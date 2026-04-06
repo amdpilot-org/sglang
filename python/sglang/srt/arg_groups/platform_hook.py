@@ -15,7 +15,7 @@ from sglang.srt.arg_groups.overrides import (
 from sglang.srt.hardware_backend.mlx.runtime import use_mlx
 from sglang.srt.model_executor.cuda_graph_config import Backend, Phase, with_phase
 from sglang.srt.runtime_context import get_platform
-from sglang.srt.utils.common import is_host_cpu_arm64
+from sglang.srt.utils.common import cpu_has_rvv_support, is_host_cpu_arm64
 
 logger = logging.getLogger(__name__)
 
@@ -158,12 +158,16 @@ def handle_cpu_backends(server_args: Any):
     cfg = resolving_view(server_args)
     if cfg.device == "cpu":
         if cfg.attention_backend is None:
+            if cpu_has_rvv_support():
+                attention_backend = "rvv"
+            elif is_host_cpu_arm64():
+                attention_backend = "torch_native"
+            else:
+                attention_backend = "intel_amx"
             declare_resolution(
                 server_args,
                 "_handle_cpu_backends",
-                attention_backend=(
-                    "torch_native" if is_host_cpu_arm64() else "intel_amx"
-                ),
+                attention_backend=attention_backend,
             )
         declare_resolution(
             server_args,
