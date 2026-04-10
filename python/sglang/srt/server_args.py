@@ -2553,6 +2553,8 @@ class ServerArgs:
     def _handle_amd_specifics(self):
         if is_hip():
             self.triton_attention_num_kv_splits = 16
+            if self.decode_attention_backend is None:
+                self.decode_attention_backend = "aiter"
 
     def _handle_nccl_pre_warm(self):
         # pre_warm_nccl is only used with CUDA or HIP hardware
