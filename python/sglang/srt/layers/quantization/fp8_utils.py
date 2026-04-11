@@ -60,6 +60,8 @@ _use_aiter_gfx95 = _use_aiter and _is_gfx95_supported
 
 
 def use_aiter_triton_gemm_w8a8_tuned_gfx950(n: int, k: int) -> bool:
+    # Added GLM-5.1-FP8 shapes for M=1 decode optimization
+    # CK backend is slow for small M; Triton has better small-M configs
     return (n, k) in [
         (1024, 8192),
         (16384, 1536),
@@ -75,6 +77,13 @@ def use_aiter_triton_gemm_w8a8_tuned_gfx950(n: int, k: int) -> bool:
         (7168, 256),
         (8192, 1024),
         (8192, 32768),
+        # GLM-5.1-FP8 shapes
+        (256, 6144),
+        (6144, 256),
+        (2048, 6144),
+        (6144, 2048),
+        (2624, 6144),
+        (1024, 6144),
     ]
 
 
