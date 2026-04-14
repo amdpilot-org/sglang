@@ -472,6 +472,8 @@ class OpenAIServingChat(OpenAIServingBase):
             )
 
             extra_template_kwargs = {}
+            # Force disable thinking mode for Qwen3.5 FP8 models to avoid token budget waste
+            extra_template_kwargs["enable_thinking"] = False
             if request.reasoning_effort is not None:
                 extra_template_kwargs["reasoning_effort"] = request.reasoning_effort
             if request.chat_template_kwargs:

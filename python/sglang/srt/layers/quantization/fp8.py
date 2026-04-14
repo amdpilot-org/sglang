@@ -101,7 +101,7 @@ _is_cpu_amx_available = cpu_has_amx_support()
 _is_cpu = is_cpu()
 _is_fp8_fnuz = is_fp8_fnuz()
 _use_hip_int4 = get_bool_env_var("SGLANG_INT4_WEIGHT") and _is_hip
-_use_aiter = envs.SGLANG_USE_AITER.get() and _is_hip
+_use_aiter = False  # Disabled: aiter 2-stage CK kernel produces incorrect FP8 block-scale results with shuffled weights
 
 if _use_aiter or _use_hip_int4:
     from aiter import ActivationType, QuantType
@@ -1003,13 +1003,13 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             layer.w2_input_scale = None
 
         if _use_aiter:
-            # Pre-shuffle weights
-            t = shuffle_weight(layer.w13_weight, (16, 16))
-            layer.w13_weight.copy_(t)
-            del t
-            t = shuffle_weight(layer.w2_weight, (16, 16))
-            layer.w2_weight.copy_(t)
-            del t
+            # Pre-shuffle weights - assign directly to preserve is_shuffled attribute
+            layer.w13_weight = torch.nn.Parameter(
+                shuffle_weight(layer.w13_weight, (16, 16)), requires_grad=False
+            )
+            layer.w2_weight = torch.nn.Parameter(
+                shuffle_weight(layer.w2_weight, (16, 16)), requires_grad=False
+            )
         elif _is_cpu:
             assert (
                 _is_cpu_amx_available
@@ -1742,6 +1742,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     w1_scale=layer.w13_weight_scale_inv,
                     w2_scale=layer.w2_weight_scale_inv,
                     quant_type=QuantType.per_128x128,
+                    doweight_stage1=True,
                     activation=(
                         ActivationType.Silu
                         if activation == "silu"

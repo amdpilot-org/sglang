@@ -79,7 +79,7 @@ if is_flashinfer_available():
 _is_hip = is_hip()
 _is_cpu_amx_available = cpu_has_amx_support()
 _is_cpu = is_cpu()
-_use_aiter = get_bool_env_var("SGLANG_USE_AITER") and _is_hip
+_use_aiter = False  # Disabled: aiter 2-stage CK kernel produces incorrect FP8 block-scale results with shuffled weights
 
 
 def create_moe_dispatcher(moe_runner_config: MoeRunnerConfig) -> BaseDispatcher:
