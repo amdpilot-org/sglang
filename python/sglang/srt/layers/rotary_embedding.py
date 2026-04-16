@@ -389,6 +389,19 @@ class RotaryEmbedding(MultiPlatformOp):
             )
         return query, key
 
+    def forward_hip(
+        self,
+        positions: torch.Tensor,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        offsets: Optional[torch.Tensor] = None,
+        fused_set_kv_buffer_arg: Optional[FusedSetKVBufferArg] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """HIP implementation using native fallback."""
+        # On HIP, always use native implementation to avoid CUDA JIT compilation issues
+        # The CUDA fallback kernel tries to compile CUDA code which fails on ROCm
+        return self.forward_native(positions, query, key, offsets, fused_set_kv_buffer_arg)
+
     def extra_repr(self) -> str:
         s = f"head_size={self.head_size}, rotary_dim={self.rotary_dim}"
         s += f", max_position_embeddings={self.max_position_embeddings}"
