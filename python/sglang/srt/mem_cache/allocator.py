@@ -32,6 +32,14 @@ if TYPE_CHECKING:
     from sglang.srt.mem_cache.memory_pool import KVCache
 
 
+# Import page attention stats
+try:
+    from sglang.srt.mem_cache.memory_pool import get_page_attention_stats
+except ImportError:
+    def get_page_attention_stats():
+        return None
+
+
 class BaseTokenToKVPoolAllocator(abc.ABC):
     @abc.abstractmethod
     def __init__(
@@ -150,6 +158,18 @@ class TokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
 
         select_index = self.free_pages[:need_size]
         self.free_pages = self.free_pages[need_size:]
+        
+        # Record statistics
+        stats = get_page_attention_stats()
+        if stats:
+            stats.kv_alloc_count += 1
+            stats.total_pages_allocated += need_size
+            stats.allocation_sizes.append(need_size)
+            
+            # Track page size distribution
+            page_size = need_size
+            stats.page_size_distribution[page_size] = stats.page_size_distribution.get(page_size, 0) + 1
+        
         return select_index
 
     def free(self, free_index: torch.Tensor):
@@ -163,6 +183,13 @@ class TokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
                 self.free_pages = torch.cat((self.free_pages, free_index))
         else:
             self.free_group.append(free_index)
+        
+        # Record statistics
+        stats = get_page_attention_stats()
+        if stats:
+            stats.kv_free_count += 1
+            stats.total_pages_freed += free_index.numel()
+            stats.free_sizes.append(free_index.numel())
 
     def get_cpu_copy(self, indices):
         return self._kvcache.get_cpu_copy(indices)

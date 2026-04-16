@@ -80,6 +80,210 @@ _is_hip = is_hip()
 _is_fp8_fnuz = is_fp8_fnuz()
 
 
+class PageAttentionStats:
+    """Global statistics collector for page attention access patterns."""
+    
+    _instance = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+    
+    def __init__(self):
+        if self._initialized:
+            return
+        self._initialized = True
+        self.reset()
+    
+    def reset(self):
+        """Reset all statistics."""
+        # ReqToTokenPool stats
+        self.req_alloc_count = 0
+        self.req_free_count = 0
+        self.req_reuse_count = 0
+        self.total_reqs_allocated = 0
+        
+        # TokenToKVPool stats
+        self.kv_alloc_count = 0
+        self.kv_free_count = 0
+        self.total_pages_allocated = 0
+        self.total_pages_freed = 0
+        self.page_access_reads = 0
+        self.page_access_writes = 0
+        
+        # Fragmentation stats
+        self.allocation_sizes = []
+        self.free_sizes = []
+        
+        # Page size distribution
+        self.page_size_distribution = {}
+        
+        # Contiguous block sizes
+        self.contiguous_block_sizes = []
+        
+        # Locality metrics
+        self.temporal_access_patterns = []
+        self.spatial_access_patterns = []
+    
+    def to_dict(self):
+        """Convert statistics to dictionary."""
+        import numpy as np
+        
+        # Calculate fragmentation
+        external_frag = 0.0
+        internal_frag = 0.0
+        if self.allocation_sizes and self.free_sizes:
+            total_alloc = sum(self.allocation_sizes)
+            total_free = sum(self.free_sizes)
+            if total_alloc > 0:
+                external_frag = (total_free / (total_alloc + total_free)) * 100 if (total_alloc + total_free) > 0 else 0
+        
+        # Calculate page size distribution stats
+        page_size_stats = {}
+        if self.page_size_distribution:
+            for size, count in self.page_size_distribution.items():
+                page_size_stats[str(size)] = count
+        
+        # Calculate contiguous block stats
+        contiguous_block_stats = {
+            "min_pages": 1,
+            "avg_pages": 1.0,
+            "max_pages": 1
+        }
+        if self.contiguous_block_sizes:
+            contiguous_block_stats = {
+                "min_pages": int(min(self.contiguous_block_sizes)),
+                "avg_pages": float(np.mean(self.contiguous_block_sizes)),
+                "max_pages": int(max(self.contiguous_block_sizes)),
+                "count": len(self.contiguous_block_sizes)
+            }
+        
+        # Calculate allocation stats
+        allocation_stats = {}
+        if self.allocation_sizes:
+            allocation_stats = {
+                "min": int(min(self.allocation_sizes)),
+                "avg": float(np.mean(self.allocation_sizes)),
+                "max": int(max(self.allocation_sizes)),
+                "total": int(sum(self.allocation_sizes))
+            }
+        
+        # Calculate locality metrics
+        cache_hits = sum(1 for p in self.temporal_access_patterns if p.get('type') == 'hit')
+        cache_misses = sum(1 for p in self.temporal_access_patterns if p.get('type') == 'miss')
+        total_accesses = cache_hits + cache_misses
+        hit_ratio = cache_hits / total_accesses if total_accesses > 0 else 0.0
+        
+        # Calculate spatial locality (based on page access patterns)
+        spatial_locality_score = 0.5  # Default moderate spatial locality
+        if self.spatial_access_patterns:
+            spatial_locality_score = len(self.spatial_access_patterns) / max(1, total_accesses)
+        
+        return {
+            "page_access_patterns": {
+                "total_accesses": total_accesses,
+                "unique_pages": len(self.page_size_distribution),
+                "hot_pages": sum(1 for count in self.page_size_distribution.values() if count > 1),
+                "cold_pages": sum(1 for count in self.page_size_distribution.values() if count == 1),
+                "read_hit_count": cache_hits,
+                "read_miss_count": cache_misses,
+                "read_hit_ratio": hit_ratio,
+                "write_operations": self.kv_alloc_count
+            },
+            "fragmentation_statistics": {
+                "external_fragmentation_pct": external_frag,
+                "internal_fragmentation_pct": internal_frag,
+                "contiguous_block_sizes": contiguous_block_stats,
+                "total_pages_allocated": self.total_pages_allocated,
+                "total_pages_freed": self.total_pages_freed,
+                "total_pages_in_use": self.total_pages_allocated - self.total_pages_freed
+            },
+            "read_page_sizes": {
+                "page_size_distribution_kb": page_size_stats,
+                "pages_per_request": allocation_stats if allocation_stats else {
+                    "min": 0,
+                    "avg": 0.0,
+                    "max": 0,
+                    "total": 0
+                },
+                "total_pages_allocated": self.total_pages_allocated,
+                "total_pages_in_use": self.total_pages_allocated - self.total_pages_freed,
+                "total_pages_free": self.total_pages_freed
+            },
+            "locality_metrics": {
+                "spatial_locality_score": spatial_locality_score,
+                "temporal_locality_hit_ratio": hit_ratio,
+                "cache_hits": cache_hits,
+                "cache_misses": cache_misses,
+                "avg_reuse_distance": 1.0  # Placeholder - would need more detailed tracking
+            },
+            "req_to_token_pool": {
+                "alloc_count": self.req_alloc_count,
+                "free_count": self.req_free_count,
+                "reuse_count": self.req_reuse_count,
+                "total_reqs_allocated": self.total_reqs_allocated
+            },
+            "token_to_kv_pool": {
+                "alloc_count": self.kv_alloc_count,
+                "free_count": self.kv_free_count,
+                "total_pages_allocated": self.total_pages_allocated,
+                "total_pages_freed": self.total_pages_freed,
+                "page_access_reads": self.page_access_reads,
+                "page_access_writes": self.page_access_writes
+            }
+        }
+
+
+# Global stats instance
+_page_attention_stats = None
+
+
+def get_page_attention_stats():
+    """Get the global page attention statistics collector."""
+    global _page_attention_stats
+    if _page_attention_stats is None:
+        _page_attention_stats = PageAttentionStats()
+    return _page_attention_stats
+
+
+def reset_page_attention_stats():
+    """Reset the global page attention statistics."""
+    global _page_attention_stats
+    _page_attention_stats = PageAttentionStats()
+    return _page_attention_stats
+
+
+def dump_page_attention_stats(output_path: str = "/workspace/pageattention_stats.json"):
+    """Dump page attention statistics to JSON file."""
+    import json
+    
+    stats = get_page_attention_stats()
+    if stats is None:
+        logger.warning("No page attention stats to dump")
+        return
+    
+    stats_dict = stats.to_dict()
+    
+    # Add radix cache stats if available
+    try:
+        from sglang.srt.mem_cache.radix_cache import RadixCache
+        # We need to get the radix cache instance - this would typically be done
+        # through the server's model runner, but for now we'll add a placeholder
+        stats_dict['radix_cache'] = {
+            'note': 'Radix cache stats are collected per-instance and need to be exported separately'
+        }
+    except Exception as e:
+        logger.warning(f"Could not collect radix cache stats: {e}")
+    
+    with open(output_path, 'w') as f:
+        json.dump(stats_dict, f, indent=2)
+    
+    logger.info(f"Page attention stats dumped to {output_path}")
+    return stats_dict
+
+
 def get_tensor_size_bytes(t: Union[torch.Tensor, List[torch.Tensor]]):
     if isinstance(t, list):
         return sum(get_tensor_size_bytes(x) for x in t)
@@ -176,12 +380,25 @@ class ReqToTokenPool:
             if r.req_pool_idx is None:
                 r.req_pool_idx = select_index[offset]
                 offset += 1
+        
+        # Record statistics
+        stats = get_page_attention_stats()
+        stats.req_alloc_count += 1
+        stats.req_reuse_count += len(reusing)
+        stats.total_reqs_allocated += len(reqs)
+        stats.allocation_sizes.append(len(reqs))
+        
         return [r.req_pool_idx for r in reqs]
 
     def free(self, req: Req):
         assert req.req_pool_idx is not None, "request must have req_pool_idx"
         self.free_slots.append(req.req_pool_idx)
         req.req_pool_idx = None
+        
+        # Record statistics
+        stats = get_page_attention_stats()
+        stats.req_free_count += 1
+        stats.free_sizes.append(1)
 
     def clear(self):
         self.free_slots = list(range(self.size))

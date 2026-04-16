@@ -64,6 +64,13 @@ from sglang.srt.mem_cache.evict_policy import (
 )
 from sglang.srt.mem_cache.utils import get_hash_str, hash_str_to_int64
 
+# Import page attention stats
+try:
+    from sglang.srt.mem_cache.memory_pool import get_page_attention_stats
+except ImportError:
+    def get_page_attention_stats():
+        return None
+
 if TYPE_CHECKING:
     from sglang.srt.managers.schedule_batch import Req
 
@@ -331,6 +338,22 @@ class RadixCache(BasePrefixCache):
             )
 
         self.evictable_leaves = set()
+        
+        # Initialize statistics tracking
+        self.stats = {
+            'cache_hits': 0,
+            'cache_misses': 0,
+            'total_tokens_matched': 0,
+            'total_tokens_inserted': 0,
+            'eviction_count': 0,
+            'evicted_tokens': 0,
+            'node_count': 1,  # Start with root node
+            'max_tree_depth': 0,
+            'avg_hit_count': 0.0,
+            'page_reads': 0,
+            'page_writes': 0
+        }
+        
         self.reset()
 
     @classmethod
@@ -365,6 +388,21 @@ class RadixCache(BasePrefixCache):
         self.protected_size_ = 0
         self.evictable_leaves.clear()
         self._record_all_cleared_event()
+        
+        # Reset statistics
+        self.stats = {
+            'cache_hits': 0,
+            'cache_misses': 0,
+            'total_tokens_matched': 0,
+            'total_tokens_inserted': 0,
+            'eviction_count': 0,
+            'evicted_tokens': 0,
+            'node_count': 1,
+            'max_tree_depth': 0,
+            'avg_hit_count': 0.0,
+            'page_reads': 0,
+            'page_writes': 0
+        }
 
     def maybe_bigram_convert(
         self, key: RadixKey, value: Optional[torch.Tensor] = None
@@ -433,6 +471,33 @@ class RadixCache(BasePrefixCache):
             return empty_match_result()
 
         value, last_node = self._match_prefix_helper(self.root_node, key)
+        
+        # Record statistics
+        matched_len = sum(len(v) for v in value) if value else 0
+        
+        # Update internal stats
+        if matched_len > 0:
+            self.stats['cache_hits'] += 1
+            self.stats['total_tokens_matched'] += matched_len
+            self.stats['page_reads'] += (matched_len + self.page_size - 1) // self.page_size
+        else:
+            self.stats['cache_misses'] += 1
+        
+        # Update global stats if available
+        stats = get_page_attention_stats()
+        if stats:
+            if matched_len > 0:
+                stats.temporal_access_patterns.append({
+                    'type': 'hit',
+                    'matched_len': matched_len,
+                    'key_len': len(key)
+                })
+            else:
+                stats.temporal_access_patterns.append({
+                    'type': 'miss',
+                    'key_len': len(key)
+                })
+        
         if value:
             value = torch.cat(value)
         else:
@@ -772,6 +837,11 @@ class RadixCache(BasePrefixCache):
             self._update_leaf_status(new_node)
             # Hash will be computed lazily during event emission
             self._record_store_event(new_node)
+            
+            # Update statistics
+            self.stats['total_tokens_inserted'] += len(key)
+            self.stats['node_count'] += 1
+            self.stats['page_writes'] += (len(key) + self.page_size - 1) // self.page_size
         return total_prefix_length
 
     def _print_helper(self, node: TreeNode, indent: int):
