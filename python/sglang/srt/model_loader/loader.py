@@ -1299,6 +1299,16 @@ class DummyModelLoader(BaseModelLoader):
 
         quant_config = _get_quantization_config(model_config, self.load_config)
 
+        # Reduce model size for dummy weights on large MoE models to avoid OOM
+        hf_config = getattr(model_config, "hf_config", None)
+        if hf_config is not None and getattr(hf_config, "n_routed_experts", None) == 256:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "Reducing n_routed_experts from 256 to 8 for dummy weight mode to save memory"
+            )
+            hf_config.n_routed_experts = 8
+
         with set_default_torch_dtype(model_config.dtype):
             with torch.device(device_config.device):
                 model = _initialize_model(
