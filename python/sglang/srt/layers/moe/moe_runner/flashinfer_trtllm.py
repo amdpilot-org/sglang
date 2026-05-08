@@ -681,6 +681,7 @@ def fused_experts_none_to_flashinfer_trtllm_fp8(
                 tune_max_num_tokens=next_power_of_2(a_q.shape[0]),
                 fp8_quantization_type=int(fp8_quantization_type),
                 activation_type=quant_info.activation_type,
+                gemm1_clamp_limit=runner_config.gemm1_clamp_limit,
             )
         else:
             assert TopKOutputChecker.format_is_bypassed(topk_output)
@@ -698,7 +699,7 @@ def fused_experts_none_to_flashinfer_trtllm_fp8(
                 gemm1_weights_scale=quant_info.w13_weight_scale_inv,
                 gemm2_weights=quant_info.w2_weight,
                 gemm2_weights_scale=quant_info.w2_weight_scale_inv,
-                num_experts=quant_info.global_num_experts,
+                num_experts=quant_info.global_experts,
                 top_k=topk_config.top_k,
                 n_group=topk_config.num_expert_group,
                 topk_group=topk_config.topk_group,
@@ -715,6 +716,7 @@ def fused_experts_none_to_flashinfer_trtllm_fp8(
                 tune_max_num_tokens=next_power_of_2(a_q.shape[0]),
                 fp8_quantization_type=int(fp8_quantization_type),
                 activation_type=quant_info.activation_type,
+                gemm1_clamp_limit=runner_config.gemm1_clamp_limit,
             )
         # TODO: Once https://github.com/flashinfer-ai/flashinfer/issues/2703 is fixed, pass output to moe kernel and remove this copy.
         symm_output.copy_(output)
@@ -777,6 +779,7 @@ def fused_experts_none_to_flashinfer_trtllm_fp8(
             routing_method_type=routing_method_type,
             tune_max_num_tokens=next_power_of_2(a_q.shape[0]),
             activation_type=quant_info.activation_type,
+            gemm1_clamp_limit=runner_config.gemm1_clamp_limit,
         )
         symm_output.copy_(output)
         output = symm_output
