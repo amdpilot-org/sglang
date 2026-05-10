@@ -325,6 +325,9 @@ def get_config(
         for key, val in text_config.__dict__.items():
             if not hasattr(config, key) and getattr(text_config, key, None) is not None:
                 setattr(config, key, val)
+        # Copy pad_token_id even if it is None (it's a valid value).
+        if not hasattr(config, "pad_token_id") and hasattr(text_config, "pad_token_id"):
+            setattr(config, "pad_token_id", text_config.pad_token_id)
 
     if config.model_type in _CONFIG_REGISTRY:
         model_type = config.model_type

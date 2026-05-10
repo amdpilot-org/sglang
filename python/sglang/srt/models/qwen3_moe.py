@@ -228,7 +228,7 @@ class Qwen3MoeSparseMoeBlock(nn.Module):
 
         self.topk = TopK(
             top_k=config.num_experts_per_tok,
-            renormalize=config.norm_topk_prob,
+            renormalize=getattr(config, "norm_topk_prob", True),
             use_grouped_topk=False,
             layer_id=layer_id,
         )
@@ -897,6 +897,9 @@ class Qwen3MoeForCausalLM(nn.Module):
     ) -> None:
         super().__init__()
         self.pp_group = get_pp_group()
+        # Handle multimodal configs (e.g. Qwen3_5MoeConfig) that wrap text_config
+        if hasattr(config, "text_config") and not hasattr(config, "vocab_size"):
+            config = config.text_config
         self.config = config
         self.quant_config = quant_config
         self.model = Qwen3MoeModel(
@@ -1137,4 +1140,8 @@ class Qwen3MoeForCausalLM(nn.Module):
         )
 
 
-EntryClass = Qwen3MoeForCausalLM
+class Qwen3_5MoeForConditionalGeneration(Qwen3MoeForCausalLM):
+    pass
+
+
+EntryClass = [Qwen3MoeForCausalLM, Qwen3_5MoeForConditionalGeneration]
