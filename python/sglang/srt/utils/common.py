@@ -3444,7 +3444,12 @@ def is_gfx95_supported():
 
 def get_hip_version():
     if torch.version.hip:
-        return tuple(map(int, torch.version.hip.split("-")[0].split(".")))
+        parts = [int(x) for x in torch.version.hip.split("-")[0].split(".")]
+        # Pad to 3 components so tuple comparison works correctly
+        # (e.g. (7, 2) >= (7, 2, 0) is False in Python, so pad to (7, 2, 0))
+        while len(parts) < 3:
+            parts.append(0)
+        return tuple(parts)
     return (0, 0, 0)
 
 
