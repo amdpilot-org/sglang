@@ -220,16 +220,10 @@ def fp8_index(
         fp32 logits -> fp32 logits_sum
         fp32 logits_sum * k_s (e8m0) -> fp32 index_score
     """
-    h = q.shape[2]
-    if _is_hip and h < 16:
-        pad = 16 - h
-        q = torch.nn.functional.pad(q, (0, 0, 0, pad, 0, 0, 0, 0))
-        q_s = torch.nn.functional.pad(q_s, (0, pad, 0, 0, 0, 0))
-        h = 16
     if _is_hip:
-        return fp8_index_kernel(h, q.shape[3], False)(q, q_s, k, k_s)
+        return fp8_index_kernel(q.shape[2], q.shape[3], False)(q, q_s, k, k_s)
     else:
-        return fp8_index_kernel(h, q.shape[3])(q, q_s, k, k_s)
+        return fp8_index_kernel(q.shape[2], q.shape[3])(q, q_s, k, k_s)
 
 
 @tilelang.jit(
