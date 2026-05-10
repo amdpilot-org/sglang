@@ -1849,6 +1849,7 @@ class NativeSparseAttnBackend(
             causal=causal,
         )
 
+    @torch.compiler.disable
     def _forward_tilelang(
         self,
         q_all: torch.Tensor,

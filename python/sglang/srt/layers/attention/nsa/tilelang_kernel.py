@@ -113,6 +113,7 @@ def act_quant_kernel(
     return act_quant_kernel_
 
 
+@torch.compiler.disable
 def act_quant(
     x: torch.Tensor, block_size: int = 128, scale_fmt: Optional[str] = None
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -200,6 +201,7 @@ def fp8_index_kernel(h: int, d: int, clear_accum=True):
     return fp8_index_kernel_
 
 
+@torch.compiler.disable
 def fp8_index(
     q: torch.Tensor,
     q_s: torch.Tensor,
@@ -1304,6 +1306,7 @@ def sparse_mla_fwd_decode_partial_fp8(
     return main
 
 
+@torch.compiler.disable
 def tilelang_sparse_fwd(
     q: torch.Tensor,
     kv: torch.Tensor,
