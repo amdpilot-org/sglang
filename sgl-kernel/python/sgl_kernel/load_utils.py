@@ -17,6 +17,11 @@ def _get_compute_capability():
     if not torch.cuda.is_available():
         return None
 
+    # ROCm GPUs do not have NVIDIA-style SM compute capabilities;
+    # return None so the loader falls back to the generic build.
+    if torch.version.hip is not None:
+        return None
+
     # Get the current device
     device = torch.cuda.current_device()
     properties = torch.cuda.get_device_properties(device)
