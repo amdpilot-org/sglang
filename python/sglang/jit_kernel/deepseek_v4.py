@@ -150,8 +150,15 @@ def topk_transform_512(
     ver: Literal[1, 2] = 1,
 ) -> None:
     """Output to page_indices tensor, optionally also output raw abs position indices"""
-    if is_hip_runtime():
+    if seq_lens.dtype != torch.int32:
+        seq_lens = seq_lens.to(torch.int32)
+    if is_hip_runtime() and hasattr(torch.ops.sgl_kernel, "deepseek_v4_topk_transform_512"):
         torch.ops.sgl_kernel.deepseek_v4_topk_transform_512(
+            scores, seq_lens, page_tables, out_page_indices, page_size, out_raw_indices
+        )
+    elif is_hip_runtime():
+        from sglang.srt.layers.attention.compressed.indexer import topk_transform_512_pytorch_vectorized
+        topk_transform_512_pytorch_vectorized(
             scores, seq_lens, page_tables, out_page_indices, page_size, out_raw_indices
         )
     else:
