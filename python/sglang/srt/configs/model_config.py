@@ -453,7 +453,7 @@ class ModelConfig:
             self.qk_rope_head_dim = self.hf_config.qk_rope_head_dim
             if envs.SGLANG_DSV4_MODE.get() == "2604":
                 self.qk_nope_head_dim = self.hf_config.head_dim - self.qk_rope_head_dim
-                self.window_size = self.hf_config.sliding_window
+                self.window_size = getattr(self.hf_config, 'sliding_window', self.hf_config.window_size)
             else:
                 self.qk_nope_head_dim = self.hf_config.qk_nope_head_dim
                 self.window_size = self.hf_config.window_size
