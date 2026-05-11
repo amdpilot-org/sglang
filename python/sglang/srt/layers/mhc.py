@@ -467,6 +467,7 @@ def mhc_pre_gemm_sqrsum_splitk_kernel(
 
 
 # Adapted from https://github.com/tile-ai/tilelang/blob/5fe8b84313083d0a4035849c9282f06586c93d58/examples/deepseek_mhc/example_mhc_pre.py
+@torch.compiler.disable
 def mhc_pre(
     residual: torch.Tensor,
     fn: torch.Tensor,
@@ -662,6 +663,7 @@ def mhc_post_tilelang(
 
 
 # Adapted from https://github.com/tile-ai/tilelang/blob/5fe8b84313083d0a4035849c9282f06586c93d58/examples/deepseek_mhc/example_mhc_post.py
+@torch.compiler.disable
 def mhc_post(
     x: torch.Tensor,
     residual: torch.Tensor,
