@@ -2337,7 +2337,7 @@ def dpsk_v4_fp8_attention_fwd(
     if _is_gfx95_supported:
         block_I, threads, num_stages, block_per_cu, cu = 64, 512, 0, 2, 256
     else:
-        block_I, threads, num_stages, block_per_cu, cu = 32, 128, 1, 1, 304
+        block_I, threads, num_stages, block_per_cu, cu = 32, 128, 0, 1, 304
 
     batch, seq_len, num_heads, _ = q.shape
     # Partial grid is (seq_len * REPLICATE_H * n_groups, batch, kv_group); the
