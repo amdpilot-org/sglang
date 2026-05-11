@@ -1813,7 +1813,7 @@ class ServerArgs:
             elif is_hip():
                 if not self.enable_dp_attention and self.nnodes == 1:
                     # TODO (Hubert): Put this back later
-                    # self.enable_aiter_allreduce_fusion = True
+                    self.enable_aiter_allreduce_fusion = True
                     logger.info(
                         "Enable Aiter AllReduce Fusion for DeepseekV3ForCausalLM"
                     )
