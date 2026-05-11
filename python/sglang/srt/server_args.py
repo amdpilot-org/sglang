@@ -781,6 +781,12 @@ class ServerArgs:
         # Validate SSL arguments early (before dummy-model short-circuit).
         self._handle_ssl_validation()
 
+        # Stage0 compatibility: dummy models return before _handle_deprecated_args,
+        # but check_server_args still reads these env-only gRPC attributes.
+        self.enable_grpc = envs.SGLANG_ENABLE_GRPC.get()
+        grpc_port_env = envs.SGLANG_GRPC_PORT.get()
+        self.grpc_port = grpc_port_env if grpc_port_env is not None else self.port + 10000
+
         if self.model_path.lower() in ["none", "dummy"]:
             # Skip for dummy models
             return
