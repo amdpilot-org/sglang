@@ -5,6 +5,7 @@ import tilelang
 import tilelang.language as T
 import torch
 
+from sglang.srt.compilation.piecewise_context_manager import is_in_piecewise_cuda_graph
 from sglang.srt.layers.quantization.fp8_kernel import is_fp8_fnuz
 from sglang.srt.utils import is_gfx95_supported, is_hip
 
@@ -128,6 +129,12 @@ def act_quant(
             - The quantized tensor with dtype `torch.float8_e4m3fn`.
             - A tensor of scaling factors with dtype `torch.float32`.
     """
+    # Fall back to Triton implementation during piecewise CUDA graph capture on AMD
+    # because Dynamo cannot trace TileLang's Cython JIT kernels
+    if _is_hip and is_in_piecewise_cuda_graph():
+        from sglang.srt.layers.attention.nsa.triton_kernel import act_quant as triton_act_quant
+        return triton_act_quant(x, block_size, scale_fmt)
+
     assert x.is_contiguous(), "Input tensor must be contiguous"
     assert (
         x.size(-1) % block_size == 0
@@ -220,6 +227,25 @@ def fp8_index(
         fp32 logits -> fp32 logits_sum
         fp32 logits_sum * k_s (e8m0) -> fp32 index_score
     """
+    # Fall back to a torch-based implementation during piecewise CUDA graph capture on AMD
+    # because Dynamo cannot trace TileLang's Cython JIT kernels
+    if _is_hip and is_in_piecewise_cuda_graph():
+        # Simple torch-based fallback for fp8_index during PCG capture
+        # This computes: relu(fp8 q @ fp8 k) * q_s -> sum * k_s
+        q_fp32 = q.to(torch.float32)
+        k_fp32 = k.to(torch.float32)
+        # q: [1, seq_len, heads, dim], k: [1, seq_len_kv, dim]
+        # Compute logits: q @ k^T
+        logits = torch.matmul(q_fp32, k_fp32.transpose(-2, -1))  # [1, seq_len, heads, seq_len_kv]
+        logits = torch.relu(logits)
+        # Apply q_s weights
+        logits = logits * q_s.unsqueeze(-1)  # [1, seq_len, heads, seq_len_kv]
+        # Sum over heads dimension
+        logits_sum = logits.sum(dim=-2)  # [1, seq_len, seq_len_kv]
+        # Apply k_s
+        index_score = logits_sum * k_s.unsqueeze(1)  # [1, seq_len, seq_len_kv]
+        return index_score
+
     if _is_hip:
         return fp8_index_kernel(q.shape[2], q.shape[3], False)(q, q_s, k, k_s)
     else:
