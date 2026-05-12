@@ -1176,7 +1176,7 @@ def sparse_mla_fwd_decode_partial_fp8(
             T.copy(q_fp8[b_i, s_i, H0:H1, 2 * group_size : 3 * group_size], q_tile2)
             T.copy(q_fp8[b_i, s_i, H0:H1, 3 * group_size : 4 * group_size], q_tile3)
 
-            for k_i in T.serial(inner_iter):
+            for k_i in T.Pipelined(inner_iter, num_stages=0):
                 topk_block_i = group_i * inner_iter + k_i
 
                 for bi_i in T.Parallel(BI):
