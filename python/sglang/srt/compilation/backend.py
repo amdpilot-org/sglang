@@ -27,6 +27,28 @@ from sglang.srt.utils.common import is_npu
 
 logger = logging.getLogger(__name__)
 
+# Register TileLang's CythonKernelWrapper.forward with torch._dynamo.allow_in_graph
+# to enable Piecewise CUDA Graph (PCG) capture for TileLang JIT kernels.
+# This is required for DeepSeek-V4-Flash decode path on MI300X.
+try:
+    from tilelang.jit.adapter.cython.adapter import CythonKernelAdapter
+    from torch._dynamo import allow_in_graph
+
+    # CythonKernelAdapter._convert_torch_func creates a lambda that calls
+    # cython_wrapper.forward. We need to allow this lambda in dynamo graphs.
+    # Patch the _convert_torch_func method to wrap the result with allow_in_graph.
+    _original_convert_torch_func = CythonKernelAdapter._convert_torch_func
+
+    def _convert_torch_func_with_allow_in_graph(self):
+        torch_func = _original_convert_torch_func(self)
+        # Wrap the torch function to allow it in dynamo graphs
+        return allow_in_graph(torch_func)
+
+    CythonKernelAdapter._convert_torch_func = _convert_torch_func_with_allow_in_graph
+except ImportError:
+    # TileLang not installed, skip registration
+    pass
+
 
 def make_compiler(config: CompilationConfig):
     if config.compiler == "eager":
