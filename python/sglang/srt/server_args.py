@@ -781,6 +781,23 @@ class ServerArgs:
         # Validate SSL arguments early (before dummy-model short-circuit).
         self._handle_ssl_validation()
 
+        # Native gRPC flags — env-only for now, not exposed as CLI args.
+        # Set as instance attributes (not dataclass fields) to avoid
+        # argparse namespace lookup in from_cli_args.
+        # This must run before the dummy-model early return since check_server_args()
+        # accesses these attributes.
+        self.enable_grpc = envs.SGLANG_ENABLE_GRPC.get()
+
+        grpc_port_env = envs.SGLANG_GRPC_PORT.get()
+        self.grpc_port = (
+            grpc_port_env if grpc_port_env is not None else self.port + 10000
+        )
+
+        if not (1 <= self.grpc_port <= 65535):
+            raise ValueError(
+                f"SGLANG_GRPC_PORT ({self.grpc_port}) must be between 1 and 65535"
+            )
+
         if self.model_path.lower() in ["none", "dummy"]:
             # Skip for dummy models
             return
@@ -1020,21 +1037,6 @@ class ServerArgs:
             )
             envs.SGLANG_SPEC_NAN_DETECTION.set(True)
             envs.SGLANG_SPEC_OOB_DETECTION.set(True)
-
-        # Native gRPC flags — env-only for now, not exposed as CLI args.
-        # Set as instance attributes (not dataclass fields) to avoid
-        # argparse namespace lookup in from_cli_args.
-        self.enable_grpc = envs.SGLANG_ENABLE_GRPC.get()
-
-        grpc_port_env = envs.SGLANG_GRPC_PORT.get()
-        self.grpc_port = (
-            grpc_port_env if grpc_port_env is not None else self.port + 10000
-        )
-
-        if not (1 <= self.grpc_port <= 65535):
-            raise ValueError(
-                f"SGLANG_GRPC_PORT ({self.grpc_port}) must be between 1 and 65535"
-            )
 
     def _handle_prefill_delayer_env_compat(self):
         if envs.SGLANG_SCHEDULER_DECREASE_PREFILL_IDLE.get():
