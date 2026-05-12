@@ -23,13 +23,13 @@ export SGLANG_USE_ROCM700A=1
 export SGLANG_TOPK_TRANSFORM_512_TORCH=1
 export SGLANG_FP8_PAGED_MQA_LOGITS_TORCH=1
 
-export SGLANG_DSV4_FP4_EXPERTS=false
+export SGLANG_DSV4_FP4_EXPERTS=true
 
 export SGLANG_OPT_DPSK_V4_RADIX=0
 export SGLANG_OPT_USE_OVERLAP_STORE_CACHE=false #non-radix backend has no store_cache method
 export SGLANG_OPT_USE_FUSED_STORE_CACHE=false #fused_store_cache JIT needs CUDA toolchain
 
-export SGLANG_FORCE_TRITON_MOE_FP8=1  # this is required to apply swiglu_limit clamp in fused_moe_triton
+export SGLANG_FORCE_TRITON_MOE_FP8=0  # enable aiter MoE path for FP4 experts
 
 python3 -m sglang.launch_server \
     --model-path /dockerx/data2/models/DeepSeek-V4-Flash-FP8 \
