@@ -5,10 +5,34 @@ import tilelang
 import tilelang.language as T
 import torch
 
+tilelang.set_log_level("WARNING")
+
+# Register TileLang's CythonKernelWrapper.forward with torch._dynamo.allow_in_graph
+# to enable Piecewise CUDA Graph (PCG) capture for TileLang kernels.
+# This is required for DeepSeek-V4-Flash decode path on MI300X with TP=4.
+# NOTE: This patch must be applied BEFORE any sglang imports to ensure it runs
+# even if later imports fail.
+try:
+    from tilelang.jit.adapter.cython.adapter import CythonKernelAdapter
+    from torch._dynamo import allow_in_graph
+
+    # Store the original forward method
+    _original_cython_forward = CythonKernelAdapter._convert_torch_func
+
+    # Create a wrapper that registers the torch_function with allow_in_graph
+    def _patched_convert_torch_func(self):
+        torch_func = _original_cython_forward(self)
+        # Register the torch_function with Dynamo to allow it in CUDA graph capture
+        return allow_in_graph(torch_func)
+
+    CythonKernelAdapter._convert_torch_func = _patched_convert_torch_func
+except Exception:
+    # If registration fails, continue without it (may impact PCG performance)
+    pass
+
+# Now import sglang modules (these may fail in some environments but patch is already applied)
 from sglang.srt.layers.quantization.fp8_kernel import is_fp8_fnuz
 from sglang.srt.utils import is_gfx95_supported, is_hip
-
-tilelang.set_log_level("WARNING")
 
 pass_configs = {
     tilelang.PassConfigKey.TL_DISABLE_WARP_SPECIALIZED: True,
