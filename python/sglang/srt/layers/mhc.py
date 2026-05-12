@@ -8,6 +8,7 @@ import torch
 
 from sglang.jit_kernel.utils import is_arch_support_pdl
 from sglang.srt.layers.attention.nsa.utils import is_nsa_prefill_cp_round_robin_split
+from sglang.srt.utils.custom_op import register_custom_op
 
 tilelang.set_log_level("WARNING")
 
@@ -466,7 +467,45 @@ def mhc_pre_gemm_sqrsum_splitk_kernel(
     )
 
 
+# Fake implementation for mhc_pre - used by torch.compile/Dynamo for shape propagation
+def _mhc_pre_fake(
+    residual: torch.Tensor,
+    fn: torch.Tensor,
+    hc_scale: torch.Tensor,
+    hc_base: torch.Tensor,
+    rms_eps: float,
+    hc_pre_eps: float,
+    hc_sinkhorn_eps: float,
+    hc_post_mult_value: float,
+    sinkhorn_repeat: int,
+    n_splits: int = 1,
+    n_splits_pre: int = 32,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Fake implementation for mhc_pre for torch.compile compatibility."""
+    hc_mult = residual.shape[-2]
+    hidden_size = residual.shape[-1]
+    hc_mult2 = hc_mult * hc_mult
+    outer_shape = residual.shape[:-2]
+    num_tokens = residual.view(-1, hc_mult, hidden_size).shape[0]
+    
+    # Use torch.empty for fake impl to avoid ROCm issues with zeros/ones
+    post_mix = torch.empty(num_tokens, hc_mult, dtype=torch.float32, device=residual.device)
+    comb_mix = torch.empty(num_tokens, hc_mult2, dtype=torch.float32, device=residual.device)
+    layer_input = torch.empty(num_tokens, hidden_size, dtype=torch.bfloat16, device=residual.device)
+    
+    post_mix = post_mix.view(*outer_shape, hc_mult, 1)
+    comb_mix = comb_mix.view(*outer_shape, hc_mult, hc_mult)
+    layer_input = layer_input.view(*outer_shape, hidden_size)
+    
+    return post_mix, comb_mix, layer_input
+
+
 # Adapted from https://github.com/tile-ai/tilelang/blob/5fe8b84313083d0a4035849c9282f06586c93d58/examples/deepseek_mhc/example_mhc_pre.py
+@register_custom_op(
+    op_name="mhc_pre",
+    fake_impl=_mhc_pre_fake,
+    eager=True,  # Eager registration to avoid torch.compile issues
+)
 def mhc_pre(
     residual: torch.Tensor,
     fn: torch.Tensor,
@@ -661,7 +700,23 @@ def mhc_post_tilelang(
             T.pdl_trigger()
 
 
+# Fake implementation for mhc_post - used by torch.compile/Dynamo for shape propagation
+def _mhc_post_fake(
+    x: torch.Tensor,
+    residual: torch.Tensor,
+    post_layer_mix: torch.Tensor,
+    comb_res_mix: torch.Tensor,
+) -> torch.Tensor:
+    """Fake implementation for mhc_post for torch.compile compatibility."""
+    return torch.empty_like(residual)
+
+
 # Adapted from https://github.com/tile-ai/tilelang/blob/5fe8b84313083d0a4035849c9282f06586c93d58/examples/deepseek_mhc/example_mhc_post.py
+@register_custom_op(
+    op_name="mhc_post",
+    fake_impl=_mhc_post_fake,
+    eager=True,  # Eager registration to avoid torch.compile issues
+)
 def mhc_post(
     x: torch.Tensor,
     residual: torch.Tensor,
