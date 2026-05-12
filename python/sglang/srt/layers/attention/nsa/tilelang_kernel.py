@@ -1346,6 +1346,8 @@ def tilelang_sparse_fwd(
                 block_I, threads, block_per_cu, cu = 32, 128, 1, 304
             ni = topk // block_I
             inner_iter = _pick_inner_iter(q.shape[0], ni, cu, block_per_cu)
+            # For gfx942 (MI300X), disable software pipelining to avoid GPU faults
+            num_stages = 0 if not _is_gfx95_supported else 1
             kernel_partial = sparse_mla_fwd_decode_partial(
                 num_heads,
                 d_v,
@@ -1354,6 +1356,7 @@ def tilelang_sparse_fwd(
                 sm_scale=sm_scale,
                 block_I=block_I,
                 inner_iter=inner_iter,
+                num_stages=num_stages,
                 threads=threads,
             )
         partial_o_batched, partial_lse_batched = kernel_partial(
