@@ -9,6 +9,14 @@ import torch
 from sglang.jit_kernel.utils import is_arch_support_pdl
 from sglang.srt.layers.attention.nsa.utils import is_nsa_prefill_cp_round_robin_split
 
+# Import allow_in_graph for torch.compile compatibility
+try:
+    from torch._dynamo import allow_in_graph
+    _HAS_ALLOW_IN_GRAPH = True
+except ImportError:
+    _HAS_ALLOW_IN_GRAPH = False
+    allow_in_graph = None
+
 tilelang.set_log_level("WARNING")
 
 pass_configs = {
@@ -684,3 +692,10 @@ def mhc_post(
         residual.shape[-1],
     )
     return out
+
+
+# Wrap mhc_pre and mhc_post with allow_in_graph for torch.compile compatibility
+# This enables the TileLang kernels to be captured in CUDA graphs when torch.compile is enabled
+if _HAS_ALLOW_IN_GRAPH:
+    mhc_pre = allow_in_graph(mhc_pre)
+    mhc_post = allow_in_graph(mhc_post)
