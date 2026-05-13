@@ -10,6 +10,33 @@ from sglang.srt.utils import is_gfx95_supported, is_hip
 
 tilelang.set_log_level("WARNING")
 
+# Register TileLang's CythonKernelWrapper.forward as allow_in_graph to unblock
+# Piecewise CUDA Graph (PCG) capture for DeepSeek-V4-Flash on MI300X.
+# Without this registration, torch Dynamo fails when capturing graphs that
+# include TileLang kernels (e.g., hc_split_sinkhorn).
+#
+# We patch CythonKernelAdapter._convert_torch_func to wrap the returned lambda
+# with allow_in_graph, since the Cython method descriptor itself cannot be
+# directly registered (method descriptors don't support weakref).
+try:
+    from torch._dynamo import allow_in_graph
+    from tilelang.jit.adapter.cython.adapter import CythonKernelAdapter
+
+    # Save the original method
+    _original_convert_torch_func = CythonKernelAdapter._convert_torch_func
+
+    def _patched_convert_torch_func(self):
+        """Patched version that wraps the lambda with allow_in_graph."""
+        lambda_forward = _original_convert_torch_func(self)
+        # Wrap the lambda with allow_in_graph so Dynamo skips introspection
+        return allow_in_graph(lambda_forward)
+
+    # Apply the patch
+    CythonKernelAdapter._convert_torch_func = _patched_convert_torch_func
+except ImportError:
+    # If TileLang or torch._dynamo is not available, skip registration
+    pass
+
 pass_configs = {
     tilelang.PassConfigKey.TL_DISABLE_WARP_SPECIALIZED: True,
     tilelang.PassConfigKey.TL_DISABLE_TMA_LOWER: True,
