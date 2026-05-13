@@ -5,6 +5,30 @@ import dataclasses
 from contextlib import contextmanager
 
 
+def _register_tilelang_with_dynamo():
+    """Register TileLang's CythonKernelWrapper with torch._dynamo.allow_in_graph.
+
+    This enables Piecewise CUDA Graph (PCG) capture for DeepSeek-V4-Flash on MI300X
+    when TileLang kernels are used. CythonKernelWrapper.forward is a method_descriptor,
+    so we register the class itself rather than the method.
+    """
+    try:
+        from tilelang.jit.adapter.cython.adapter import CythonKernelWrapper
+        import torch._dynamo
+        torch._dynamo.allow_in_graph(CythonKernelWrapper)
+    except ImportError:
+        # TileLang not installed, skip registration
+        pass
+    except Exception as e:
+        # Registration failed, log but don't crash
+        import logging
+        logging.warning(f"Failed to register TileLang with Dynamo: {e}")
+
+
+# Register on module import
+_register_tilelang_with_dynamo()
+
+
 @dataclasses.dataclass
 class CompilationCounter:
     num_models_seen: int = 0
