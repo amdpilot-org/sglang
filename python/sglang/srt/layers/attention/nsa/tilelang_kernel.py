@@ -10,6 +10,19 @@ from sglang.srt.utils import is_gfx95_supported, is_hip
 
 tilelang.set_log_level("WARNING")
 
+# Register TileLang's CythonKernelWrapper.forward with torch._dynamo.allow_in_graph
+# to enable Piecewise CUDA Graph (PCG) capture for DeepSeek-V4-Flash decode path.
+try:
+    from tilelang.jit.adapter.cython.adapter import CythonKernelWrapper
+    from torch._dynamo import allow_in_graph, trace_rules
+    try:
+        allow_in_graph(CythonKernelWrapper.forward)
+    except TypeError:
+        # Workaround for method descriptors (Cython extension classes)
+        trace_rules._allowed_callable_ids.add(id(CythonKernelWrapper.forward))
+except Exception:
+    pass
+
 pass_configs = {
     tilelang.PassConfigKey.TL_DISABLE_WARP_SPECIALIZED: True,
     tilelang.PassConfigKey.TL_DISABLE_TMA_LOWER: True,
