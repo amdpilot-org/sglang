@@ -31,7 +31,7 @@ ENV BUILD_TRITON="0"
 ENV BUILD_LLVM="0"
 ENV BUILD_AITER_ALL="1"
 ENV BUILD_MOONCAKE="1"
-ENV AITER_COMMIT_DEFAULT="a6bb499375849eec45d68c5ccaebc8865fd422c0"
+ENV AITER_COMMIT_DEFAULT="3c5f0ba937861da585ef0f72d20d9c8dba30ef3b"
 
 # ===============================
 # Base image 942 with rocm720 and args
@@ -41,7 +41,7 @@ ENV BUILD_TRITON="1"
 ENV BUILD_LLVM="0"
 ENV BUILD_AITER_ALL="1"
 ENV BUILD_MOONCAKE="1"
-ENV AITER_COMMIT_DEFAULT="a6bb499375849eec45d68c5ccaebc8865fd422c0"
+ENV AITER_COMMIT_DEFAULT="3c5f0ba937861da585ef0f72d20d9c8dba30ef3b"
 
 # ===============================
 # Base image 950 and args
@@ -51,7 +51,7 @@ ENV BUILD_TRITON="0"
 ENV BUILD_LLVM="0"
 ENV BUILD_AITER_ALL="1"
 ENV BUILD_MOONCAKE="1"
-ENV AITER_COMMIT_DEFAULT="a6bb499375849eec45d68c5ccaebc8865fd422c0"
+ENV AITER_COMMIT_DEFAULT="3c5f0ba937861da585ef0f72d20d9c8dba30ef3b"
 
 # ===============================
 # Base image 950 with rocm720 and args
@@ -61,7 +61,7 @@ ENV BUILD_TRITON="1"
 ENV BUILD_LLVM="0"
 ENV BUILD_AITER_ALL="1"
 ENV BUILD_MOONCAKE="1"
-ENV AITER_COMMIT_DEFAULT="a6bb499375849eec45d68c5ccaebc8865fd422c0"
+ENV AITER_COMMIT_DEFAULT="3c5f0ba937861da585ef0f72d20d9c8dba30ef3b"
 
 # ===============================
 # Chosen arch and args
@@ -85,6 +85,8 @@ ARG TRITON_COMMIT="42270451990532c67e69d753fbd026f28fcc4840"
 ARG AITER_REPO="https://github.com/ROCm/aiter.git"
 ARG AITER_COMMIT=""
 ENV AITER_COMMIT="${AITER_COMMIT:-${AITER_COMMIT_DEFAULT}}"
+# Keep the Triton already installed in the image when AITER setup.py runs.
+ENV AITER_USE_SYSTEM_TRITON=1
 
 ARG LLVM_REPO="https://github.com/jrbyrnes/llvm-project.git"
 ARG LLVM_BRANCH="MainOpSelV2"
@@ -301,6 +303,9 @@ RUN python3 -m pip install --no-cache-dir maturin \
     && ulimit -n 65536 && maturin build --release --features vendored-openssl --out dist \
     && python3 -m pip install --force-reinstall dist/*.whl \
     && rm -rf /root/.cache
+
+# General
+RUN echo "ulimit -n 65535" >> /etc/bash.bashrc
 
 # -----------------------
 # TileLang
@@ -577,6 +582,16 @@ ENV SGLANG_ROCM_FUSED_DECODE_MLA=1
 ENV SGLANG_SET_CPU_AFFINITY=1
 ENV SGLANG_USE_AITER=1
 ENV SGLANG_USE_ROCM700A=1
+ENV SGLANG_TOPK_TRANSFORM_512_TORCH=0
+ENV SGLANG_OPT_USE_FUSED_COMPRESS=true
+ENV SGLANG_OPT_USE_TILELANG_INDEXER=true
+ENV SGLANG_HACK_FLASHMLA_BACKEND=triton
+ENV SGLANG_OPT_USE_AITER_MHC_PRE=true
+ENV SGLANG_OPT_USE_AITER_MHC_POST=true
+ENV SGLANG_OPT_USE_TILELANG_MHC_PRE=false
+ENV SGLANG_OPT_USE_TILELANG_MHC_POST=false
+ENV SGLANG_OPT_USE_FUSED_HASH_TOPK=true
+ENV SGLANG_OPT_USE_FUSED_STORE_CACHE=true
 
 ENV NCCL_MIN_NCHANNELS=112
 ENV ROCM_QUICK_REDUCE_QUANTIZATION=INT8
