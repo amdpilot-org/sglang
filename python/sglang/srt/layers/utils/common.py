@@ -41,15 +41,32 @@ def pad_or_narrow_weight(
 def copy_or_rebind_param(
     module: torch.nn.Module, name: str, new_value: torch.Tensor
 ) -> None:
-    """Keep parameter identities stable for CUDA graph reuse and hot reload."""
+    """Keep parameter identities stable for CUDA graph reuse and hot reload.
+
+    Preserves custom attributes on the parameter (e.g., weight_loader).
+    """
     new_value = new_value.detach()
     param = getattr(module, name, None)
     if isinstance(param, Parameter):
+        # Save custom attributes before replacing
+        # Save all non-standard attributes that were set on the parameter
+        custom_attrs = {}
+        # Get attributes that are not standard torch Parameter attributes
+        # We use __dict__ approach which is more reliable than dir() 
+        for attr_name, attr_value in param.__dict__.items():
+            # Skip standard parameter attributes
+            if attr_name not in ['data', 'grad', 'requires_grad', 'shape', 'dtype', 'device', 'grad_fn', '_grad', '_backward_hooks']:
+                custom_attrs[attr_name] = attr_value
+        
         if param.data.shape == new_value.shape and param.data.dtype == new_value.dtype:
             param.data.copy_(new_value)
         else:
             param.data = new_value
         param.requires_grad_(False)
+        
+        # Restore custom attributes
+        for attr_name, attr_value in custom_attrs.items():
+            setattr(param, attr_name, attr_value)
     else:
         setattr(module, name, Parameter(new_value, requires_grad=False))
 
