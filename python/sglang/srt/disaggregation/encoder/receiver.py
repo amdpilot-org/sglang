@@ -33,6 +33,7 @@ from sglang.srt.environ import envs
 from sglang.srt.managers.io_struct import (
     EncoderDispatchErrorReq,
     GenerateReqInput,
+    MooncakeMMUrlItem,
     TokenizedGenerateReqInput,
 )
 from sglang.srt.managers.multimodal_processor import get_mm_processor, import_processors
@@ -838,13 +839,11 @@ def _embedding_part_matches_request(
     )
 
 
-def _encoder_media_item(mm_item: dict):
+def _encoder_media_item(mm_item: MooncakeMMUrlItem):
     """Keep per-media options aligned while preserving the legacy URL shape."""
-    item = {
-        key: value
-        for key, value in mm_item.items()
-        if key != "modality" and value is not None
-    }
+    item = {"url": mm_item.url, **mm_item.preprocess_kwargs}
+    if mm_item.content_hash is not None:
+        item["content_hash"] = mm_item.content_hash
     return item["url"] if set(item) == {"url"} else item
 
 
@@ -2596,7 +2595,9 @@ class MMReceiverBase(ABC):
 
         return num_items_assigned
 
-    def _extract_url_data(self, request_obj: GenerateReqInput) -> List[Dict]:
+    def _extract_url_data(
+        self, request_obj: GenerateReqInput
+    ) -> List[MooncakeMMUrlItem]:
         def flatten_mm_items(items):
             if not isinstance(items, list):
                 return [items]
@@ -2633,13 +2634,10 @@ class MMReceiverBase(ABC):
                     raw_url = to_raw_url(mm_item)
                     if raw_url is None:
                         continue
-                    entry = {
-                        "url": raw_url,
-                        "modality": modality,
-                    }
-                    entry.update(
-                        media_preprocess_kwargs(mm_item, defaults={"detail": "auto"})
+                    preprocess_kwargs = media_preprocess_kwargs(
+                        mm_item, defaults={"detail": "auto"}
                     )
+                    content_hash = None
                     if modality == Modality.IMAGE:
                         inline_hash = (
                             mm_item.content_hash
@@ -2656,9 +2654,16 @@ class MMReceiverBase(ABC):
                             and image_index < len(image_hashes)
                             else None
                         )
-                        entry["content_hash"] = explicit_hash or inline_hash
+                        content_hash = explicit_hash or inline_hash
                         image_index += 1
-                    mm_data.append(entry)
+                    mm_data.append(
+                        MooncakeMMUrlItem(
+                            url=raw_url,
+                            modality=modality,
+                            preprocess_kwargs=preprocess_kwargs,
+                            content_hash=content_hash,
+                        )
+                    )
         if image_hashes is not None and image_index != len(image_hashes):
             raise ValueError(
                 f"mm_content_hashes has {len(image_hashes)} entries for "

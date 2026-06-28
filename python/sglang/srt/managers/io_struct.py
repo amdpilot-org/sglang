@@ -170,6 +170,15 @@ MultimodalDataInputFormat = Union[
 ]
 
 
+class MooncakeMMUrlItem(msgspec.Struct, array_like=True):
+    """Multimodal input captured for Mooncake encoder dispatch."""
+
+    url: object
+    modality: Modality
+    preprocess_kwargs: Dict[str, object] = msgspec.field(default_factory=dict)
+    content_hash: Optional[str] = None
+
+
 @dataclass
 class GenerateReqInput:
     # Request ID(s). If omitted, generated during normalization. For batch
@@ -331,6 +340,7 @@ class GenerateReqInput:
     # For EPD-disaggregated inference
     need_wait_for_mm_inputs: Optional[bool] = None
     num_items_assigned: Optional[Dict[Modality, List[int]]] = None
+    mm_data_mooncake: Optional[List[MooncakeMMUrlItem]] = None
     # Snapshot of encoder URLs at the time tokenizer-side computed
     # ``num_items_assigned``.
     encoder_urls: Optional[List[str]] = None
