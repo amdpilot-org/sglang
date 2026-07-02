@@ -61,6 +61,11 @@ from sglang.srt.managers.schedule_batch import (
     get_return_hidden_states_mode,
 )
 from sglang.srt.multimodal.mm_utils import has_valid_data
+from sglang.srt.observability.req_time_stats import (
+    APIServerReqTimeStats,
+    DPControllerReqTimeStats,
+    SchedulerReqTimeStats,
+)
 from sglang.srt.sampling.sampling_params import SamplingParams
 from sglang.srt.utils import ImageData, VideoData
 from sglang.srt.utils.field_validators import validate_optional_list_i64_1d_2d
@@ -70,6 +75,8 @@ from sglang.srt.utils.msgspec_utils import (
     msgspec_struct_pydantic_core_schema,
 )
 from sglang.srt.utils.weight_versions import WeightVersionSpans
+
+RequestTimeStats = Union[APIServerReqTimeStats, DPControllerReqTimeStats]
 
 # Handle serialization of Image for pydantic
 if TYPE_CHECKING:
@@ -1072,18 +1079,10 @@ class TokenizedGenerateReqInput(BaseReq, kw_only=True):
     multi_item_delimiter_indices: Optional[List[int]] = None
 
     # For observability
-    # Pickled Optional[Union[APIServerReqTimeStats, DPControllerReqTimeStats]]
-    time_stats: Optional[PickleWrapper] = None
+    time_stats: Optional[RequestTimeStats] = None
 
     # Cache namespace used to isolate otherwise-identical prefixes.
     cache_salt: Optional[str] = None
-
-    def wrap_pickle_fields(self):
-        self.time_stats = wrap_as_pickle(self.time_stats)
-
-    def unwrap_pickle_fields(self):
-        self.time_stats = unwrap_from_pickle(self.time_stats)
-
 
 class BatchTokenizedGenerateReqInput(BaseBatchReq, kw_only=True):
     # The batch of tokenized requests
@@ -1361,14 +1360,7 @@ class TokenizedEmbeddingReqInput(BaseReq, kw_only=True):
     multi_item_delimiter_indices: Optional[List[int]] = None
 
     # For observability
-    # Pickled Optional[Union[APIServerReqTimeStats, DPControllerReqTimeStats]]
-    time_stats: Optional[PickleWrapper] = None
-
-    def wrap_pickle_fields(self):
-        self.time_stats = wrap_as_pickle(self.time_stats)
-
-    def unwrap_pickle_fields(self):
-        self.time_stats = unwrap_from_pickle(self.time_stats)
+    time_stats: Optional[RequestTimeStats] = None
 
 
 class BatchTokenizedEmbeddingReqInput(BaseBatchReq, kw_only=True):
@@ -1510,8 +1502,7 @@ class BatchTokenIDOutput(BaseBatchReq, kw_only=True):
     dp_ranks: Optional[List[Optional[int]]] = None
 
     # For observability
-    # Pickled Optional[List[SchedulerReqTimeStats]]
-    time_stats: Optional[PickleWrapper] = None
+    time_stats: Optional[List[SchedulerReqTimeStats]] = None
 
     # Multimodal prompt token counts (image/audio/video). None when not applicable.
     image_tokens: Optional[List[int]] = None
@@ -1606,8 +1597,7 @@ class BatchStrOutput(BaseBatchReq, kw_only=True):
     dp_ranks: Optional[List[Optional[int]]] = None
 
     # For observability
-    # Pickled Optional[List[SchedulerReqTimeStats]]
-    time_stats: Optional[PickleWrapper] = None
+    time_stats: Optional[List[SchedulerReqTimeStats]] = None
 
     # Multimodal prompt token counts (image/audio/video). None when not applicable.
     image_tokens: Optional[List[int]] = None
@@ -1649,8 +1639,7 @@ class BatchEmbeddingOutput(BaseBatchReq, kw_only=True):
     cached_tokens_details: Optional[List[Optional[CachedTokensDetails]]] = None
 
     # For observability
-    # Pickled Optional[List[SchedulerReqTimeStats]]
-    time_stats: Optional[PickleWrapper] = None
+    time_stats: Optional[List[SchedulerReqTimeStats]] = None
 
     # Optional pooled hidden states (pre-head transformer output).
     # Two IPC formats, disambiguated by len vs len(rids):

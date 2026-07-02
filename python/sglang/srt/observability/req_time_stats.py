@@ -18,9 +18,10 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
+import msgspec
 from typing_extensions import Self
 
 from sglang.srt.disaggregation.utils import DisaggregationMode
@@ -37,10 +38,6 @@ from sglang.srt.observability.trace import (
     TraceSliceContext,
     get_global_tracing_enabled,
 )
-from sglang.srt.observability.trace_async import (
-    TraceReqContextAsync,
-    is_async_tracing_available,
-)
 from sglang.srt.utils import get_bool_env_var
 
 if TYPE_CHECKING:
@@ -54,6 +51,12 @@ logger = logging.getLogger(__name__)
 
 # Reduce system time calls by computing time.time() based on calibrated perf_counter() values.
 global_diff_realtime_monotonic = time.time() - time.perf_counter()
+
+
+def _restore_req_time_stats(cls: type, state: Dict[str, Any]) -> Any:
+    obj = cls()
+    obj.__setstate__(state)
+    return obj
 
 
 def calibrate_time_diff():
@@ -225,21 +228,25 @@ class RequestStage:
     ANONYMOUS = RequestStageConfig("")
 
 
-@dataclass
-class ReqTimeStatsBase:
+class ReqTimeStatsBase(
+    msgspec.Struct, tag=True, kw_only=True, dict=True, omit_defaults=True
+):
     enable_metrics: bool = False
-    metrics_collector: Optional[
-        Union[
-            SchedulerMetricsCollector,
-            TokenizerMetricsCollector,
-            EncoderMetricsCollector,
-        ]
-    ] = None
-    trace_ctx: Union[TraceReqContext, TraceNullContext] = field(
-        default_factory=TraceNullContext
-    )
     disagg_mode: DisaggregationMode = DisaggregationMode.NULL
     diff_realtime_monotonic: float = 0.0
+    trace_ctx_state: Optional[Dict[str, Any]] = None
+
+    def __post_init__(self):
+        self.metrics_collector: Optional[
+            Union[
+                SchedulerMetricsCollector,
+                TokenizerMetricsCollector,
+                EncoderMetricsCollector,
+            ]
+        ] = None
+        self.trace_ctx: Union[TraceReqContext, TraceNullContext] = (
+            self._decode_trace_ctx_state(self.trace_ctx_state)
+        )
 
     @classmethod
     def new_from_obj(cls, obj: Optional[ReqTimeStatsBase], *args, **kwargs) -> Self:
@@ -247,14 +254,73 @@ class ReqTimeStatsBase:
         new_obj = cls(*args, **kwargs)
         if obj is None:
             return new_obj
-        for key, value in obj.__dict__.items():
-            if hasattr(new_obj, key):
-                setattr(new_obj, key, value)
+
+        new_fields = {field.name for field in msgspec.structs.fields(type(new_obj))}
+        for field in msgspec.structs.fields(type(obj)):
+            if field.name in new_fields:
+                setattr(new_obj, field.name, getattr(obj, field.name))
+
+        new_obj.metrics_collector = obj.metrics_collector
+        new_obj.trace_ctx = obj.trace_ctx
 
         if new_obj.trace_ctx.tracing_enable:
             new_obj.trace_ctx.rebuild_thread_context()
 
         return new_obj
+
+    @staticmethod
+    def _decode_trace_ctx_state(
+        trace_ctx_state: Optional[Dict[str, Any]],
+    ) -> Union[TraceReqContext, TraceNullContext]:
+        if isinstance(trace_ctx_state, dict) and trace_ctx_state.get("tracing_enable"):
+            trace_ctx_state = ReqTimeStatsBase._decode_trace_ctx_ids(trace_ctx_state)
+            trace_ctx = object.__new__(TraceReqContext)
+            trace_ctx.__setstate__(trace_ctx_state)
+            return trace_ctx
+        return TraceNullContext()
+
+    @staticmethod
+    def _encode_trace_ctx_ids(trace_ctx_state: Dict[str, Any]) -> Dict[str, Any]:
+        trace_ctx_state = trace_ctx_state.copy()
+        last_span_context = trace_ctx_state.get("last_span_context")
+        if isinstance(last_span_context, dict):
+            last_span_context = last_span_context.copy()
+            trace_id = last_span_context.get("trace_id")
+            span_id = last_span_context.get("span_id")
+            if isinstance(trace_id, int):
+                last_span_context["trace_id"] = f"{trace_id:032x}"
+            if isinstance(span_id, int):
+                last_span_context["span_id"] = f"{span_id:016x}"
+            trace_ctx_state["last_span_context"] = last_span_context
+        return trace_ctx_state
+
+    @staticmethod
+    def _decode_trace_ctx_ids(trace_ctx_state: Dict[str, Any]) -> Dict[str, Any]:
+        trace_ctx_state = trace_ctx_state.copy()
+        last_span_context = trace_ctx_state.get("last_span_context")
+        if isinstance(last_span_context, dict):
+            last_span_context = last_span_context.copy()
+            for key in ("trace_id", "span_id"):
+                value = last_span_context.get(key)
+                if isinstance(value, str):
+                    last_span_context[key] = int(value, 16)
+            trace_ctx_state["last_span_context"] = last_span_context
+        return trace_ctx_state
+
+    def _get_trace_ctx_state(self) -> Dict[str, Any]:
+        if self.trace_ctx.tracing_enable:
+            return self._encode_trace_ctx_ids(self.trace_ctx.__getstate__())
+        if self.trace_ctx_state is not None:
+            return self.trace_ctx_state
+        return {"tracing_enable": False}
+
+    def to_ipc(self) -> Self:
+        return type(self)(
+            disagg_mode=self.disagg_mode,
+            enable_metrics=False,
+            trace_ctx_state=self._get_trace_ctx_state(),
+            diff_realtime_monotonic=global_diff_realtime_monotonic,
+        )
 
     def disagg_mode_str(self) -> str:
         if self.disagg_mode == DisaggregationMode.NULL:
@@ -290,22 +356,13 @@ class ReqTimeStatsBase:
         bootstrap_room: Optional[int],
         external_trace_header: Optional[Dict[str, str]] = None,
     ):
-        if is_async_tracing_available():
-            self.trace_ctx = TraceReqContextAsync(
-                rid=rid,
-                bootstrap_room=bootstrap_room,
-                role=self.disagg_mode_str(),
-                module_name="request",
-                external_trace_header=external_trace_header,
-            )
-        else:
-            self.trace_ctx = TraceReqContext(
-                rid=rid,
-                bootstrap_room=bootstrap_room,
-                role=self.disagg_mode_str(),
-                module_name="request",
-                external_trace_header=external_trace_header,
-            )
+        self.trace_ctx = TraceReqContext(
+            rid=rid,
+            bootstrap_room=bootstrap_room,
+            role=self.disagg_mode_str(),
+            module_name="request",
+            external_trace_header=external_trace_header,
+        )
 
         if not self.trace_ctx.tracing_enable:
             self.trace_ctx = TraceNullContext()
@@ -330,17 +387,15 @@ class ReqTimeStatsBase:
     def __getstate__(self) -> object:
         # The object is propagated to other processes via serialization and deserialization methods,
         # requiring the metric collector to be reconfigured.
-        trace_ctx_state = (
-            self.trace_ctx.__getstate__()
-            if self.trace_ctx.tracing_enable
-            else {"tracing_enable": False}
-        )
         return {
             "disagg_mode": self.disagg_mode.value if self.disagg_mode else None,
             "enable_metrics": False,
-            "trace_ctx": trace_ctx_state,
+            "trace_ctx": self._get_trace_ctx_state(),
             "diff_realtime_monotonic": global_diff_realtime_monotonic,
         }
+
+    def __reduce_ex__(self, protocol: int):
+        return _restore_req_time_stats, (type(self), self.__getstate__())
 
     def __setstate__(self, state: object):
         # Reconstruct disagg_mode from string value if needed
@@ -349,27 +404,25 @@ class ReqTimeStatsBase:
             state["disagg_mode"] = DisaggregationMode(disagg_mode_val)
 
         # Reconstruct trace_ctx from serialized dict if needed
-        trace_ctx_state = state.get("trace_ctx")
+        trace_ctx_state = state.pop("trace_ctx", state.get("trace_ctx_state", None))
         if isinstance(trace_ctx_state, dict):
-            if trace_ctx_state.get("tracing_enable"):
-                if trace_ctx_state.get("is_async"):
-                    trace_ctx = object.__new__(TraceReqContextAsync)
-                    trace_ctx.__setstate__(trace_ctx_state)
-                else:
-                    trace_ctx = object.__new__(TraceReqContext)
-                    trace_ctx.__setstate__(trace_ctx_state)
-                state["trace_ctx"] = trace_ctx
-            else:
-                state["trace_ctx"] = TraceNullContext()
+            self.trace_ctx_state = trace_ctx_state
+            self.trace_ctx = self._decode_trace_ctx_state(trace_ctx_state)
 
         for key in state.keys():
-            if key.endswith("time") and state[key]:
+            if key.endswith("time") and state[key] > 0.0:
                 state[key] = convert_time_cross_thread(
                     state[key],
                     state["diff_realtime_monotonic"],
                     global_diff_realtime_monotonic,
                 )
-        self.__dict__.update(state)
+
+        struct_fields = {field.name for field in msgspec.structs.fields(type(self))}
+        for key, value in state.items():
+            if key == "diff_realtime_monotonic":
+                value = global_diff_realtime_monotonic
+            if key in struct_fields:
+                setattr(self, key, value)
 
     def encode_json(self) -> Dict[str, Any]:
         return self.__getstate__()
@@ -378,7 +431,6 @@ class ReqTimeStatsBase:
         self.__setstate__(state)
 
 
-@dataclass
 class APIServerReqTimeStats(ReqTimeStatsBase):
     # get by time.perf_counter()
     created_time: float = 0.0
@@ -415,18 +467,12 @@ class APIServerReqTimeStats(ReqTimeStatsBase):
                 convert_time_to_realtime_ns(ts),
             )
 
-    def set_finished_time(self, ts=None, span_attrs=None):
+    def set_finished_time(self, ts=None):
         ts = ts or time.perf_counter()
         self.finished_time = ts
 
         if self.trace_ctx.tracing_enable:
-            # The latency attrs are derived from finished_time and the root span is
-            # closed below, so they must be merged in here rather than by the caller.
-            attrs = dict(span_attrs) if span_attrs else {}
-            attrs.update(self.convert_to_gen_ai_span_attrs())
-            self.trace_ctx.trace_req_finish(
-                convert_time_to_realtime_ns(ts), attrs=attrs
-            )
+            self.trace_ctx.trace_req_finish(convert_time_to_realtime_ns(ts))
 
     def set_first_token_time(self, ts=None):
         ts = ts or time.perf_counter()
@@ -547,7 +593,6 @@ class APIServerReqTimeStats(ReqTimeStatsBase):
         return span_attrs
 
 
-@dataclass
 class DPControllerReqTimeStats(ReqTimeStatsBase):
     # propagated from tokenizer/grpc_server, get by time.perf_counter()
     created_time: float = 0.0
@@ -593,7 +638,6 @@ class DPControllerReqTimeStats(ReqTimeStatsBase):
             )
 
 
-@dataclass
 class SchedulerReqTimeStats(ReqTimeStatsBase):
     """
     Store the timestamps for each stage of a request.
@@ -646,21 +690,50 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
     transfer_speed_gb_s: float = 0.0
     transfer_total_mb: float = 0.0
 
-    has_timing_data: bool = False
+    def __post_init__(self):
+        super().__post_init__()
+        if (
+            self.diff_realtime_monotonic
+            and self.diff_realtime_monotonic != global_diff_realtime_monotonic
+        ):
+            old_diff = self.diff_realtime_monotonic
+            new_diff = global_diff_realtime_monotonic
+            if self.wait_queue_entry_time > 0.0:
+                self.wait_queue_entry_time = convert_time_cross_thread(
+                    self.wait_queue_entry_time, old_diff, new_diff
+                )
+            if self.forward_entry_time > 0.0:
+                self.forward_entry_time = convert_time_cross_thread(
+                    self.forward_entry_time, old_diff, new_diff
+                )
+            if self.prefill_finished_time > 0.0:
+                self.prefill_finished_time = convert_time_cross_thread(
+                    self.prefill_finished_time, old_diff, new_diff
+                )
+            self.diff_realtime_monotonic = new_diff
 
     def __getstate__(self) -> object:
         # send to detokenizer/tokenizer
-        if not (self.enable_metrics or self.has_timing_data):
+        if not self.enable_metrics and not self.diff_realtime_monotonic:
             return {}
 
         state = {
-            "has_timing_data": True,
             "wait_queue_entry_time": self.wait_queue_entry_time,
             "forward_entry_time": self.forward_entry_time,
             "prefill_finished_time": self.prefill_finished_time,
             "diff_realtime_monotonic": global_diff_realtime_monotonic,
         }
         return state
+
+    def to_ipc(self) -> Self:
+        if not self.enable_metrics:
+            return type(self)()
+        return type(self)(
+            wait_queue_entry_time=self.wait_queue_entry_time,
+            forward_entry_time=self.forward_entry_time,
+            prefill_finished_time=self.prefill_finished_time,
+            diff_realtime_monotonic=global_diff_realtime_monotonic,
+        )
 
     def set_scheduler_recv_time(self, ts=None):
         calibrate_time_diff()
@@ -1063,9 +1136,9 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
             )
 
             if SGLANG_TEST_REQUEST_TIME_STATS:
-                assert queue_duration >= 0 and forward_duration >= 0, (
-                    f"queue_duration={queue_duration} < 0 or forward_duration={forward_duration} < 0"
-                )
+                assert (
+                    queue_duration >= 0 and forward_duration >= 0
+                ), f"queue_duration={queue_duration} < 0 or forward_duration={forward_duration} < 0"
 
             return f"queue_duration={self.format_duration(queue_duration)}, forward_duration={self.format_duration(forward_duration)}, entry_time={self.format_wallclock(self.wait_queue_entry_time)}"
         elif self.disagg_mode == DisaggregationMode.PREFILL:
@@ -1085,9 +1158,7 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
                         bootstrap_queue_duration >= 0
                         and queue_duration >= 0
                         and forward_duration >= 0
-                    ), (
-                        f"bootstrap_queue_duration={bootstrap_queue_duration} < 0 or queue_duration={queue_duration} < 0 or forward_duration={forward_duration} < 0"
-                    )
+                    ), f"bootstrap_queue_duration={bootstrap_queue_duration} < 0 or queue_duration={queue_duration} < 0 or forward_duration={forward_duration} < 0"
 
             if (
                 self.bootstrap_done_time > 0
@@ -1097,9 +1168,9 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
                     self.prefill_bootstrap_queue_entry_time, self.bootstrap_done_time
                 )
                 if SGLANG_TEST_REQUEST_TIME_STATS:
-                    assert bootstrap_duration >= 0, (
-                        f"bootstrap_duration={bootstrap_duration} < 0"
-                    )
+                    assert (
+                        bootstrap_duration >= 0
+                    ), f"bootstrap_duration={bootstrap_duration} < 0"
                 bootstrap_fields = (
                     f"bootstrap_duration={self.format_duration(bootstrap_duration)}, "
                 )
@@ -1141,9 +1212,7 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
                         and transfer_duration >= 0
                         and queue_duration >= 0
                         and forward_duration >= 0
-                    ), (
-                        f"prealloc_duration={prealloc_duration} < 0 or transfer_duration={transfer_duration} < 0 or queue_duration={queue_duration} < 0 or forward_duration={forward_duration} < 0. {self=}"
-                    )
+                    ), f"prealloc_duration={prealloc_duration} < 0 or transfer_duration={transfer_duration} < 0 or queue_duration={queue_duration} < 0 or forward_duration={forward_duration} < 0. {self=}"
 
             # Break down prealloc_duration into sub-phases
             if self.bootstrap_done_time > 0:
@@ -1154,9 +1223,9 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
                     self.bootstrap_done_time, self.decode_transfer_queue_entry_time
                 )
                 if SGLANG_TEST_REQUEST_TIME_STATS:
-                    assert bootstrap_duration >= 0 and alloc_wait_duration >= 0, (
-                        f"bootstrap_duration={bootstrap_duration} < 0 or alloc_wait_duration={alloc_wait_duration} < 0"
-                    )
+                    assert (
+                        bootstrap_duration >= 0 and alloc_wait_duration >= 0
+                    ), f"bootstrap_duration={bootstrap_duration} < 0 or alloc_wait_duration={alloc_wait_duration} < 0"
                 prealloc_fields = (
                     f"bootstrap_duration={self.format_duration(bootstrap_duration)}, "
                     f"alloc_wait_duration={self.format_duration(alloc_wait_duration)}, "
@@ -1204,7 +1273,6 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
         return f"{convert_time_to_realtime(perf_counter_time):.3f}"
 
 
-@dataclass
 class EncoderReqTimeStats(ReqTimeStatsBase):
     mm_encode_start_time: float = 0.0
     mm_encode_end_time: float = 0.0
@@ -1274,19 +1342,3 @@ def set_time_batch(
             method(ts)
         else:
             method(ts, attrs)
-
-
-def flush_trace_batch(reqs: List[Any]):
-    """Proactively flush buffered trace ops for a batch of requests.
-
-    Call at natural CPU/GPU overlap points (e.g., right before run_batch)
-    so the ZMQ send overlaps with GPU forward compute.
-    """
-    if reqs is None or not get_global_tracing_enabled():
-        return
-    for req in reqs:
-        time_stats = getattr(req, "time_stats", None)
-        if time_stats is not None:
-            trace_ctx = getattr(time_stats, "trace_ctx", None)
-            if trace_ctx is not None:
-                trace_ctx.flush()
