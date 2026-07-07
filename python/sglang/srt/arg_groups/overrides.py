@@ -1559,6 +1559,33 @@ def _flashinfer_allreduce_fusion_auto_enable(view: Any) -> dict:
 
 
 @register_post_process
+def _aiter_allreduce_fusion_auto_enable(view: Any) -> dict:
+    """ROCm counterpart of _flashinfer_allreduce_fusion_auto_enable: auto-enable
+    AITER AllReduce Fusion on HIP for models with explicit support, when the
+    user has opted into AITER via SGLANG_USE_AITER=1. Mirrors the FlashInfer
+    gating (tp_size > 1, no dp_attention, single-node, no moe_a2a) so the two
+    paths are symmetric. The AITER allreduce kernel is not gfx95-gated (unlike
+    the AITER fused-MoE path), so this covers both MI300X (gfx942) and MI355X
+    (gfx950)."""
+    model_arch = view.get_model_config().hf_config.architectures[0]
+    if (
+        not view.enable_aiter_allreduce_fusion
+        and is_hip()
+        and envs.SGLANG_USE_AITER.get()
+        and model_arch in _FLASHINFER_ALLREDUCE_FUSION_ARCHS
+        and view.tp_size > 1
+        and not view.enable_dp_attention
+        and view.nnodes == 1
+        and view.moe_a2a_backend == "none"
+    ):
+        logger.info(
+            f"Auto-enabling AITER AllReduce Fusion on ROCm for {model_arch}"
+        )
+        return {"enable_aiter_allreduce_fusion": True}
+    return {}
+
+
+@register_post_process
 def _enforce_disable_allreduce_fusion(view: Any) -> dict:
     """Slot pass right after the auto-enable: the user's enforce-disable
     switch wins over every model-specific adjustment."""

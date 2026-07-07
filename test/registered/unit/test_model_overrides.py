@@ -1103,6 +1103,98 @@ class TestGoldenModelOverrides(_IsolatedPublish):
             {},
         )
 
+    def test_aiter_allreduce_fusion_passes(self):
+        # Guards the ROCm counterpart of _flashinfer_allreduce_fusion_auto_enable:
+        # the auto-enable must fire only on HIP with SGLANG_USE_AITER=1, for an
+        # arch in the shared whitelist, and only when all four symmetry gates
+        # with the FlashInfer path hold (tp_size > 1, no dp_attention,
+        # single-node, no moe_a2a). A regression in any single gate silently
+        # breaks the symmetry contract -- the FlashInfer test above does not
+        # cover this function, so each branch here is the only guard.
+        from sglang.srt.arg_groups.overrides import (
+            ResolvedView,
+            _aiter_allreduce_fusion_auto_enable,
+        )
+
+        def _view(arch="Qwen3MoeForCausalLM", **kw):
+            hf = SimpleNamespace(architectures=[arch])
+            defaults = dict(
+                enable_aiter_allreduce_fusion=False,
+                tp_size=2,
+                enable_dp_attention=False,
+                nnodes=1,
+                moe_a2a_backend="none",
+            )
+            defaults.update(kw)
+            return ResolvedView(
+                SimpleNamespace(
+                    get_model_config=lambda: SimpleNamespace(hf_config=hf), **defaults
+                )
+            )
+
+        with (
+            patch.object(overrides_module, "is_hip", return_value=True),
+            patch("sglang.srt.environ.envs.SGLANG_USE_AITER") as aiter_env,
+        ):
+            aiter_env.get.return_value = True
+            # HIP + SGLANG_USE_AITER=1 + whitelisted arch + all gates hold
+            self.assertEqual(
+                _aiter_allreduce_fusion_auto_enable(_view()),
+                {"enable_aiter_allreduce_fusion": True},
+            )
+            # user-set flag survives (no double-enable)
+            self.assertEqual(
+                _aiter_allreduce_fusion_auto_enable(
+                    _view(enable_aiter_allreduce_fusion=True)
+                ),
+                {},
+            )
+            # SGLANG_USE_AITER=0 -> no auto-enable
+            aiter_env.get.return_value = False
+            self.assertEqual(
+                _aiter_allreduce_fusion_auto_enable(_view()), {}
+            )
+            aiter_env.get.return_value = True
+            # unsupported arch
+            self.assertEqual(
+                _aiter_allreduce_fusion_auto_enable(
+                    _view(arch="LlamaForCausalLM")
+                ),
+                {},
+            )
+            # tp_size == 1
+            self.assertEqual(
+                _aiter_allreduce_fusion_auto_enable(_view(tp_size=1)), {}
+            )
+            # dp attention
+            self.assertEqual(
+                _aiter_allreduce_fusion_auto_enable(
+                    _view(enable_dp_attention=True)
+                ),
+                {},
+            )
+            # multi-node
+            self.assertEqual(
+                _aiter_allreduce_fusion_auto_enable(_view(nnodes=2)), {}
+            )
+            # moe_a2a backend
+            self.assertEqual(
+                _aiter_allreduce_fusion_auto_enable(
+                    _view(moe_a2a_backend="deepep")
+                ),
+                {},
+            )
+
+        # non-HIP -> no auto-enable even if SGLANG_USE_AITER is set
+        with (
+            patch.object(overrides_module, "is_hip", return_value=False),
+            patch("sglang.srt.environ.envs.SGLANG_USE_AITER") as aiter_env,
+        ):
+            aiter_env.get.return_value = True
+            self.assertEqual(
+                _aiter_allreduce_fusion_auto_enable(_view()), {}
+            )
+
     def test_cutedsl_prefill_backend_fill_pass(self):
         from sglang.srt.arg_groups.overrides import (
             ResolvedView,
