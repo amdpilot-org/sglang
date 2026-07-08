@@ -64,15 +64,58 @@ def idct_1d(X: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
 
 
 # ---------------------------------------------------------------------------
-# 2-D DCT-II / IDCT-II (separable: apply 1-D along H then W)
+# 2-D DCT-II / IDCT-II
 # ---------------------------------------------------------------------------
+#
+# For the orthonormal case (the only norm used by the progressive-resolution
+# upsample path) we use a cached DCT-II matrix and two batched matmuls instead
+# of four FFT passes.  Profiling of ``dct_upsample_2d`` showed the FFT path was
+# dominated by ~40 small elementwise kernels (cat / flip / complex / exp / div /
+# copy) plus four FFT launches; the matrix path collapses all of that into four
+# ``torch.matmul`` calls with a pre-computed, cached orthonormal basis matrix.
+# The 1-D FFT implementations above are retained as the fallback for any
+# non-``ortho`` norm.
+
+_DCT_MATRIX_CACHE: dict = {}
+
+
+def _dct_matrix(N: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    """Return the cached orthonormal DCT-II basis matrix ``D`` (N x N).
+
+    ``D[k, n] = alpha_k * cos(pi * (2n+1) * k / (2N))`` with
+    ``alpha_0 = sqrt(1/N)``, ``alpha_k = sqrt(2/N)``.  ``D`` is orthonormal so
+    the inverse is simply ``D.t()``.
+    """
+    key = (N, str(device), dtype)
+    D = _DCT_MATRIX_CACHE.get(key)
+    if D is None:
+        k = torch.arange(N, device=device, dtype=dtype).unsqueeze(1)
+        n = torch.arange(N, device=device, dtype=dtype).unsqueeze(0)
+        D = torch.cos(math.pi * (2 * n + 1) * k / (2 * N))
+        alpha = torch.full((N, 1), math.sqrt(2.0 / N), device=device, dtype=dtype)
+        alpha[0] = math.sqrt(1.0 / N)
+        D = (D * alpha).contiguous()
+        _DCT_MATRIX_CACHE[key] = D
+    return D
 
 
 def dct_2d(x: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
     """2-D DCT-II on the last two dims of x (..., H, W)."""
-    return dct_1d(dct_1d(x, norm).transpose(-1, -2), norm).transpose(-1, -2)
+    if norm != "ortho":
+        return dct_1d(dct_1d(x, norm).transpose(-1, -2), norm).transpose(-1, -2)
+    H, W = x.shape[-2], x.shape[-1]
+    Dh = _dct_matrix(H, x.device, x.dtype)
+    Dw = _dct_matrix(W, x.device, x.dtype)
+    # DCT along W (last dim) then H (second-to-last dim):  Dh @ (x @ Dw.t())
+    return torch.matmul(Dh, torch.matmul(x, Dw.t()))
 
 
 def idct_2d(X: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
     """2-D IDCT-II on the last two dims of X (..., H, W)."""
-    return idct_1d(idct_1d(X, norm).transpose(-1, -2), norm).transpose(-1, -2)
+    if norm != "ortho":
+        return idct_1d(idct_1d(X, norm).transpose(-1, -2), norm).transpose(-1, -2)
+    H, W = X.shape[-2], X.shape[-1]
+    Dh = _dct_matrix(H, X.device, X.dtype)
+    Dw = _dct_matrix(W, X.device, X.dtype)
+    # D is orthonormal, so IDCT = D.t() @ X @ D
+    return torch.matmul(Dh.t(), torch.matmul(X, Dw))
