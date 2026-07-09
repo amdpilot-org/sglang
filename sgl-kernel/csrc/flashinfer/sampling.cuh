@@ -1,0 +1,100 @@
+/*
+ * ROCm wrapper for flashinfer/sampling.cuh
+ *
+ * On CUDA, flashinfer provides this header directly.  On ROCm we delegate to
+ * aiter's hipified copy (aiter/csrc/cpp_itfs/sampling/sampling.cuh) and alias
+ * the aiter::sampling namespace into flashinfer::sampling so that downstream
+ * code (speculative_sampling.cuh) compiles unchanged.
+ *
+ * This file also provides:
+ *   - FLASHINFER_CUDA_CALL macro
+ *   - DISPATCH_ALIGNED_VEC_SIZE / DISPATCH_DETERMINISTIC macros
+ *   - cuda* -> hip* compatibility shims for APIs used in .cuh headers
+ *     (PyTorch's hipify only rewrites .cu sources, not .cuh headers)
+ */
+#pragma once
+
+#ifdef __HIP_PLATFORM_AMD__
+
+// Include aiter's hipified sampling.cuh via a path that hipify won't rename.
+// (PyTorch's hipify rewrites .cuh -> _hip.cuh, breaking relative includes.)
+#include "/sgl-workspace/aiter/csrc/cpp_itfs/sampling/sampling.cuh"
+#include <assert.h>
+#include <sstream>
+#include <stdexcept>
+
+// ---------------------------------------------------------------------------
+// Namespace alias: bring aiter::sampling into flashinfer::sampling
+// ---------------------------------------------------------------------------
+namespace flashinfer {
+namespace sampling {
+using namespace aiter::sampling;
+using namespace hipcub;
+using aiter::vec_t;
+}  // namespace sampling
+}  // namespace flashinfer
+
+// ---------------------------------------------------------------------------
+// FLASHINFER_CUDA_CALL — HIP equivalent
+// ---------------------------------------------------------------------------
+#define FLASHINFER_CUDA_CALL(x) \
+  do {                          \
+    hipError_t _err = (x);      \
+    assert(_err == hipSuccess); \
+  } while (0)
+
+// ---------------------------------------------------------------------------
+// cuda* -> hip* compatibility for .cuh headers (not hipified by PyTorch)
+// ---------------------------------------------------------------------------
+#define cudaError_t hipError_t
+#define cudaSuccess hipSuccess
+#define cudaStream_t hipStream_t
+#define cudaLaunchKernel hipLaunchKernel
+#define cudaFuncSetAttribute hipFuncSetAttribute
+#define cudaFuncAttributeMaxDynamicSharedMemorySize \
+  hipFuncAttributeMaxDynamicSharedMemorySize
+
+// ---------------------------------------------------------------------------
+// DISPATCH_ALIGNED_VEC_SIZE — from flashinfer upstream vec_dtypes.cuh
+// ---------------------------------------------------------------------------
+#define DISPATCH_ALIGNED_VEC_SIZE(vec_size, VEC_SIZE, ...)    \
+  do {                                                         \
+    if (vec_size == 1) {                                       \
+      constexpr size_t VEC_SIZE = 1;                           \
+      __VA_ARGS__;                                             \
+    } else if (vec_size == 2) {                                \
+      constexpr size_t VEC_SIZE = 2;                           \
+      __VA_ARGS__;                                             \
+    } else if (vec_size == 4) {                                \
+      constexpr size_t VEC_SIZE = 4;                           \
+      __VA_ARGS__;                                             \
+    } else if (vec_size == 8) {                                \
+      constexpr size_t VEC_SIZE = 8;                           \
+      __VA_ARGS__;                                             \
+    } else if (vec_size == 16) {                               \
+      constexpr size_t VEC_SIZE = 16;                          \
+      __VA_ARGS__;                                             \
+    } else {                                                   \
+      std::ostringstream err;                                  \
+      err << "Unsupported vector size: " << vec_size;          \
+      throw std::runtime_error(err.str());                     \
+    }                                                          \
+  } while (false);
+
+// ---------------------------------------------------------------------------
+// DISPATCH_DETERMINISTIC — from flashinfer upstream
+// ---------------------------------------------------------------------------
+#define DISPATCH_DETERMINISTIC(deterministic, DETERMINISTIC, ...) \
+  do {                                                             \
+    if (deterministic) {                                           \
+      constexpr bool DETERMINISTIC = true;                         \
+      __VA_ARGS__;                                                 \
+    } else {                                                       \
+      constexpr bool DETERMINISTIC = false;                        \
+      __VA_ARGS__;                                                 \
+    }                                                              \
+  } while (false);
+
+#else
+#error "This wrapper is for ROCm only. On CUDA, use the upstream flashinfer/sampling.cuh"
+#endif
