@@ -497,9 +497,12 @@ class TestIdeogram4OnResolutionChange(unittest.TestCase):
         new_w_pixel = new_grid_w * self._SCALE
 
         # Build fake ctx and batch
+        # _on_resolution_change early-returns when ctx.cfg_policy is None;
+        # set a non-None dummy so the position-id / attn-mask update path runs.
         ctx = SimpleNamespace(
             latents=torch.zeros(B, new_num_img, self._IN_C),
             extra=self._make_ctx_extra(B, old_num_img, max_text_tokens),
+            cfg_policy=object(),
         )
         batch = SimpleNamespace(
             extra={
@@ -555,6 +558,7 @@ class TestIdeogram4OnResolutionChange(unittest.TestCase):
         ctx = SimpleNamespace(
             latents=torch.zeros(B, new_grid_h * new_grid_w, self._IN_C),
             extra=self._make_ctx_extra(B, old_grid_h * old_grid_w, max_text_tokens),
+            cfg_policy=object(),
         )
         batch = SimpleNamespace(extra={"ideogram4": old_data})
 
@@ -594,6 +598,7 @@ class TestIdeogram4OnResolutionChange(unittest.TestCase):
         ctx = SimpleNamespace(
             latents=torch.zeros(B, grid_h * grid_w, self._IN_C),
             extra=self._make_ctx_extra(B, old_num_img, max_text_tokens),
+            cfg_policy=object(),
         )
         batch = SimpleNamespace(
             extra={
