@@ -1471,7 +1471,13 @@ class Scheduler(
             else None
         )
 
-        if self.spec_algorithm.carries_draft_hidden_states():
+        worker_carries_draft_hidden = getattr(
+            self.draft_worker, "carries_draft_hidden_states", lambda: True
+        )()
+        if (
+            self.spec_algorithm.carries_draft_hidden_states()
+            and worker_carries_draft_hidden
+        ):
             # Derive the rank-uniform PD wire schema from config because only the
             # last prefill PP stage owns a draft runner.
             draft_model_config = ModelConfig.from_server_args(
