@@ -370,6 +370,18 @@ class SchedulerBatchResultProcessor:
                     ):
                         req.kv.kv_committed_len += 1
                     if req.finished():
+                        if isinstance(self.draft_worker, BaseSpecWorker):
+                            self.draft_worker.note_request_finished(
+                                rid=req.rid,
+                                natural_stop=isinstance(
+                                    req.finished_reason, FINISH_MATCHED_TOKEN
+                                ),
+                            )
+                        prepare_release = getattr(
+                            self.model_worker, "prepare_for_kv_cache_release", None
+                        )
+                        if callable(prepare_release):
+                            prepare_release(req)
                         if sampling_mask_finish_reason is None:
                             self._maybe_collect_routed_experts(req)
                             self._maybe_collect_indexer_topk(req)
