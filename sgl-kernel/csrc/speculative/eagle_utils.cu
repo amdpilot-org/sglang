@@ -270,29 +270,32 @@ void build_tree_kernel_efficient(
 
 template <typename IdType, typename IdType2>
 __global__ void VerifyTreeGreedy(
-    IdType* predicts,
-    IdType* accept_index,
-    IdType* accept_token_num,  // mutable
-    IdType2* candidates,
-    IdType2* retrive_index,
-    IdType2* retrive_next_token,
-    IdType2* retrive_next_sibling,
-    IdType2* target_predict,
+    IdType* __restrict__ predicts,
+    IdType* __restrict__ accept_index,
+    IdType* __restrict__ accept_token_num,  // mutable
+    const IdType2* __restrict__ candidates,
+    const IdType2* __restrict__ retrive_index,
+    const IdType2* __restrict__ retrive_next_token,
+    const IdType2* __restrict__ retrive_next_sibling,
+    const IdType2* __restrict__ target_predict,
     uint32_t batch_size,
     uint32_t num_speculative_tokens,
     uint32_t num_draft_tokens) {
   uint32_t bx = blockIdx.x;
+  // Hoist the per-batch base offset so the address math is computed once
+  // instead of being repeated for every global-memory access below.
+  const uint32_t base = bx * num_draft_tokens;
 
-  IdType2 last_accepted_retrive_idx = retrive_index[bx * num_draft_tokens];
+  IdType2 last_accepted_retrive_idx = retrive_index[base];
   accept_index[bx * num_speculative_tokens] = last_accepted_retrive_idx;
   uint32_t num_accepted_tokens = 0;
   IdType2 cur_index = 0;
 
   for (uint32_t j = 1; j < num_speculative_tokens; ++j) {
-    cur_index = retrive_next_token[bx * num_draft_tokens + cur_index];
+    cur_index = retrive_next_token[base + cur_index];
     while (cur_index != -1) {
-      IdType2 draft_index = retrive_index[bx * num_draft_tokens + cur_index];
-      IdType2 draft_token_id = candidates[bx * num_draft_tokens + cur_index];
+      IdType2 draft_index = retrive_index[base + cur_index];
+      IdType2 draft_token_id = candidates[base + cur_index];
       IdType2 target_token_id = target_predict[last_accepted_retrive_idx];
 
       if (draft_token_id == target_token_id) {
@@ -303,7 +306,7 @@ __global__ void VerifyTreeGreedy(
         last_accepted_retrive_idx = draft_index;
         break;
       } else {
-        cur_index = retrive_next_sibling[bx * num_draft_tokens + cur_index];
+        cur_index = retrive_next_sibling[base + cur_index];
       }
     }
     if (cur_index == -1) break;
@@ -390,7 +393,10 @@ void verify_tree_greedy(
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   dim3 grid(batch_size);
-  dim3 block(1);
+  // A 32-thread block gives the scheduler a full warp-sized work-group on
+  // AMD (64-wide wavefront) instead of the pathological single-thread block,
+  // reducing launch/scheduling overhead for this tiny per-batch traversal.
+  dim3 block(32);
 
   VerifyTreeGreedy<int32_t, int64_t><<<grid, block, 0, stream>>>(
       static_cast<int32_t*>(predicts.data_ptr()),
