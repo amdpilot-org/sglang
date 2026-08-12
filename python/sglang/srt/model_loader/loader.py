@@ -1825,6 +1825,8 @@ class ShardedStateLoader(BaseModelLoader):
                 part_idx += 1
                 total_size = 0
                 state_dict_part = {}
+            # Kernel-ready layouts can be non-contiguous. Materialize them at
+            # the save boundary without changing the live runtime layout.
             state_dict_part[key] = (
                 tensor.detach().to(device="cpu", copy=False).contiguous()
             )

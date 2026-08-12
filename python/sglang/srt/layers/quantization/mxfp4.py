@@ -439,6 +439,11 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         self.with_bias = with_bias
         mxfp4_block = 32
         triton_kernels_padding_alignment = 64
+        # These Parameters are also referenced by Triton wrappers, which are
+        # outside the temporary parameter mapping used by CPU offload.
+        triton_runtime_attrs = (
+            {"_sglang_keep_on_device": True} if self.use_triton_kernels else None
+        )
 
         # pad the intermediate size to be a multiple of 2 * mxfp4_block
         # for to hold non-uniform sharded tensor as well as swizzling
@@ -547,6 +552,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         )
         layer.register_parameter("w13_weight", w13_weight)
         set_weight_attrs(w13_weight, extra_weight_attrs)
+        set_weight_attrs(w13_weight, triton_runtime_attrs)
 
         w13_weight_scale = torch.nn.Parameter(
             torch.full(
@@ -562,6 +568,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         )
         layer.register_parameter("w13_weight_scale", w13_weight_scale)
         set_weight_attrs(w13_weight_scale, extra_weight_attrs)
+        set_weight_attrs(w13_weight_scale, triton_runtime_attrs)
         w13_weight_scale.quant_method = "group"
 
         create_bias = with_bias or not _is_hip
@@ -589,6 +596,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         )
         layer.register_parameter("w2_weight", w2_weight)
         set_weight_attrs(w2_weight, extra_weight_attrs)
+        set_weight_attrs(w2_weight, triton_runtime_attrs)
 
         w2_weight_scale = torch.nn.Parameter(
             torch.full(
@@ -604,6 +612,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         )
         layer.register_parameter("w2_weight_scale", w2_weight_scale)
         set_weight_attrs(w2_weight_scale, extra_weight_attrs)
+        set_weight_attrs(w2_weight_scale, triton_runtime_attrs)
         w2_weight_scale.quant_method = "group"
 
         if create_bias:
@@ -1030,8 +1039,10 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                 layer.w2_weight, layer.w2_weight_scale, num_warps
             )
 
-            # Keep the postprocessed storage registered on the layer so model
-            # state exports contain the tensors consumed by Triton kernels.
+            # Rebind the existing Parameters so state exports contain the
+            # tensors consumed by Triton while preserving weight-loader attrs.
+            # Point each wrapper back to the stable Parameter object so later
+            # module-level storage changes remain visible to the kernel.
             for name, tensor in (
                 ("w13_weight", w13_weight),
                 ("w13_weight_scale", w13_scale),
