@@ -20,7 +20,7 @@ use tracing::{debug, info, warn};
 
 use crate::{
     app_context::AppContext,
-    config::RoutingMode,
+    config::{GatewayConfig, RoutingMode},
     core::{ConnectionMode, RuntimeType, WorkerRegistry, WorkerType},
     protocols::{
         chat::ChatCompletionRequest,
@@ -32,7 +32,6 @@ use crate::{
         responses::{ResponsesGetParams, ResponsesRequest},
     },
     routers::RouterTrait,
-    server::ServerConfig,
 };
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -79,16 +78,16 @@ impl RouterManager {
     }
 
     pub async fn from_config(
-        config: &ServerConfig,
+        config: &GatewayConfig,
         app_context: &Arc<AppContext>,
     ) -> Result<Arc<Self>, String> {
         use crate::routers::RouterFactory;
 
         let mut manager = Self::new(app_context.worker_registry.clone());
-        manager.enable_igw = config.router_config.enable_igw;
+        manager.enable_igw = config.routing.enable_igw;
         let manager = Arc::new(manager);
 
-        if config.router_config.enable_igw {
+        if config.routing.enable_igw {
             info!("Initializing RouterManager in multi-router mode (IGW)");
 
             match RouterFactory::create_regular_router(app_context).await {
@@ -115,13 +114,8 @@ impl RouterManager {
             info!("PD disaggregation auto-enabled for IGW mode, creating PD routers");
 
             // Create HTTP PD router
-            match RouterFactory::create_pd_router(
-                None,
-                None,
-                &config.router_config.policy,
-                app_context,
-            )
-            .await
+            match RouterFactory::create_pd_router(None, None, &config.routing.policy, app_context)
+                .await
             {
                 Ok(http_pd) => {
                     info!("Created HTTP PD router");
@@ -136,7 +130,7 @@ impl RouterManager {
             match RouterFactory::create_grpc_pd_router(
                 None,
                 None,
-                &config.router_config.policy,
+                &config.routing.policy,
                 app_context,
             )
             .await
@@ -169,10 +163,8 @@ impl RouterManager {
             info!("Initializing RouterManager in single-router mode");
 
             let single_router = Arc::from(RouterFactory::create_router(app_context).await?);
-            let router_id = Self::determine_router_id(
-                &config.router_config.mode,
-                &config.router_config.connection_mode,
-            );
+            let router_id =
+                Self::determine_router_id(&config.routing.mode, &config.workers.connection_mode);
 
             info!("Created single router with ID: {}", router_id.as_str());
             manager.register_router(router_id.clone(), single_router);

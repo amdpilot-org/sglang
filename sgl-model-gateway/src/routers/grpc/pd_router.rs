@@ -7,7 +7,7 @@ use tracing::debug;
 use super::{context::SharedComponents, pipeline::RequestPipeline};
 use crate::{
     app_context::AppContext,
-    config::types::RetryConfig,
+    config::RetryConfig,
     core::{
         is_retryable_status, ConnectionMode, RetryExecutor, WorkerRegistry, WorkerType,
         UNKNOWN_MODEL_ID,
@@ -68,7 +68,7 @@ impl GrpcPDRouter {
             worker_registry,
             pipeline,
             shared_components,
-            retry_config: ctx.router_config.effective_retry_config(),
+            retry_config: ctx.gateway_config.workers.effective_retry_config(),
         })
     }
 

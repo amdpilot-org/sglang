@@ -9,7 +9,7 @@ use reqwest::Client;
 use serde_json::json;
 use smg::{
     app_context::AppContext,
-    config::{RouterConfig, RoutingMode},
+    config::{GatewayConfig, RoutingMode},
     routers::{RouterFactory, RouterTrait},
 };
 use tower::ServiceExt;
@@ -21,14 +21,14 @@ struct ParserTestContext {
     workers: Vec<MockWorker>,
     router: Arc<dyn RouterTrait>,
     _client: Client,
-    _config: RouterConfig,
+    _config: GatewayConfig,
     app_context: Arc<AppContext>,
 }
 
 impl ParserTestContext {
     async fn new(worker_configs: Vec<MockWorkerConfig>) -> Self {
         // Create router config with parser support enabled
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![])
             .random_policy()
             .host("127.0.0.1")
@@ -45,7 +45,7 @@ impl ParserTestContext {
     }
 
     async fn new_with_config(
-        mut config: RouterConfig,
+        mut config: GatewayConfig,
         worker_configs: Vec<MockWorkerConfig>,
     ) -> Self {
         let mut workers = Vec::new();
@@ -64,7 +64,7 @@ impl ParserTestContext {
         }
 
         // Update config with worker URLs if not already set
-        match &mut config.mode {
+        match &mut config.routing.mode {
             RoutingMode::Regular {
                 worker_urls: ref mut urls,
             } => {
@@ -83,7 +83,9 @@ impl ParserTestContext {
         }
 
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(config.request_timeout_secs))
+            .timeout(std::time::Duration::from_secs(
+                config.workers.request_timeout_secs,
+            ))
             .build()
             .unwrap();
 

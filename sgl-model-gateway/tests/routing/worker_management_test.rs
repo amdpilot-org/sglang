@@ -14,7 +14,7 @@ use axum::{
 use serde_json::json;
 use tower::ServiceExt;
 
-use crate::common::{AppTestContext, TestRouterConfig, TestWorkerConfig};
+use crate::common::{AppTestContext, TestGatewayConfig, TestWorkerConfig};
 
 #[cfg(test)]
 mod worker_management_tests {
@@ -23,7 +23,7 @@ mod worker_management_tests {
     /// Test listing workers via API
     #[tokio::test]
     async fn test_list_workers() {
-        let config = TestRouterConfig::round_robin(3900);
+        let config = TestGatewayConfig::round_robin(3900);
 
         let ctx = AppTestContext::new_with_config(
             config,
@@ -56,7 +56,7 @@ mod worker_management_tests {
     /// Test that routing continues to work with multiple workers
     #[tokio::test]
     async fn test_routing_with_multiple_workers() {
-        let config = TestRouterConfig::round_robin(3901);
+        let config = TestGatewayConfig::round_robin(3901);
 
         let ctx = AppTestContext::new_with_config(
             config,
@@ -101,7 +101,7 @@ mod worker_management_tests {
     /// Test that requests continue to work during worker operations
     #[tokio::test]
     async fn test_requests_during_worker_changes() {
-        let config = TestRouterConfig::round_robin(3902);
+        let config = TestGatewayConfig::round_robin(3902);
 
         let ctx =
             AppTestContext::new_with_config(config, vec![TestWorkerConfig::healthy(19904)]).await;

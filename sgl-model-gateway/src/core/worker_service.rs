@@ -15,7 +15,7 @@ use serde_json::json;
 use tracing::warn;
 
 use crate::{
-    config::RouterConfig,
+    config::GatewayConfig,
     core::{worker::worker_to_info, worker_registry::WorkerId, Job, JobQueue, WorkerRegistry},
     protocols::worker_spec::{
         WorkerConfigRequest, WorkerErrorResponse, WorkerInfo, WorkerUpdateRequest,
@@ -188,7 +188,7 @@ impl IntoResponse for GetWorkerResponse {
 pub struct WorkerService {
     worker_registry: Arc<WorkerRegistry>,
     job_queue: Arc<std::sync::OnceLock<Arc<JobQueue>>>,
-    router_config: RouterConfig,
+    gateway_config: GatewayConfig,
 }
 
 impl WorkerService {
@@ -196,12 +196,12 @@ impl WorkerService {
     pub fn new(
         worker_registry: Arc<WorkerRegistry>,
         job_queue: Arc<std::sync::OnceLock<Arc<JobQueue>>>,
-        router_config: RouterConfig,
+        gateway_config: GatewayConfig,
     ) -> Self {
         Self {
             worker_registry,
             job_queue,
-            router_config,
+            gateway_config,
         }
     }
 
@@ -226,7 +226,7 @@ impl WorkerService {
         &self,
         mut config: WorkerConfigRequest,
     ) -> Result<CreateWorkerResult, WorkerServiceError> {
-        if self.router_config.api_key.is_some() && config.api_key.is_none() {
+        if self.gateway_config.security.api_key.is_some() && config.api_key.is_none() {
             warn!(
                 "Adding worker {} without API key while router has API key configured. \
                 Worker will be accessible without authentication. \
@@ -235,7 +235,7 @@ impl WorkerService {
             );
         }
 
-        config.dp_aware = self.router_config.dp_aware;
+        config.dp_aware = self.gateway_config.routing.dp_aware;
 
         let worker_url = config.url.clone();
         let worker_id = self.worker_registry.reserve_id_for_url(&worker_url);

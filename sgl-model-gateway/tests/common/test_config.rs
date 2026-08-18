@@ -1,10 +1,12 @@
 //! Test configuration builders to reduce duplication across tests
 //!
-//! Provides pre-configured RouterConfig and MockWorkerConfig builders
+//! Provides pre-configured GatewayConfig and MockWorkerConfig builders
 //! for common test scenarios.
 
 use smg::config::{
-    CircuitBreakerConfig, ManualAssignmentMode, PolicyConfig, RetryConfig, RouterConfig,
+    routing::{ManualAssignmentMode, PolicyConfig, RoutingMode},
+    worker_pool::{CircuitBreakerConfig, RetryConfig},
+    ConfigResult, GatewayConfig, HistoryBackend, OracleConfig,
 };
 
 use super::mock_worker::{HealthStatus, MockWorkerConfig, WorkerType};
@@ -20,193 +22,122 @@ pub mod defaults {
     pub const QUEUE_TIMEOUT_SECS: u64 = 60;
 }
 
-/// Builder for common test RouterConfig patterns
-pub struct TestRouterConfig;
+/// Factory for common gateway configuration patterns used by tests.
+pub struct TestGatewayConfig;
 
-impl TestRouterConfig {
+impl TestGatewayConfig {
+    fn base(port: u16, policy: PolicyConfig) -> GatewayConfig {
+        let mut config = GatewayConfig::default();
+        config.server.host = defaults::HOST.to_string();
+        config.server.port = port;
+        config.server.max_payload_size = defaults::MAX_PAYLOAD_SIZE;
+        config.routing.mode = RoutingMode::Regular {
+            worker_urls: Vec::new(),
+        };
+        config.routing.policy = policy;
+        config.routing.max_concurrent_requests = defaults::MAX_CONCURRENT_REQUESTS;
+        config.routing.queue_timeout_secs = defaults::QUEUE_TIMEOUT_SECS;
+        config.workers.request_timeout_secs = defaults::REQUEST_TIMEOUT_SECS;
+        config.workers.startup_timeout_secs = defaults::WORKER_STARTUP_TIMEOUT_SECS;
+        config.workers.startup_check_interval_secs = defaults::WORKER_STARTUP_CHECK_INTERVAL_SECS;
+        config
+    }
+
     /// Create a basic round-robin config for routing tests
-    pub fn round_robin(port: u16) -> RouterConfig {
-        RouterConfig::builder()
-            .regular_mode(vec![])
-            .round_robin_policy()
-            .host(defaults::HOST)
-            .port(port)
-            .max_payload_size(defaults::MAX_PAYLOAD_SIZE)
-            .request_timeout_secs(defaults::REQUEST_TIMEOUT_SECS)
-            .worker_startup_timeout_secs(defaults::WORKER_STARTUP_TIMEOUT_SECS)
-            .worker_startup_check_interval_secs(defaults::WORKER_STARTUP_CHECK_INTERVAL_SECS)
-            .max_concurrent_requests(defaults::MAX_CONCURRENT_REQUESTS)
-            .queue_timeout_secs(defaults::QUEUE_TIMEOUT_SECS)
-            .build_unchecked()
+    pub fn round_robin(port: u16) -> GatewayConfig {
+        Self::base(port, PolicyConfig::RoundRobin)
     }
 
     /// Create a random load balancing config
-    pub fn random(port: u16) -> RouterConfig {
-        RouterConfig::builder()
-            .regular_mode(vec![])
-            .random_policy()
-            .host(defaults::HOST)
-            .port(port)
-            .max_payload_size(defaults::MAX_PAYLOAD_SIZE)
-            .request_timeout_secs(defaults::REQUEST_TIMEOUT_SECS)
-            .worker_startup_timeout_secs(defaults::WORKER_STARTUP_TIMEOUT_SECS)
-            .worker_startup_check_interval_secs(defaults::WORKER_STARTUP_CHECK_INTERVAL_SECS)
-            .max_concurrent_requests(defaults::MAX_CONCURRENT_REQUESTS)
-            .queue_timeout_secs(defaults::QUEUE_TIMEOUT_SECS)
-            .build_unchecked()
+    pub fn random(port: u16) -> GatewayConfig {
+        Self::base(port, PolicyConfig::Random)
     }
 
     /// Create a cache-aware config for routing tests
-    pub fn cache_aware(port: u16) -> RouterConfig {
-        RouterConfig::builder()
-            .regular_mode(vec![])
-            .cache_aware_policy(
-                0.5,  // cache_threshold
-                32,   // balance_abs_threshold
-                1.5,  // balance_rel_threshold
-                60,   // eviction_interval_secs
-                1000, // max_tree_size
-            )
-            .host(defaults::HOST)
-            .port(port)
-            .max_payload_size(defaults::MAX_PAYLOAD_SIZE)
-            .request_timeout_secs(defaults::REQUEST_TIMEOUT_SECS)
-            .worker_startup_timeout_secs(defaults::WORKER_STARTUP_TIMEOUT_SECS)
-            .worker_startup_check_interval_secs(defaults::WORKER_STARTUP_CHECK_INTERVAL_SECS)
-            .max_concurrent_requests(defaults::MAX_CONCURRENT_REQUESTS)
-            .queue_timeout_secs(defaults::QUEUE_TIMEOUT_SECS)
-            .build_unchecked()
+    pub fn cache_aware(port: u16) -> GatewayConfig {
+        Self::base(
+            port,
+            PolicyConfig::CacheAware {
+                cache_threshold: 0.5,
+                balance_abs_threshold: 32,
+                balance_rel_threshold: 1.5,
+                eviction_interval_secs: 60,
+                max_tree_size: 1000,
+            },
+        )
     }
 
     /// Create a power-of-two config
-    pub fn power_of_two(port: u16) -> RouterConfig {
-        RouterConfig::builder()
-            .regular_mode(vec![])
-            .power_of_two_policy(5) // load_check_interval_secs
-            .host(defaults::HOST)
-            .port(port)
-            .max_payload_size(defaults::MAX_PAYLOAD_SIZE)
-            .request_timeout_secs(defaults::REQUEST_TIMEOUT_SECS)
-            .worker_startup_timeout_secs(defaults::WORKER_STARTUP_TIMEOUT_SECS)
-            .worker_startup_check_interval_secs(defaults::WORKER_STARTUP_CHECK_INTERVAL_SECS)
-            .max_concurrent_requests(defaults::MAX_CONCURRENT_REQUESTS)
-            .queue_timeout_secs(defaults::QUEUE_TIMEOUT_SECS)
-            .build_unchecked()
+    pub fn power_of_two(port: u16) -> GatewayConfig {
+        Self::base(
+            port,
+            PolicyConfig::PowerOfTwo {
+                load_check_interval_secs: 5,
+            },
+        )
     }
 
     /// Create a manual routing config (for sticky routing tests)
-    pub fn manual(port: u16) -> RouterConfig {
+    pub fn manual(port: u16) -> GatewayConfig {
         Self::manual_with_mode(port, ManualAssignmentMode::Random)
     }
 
     /// Create a manual routing config with min_group assignment mode
-    pub fn manual_min_group(port: u16) -> RouterConfig {
+    pub fn manual_min_group(port: u16) -> GatewayConfig {
         Self::manual_with_mode(port, ManualAssignmentMode::MinGroup)
     }
 
     /// Create a manual routing config with specified assignment mode
-    pub fn manual_with_mode(port: u16, assignment_mode: ManualAssignmentMode) -> RouterConfig {
-        RouterConfig::builder()
-            .regular_mode(vec![])
-            .policy(PolicyConfig::Manual {
+    pub fn manual_with_mode(port: u16, assignment_mode: ManualAssignmentMode) -> GatewayConfig {
+        Self::base(
+            port,
+            PolicyConfig::Manual {
                 eviction_interval_secs: 60,
                 max_idle_secs: 3600,
                 assignment_mode,
-            })
-            .host(defaults::HOST)
-            .port(port)
-            .max_payload_size(defaults::MAX_PAYLOAD_SIZE)
-            .request_timeout_secs(defaults::REQUEST_TIMEOUT_SECS)
-            .worker_startup_timeout_secs(defaults::WORKER_STARTUP_TIMEOUT_SECS)
-            .worker_startup_check_interval_secs(defaults::WORKER_STARTUP_CHECK_INTERVAL_SECS)
-            .max_concurrent_requests(defaults::MAX_CONCURRENT_REQUESTS)
-            .queue_timeout_secs(defaults::QUEUE_TIMEOUT_SECS)
-            .build_unchecked()
+            },
+        )
     }
 
     /// Create a config with custom concurrent request limit (for rate limiting tests)
-    pub fn with_concurrency(port: u16, max_concurrent: i32) -> RouterConfig {
-        RouterConfig::builder()
-            .regular_mode(vec![])
-            .round_robin_policy()
-            .host(defaults::HOST)
-            .port(port)
-            .max_payload_size(defaults::MAX_PAYLOAD_SIZE)
-            .request_timeout_secs(defaults::REQUEST_TIMEOUT_SECS)
-            .worker_startup_timeout_secs(defaults::WORKER_STARTUP_TIMEOUT_SECS)
-            .worker_startup_check_interval_secs(defaults::WORKER_STARTUP_CHECK_INTERVAL_SECS)
-            .max_concurrent_requests(max_concurrent)
-            .queue_timeout_secs(defaults::QUEUE_TIMEOUT_SECS)
-            .build_unchecked()
+    pub fn with_concurrency(port: u16, max_concurrent: i32) -> GatewayConfig {
+        let mut config = Self::round_robin(port);
+        config.routing.max_concurrent_requests = max_concurrent;
+        config
     }
 
     /// Create a config with custom payload size limit
-    pub fn with_payload_limit(port: u16, max_payload_size: usize) -> RouterConfig {
-        RouterConfig::builder()
-            .regular_mode(vec![])
-            .round_robin_policy()
-            .host(defaults::HOST)
-            .port(port)
-            .max_payload_size(max_payload_size)
-            .request_timeout_secs(defaults::REQUEST_TIMEOUT_SECS)
-            .worker_startup_timeout_secs(defaults::WORKER_STARTUP_TIMEOUT_SECS)
-            .worker_startup_check_interval_secs(defaults::WORKER_STARTUP_CHECK_INTERVAL_SECS)
-            .max_concurrent_requests(defaults::MAX_CONCURRENT_REQUESTS)
-            .queue_timeout_secs(defaults::QUEUE_TIMEOUT_SECS)
-            .build_unchecked()
+    pub fn with_payload_limit(port: u16, max_payload_size: usize) -> GatewayConfig {
+        let mut config = Self::round_robin(port);
+        config.server.max_payload_size = max_payload_size;
+        config
     }
 
     /// Create a config with short timeouts (for timeout/retry tests)
-    pub fn with_short_timeouts(port: u16) -> RouterConfig {
-        RouterConfig::builder()
-            .regular_mode(vec![])
-            .round_robin_policy()
-            .host(defaults::HOST)
-            .port(port)
-            .max_payload_size(defaults::MAX_PAYLOAD_SIZE)
-            .request_timeout_secs(5)
-            .worker_startup_timeout_secs(2)
-            .worker_startup_check_interval_secs(1)
-            .max_concurrent_requests(defaults::MAX_CONCURRENT_REQUESTS)
-            .queue_timeout_secs(5)
-            .build_unchecked()
+    pub fn with_short_timeouts(port: u16) -> GatewayConfig {
+        let mut config = Self::round_robin(port);
+        config.workers.request_timeout_secs = 5;
+        config.workers.startup_timeout_secs = 2;
+        config.workers.startup_check_interval_secs = 1;
+        config.routing.queue_timeout_secs = 5;
+        config
     }
 
     /// Create a round-robin config with retry settings
-    pub fn round_robin_with_retry(port: u16, retry_config: RetryConfig) -> RouterConfig {
-        RouterConfig::builder()
-            .regular_mode(vec![])
-            .round_robin_policy()
-            .host(defaults::HOST)
-            .port(port)
-            .max_payload_size(defaults::MAX_PAYLOAD_SIZE)
-            .request_timeout_secs(defaults::REQUEST_TIMEOUT_SECS)
-            .worker_startup_timeout_secs(defaults::WORKER_STARTUP_TIMEOUT_SECS)
-            .worker_startup_check_interval_secs(defaults::WORKER_STARTUP_CHECK_INTERVAL_SECS)
-            .max_concurrent_requests(defaults::MAX_CONCURRENT_REQUESTS)
-            .queue_timeout_secs(defaults::QUEUE_TIMEOUT_SECS)
-            .retry_config(retry_config)
-            .build_unchecked()
+    pub fn round_robin_with_retry(port: u16, retry_config: RetryConfig) -> GatewayConfig {
+        let mut config = Self::round_robin(port);
+        config.workers.retry = retry_config;
+        config
     }
 
     /// Create a round-robin config with circuit breaker
     pub fn round_robin_with_circuit_breaker(
         port: u16,
         circuit_breaker: CircuitBreakerConfig,
-    ) -> RouterConfig {
-        RouterConfig::builder()
-            .regular_mode(vec![])
-            .round_robin_policy()
-            .host(defaults::HOST)
-            .port(port)
-            .max_payload_size(defaults::MAX_PAYLOAD_SIZE)
-            .request_timeout_secs(defaults::REQUEST_TIMEOUT_SECS)
-            .worker_startup_timeout_secs(defaults::WORKER_STARTUP_TIMEOUT_SECS)
-            .worker_startup_check_interval_secs(defaults::WORKER_STARTUP_CHECK_INTERVAL_SECS)
-            .max_concurrent_requests(defaults::MAX_CONCURRENT_REQUESTS)
-            .queue_timeout_secs(defaults::QUEUE_TIMEOUT_SECS)
-            .circuit_breaker_config(circuit_breaker)
-            .build_unchecked()
+    ) -> GatewayConfig {
+        let mut config = Self::round_robin(port);
+        config.workers.circuit_breaker = circuit_breaker;
+        config
     }
 
     /// Create a round-robin config with both retry and circuit breaker
@@ -214,21 +145,182 @@ impl TestRouterConfig {
         port: u16,
         retry_config: RetryConfig,
         circuit_breaker: CircuitBreakerConfig,
-    ) -> RouterConfig {
-        RouterConfig::builder()
-            .regular_mode(vec![])
-            .round_robin_policy()
-            .host(defaults::HOST)
-            .port(port)
-            .max_payload_size(defaults::MAX_PAYLOAD_SIZE)
-            .request_timeout_secs(defaults::REQUEST_TIMEOUT_SECS)
-            .worker_startup_timeout_secs(defaults::WORKER_STARTUP_TIMEOUT_SECS)
-            .worker_startup_check_interval_secs(defaults::WORKER_STARTUP_CHECK_INTERVAL_SECS)
-            .max_concurrent_requests(defaults::MAX_CONCURRENT_REQUESTS)
-            .queue_timeout_secs(defaults::QUEUE_TIMEOUT_SECS)
-            .retry_config(retry_config)
-            .circuit_breaker_config(circuit_breaker)
-            .build_unchecked()
+    ) -> GatewayConfig {
+        let mut config = Self::round_robin(port);
+        config.workers.retry = retry_config;
+        config.workers.circuit_breaker = circuit_breaker;
+        config
+    }
+}
+
+/// Fluent test-data factory for existing integration tests.
+///
+/// This is intentionally local to `tests/`: production configuration is
+/// constructed directly through `GatewayConfig` and has no builder API.
+pub struct TestGatewayConfigBuilder {
+    config: GatewayConfig,
+}
+
+impl TestGatewayConfigBuilder {
+    pub fn new() -> Self {
+        Self {
+            config: GatewayConfig::default(),
+        }
+    }
+
+    pub fn regular_mode(mut self, worker_urls: Vec<String>) -> Self {
+        self.config.routing.mode = RoutingMode::Regular { worker_urls };
+        self
+    }
+
+    pub fn openai_mode(mut self, worker_urls: Vec<String>) -> Self {
+        self.config.routing.mode = RoutingMode::OpenAI { worker_urls };
+        self
+    }
+
+    pub fn prefill_decode_mode(
+        mut self,
+        prefill_urls: Vec<(String, Option<u16>)>,
+        decode_urls: Vec<String>,
+    ) -> Self {
+        self.config.routing.mode = RoutingMode::PrefillDecode {
+            prefill_urls,
+            decode_urls,
+            prefill_policy: None,
+            decode_policy: None,
+        };
+        self
+    }
+
+    pub fn policy(mut self, policy: PolicyConfig) -> Self {
+        self.config.routing.policy = policy;
+        self
+    }
+
+    pub fn random_policy(self) -> Self {
+        self.policy(PolicyConfig::Random)
+    }
+
+    pub fn round_robin_policy(self) -> Self {
+        self.policy(PolicyConfig::RoundRobin)
+    }
+
+    pub fn power_of_two_policy(self, load_check_interval_secs: u64) -> Self {
+        self.policy(PolicyConfig::PowerOfTwo {
+            load_check_interval_secs,
+        })
+    }
+
+    pub fn host(mut self, host: impl Into<String>) -> Self {
+        self.config.server.host = host.into();
+        self
+    }
+
+    pub fn port(mut self, port: u16) -> Self {
+        self.config.server.port = port;
+        self
+    }
+
+    pub fn max_payload_size(mut self, max_payload_size: usize) -> Self {
+        self.config.server.max_payload_size = max_payload_size;
+        self
+    }
+
+    pub fn request_id_headers(mut self, request_id_headers: Vec<String>) -> Self {
+        self.config.server.request_id_headers = Some(request_id_headers);
+        self
+    }
+
+    pub fn request_timeout_secs(mut self, request_timeout_secs: u64) -> Self {
+        self.config.workers.request_timeout_secs = request_timeout_secs;
+        self
+    }
+
+    pub fn worker_startup_timeout_secs(mut self, startup_timeout_secs: u64) -> Self {
+        self.config.workers.startup_timeout_secs = startup_timeout_secs;
+        self
+    }
+
+    pub fn worker_startup_check_interval_secs(mut self, check_interval_secs: u64) -> Self {
+        self.config.workers.startup_check_interval_secs = check_interval_secs;
+        self
+    }
+
+    pub fn max_concurrent_requests(mut self, max_concurrent_requests: i32) -> Self {
+        self.config.routing.max_concurrent_requests = max_concurrent_requests;
+        self
+    }
+
+    pub fn queue_size(mut self, queue_size: usize) -> Self {
+        self.config.routing.queue_size = queue_size;
+        self
+    }
+
+    pub fn queue_timeout_secs(mut self, queue_timeout_secs: u64) -> Self {
+        self.config.routing.queue_timeout_secs = queue_timeout_secs;
+        self
+    }
+
+    pub fn rate_limit_tokens_per_second(mut self, tokens_per_second: i32) -> Self {
+        self.config.routing.rate_limit_tokens_per_second = Some(tokens_per_second);
+        self
+    }
+
+    pub fn retry_config(mut self, retry: RetryConfig) -> Self {
+        self.config.workers.retry = retry;
+        self
+    }
+
+    pub fn circuit_breaker_config(mut self, circuit_breaker: CircuitBreakerConfig) -> Self {
+        self.config.workers.circuit_breaker = circuit_breaker;
+        self
+    }
+
+    pub fn disable_retries(mut self) -> Self {
+        self.config.workers.disable_retries = true;
+        self
+    }
+
+    pub fn disable_circuit_breaker(mut self) -> Self {
+        self.config.workers.disable_circuit_breaker = true;
+        self
+    }
+
+    pub fn log_level(mut self, log_level: impl Into<String>) -> Self {
+        self.config.observability.log_level = Some(log_level.into());
+        self
+    }
+
+    pub fn enable_trace(mut self, endpoint: impl Into<String>) -> Self {
+        self.config.observability.enable_trace = true;
+        self.config.observability.otlp_traces_endpoint = endpoint.into();
+        self
+    }
+
+    pub fn history_backend(mut self, history_backend: HistoryBackend) -> Self {
+        self.config.storage.history_backend = history_backend;
+        self
+    }
+
+    pub fn oracle_history(mut self, oracle: OracleConfig) -> Self {
+        self.config.storage.history_backend = HistoryBackend::Oracle;
+        self.config.storage.oracle = Some(oracle);
+        self
+    }
+
+    pub fn build(self) -> ConfigResult<GatewayConfig> {
+        self.config.validate()?;
+        Ok(self.config)
+    }
+
+    pub fn build_unchecked(self) -> GatewayConfig {
+        self.config
+    }
+}
+
+impl Default for TestGatewayConfigBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -318,12 +410,6 @@ impl TestWorkerConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_round_robin_config() {
-        let config = TestRouterConfig::round_robin(3000);
-        assert_eq!(config.port, 3000);
-    }
 
     #[test]
     fn test_healthy_workers() {

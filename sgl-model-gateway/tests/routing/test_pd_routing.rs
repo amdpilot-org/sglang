@@ -3,7 +3,7 @@ mod pd_routing_unit_tests {
     use serde_json::json;
     use smg::{
         app_context::AppContext,
-        config::{PolicyConfig, RouterConfig, RoutingMode},
+        config::{PolicyConfig, RoutingMode},
         core::{BasicWorkerBuilder, Worker, WorkerType},
         routers::{http::pd_types::PDSelectionPolicy, RouterFactory},
         tokenizer::registry::TokenizerRegistry,
@@ -197,7 +197,7 @@ mod pd_routing_unit_tests {
                     prefill_urls,
                     decode_urls,
                     ..
-                } => RouterConfig::builder()
+                } => crate::common::TestGatewayConfigBuilder::new()
                     .prefill_decode_mode(prefill_urls, decode_urls)
                     .policy(policy)
                     .host("127.0.0.1")
@@ -231,7 +231,7 @@ mod pd_routing_unit_tests {
 
                 // Initialize registries
                 let worker_registry = Arc::new(WorkerRegistry::new());
-                let policy_registry = Arc::new(PolicyRegistry::new(config.policy.clone()));
+                let policy_registry = Arc::new(PolicyRegistry::new(config.routing.policy.clone()));
 
                 // Initialize storage backends
                 let response_storage = Arc::new(MemoryResponseStorage::new());
@@ -243,7 +243,7 @@ mod pd_routing_unit_tests {
                     worker_registry.clone(),
                     policy_registry.clone(),
                     client.clone(),
-                    config.worker_startup_check_interval_secs,
+                    config.workers.startup_check_interval_secs,
                 )));
 
                 // Create empty OnceLock for worker job queue, workflow engines, and mcp manager
@@ -253,7 +253,7 @@ mod pd_routing_unit_tests {
 
                 Arc::new(
                     AppContext::builder()
-                        .router_config(config)
+                        .gateway_config(config)
                         .client(client)
                         .rate_limiter(rate_limiter)
                         .tokenizer_registry(Arc::new(TokenizerRegistry::new())) // tokenizer

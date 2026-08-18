@@ -8,10 +8,10 @@ use axum::{
     http::{header::CONTENT_TYPE, StatusCode},
 };
 use serde_json::json;
-use smg::config::{CircuitBreakerConfig, RetryConfig, RouterConfig};
+use smg::config::{CircuitBreakerConfig, RetryConfig};
 use tower::ServiceExt;
 
-use crate::common::{AppTestContext, TestRouterConfig, TestWorkerConfig};
+use crate::common::{AppTestContext, TestGatewayConfig, TestWorkerConfig};
 
 #[cfg(test)]
 mod circuit_breaker_tests {
@@ -20,7 +20,7 @@ mod circuit_breaker_tests {
     /// Test that circuit breaker opens after consecutive failures
     #[tokio::test]
     async fn test_circuit_breaker_opens_after_failures() {
-        let config = TestRouterConfig::round_robin_with_circuit_breaker(
+        let config = TestGatewayConfig::round_robin_with_circuit_breaker(
             3200,
             CircuitBreakerConfig {
                 failure_threshold: 3,
@@ -75,7 +75,7 @@ mod circuit_breaker_tests {
     /// Test circuit breaker with disabled flag
     #[tokio::test]
     async fn test_circuit_breaker_disabled() {
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -126,7 +126,7 @@ mod circuit_breaker_tests {
     /// Test circuit breaker per-worker isolation
     #[tokio::test]
     async fn test_circuit_breaker_per_worker_isolation() {
-        let config = TestRouterConfig::round_robin_with_circuit_breaker(
+        let config = TestGatewayConfig::round_robin_with_circuit_breaker(
             3202,
             CircuitBreakerConfig {
                 failure_threshold: 2,
@@ -182,7 +182,7 @@ mod circuit_breaker_tests {
     /// Test circuit breaker with retries enabled
     #[tokio::test]
     async fn test_circuit_breaker_with_retries() {
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![])
             .round_robin_policy()
             .host("127.0.0.1")

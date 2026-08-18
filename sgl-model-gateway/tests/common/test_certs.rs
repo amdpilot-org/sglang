@@ -83,7 +83,7 @@ impl TestCertificates {
         })
     }
 
-    /// Get paths as string references for use with RouterConfig builder
+    /// Get paths as string references for use with GatewayConfig builder
     pub fn ca_cert_str(&self) -> &str {
         self.ca_cert_path.to_str().unwrap()
     }

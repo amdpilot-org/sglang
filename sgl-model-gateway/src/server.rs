@@ -16,16 +16,14 @@ use axum::{
 use rustls::crypto::ring;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use smg_mesh::{
-    rate_limit_window::RateLimitWindow, MeshServerConfig, MeshServerHandler, MeshSyncManager,
-};
+use smg_mesh::{rate_limit_window::RateLimitWindow, MeshServerHandler, MeshSyncManager};
 use tokio::{signal, spawn};
 use tracing::{debug, error, info, warn, Level};
 use wfaas::LoggingSubscriber;
 
 use crate::{
     app_context::AppContext,
-    config::{RouterConfig, RoutingMode},
+    config::{GatewayConfig, RoutingMode},
     core::{
         job_queue::{JobQueue, JobQueueConfig},
         steps::{TokenizerConfigRequest, WorkflowEngines},
@@ -103,10 +101,10 @@ async fn readiness(State(state): State<Arc<AppState>>) -> Response {
     let workers = state.context.worker_registry.get_all();
     let healthy_workers: Vec<_> = workers.iter().filter(|w| w.is_healthy()).collect();
 
-    let is_ready = if state.context.router_config.enable_igw {
+    let is_ready = if state.context.gateway_config.routing.enable_igw {
         !healthy_workers.is_empty()
     } else {
-        match &state.context.router_config.mode {
+        match &state.context.gateway_config.routing.mode {
             RoutingMode::PrefillDecode { .. } => {
                 let has_prefill = healthy_workers
                     .iter()
@@ -515,24 +513,6 @@ async fn v1_tokenizers_remove(
     tokenize::remove_tokenizer(&state.context, &tokenizer_id).await
 }
 
-pub struct ServerConfig {
-    pub host: String,
-    pub port: u16,
-    pub router_config: RouterConfig,
-    pub max_payload_size: usize,
-    pub log_dir: Option<String>,
-    pub log_level: Option<String>,
-    pub json_log: bool,
-    pub service_discovery_config: Option<ServiceDiscoveryConfig>,
-    pub prometheus_config: Option<PrometheusConfig>,
-    pub request_timeout_secs: u64,
-    pub request_id_headers: Option<Vec<String>>,
-    pub shutdown_grace_period_secs: u64,
-    /// Control plane authentication configuration
-    pub control_plane_auth: Option<crate::auth::ControlPlaneAuthConfig>,
-    pub mesh_server_config: Option<MeshServerConfig>,
-}
-
 pub fn build_app(
     app_state: Arc<AppState>,
     auth_config: AuthConfig,
@@ -693,20 +673,19 @@ pub fn build_app(
         .with_state(app_state)
 }
 
-pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn startup(config: GatewayConfig) -> Result<(), Box<dyn std::error::Error>> {
     static LOGGING_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
-    if let Some(trace_config) = &config.router_config.trace_config {
-        otel_trace::otel_tracing_init(
-            trace_config.enable_trace,
-            Some(&trace_config.otlp_traces_endpoint),
-        )?;
-    }
+    otel_trace::otel_tracing_init(
+        config.observability.enable_trace,
+        Some(&config.observability.otlp_traces_endpoint),
+    )?;
 
     let _log_guard = if !LOGGING_INITIALIZED.swap(true, Ordering::SeqCst) {
         Some(logging::init_logging(
             LoggingConfig {
                 level: config
+                    .observability
                     .log_level
                     .as_deref()
                     .and_then(|s| match s.to_uppercase().parse::<Level>() {
@@ -717,25 +696,57 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
                         }
                     })
                     .unwrap_or(Level::INFO),
-                json_format: config.json_log,
-                log_dir: config.log_dir.clone(),
+                json_format: config.observability.json_log,
+                log_dir: config.observability.log_dir.clone(),
                 colorize: true,
                 log_file_name: "smg".to_string(),
                 log_targets: None,
             },
-            config.router_config.trace_config.clone(),
+            Some(&config.observability),
         ))
     } else {
         None
     };
 
-    if let Some(prometheus_config) = &config.prometheus_config {
-        metrics::start_prometheus(prometheus_config.clone());
-    }
+    info!("SGLang Router starting...");
 
-    let (mesh_handler, mesh_sync_manager) = if let Some(mesh_server_config) =
-        &config.mesh_server_config
-    {
+    let mode = if config.routing.enable_igw {
+        "IGW (Inference Gateway)"
+    } else {
+        match &config.routing.mode {
+            RoutingMode::OpenAI { .. } => "OpenAI Backend",
+            RoutingMode::PrefillDecode { .. } => "PD Disaggregated",
+            RoutingMode::Regular { .. } => "Regular",
+        }
+    };
+
+    info!(
+        "Starting gateway on {}:{} in {} mode",
+        config.server.host, config.server.port, mode
+    );
+
+    if !config.routing.enable_igw {
+        info!("Policy: {}", config.routing.policy.name());
+
+        if let RoutingMode::PrefillDecode {
+            prefill_urls,
+            decode_urls,
+            ..
+        } = &config.routing.mode
+        {
+            if !prefill_urls.is_empty() {
+                info!("Prefill nodes: {:?}", prefill_urls);
+                info!("Decode nodes: {:?}", decode_urls);
+            }
+        }
+    }
+    metrics::start_prometheus(PrometheusConfig {
+        host: config.observability.prometheus_host.clone(),
+        port: config.observability.prometheus_port,
+        duration_buckets: config.observability.prometheus_duration_buckets.clone(),
+    });
+
+    let (mesh_handler, mesh_sync_manager) = if let Some(mesh_server_config) = &config.mesh {
         // Create HA sync manager with stores first
         use smg_mesh::{partition::PartitionDetector, stores::StateStores, sync::MeshSyncManager};
         let stores = Arc::new(StateStores::with_self_name(
@@ -791,20 +802,16 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
 
     info!(
         "Starting router on {}:{} | mode: {:?} | policy: {:?} | max_payload: {}MB",
-        config.host,
-        config.port,
-        config.router_config.mode,
-        config.router_config.policy,
-        config.max_payload_size / (1024 * 1024)
+        config.server.host,
+        config.server.port,
+        config.routing.mode,
+        config.routing.policy,
+        config.server.max_payload_size / (1024 * 1024)
     );
 
-    let app_context = Arc::new(
-        AppContext::from_config(config.router_config.clone(), config.request_timeout_secs).await?,
-    );
+    let app_context = Arc::new(AppContext::from_config(config.clone()).await?);
 
-    if config.prometheus_config.is_some() {
-        app_context.inflight_tracker.start_sampler(20);
-    }
+    app_context.inflight_tracker.start_sampler(20);
 
     let weak_context = Arc::downgrade(&app_context);
     let worker_job_queue = JobQueue::new(JobQueueConfig::default(), weak_context);
@@ -814,7 +821,7 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
         .expect("JobQueue should only be initialized once");
 
     // Initialize typed workflow engines
-    let engines = WorkflowEngines::new(&config.router_config);
+    let engines = WorkflowEngines::new(&config);
 
     // Subscribe logging to all workflow engines
     engines.subscribe_all(Arc::new(LoggingSubscriber)).await;
@@ -825,16 +832,16 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
         .expect("WorkflowEngines should only be initialized once");
     debug!(
         "Workflow engines initialized (health check timeout: {}s)",
-        config.router_config.health_check.timeout_secs
+        config.workers.health_check.timeout_secs
     );
 
     // Submit startup tokenizer job if tokenizer path is configured
     // This runs before worker initialization to ensure tokenizer is available
     if let Some(tokenizer_source) = config
-        .router_config
+        .model
         .tokenizer_path
         .as_ref()
-        .or(config.router_config.model_path.as_ref())
+        .or(config.model.model_path.as_ref())
     {
         info!("Loading startup tokenizer from: {}", tokenizer_source);
 
@@ -847,8 +854,8 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
             id: TokenizerRegistry::generate_id(),
             name: tokenizer_source.clone(),
             source: tokenizer_source.clone(),
-            chat_template_path: config.router_config.chat_template.clone(),
-            cache_config: config.router_config.tokenizer_cache.to_option(),
+            chat_template_path: config.model.chat_template.clone(),
+            cache_config: config.model.tokenizer_cache.to_option(),
             fail_on_duplicate: false,
         };
 
@@ -866,7 +873,7 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
 
     info!(
         "Initializing workers for routing mode: {:?}",
-        config.router_config.mode
+        config.routing.mode
     );
 
     // Submit worker initialization job to queue
@@ -875,7 +882,7 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
         .get()
         .expect("JobQueue should be initialized");
     let job = Job::InitializeWorkersFromConfig {
-        router_config: Box::new(config.router_config.clone()),
+        gateway_config: Box::new(config.clone()),
     };
     job_queue
         .submit(job)
@@ -884,7 +891,7 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
 
     info!("Worker initialization job submitted (will complete in background)");
 
-    if let Some(mcp_config) = &config.router_config.mcp_config {
+    if let Some(mcp_config) = &config.extensions.mcp_config {
         info!("Found {} MCP server(s) in config", mcp_config.servers.len());
         let mcp_job = Job::InitializeMcpServers {
             mcp_config: Box::new(mcp_config.clone()),
@@ -914,13 +921,13 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
     let router_manager = RouterManager::from_config(&config, &app_context).await?;
     let router: Arc<dyn RouterTrait> = router_manager.clone();
 
-    if !config.router_config.health_check.disable_health_check {
+    if !config.workers.health_check.disable_health_check {
         let _health_checker = app_context
             .worker_registry
-            .start_health_checker(config.router_config.health_check.check_interval_secs);
+            .start_health_checker(config.workers.health_check.check_interval_secs);
         debug!(
             "Started health checker for workers with {}s interval",
-            config.router_config.health_check.check_interval_secs
+            config.workers.health_check.check_interval_secs
         );
     } else {
         info!("Global health checks disabled via CLI/config; skipping health checker");
@@ -933,8 +940,8 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
 
     let (limiter, processor) = middleware::ConcurrencyLimiter::new(
         app_context.rate_limiter.clone(),
-        config.router_config.queue_size,
-        Duration::from_secs(config.router_config.queue_timeout_secs),
+        config.routing.queue_size,
+        Duration::from_secs(config.routing.queue_timeout_secs),
     );
 
     if app_context.rate_limiter.is_none() {
@@ -946,13 +953,13 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
             spawn(proc.run());
             debug!(
                 "Started request queue (size: {}, timeout: {}s)",
-                config.router_config.queue_size, config.router_config.queue_timeout_secs
+                config.routing.queue_size, config.routing.queue_timeout_secs
             );
         }
         None => {
             debug!(
                 "Rate limiting enabled (max_concurrent_requests = {}, queue disabled)",
-                config.router_config.max_concurrent_requests
+                config.routing.max_concurrent_requests
             );
         }
     }
@@ -975,10 +982,7 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
 
     // Get mesh cluster state and port before moving mesh_handler into app_state
     let mesh_cluster_state = mesh_handler.as_ref().map(|h| h.state.clone());
-    let mesh_port = config
-        .mesh_server_config
-        .as_ref()
-        .map(|c| c.self_addr.port());
+    let mesh_port = config.mesh.as_ref().map(|c| c.self_addr.port());
 
     let app_state = Arc::new(AppState {
         router,
@@ -988,30 +992,42 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
         mesh_handler,
         mesh_sync_manager,
     });
-    if let Some(service_discovery_config) = config.service_discovery_config {
-        if service_discovery_config.enabled {
-            let app_context_arc = Arc::clone(&app_state.context);
+    if let Some(discovery) = config.discovery.clone() {
+        let service_discovery_config = ServiceDiscoveryConfig {
+            enabled: true,
+            selector: discovery.selector,
+            check_interval: Duration::from_secs(discovery.check_interval_secs),
+            port: discovery.port,
+            namespace: discovery.namespace,
+            pd_mode: discovery.pd_mode,
+            prefill_selector: discovery.prefill_selector,
+            decode_selector: discovery.decode_selector,
+            bootstrap_port_annotation: discovery.bootstrap_port_annotation,
+            router_selector: discovery.router_selector,
+            router_mesh_port_annotation: discovery.router_mesh_port_annotation,
+            igw_mode: discovery.igw_mode,
+        };
+        let app_context_arc = Arc::clone(&app_state.context);
 
-            match start_service_discovery(
-                service_discovery_config,
-                app_context_arc,
-                mesh_cluster_state,
-                mesh_port,
-            )
-            .await
-            {
-                Ok(handle) => {
-                    info!("Service discovery started");
-                    spawn(async move {
-                        if let Err(e) = handle.await {
-                            error!("Service discovery task failed: {:?}", e);
-                        }
-                    });
-                }
-                Err(e) => {
-                    error!("Failed to start service discovery: {e}");
-                    warn!("Continuing without service discovery");
-                }
+        match start_service_discovery(
+            service_discovery_config,
+            app_context_arc,
+            mesh_cluster_state,
+            mesh_port,
+        )
+        .await
+        {
+            Ok(handle) => {
+                info!("Service discovery started");
+                spawn(async move {
+                    if let Err(e) = handle.await {
+                        error!("Service discovery task failed: {:?}", e);
+                    }
+                });
+            }
+            Err(e) => {
+                error!("Failed to start service discovery: {e}");
+                warn!("Continuing without service discovery");
             }
         }
     }
@@ -1021,7 +1037,7 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
         WorkerManager::get_worker_urls(&app_state.context.worker_registry)
     );
 
-    let request_id_headers = config.request_id_headers.clone().unwrap_or_else(|| {
+    let request_id_headers = config.server.request_id_headers.clone().unwrap_or_else(|| {
         vec![
             "x-request-id".to_string(),
             "x-correlation-id".to_string(),
@@ -1031,24 +1047,25 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
     });
 
     let auth_config = AuthConfig {
-        api_key: config.router_config.api_key.clone(),
+        api_key: config.security.api_key.clone(),
     };
 
     // Initialize control plane authentication if configured
     let control_plane_auth_state =
-        crate::auth::ControlPlaneAuthState::try_init(config.control_plane_auth.as_ref()).await;
+        crate::auth::ControlPlaneAuthState::try_init(config.security.control_plane_auth.as_ref())
+            .await;
 
     let app = build_app(
         app_state,
         auth_config,
         control_plane_auth_state,
-        config.max_payload_size,
+        config.server.max_payload_size,
         request_id_headers,
-        config.router_config.cors_allowed_origins.clone(),
+        config.server.cors_allowed_origins.clone(),
     );
 
     // TcpListener::bind accepts &str and handles IPv4/IPv6 via ToSocketAddrs
-    let bind_addr = format!("{}:{}", config.host, config.port);
+    let bind_addr = format!("{}:{}", config.server.host, config.server.port);
     info!("Starting server on {}", bind_addr);
 
     // Parse address and set up graceful shutdown (common to both TLS and non-TLS)
@@ -1058,24 +1075,24 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
 
     let handle = axum_server::Handle::new();
     let handle_clone = handle.clone();
-    let grace_period = Duration::from_secs(config.shutdown_grace_period_secs);
+    let grace_period = Duration::from_secs(config.server.shutdown_grace_period_secs);
     spawn(async move {
         shutdown_signal().await;
         handle_clone.graceful_shutdown(Some(grace_period));
     });
 
-    if let (Some(cert), Some(key)) = (
-        &config.router_config.server_cert,
-        &config.router_config.server_key,
-    ) {
+    if let Some(tls) = &config.security.server_tls {
         info!("TLS enabled");
         ring::default_provider()
             .install_default()
             .map_err(|e| format!("Failed to install rustls ring provider: {e:?}"))?;
 
-        let tls_config = axum_server::tls_rustls::RustlsConfig::from_pem(cert.clone(), key.clone())
-            .await
-            .map_err(|e| format!("Failed to create TLS config: {}", e))?;
+        let tls_config = axum_server::tls_rustls::RustlsConfig::from_pem(
+            tls.certificate.clone(),
+            tls.private_key.clone(),
+        )
+        .await
+        .map_err(|e| format!("Failed to create TLS config: {}", e))?;
 
         axum_server::bind_rustls(addr, tls_config)
             .handle(handle)

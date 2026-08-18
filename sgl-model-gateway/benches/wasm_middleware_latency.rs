@@ -9,7 +9,7 @@ use axum::{
 use criterion::{criterion_group, criterion_main, Criterion};
 use http_body_util::BodyExt;
 use smg::{
-    app_context::AppContext, config::RouterConfig, middleware::wasm_middleware,
+    app_context::AppContext, config::GatewayConfig, middleware::wasm_middleware,
     protocols::chat::ChatCompletionRequest, routers::RouterTrait, server::AppState,
 };
 use tokio::runtime::Runtime;
@@ -62,9 +62,10 @@ fn bench_wasm_middleware_buffering(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
     // Setup AppContext with WASM enabled
-    let config = RouterConfig::builder().enable_wasm(true).build_unchecked();
+    let mut config = GatewayConfig::default();
+    config.extensions.enable_wasm = true;
 
-    let context = rt.block_on(AppContext::from_config(config, 30)).unwrap();
+    let context = rt.block_on(AppContext::from_config(config)).unwrap();
     let app_state = Arc::new(AppState {
         router: Arc::new(MockRouter),
         context: Arc::new(context),

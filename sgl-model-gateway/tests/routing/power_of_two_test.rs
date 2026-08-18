@@ -13,10 +13,9 @@ use axum::{
     http::{header::CONTENT_TYPE, StatusCode},
 };
 use serde_json::json;
-use smg::config::RouterConfig;
 use tower::ServiceExt;
 
-use crate::common::{AppTestContext, TestRouterConfig, TestWorkerConfig};
+use crate::common::{AppTestContext, TestGatewayConfig, TestWorkerConfig};
 
 #[cfg(test)]
 mod power_of_two_tests {
@@ -25,7 +24,7 @@ mod power_of_two_tests {
     /// Test that power of two distributes requests across workers
     #[tokio::test]
     async fn test_power_of_two_distribution() {
-        let config = TestRouterConfig::power_of_two(3600);
+        let config = TestGatewayConfig::power_of_two(3600);
 
         let ctx =
             AppTestContext::new_with_config(config, TestWorkerConfig::healthy_workers(19600, 2))
@@ -66,7 +65,7 @@ mod power_of_two_tests {
     /// Test that power of two prefers less loaded workers
     #[tokio::test]
     async fn test_power_of_two_prefers_less_loaded() {
-        let config = TestRouterConfig::power_of_two(3601);
+        let config = TestGatewayConfig::power_of_two(3601);
 
         let ctx = AppTestContext::new_with_config(
             config,
@@ -140,7 +139,7 @@ mod power_of_two_tests {
             window_duration_secs: 10,
         };
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![])
             .power_of_two_policy(1)
             .host("127.0.0.1")

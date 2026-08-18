@@ -8,7 +8,6 @@ use axum::{
     http::{header::CONTENT_TYPE, StatusCode},
 };
 use serde_json::json;
-use smg::config::RouterConfig;
 use tower::ServiceExt;
 
 use crate::common::{
@@ -23,7 +22,7 @@ mod service_discovery_tests {
     /// Test service discovery endpoint responds correctly
     #[tokio::test]
     async fn test_service_discovery_endpoint() {
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -71,7 +70,7 @@ mod service_discovery_tests {
     /// Test worker registration via discovery shim
     #[tokio::test]
     async fn test_worker_registration() {
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -129,7 +128,7 @@ mod service_discovery_tests {
     /// Test worker deregistration via discovery shim
     #[tokio::test]
     async fn test_worker_deregistration() {
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -214,7 +213,7 @@ mod service_discovery_tests {
     /// Test health status reporting for discovery
     #[tokio::test]
     async fn test_health_status_endpoint() {
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![])
             .round_robin_policy()
             .host("127.0.0.1")

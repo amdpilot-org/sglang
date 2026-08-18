@@ -764,7 +764,7 @@ pub async fn wasm_middleware(
     next: Next,
 ) -> Result<Response, StatusCode> {
     // Check if WASM is enabled
-    if !app_state.context.router_config.enable_wasm {
+    if !app_state.context.gateway_config.extensions.enable_wasm {
         return Ok(next.run(request).await);
     }
 

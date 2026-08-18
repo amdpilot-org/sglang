@@ -13,7 +13,7 @@ use tracing_subscriber::{
 };
 
 use super::otel_trace::get_otel_layer;
-use crate::config::TraceConfig;
+use crate::config::ObservabilityConfig;
 
 const TIME_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 const TIME_FORMAT_MS: &str = "%Y-%m-%d %H:%M:%S%.3f";
@@ -87,7 +87,10 @@ fn build_filter_string(targets: &[String], level_filter: &str) -> String {
     filter_string
 }
 
-pub fn init_logging(config: LoggingConfig, otel_layer_config: Option<TraceConfig>) -> LogGuard {
+pub fn init_logging(
+    config: LoggingConfig,
+    otel_layer_config: Option<&ObservabilityConfig>,
+) -> LogGuard {
     let _ = LogTracer::init();
 
     let level_filter = level_to_str(config.level);

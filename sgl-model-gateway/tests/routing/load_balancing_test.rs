@@ -11,7 +11,7 @@ use serde_json::json;
 use smg::config::{CircuitBreakerConfig, RetryConfig};
 use tower::ServiceExt;
 
-use crate::common::{AppTestContext, TestRouterConfig, TestWorkerConfig};
+use crate::common::{AppTestContext, TestGatewayConfig, TestWorkerConfig};
 
 #[cfg(test)]
 mod round_robin_tests {
@@ -20,7 +20,7 @@ mod round_robin_tests {
     /// Test that round robin distributes requests evenly across workers
     #[tokio::test]
     async fn test_round_robin_distribution() {
-        let config = TestRouterConfig::round_robin(3100);
+        let config = TestGatewayConfig::round_robin(3100);
         let ctx =
             AppTestContext::new_with_config(config, TestWorkerConfig::healthy_workers(19001, 3))
                 .await;
@@ -60,7 +60,7 @@ mod round_robin_tests {
     /// Test round robin with one worker failing
     #[tokio::test]
     async fn test_round_robin_with_failing_worker() {
-        let config = TestRouterConfig::round_robin_with_retry(
+        let config = TestGatewayConfig::round_robin_with_retry(
             3101,
             RetryConfig {
                 max_retries: 2,
@@ -112,7 +112,7 @@ mod random_tests {
     /// Test that random policy distributes requests across workers
     #[tokio::test]
     async fn test_random_distribution() {
-        let config = TestRouterConfig::random(3102);
+        let config = TestGatewayConfig::random(3102);
         let ctx =
             AppTestContext::new_with_config(config, TestWorkerConfig::healthy_workers(19010, 2))
                 .await;
@@ -157,7 +157,7 @@ mod cache_aware_tests {
     /// Test cache-aware routing uses consistent hashing
     #[tokio::test]
     async fn test_cache_aware_consistent_routing() {
-        let config = TestRouterConfig::cache_aware(3103);
+        let config = TestGatewayConfig::cache_aware(3103);
         let ctx =
             AppTestContext::new_with_config(config, TestWorkerConfig::healthy_workers(19020, 2))
                 .await;
@@ -201,7 +201,7 @@ mod cache_aware_tests {
     /// Test cache-aware routing with different prompts
     #[tokio::test]
     async fn test_cache_aware_different_prompts() {
-        let config = TestRouterConfig::cache_aware(3104);
+        let config = TestGatewayConfig::cache_aware(3104);
         let ctx =
             AppTestContext::new_with_config(config, TestWorkerConfig::healthy_workers(19022, 2))
                 .await;
@@ -248,7 +248,7 @@ mod worker_health_tests {
     /// Test that failing workers are avoided via circuit breaker/retry
     #[tokio::test]
     async fn test_skip_failing_workers() {
-        let config = TestRouterConfig::round_robin_with_reliability(
+        let config = TestGatewayConfig::round_robin_with_reliability(
             3105,
             RetryConfig {
                 max_retries: 3,
@@ -335,7 +335,7 @@ mod worker_response_delay_tests {
     /// Test that response delays are handled correctly
     #[tokio::test]
     async fn test_worker_with_delay() {
-        let config = TestRouterConfig::random(3106);
+        let config = TestGatewayConfig::random(3106);
         let ctx = AppTestContext::new_with_config(
             config,
             vec![TestWorkerConfig::slow(19040, 100)], // 100ms delay

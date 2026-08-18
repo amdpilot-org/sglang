@@ -4,7 +4,7 @@ use axum::{
     http::{header::CONTENT_TYPE, StatusCode},
 };
 use serde_json::json;
-use smg::{config::RouterConfig, routers::RouterFactory};
+use smg::routers::RouterFactory;
 use tower::ServiceExt;
 
 use crate::common::{
@@ -857,7 +857,7 @@ mod responses_endpoint_tests {
     async fn test_v1_responses_input_items() {
         // This test uses OpenAI mode because the input_items endpoint
         // is only implemented in OpenAIRouter and reads from storage (no workers needed)
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .openai_mode(vec!["http://dummy.local".to_string()]) // Dummy URL (won't be called)
             .random_policy()
             .host("127.0.0.1")
@@ -1076,7 +1076,7 @@ mod error_tests {
     #[tokio::test]
     async fn test_payload_too_large() {
         // Create context with small payload limit
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![])
             .random_policy()
             .host("127.0.0.1")
@@ -1376,7 +1376,7 @@ mod pd_mode_tests {
             .and_then(|p| p.trim_end_matches('/').parse::<u16>().ok())
             .unwrap_or(9000);
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .prefill_decode_mode(vec![(prefill_url, Some(prefill_port))], vec![decode_url])
             .random_policy()
             .host("127.0.0.1")
@@ -1513,7 +1513,7 @@ mod request_id_tests {
     #[tokio::test]
     async fn test_request_id_with_custom_headers() {
         // Create config with custom request ID headers
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![])
             .random_policy()
             .host("127.0.0.1")

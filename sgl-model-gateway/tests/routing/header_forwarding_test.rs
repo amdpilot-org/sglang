@@ -8,7 +8,6 @@ use axum::{
     http::{header::CONTENT_TYPE, StatusCode},
 };
 use serde_json::json;
-use smg::config::RouterConfig;
 use tower::ServiceExt;
 
 use crate::common::{
@@ -66,7 +65,7 @@ mod header_forwarding_tests {
     /// Test custom request ID headers
     #[tokio::test]
     async fn test_custom_request_id_headers() {
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![])
             .random_policy()
             .host("127.0.0.1")

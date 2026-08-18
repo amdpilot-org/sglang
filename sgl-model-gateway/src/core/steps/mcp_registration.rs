@@ -49,9 +49,10 @@ impl StepExecutor<McpWorkflowData> for ConnectMcpServerStep {
 
         debug!("Connecting to MCP server: {}", config_request.name);
 
-        // Get proxy config from router_config if available, otherwise fall back to env
+        // Get proxy config from gateway configuration if available, otherwise fall back to env.
         let proxy_config = app_context
-            .router_config
+            .gateway_config
+            .extensions
             .mcp_config
             .as_ref()
             .and_then(|cfg| cfg.proxy.as_ref());

@@ -8,7 +8,6 @@ use axum::{
     http::{header::CONTENT_TYPE, StatusCode},
 };
 use serde_json::json;
-use smg::config::RouterConfig;
 use tower::ServiceExt;
 
 use crate::common::{
@@ -23,7 +22,7 @@ mod payload_size_tests {
     /// Test that small payloads are handled correctly
     #[tokio::test]
     async fn test_small_payload() {
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -75,7 +74,7 @@ mod payload_size_tests {
     /// Test that payloads within limit are accepted
     #[tokio::test]
     async fn test_payload_within_limit() {
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -129,7 +128,7 @@ mod payload_size_tests {
     /// Test that payloads exceeding limit are rejected
     #[tokio::test]
     async fn test_payload_exceeds_limit() {
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -188,7 +187,7 @@ mod payload_size_tests {
         // Use a more reasonable limit for this test
         let limit_bytes = 10 * 1024; // 10KB limit
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -244,7 +243,7 @@ mod payload_size_tests {
     /// Test default payload size limit (256MB)
     #[tokio::test]
     async fn test_default_payload_limit() {
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![])
             .round_robin_policy()
             .host("127.0.0.1")

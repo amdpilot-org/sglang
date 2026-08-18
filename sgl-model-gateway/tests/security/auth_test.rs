@@ -10,7 +10,7 @@ use axum::{
 use serde_json::json;
 use tower::ServiceExt;
 
-use crate::common::{AppTestContext, TestRouterConfig, TestWorkerConfig};
+use crate::common::{AppTestContext, TestGatewayConfig, TestWorkerConfig};
 
 const AUTH_HEADER: &str = "Authorization";
 
@@ -21,7 +21,7 @@ mod auth_tests {
     /// Test request without API key when auth is not required
     #[tokio::test]
     async fn test_no_auth_required() {
-        let config = TestRouterConfig::round_robin(4300);
+        let config = TestGatewayConfig::round_robin(4300);
 
         let ctx =
             AppTestContext::new_with_config(config, vec![TestWorkerConfig::healthy(20300)]).await;
@@ -54,7 +54,7 @@ mod auth_tests {
     /// Test request with valid API key format
     #[tokio::test]
     async fn test_with_api_key_header() {
-        let config = TestRouterConfig::round_robin(4301);
+        let config = TestGatewayConfig::round_robin(4301);
 
         let ctx =
             AppTestContext::new_with_config(config, vec![TestWorkerConfig::healthy(20301)]).await;
@@ -89,7 +89,7 @@ mod auth_tests {
     /// Test health endpoint doesn't require authentication
     #[tokio::test]
     async fn test_health_endpoint_no_auth() {
-        let config = TestRouterConfig::round_robin(4302);
+        let config = TestGatewayConfig::round_robin(4302);
 
         let ctx =
             AppTestContext::new_with_config(config, vec![TestWorkerConfig::healthy(20302)]).await;
@@ -116,7 +116,7 @@ mod auth_tests {
     /// Test OpenAI-compatible API key header (X-API-Key)
     #[tokio::test]
     async fn test_openai_api_key_header() {
-        let config = TestRouterConfig::round_robin(4303);
+        let config = TestGatewayConfig::round_robin(4303);
 
         let ctx =
             AppTestContext::new_with_config(config, vec![TestWorkerConfig::healthy(20303)]).await;
@@ -155,7 +155,7 @@ mod auth_tests {
             Arc,
         };
 
-        let config = TestRouterConfig::round_robin(4304);
+        let config = TestGatewayConfig::round_robin(4304);
 
         let ctx =
             AppTestContext::new_with_config(config, vec![TestWorkerConfig::healthy(20304)]).await;
@@ -215,7 +215,7 @@ mod mtls_tests {
     async fn test_tls_config_available() {
         // This test verifies the config builder accepts TLS-related options
         // Actual mTLS testing requires certificate infrastructure
-        let config = TestRouterConfig::round_robin(4305);
+        let config = TestGatewayConfig::round_robin(4305);
 
         let ctx =
             AppTestContext::new_with_config(config, vec![TestWorkerConfig::healthy(20305)]).await;

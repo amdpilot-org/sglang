@@ -19,7 +19,10 @@ use axum::{
 use data_connector::{ResponseId, StoredResponse};
 use serde_json::json;
 use smg::{
-    config::{ConfigError, HistoryBackend, OracleConfig, RouterConfig, RoutingMode},
+    config::{
+        routing::{PolicyConfig, RoutingMode},
+        ConfigError, GatewayConfig, HistoryBackend, OracleConfig,
+    },
     protocols::{
         chat::{ChatCompletionRequest, ChatMessage, MessageContent},
         common::StringOrArray,
@@ -576,7 +579,7 @@ async fn test_router_factory_openai_mode() {
         worker_urls: vec!["https://api.openai.com".to_string()],
     };
 
-    let router_config = RouterConfig::new(routing_mode, smg::config::PolicyConfig::Random);
+    let router_config = GatewayConfig::new(routing_mode, PolicyConfig::Random);
 
     let app_context = crate::common::create_test_context(router_config).await;
 
@@ -850,7 +853,7 @@ async fn test_openai_router_models_from_registry() {
 
 #[test]
 fn oracle_config_validation_requires_config_when_enabled() {
-    let config = RouterConfig::builder()
+    let config = crate::common::TestGatewayConfigBuilder::new()
         .openai_mode(vec!["https://api.openai.com".to_string()])
         .history_backend(HistoryBackend::Oracle)
         .build_unchecked();
@@ -869,7 +872,7 @@ fn oracle_config_validation_requires_config_when_enabled() {
 
 #[test]
 fn oracle_config_validation_accepts_dsn_only() {
-    let config = RouterConfig::builder()
+    let config = crate::common::TestGatewayConfigBuilder::new()
         .openai_mode(vec!["https://api.openai.com".to_string()])
         .oracle_history(OracleConfig {
             wallet_path: None,
@@ -887,7 +890,7 @@ fn oracle_config_validation_accepts_dsn_only() {
 
 #[test]
 fn oracle_config_validation_accepts_wallet_alias() {
-    let config = RouterConfig::builder()
+    let config = crate::common::TestGatewayConfigBuilder::new()
         .openai_mode(vec!["https://api.openai.com".to_string()])
         .oracle_history(OracleConfig {
             wallet_path: Some("/etc/sglang/oracle-wallet".to_string()),

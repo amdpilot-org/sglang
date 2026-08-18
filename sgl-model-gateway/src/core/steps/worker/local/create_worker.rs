@@ -261,7 +261,10 @@ fn determine_runtime_type(
 }
 
 fn build_circuit_breaker_config(app_context: &AppContext) -> CircuitBreakerConfig {
-    let cfg = app_context.router_config.effective_circuit_breaker_config();
+    let cfg = app_context
+        .gateway_config
+        .workers
+        .effective_circuit_breaker_config();
     CircuitBreakerConfig {
         failure_threshold: cfg.failure_threshold,
         success_threshold: cfg.success_threshold,
@@ -271,7 +274,7 @@ fn build_circuit_breaker_config(app_context: &AppContext) -> CircuitBreakerConfi
 }
 
 fn build_health_config(app_context: &AppContext, config: &WorkerConfigRequest) -> HealthConfig {
-    let cfg = &app_context.router_config.health_check;
+    let cfg = &app_context.gateway_config.workers.health_check;
     HealthConfig {
         timeout_secs: cfg.timeout_secs,
         check_interval_secs: cfg.check_interval_secs,

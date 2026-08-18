@@ -20,7 +20,7 @@ use super::{
 };
 use crate::{
     app_context::AppContext,
-    config::types::RetryConfig,
+    config::RetryConfig,
     core::{is_retryable_status, RetryExecutor, WorkerRegistry, UNKNOWN_MODEL_ID},
     observability::metrics::{metrics_labels, Metrics},
     protocols::{
@@ -134,7 +134,7 @@ impl GrpcRouter {
             shared_components,
             responses_context,
             harmony_responses_context,
-            retry_config: ctx.router_config.effective_retry_config(),
+            retry_config: ctx.gateway_config.workers.effective_retry_config(),
         })
     }
 

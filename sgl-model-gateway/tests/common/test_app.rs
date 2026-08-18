@@ -7,7 +7,7 @@ use data_connector::{
 use reqwest::Client;
 use smg::{
     app_context::AppContext,
-    config::RouterConfig,
+    config::GatewayConfig,
     core::{
         BasicWorkerBuilder, LoadMonitor, ModelCard, RuntimeType, Worker, WorkerRegistry, WorkerType,
     },
@@ -24,13 +24,14 @@ use smg_mcp::{McpConfig, McpManager};
 pub fn create_test_app(
     router: Arc<dyn RouterTrait>,
     client: Client,
-    router_config: &RouterConfig,
+    gateway_config: &GatewayConfig,
 ) -> Router {
     // Initialize rate limiter
-    let rate_limiter = match router_config.max_concurrent_requests {
+    let rate_limiter = match gateway_config.routing.max_concurrent_requests {
         n if n <= 0 => None,
         n => {
-            let rate_limit_tokens = router_config
+            let rate_limit_tokens = gateway_config
+                .routing
                 .rate_limit_tokens_per_second
                 .filter(|&t| t > 0)
                 .unwrap_or(n);
@@ -43,7 +44,7 @@ pub fn create_test_app(
 
     // Initialize registries
     let worker_registry = Arc::new(WorkerRegistry::new());
-    let policy_registry = Arc::new(PolicyRegistry::new(router_config.policy.clone()));
+    let policy_registry = Arc::new(PolicyRegistry::new(gateway_config.routing.policy.clone()));
 
     // Initialize storage backends
     let response_storage = Arc::new(MemoryResponseStorage::new());
@@ -55,7 +56,7 @@ pub fn create_test_app(
         worker_registry.clone(),
         policy_registry.clone(),
         client.clone(),
-        router_config.worker_startup_check_interval_secs,
+        gateway_config.workers.startup_check_interval_secs,
     )));
 
     // Create empty OnceLock for worker job queue and workflow engines
@@ -65,7 +66,7 @@ pub fn create_test_app(
     // Create AppContext using builder pattern
     let app_context = Arc::new(
         AppContext::builder()
-            .router_config(router_config.clone())
+            .gateway_config(gateway_config.clone())
             .client(client)
             .rate_limiter(rate_limiter)
             .tokenizer_registry(Arc::new(TokenizerRegistry::new())) // tokenizer
@@ -94,18 +95,22 @@ pub fn create_test_app(
     });
 
     // Configure request ID headers (use defaults if not specified)
-    let request_id_headers = router_config.request_id_headers.clone().unwrap_or_else(|| {
-        vec![
-            "x-request-id".to_string(),
-            "x-correlation-id".to_string(),
-            "x-trace-id".to_string(),
-            "request-id".to_string(),
-        ]
-    });
+    let request_id_headers = gateway_config
+        .server
+        .request_id_headers
+        .clone()
+        .unwrap_or_else(|| {
+            vec![
+                "x-request-id".to_string(),
+                "x-correlation-id".to_string(),
+                "x-trace-id".to_string(),
+                "request-id".to_string(),
+            ]
+        });
 
     // Create auth config from router config
     let auth_config = AuthConfig {
-        api_key: router_config.api_key.clone(),
+        api_key: gateway_config.security.api_key.clone(),
     };
 
     // Use the actual server's build_app function
@@ -113,9 +118,9 @@ pub fn create_test_app(
         app_state,
         auth_config,
         None, // No control plane auth for tests
-        router_config.max_payload_size,
+        gateway_config.server.max_payload_size,
         request_id_headers,
-        router_config.cors_allowed_origins.clone(),
+        gateway_config.server.cors_allowed_origins.clone(),
     )
 }
 
@@ -136,21 +141,25 @@ pub fn create_test_app_with_context(
     });
 
     // Get config from the context
-    let router_config = &app_context.router_config;
+    let gateway_config = &app_context.gateway_config;
 
     // Configure request ID headers (use defaults if not specified)
-    let request_id_headers = router_config.request_id_headers.clone().unwrap_or_else(|| {
-        vec![
-            "x-request-id".to_string(),
-            "x-correlation-id".to_string(),
-            "x-trace-id".to_string(),
-            "request-id".to_string(),
-        ]
-    });
+    let request_id_headers = gateway_config
+        .server
+        .request_id_headers
+        .clone()
+        .unwrap_or_else(|| {
+            vec![
+                "x-request-id".to_string(),
+                "x-correlation-id".to_string(),
+                "x-trace-id".to_string(),
+                "request-id".to_string(),
+            ]
+        });
 
     // Create auth config from router config
     let auth_config = AuthConfig {
-        api_key: router_config.api_key.clone(),
+        api_key: gateway_config.security.api_key.clone(),
     };
 
     // Use the actual server's build_app function
@@ -158,16 +167,16 @@ pub fn create_test_app_with_context(
         app_state,
         auth_config,
         None, // No control plane auth for tests
-        router_config.max_payload_size,
+        gateway_config.server.max_payload_size,
         request_id_headers,
-        router_config.cors_allowed_origins.clone(),
+        gateway_config.server.cors_allowed_origins.clone(),
     )
 }
 
 /// Create a minimal test AppContext for unit tests
 #[allow(dead_code)]
 pub async fn create_test_app_context() -> Arc<AppContext> {
-    let router_config = RouterConfig::default();
+    let gateway_config = GatewayConfig::default();
     let client = Client::new();
 
     // Initialize empty OnceLocks
@@ -190,7 +199,7 @@ pub async fn create_test_app_context() -> Arc<AppContext> {
 
     // Initialize registries
     let worker_registry = Arc::new(WorkerRegistry::new());
-    let policy_registry = Arc::new(PolicyRegistry::new(router_config.policy.clone()));
+    let policy_registry = Arc::new(PolicyRegistry::new(gateway_config.routing.policy.clone()));
 
     // Initialize storage backends
     let response_storage = Arc::new(MemoryResponseStorage::new());
@@ -199,7 +208,7 @@ pub async fn create_test_app_context() -> Arc<AppContext> {
 
     Arc::new(
         AppContext::builder()
-            .router_config(router_config)
+            .gateway_config(gateway_config)
             .client(client)
             .rate_limiter(None)
             .tokenizer_registry(Arc::new(TokenizerRegistry::new()))

@@ -8,7 +8,6 @@ use axum::{
     http::{header::CONTENT_TYPE, StatusCode},
 };
 use serde_json::json;
-use smg::config::RouterConfig;
 use tower::ServiceExt;
 
 use crate::common::{
@@ -23,7 +22,7 @@ mod pd_routing_tests {
     /// Test basic PD mode routing with prefill and decode workers
     #[tokio::test]
     async fn test_pd_mode_basic_routing() {
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .prefill_decode_mode(
                 vec![
                     ("http://127.0.0.1:19800".to_string(), None),
@@ -90,7 +89,7 @@ mod pd_routing_tests {
     /// Test PD mode with round robin policy
     #[tokio::test]
     async fn test_pd_mode_round_robin() {
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .prefill_decode_mode(
                 vec![("http://127.0.0.1:19810".to_string(), None)],
                 vec![
@@ -154,7 +153,7 @@ mod pd_routing_tests {
     async fn test_pd_mode_with_failing_decode_worker() {
         use smg::config::RetryConfig;
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .prefill_decode_mode(
                 vec![("http://127.0.0.1:19820".to_string(), None)],
                 vec![

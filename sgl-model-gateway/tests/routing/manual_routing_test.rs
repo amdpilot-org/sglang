@@ -12,7 +12,7 @@ use axum::{
 use serde_json::json;
 use tower::ServiceExt;
 
-use crate::common::{AppTestContext, TestRouterConfig, TestWorkerConfig};
+use crate::common::{AppTestContext, TestGatewayConfig, TestWorkerConfig};
 
 const ROUTING_KEY_HEADER: &str = "X-SMG-Routing-Key";
 
@@ -23,7 +23,7 @@ mod manual_routing_tests {
     /// Test sticky routing with X-SMG-Routing-Key header
     #[tokio::test]
     async fn test_manual_routing_with_header() {
-        let config = TestRouterConfig::manual(3700);
+        let config = TestGatewayConfig::manual(3700);
 
         let ctx =
             AppTestContext::new_with_config(config, TestWorkerConfig::healthy_workers(19700, 2))
@@ -82,7 +82,7 @@ mod manual_routing_tests {
     /// Test random fallback when no routing key header is provided
     #[tokio::test]
     async fn test_manual_routing_without_header() {
-        let config = TestRouterConfig::manual(3701);
+        let config = TestGatewayConfig::manual(3701);
 
         let ctx =
             AppTestContext::new_with_config(config, TestWorkerConfig::healthy_workers(19702, 2))
@@ -124,7 +124,7 @@ mod manual_routing_tests {
     /// Test that same routing key consistently routes to same worker
     #[tokio::test]
     async fn test_manual_routing_consistency() {
-        let config = TestRouterConfig::manual(3702);
+        let config = TestGatewayConfig::manual(3702);
 
         let ctx =
             AppTestContext::new_with_config(config, TestWorkerConfig::healthy_workers(19704, 3))
@@ -207,7 +207,7 @@ mod manual_min_group_tests {
 
     #[tokio::test]
     async fn test_min_group_concurrent_distribution() {
-        let config = TestRouterConfig::manual_min_group(3910);
+        let config = TestGatewayConfig::manual_min_group(3910);
 
         let ctx =
             AppTestContext::new_with_config(config, TestWorkerConfig::slow_workers(29910, 3, 500))
@@ -256,7 +256,7 @@ mod manual_min_group_tests {
 
     #[tokio::test]
     async fn test_min_group_sticky_routing() {
-        let config = TestRouterConfig::manual_min_group(3911);
+        let config = TestGatewayConfig::manual_min_group(3911);
 
         let ctx =
             AppTestContext::new_with_config(config, TestWorkerConfig::slow_workers(29920, 3, 200))
@@ -294,7 +294,7 @@ mod manual_min_group_tests {
 
     #[tokio::test]
     async fn test_min_group_mixed_concurrent_routing() {
-        let config = TestRouterConfig::manual_min_group(3912);
+        let config = TestGatewayConfig::manual_min_group(3912);
 
         let ctx =
             AppTestContext::new_with_config(config, TestWorkerConfig::slow_workers(29930, 2, 300))

@@ -21,8 +21,8 @@ pub struct RouterFactory;
 impl RouterFactory {
     /// Create a router instance from application context
     pub async fn create_router(ctx: &Arc<AppContext>) -> Result<Box<dyn RouterTrait>, String> {
-        match ctx.router_config.connection_mode {
-            ConnectionMode::Grpc { .. } => match &ctx.router_config.mode {
+        match ctx.gateway_config.workers.connection_mode {
+            ConnectionMode::Grpc { .. } => match &ctx.gateway_config.routing.mode {
                 RoutingMode::Regular { .. } => Self::create_grpc_router(ctx).await,
                 RoutingMode::PrefillDecode {
                     prefill_policy,
@@ -32,7 +32,7 @@ impl RouterFactory {
                     Self::create_grpc_pd_router(
                         prefill_policy.as_ref(),
                         decode_policy.as_ref(),
-                        &ctx.router_config.policy,
+                        &ctx.gateway_config.routing.policy,
                         ctx,
                     )
                     .await
@@ -41,7 +41,7 @@ impl RouterFactory {
                     Err("OpenAI mode requires HTTP connection_mode".to_string())
                 }
             },
-            ConnectionMode::Http => match &ctx.router_config.mode {
+            ConnectionMode::Http => match &ctx.gateway_config.routing.mode {
                 RoutingMode::Regular { .. } => Self::create_regular_router(ctx).await,
                 RoutingMode::PrefillDecode {
                     prefill_policy,
@@ -51,7 +51,7 @@ impl RouterFactory {
                     Self::create_pd_router(
                         prefill_policy.as_ref(),
                         decode_policy.as_ref(),
-                        &ctx.router_config.policy,
+                        &ctx.gateway_config.routing.policy,
                         ctx,
                     )
                     .await

@@ -2,43 +2,43 @@ use std::collections::HashMap;
 
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use rand::{distr::Alphanumeric, Rng};
-use smg_mesh::service::MeshServerConfig;
 
 use crate::{
     auth::{ApiKeyEntry, ControlPlaneAuthConfig, JwtConfig, Role},
     config::{
-        CircuitBreakerConfig, ConfigError, ConfigResult, DiscoveryConfig, HealthCheckConfig,
-        HistoryBackend, ManualAssignmentMode, MetricsConfig, OracleConfig, PolicyConfig,
-        PostgresConfig, RedisConfig, RetryConfig, RouterConfig, RoutingMode, TokenizerCacheConfig,
-        TraceConfig, DEFAULT_CONNECT_TIMEOUT_SECS, DEFAULT_POOL_IDLE_TIMEOUT_SECS,
-        DEFAULT_POOL_MAX_IDLE_PER_HOST, DEFAULT_TCP_KEEPALIVE_SECS,
+        extensions::ExtensionConfig,
+        gateway::GatewayConfig,
+        infrastructure::{
+            DiscoveryConfig as GatewayDiscoveryConfig, MeshConfig, ObservabilityConfig,
+        },
+        model::{ModelConfig, TokenizerCacheConfig},
+        routing::{ManualAssignmentMode, PolicyConfig, RoutingConfig, RoutingMode},
+        server::{HttpServerConfig, SecurityConfig, ServerTlsConfig},
+        storage::{HistoryBackend, OracleConfig, PostgresConfig, RedisConfig, StorageConfig},
+        worker_pool::{
+            CircuitBreakerConfig, HealthCheckConfig, RetryConfig, WorkerPoolConfig,
+            DEFAULT_CONNECT_TIMEOUT_SECS, DEFAULT_POOL_IDLE_TIMEOUT_SECS,
+            DEFAULT_POOL_MAX_IDLE_PER_HOST, DEFAULT_TCP_KEEPALIVE_SECS,
+        },
+        ConfigError, ConfigResult,
     },
     core::ConnectionMode,
-    observability::metrics::PrometheusConfig,
-    server::ServerConfig,
-    service_discovery::ServiceDiscoveryConfig,
     version,
 };
 
 #[derive(Parser, Debug)]
-#[command(name = "sglang-router", alias = "smg", alias = "amg")]
+#[command(name = "sglang-router")]
 #[command(about = "SGLang Model Gateway - High-performance inference gateway")]
 #[command(args_conflicts_with_subcommands = true)]
 #[command(version = version::get_version_string())]
-#[command(long_about = r#"
-SGLang Model Gateway - Rust-based inference gateway
-
-Usage:
-  smg launch [OPTIONS]     Launch router (short command)
-  amg launch [OPTIONS]     Launch router (alternative)
-  sglang-router [OPTIONS]  Launch router (full name)
-
+#[command(long_about = "SGLang Model Gateway - Rust-based inference gateway")]
+#[command(after_long_help = r#"
 Examples:
   # Regular mode
-  smg launch --worker-urls http://worker1:8000 http://worker2:8000
+  smg --worker-urls http://worker1:8000 http://worker2:8000
 
   # PD disaggregated mode
-  smg launch --pd-disaggregation \
+  smg --pd-disaggregation \
     --prefill http://127.0.0.1:30001 9001 \
     --prefill http://127.0.0.2:30002 9002 \
     --decode http://127.0.0.3:30003 \
@@ -46,7 +46,7 @@ Examples:
     --policy cache_aware
 
   # With different policies
-  smg launch --pd-disaggregation \
+  smg --pd-disaggregation \
     --prefill http://127.0.0.1:30001 9001 \
     --prefill http://127.0.0.2:30002 \
     --decode http://127.0.0.3:30003 \
@@ -58,7 +58,7 @@ pub struct Cli {
     #[arg(
         long,
         global = true,
-        action = ArgAction::SetTrue,
+        exclusive = true,
         help = "Print detailed version information and exit"
     )]
     version_verbose: bool,
@@ -67,24 +67,23 @@ pub struct Cli {
     command: Option<Commands>,
 
     #[command(flatten)]
-    router_args: CliArgs,
+    args: CliArgs,
 }
 
 impl Cli {
-    pub fn complete_config(self) -> ConfigResult<ServerConfig> {
-        let mut args = self.into_router_args();
-        args.complete_config()
+    /// Selects the root or `launch` arguments and resolves them into startup config.
+    pub fn try_into_config(self) -> ConfigResult<GatewayConfig> {
+        let args = match self.command {
+            Some(Commands::Launch { args }) => args,
+            None => self.args,
+        };
+
+        args.resolve_config()
     }
 
+    /// Returns whether the detailed version output was requested.
     pub fn wants_verbose_version(&self) -> bool {
         self.version_verbose
-    }
-
-    pub fn into_router_args(self) -> CliArgs {
-        match self.command {
-            Some(Commands::Launch { args }) => args,
-            None => self.router_args,
-        }
     }
 }
 
@@ -100,23 +99,52 @@ pub enum Commands {
 
 #[derive(Parser, Debug)]
 pub struct CliArgs {
-    // ==================== Worker Configuration ====================
+    // Server Configuration
     /// Host address to bind the router server
-    #[arg(long, default_value = "0.0.0.0", help_heading = "Worker Configuration")]
+    #[arg(long, default_value = "0.0.0.0", help_heading = "Server Configuration")]
     host: String,
 
     /// Port number to bind the router server
-    #[arg(long, default_value_t = 30000, help_heading = "Worker Configuration")]
+    #[arg(long, default_value_t = 30000, help_heading = "Server Configuration")]
     port: u16,
 
+    /// Maximum payload size in bytes
+    #[arg(long, default_value_t = 536870912, help_heading = "Request Handling")]
+    max_payload_size: usize,
+
+    /// CORS allowed origins
+    #[arg(long, num_args = 0.., help_heading = "Request Handling")]
+    cors_allowed_origins: Vec<String>,
+
+    /// Custom HTTP headers to check for request IDs
+    #[arg(long, num_args = 0.., help_heading = "Request Handling")]
+    request_id_headers: Vec<String>,
+
+    /// Grace period in seconds to wait for in-flight requests during shutdown
+    #[arg(long, default_value_t = 180, help_heading = "Request Handling")]
+    shutdown_grace_period_secs: u64,
+
+    // Worker Configuration
     /// List of worker URLs (supports IPv4 and IPv6)
     #[arg(long, num_args = 0.., help_heading = "Worker Configuration")]
     worker_urls: Vec<String>,
 
-    // ==================== Routing Policy ====================
+    /// API key used to authorize requests to workers
+    #[arg(long, help_heading = "Worker Configuration")]
+    api_key: Option<String>,
+
+    /// Maximum time to wait for a worker to become reachable and register
+    #[arg(long, default_value_t = 1800, help_heading = "Worker Configuration")]
+    worker_startup_timeout_secs: u64,
+
+    /// Interval in seconds between worker load and availability checks
+    #[arg(long, default_value_t = 30, help_heading = "Worker Configuration")]
+    worker_startup_check_interval: u64,
+
+    // Routing
     /// Load balancing policy to use
-    #[arg(long, default_value = "cache_aware", value_parser = ["random", "round_robin", "cache_aware", "power_of_two", "prefix_hash", "manual"], help_heading = "Routing Policy")]
-    policy: String,
+    #[arg(long, value_enum, default_value_t = PolicyKind::CacheAware, help_heading = "Routing Policy")]
+    policy: PolicyKind,
 
     /// Cache threshold (0.0-1.0) for cache-aware routing
     #[arg(long, default_value_t = 0.3, help_heading = "Routing Policy")]
@@ -143,8 +171,8 @@ pub struct CliArgs {
     max_idle_secs: u64,
 
     /// Assignment mode for manual policy when encountering a new routing key
-    #[arg(long, default_value = "random", value_parser = ["random", "min_load", "min_group"], help_heading = "Routing Policy")]
-    assignment_mode: String,
+    #[arg(long, value_enum, default_value_t = ManualAssignmentMode::Random, help_heading = "Routing Policy")]
+    assignment_mode: ManualAssignmentMode,
 
     /// Number of prefix tokens to use for prefix_hash policy
     #[arg(long, default_value_t = 256, help_heading = "Routing Policy")]
@@ -162,115 +190,65 @@ pub struct CliArgs {
     #[arg(long, default_value_t = false, help_heading = "Routing Policy")]
     enable_igw: bool,
 
-    // ==================== PD Disaggregation ====================
+    // PD Disaggregation
     /// Enable PD (Prefill-Decode) disaggregated mode
     #[arg(long, default_value_t = false, help_heading = "PD Disaggregation")]
     pd_disaggregation: bool,
 
-    #[arg(long,value_names = ["URL", "BOOTSTRAP_PORT"],num_args = 1..=2,action = ArgAction::Append,help_heading = "PD Disaggregation")]
+    /// Prefill server URL and optional bootstrap port; may be specified multiple times
+    #[arg(
+        long,
+        value_names = ["URL", "BOOTSTRAP_PORT"],
+        num_args = 1..=2,
+        action = ArgAction::Append,
+        help_heading = "PD Disaggregation"
+    )]
     prefill: Vec<Vec<String>>,
 
-    /// Decode server URLs (can be specified multiple times)
+    /// Decode server URLs; may be specified multiple times
     #[arg(long, action = ArgAction::Append, help_heading = "PD Disaggregation")]
     decode: Vec<String>,
 
     /// Specific policy for prefill nodes in PD mode
-    #[arg(long, value_parser = ["random", "round_robin", "cache_aware", "power_of_two", "prefix_hash", "manual"], help_heading = "PD Disaggregation")]
-    prefill_policy: Option<String>,
+    #[arg(long, value_enum, help_heading = "PD Disaggregation")]
+    prefill_policy: Option<PolicyKind>,
 
     /// Specific policy for decode nodes in PD mode
-    #[arg(long, value_parser = ["random", "round_robin", "cache_aware", "power_of_two", "prefix_hash", "manual"], help_heading = "PD Disaggregation")]
-    decode_policy: Option<String>,
+    #[arg(long, value_enum, help_heading = "PD Disaggregation")]
+    decode_policy: Option<PolicyKind>,
 
-    /// Timeout in seconds for worker startup and registration
-    #[arg(long, default_value_t = 1800, help_heading = "PD Disaggregation")]
-    worker_startup_timeout_secs: u64,
+    // Admission control
+    /// Maximum concurrent requests (-1 to disable)
+    #[arg(long, default_value_t = -1, help_heading = "Rate Limiting")]
+    max_concurrent_requests: i32,
 
-    /// Interval in seconds between worker startup checks
-    #[arg(long, default_value_t = 30, help_heading = "PD Disaggregation")]
-    worker_startup_check_interval: u64,
+    /// Queue size for pending requests when limit reached
+    #[arg(long, default_value_t = 100, help_heading = "Rate Limiting")]
+    queue_size: usize,
 
-    // ==================== Service Discovery (Kubernetes) ====================
-    /// Enable Kubernetes service discovery
+    /// Maximum time in seconds a request can wait in queue
+    #[arg(long, default_value_t = 60, help_heading = "Rate Limiting")]
+    queue_timeout_secs: u64,
+
+    /// Token bucket refill rate (tokens per second)
+    #[arg(long, help_heading = "Rate Limiting")]
+    rate_limit_tokens_per_second: Option<i32>,
+
+    // Backend
+    /// Backend runtime to use
     #[arg(
         long,
-        default_value_t = false,
-        help_heading = "Service Discovery (Kubernetes)"
+        value_enum,
+        default_value_t = Backend::Sglang,
+        alias = "runtime",
+        help_heading = "Backend"
     )]
-    service_discovery: bool,
-
-    /// Label selector for Kubernetes service discovery (format: key=value)
-    #[arg(long, num_args = 0.., help_heading = "Service Discovery (Kubernetes)")]
-    selector: Vec<String>,
-
-    /// Port to use for discovered worker pods
-    #[arg(
-        long,
-        default_value_t = 80,
-        help_heading = "Service Discovery (Kubernetes)"
-    )]
-    service_discovery_port: u16,
-
-    /// Kubernetes namespace to watch for pods
-    #[arg(long, help_heading = "Service Discovery (Kubernetes)")]
-    service_discovery_namespace: Option<String>,
-
-    /// Label selector for prefill server pods in PD mode
-    #[arg(long, num_args = 0.., help_heading = "Service Discovery (Kubernetes)")]
-    prefill_selector: Vec<String>,
-
-    /// Label selector for decode server pods in PD mode
-    #[arg(long, num_args = 0.., help_heading = "Service Discovery (Kubernetes)")]
-    decode_selector: Vec<String>,
-
-    // ==================== Logging ====================
-    /// Directory to store log files
-    #[arg(long, help_heading = "Logging")]
-    log_dir: Option<String>,
-
-    /// Set the logging level
-    #[arg(long, default_value = "info", value_parser = ["debug", "info", "warn", "error"], help_heading = "Logging")]
-    log_level: String,
-
-    /// Enable structured JSON log output instead of plain text
-    #[arg(long, default_value_t = false, help_heading = "Logging")]
-    json_log: bool,
-
-    // ==================== Prometheus Metrics ====================
-    /// Port to expose Prometheus metrics
-    #[arg(long, default_value_t = 29000, help_heading = "Prometheus Metrics")]
-    prometheus_port: u16,
-
-    /// Host address to bind the Prometheus metrics server
-    #[arg(long, default_value = "0.0.0.0", help_heading = "Prometheus Metrics")]
-    prometheus_host: String,
-
-    /// Custom buckets for Prometheus duration metrics
-    #[arg(long, num_args = 0.., help_heading = "Prometheus Metrics")]
-    prometheus_duration_buckets: Vec<f64>,
-
-    // ==================== Request Handling ====================
-    /// Custom HTTP headers to check for request IDs
-    #[arg(long, num_args = 0.., help_heading = "Request Handling")]
-    request_id_headers: Vec<String>,
+    backend: Backend,
 
     /// Request timeout in seconds
-    #[arg(long, default_value_t = 1800, help_heading = "Request Handling")]
+    #[arg(long, default_value_t = 1800, help_heading = "HTTP Client")]
     request_timeout_secs: u64,
 
-    /// Grace period in seconds to wait for in-flight requests during shutdown
-    #[arg(long, default_value_t = 180, help_heading = "Request Handling")]
-    shutdown_grace_period_secs: u64,
-
-    /// Maximum payload size in bytes
-    #[arg(long, default_value_t = 536870912, help_heading = "Request Handling")]
-    max_payload_size: usize,
-
-    /// CORS allowed origins
-    #[arg(long, num_args = 0.., help_heading = "Request Handling")]
-    cors_allowed_origins: Vec<String>,
-
-    // ==================== HTTP Client ====================
     /// Idle timeout in seconds for pooled upstream HTTP connections
     #[arg(
         long,
@@ -307,24 +285,7 @@ pub struct CliArgs {
     )]
     tcp_keepalive_secs: u64,
 
-    // ==================== Rate Limiting ====================
-    /// Maximum concurrent requests (-1 to disable)
-    #[arg(long, default_value_t = -1, help_heading = "Rate Limiting")]
-    max_concurrent_requests: i32,
-
-    /// Queue size for pending requests when limit reached
-    #[arg(long, default_value_t = 100, help_heading = "Rate Limiting")]
-    queue_size: usize,
-
-    /// Maximum time in seconds a request can wait in queue
-    #[arg(long, default_value_t = 60, help_heading = "Rate Limiting")]
-    queue_timeout_secs: u64,
-
-    /// Token bucket refill rate (tokens per second)
-    #[arg(long, help_heading = "Rate Limiting")]
-    rate_limit_tokens_per_second: Option<i32>,
-
-    // ==================== Retry Configuration ====================
+    // Retry Configuration
     /// Maximum number of retry attempts
     #[arg(long, default_value_t = 5, help_heading = "Retry Configuration")]
     retry_max_retries: u32,
@@ -349,7 +310,7 @@ pub struct CliArgs {
     #[arg(long, default_value_t = false, help_heading = "Retry Configuration")]
     disable_retries: bool,
 
-    // ==================== Circuit Breaker ====================
+    // Circuit breaker
     /// Number of failures before circuit opens
     #[arg(long, default_value_t = 10, help_heading = "Circuit Breaker")]
     cb_failure_threshold: u32,
@@ -370,7 +331,7 @@ pub struct CliArgs {
     #[arg(long, default_value_t = false, help_heading = "Circuit Breaker")]
     disable_circuit_breaker: bool,
 
-    // ==================== Health Checks ====================
+    // Health checks
     /// Failures before marking worker unhealthy
     #[arg(long, default_value_t = 3, help_heading = "Health Checks")]
     health_failure_threshold: u32,
@@ -391,11 +352,11 @@ pub struct CliArgs {
     #[arg(long, default_value = "/health", help_heading = "Health Checks")]
     health_check_endpoint: String,
 
-    /// Disable all worker health checks at startup
+    /// Disable all worker health checks
     #[arg(long, default_value_t = false, help_heading = "Health Checks")]
     disable_health_check: bool,
 
-    // ==================== Tokenizer ====================
+    // Tokenizer
     /// Model path for loading tokenizer (HuggingFace ID or local path)
     #[arg(long, help_heading = "Tokenizer")]
     model_path: Option<String>,
@@ -424,7 +385,7 @@ pub struct CliArgs {
     #[arg(long, default_value_t = 52428800, help_heading = "Tokenizer")]
     tokenizer_cache_l1_max_memory: usize,
 
-    // ==================== Parsers ====================
+    // Model parsers
     /// Parser for reasoning models (e.g., deepseek-r1, qwen3)
     #[arg(long, help_heading = "Parsers")]
     reasoning_parser: Option<String>,
@@ -433,24 +394,21 @@ pub struct CliArgs {
     #[arg(long, help_heading = "Parsers")]
     tool_call_parser: Option<String>,
 
+    // Extensions
     /// Path to MCP server configuration file
-    #[arg(long, help_heading = "Parsers")]
+    #[arg(long, help_heading = "Extensions")]
     mcp_config_path: Option<String>,
 
-    // ==================== Backend ====================
-    /// Backend runtime to use
-    #[arg(long, value_enum, default_value_t = Backend::Sglang, alias = "runtime", help_heading = "Backend")]
-    backend: Backend,
-
-    /// History storage backend
-    #[arg(long, default_value = "memory", value_parser = ["memory", "none", "oracle", "postgres", "redis"], help_heading = "Backend")]
-    history_backend: String,
-
     /// Enable WebAssembly support
-    #[arg(long, default_value_t = false, help_heading = "Backend")]
+    #[arg(long, default_value_t = false, help_heading = "Extensions")]
     enable_wasm: bool,
 
-    // ==================== Oracle Database ====================
+    // Storage
+    /// History storage backend
+    #[arg(long,value_enum, default_value_t = HistoryBackendKind::Memory, help_heading = "Storage")]
+    history_backend: HistoryBackendKind,
+
+    // Oracle storage
     /// Path to Oracle ATP wallet directory
     #[arg(long, env = "ATP_WALLET_PATH", help_heading = "Oracle Database")]
     oracle_wallet_path: Option<String>,
@@ -483,7 +441,7 @@ pub struct CliArgs {
     #[arg(long, env = "ATP_POOL_TIMEOUT_SECS", help_heading = "Oracle Database")]
     oracle_pool_timeout_secs: Option<u64>,
 
-    // ==================== PostgreSQL Database ====================
+    // PostgreSQL storage
     /// PostgreSQL database connection URL
     #[arg(long, help_heading = "PostgreSQL Database")]
     postgres_db_url: Option<String>,
@@ -492,7 +450,7 @@ pub struct CliArgs {
     #[arg(long, help_heading = "PostgreSQL Database")]
     postgres_pool_max_size: Option<usize>,
 
-    // ==================== Redis Database ====================
+    // Redis storage
     /// Redis connection URL
     #[arg(long, help_heading = "Redis Database")]
     redis_url: Option<String>,
@@ -505,7 +463,7 @@ pub struct CliArgs {
     #[arg(long, help_heading = "Redis Database")]
     redis_retention_days: Option<i64>,
 
-    // ==================== TLS/mTLS Security ====================
+    // Security
     /// Path to server TLS certificate (PEM format)
     #[arg(long, help_heading = "TLS/mTLS Security")]
     tls_cert_path: Option<String>,
@@ -514,28 +472,7 @@ pub struct CliArgs {
     #[arg(long, help_heading = "TLS/mTLS Security")]
     tls_key_path: Option<String>,
 
-    // ==================== Tracing (OpenTelemetry) ====================
-    /// Enable OpenTelemetry tracing
-    #[arg(
-        long,
-        default_value_t = false,
-        help_heading = "Tracing (OpenTelemetry)"
-    )]
-    enable_trace: bool,
-
-    /// OTLP collector endpoint (format: host:port)
-    #[arg(
-        long,
-        default_value = "localhost:4317",
-        help_heading = "Tracing (OpenTelemetry)"
-    )]
-    otlp_traces_endpoint: String,
-
-    // ==================== Control Plane Authentication ====================
-    /// API key for worker authorization
-    #[arg(long, help_heading = "Control Plane Authentication")]
-    api_key: Option<String>,
-
+    // Control-plane authentication
     /// JWT issuer URL for OIDC authentication
     #[arg(
         long,
@@ -584,72 +521,99 @@ pub struct CliArgs {
     )]
     disable_audit_logging: bool,
 
-    // ==================== Mesh Server ====================
-    #[arg(long, default_value_t = false)]
+    // Discovery
+    /// Enable Kubernetes service discovery
+    #[arg(
+        long,
+        default_value_t = false,
+        help_heading = "Service Discovery (Kubernetes)"
+    )]
+    service_discovery: bool,
+
+    /// Label selector for Kubernetes service discovery (format: key=value)
+    #[arg(long, num_args = 0.., help_heading = "Service Discovery (Kubernetes)")]
+    selector: Vec<String>,
+
+    /// Port to use for discovered worker pods
+    #[arg(
+        long,
+        default_value_t = 80,
+        help_heading = "Service Discovery (Kubernetes)"
+    )]
+    service_discovery_port: u16,
+
+    /// Kubernetes namespace to watch for pods
+    #[arg(long, help_heading = "Service Discovery (Kubernetes)")]
+    service_discovery_namespace: Option<String>,
+
+    /// Label selector for prefill server pods in PD mode
+    #[arg(long, num_args = 0.., help_heading = "Service Discovery (Kubernetes)")]
+    prefill_selector: Vec<String>,
+
+    /// Label selector for decode server pods in PD mode
+    #[arg(long, num_args = 0.., help_heading = "Service Discovery (Kubernetes)")]
+    decode_selector: Vec<String>,
+
+    // Mesh
+    #[arg(long, default_value_t = false, help_heading = "Mesh")]
     enable_mesh: bool,
 
-    #[arg(long)]
+    #[arg(long, help_heading = "Mesh")]
     mesh_server_name: Option<String>,
 
-    #[arg(long, default_value = "0.0.0.0")]
+    #[arg(long, default_value = "0.0.0.0", help_heading = "Mesh")]
     mesh_host: String,
 
-    #[arg(long, default_value_t = 39527)]
+    #[arg(long, default_value_t = 39527, help_heading = "Mesh")]
     mesh_port: u16,
 
-    #[arg(long, num_args = 0..)]
+    #[arg(long, num_args = 0.., help_heading = "Mesh")]
     mesh_peer_urls: Vec<String>,
+
+    // Observability
+    /// Directory to store log files
+    #[arg(long, help_heading = "Logging")]
+    log_dir: Option<String>,
+
+    /// Set the logging level
+    #[arg(long, default_value = "info", value_parser = ["debug", "info", "warn", "error"], help_heading = "Logging")]
+    log_level: String,
+
+    /// Enable structured JSON log output instead of plain text
+    #[arg(long, default_value_t = false, help_heading = "Logging")]
+    json_log: bool,
+
+    /// Host address to bind the Prometheus metrics server
+    #[arg(long, default_value = "0.0.0.0", help_heading = "Prometheus Metrics")]
+    prometheus_host: String,
+
+    /// Port to expose the Prometheus metrics server
+    #[arg(long, default_value_t = 29000, help_heading = "Prometheus Metrics")]
+    prometheus_port: u16,
+
+    /// Custom buckets for Prometheus duration metrics
+    #[arg(long, num_args = 0.., help_heading = "Prometheus Metrics")]
+    prometheus_duration_buckets: Vec<f64>,
+
+    /// Enable OpenTelemetry tracing
+    #[arg(
+        long,
+        default_value_t = false,
+        help_heading = "Tracing (OpenTelemetry)"
+    )]
+    enable_trace: bool,
+
+    /// OTLP collector endpoint (format: host:port)
+    #[arg(
+        long,
+        default_value = "localhost:4317",
+        help_heading = "Tracing (OpenTelemetry)"
+    )]
+    otlp_traces_endpoint: String,
 }
 
 impl CliArgs {
-    fn complete_config(&mut self) -> ConfigResult<ServerConfig> {
-        let prefill_urls = self.parse_prefill_args()?;
-
-        // Service discovery needs the multi-model router implementation.
-        if self.service_discovery && !self.enable_igw {
-            println!("INFO: IGW mode automatically enabled because service discovery is turned on");
-            self.enable_igw = true;
-        }
-
-        println!("SGLang Router starting...");
-        println!("Host: {}:{}", self.host, self.port);
-        let mode_str = if self.enable_igw {
-            "IGW (Inference Gateway)".to_string()
-        } else if matches!(self.backend, Backend::Openai) {
-            "OpenAI Backend".to_string()
-        } else if self.pd_disaggregation {
-            "PD Disaggregated".to_string()
-        } else {
-            format!("Regular ({})", self.backend)
-        };
-        println!("Mode: {}", mode_str);
-
-        match self.backend {
-            Backend::Vllm | Backend::Trtllm | Backend::Anthropic => {
-                println!(
-                    "WARNING: runtime '{}' not implemented yet; falling back to regular routing. \
-Provide --worker-urls or PD flags as usual.",
-                    self.backend
-                );
-            }
-            Backend::Sglang | Backend::Openai => {}
-        }
-
-        if !self.enable_igw {
-            println!("Policy: {}", self.policy);
-
-            if self.pd_disaggregation && !prefill_urls.is_empty() {
-                println!("Prefill nodes: {:?}", prefill_urls);
-                println!("Decode nodes: {:?}", self.decode);
-            }
-        }
-
-        let router_config = self.to_router_config(prefill_urls)?;
-        router_config.validate()?;
-
-        Ok(self.to_server_config(router_config))
-    }
-
+    /// Parses repeated `--prefill URL [BOOTSTRAP_PORT]` arguments.
     fn parse_prefill_args(&self) -> ConfigResult<Vec<(String, Option<u16>)>> {
         self.prefill
             .iter()
@@ -714,88 +678,54 @@ Provide --worker-urls or PD flags as usual.",
         }
     }
 
-    fn determine_connection_mode(worker_urls: &[String]) -> ConnectionMode {
-        for url in worker_urls {
-            if url.starts_with("grpc://") || url.starts_with("grpcs://") {
-                return ConnectionMode::Grpc { port: None };
-            }
-        }
-        ConnectionMode::Http
-    }
-
-    fn parse_selector(selector_list: &[String]) -> HashMap<String, String> {
-        let mut map = HashMap::new();
-        for item in selector_list {
-            if let Some(eq_pos) = item.find('=') {
-                let key = item[..eq_pos].to_string();
-                let value = item[eq_pos + 1..].to_string();
-                map.insert(key, value);
-            }
-        }
-        map
-    }
-
-    fn parse_policy(&self, policy_str: &str) -> PolicyConfig {
-        match policy_str {
-            "random" => PolicyConfig::Random,
-            "round_robin" => PolicyConfig::RoundRobin,
-            "cache_aware" => PolicyConfig::CacheAware {
+    /// Combines a selected policy with its CLI tuning parameters.
+    fn build_policy_config(&self, policy: PolicyKind) -> PolicyConfig {
+        match policy {
+            PolicyKind::Random => PolicyConfig::Random,
+            PolicyKind::RoundRobin => PolicyConfig::RoundRobin,
+            PolicyKind::CacheAware => PolicyConfig::CacheAware {
                 cache_threshold: self.cache_threshold,
                 balance_abs_threshold: self.balance_abs_threshold,
                 balance_rel_threshold: self.balance_rel_threshold,
                 eviction_interval_secs: self.eviction_interval,
                 max_tree_size: self.max_tree_size,
             },
-            "power_of_two" => PolicyConfig::PowerOfTwo {
+            PolicyKind::PowerOfTwo => PolicyConfig::PowerOfTwo {
                 load_check_interval_secs: 5,
             },
-            "prefix_hash" => PolicyConfig::PrefixHash {
+            PolicyKind::PrefixHash => PolicyConfig::PrefixHash {
                 prefix_token_count: self.prefix_token_count,
                 load_factor: self.prefix_hash_load_factor,
             },
-            "manual" => PolicyConfig::Manual {
+            PolicyKind::Manual => PolicyConfig::Manual {
                 eviction_interval_secs: self.eviction_interval,
                 max_idle_secs: self.max_idle_secs,
-                assignment_mode: match self.assignment_mode.as_str() {
-                    "random" => ManualAssignmentMode::Random,
-                    "min_load" => ManualAssignmentMode::MinLoad,
-                    "min_group" => ManualAssignmentMode::MinGroup,
-                    other => panic!("Unknown assignment mode: {}", other),
-                },
+                assignment_mode: self.assignment_mode,
             },
+            // TODO: impl bucket policy
             _ => PolicyConfig::RoundRobin,
         }
     }
 
-    fn resolve_oracle_connect_details(&self) -> ConfigResult<OracleConnectSource> {
-        if let Some(dsn) = self.oracle_dsn.clone() {
-            return Ok(OracleConnectSource::Dsn { descriptor: dsn });
-        }
-
-        let wallet_path = self
-            .oracle_wallet_path
-            .clone()
-            .ok_or(ConfigError::MissingRequired {
-                field: "oracle_wallet_path or ATP_WALLET_PATH".to_string(),
-            })?;
-
-        let tns_alias = self
-            .oracle_tns_alias
-            .clone()
-            .ok_or(ConfigError::MissingRequired {
-                field: "oracle_tns_alias or ATP_TNS_ALIAS".to_string(),
-            })?;
-
-        Ok(OracleConnectSource::Wallet {
-            path: wallet_path,
-            alias: tns_alias,
-        })
-    }
-
+    /// Builds Oracle settings from either a DSN or wallet/TNS inputs.
     fn build_oracle_config(&self) -> ConfigResult<OracleConfig> {
-        let (wallet_path, connect_descriptor) = match self.resolve_oracle_connect_details()? {
-            OracleConnectSource::Dsn { descriptor } => (None, descriptor),
-            OracleConnectSource::Wallet { path, alias } => (Some(path), alias),
+        let (wallet_path, connect_descriptor) = match &self.oracle_dsn {
+            Some(dsn) => (None, dsn.clone()),
+            None => {
+                let wallet_path =
+                    self.oracle_wallet_path
+                        .clone()
+                        .ok_or(ConfigError::MissingRequired {
+                            field: "oracle_wallet_path or ATP_WALLET_PATH".to_string(),
+                        })?;
+                let tns_alias =
+                    self.oracle_tns_alias
+                        .clone()
+                        .ok_or(ConfigError::MissingRequired {
+                            field: "oracle_tns_alias or ATP_TNS_ALIAS".to_string(),
+                        })?;
+                (Some(wallet_path), tns_alias)
+            }
         };
         let username = self
             .oracle_user
@@ -848,6 +778,7 @@ Provide --worker-urls or PD flags as usual.",
         })
     }
 
+    /// Builds and validates PostgreSQL storage settings.
     fn build_postgres_config(&self) -> ConfigResult<PostgresConfig> {
         let db_url = self.postgres_db_url.clone().unwrap_or_default();
         let pool_max = self
@@ -860,6 +791,7 @@ Provide --worker-urls or PD flags as usual.",
         Ok(pcf)
     }
 
+    /// Builds and validates Redis storage settings.
     fn build_redis_config(&self) -> ConfigResult<RedisConfig> {
         let url = self.redis_url.clone().unwrap_or_default();
         let pool_max = self.redis_pool_max_size.unwrap_or(16);
@@ -881,12 +813,85 @@ Provide --worker-urls or PD flags as usual.",
         Ok(rcf)
     }
 
-    fn to_router_config(
-        &self,
-        prefill_urls: Vec<(String, Option<u16>)>,
-    ) -> ConfigResult<RouterConfig> {
-        // Determine routing mode based on backend type and PD disaggregation flag
-        // IGW mode doesn't change routing mode, only affects router initialization
+    /// Loads TLS material when both certificate and key paths are supplied.
+    fn load_server_tls_config(&self) -> ConfigResult<Option<ServerTlsConfig>> {
+        match (&self.tls_cert_path, &self.tls_key_path) {
+            (Some(cert_path), Some(key_path)) => {
+                let certificate =
+                    std::fs::read(cert_path).map_err(|error| ConfigError::ValidationFailed {
+                        reason: format!(
+                            "Failed to read server certificate from {cert_path}: {error}"
+                        ),
+                    })?;
+                let private_key =
+                    std::fs::read(key_path).map_err(|error| ConfigError::ValidationFailed {
+                        reason: format!("Failed to read server key from {key_path}: {error}"),
+                    })?;
+                Ok(Some(ServerTlsConfig {
+                    certificate,
+                    private_key,
+                }))
+            }
+            (None, None) => Ok(None),
+            _ => Err(ConfigError::ValidationFailed {
+                reason: "Both --tls-cert-path and --tls-key-path must be specified together"
+                    .to_string(),
+            }),
+        }
+    }
+
+    /// Loads and parses the optional MCP YAML configuration.
+    fn load_mcp_config(&self) -> ConfigResult<Option<smg_mcp::McpConfig>> {
+        let Some(path) = &self.mcp_config_path else {
+            return Ok(None);
+        };
+
+        let contents =
+            std::fs::read_to_string(path).map_err(|error| ConfigError::ValidationFailed {
+                reason: format!("Failed to read MCP config from {path}: {error}"),
+            })?;
+        let config =
+            serde_yaml::from_str(&contents).map_err(|error| ConfigError::ValidationFailed {
+                reason: format!("Failed to parse MCP config from {path}: {error}"),
+            })?;
+        Ok(Some(config))
+    }
+
+    /// Builds mesh node settings, returning None when mesh is disabled or invalid.
+    fn build_mesh_config(&self) -> Option<MeshConfig> {
+        if !self.enable_mesh {
+            return None;
+        }
+
+        let self_name = self.mesh_server_name.clone().unwrap_or_else(|| {
+            let mut rng = rand::rng();
+            let suffix: String = (0..4).map(|_| rng.sample(Alphanumeric) as char).collect();
+            format!("Mesh_{suffix}")
+        });
+        let self_addr = match format!("{}:{}", self.mesh_host, self.mesh_port).parse() {
+            Ok(address) => address,
+            Err(_) => {
+                tracing::warn!("Invalid mesh server address, so mesh server will not be started");
+                return None;
+            }
+        };
+        let init_peer = self.mesh_peer_urls.first().and_then(|url| url.parse().ok());
+
+        Some(MeshConfig {
+            self_name,
+            self_addr,
+            init_peer,
+        })
+    }
+
+    /// Resolves CLI arguments into the canonical gateway configuration.
+    ///
+    /// File-backed settings are loaded here so the resulting configuration is
+    /// self-contained and does not retain CLI paths.
+    fn resolve_config(&self) -> ConfigResult<GatewayConfig> {
+        let prefill_urls = self.parse_prefill_args()?;
+        let enable_igw = self.enable_igw || self.service_discovery;
+
         let mode = if matches!(self.backend, Backend::Openai) {
             RoutingMode::OpenAI {
                 worker_urls: self.worker_urls.clone(),
@@ -895,8 +900,8 @@ Provide --worker-urls or PD flags as usual.",
             RoutingMode::PrefillDecode {
                 prefill_urls,
                 decode_urls: self.decode.clone(),
-                prefill_policy: self.prefill_policy.as_ref().map(|p| self.parse_policy(p)),
-                decode_policy: self.decode_policy.as_ref().map(|p| self.parse_policy(p)),
+                prefill_policy: self.prefill_policy.map(|p| self.build_policy_config(p)),
+                decode_policy: self.decode_policy.map(|p| self.build_policy_config(p)),
             }
         } else {
             RoutingMode::Regular {
@@ -904,269 +909,157 @@ Provide --worker-urls or PD flags as usual.",
             }
         };
 
-        let policy = self.parse_policy(&self.policy);
-
-        let discovery = if self.service_discovery {
-            Some(DiscoveryConfig {
-                enabled: true,
-                namespace: self.service_discovery_namespace.clone(),
-                port: self.service_discovery_port,
-                check_interval_secs: 60,
-                selector: Self::parse_selector(&self.selector),
-                prefill_selector: Self::parse_selector(&self.prefill_selector),
-                decode_selector: Self::parse_selector(&self.decode_selector),
-                bootstrap_port_annotation: "sglang.ai/bootstrap-port".to_string(),
-                router_selector: HashMap::new(), // Can be set via config file
-                router_mesh_port_annotation: "sglang.ai/ha-port".to_string(),
-            })
-        } else {
-            None
-        };
-
-        let metrics = Some(MetricsConfig {
-            port: self.prometheus_port,
-            host: self.prometheus_host.clone(),
-        });
-
-        let trace_config = Some(TraceConfig {
-            enable_trace: self.enable_trace,
-            otlp_traces_endpoint: self.otlp_traces_endpoint.clone(),
-        });
-
         let mut all_urls = Vec::new();
         match &mode {
-            RoutingMode::Regular { worker_urls } => {
-                all_urls.extend(worker_urls.clone());
-            }
+            RoutingMode::Regular { worker_urls } => all_urls.extend(worker_urls.clone()),
             RoutingMode::PrefillDecode {
                 prefill_urls,
                 decode_urls,
                 ..
             } => {
-                for (url, _) in prefill_urls {
-                    all_urls.push(url.clone());
-                }
+                all_urls.extend(prefill_urls.iter().map(|(url, _)| url.clone()));
                 all_urls.extend(decode_urls.clone());
             }
             RoutingMode::OpenAI { .. } => {}
         }
         let connection_mode = match &mode {
             RoutingMode::OpenAI { .. } => ConnectionMode::Http,
-            _ => Self::determine_connection_mode(&all_urls),
+            _ => determine_connection_mode(&all_urls),
         };
 
-        let history_backend = match self.history_backend.as_str() {
-            "none" => HistoryBackend::None,
-            "oracle" => HistoryBackend::Oracle,
-            "postgres" => HistoryBackend::Postgres,
-            "redis" => HistoryBackend::Redis,
-            _ => HistoryBackend::Memory,
-        };
+        let oracle = (self.history_backend == HistoryBackendKind::Oracle)
+            .then(|| self.build_oracle_config())
+            .transpose()?;
+        let postgres = (self.history_backend == HistoryBackendKind::Postgres)
+            .then(|| self.build_postgres_config())
+            .transpose()?;
+        let redis = (self.history_backend == HistoryBackendKind::Redis)
+            .then(|| self.build_redis_config())
+            .transpose()?;
 
-        let oracle = if history_backend == HistoryBackend::Oracle {
-            Some(self.build_oracle_config()?)
-        } else {
-            None
-        };
-        let postgres = if history_backend == HistoryBackend::Postgres {
-            Some(self.build_postgres_config()?)
-        } else {
-            None
-        };
-        let redis = if history_backend == HistoryBackend::Redis {
-            Some(self.build_redis_config()?)
-        } else {
-            None
-        };
-
-        let builder = RouterConfig::builder()
-            .mode(mode)
-            .policy(policy)
-            .connection_mode(connection_mode)
-            .host(&self.host)
-            .port(self.port)
-            .max_payload_size(self.max_payload_size)
-            .request_timeout_secs(self.request_timeout_secs)
-            .worker_startup_timeout_secs(self.worker_startup_timeout_secs)
-            .worker_startup_check_interval_secs(self.worker_startup_check_interval)
-            .pool_idle_timeout_secs(self.pool_idle_timeout_secs)
-            .connect_timeout_secs(self.connect_timeout_secs)
-            .pool_max_idle_per_host(self.pool_max_idle_per_host)
-            .tcp_keepalive_secs(self.tcp_keepalive_secs)
-            .max_concurrent_requests(self.max_concurrent_requests)
-            .queue_size(self.queue_size)
-            .queue_timeout_secs(self.queue_timeout_secs)
-            .cors_allowed_origins(self.cors_allowed_origins.clone())
-            .retry_config(RetryConfig {
-                max_retries: self.retry_max_retries,
-                initial_backoff_ms: self.retry_initial_backoff_ms,
-                max_backoff_ms: self.retry_max_backoff_ms,
-                backoff_multiplier: self.retry_backoff_multiplier,
-                jitter_factor: self.retry_jitter_factor,
-            })
-            .circuit_breaker_config(CircuitBreakerConfig {
-                failure_threshold: self.cb_failure_threshold,
-                success_threshold: self.cb_success_threshold,
-                timeout_duration_secs: self.cb_timeout_duration_secs,
-                window_duration_secs: self.cb_window_duration_secs,
-            })
-            .health_check_config(HealthCheckConfig {
-                failure_threshold: self.health_failure_threshold,
-                success_threshold: self.health_success_threshold,
-                timeout_secs: self.health_check_timeout_secs,
-                check_interval_secs: self.health_check_interval_secs,
-                endpoint: self.health_check_endpoint.clone(),
-                disable_health_check: self.disable_health_check,
-            })
-            .tokenizer_cache(TokenizerCacheConfig {
-                enable_l0: self.tokenizer_cache_enable_l0,
-                l0_max_entries: self.tokenizer_cache_l0_max_entries,
-                enable_l1: self.tokenizer_cache_enable_l1,
-                l1_max_memory: self.tokenizer_cache_l1_max_memory,
-            })
-            .history_backend(history_backend)
-            .log_level(&self.log_level)
-            .maybe_api_key(self.api_key.as_ref())
-            .maybe_discovery(discovery)
-            .maybe_metrics(metrics)
-            .maybe_trace(trace_config)
-            .maybe_log_dir(self.log_dir.as_ref())
-            .maybe_request_id_headers(
-                (!self.request_id_headers.is_empty()).then(|| self.request_id_headers.clone()),
-            )
-            .maybe_rate_limit_tokens_per_second(self.rate_limit_tokens_per_second)
-            .maybe_model_path(self.model_path.as_ref())
-            .maybe_tokenizer_path(self.tokenizer_path.as_ref())
-            .maybe_chat_template(self.chat_template.as_ref())
-            .maybe_oracle(oracle)
-            .maybe_postgres(postgres)
-            .maybe_redis(redis)
-            .maybe_reasoning_parser(self.reasoning_parser.as_ref())
-            .maybe_tool_call_parser(self.tool_call_parser.as_ref())
-            .maybe_mcp_config_path(self.mcp_config_path.as_ref())
-            .dp_aware(self.dp_aware)
-            .retries(!self.disable_retries)
-            .circuit_breaker(!self.disable_circuit_breaker)
-            .enable_wasm(self.enable_wasm)
-            .igw(self.enable_igw)
-            .maybe_server_cert_and_key(self.tls_cert_path.as_ref(), self.tls_key_path.as_ref());
-
-        builder.build()
-    }
-
-    fn to_server_config(&self, router_config: RouterConfig) -> ServerConfig {
-        let service_discovery_config = if self.service_discovery {
-            // Get router discovery config from router_config.discovery if available
-            let (router_selector, router_mesh_port_annotation) = router_config
-                .discovery
-                .as_ref()
-                .map(|d| {
-                    (
-                        d.router_selector.clone(),
-                        d.router_mesh_port_annotation.clone(),
-                    )
-                })
-                .unwrap_or_else(|| (HashMap::new(), "sglang.ai/mesh-port".to_string()));
-
-            let selector = Self::parse_selector(&self.selector);
-
-            let service_discovery_config = ServiceDiscoveryConfig {
-                enabled: true,
-                selector,
-                check_interval: std::time::Duration::from_secs(60),
-                port: self.service_discovery_port,
-                namespace: self.service_discovery_namespace.clone(),
-                pd_mode: self.pd_disaggregation,
-                prefill_selector: Self::parse_selector(&self.prefill_selector),
-                decode_selector: Self::parse_selector(&self.decode_selector),
-                bootstrap_port_annotation: "sglang.ai/bootstrap-port".to_string(),
-                router_selector,
-                router_mesh_port_annotation,
-                igw_mode: self.enable_igw,
-            };
-            service_discovery_config.warn_if_misconfigured();
-            Some(service_discovery_config)
-        } else {
-            None
-        };
-
-        let prometheus_config = Some(PrometheusConfig {
-            port: self.prometheus_port,
-            host: self.prometheus_host.clone(),
-            duration_buckets: if self.prometheus_duration_buckets.is_empty() {
-                None
-            } else {
-                Some(self.prometheus_duration_buckets.clone())
-            },
+        let discovery = self.service_discovery.then(|| GatewayDiscoveryConfig {
+            selector: parse_label_selectors(&self.selector),
+            namespace: self.service_discovery_namespace.clone(),
+            port: self.service_discovery_port,
+            check_interval_secs: 60,
+            pd_mode: self.pd_disaggregation,
+            prefill_selector: parse_label_selectors(&self.prefill_selector),
+            decode_selector: parse_label_selectors(&self.decode_selector),
+            bootstrap_port_annotation: "sglang.ai/bootstrap-port".to_string(),
+            router_selector: HashMap::new(),
+            router_mesh_port_annotation: "sglang.ai/ha-port".to_string(),
+            igw_mode: enable_igw,
         });
 
-        // Build control plane auth config
-        let control_plane_auth = {
-            let config = self.build_control_plane_auth_config();
-            if config.is_enabled() {
-                Some(config)
-            } else {
-                None
-            }
-        };
+        let control_plane_auth = self.build_control_plane_auth_config();
+        let control_plane_auth = control_plane_auth
+            .is_enabled()
+            .then_some(control_plane_auth);
 
-        // ==================== Mesh Server ====================
-        let mesh_server_config = if self.enable_mesh {
-            let self_name = if let Some(name) = &self.mesh_server_name {
-                name.to_string()
-            } else {
-                // If name is not set, use a random name
-                let mut rng = rand::rng();
-                let random_string: String =
-                    (0..4).map(|_| rng.sample(Alphanumeric) as char).collect();
-                format!("Mesh_{}", random_string)
-            };
-
-            let peer = self
-                .mesh_peer_urls
-                .first()
-                .and_then(|url| url.parse::<std::net::SocketAddr>().ok());
-            if let Ok(addr) =
-                format!("{}:{}", self.mesh_host, self.mesh_port).parse::<std::net::SocketAddr>()
-            {
-                Some(MeshServerConfig {
-                    self_name,
-                    self_addr: addr,
-                    init_peer: peer,
-                })
-            } else {
-                tracing::warn!("Invalid mesh server address, so mesh server will not be started");
-                None
-            }
-        } else {
-            None
-        };
-
-        ServerConfig {
-            host: self.host.clone(),
-            port: self.port,
-            router_config,
-            max_payload_size: self.max_payload_size,
-            log_dir: self.log_dir.clone(),
-            log_level: Some(self.log_level.clone()),
-            json_log: self.json_log,
-            service_discovery_config,
-            prometheus_config,
-            request_timeout_secs: self.request_timeout_secs,
-            request_id_headers: if self.request_id_headers.is_empty() {
-                None
-            } else {
-                Some(self.request_id_headers.clone())
+        let config = GatewayConfig {
+            server: HttpServerConfig {
+                host: self.host.clone(),
+                port: self.port,
+                max_payload_size: self.max_payload_size,
+                cors_allowed_origins: self.cors_allowed_origins.clone(),
+                request_id_headers: (!self.request_id_headers.is_empty())
+                    .then(|| self.request_id_headers.clone()),
+                shutdown_grace_period_secs: self.shutdown_grace_period_secs,
             },
-            shutdown_grace_period_secs: self.shutdown_grace_period_secs,
-            control_plane_auth,
-            mesh_server_config,
-        }
+            routing: RoutingConfig {
+                mode,
+                policy: self.build_policy_config(self.policy),
+                dp_aware: self.dp_aware,
+                enable_igw,
+                max_concurrent_requests: self.max_concurrent_requests,
+                queue_size: self.queue_size,
+                queue_timeout_secs: self.queue_timeout_secs,
+                rate_limit_tokens_per_second: self.rate_limit_tokens_per_second,
+            },
+            workers: WorkerPoolConfig {
+                connection_mode,
+                request_timeout_secs: self.request_timeout_secs,
+                startup_timeout_secs: self.worker_startup_timeout_secs,
+                startup_check_interval_secs: self.worker_startup_check_interval,
+                pool_idle_timeout_secs: self.pool_idle_timeout_secs,
+                connect_timeout_secs: self.connect_timeout_secs,
+                pool_max_idle_per_host: self.pool_max_idle_per_host,
+                tcp_keepalive_secs: self.tcp_keepalive_secs,
+                retry: RetryConfig {
+                    max_retries: self.retry_max_retries,
+                    initial_backoff_ms: self.retry_initial_backoff_ms,
+                    max_backoff_ms: self.retry_max_backoff_ms,
+                    backoff_multiplier: self.retry_backoff_multiplier,
+                    jitter_factor: self.retry_jitter_factor,
+                },
+                circuit_breaker: CircuitBreakerConfig {
+                    failure_threshold: self.cb_failure_threshold,
+                    success_threshold: self.cb_success_threshold,
+                    timeout_duration_secs: self.cb_timeout_duration_secs,
+                    window_duration_secs: self.cb_window_duration_secs,
+                },
+                disable_retries: self.disable_retries,
+                disable_circuit_breaker: self.disable_circuit_breaker,
+                health_check: HealthCheckConfig {
+                    failure_threshold: self.health_failure_threshold,
+                    success_threshold: self.health_success_threshold,
+                    timeout_secs: self.health_check_timeout_secs,
+                    check_interval_secs: self.health_check_interval_secs,
+                    endpoint: self.health_check_endpoint.clone(),
+                    disable_health_check: self.disable_health_check,
+                },
+            },
+            model: ModelConfig {
+                model_path: self.model_path.clone(),
+                tokenizer_path: self.tokenizer_path.clone(),
+                chat_template: self.chat_template.clone(),
+                tokenizer_cache: TokenizerCacheConfig {
+                    enable_l0: self.tokenizer_cache_enable_l0,
+                    l0_max_entries: self.tokenizer_cache_l0_max_entries,
+                    enable_l1: self.tokenizer_cache_enable_l1,
+                    l1_max_memory: self.tokenizer_cache_l1_max_memory,
+                },
+                reasoning_parser: self.reasoning_parser.clone(),
+                tool_call_parser: self.tool_call_parser.clone(),
+            },
+            storage: StorageConfig {
+                history_backend: self.history_backend.into(),
+                oracle,
+                postgres,
+                redis,
+            },
+            extensions: ExtensionConfig {
+                mcp_config: self.load_mcp_config()?,
+                enable_wasm: self.enable_wasm,
+            },
+            observability: ObservabilityConfig {
+                log_dir: self.log_dir.clone(),
+                log_level: Some(self.log_level.clone()),
+                json_log: self.json_log,
+                prometheus_host: self.prometheus_host.clone(),
+                prometheus_port: self.prometheus_port,
+                prometheus_duration_buckets: (!self.prometheus_duration_buckets.is_empty())
+                    .then(|| self.prometheus_duration_buckets.clone()),
+                enable_trace: self.enable_trace,
+                otlp_traces_endpoint: self.otlp_traces_endpoint.clone(),
+            },
+            security: SecurityConfig {
+                api_key: self.api_key.clone(),
+                control_plane_auth,
+                server_tls: self.load_server_tls_config()?,
+                ..Default::default()
+            },
+            discovery,
+            mesh: self.build_mesh_config(),
+        };
+
+        config.validate()?;
+        Ok(config)
     }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
-pub enum Backend {
+enum Backend {
     #[value(name = "sglang")]
     Sglang,
     #[value(name = "vllm")]
@@ -1181,52 +1074,51 @@ pub enum Backend {
 
 impl std::fmt::Display for Backend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            Backend::Sglang => "sglang",
-            Backend::Vllm => "vllm",
-            Backend::Trtllm => "trtllm",
-            Backend::Openai => "openai",
-            Backend::Anthropic => "anthropic",
-        };
-        write!(f, "{}", s)
+        f.write_str(match self {
+            Self::Sglang => "sglang",
+            Self::Vllm => "vllm",
+            Self::Trtllm => "trtllm",
+            Self::Openai => "openai",
+            Self::Anthropic => "anthropic",
+        })
     }
 }
 
-enum OracleConnectSource {
-    Dsn { descriptor: String },
-    Wallet { path: String, alias: String },
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, ValueEnum)]
+#[value(rename_all = "snake_case")]
+enum PolicyKind {
+    Random,
+    RoundRobin,
+
+    #[default]
+    CacheAware,
+    PowerOfTwo,
+    PrefixHash,
+    Bucket,
+    Manual,
 }
 
-// fn parse_prefill_args() -> Vec<(String, Option<u16>)> {
-//     let args: Vec<String> = std::env::args().collect();
-//     let mut prefill_entries = Vec::new();
-//     let mut i = 0;
-//
-//     while i < args.len() {
-//         if args[i] == "--prefill" && i + 1 < args.len() {
-//             let url = args[i + 1].clone();
-//             let bootstrap_port = if i + 2 < args.len() && !args[i + 2].starts_with("--") {
-//                 if let Ok(port) = args[i + 2].parse::<u16>() {
-//                     i += 1;
-//                     Some(port)
-//                 } else if args[i + 2].to_lowercase() == "none" {
-//                     i += 1;
-//                     None
-//                 } else {
-//                     None
-//                 }
-//             } else {
-//                 None
-//             };
-//             prefill_entries.push((url, bootstrap_port));
-//             i += 2;
-//         } else {
-//             i += 1;
-//         }
-//     }
-//
-//     prefill_entries
-// }
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "lowercase")]
+enum HistoryBackendKind {
+    Memory,
+    None,
+    Oracle,
+    Postgres,
+    Redis,
+}
+
+impl From<HistoryBackendKind> for HistoryBackend {
+    fn from(value: HistoryBackendKind) -> Self {
+        match value {
+            HistoryBackendKind::Memory => Self::Memory,
+            HistoryBackendKind::Oracle => Self::Oracle,
+            HistoryBackendKind::Postgres => Self::Postgres,
+            HistoryBackendKind::Redis => Self::Redis,
+            HistoryBackendKind::None => Self::None,
+        }
+    }
+}
 
 /// Parse role mapping from CLI format "idp_role=gateway_role"
 fn parse_role_mapping(mapping: &str) -> Option<(String, Role)> {
@@ -1281,4 +1173,25 @@ fn parse_control_plane_api_key(key_str: &str) -> Option<ApiKeyEntry> {
     };
 
     Some(ApiKeyEntry::new(id, name, key, role))
+}
+
+fn determine_connection_mode(worker_urls: &[String]) -> ConnectionMode {
+    for url in worker_urls {
+        if url.starts_with("grpc://") || url.starts_with("grpcs://") {
+            return ConnectionMode::Grpc { port: None };
+        }
+    }
+    ConnectionMode::Http
+}
+
+fn parse_label_selectors(selector_list: &[String]) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for item in selector_list {
+        if let Some(eq_pos) = item.find('=') {
+            let key = item[..eq_pos].to_string();
+            let value = item[eq_pos + 1..].to_string();
+            map.insert(key, value);
+        }
+    }
+    map
 }

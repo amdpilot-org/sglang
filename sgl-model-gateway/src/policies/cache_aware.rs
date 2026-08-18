@@ -1312,7 +1312,7 @@ mod tests {
         Arc<dyn Worker>,
     ) {
         let registry = Arc::new(crate::policies::PolicyRegistry::new(
-            crate::config::types::PolicyConfig::RoundRobin,
+            crate::config::PolicyConfig::RoundRobin,
         ));
         let no_eviction = CacheAwareConfig {
             eviction_interval_secs: 0,
@@ -1516,7 +1516,7 @@ mod tests {
         // (b) Non-cache_aware policy: PD pool is round_robin. The downcast must
         // be skipped (no panic) and the call must be a no-op.
         let registry =
-            crate::policies::PolicyRegistry::new(crate::config::types::PolicyConfig::RoundRobin);
+            crate::policies::PolicyRegistry::new(crate::config::PolicyConfig::RoundRobin);
         let rr_prefill: Arc<dyn LoadBalancingPolicy> =
             Arc::new(crate::policies::RoundRobinPolicy::new());
         let rr_decode: Arc<dyn LoadBalancingPolicy> =
@@ -1550,9 +1550,8 @@ mod tests {
         // (a) Both pools are cache_aware with workers → both trees seeded under
         // the correct composite key.
         {
-            let registry = crate::policies::PolicyRegistry::new(
-                crate::config::types::PolicyConfig::RoundRobin,
-            );
+            let registry =
+                crate::policies::PolicyRegistry::new(crate::config::PolicyConfig::RoundRobin);
             let prefill_ca = Arc::new(CacheAwarePolicy::with_config(no_eviction.clone()));
             let decode_ca = Arc::new(CacheAwarePolicy::with_config(no_eviction.clone()));
             registry.set_prefill_policy(prefill_ca.clone() as Arc<dyn LoadBalancingPolicy>);
@@ -1581,9 +1580,8 @@ mod tests {
         // (b) Only prefill is cache_aware (decode is round_robin) → prefill seeded,
         // decode side skipped silently (no downcast, no panic).
         {
-            let registry = crate::policies::PolicyRegistry::new(
-                crate::config::types::PolicyConfig::RoundRobin,
-            );
+            let registry =
+                crate::policies::PolicyRegistry::new(crate::config::PolicyConfig::RoundRobin);
             let prefill_ca = Arc::new(CacheAwarePolicy::with_config(no_eviction.clone()));
             let decode_rr: Arc<dyn LoadBalancingPolicy> =
                 Arc::new(crate::policies::RoundRobinPolicy::new());
@@ -1602,9 +1600,8 @@ mod tests {
         // NOT seeded (the inner `!is_empty()` guard short-circuits); decode side
         // is still seeded.
         {
-            let registry = crate::policies::PolicyRegistry::new(
-                crate::config::types::PolicyConfig::RoundRobin,
-            );
+            let registry =
+                crate::policies::PolicyRegistry::new(crate::config::PolicyConfig::RoundRobin);
             let prefill_ca = Arc::new(CacheAwarePolicy::with_config(no_eviction.clone()));
             let decode_ca = Arc::new(CacheAwarePolicy::with_config(no_eviction.clone()));
             registry.set_prefill_policy(prefill_ca.clone() as Arc<dyn LoadBalancingPolicy>);
@@ -1624,9 +1621,8 @@ mod tests {
 
         // (d) Both worker lists empty → neither pool seeded (init is a full no-op).
         {
-            let registry = crate::policies::PolicyRegistry::new(
-                crate::config::types::PolicyConfig::RoundRobin,
-            );
+            let registry =
+                crate::policies::PolicyRegistry::new(crate::config::PolicyConfig::RoundRobin);
             let prefill_ca = Arc::new(CacheAwarePolicy::with_config(no_eviction.clone()));
             let decode_ca = Arc::new(CacheAwarePolicy::with_config(no_eviction));
             registry.set_prefill_policy(prefill_ca.clone() as Arc<dyn LoadBalancingPolicy>);

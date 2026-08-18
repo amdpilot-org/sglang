@@ -18,7 +18,6 @@ use portpicker::pick_unused_port;
 use serde_json::json;
 use serial_test::serial;
 use smg::{
-    config::{RouterConfig, TraceConfig},
     core::Job,
     observability::{logging, otel_trace},
     routers::RouterFactory,
@@ -119,7 +118,7 @@ async fn test_router_with_tracing() {
     println!("Mock worker started on: {}", worker_url);
 
     // 3. create router config and enable tracing
-    let router_config = RouterConfig::builder()
+    let router_config = common::TestGatewayConfigBuilder::new()
         .regular_mode(vec![worker_url.clone()])
         .random_policy()
         .host("0.0.0.0")
@@ -150,10 +149,6 @@ async fn test_router_with_tracing() {
         false
     };
 
-    let trace_config = TraceConfig {
-        enable_trace: true,
-        otlp_traces_endpoint: collector_endpoint.clone(),
-    };
     let _log_guard = logging::init_logging(
         logging::LoggingConfig {
             level: tracing::Level::INFO,
@@ -163,7 +158,7 @@ async fn test_router_with_tracing() {
             log_file_name: "test-otel".to_string(),
             log_targets: Some(vec!["smg".to_string()]),
         },
-        Some(trace_config),
+        Some(&router_config.observability),
     );
     println!("Logging initialized with OTEL layer");
 
@@ -182,7 +177,7 @@ async fn test_router_with_tracing() {
         .expect("JobQueue should be initialized");
 
     let job = Job::InitializeWorkersFromConfig {
-        router_config: Box::new(router_config.clone()),
+        gateway_config: Box::new(router_config.clone()),
     };
 
     job_queue

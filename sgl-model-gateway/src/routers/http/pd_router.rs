@@ -17,7 +17,7 @@ use tracing::{debug, error, warn};
 
 use super::pd_types::api_path;
 use crate::{
-    config::types::RetryConfig,
+    config::RetryConfig,
     core::{
         is_retryable_status, HashRing, RetryExecutor, Worker, WorkerLoadGuard, WorkerRegistry,
         WorkerType, UNKNOWN_MODEL_ID,
@@ -182,9 +182,9 @@ impl PDRouter {
             worker_registry: Arc::clone(&ctx.worker_registry),
             policy_registry: Arc::clone(&ctx.policy_registry),
             client: ctx.client.clone(),
-            retry_config: ctx.router_config.effective_retry_config(),
-            api_key: ctx.router_config.api_key.clone(),
-            enable_igw: ctx.router_config.enable_igw,
+            retry_config: ctx.gateway_config.workers.effective_retry_config(),
+            api_key: ctx.gateway_config.security.api_key.clone(),
+            enable_igw: ctx.gateway_config.routing.enable_igw,
         })
     }
 

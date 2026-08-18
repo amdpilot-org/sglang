@@ -13,10 +13,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let cfg = cli.complete_config()?;
+    let config = cli.try_into_config()?;
 
     let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async move { server::startup(cfg).await })?;
+    runtime.block_on(async move { server::startup(config).await })?;
     if is_otel_enabled() {
         shutdown_otel();
     }
