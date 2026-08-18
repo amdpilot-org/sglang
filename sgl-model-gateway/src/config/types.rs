@@ -101,6 +101,72 @@ pub struct RouterConfig {
     pub enable_wasm: bool,
 }
 
+impl RouterConfig {
+    /// Create a new configuration with mode and policy
+    pub fn new(mode: RoutingMode, policy: PolicyConfig) -> Self {
+        Self {
+            mode,
+            policy,
+            ..Default::default()
+        }
+    }
+
+    /// Validate the configuration
+    pub fn validate(&self) -> ConfigResult<()> {
+        crate::config::validation::ConfigValidator::validate(self)
+    }
+
+    /// Get the routing mode type as a string
+    pub fn mode_type(&self) -> &'static str {
+        match self.mode {
+            RoutingMode::Regular { .. } => "regular",
+            RoutingMode::PrefillDecode { .. } => "prefill_decode",
+            RoutingMode::OpenAI { .. } => "openai",
+        }
+    }
+
+    /// Check if service discovery is enabled
+    pub fn has_service_discovery(&self) -> bool {
+        self.discovery.as_ref().is_some_and(|d| d.enabled)
+    }
+
+    /// Check if metrics are enabled
+    pub fn has_metrics(&self) -> bool {
+        self.metrics.is_some()
+    }
+
+    /// Check if tracing is enabled
+    pub fn has_tracing(&self) -> bool {
+        match &self.trace_config {
+            Some(trace_config) => trace_config.enable_trace,
+            None => false,
+        }
+    }
+
+    /// Compute the effective retry config considering disable flag
+    pub fn effective_retry_config(&self) -> RetryConfig {
+        let mut cfg = self.retry.clone();
+        if self.disable_retries {
+            cfg.max_retries = 1;
+        }
+        cfg
+    }
+
+    /// Compute the effective circuit breaker config considering disable flag
+    pub fn effective_circuit_breaker_config(&self) -> CircuitBreakerConfig {
+        let mut cfg = self.circuit_breaker.clone();
+        if self.disable_circuit_breaker {
+            cfg.failure_threshold = u32::MAX;
+        }
+        cfg
+    }
+
+    /// Check if running in IGW (Inference Gateway) mode
+    pub fn is_igw_mode(&self) -> bool {
+        self.enable_igw
+    }
+}
+
 /// Tokenizer cache configuration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TokenizerCacheConfig {
@@ -557,70 +623,16 @@ impl Default for RouterConfig {
     }
 }
 
-impl RouterConfig {
-    /// Create a new configuration with mode and policy
-    pub fn new(mode: RoutingMode, policy: PolicyConfig) -> Self {
-        Self {
-            mode,
-            policy,
-            ..Default::default()
-        }
-    }
-
-    /// Validate the configuration
-    pub fn validate(&self) -> ConfigResult<()> {
-        crate::config::validation::ConfigValidator::validate(self)
-    }
-
-    /// Get the routing mode type as a string
-    pub fn mode_type(&self) -> &'static str {
-        match self.mode {
-            RoutingMode::Regular { .. } => "regular",
-            RoutingMode::PrefillDecode { .. } => "prefill_decode",
-            RoutingMode::OpenAI { .. } => "openai",
-        }
-    }
-
-    /// Check if service discovery is enabled
-    pub fn has_service_discovery(&self) -> bool {
-        self.discovery.as_ref().is_some_and(|d| d.enabled)
-    }
-
-    /// Check if metrics are enabled
-    pub fn has_metrics(&self) -> bool {
-        self.metrics.is_some()
-    }
-
-    /// Check if tracing is enabled
-    pub fn has_tracing(&self) -> bool {
-        match &self.trace_config {
-            Some(trace_config) => trace_config.enable_trace,
-            None => false,
-        }
-    }
-
-    /// Compute the effective retry config considering disable flag
-    pub fn effective_retry_config(&self) -> RetryConfig {
-        let mut cfg = self.retry.clone();
-        if self.disable_retries {
-            cfg.max_retries = 1;
-        }
-        cfg
-    }
-
-    /// Compute the effective circuit breaker config considering disable flag
-    pub fn effective_circuit_breaker_config(&self) -> CircuitBreakerConfig {
-        let mut cfg = self.circuit_breaker.clone();
-        if self.disable_circuit_breaker {
-            cfg.failure_threshold = u32::MAX;
-        }
-        cfg
-    }
-
-    /// Check if running in IGW (Inference Gateway) mode
-    pub fn is_igw_mode(&self) -> bool {
-        self.enable_igw
-    }
+pub struct Config {
+    pub router_config: RouterConfig,
+    pub token_cacache_config: TokenizerCacheConfig,
+    pub policy_config: PolicyConfig,
+    pub discovery_config: DiscoveryConfig,
+    pub retry_config: RetryConfig,
+    pub health_check_config: HealthCheckConfig,
+    pub circuit_breaker_config: CircuitBreakerConfig,
+    pub metrics_config: MetricsConfig,
+    pub trace_config: TraceConfig,
 }
 
 #[cfg(test)]
