@@ -25,6 +25,27 @@ from sglang.srt.utils.runai_utils import is_runai_obj_uri
 logger = logging.getLogger(__name__)
 
 
+def check_bwap_server_args(cfg: Any) -> None:
+    """Validate the opt-in BWAP schedule and explicitly gated probe mode."""
+    if not cfg.enable_bwap:
+        assert not cfg.bwap_fused, "--bwap-fused requires --enable-bwap."
+        assert not cfg.bwap_probe, "--bwap-probe requires --enable-bwap."
+        return
+
+    assert 0.0 <= cfg.bwap_sparsity < 1.0, "--bwap-sparsity must be in [0, 1)."
+    assert cfg.bwap_t_init >= 0, "--bwap-t-init must be non-negative."
+    assert cfg.bwap_t_explore >= 1, "--bwap-t-explore must be positive."
+    assert cfg.bwap_t_prune >= 1, "--bwap-t-prune must be positive."
+    assert not cfg.bwap_probe or cfg.bwap_fused, (
+        "--bwap-probe requires --bwap-fused."
+    )
+    if cfg.bwap_fused and cfg.tp_size > 1:
+        logger.warning(
+            "--bwap-fused gather-GEMM is TP=1 only; with tp_size>1, "
+            "layers fall back to activation masking without a speedup."
+        )
+
+
 def check_server_args(server_args: Any):
     from sglang.srt.arg_groups.lora_hook import check_lora_server_args
 
@@ -101,6 +122,9 @@ def check_server_args(server_args: Any):
 
     # Check LoRA
     check_lora_server_args(server_args)
+
+    # Check BWAP
+    check_bwap_server_args(cfg)
 
     # Check speculative decoding
     if cfg.speculative_algorithm is not None:
