@@ -1,16 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::{anyhow, Context, Error, Result};
-use axum::{
-    extract::{Path, Query, Request, State},
-    http::StatusCode,
-    response::{IntoResponse, Response},
-    routing::{delete, get, post},
-    Json, Router,
-};
+use axum::Router;
 use rustls::crypto::ring;
-use serde::Deserialize;
-use serde_json::{json, Value};
 use smg_mesh::{rate_limit_window::RateLimitWindow, MeshServerHandler, MeshSyncManager};
 use tokio::{signal, spawn};
 use tracing::{debug, error, info, warn};
@@ -22,7 +14,6 @@ use crate::{
     core::{
         job_queue::{JobQueue, JobQueueConfig},
         steps::{TokenizerConfigRequest, WorkflowEngines},
-        worker::WorkerType,
         worker_manager::WorkerManager,
         Job,
     },
@@ -32,656 +23,67 @@ use crate::{
         metrics::{self, PrometheusConfig},
         otel_trace,
     },
-    protocols::{
-        chat::ChatCompletionRequest,
-        classify::ClassifyRequest,
-        completion::CompletionRequest,
-        embedding::EmbeddingRequest,
-        generate::GenerateRequest,
-        parser::{ParseFunctionCallRequest, SeparateReasoningRequest},
-        rerank::V1RerankReqInput,
-        responses::{ResponsesGetParams, ResponsesRequest},
-        tokenize::{AddTokenizerRequest, DetokenizeRequest, TokenizeRequest},
-        validated::ValidatedJson,
-        worker_spec::{WorkerConfigRequest, WorkerUpdateRequest},
-    },
-    routers::{
-        conversations,
-        mesh::{
-            get_app_config, get_cluster_status, get_global_rate_limit, get_global_rate_limit_stats,
-            get_mesh_health, get_policy_state, get_policy_states, get_worker_state,
-            get_worker_states, set_global_rate_limit, trigger_graceful_shutdown, update_app_config,
-        },
-        parse,
-        router_manager::RouterManager,
-        tokenize, RouterTrait,
-    },
+    routers::{router_manager::RouterManager, RouterTrait},
     service_discovery::{start_service_discovery, ServiceDiscoveryConfig},
     tokenizer::TokenizerRegistry,
-    wasm::route::{add_wasm_module, list_wasm_modules, remove_wasm_module},
 };
-#[derive(Clone)]
-pub struct AppState {
-    pub router: Arc<dyn RouterTrait>,
-    pub context: Arc<AppContext>,
-    pub concurrency_queue_tx: Option<tokio::sync::mpsc::Sender<QueuedRequest>>,
-    pub router_manager: Option<Arc<RouterManager>>,
-    pub mesh_handler: Option<Arc<MeshServerHandler>>,
-    pub mesh_sync_manager: Option<Arc<MeshSyncManager>>,
-}
-
-async fn parse_function_call(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<ParseFunctionCallRequest>,
-) -> Response {
-    parse::parse_function_call(&state.context, &req).await
-}
-
-async fn parse_reasoning(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<SeparateReasoningRequest>,
-) -> Response {
-    parse::parse_reasoning(&state.context, &req).await
-}
-
-async fn sink_handler() -> Response {
-    StatusCode::NOT_FOUND.into_response()
-}
-
-async fn liveness() -> Response {
-    (StatusCode::OK, "OK").into_response()
-}
-
-async fn readiness(State(state): State<Arc<AppState>>) -> Response {
-    let workers = state.context.worker_registry.get_all();
-    let healthy_workers: Vec<_> = workers.iter().filter(|w| w.is_healthy()).collect();
-
-    let is_ready = if state.context.gateway_config.routing.enable_igw {
-        !healthy_workers.is_empty()
-    } else {
-        match &state.context.gateway_config.routing.mode {
-            RoutingMode::PrefillDecode { .. } => {
-                let has_prefill = healthy_workers
-                    .iter()
-                    .any(|w| matches!(w.worker_type(), WorkerType::Prefill { .. }));
-                let has_decode = healthy_workers
-                    .iter()
-                    .any(|w| matches!(w.worker_type(), WorkerType::Decode));
-                has_prefill && has_decode
-            }
-            RoutingMode::Regular { .. } => !healthy_workers.is_empty(),
-            RoutingMode::OpenAI { .. } => !healthy_workers.is_empty(),
-        }
-    };
-
-    if is_ready {
-        (
-            StatusCode::OK,
-            Json(json!({
-                "status": "ready",
-                "healthy_workers": healthy_workers.len(),
-                "total_workers": workers.len()
-            })),
-        )
-            .into_response()
-    } else {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({
-                "status": "not ready",
-                "reason": "insufficient healthy workers"
-            })),
-        )
-            .into_response()
-    }
-}
-
-async fn health(_state: State<Arc<AppState>>) -> Response {
-    liveness().await
-}
-
-async fn health_generate(State(state): State<Arc<AppState>>, req: Request) -> Response {
-    state.router.health_generate(req).await
-}
-
-async fn engine_metrics(State(state): State<Arc<AppState>>) -> Response {
-    WorkerManager::get_engine_metrics(&state.context.worker_registry, &state.context.client)
-        .await
-        .into_response()
-}
-
-async fn get_server_info(State(state): State<Arc<AppState>>, req: Request) -> Response {
-    state.router.get_server_info(req).await
-}
-
-async fn v1_models(State(state): State<Arc<AppState>>, req: Request) -> Response {
-    state.router.get_models(req).await
-}
-
-async fn get_model_info(State(state): State<Arc<AppState>>, req: Request) -> Response {
-    state.router.get_model_info(req).await
-}
-
-async fn generate(
-    State(state): State<Arc<AppState>>,
-    headers: http::HeaderMap,
-    Json(body): Json<GenerateRequest>,
-) -> Response {
-    let model_id = body.model.as_deref();
-    state
-        .router
-        .route_generate(Some(&headers), &body, model_id)
-        .await
-}
-
-async fn v1_chat_completions(
-    State(state): State<Arc<AppState>>,
-    headers: http::HeaderMap,
-    ValidatedJson(body): ValidatedJson<ChatCompletionRequest>,
-) -> Response {
-    state
-        .router
-        .route_chat(Some(&headers), &body, Some(&body.model))
-        .await
-}
-
-async fn v1_completions(
-    State(state): State<Arc<AppState>>,
-    headers: http::HeaderMap,
-    Json(body): Json<CompletionRequest>,
-) -> Response {
-    state
-        .router
-        .route_completion(Some(&headers), &body, Some(&body.model))
-        .await
-}
-
-async fn v1_rerank(
-    State(state): State<Arc<AppState>>,
-    headers: http::HeaderMap,
-    Json(body): Json<V1RerankReqInput>,
-) -> Response {
-    let rerank_body = &body.into();
-    state
-        .router
-        .route_rerank(Some(&headers), rerank_body, Some(&rerank_body.model))
-        .await
-}
-
-async fn v1_responses(
-    State(state): State<Arc<AppState>>,
-    headers: http::HeaderMap,
-    ValidatedJson(body): ValidatedJson<ResponsesRequest>,
-) -> Response {
-    state
-        .router
-        .route_responses(Some(&headers), &body, Some(&body.model))
-        .await
-}
-
-async fn v1_embeddings(
-    State(state): State<Arc<AppState>>,
-    headers: http::HeaderMap,
-    Json(body): Json<EmbeddingRequest>,
-) -> Response {
-    state
-        .router
-        .route_embeddings(Some(&headers), &body, Some(&body.model))
-        .await
-}
-
-async fn v1_classify(
-    State(state): State<Arc<AppState>>,
-    headers: http::HeaderMap,
-    Json(body): Json<ClassifyRequest>,
-) -> Response {
-    state
-        .router
-        .route_classify(Some(&headers), &body, Some(&body.model))
-        .await
-}
-
-async fn v1_responses_get(
-    State(state): State<Arc<AppState>>,
-    Path(response_id): Path<String>,
-    headers: http::HeaderMap,
-    Query(params): Query<ResponsesGetParams>,
-) -> Response {
-    state
-        .router
-        .get_response(Some(&headers), &response_id, &params)
-        .await
-}
-
-async fn v1_responses_cancel(
-    State(state): State<Arc<AppState>>,
-    Path(response_id): Path<String>,
-    headers: http::HeaderMap,
-) -> Response {
-    state
-        .router
-        .cancel_response(Some(&headers), &response_id)
-        .await
-}
-
-async fn v1_responses_delete(
-    State(state): State<Arc<AppState>>,
-    Path(response_id): Path<String>,
-    headers: http::HeaderMap,
-) -> Response {
-    state
-        .router
-        .delete_response(Some(&headers), &response_id)
-        .await
-}
-
-async fn v1_responses_list_input_items(
-    State(state): State<Arc<AppState>>,
-    Path(response_id): Path<String>,
-    headers: http::HeaderMap,
-) -> Response {
-    state
-        .router
-        .list_response_input_items(Some(&headers), &response_id)
-        .await
-}
-
-async fn v1_conversations_create(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<Value>,
-) -> Response {
-    conversations::create_conversation(&state.context.conversation_storage, body).await
-}
-
-async fn v1_conversations_get(
-    State(state): State<Arc<AppState>>,
-    Path(conversation_id): Path<String>,
-) -> Response {
-    conversations::get_conversation(&state.context.conversation_storage, &conversation_id).await
-}
-
-async fn v1_conversations_update(
-    State(state): State<Arc<AppState>>,
-    Path(conversation_id): Path<String>,
-    Json(body): Json<Value>,
-) -> Response {
-    conversations::update_conversation(&state.context.conversation_storage, &conversation_id, body)
-        .await
-}
-
-async fn v1_conversations_delete(
-    State(state): State<Arc<AppState>>,
-    Path(conversation_id): Path<String>,
-) -> Response {
-    conversations::delete_conversation(&state.context.conversation_storage, &conversation_id).await
-}
-
-#[derive(Deserialize, Default)]
-struct ListItemsQuery {
-    limit: Option<usize>,
-    order: Option<String>,
-    after: Option<String>,
-}
-
-async fn v1_conversations_list_items(
-    State(state): State<Arc<AppState>>,
-    Path(conversation_id): Path<String>,
-    Query(ListItemsQuery {
-        limit,
-        order,
-        after,
-    }): Query<ListItemsQuery>,
-) -> Response {
-    conversations::list_conversation_items(
-        &state.context.conversation_storage,
-        &state.context.conversation_item_storage,
-        &conversation_id,
-        limit,
-        order.as_deref(),
-        after.as_deref(),
-    )
-    .await
-}
-
-#[derive(Deserialize, Default)]
-struct GetItemQuery {
-    /// Additional fields to include in response (not yet implemented)
-    include: Option<Vec<String>>,
-}
-
-async fn v1_conversations_create_items(
-    State(state): State<Arc<AppState>>,
-    Path(conversation_id): Path<String>,
-    Json(body): Json<Value>,
-) -> Response {
-    conversations::create_conversation_items(
-        &state.context.conversation_storage,
-        &state.context.conversation_item_storage,
-        &conversation_id,
-        body,
-    )
-    .await
-}
-
-async fn v1_conversations_get_item(
-    State(state): State<Arc<AppState>>,
-    Path((conversation_id, item_id)): Path<(String, String)>,
-    Query(query): Query<GetItemQuery>,
-) -> Response {
-    conversations::get_conversation_item(
-        &state.context.conversation_storage,
-        &state.context.conversation_item_storage,
-        &conversation_id,
-        &item_id,
-        query.include,
-    )
-    .await
-}
-
-async fn v1_conversations_delete_item(
-    State(state): State<Arc<AppState>>,
-    Path((conversation_id, item_id)): Path<(String, String)>,
-) -> Response {
-    conversations::delete_conversation_item(
-        &state.context.conversation_storage,
-        &state.context.conversation_item_storage,
-        &conversation_id,
-        &item_id,
-    )
-    .await
-}
-
-async fn flush_cache(State(state): State<Arc<AppState>>, _req: Request) -> Response {
-    WorkerManager::flush_cache_all(&state.context.worker_registry, &state.context.client)
-        .await
-        .into_response()
-}
-
-async fn get_loads(State(state): State<Arc<AppState>>, _req: Request) -> Response {
-    WorkerManager::get_all_worker_loads(&state.context.worker_registry, &state.context.client)
-        .await
-        .into_response()
-}
-
-async fn create_worker(
-    State(state): State<Arc<AppState>>,
-    Json(config): Json<WorkerConfigRequest>,
-) -> Response {
-    match state.context.worker_service.create_worker(config).await {
-        Ok(result) => result.into_response(),
-        Err(err) => err.into_response(),
-    }
-}
-
-async fn list_workers_rest(State(state): State<Arc<AppState>>) -> Response {
-    state.context.worker_service.list_workers().into_response()
-}
-
-async fn get_worker(
-    State(state): State<Arc<AppState>>,
-    Path(worker_id_raw): Path<String>,
-) -> Response {
-    match state.context.worker_service.get_worker(&worker_id_raw) {
-        Ok(result) => result.into_response(),
-        Err(err) => err.into_response(),
-    }
-}
-
-async fn delete_worker(
-    State(state): State<Arc<AppState>>,
-    Path(worker_id_raw): Path<String>,
-) -> Response {
-    match state
-        .context
-        .worker_service
-        .delete_worker(&worker_id_raw)
-        .await
-    {
-        Ok(result) => result.into_response(),
-        Err(err) => err.into_response(),
-    }
-}
-
-async fn update_worker(
-    State(state): State<Arc<AppState>>,
-    Path(worker_id_raw): Path<String>,
-    Json(update): Json<WorkerUpdateRequest>,
-) -> Response {
-    match state
-        .context
-        .worker_service
-        .update_worker(&worker_id_raw, update)
-        .await
-    {
-        Ok(result) => result.into_response(),
-        Err(err) => err.into_response(),
-    }
-}
-
-// ============================================================================
-// Tokenize / Detokenize Handlers
-// ============================================================================
-
-async fn v1_tokenize(
-    State(state): State<Arc<AppState>>,
-    Json(request): Json<TokenizeRequest>,
-) -> Response {
-    tokenize::tokenize(&state.context.tokenizer_registry, request).await
-}
-
-async fn v1_detokenize(
-    State(state): State<Arc<AppState>>,
-    Json(request): Json<DetokenizeRequest>,
-) -> Response {
-    tokenize::detokenize(&state.context.tokenizer_registry, request).await
-}
-
-async fn v1_tokenizers_add(
-    State(state): State<Arc<AppState>>,
-    Json(request): Json<AddTokenizerRequest>,
-) -> Response {
-    tokenize::add_tokenizer(&state.context, request).await
-}
-
-async fn v1_tokenizers_list(State(state): State<Arc<AppState>>) -> Response {
-    tokenize::list_tokenizers(&state.context.tokenizer_registry).await
-}
-
-async fn v1_tokenizers_get(
-    State(state): State<Arc<AppState>>,
-    Path(tokenizer_id): Path<String>,
-) -> Response {
-    tokenize::get_tokenizer_info(&state.context, &tokenizer_id).await
-}
-
-async fn v1_tokenizers_status(
-    State(state): State<Arc<AppState>>,
-    Path(tokenizer_id): Path<String>,
-) -> Response {
-    tokenize::get_tokenizer_status(&state.context, &tokenizer_id).await
-}
-
-async fn v1_tokenizers_remove(
-    State(state): State<Arc<AppState>>,
-    Path(tokenizer_id): Path<String>,
-) -> Response {
-    tokenize::remove_tokenizer(&state.context, &tokenizer_id).await
-}
-
-pub fn build_app(
-    app_state: Arc<AppState>,
-    auth_config: AuthConfig,
-    control_plane_auth_state: Option<crate::auth::ControlPlaneAuthState>,
-    max_payload_size: usize,
-    request_id_headers: Vec<String>,
-    cors_allowed_origins: Vec<String>,
-) -> Router {
-    let protected_routes = Router::new()
-        .route("/generate", post(generate))
-        .route("/v1/chat/completions", post(v1_chat_completions))
-        .route("/v1/completions", post(v1_completions))
-        .route("/v1/rerank", post(v1_rerank))
-        .route("/v1/responses", post(v1_responses))
-        .route("/v1/embeddings", post(v1_embeddings))
-        .route("/v1/classify", post(v1_classify))
-        .route("/v1/responses/{response_id}", get(v1_responses_get))
-        .route(
-            "/v1/responses/{response_id}/cancel",
-            post(v1_responses_cancel),
-        )
-        .route("/v1/responses/{response_id}", delete(v1_responses_delete))
-        .route(
-            "/v1/responses/{response_id}/input_items",
-            get(v1_responses_list_input_items),
-        )
-        .route("/v1/conversations", post(v1_conversations_create))
-        .route(
-            "/v1/conversations/{conversation_id}",
-            get(v1_conversations_get)
-                .post(v1_conversations_update)
-                .delete(v1_conversations_delete),
-        )
-        .route(
-            "/v1/conversations/{conversation_id}/items",
-            get(v1_conversations_list_items).post(v1_conversations_create_items),
-        )
-        .route(
-            "/v1/conversations/{conversation_id}/items/{item_id}",
-            get(v1_conversations_get_item).delete(v1_conversations_delete_item),
-        )
-        // Tokenize / Detokenize endpoints
-        .route("/v1/tokenize", post(v1_tokenize))
-        .route("/v1/detokenize", post(v1_detokenize))
-        .route_layer(axum::middleware::from_fn_with_state(
-            app_state.clone(),
-            middleware::concurrency_limit_middleware,
-        ))
-        .route_layer(axum::middleware::from_fn_with_state(
-            auth_config.clone(),
-            middleware::auth_middleware,
-        ))
-        .route_layer(axum::middleware::from_fn_with_state(
-            app_state.clone(),
-            middleware::wasm_middleware,
-        ));
-
-    let public_routes = Router::new()
-        .route("/liveness", get(liveness))
-        .route("/readiness", get(readiness))
-        .route("/health", get(health))
-        .route("/health_generate", get(health_generate))
-        .route("/engine_metrics", get(engine_metrics))
-        .route("/v1/models", get(v1_models))
-        .route("/model_info", get(get_model_info))
-        // TODO: Remove `/get_model_info` alias after one release-cycle deprecation window.
-        .route("/get_model_info", get(get_model_info))
-        .route("/server_info", get(get_server_info))
-        // TODO: Remove `/get_server_info` alias after one release-cycle deprecation window.
-        .route("/get_server_info", get(get_server_info));
-
-    // Build admin routes with control plane auth if configured, otherwise use simple API key auth
-    let admin_routes = Router::new()
-        .route("/flush_cache", post(flush_cache))
-        .route("/v1/loads", get(get_loads))
-        // TODO: Remove `/get_loads` alias after one release-cycle deprecation window.
-        .route("/get_loads", get(get_loads))
-        .route("/parse/function_call", post(parse_function_call))
-        .route("/parse/reasoning", post(parse_reasoning))
-        .route("/wasm", post(add_wasm_module))
-        .route("/wasm/{module_uuid}", delete(remove_wasm_module))
-        .route("/wasm", get(list_wasm_modules))
-        // Tokenizer management endpoints
-        .route(
-            "/v1/tokenizers",
-            post(v1_tokenizers_add).get(v1_tokenizers_list),
-        )
-        .route(
-            "/v1/tokenizers/{tokenizer_id}",
-            get(v1_tokenizers_get).delete(v1_tokenizers_remove),
-        )
-        .route(
-            "/v1/tokenizers/{tokenizer_id}/status",
-            get(v1_tokenizers_status),
-        );
-
-    // Build worker routes
-    let worker_routes = Router::new()
-        .route("/workers", post(create_worker).get(list_workers_rest))
-        .route(
-            "/workers/{worker_id}",
-            get(get_worker).put(update_worker).delete(delete_worker),
-        );
-
-    // Apply authentication middleware to control plane routes
-    let apply_control_plane_auth = |routes: Router<Arc<AppState>>| {
-        if let Some(ref cp_state) = control_plane_auth_state {
-            routes.route_layer(axum::middleware::from_fn_with_state(
-                cp_state.clone(),
-                crate::auth::control_plane_auth_middleware,
-            ))
-        } else {
-            routes.route_layer(axum::middleware::from_fn_with_state(
-                auth_config.clone(),
-                middleware::auth_middleware,
-            ))
-        }
-    };
-    let admin_routes = apply_control_plane_auth(admin_routes);
-    let worker_routes = apply_control_plane_auth(worker_routes);
-
-    // HA management routes
-    let mesh_routes = Router::new()
-        .route("/ha/status", get(get_cluster_status))
-        .route("/ha/health", get(get_mesh_health))
-        .route("/ha/workers", get(get_worker_states))
-        .route("/ha/workers/{worker_id}", get(get_worker_state))
-        .route("/ha/policies", get(get_policy_states))
-        .route("/ha/policies/{model_id}", get(get_policy_state))
-        .route("/ha/config/{key}", get(get_app_config))
-        .route("/ha/config", post(update_app_config))
-        .route("/ha/rate-limit", post(set_global_rate_limit))
-        .route("/ha/rate-limit", get(get_global_rate_limit))
-        .route("/ha/rate-limit/stats", get(get_global_rate_limit_stats))
-        .route("/ha/shutdown", post(trigger_graceful_shutdown))
-        .route_layer(axum::middleware::from_fn_with_state(
-            auth_config.clone(),
-            middleware::auth_middleware,
-        ));
-
-    Router::new()
-        .merge(protected_routes)
-        .merge(public_routes)
-        .merge(admin_routes)
-        .merge(worker_routes)
-        .merge(mesh_routes)
-        .layer(axum::extract::DefaultBodyLimit::max(max_payload_size))
-        .layer(tower_http::limit::RequestBodyLimitLayer::new(
-            max_payload_size,
-        ))
-        .layer(middleware::create_logging_layer())
-        .layer(middleware::HttpMetricsLayer::new(
-            app_state.context.inflight_tracker.clone(),
-        ))
-        .layer(middleware::RequestIdLayer::new(request_id_headers))
-        .layer(create_cors_layer(cors_allowed_origins))
-        .fallback(sink_handler)
-        .with_state(app_state)
-}
+pub use crate::{app_state::AppState, routers::app::build_app};
 
 pub async fn startup(config: GatewayConfig) -> Result<()> {
-    // TODO: the loggong init should be move to main.
-    let log_guard = init_tracing(&config.observability).context("initialize tracing")?;
+    log_startup(&config);
 
-    let server_result = run(config).await;
-    let shutdown_result = shutdown_tracing(log_guard).await;
+    // start prometheus
+    metrics::start_prometheus(PrometheusConfig {
+        host: config.observability.prometheus_host.clone(),
+        port: config.observability.prometheus_port,
+        duration_buckets: config.observability.prometheus_duration_buckets.clone(),
+    });
 
-    server_result.context("run gateway server")?;
-    shutdown_result.context("shutdown tracing")?;
+    let (mesh_handler, mesh_sync_manager) = start_mesh(config.mesh.as_ref());
+    let app_context = initialize_app_context(&config).await?;
+    submit_startup_jobs(&app_context, &config).await?;
 
-    Ok(())
+    // start mcp
+    if let Some(mcp_manager) = app_context.mcp_manager.get() {
+        Arc::clone(mcp_manager).spawn_background_refresh_all(Duration::from_secs(600));
+        debug!("Started background refresh for all MCP servers (every 10 minutes)");
+    }
+
+    // start health checker
+    if !config.workers.health_check.disable_health_check {
+        let _health_checker = app_context
+            .worker_registry
+            .start_health_checker(config.workers.health_check.check_interval_secs);
+        debug!(
+            "Started health checker for workers with {}s interval",
+            config.workers.health_check.check_interval_secs
+        );
+    }
+
+    // start load monitor
+    if let Some(load_monitor) = &app_context.load_monitor {
+        load_monitor.start().await;
+        debug!("Started LoadMonitor for PowerOfTwo policies");
+    }
+
+    let concurrency_queue_tx = start_concurrency_queue(&app_context, &config);
+    configure_mesh_sync(&app_context, mesh_sync_manager.as_ref());
+
+    let router_manager = create_router_manager(&app_context, &config).await?;
+    let app_state = build_app_state(
+        app_context,
+        router_manager,
+        concurrency_queue_tx,
+        mesh_handler,
+        mesh_sync_manager,
+    );
+    start_service_discovery_if_enabled(&config, &app_state).await;
+
+    let app = build_http_app(&config, app_state).await;
+    serve_http(app, &config).await
 }
 
-async fn run(config: GatewayConfig) -> Result<()> {
+fn log_startup(config: &GatewayConfig) {
     info!("SGLang Router starting...");
 
     let mode = if config.routing.enable_igw {
@@ -693,7 +95,6 @@ async fn run(config: GatewayConfig) -> Result<()> {
             RoutingMode::Regular { .. } => "Regular",
         }
     };
-
     info!(
         host = %config.server.host,
         port = config.server.port,
@@ -724,66 +125,57 @@ async fn run(config: GatewayConfig) -> Result<()> {
             }
         }
     }
-    metrics::start_prometheus(PrometheusConfig {
-        host: config.observability.prometheus_host.clone(),
-        port: config.observability.prometheus_port,
-        duration_buckets: config.observability.prometheus_duration_buckets.clone(),
-    });
+}
 
-    let (mesh_handler, mesh_sync_manager) = if let Some(mesh_server_config) = &config.mesh {
-        // Create HA sync manager with stores first
-        use smg_mesh::{partition::PartitionDetector, stores::StateStores, sync::MeshSyncManager};
-        let stores = Arc::new(StateStores::with_self_name(
-            mesh_server_config.self_name.clone(),
-        ));
-        let sync_manager = Arc::new(MeshSyncManager::new(
-            stores.clone(),
-            mesh_server_config.self_name.clone(),
-        ));
-
-        // Create partition detector
-        let partition_detector = Arc::new(PartitionDetector::default());
-
-        // Initialize rate-limit hash ring with current membership
-        sync_manager.update_rate_limit_membership();
-
-        // Start rate limit window reset task
-        let window_manager = RateLimitWindow::new(sync_manager.clone(), 1); // Reset every 1 second
-        spawn(async move {
-            window_manager.start_reset_task().await;
-        });
-
-        // Create mesh server builder and build with stores
-        use smg_mesh::service::MeshServerBuilder;
-        let builder = MeshServerBuilder::new(
-            mesh_server_config.self_name.clone(),
-            mesh_server_config.self_addr,
-            mesh_server_config.init_peer,
-        );
-        let (mesh_server, handler) = builder.build_with_stores(Some(stores.clone()));
-
-        // Spawn the mesh server with stores and partition detector
-        let stores_for_server = stores.clone();
-        let sync_manager_for_server = sync_manager.clone();
-        let partition_detector_for_server = partition_detector.clone();
-        spawn(async move {
-            if let Err(e) = mesh_server
-                .start_serve_with_stores(
-                    Some(stores_for_server),
-                    Some(sync_manager_for_server),
-                    Some(partition_detector_for_server),
-                )
-                .await
-            {
-                tracing::error!("Mesh server failed: {}", e);
-            }
-        });
-
-        (Some(Arc::new(handler)), Some(sync_manager))
-    } else {
-        (None, None)
+fn start_mesh(
+    mesh_config: Option<&crate::config::MeshConfig>,
+) -> (Option<Arc<MeshServerHandler>>, Option<Arc<MeshSyncManager>>) {
+    let Some(mesh_config) = mesh_config else {
+        return (None, None);
     };
 
+    use smg_mesh::{partition::PartitionDetector, stores::StateStores, sync::MeshSyncManager};
+
+    let stores = Arc::new(StateStores::with_self_name(mesh_config.self_name.clone()));
+    let sync_manager = Arc::new(MeshSyncManager::new(
+        stores.clone(),
+        mesh_config.self_name.clone(),
+    ));
+    let partition_detector = Arc::new(PartitionDetector::default());
+    sync_manager.update_rate_limit_membership();
+
+    let window_manager = RateLimitWindow::new(sync_manager.clone(), 1);
+    spawn(async move {
+        window_manager.start_reset_task().await;
+    });
+
+    use smg_mesh::service::MeshServerBuilder;
+    let builder = MeshServerBuilder::new(
+        mesh_config.self_name.clone(),
+        mesh_config.self_addr,
+        mesh_config.init_peer,
+    );
+    let (mesh_server, handler) = builder.build_with_stores(Some(stores.clone()));
+
+    let stores_for_server = stores.clone();
+    let sync_manager_for_server = sync_manager.clone();
+    spawn(async move {
+        if let Err(error) = mesh_server
+            .start_serve_with_stores(
+                Some(stores_for_server),
+                Some(sync_manager_for_server),
+                Some(partition_detector),
+            )
+            .await
+        {
+            error!("Mesh server failed: {error}");
+        }
+    });
+
+    (Some(Arc::new(handler)), Some(sync_manager))
+}
+
+async fn initialize_app_context(config: &GatewayConfig) -> Result<Arc<AppContext>> {
     info!(
         "Starting router on {}:{} | mode: {:?} | policy: {:?} | max_payload: {}MB",
         config.server.host,
@@ -799,19 +191,15 @@ async fn run(config: GatewayConfig) -> Result<()> {
             .map_err(Error::msg)
             .context("create app context")?,
     );
-
     app_context.inflight_tracker.start_sampler(20);
 
-    let weak_context = Arc::downgrade(&app_context);
-    let worker_job_queue = JobQueue::new(JobQueueConfig::default(), weak_context);
+    let worker_job_queue = JobQueue::new(JobQueueConfig::default(), Arc::downgrade(&app_context));
     app_context
         .worker_job_queue
         .set(worker_job_queue)
         .expect("JobQueue should only be initialized once");
 
-    // Initialize typed workflow engines
-    // Subscribe logging to all workflow engines
-    let engines = WorkflowEngines::new(&config);
+    let engines = WorkflowEngines::new(config);
     engines.subscribe_all(Arc::new(LoggingSubscriber)).await;
     app_context
         .workflow_engines
@@ -822,39 +210,35 @@ async fn run(config: GatewayConfig) -> Result<()> {
         config.workers.health_check.timeout_secs
     );
 
-    // Submit startup tokenizer job if tokenizer path is configured
-    // This runs before worker initialization to ensure tokenizer is available
+    Ok(app_context)
+}
+
+async fn submit_startup_jobs(app_context: &Arc<AppContext>, config: &GatewayConfig) -> Result<()> {
+    let job_queue = app_context
+        .worker_job_queue
+        .get()
+        .expect("JobQueue should be initialized");
+
     if let Some(tokenizer_source) = config
         .model
         .tokenizer_path
         .as_ref()
         .or(config.model.model_path.as_ref())
     {
-        info!("Loading startup tokenizer from: {}", tokenizer_source);
-
-        let job_queue = app_context
-            .worker_job_queue
-            .get()
-            .expect("JobQueue should be initialized");
-
-        let tokenizer_config = TokenizerConfigRequest {
-            id: TokenizerRegistry::generate_id(),
-            name: tokenizer_source.clone(),
-            source: tokenizer_source.clone(),
-            chat_template_path: config.model.chat_template.clone(),
-            cache_config: config.model.tokenizer_cache.to_option(),
-            fail_on_duplicate: false,
-        };
-
-        let job = Job::AddTokenizer {
-            config: Box::new(tokenizer_config),
-        };
-
+        info!("Loading startup tokenizer from: {tokenizer_source}");
         job_queue
-            .submit(job)
+            .submit(Job::AddTokenizer {
+                config: Box::new(TokenizerConfigRequest {
+                    id: TokenizerRegistry::generate_id(),
+                    name: tokenizer_source.clone(),
+                    source: tokenizer_source.clone(),
+                    chat_template_path: config.model.chat_template.clone(),
+                    cache_config: config.model.tokenizer_cache.to_option(),
+                    fail_on_duplicate: false,
+                }),
+            })
             .await
-            .map_err(|e| anyhow!("Failed to submit startup tokenizer job: {e}"))?;
-
+            .map_err(|error| anyhow!("Failed to submit startup tokenizer job: {error}"))?;
         info!("Startup tokenizer job submitted (will complete in background)");
     }
 
@@ -862,86 +246,62 @@ async fn run(config: GatewayConfig) -> Result<()> {
         "Initializing workers for routing mode: {:?}",
         config.routing.mode
     );
-
-    // Submit worker initialization job to queue
-    let job_queue = app_context
-        .worker_job_queue
-        .get()
-        .expect("JobQueue should be initialized");
-    let job = Job::InitializeWorkersFromConfig {
-        gateway_config: Box::new(config.clone()),
-    };
     job_queue
-        .submit(job)
+        .submit(Job::InitializeWorkersFromConfig {
+            gateway_config: Box::new(config.clone()),
+        })
         .await
-        .map_err(|e| anyhow!("Failed to submit worker initialization job: {e}"))?;
-
+        .map_err(|error| anyhow!("Failed to submit worker initialization job: {error}"))?;
     info!("Worker initialization job submitted (will complete in background)");
 
     if let Some(mcp_config) = &config.extensions.mcp_config {
         info!("Found {} MCP server(s) in config", mcp_config.servers.len());
-        let mcp_job = Job::InitializeMcpServers {
-            mcp_config: Box::new(mcp_config.clone()),
-        };
         job_queue
-            .submit(mcp_job)
+            .submit(Job::InitializeMcpServers {
+                mcp_config: Box::new(mcp_config.clone()),
+            })
             .await
-            .map_err(|e| anyhow!("Failed to submit MCP initialization job: {e}"))?;
+            .map_err(|error| anyhow!("Failed to submit MCP initialization job: {error}"))?;
     } else {
         info!("No MCP config provided, skipping MCP server initialization");
     }
 
-    // Start background refresh for ALL MCP servers (static + dynamic in LRU cache)
-    if let Some(mcp_manager) = app_context.mcp_manager.get() {
-        let refresh_interval = Duration::from_secs(600); // 10 minutes
-        let _refresh_handle =
-            Arc::clone(mcp_manager).spawn_background_refresh_all(refresh_interval);
-        debug!("Started background refresh for all MCP servers (every 10 minutes)");
-    }
+    Ok(())
+}
+
+async fn create_router_manager(
+    app_context: &Arc<AppContext>,
+    config: &GatewayConfig,
+) -> Result<Arc<RouterManager>> {
+    let router_manager = RouterManager::from_config(config, app_context)
+        .await
+        .map_err(Error::msg)
+        .context("create router manager")?;
 
     let worker_stats = app_context.worker_registry.stats();
     info!(
         "Workers initialized: {} total, {} healthy",
         worker_stats.total_workers, worker_stats.healthy_workers
     );
+    Ok(router_manager)
+}
 
-    let router_manager = RouterManager::from_config(&config, &app_context)
-        .await
-        .map_err(Error::msg)
-        .context("create router manager")?;
-
-    let router: Arc<dyn RouterTrait> = router_manager.clone();
-
-    if !config.workers.health_check.disable_health_check {
-        let _health_checker = app_context
-            .worker_registry
-            .start_health_checker(config.workers.health_check.check_interval_secs);
-        debug!(
-            "Started health checker for workers with {}s interval",
-            config.workers.health_check.check_interval_secs
-        );
-    } else {
-        info!("Global health checks disabled via CLI/config; skipping health checker");
-    }
-
-    if let Some(ref load_monitor) = app_context.load_monitor {
-        load_monitor.start().await;
-        debug!("Started LoadMonitor for PowerOfTwo policies");
-    }
-
+fn start_concurrency_queue(
+    app_context: &Arc<AppContext>,
+    config: &GatewayConfig,
+) -> Option<tokio::sync::mpsc::Sender<QueuedRequest>> {
     let (limiter, processor) = middleware::ConcurrencyLimiter::new(
         app_context.rate_limiter.clone(),
         config.routing.queue_size,
         Duration::from_secs(config.routing.queue_timeout_secs),
     );
-
     if app_context.rate_limiter.is_none() {
         info!("Rate limiting is disabled (max_concurrent_requests = -1)");
     }
 
     match processor {
-        Some(proc) => {
-            spawn(proc.run());
+        Some(processor) => {
+            spawn(processor.run());
             debug!(
                 "Started request queue (size: {}, timeout: {}s)",
                 config.routing.queue_size, config.routing.queue_timeout_secs
@@ -955,74 +315,90 @@ async fn run(config: GatewayConfig) -> Result<()> {
         }
     }
 
-    // Set mesh sync manager to worker registry and policy registry if mesh is enabled
-    // This allows these components to sync state across mesh nodes when mesh is enabled,
-    // but they work independently without mesh when mesh is disabled.
-    // Using thread-safe set_mesh_sync method that works with Arc-wrapped registries
-    if let Some(ref sync_manager) = mesh_sync_manager {
-        app_context
-            .worker_registry
-            .set_mesh_sync(Some(sync_manager.clone()));
-        info!("Mesh sync manager set on worker registry");
+    limiter.queue_tx.clone()
+}
 
-        app_context
-            .policy_registry
-            .set_mesh_sync(Some(sync_manager.clone()));
-        info!("Mesh sync manager set on policy registry");
-    }
+fn configure_mesh_sync(app_context: &Arc<AppContext>, sync_manager: Option<&Arc<MeshSyncManager>>) {
+    let Some(sync_manager) = sync_manager else {
+        return;
+    };
 
-    // Get mesh cluster state and port before moving mesh_handler into app_state
-    let mesh_cluster_state = mesh_handler.as_ref().map(|h| h.state.clone());
-    let mesh_port = config.mesh.as_ref().map(|c| c.self_addr.port());
+    app_context
+        .worker_registry
+        .set_mesh_sync(Some(sync_manager.clone()));
+    app_context
+        .policy_registry
+        .set_mesh_sync(Some(sync_manager.clone()));
+    info!("Mesh sync manager set on worker and policy registries");
+}
 
-    let app_state = Arc::new(AppState {
+fn build_app_state(
+    app_context: Arc<AppContext>,
+    router_manager: Arc<RouterManager>,
+    concurrency_queue_tx: Option<tokio::sync::mpsc::Sender<QueuedRequest>>,
+    mesh_handler: Option<Arc<MeshServerHandler>>,
+    mesh_sync_manager: Option<Arc<MeshSyncManager>>,
+) -> Arc<AppState> {
+    let router: Arc<dyn RouterTrait> = router_manager.clone();
+    Arc::new(AppState {
         router,
-        context: app_context.clone(),
-        concurrency_queue_tx: limiter.queue_tx.clone(),
+        context: app_context,
+        concurrency_queue_tx,
         router_manager: Some(router_manager),
         mesh_handler,
         mesh_sync_manager,
-    });
-    if let Some(discovery) = config.discovery.clone() {
-        let service_discovery_config = ServiceDiscoveryConfig {
-            enabled: true,
-            selector: discovery.selector,
-            check_interval: Duration::from_secs(discovery.check_interval_secs),
-            port: discovery.port,
-            namespace: discovery.namespace,
-            pd_mode: discovery.pd_mode,
-            prefill_selector: discovery.prefill_selector,
-            decode_selector: discovery.decode_selector,
-            bootstrap_port_annotation: discovery.bootstrap_port_annotation,
-            router_selector: discovery.router_selector,
-            router_mesh_port_annotation: discovery.router_mesh_port_annotation,
-            igw_mode: discovery.igw_mode,
-        };
-        let app_context_arc = Arc::clone(&app_state.context);
+    })
+}
 
-        match start_service_discovery(
-            service_discovery_config,
-            app_context_arc,
-            mesh_cluster_state,
-            mesh_port,
-        )
-        .await
-        {
-            Ok(handle) => {
-                info!("Service discovery started");
-                spawn(async move {
-                    if let Err(e) = handle.await {
-                        error!("Service discovery task failed: {:?}", e);
-                    }
-                });
-            }
-            Err(e) => {
-                error!("Failed to start service discovery: {e}");
-                warn!("Continuing without service discovery");
-            }
+async fn start_service_discovery_if_enabled(config: &GatewayConfig, app_state: &Arc<AppState>) {
+    let Some(discovery) = config.discovery.clone() else {
+        return;
+    };
+
+    let service_discovery_config = ServiceDiscoveryConfig {
+        enabled: true,
+        selector: discovery.selector,
+        check_interval: Duration::from_secs(discovery.check_interval_secs),
+        port: discovery.port,
+        namespace: discovery.namespace,
+        pd_mode: discovery.pd_mode,
+        prefill_selector: discovery.prefill_selector,
+        decode_selector: discovery.decode_selector,
+        bootstrap_port_annotation: discovery.bootstrap_port_annotation,
+        router_selector: discovery.router_selector,
+        router_mesh_port_annotation: discovery.router_mesh_port_annotation,
+        igw_mode: discovery.igw_mode,
+    };
+    let mesh_cluster_state = app_state
+        .mesh_handler
+        .as_ref()
+        .map(|handler| handler.state.clone());
+    let mesh_port = config.mesh.as_ref().map(|mesh| mesh.self_addr.port());
+
+    match start_service_discovery(
+        service_discovery_config,
+        Arc::clone(&app_state.context),
+        mesh_cluster_state,
+        mesh_port,
+    )
+    .await
+    {
+        Ok(handle) => {
+            info!("Service discovery started");
+            spawn(async move {
+                if let Err(error) = handle.await {
+                    error!("Service discovery task failed: {error:?}");
+                }
+            });
+        }
+        Err(error) => {
+            error!("Failed to start service discovery: {error}");
+            warn!("Continuing without service discovery");
         }
     }
+}
 
+async fn build_http_app(config: &GatewayConfig, app_state: Arc<AppState>) -> Router {
     info!(
         "Router ready | workers: {:?}",
         WorkerManager::get_worker_urls(&app_state.context.worker_registry)
@@ -1036,54 +412,51 @@ async fn run(config: GatewayConfig) -> Result<()> {
             "request-id".to_string(),
         ]
     });
-
     let auth_config = AuthConfig {
         api_key: config.security.api_key.clone(),
     };
-
-    // Initialize control plane authentication if configured
     let control_plane_auth_state =
         crate::auth::ControlPlaneAuthState::try_init(config.security.control_plane_auth.as_ref())
             .await;
 
-    let app = build_app(
+    build_app(
         app_state,
         auth_config,
         control_plane_auth_state,
         config.server.max_payload_size,
         request_id_headers,
         config.server.cors_allowed_origins.clone(),
-    );
+    )
+}
 
-    // TcpListener::bind accepts &str and handles IPv4/IPv6 via ToSocketAddrs
+async fn serve_http(app: Router, config: &GatewayConfig) -> Result<()> {
     let bind_addr = format!("{}:{}", config.server.host, config.server.port);
-    info!("Starting server on {}", bind_addr);
+    info!("Starting server on {bind_addr}");
 
-    // Parse address and set up graceful shutdown (common to both TLS and non-TLS)
     let addr: std::net::SocketAddr = bind_addr
         .parse()
-        .map_err(|e| anyhow!("Invalid address: {e}"))?;
-
+        .map_err(|error| anyhow!("Invalid address: {error}"))?;
     let handle = axum_server::Handle::new();
-    let handle_clone = handle.clone();
+
+    let shutdown_handle = handle.clone();
     let grace_period = Duration::from_secs(config.server.shutdown_grace_period_secs);
     spawn(async move {
         shutdown_signal().await;
-        handle_clone.graceful_shutdown(Some(grace_period));
+        shutdown_handle.graceful_shutdown(Some(grace_period));
     });
 
+    // https server
     if let Some(tls) = &config.security.server_tls {
         info!("TLS enabled");
         ring::default_provider()
             .install_default()
-            .map_err(|e| anyhow!("Failed to install rustls ring provider: {e:?}"))?;
-
+            .map_err(|error| anyhow!("Failed to install rustls ring provider: {error:?}"))?;
         let tls_config = axum_server::tls_rustls::RustlsConfig::from_pem(
             tls.certificate.clone(),
             tls.private_key.clone(),
         )
         .await
-        .map_err(|e| anyhow!("Failed to create TLS config: {e}"))?;
+        .map_err(|error| anyhow!("Failed to create TLS config: {error}"))?;
 
         axum_server::bind_rustls(addr, tls_config)
             .handle(handle)
@@ -1097,9 +470,6 @@ async fn run(config: GatewayConfig) -> Result<()> {
             .await
             .context("run HTTP server")?;
     }
-
-    // HA handler shutdown is handled by the signal in mesh_run! macro
-    // No need to manually shutdown here
 
     Ok(())
 }
@@ -1132,32 +502,7 @@ async fn shutdown_signal() {
     }
 }
 
-fn create_cors_layer(allowed_origins: Vec<String>) -> tower_http::cors::CorsLayer {
-    use tower_http::cors::Any;
-
-    let cors = if allowed_origins.is_empty() {
-        tower_http::cors::CorsLayer::new()
-            .allow_origin(Any)
-            .allow_methods(Any)
-            .allow_headers(Any)
-            .expose_headers(Any)
-    } else {
-        let origins: Vec<http::HeaderValue> = allowed_origins
-            .into_iter()
-            .filter_map(|origin| origin.parse().ok())
-            .collect();
-
-        tower_http::cors::CorsLayer::new()
-            .allow_origin(origins)
-            .allow_methods([http::Method::GET, http::Method::POST, http::Method::OPTIONS])
-            .allow_headers([http::header::CONTENT_TYPE, http::header::AUTHORIZATION])
-            .expose_headers([http::header::HeaderName::from_static("x-request-id")])
-    };
-
-    cors.max_age(Duration::from_secs(3600))
-}
-
-fn init_tracing(config: &ObservabilityConfig) -> Result<LogGuard> {
+pub fn init_tracing(config: &ObservabilityConfig) -> Result<LogGuard> {
     // init OTel first
     otel_trace::otel_tracing_init(config.enable_trace, Some(&config.otlp_traces_endpoint))
         .context("initialize OpenTelemetry")?;
@@ -1174,7 +519,7 @@ fn init_tracing(config: &ObservabilityConfig) -> Result<LogGuard> {
     }
 }
 
-async fn shutdown_tracing(log_guard: LogGuard) -> Result<()> {
+pub async fn shutdown_tracing(log_guard: LogGuard) -> Result<()> {
     let enabled = otel_trace::is_otel_enabled();
 
     let flush_result = if enabled {

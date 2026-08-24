@@ -16,5 +16,13 @@ async fn main() -> Result<()> {
         .try_into_config()
         .context("resolve gateway configuration from cli arguments")?;
 
-    server::startup(config).await.context("run server")
+    let log_guard = server::init_tracing(&config.observability)?;
+
+    let server_result = server::startup(config).await;
+    let shutdown_result = server::shutdown_tracing(log_guard).await;
+
+    server_result.context("run gateway")?;
+    shutdown_result.context("shutdown tracing")?;
+
+    Ok(())
 }

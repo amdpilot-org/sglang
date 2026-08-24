@@ -1075,9 +1075,14 @@ impl Router {
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
 
         runtime.block_on(async move {
-            server::startup(gateway_config)
-                .await
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+            let log_guard = server::init_tracing(&gateway_config.observability)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+            let server_result = server::startup(gateway_config).await;
+            let shutdown_result = server::shutdown_tracing(log_guard).await;
+
+            server_result.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            shutdown_result.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
         })
     }
 }

@@ -18,7 +18,6 @@ use crate::{
     observability::inflight_tracker::InFlightRequestTracker,
     policies::PolicyRegistry,
     reasoning_parser::ParserFactory as ReasoningParserFactory,
-    routers::router_manager::RouterManager,
     tokenizer::registry::TokenizerRegistry,
     tool_parser::ParserFactory as ToolParserFactory,
     wasm::{config::WasmRuntimeConfig, module_manager::WasmModuleManager},
@@ -46,7 +45,6 @@ pub struct AppContext {
     pub tool_parser_factory: Option<ToolParserFactory>,
     pub worker_registry: Arc<WorkerRegistry>,
     pub policy_registry: Arc<PolicyRegistry>,
-    pub router_manager: Option<Arc<RouterManager>>,
     pub response_storage: Arc<dyn ResponseStorage>,
     pub conversation_storage: Arc<dyn ConversationStorage>,
     pub conversation_item_storage: Arc<dyn ConversationItemStorage>,
@@ -78,7 +76,6 @@ pub struct AppContextBuilder {
     tool_parser_factory: Option<ToolParserFactory>,
     worker_registry: Option<Arc<WorkerRegistry>>,
     policy_registry: Option<Arc<PolicyRegistry>>,
-    router_manager: Option<Arc<RouterManager>>,
     response_storage: Option<Arc<dyn ResponseStorage>>,
     conversation_storage: Option<Arc<dyn ConversationStorage>>,
     conversation_item_storage: Option<Arc<dyn ConversationItemStorage>>,
@@ -115,7 +112,6 @@ impl AppContextBuilder {
             tool_parser_factory: None,
             worker_registry: None,
             policy_registry: None,
-            router_manager: None,
             response_storage: None,
             conversation_storage: None,
             conversation_item_storage: None,
@@ -167,11 +163,6 @@ impl AppContextBuilder {
 
     pub fn policy_registry(mut self, policy_registry: Arc<PolicyRegistry>) -> Self {
         self.policy_registry = Some(policy_registry);
-        self
-    }
-
-    pub fn router_manager(mut self, router_manager: Option<Arc<RouterManager>>) -> Self {
-        self.router_manager = router_manager;
         self
     }
 
@@ -255,7 +246,6 @@ impl AppContextBuilder {
             policy_registry: self
                 .policy_registry
                 .ok_or(AppContextBuildError("policy_registry"))?,
-            router_manager: self.router_manager,
             response_storage: self
                 .response_storage
                 .ok_or(AppContextBuildError("response_storage"))?,

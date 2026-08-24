@@ -1,4 +1,5 @@
 pub mod app_context;
+pub mod app_state;
 pub use smg_auth as auth;
 pub mod config;
 pub mod core;
