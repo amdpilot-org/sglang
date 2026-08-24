@@ -923,8 +923,8 @@ impl Worker for BasicWorker {
         let maybe = self.get_grpc_client().await?;
         let Some(grpc_client) = maybe else {
             tracing::error!(
-                "Worker {} is not a gRPC worker but connection mode is gRPC",
-                self.metadata.url
+                worker_url = %self.metadata.url,
+                "worker is not a gRPC worker but connection mode is gRPC"
             );
             return Ok(false);
         };
@@ -932,18 +932,25 @@ impl Worker for BasicWorker {
         match time::timeout(timeout, grpc_client.health_check()).await {
             Ok(Ok(resp)) => {
                 tracing::debug!(
-                    "gRPC health OK for {}: healthy={}",
-                    self.metadata.url,
-                    resp.healthy
+                    worker_url = %self.metadata.url,
+                    healthy = resp.healthy,
+                    "gRPC health check completed"
                 );
                 Ok(resp.healthy)
             }
             Ok(Err(err)) => {
-                tracing::warn!("gRPC health RPC error for {}: {err:?}", self.metadata.url);
+                tracing::warn!(
+                    worker_url = %self.metadata.url,
+                    error = ?err,
+                    "gRPC health check failed"
+                );
                 Ok(false)
             }
             Err(_) => {
-                tracing::warn!("gRPC health timed out for {}", self.metadata.url);
+                tracing::warn!(
+                    worker_url = %self.metadata.url,
+                    "gRPC health check timed out"
+                );
                 Ok(false)
             }
         }
@@ -967,15 +974,19 @@ impl Worker for BasicWorker {
                     Ok(true)
                 } else {
                     tracing::warn!(
-                        "HTTP health check returned non-success status for {}: {}",
-                        health_url,
-                        status
+                        worker_url = %health_url,
+                        status = %status,
+                        "HTTP health check returned non-success status"
                     );
                     Ok(false)
                 }
             }
             Err(err) => {
-                tracing::warn!("HTTP health check failed for {}: {err:?}", health_url);
+                tracing::warn!(
+                    worker_url = %health_url,
+                    error = ?err,
+                    "HTTP health check failed"
+                );
                 Ok(false)
             }
         }

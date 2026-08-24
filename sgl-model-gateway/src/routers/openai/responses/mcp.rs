@@ -133,15 +133,16 @@ pub(super) async fn execute_streaming_tool_calls(
         // Skip if name is empty (invalid call)
         if call.name.is_empty() {
             warn!(
-                "Skipping incomplete tool call: name is empty, args_len={}",
-                call.arguments_buffer.len()
+                argument_bytes = call.arguments_buffer.len(),
+                "skipping incomplete MCP tool call"
             );
             continue;
         }
 
         info!(
-            "Executing tool call during streaming: {} ({})",
-            call.name, call.call_id
+            tool_name = %call.name,
+            call_id = %call.call_id,
+            "executing MCP tool call during streaming"
         );
 
         // Use empty JSON object if arguments_buffer is empty
@@ -152,20 +153,30 @@ pub(super) async fn execute_streaming_tool_calls(
         };
 
         // Call tool directly - manager handles parsing and type coercion
-        debug!("Calling MCP tool '{}' with args: {}", call.name, args_str);
+        debug!(
+            tool_name = %call.name,
+            call_id = %call.call_id,
+            argument_bytes = args_str.len(),
+            "calling MCP tool"
+        );
         let call_result = active_mcp.call_tool(&call.name, args_str).await;
         let (output_str, success, error_msg) = match call_result {
             Ok(result) => match serde_json::to_string(&result) {
                 Ok(output) => (output, true, None),
                 Err(e) => {
                     let err = format!("Failed to serialize tool result: {}", e);
-                    warn!("{}", err);
+                    warn!(error = %e, "failed to serialize MCP tool result");
                     (json!({ "error": &err }).to_string(), false, Some(err))
                 }
             },
             Err(err) => {
                 let err_str = format!("tool call failed: {}", err);
-                warn!("Tool execution failed during streaming: {}", err_str);
+                warn!(
+                    tool_name = %call.name,
+                    call_id = %call.call_id,
+                    error = %err,
+                    "MCP tool call failed during streaming"
+                );
                 (
                     json!({ "error": &err_str }).to_string(),
                     false,
@@ -593,8 +604,9 @@ pub(super) async fn execute_tool_loop(
 
             // Execute tool - manager handles parsing and type coercion
             debug!(
-                "Calling MCP tool '{}' with args: {}",
-                tool_name, args_json_str
+                tool_name = %tool_name,
+                argument_bytes = args_json_str.len(),
+                "calling MCP tool"
             );
             let call_result = active_mcp
                 .call_tool(&tool_name, args_json_str.as_str())

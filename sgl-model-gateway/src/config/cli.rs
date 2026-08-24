@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use anyhow::Result;
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use rand::{distr::Alphanumeric, Rng};
 
@@ -72,7 +73,7 @@ pub struct Cli {
 
 impl Cli {
     /// Selects the root or `launch` arguments and resolves them into startup config.
-    pub fn try_into_config(self) -> ConfigResult<GatewayConfig> {
+    pub fn try_into_config(self) -> Result<GatewayConfig> {
         let args = match self.command {
             Some(Commands::Launch { args }) => args,
             None => self.args,
@@ -784,10 +785,12 @@ impl CliArgs {
         let pool_max = self
             .postgres_pool_max_size
             .unwrap_or_else(PostgresConfig::default_pool_max);
+
         let pcf = PostgresConfig { db_url, pool_max };
         pcf.validate().map_err(|e| ConfigError::ValidationFailed {
             reason: e.to_string(),
         })?;
+
         Ok(pcf)
     }
 
@@ -858,9 +861,9 @@ impl CliArgs {
     }
 
     /// Builds mesh node settings, returning None when mesh is disabled or invalid.
-    fn build_mesh_config(&self) -> Option<MeshConfig> {
+    fn build_mesh_config(&self) -> ConfigResult<Option<MeshConfig>> {
         if !self.enable_mesh {
-            return None;
+            return Ok(None);
         }
 
         let self_name = self.mesh_server_name.clone().unwrap_or_else(|| {
@@ -868,27 +871,35 @@ impl CliArgs {
             let suffix: String = (0..4).map(|_| rng.sample(Alphanumeric) as char).collect();
             format!("Mesh_{suffix}")
         });
-        let self_addr = match format!("{}:{}", self.mesh_host, self.mesh_port).parse() {
-            Ok(address) => address,
-            Err(_) => {
-                tracing::warn!("Invalid mesh server address, so mesh server will not be started");
-                return None;
-            }
-        };
-        let init_peer = self.mesh_peer_urls.first().and_then(|url| url.parse().ok());
 
-        Some(MeshConfig {
+        let address = format!("{}:{}", self.mesh_host, self.mesh_port);
+        let self_addr = address.parse().map_err(|_| ConfigError::InvalidValue {
+            field: "mesh perr".to_string(),
+            value: address.clone(),
+            reason: "must be a valid socket address".to_string(),
+        })?;
+
+        let init_peer = match self.mesh_peer_urls.first() {
+            Some(peer) => Some(peer.parse().map_err(|_| ConfigError::InvalidValue {
+                field: "mesh peer".to_string(),
+                value: peer.clone(),
+                reason: "must be a valid socket address".to_string(),
+            })?),
+            None => None,
+        };
+
+        Ok(Some(MeshConfig {
             self_name,
             self_addr,
             init_peer,
-        })
+        }))
     }
 
     /// Resolves CLI arguments into the canonical gateway configuration.
     ///
     /// File-backed settings are loaded here so the resulting configuration is
     /// self-contained and does not retain CLI paths.
-    fn resolve_config(&self) -> ConfigResult<GatewayConfig> {
+    fn resolve_config(&self) -> Result<GatewayConfig> {
         let prefill_urls = self.parse_prefill_args()?;
         let enable_igw = self.enable_igw || self.service_discovery;
 
@@ -1050,7 +1061,7 @@ impl CliArgs {
                 ..Default::default()
             },
             discovery,
-            mesh: self.build_mesh_config(),
+            mesh: self.build_mesh_config()?,
         };
 
         config.validate()?;

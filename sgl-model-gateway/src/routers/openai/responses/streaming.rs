@@ -621,9 +621,9 @@ pub(super) async fn handle_simple_streaming_passthrough(
 
             if upstream_failed {
                 warn!(
-                    "Skipping /responses persistence due to upstream stream error from {}: \
-                    store={} conversation={:?}",
-                    upstream_url, should_store, original_request.conversation
+                    upstream_url = %upstream_url,
+                    store = should_store,
+                    "skipping response persistence after upstream stream error"
                 );
             } else {
                 if chunk_processor.has_remaining() {
@@ -650,7 +650,17 @@ pub(super) async fn handle_simple_streaming_passthrough(
                         warn!("Failed to persist conversation items (stream): {}", err);
                     }
                 } else if let Some(error_payload) = encountered_error {
-                    warn!("Upstream streaming error payload: {}", error_payload);
+                    warn!(
+                        error_type = error_payload
+                            .get("type")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("unknown"),
+                        error_code = error_payload
+                            .get("code")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("unknown"),
+                        "upstream streaming error"
+                    );
                 } else {
                     warn!("Streaming completed without a final response payload");
                 }

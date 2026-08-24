@@ -189,7 +189,10 @@ async fn process_and_transform_sse_stream(
                 }
                 Err(_) => {
                     // Not a valid chat chunk - might be error event, pass through
-                    debug!("Non-chunk SSE event, passing through: {}", event);
+                    debug!(
+                        event_bytes = event.len(),
+                        "passing through non-chunk SSE event"
+                    );
                     if tx.send(Ok(Bytes::from(format!("{}\n\n", event)))).is_err() {
                         return Err("Client disconnected".to_string());
                     }
@@ -711,9 +714,10 @@ async fn execute_tool_loop_streaming_internal(
 
                 // Execute the MCP tool - manager handles parsing and type coercion
                 trace!(
-                    "Calling MCP tool '{}' with args: {}",
-                    tool_call.name,
-                    tool_call.arguments
+                    tool_name = %tool_call.name,
+                    call_id = %tool_call.call_id,
+                    argument_bytes = tool_call.arguments.len(),
+                    "calling MCP tool"
                 );
                 let tool_start = Instant::now();
                 let (output_str, success, error) = match ctx

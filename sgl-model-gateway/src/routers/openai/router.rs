@@ -332,7 +332,19 @@ impl OpenAIRouter {
                 arr.iter()
                     .filter_map(|item| {
                         serde_json::from_value::<ResponseInputOutputItem>(item.clone())
-                            .map_err(|e| warn!("Failed to deserialize item: {}. Item: {}", e, item))
+                            .map_err(|error| {
+                                warn!(
+                                    error = %error,
+                                    item_type = item
+                                        .get("type")
+                                        .and_then(serde_json::Value::as_str)
+                                        .unwrap_or("unknown"),
+                                    item_field_count = item
+                                        .as_object()
+                                        .map_or(0, serde_json::Map::len),
+                                    "failed to deserialize response item"
+                                )
+                            })
                             .ok()
                     })
                     .collect()

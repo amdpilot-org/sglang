@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use anyhow::{Context, Result};
 use tracing::Level;
 use tracing_appender::{
     non_blocking::WorkerGuard,
@@ -34,6 +35,26 @@ pub struct LoggingConfig {
     pub colorize: bool,
     pub log_file_name: String,
     pub log_targets: Option<Vec<String>>,
+}
+
+impl LoggingConfig {
+    // Init LoggingConfig by ObservabilityConfig.
+    pub fn from_config(config: &ObservabilityConfig) -> Self {
+        let level = config
+            .log_level
+            .as_deref()
+            .and_then(|value| value.parse::<Level>().ok())
+            .unwrap_or(Level::INFO);
+
+        Self {
+            level: level,
+            json_format: config.json_log,
+            log_dir: config.log_dir.clone(),
+            colorize: true,
+            log_file_name: "smg".to_string(),
+            log_targets: None,
+        }
+    }
 }
 
 impl Default for LoggingConfig {
@@ -90,8 +111,8 @@ fn build_filter_string(targets: &[String], level_filter: &str) -> String {
 pub fn init_logging(
     config: LoggingConfig,
     otel_layer_config: Option<&ObservabilityConfig>,
-) -> LogGuard {
-    let _ = LogTracer::init();
+) -> Result<LogGuard> {
+    LogTracer::init().context("initialize log tracer")?;
 
     let level_filter = level_to_str(config.level);
 
@@ -135,10 +156,8 @@ pub fn init_logging(
         let log_dir = PathBuf::from(log_dir);
 
         if !log_dir.exists() {
-            if let Err(e) = std::fs::create_dir_all(&log_dir) {
-                eprintln!("Failed to create log directory: {}", e);
-                return LogGuard { _file_guard: None };
-            }
+            std::fs::create_dir_all(&log_dir)
+                .with_context(|| format!("create log directory {}", log_dir.display()))?;
         }
 
         let file_appender =
@@ -176,12 +195,13 @@ pub fn init_logging(
         }
     }
 
-    let _ = tracing_subscriber::registry()
+    tracing_subscriber::registry()
         .with(env_filter)
         .with(layers)
-        .try_init();
+        .try_init()
+        .context("initialize tracing subscriber")?;
 
-    LogGuard {
+    Ok(LogGuard {
         _file_guard: file_guard,
-    }
+    })
 }

@@ -1,11 +1,6 @@
-use std::{
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
+use anyhow::{anyhow, Context, Error, Result};
 use axum::{
     extract::{Path, Query, Request, State},
     http::StatusCode,
@@ -18,12 +13,12 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use smg_mesh::{rate_limit_window::RateLimitWindow, MeshServerHandler, MeshSyncManager};
 use tokio::{signal, spawn};
-use tracing::{debug, error, info, warn, Level};
+use tracing::{debug, error, info, warn};
 use wfaas::LoggingSubscriber;
 
 use crate::{
     app_context::AppContext,
-    config::{GatewayConfig, RoutingMode},
+    config::{GatewayConfig, ObservabilityConfig, RoutingMode},
     core::{
         job_queue::{JobQueue, JobQueueConfig},
         steps::{TokenizerConfigRequest, WorkflowEngines},
@@ -33,7 +28,7 @@ use crate::{
     },
     middleware::{self, AuthConfig, QueuedRequest},
     observability::{
-        logging::{self, LoggingConfig},
+        logging::{self, LogGuard, LoggingConfig},
         metrics::{self, PrometheusConfig},
         otel_trace,
     },
@@ -673,41 +668,20 @@ pub fn build_app(
         .with_state(app_state)
 }
 
-pub async fn startup(config: GatewayConfig) -> Result<(), Box<dyn std::error::Error>> {
-    static LOGGING_INITIALIZED: AtomicBool = AtomicBool::new(false);
+pub async fn startup(config: GatewayConfig) -> Result<()> {
+    // TODO: the loggong init should be move to main.
+    let log_guard = init_tracing(&config.observability).context("initialize tracing")?;
 
-    otel_trace::otel_tracing_init(
-        config.observability.enable_trace,
-        Some(&config.observability.otlp_traces_endpoint),
-    )?;
+    let server_result = run(config).await;
+    let shutdown_result = shutdown_tracing(log_guard).await;
 
-    let _log_guard = if !LOGGING_INITIALIZED.swap(true, Ordering::SeqCst) {
-        Some(logging::init_logging(
-            LoggingConfig {
-                level: config
-                    .observability
-                    .log_level
-                    .as_deref()
-                    .and_then(|s| match s.to_uppercase().parse::<Level>() {
-                        Ok(l) => Some(l),
-                        Err(_) => {
-                            warn!("Invalid log level string: '{s}'. Defaulting to INFO.");
-                            None
-                        }
-                    })
-                    .unwrap_or(Level::INFO),
-                json_format: config.observability.json_log,
-                log_dir: config.observability.log_dir.clone(),
-                colorize: true,
-                log_file_name: "smg".to_string(),
-                log_targets: None,
-            },
-            Some(&config.observability),
-        ))
-    } else {
-        None
-    };
+    server_result.context("run gateway server")?;
+    shutdown_result.context("shutdown tracing")?;
 
+    Ok(())
+}
+
+async fn run(config: GatewayConfig) -> Result<()> {
     info!("SGLang Router starting...");
 
     let mode = if config.routing.enable_igw {
@@ -721,12 +695,17 @@ pub async fn startup(config: GatewayConfig) -> Result<(), Box<dyn std::error::Er
     };
 
     info!(
-        "Starting gateway on {}:{} in {} mode",
-        config.server.host, config.server.port, mode
+        host = %config.server.host,
+        port = config.server.port,
+        mode,
+        "starting gateway"
     );
 
     if !config.routing.enable_igw {
-        info!("Policy: {}", config.routing.policy.name());
+        info!(
+            policy = config.routing.policy.name(),
+            "configured routing policy"
+        );
 
         if let RoutingMode::PrefillDecode {
             prefill_urls,
@@ -735,8 +714,13 @@ pub async fn startup(config: GatewayConfig) -> Result<(), Box<dyn std::error::Er
         } = &config.routing.mode
         {
             if !prefill_urls.is_empty() {
-                info!("Prefill nodes: {:?}", prefill_urls);
-                info!("Decode nodes: {:?}", decode_urls);
+                info!(
+                    prefill_worker_count = prefill_urls.len(),
+                    decode_worker_count = decode_urls.len(),
+                    prefill_worker_urls = ?prefill_urls,
+                    decode_worker_urls = ?decode_urls,
+                    "configured PD workers"
+                );
             }
         }
     }
@@ -809,7 +793,12 @@ pub async fn startup(config: GatewayConfig) -> Result<(), Box<dyn std::error::Er
         config.server.max_payload_size / (1024 * 1024)
     );
 
-    let app_context = Arc::new(AppContext::from_config(config.clone()).await?);
+    let app_context = Arc::new(
+        AppContext::from_config(config.clone())
+            .await
+            .map_err(Error::msg)
+            .context("create app context")?,
+    );
 
     app_context.inflight_tracker.start_sampler(20);
 
@@ -821,11 +810,9 @@ pub async fn startup(config: GatewayConfig) -> Result<(), Box<dyn std::error::Er
         .expect("JobQueue should only be initialized once");
 
     // Initialize typed workflow engines
-    let engines = WorkflowEngines::new(&config);
-
     // Subscribe logging to all workflow engines
+    let engines = WorkflowEngines::new(&config);
     engines.subscribe_all(Arc::new(LoggingSubscriber)).await;
-
     app_context
         .workflow_engines
         .set(engines)
@@ -866,7 +853,7 @@ pub async fn startup(config: GatewayConfig) -> Result<(), Box<dyn std::error::Er
         job_queue
             .submit(job)
             .await
-            .map_err(|e| format!("Failed to submit startup tokenizer job: {}", e))?;
+            .map_err(|e| anyhow!("Failed to submit startup tokenizer job: {e}"))?;
 
         info!("Startup tokenizer job submitted (will complete in background)");
     }
@@ -887,7 +874,7 @@ pub async fn startup(config: GatewayConfig) -> Result<(), Box<dyn std::error::Er
     job_queue
         .submit(job)
         .await
-        .map_err(|e| format!("Failed to submit worker initialization job: {}", e))?;
+        .map_err(|e| anyhow!("Failed to submit worker initialization job: {e}"))?;
 
     info!("Worker initialization job submitted (will complete in background)");
 
@@ -899,7 +886,7 @@ pub async fn startup(config: GatewayConfig) -> Result<(), Box<dyn std::error::Er
         job_queue
             .submit(mcp_job)
             .await
-            .map_err(|e| format!("Failed to submit MCP initialization job: {}", e))?;
+            .map_err(|e| anyhow!("Failed to submit MCP initialization job: {e}"))?;
     } else {
         info!("No MCP config provided, skipping MCP server initialization");
     }
@@ -918,7 +905,11 @@ pub async fn startup(config: GatewayConfig) -> Result<(), Box<dyn std::error::Er
         worker_stats.total_workers, worker_stats.healthy_workers
     );
 
-    let router_manager = RouterManager::from_config(&config, &app_context).await?;
+    let router_manager = RouterManager::from_config(&config, &app_context)
+        .await
+        .map_err(Error::msg)
+        .context("create router manager")?;
+
     let router: Arc<dyn RouterTrait> = router_manager.clone();
 
     if !config.workers.health_check.disable_health_check {
@@ -1071,7 +1062,7 @@ pub async fn startup(config: GatewayConfig) -> Result<(), Box<dyn std::error::Er
     // Parse address and set up graceful shutdown (common to both TLS and non-TLS)
     let addr: std::net::SocketAddr = bind_addr
         .parse()
-        .map_err(|e| format!("Invalid address: {}", e))?;
+        .map_err(|e| anyhow!("Invalid address: {e}"))?;
 
     let handle = axum_server::Handle::new();
     let handle_clone = handle.clone();
@@ -1085,26 +1076,26 @@ pub async fn startup(config: GatewayConfig) -> Result<(), Box<dyn std::error::Er
         info!("TLS enabled");
         ring::default_provider()
             .install_default()
-            .map_err(|e| format!("Failed to install rustls ring provider: {e:?}"))?;
+            .map_err(|e| anyhow!("Failed to install rustls ring provider: {e:?}"))?;
 
         let tls_config = axum_server::tls_rustls::RustlsConfig::from_pem(
             tls.certificate.clone(),
             tls.private_key.clone(),
         )
         .await
-        .map_err(|e| format!("Failed to create TLS config: {}", e))?;
+        .map_err(|e| anyhow!("Failed to create TLS config: {e}"))?;
 
         axum_server::bind_rustls(addr, tls_config)
             .handle(handle)
             .serve(app.into_make_service())
             .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            .context("run TLS server")?;
     } else {
         axum_server::bind(addr)
             .handle(handle)
             .serve(app.into_make_service())
             .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            .context("run HTTP server")?;
     }
 
     // HA handler shutdown is handled by the signal in mesh_run! macro
@@ -1164,4 +1155,39 @@ fn create_cors_layer(allowed_origins: Vec<String>) -> tower_http::cors::CorsLaye
     };
 
     cors.max_age(Duration::from_secs(3600))
+}
+
+fn init_tracing(config: &ObservabilityConfig) -> Result<LogGuard> {
+    // init OTel first
+    otel_trace::otel_tracing_init(config.enable_trace, Some(&config.otlp_traces_endpoint))
+        .context("initialize OpenTelemetry")?;
+
+    // initilzer logging
+    match logging::init_logging(LoggingConfig::from_config(config), Some(config)) {
+        Ok(guard) => Ok(guard),
+        Err(error) => {
+            if otel_trace::is_otel_enabled() {
+                otel_trace::shutdown_otel();
+            }
+            return Err(error).context("initialize logging");
+        }
+    }
+}
+
+async fn shutdown_tracing(log_guard: LogGuard) -> Result<()> {
+    let enabled = otel_trace::is_otel_enabled();
+
+    let flush_result = if enabled {
+        otel_trace::flush_spans_async()
+            .await
+            .context("flush OpenTelemetry spans")
+    } else {
+        Ok(())
+    };
+    if enabled {
+        otel_trace::shutdown_otel();
+    }
+
+    drop(log_guard);
+    flush_result
 }

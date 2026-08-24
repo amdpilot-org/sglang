@@ -265,7 +265,7 @@ impl JobQueue {
             JobStatus::processing(job_type, &worker_url),
         );
 
-        debug!("Processing job: type={}, worker={}", job_type, worker_url);
+        debug!(job_type, resource = %worker_url, "processing job");
 
         // Execute job
         match context.upgrade() {
@@ -281,8 +281,9 @@ impl JobQueue {
                     JobStatus::failed(job_type, &worker_url, error_msg),
                 );
                 error!(
-                    "AppContext dropped, cannot process job: type={}, worker={}",
-                    job_type, worker_url
+                    job_type,
+                    resource = %worker_url,
+                    "AppContext dropped; cannot process job"
                 );
             }
         }
@@ -772,7 +773,7 @@ impl JobQueue {
     fn record_job_completion(
         job_type: &'static str,
         worker_url: &str,
-        _duration: Duration,
+        duration: Duration,
         result: &Result<String, String>,
         status_map: &Arc<DashMap<String, JobStatus>>,
     ) {
@@ -780,8 +781,11 @@ impl JobQueue {
             Ok(message) => {
                 status_map.remove(worker_url);
                 debug!(
-                    "Completed job: type={}, worker={}, result={}",
-                    job_type, worker_url, message
+                    job_type,
+                    resource = %worker_url,
+                    duration_ms = duration.as_millis() as u64,
+                    result_message = %message,
+                    "job completed"
                 );
             }
             Err(error) => {
@@ -790,8 +794,11 @@ impl JobQueue {
                     JobStatus::failed(job_type, worker_url, error.clone()),
                 );
                 warn!(
-                    "Failed job: type={}, worker={}, error={}",
-                    job_type, worker_url, error
+                    job_type,
+                    resource = %worker_url,
+                    duration_ms = duration.as_millis() as u64,
+                    error = %error,
+                    "job failed"
                 );
             }
         }
