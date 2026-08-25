@@ -864,7 +864,7 @@ fn oracle_config_validation_requires_config_when_enabled() {
 
     match err {
         ConfigError::MissingRequired { field } => {
-            assert_eq!(field, "oracle");
+            assert_eq!(field, "storage.oracle");
         }
         other => panic!("unexpected error: {:?}", other),
     }

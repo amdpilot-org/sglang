@@ -40,8 +40,10 @@ pub async fn startup(config: GatewayConfig) -> Result<()> {
         duration_buckets: config.observability.prometheus_duration_buckets.clone(),
     });
 
+    // start mesh synchronization server
     let (mesh_handler, mesh_sync_manager) = start_mesh(config.mesh.as_ref());
     let mesh_shutdown_handler = mesh_handler.clone();
+
     let app_context = initialize_app_context(&config).await?;
     submit_startup_jobs(&app_context, &config).await?;
 
@@ -65,7 +67,6 @@ pub async fn startup(config: GatewayConfig) -> Result<()> {
     configure_mesh_sync(&app_context, mesh_sync_manager.as_ref());
 
     let router_manager = create_router_manager(&app_context, &config).await?;
-
     let app_state = build_app_state(
         app_context.clone(),
         router_manager,
@@ -134,16 +135,17 @@ async fn shutdown_background_services(
 /// Logs the effective HTTP, routing policy, and worker configuration.
 fn log_startup(config: &GatewayConfig) {
     info!(
-        host = %config.server.host,
-        port = config.server.port,
-        "HTTP server configured"
+        "Starting router on {}:{} | mode: {:?} | policy: {:?} | max_payload: {}MB",
+        config.server.host,
+        config.server.port,
+        config.routing.mode,
+        config.routing.policy,
+        config.server.max_payload_size / (1024 * 1024)
     );
 
     if config.routing.enable_igw {
         return;
     }
-
-    info!(policy = config.routing.policy.name(), "routing configured");
 
     match &config.routing.mode {
         RoutingMode::Regular { worker_urls } | RoutingMode::OpenAI { worker_urls } => {
@@ -220,15 +222,6 @@ fn start_mesh(
 
 /// Creates shared application state and the job-processing infrastructure.
 async fn initialize_app_context(config: &GatewayConfig) -> Result<Arc<AppContext>> {
-    info!(
-        "Starting router on {}:{} | mode: {:?} | policy: {:?} | max_payload: {}MB",
-        config.server.host,
-        config.server.port,
-        config.routing.mode,
-        config.routing.policy,
-        config.server.max_payload_size / (1024 * 1024)
-    );
-
     let app_context = Arc::new(
         AppContext::from_config(config.clone())
             .await
@@ -249,6 +242,7 @@ async fn initialize_app_context(config: &GatewayConfig) -> Result<Arc<AppContext
         .workflow_engines
         .set(engines)
         .expect("WorkflowEngines should only be initialized once");
+
     debug!(
         "Workflow engines initialized (health check timeout: {}s)",
         config.workers.health_check.timeout_secs
@@ -264,6 +258,7 @@ async fn submit_startup_jobs(app_context: &Arc<AppContext>, config: &GatewayConf
         .get()
         .expect("JobQueue should be initialized");
 
+    // tokenizer job
     if let Some(tokenizer_source) = config
         .model
         .tokenizer_path
@@ -284,9 +279,11 @@ async fn submit_startup_jobs(app_context: &Arc<AppContext>, config: &GatewayConf
             })
             .await
             .map_err(|error| anyhow!("Failed to submit startup tokenizer job: {error}"))?;
+
         info!("Startup tokenizer job submitted (will complete in background)");
     }
 
+    // worker initialization job.
     info!(
         "Initializing workers for routing mode: {:?}",
         config.routing.mode
@@ -297,8 +294,10 @@ async fn submit_startup_jobs(app_context: &Arc<AppContext>, config: &GatewayConf
         })
         .await
         .map_err(|error| anyhow!("Failed to submit worker initialization job: {error}"))?;
+
     info!("Worker initialization job submitted (will complete in background)");
 
+    // MCP initialization job
     if let Some(mcp_config) = &config.extensions.mcp_config {
         info!("Found {} MCP server(s) in config", mcp_config.servers.len());
         job_queue
