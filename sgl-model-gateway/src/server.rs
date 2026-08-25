@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context, Error, Result};
 use axum::Router;
 use rustls::crypto::ring;
 use smg_mesh::{rate_limit_window::RateLimitWindow, MeshServerHandler, MeshSyncManager};
-use tokio::{signal, spawn};
+use tokio::{signal, spawn, task::JoinHandle};
 use tracing::{debug, error, info, warn};
 use wfaas::LoggingSubscriber;
 
@@ -40,6 +40,7 @@ pub async fn startup(config: GatewayConfig) -> Result<()> {
     });
 
     let (mesh_handler, mesh_sync_manager) = start_mesh(config.mesh.as_ref());
+    let mesh_shutdown_handler = mesh_handler.clone();
     let app_context = initialize_app_context(&config).await?;
     submit_startup_jobs(&app_context, &config).await?;
 
@@ -49,16 +50,7 @@ pub async fn startup(config: GatewayConfig) -> Result<()> {
         debug!("Started background refresh for all MCP servers (every 10 minutes)");
     }
 
-    // start health checker
-    if !config.workers.health_check.disable_health_check {
-        let _health_checker = app_context
-            .worker_registry
-            .start_health_checker(config.workers.health_check.check_interval_secs);
-        debug!(
-            "Started health checker for workers with {}s interval",
-            config.workers.health_check.check_interval_secs
-        );
-    }
+    let health_checker = start_health_checker(&app_context, &config);
 
     // start load monitor
     if let Some(load_monitor) = &app_context.load_monitor {
@@ -66,12 +58,13 @@ pub async fn startup(config: GatewayConfig) -> Result<()> {
         debug!("Started LoadMonitor for PowerOfTwo policies");
     }
 
-    let concurrency_queue_tx = start_concurrency_queue(&app_context, &config);
+    let (concurrency_queue_tx, concurrency_processor) =
+        start_concurrency_queue(&app_context, &config);
     configure_mesh_sync(&app_context, mesh_sync_manager.as_ref());
 
     let router_manager = create_router_manager(&app_context, &config).await?;
     let app_state = build_app_state(
-        app_context,
+        app_context.clone(),
         router_manager,
         concurrency_queue_tx,
         mesh_handler,
@@ -80,7 +73,57 @@ pub async fn startup(config: GatewayConfig) -> Result<()> {
     start_service_discovery_if_enabled(&config, &app_state).await;
 
     let app = build_http_app(&config, app_state).await;
-    serve_http(app, &config).await
+    let server_result = serve_http(app, &config).await;
+
+    shutdown_background_services(
+        &app_context,
+        health_checker,
+        concurrency_processor,
+        mesh_shutdown_handler,
+    )
+    .await;
+
+    server_result
+}
+
+async fn shutdown_background_services(
+    app_context: &Arc<AppContext>,
+    health_checker: Option<crate::core::worker::HealthChecker>,
+    concurrency_processor: Option<JoinHandle<()>>,
+    mesh_handler: Option<Arc<MeshServerHandler>>,
+) {
+    const BACKGROUND_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+
+    if let Some(processor) = concurrency_processor {
+        processor.abort();
+        let _ = processor.await;
+    }
+
+    if let Some(load_monitor) = &app_context.load_monitor {
+        load_monitor.stop().await;
+    }
+
+    if let Some(health_checker) = health_checker {
+        if tokio::time::timeout(BACKGROUND_SHUTDOWN_TIMEOUT, health_checker.shutdown())
+            .await
+            .is_err()
+        {
+            warn!("Worker health checker did not stop before timeout");
+        }
+    }
+
+    if let Some(mesh_handler) = mesh_handler {
+        match tokio::time::timeout(
+            BACKGROUND_SHUTDOWN_TIMEOUT,
+            mesh_handler.graceful_shutdown(),
+        )
+        .await
+        {
+            Ok(Ok(())) => info!("Mesh shut down gracefully"),
+            Ok(Err(error)) => warn!(%error, "Mesh graceful shutdown failed"),
+            Err(_) => warn!("Mesh graceful shutdown timed out"),
+        }
+    }
 }
 
 fn log_startup(config: &GatewayConfig) {
@@ -286,10 +329,31 @@ async fn create_router_manager(
     Ok(router_manager)
 }
 
+fn start_health_checker(
+    app_context: &Arc<AppContext>,
+    config: &GatewayConfig,
+) -> Option<crate::core::worker::HealthChecker> {
+    if config.workers.health_check.disable_health_check {
+        return None;
+    }
+
+    let health_checker = app_context
+        .worker_registry
+        .start_health_checker(config.workers.health_check.check_interval_secs);
+    debug!(
+        "Started health checker for workers with {}s interval",
+        config.workers.health_check.check_interval_secs
+    );
+    Some(health_checker)
+}
+
 fn start_concurrency_queue(
     app_context: &Arc<AppContext>,
     config: &GatewayConfig,
-) -> Option<tokio::sync::mpsc::Sender<QueuedRequest>> {
+) -> (
+    Option<tokio::sync::mpsc::Sender<QueuedRequest>>,
+    Option<JoinHandle<()>>,
+) {
     let (limiter, processor) = middleware::ConcurrencyLimiter::new(
         app_context.rate_limiter.clone(),
         config.routing.queue_size,
@@ -301,21 +365,21 @@ fn start_concurrency_queue(
 
     match processor {
         Some(processor) => {
-            spawn(processor.run());
+            let processor = spawn(processor.run());
             debug!(
                 "Started request queue (size: {}, timeout: {}s)",
                 config.routing.queue_size, config.routing.queue_timeout_secs
             );
+            (limiter.queue_tx.clone(), Some(processor))
         }
         None => {
             debug!(
                 "Rate limiting enabled (max_concurrent_requests = {}, queue disabled)",
                 config.routing.max_concurrent_requests
             );
+            (limiter.queue_tx.clone(), None)
         }
     }
-
-    limiter.queue_tx.clone()
 }
 
 fn configure_mesh_sync(app_context: &Arc<AppContext>, sync_manager: Option<&Arc<MeshSyncManager>>) {
