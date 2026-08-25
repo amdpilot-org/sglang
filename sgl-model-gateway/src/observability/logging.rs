@@ -8,7 +8,6 @@ use tracing_appender::{
     non_blocking::WorkerGuard,
     rolling::{RollingFileAppender, Rotation},
 };
-use tracing_log::LogTracer;
 use tracing_subscriber::{
     fmt::time::ChronoUtc, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer,
 };
@@ -112,8 +111,6 @@ pub fn init_logging(
     config: LoggingConfig,
     otel_layer_config: Option<&ObservabilityConfig>,
 ) -> Result<LogGuard> {
-    LogTracer::init().context("initialize log tracer")?;
-
     let level_filter = level_to_str(config.level);
 
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {

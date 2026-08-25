@@ -7,14 +7,14 @@ use data_connector::{
 use reqwest::Client;
 use smg::{
     app_context::AppContext,
+    app_state::AppState,
     config::GatewayConfig,
     core::{
         BasicWorkerBuilder, LoadMonitor, ModelCard, RuntimeType, Worker, WorkerRegistry, WorkerType,
     },
     middleware::{AuthConfig, TokenBucket},
     policies::PolicyRegistry,
-    routers::RouterTrait,
-    server::{build_app, AppState},
+    routers::{app::build_app, RouterTrait},
     tokenizer::registry::TokenizerRegistry,
 };
 use smg_mcp::{McpConfig, McpManager};

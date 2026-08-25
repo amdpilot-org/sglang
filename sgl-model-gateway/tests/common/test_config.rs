@@ -4,9 +4,8 @@
 //! for common test scenarios.
 
 use smg::config::{
-    routing::{ManualAssignmentMode, PolicyConfig, RoutingMode},
-    worker_pool::{CircuitBreakerConfig, RetryConfig},
-    ConfigResult, GatewayConfig, HistoryBackend, OracleConfig,
+    CircuitBreakerConfig, ConfigResult, GatewayConfig, HistoryBackend, ManualAssignmentMode,
+    OracleConfig, PolicyConfig, RetryConfig, RoutingMode,
 };
 
 use super::mock_worker::{HealthStatus, MockWorkerConfig, WorkerType};

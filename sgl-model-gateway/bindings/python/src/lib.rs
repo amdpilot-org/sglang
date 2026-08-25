@@ -467,7 +467,7 @@ impl Router {
             CircuitBreakerConfig, DiscoveryConfig, ExtensionConfig, HealthCheckConfig,
             HttpServerConfig, ModelConfig, ObservabilityConfig, PolicyConfig as ConfigPolicyConfig,
             RetryConfig, RoutingConfig, RoutingMode, SecurityConfig, ServerTlsConfig,
-            StorageConfig, TokenizerCacheConfig, WorkerPoolConfig,
+            StorageConfig, TokenizerCacheConfig, WorkerConfig,
         };
 
         let convert_policy = |policy: &PolicyType| -> ConfigPolicyConfig {
@@ -534,15 +534,12 @@ impl Router {
             Some(DiscoveryConfig {
                 namespace: self.service_discovery_namespace.clone(),
                 port: self.service_discovery_port,
-                check_interval_secs: 60,
-                pd_mode: self.pd_disaggregation,
                 selector: self.selector.clone(),
                 prefill_selector: self.prefill_selector.clone(),
                 decode_selector: self.decode_selector.clone(),
                 bootstrap_port_annotation: self.bootstrap_port_annotation.clone(),
                 router_selector: HashMap::new(),
-                router_mesh_port_annotation: "sglang.ai/mesh-port".to_string(),
-                igw_mode: self.enable_igw,
+                ..Default::default()
             })
         } else {
             None
@@ -680,7 +677,7 @@ impl Router {
                 queue_timeout_secs: self.queue_timeout_secs,
                 rate_limit_tokens_per_second: self.rate_limit_tokens_per_second,
             },
-            workers: WorkerPoolConfig {
+            workers: WorkerConfig {
                 connection_mode: self.connection_mode.clone(),
                 request_timeout_secs: self.request_timeout_secs,
                 startup_timeout_secs: self.worker_startup_timeout_secs,

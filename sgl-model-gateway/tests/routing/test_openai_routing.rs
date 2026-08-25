@@ -20,7 +20,7 @@ use data_connector::{ResponseId, StoredResponse};
 use serde_json::json;
 use smg::{
     config::{
-        routing::{PolicyConfig, RoutingMode},
+        gateway::{PolicyConfig, RoutingMode},
         ConfigError, GatewayConfig, HistoryBackend, OracleConfig,
     },
     protocols::{

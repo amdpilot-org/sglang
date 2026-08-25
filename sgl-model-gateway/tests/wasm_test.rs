@@ -20,11 +20,11 @@ use data_connector::{
 };
 use smg::{
     app_context::AppContext,
+    app_state::AppState,
     config::GatewayConfig,
     core::{LoadMonitor, WorkerRegistry},
     policies::PolicyRegistry,
-    routers::RouterFactory,
-    server::{build_app, AppState},
+    routers::{app::build_app, RouterFactory},
     tokenizer::TokenizerRegistry,
     wasm::{
         module::{

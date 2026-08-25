@@ -38,7 +38,7 @@ use wfaas::{BackoffStrategy, FailureAction, RetryPolicy, StepDefinition, Workflo
 use super::shared::{ActivateWorkersStep, RegisterWorkersStep, UpdatePoliciesStep};
 use crate::{
     app_context::AppContext,
-    config::WorkerPoolConfig,
+    config::WorkerConfig,
     core::{
         steps::workflow_data::{
             LocalWorkerWorkflowData, WorkerRemovalWorkflowData, WorkerUpdateWorkflowData,
@@ -74,7 +74,7 @@ pub(crate) fn find_workers_by_url(
 }
 
 pub fn create_local_worker_workflow(
-    worker_pool_config: &WorkerPoolConfig,
+    worker_pool_config: &WorkerConfig,
 ) -> WorkflowDefinition<LocalWorkerWorkflowData> {
     let detect_timeout = Duration::from_secs(worker_pool_config.startup_timeout_secs);
 

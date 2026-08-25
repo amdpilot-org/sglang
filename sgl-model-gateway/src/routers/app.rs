@@ -43,166 +43,6 @@ use crate::{
     },
 };
 
-pub fn build_app(
-    app_state: Arc<AppState>,
-    auth_config: AuthConfig,
-    control_plane_auth_state: Option<crate::auth::ControlPlaneAuthState>,
-    max_payload_size: usize,
-    request_id_headers: Vec<String>,
-    cors_allowed_origins: Vec<String>,
-) -> Router {
-    let protected_routes = Router::new()
-        .route("/generate", post(generate))
-        .route("/v1/chat/completions", post(v1_chat_completions))
-        .route("/v1/completions", post(v1_completions))
-        .route("/v1/rerank", post(v1_rerank))
-        .route("/v1/responses", post(v1_responses))
-        .route("/v1/embeddings", post(v1_embeddings))
-        .route("/v1/classify", post(v1_classify))
-        .route("/v1/responses/{response_id}", get(v1_responses_get))
-        .route(
-            "/v1/responses/{response_id}/cancel",
-            post(v1_responses_cancel),
-        )
-        .route("/v1/responses/{response_id}", delete(v1_responses_delete))
-        .route(
-            "/v1/responses/{response_id}/input_items",
-            get(v1_responses_list_input_items),
-        )
-        .route("/v1/conversations", post(v1_conversations_create))
-        .route(
-            "/v1/conversations/{conversation_id}",
-            get(v1_conversations_get)
-                .post(v1_conversations_update)
-                .delete(v1_conversations_delete),
-        )
-        .route(
-            "/v1/conversations/{conversation_id}/items",
-            get(v1_conversations_list_items).post(v1_conversations_create_items),
-        )
-        .route(
-            "/v1/conversations/{conversation_id}/items/{item_id}",
-            get(v1_conversations_get_item).delete(v1_conversations_delete_item),
-        )
-        // Tokenize / Detokenize endpoints
-        .route("/v1/tokenize", post(v1_tokenize))
-        .route("/v1/detokenize", post(v1_detokenize))
-        .route_layer(axum::middleware::from_fn_with_state(
-            app_state.clone(),
-            middleware::concurrency_limit_middleware,
-        ))
-        .route_layer(axum::middleware::from_fn_with_state(
-            auth_config.clone(),
-            middleware::auth_middleware,
-        ))
-        .route_layer(axum::middleware::from_fn_with_state(
-            app_state.clone(),
-            middleware::wasm_middleware,
-        ));
-
-    let public_routes = Router::new()
-        .route("/liveness", get(liveness))
-        .route("/readiness", get(readiness))
-        .route("/health", get(health))
-        .route("/health_generate", get(health_generate))
-        .route("/engine_metrics", get(engine_metrics))
-        .route("/v1/models", get(v1_models))
-        .route("/model_info", get(get_model_info))
-        // TODO: Remove `/get_model_info` alias after one release-cycle deprecation window.
-        .route("/get_model_info", get(get_model_info))
-        .route("/server_info", get(get_server_info))
-        // TODO: Remove `/get_server_info` alias after one release-cycle deprecation window.
-        .route("/get_server_info", get(get_server_info));
-
-    // Build admin routes with control plane auth if configured, otherwise use simple API key auth
-    let admin_routes = Router::new()
-        .route("/flush_cache", post(flush_cache))
-        .route("/v1/loads", get(get_loads))
-        // TODO: Remove `/get_loads` alias after one release-cycle deprecation window.
-        .route("/get_loads", get(get_loads))
-        .route("/parse/function_call", post(parse_function_call_http))
-        .route("/parse/reasoning", post(parse_reasoning_http))
-        .route("/wasm", post(add_wasm_module))
-        .route("/wasm/{module_uuid}", delete(remove_wasm_module))
-        .route("/wasm", get(list_wasm_modules))
-        // Tokenizer management endpoints
-        .route(
-            "/v1/tokenizers",
-            post(v1_tokenizers_add).get(v1_tokenizers_list),
-        )
-        .route(
-            "/v1/tokenizers/{tokenizer_id}",
-            get(v1_tokenizers_get).delete(v1_tokenizers_remove),
-        )
-        .route(
-            "/v1/tokenizers/{tokenizer_id}/status",
-            get(v1_tokenizers_status),
-        );
-
-    // Build worker routes
-    let worker_routes = Router::new()
-        .route("/workers", post(create_worker).get(list_workers_rest))
-        .route(
-            "/workers/{worker_id}",
-            get(get_worker).put(update_worker).delete(delete_worker),
-        );
-
-    // Apply authentication middleware to control plane routes
-    let apply_control_plane_auth = |routes: Router<Arc<AppState>>| {
-        if let Some(ref cp_state) = control_plane_auth_state {
-            routes.route_layer(axum::middleware::from_fn_with_state(
-                cp_state.clone(),
-                crate::auth::control_plane_auth_middleware,
-            ))
-        } else {
-            routes.route_layer(axum::middleware::from_fn_with_state(
-                auth_config.clone(),
-                middleware::auth_middleware,
-            ))
-        }
-    };
-    let admin_routes = apply_control_plane_auth(admin_routes);
-    let worker_routes = apply_control_plane_auth(worker_routes);
-
-    // HA management routes
-    let mesh_routes = Router::new()
-        .route("/ha/status", get(get_cluster_status))
-        .route("/ha/health", get(get_mesh_health))
-        .route("/ha/workers", get(get_worker_states))
-        .route("/ha/workers/{worker_id}", get(get_worker_state))
-        .route("/ha/policies", get(get_policy_states))
-        .route("/ha/policies/{model_id}", get(get_policy_state))
-        .route("/ha/config/{key}", get(get_app_config))
-        .route("/ha/config", post(update_app_config))
-        .route("/ha/rate-limit", post(set_global_rate_limit))
-        .route("/ha/rate-limit", get(get_global_rate_limit))
-        .route("/ha/rate-limit/stats", get(get_global_rate_limit_stats))
-        .route("/ha/shutdown", post(trigger_graceful_shutdown))
-        .route_layer(axum::middleware::from_fn_with_state(
-            auth_config.clone(),
-            middleware::auth_middleware,
-        ));
-
-    Router::new()
-        .merge(protected_routes)
-        .merge(public_routes)
-        .merge(admin_routes)
-        .merge(worker_routes)
-        .merge(mesh_routes)
-        .layer(axum::extract::DefaultBodyLimit::max(max_payload_size))
-        .layer(tower_http::limit::RequestBodyLimitLayer::new(
-            max_payload_size,
-        ))
-        .layer(middleware::create_logging_layer())
-        .layer(middleware::HttpMetricsLayer::new(
-            app_state.context.inflight_tracker.clone(),
-        ))
-        .layer(middleware::RequestIdLayer::new(request_id_headers))
-        .layer(create_cors_layer(cors_allowed_origins))
-        .fallback(sink_handler)
-        .with_state(app_state)
-}
-
 fn create_cors_layer(allowed_origins: Vec<String>) -> tower_http::cors::CorsLayer {
     use tower_http::cors::Any;
 
@@ -1215,4 +1055,164 @@ async fn list_wasm_modules(State(state): State<Arc<AppState>>) -> Response {
         }
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
+}
+
+pub fn build_app(
+    app_state: Arc<AppState>,
+    auth_config: AuthConfig,
+    control_plane_auth_state: Option<crate::auth::ControlPlaneAuthState>,
+    max_payload_size: usize,
+    request_id_headers: Vec<String>,
+    cors_allowed_origins: Vec<String>,
+) -> Router {
+    let protected_routes = Router::new()
+        .route("/generate", post(generate))
+        .route("/v1/chat/completions", post(v1_chat_completions))
+        .route("/v1/completions", post(v1_completions))
+        .route("/v1/rerank", post(v1_rerank))
+        .route("/v1/responses", post(v1_responses))
+        .route("/v1/embeddings", post(v1_embeddings))
+        .route("/v1/classify", post(v1_classify))
+        .route("/v1/responses/{response_id}", get(v1_responses_get))
+        .route(
+            "/v1/responses/{response_id}/cancel",
+            post(v1_responses_cancel),
+        )
+        .route("/v1/responses/{response_id}", delete(v1_responses_delete))
+        .route(
+            "/v1/responses/{response_id}/input_items",
+            get(v1_responses_list_input_items),
+        )
+        .route("/v1/conversations", post(v1_conversations_create))
+        .route(
+            "/v1/conversations/{conversation_id}",
+            get(v1_conversations_get)
+                .post(v1_conversations_update)
+                .delete(v1_conversations_delete),
+        )
+        .route(
+            "/v1/conversations/{conversation_id}/items",
+            get(v1_conversations_list_items).post(v1_conversations_create_items),
+        )
+        .route(
+            "/v1/conversations/{conversation_id}/items/{item_id}",
+            get(v1_conversations_get_item).delete(v1_conversations_delete_item),
+        )
+        // Tokenize / Detokenize endpoints
+        .route("/v1/tokenize", post(v1_tokenize))
+        .route("/v1/detokenize", post(v1_detokenize))
+        .route_layer(axum::middleware::from_fn_with_state(
+            app_state.clone(),
+            middleware::concurrency_limit_middleware,
+        ))
+        .route_layer(axum::middleware::from_fn_with_state(
+            auth_config.clone(),
+            middleware::auth_middleware,
+        ))
+        .route_layer(axum::middleware::from_fn_with_state(
+            app_state.clone(),
+            middleware::wasm_middleware,
+        ));
+
+    let public_routes = Router::new()
+        .route("/liveness", get(liveness))
+        .route("/readiness", get(readiness))
+        .route("/health", get(health))
+        .route("/health_generate", get(health_generate))
+        .route("/engine_metrics", get(engine_metrics))
+        .route("/v1/models", get(v1_models))
+        .route("/model_info", get(get_model_info))
+        // TODO: Remove `/get_model_info` alias after one release-cycle deprecation window.
+        .route("/get_model_info", get(get_model_info))
+        .route("/server_info", get(get_server_info))
+        // TODO: Remove `/get_server_info` alias after one release-cycle deprecation window.
+        .route("/get_server_info", get(get_server_info));
+
+    // Build admin routes with control plane auth if configured, otherwise use simple API key auth
+    let admin_routes = Router::new()
+        .route("/flush_cache", post(flush_cache))
+        .route("/v1/loads", get(get_loads))
+        // TODO: Remove `/get_loads` alias after one release-cycle deprecation window.
+        .route("/get_loads", get(get_loads))
+        .route("/parse/function_call", post(parse_function_call_http))
+        .route("/parse/reasoning", post(parse_reasoning_http))
+        .route("/wasm", post(add_wasm_module))
+        .route("/wasm/{module_uuid}", delete(remove_wasm_module))
+        .route("/wasm", get(list_wasm_modules))
+        // Tokenizer management endpoints
+        .route(
+            "/v1/tokenizers",
+            post(v1_tokenizers_add).get(v1_tokenizers_list),
+        )
+        .route(
+            "/v1/tokenizers/{tokenizer_id}",
+            get(v1_tokenizers_get).delete(v1_tokenizers_remove),
+        )
+        .route(
+            "/v1/tokenizers/{tokenizer_id}/status",
+            get(v1_tokenizers_status),
+        );
+
+    // Build worker routes
+    let worker_routes = Router::new()
+        .route("/workers", post(create_worker).get(list_workers_rest))
+        .route(
+            "/workers/{worker_id}",
+            get(get_worker).put(update_worker).delete(delete_worker),
+        );
+
+    // Apply authentication middleware to control plane routes
+    let apply_control_plane_auth = |routes: Router<Arc<AppState>>| {
+        if let Some(ref cp_state) = control_plane_auth_state {
+            routes.route_layer(axum::middleware::from_fn_with_state(
+                cp_state.clone(),
+                crate::auth::control_plane_auth_middleware,
+            ))
+        } else {
+            routes.route_layer(axum::middleware::from_fn_with_state(
+                auth_config.clone(),
+                middleware::auth_middleware,
+            ))
+        }
+    };
+    let admin_routes = apply_control_plane_auth(admin_routes);
+    let worker_routes = apply_control_plane_auth(worker_routes);
+
+    // HA management routes
+    let mesh_routes = Router::new()
+        .route("/ha/status", get(get_cluster_status))
+        .route("/ha/health", get(get_mesh_health))
+        .route("/ha/workers", get(get_worker_states))
+        .route("/ha/workers/{worker_id}", get(get_worker_state))
+        .route("/ha/policies", get(get_policy_states))
+        .route("/ha/policies/{model_id}", get(get_policy_state))
+        .route("/ha/config/{key}", get(get_app_config))
+        .route("/ha/config", post(update_app_config))
+        .route("/ha/rate-limit", post(set_global_rate_limit))
+        .route("/ha/rate-limit", get(get_global_rate_limit))
+        .route("/ha/rate-limit/stats", get(get_global_rate_limit_stats))
+        .route("/ha/shutdown", post(trigger_graceful_shutdown))
+        .route_layer(axum::middleware::from_fn_with_state(
+            auth_config.clone(),
+            middleware::auth_middleware,
+        ));
+
+    Router::new()
+        .merge(protected_routes)
+        .merge(public_routes)
+        .merge(admin_routes)
+        .merge(worker_routes)
+        .merge(mesh_routes)
+        .layer(axum::extract::DefaultBodyLimit::max(max_payload_size))
+        .layer(tower_http::limit::RequestBodyLimitLayer::new(
+            max_payload_size,
+        ))
+        .layer(middleware::create_logging_layer())
+        .layer(middleware::HttpMetricsLayer::new(
+            app_state.context.inflight_tracker.clone(),
+        ))
+        .layer(middleware::RequestIdLayer::new(request_id_headers))
+        .layer(create_cors_layer(cors_allowed_origins))
+        .fallback(sink_handler)
+        .with_state(app_state)
 }

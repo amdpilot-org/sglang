@@ -7,19 +7,14 @@ use rand::{distr::Alphanumeric, Rng};
 use crate::{
     auth::{ApiKeyEntry, ControlPlaneAuthConfig, JwtConfig, Role},
     config::{
-        extensions::ExtensionConfig,
-        gateway::GatewayConfig,
-        infrastructure::{
-            DiscoveryConfig as GatewayDiscoveryConfig, MeshConfig, ObservabilityConfig,
-        },
-        model::{ModelConfig, TokenizerCacheConfig},
-        routing::{ManualAssignmentMode, PolicyConfig, RoutingConfig, RoutingMode},
-        server::{HttpServerConfig, SecurityConfig, ServerTlsConfig},
-        storage::{HistoryBackend, OracleConfig, PostgresConfig, RedisConfig, StorageConfig},
-        worker_pool::{
-            CircuitBreakerConfig, HealthCheckConfig, RetryConfig, WorkerPoolConfig,
-            DEFAULT_CONNECT_TIMEOUT_SECS, DEFAULT_POOL_IDLE_TIMEOUT_SECS,
-            DEFAULT_POOL_MAX_IDLE_PER_HOST, DEFAULT_TCP_KEEPALIVE_SECS,
+        gateway::{
+            CircuitBreakerConfig, DiscoveryConfig, ExtensionConfig, GatewayConfig,
+            HealthCheckConfig, HistoryBackend, HttpServerConfig, ManualAssignmentMode, MeshConfig,
+            ModelConfig, ObservabilityConfig, OracleConfig, PolicyConfig, PostgresConfig,
+            RedisConfig, RetryConfig, RoutingConfig, RoutingMode, SecurityConfig, ServerTlsConfig,
+            StorageConfig, TokenizerCacheConfig, WorkerConfig, DEFAULT_CONNECT_TIMEOUT_SECS,
+            DEFAULT_POOL_IDLE_TIMEOUT_SECS, DEFAULT_POOL_MAX_IDLE_PER_HOST,
+            DEFAULT_TCP_KEEPALIVE_SECS,
         },
         ConfigError, ConfigResult,
     },
@@ -28,7 +23,7 @@ use crate::{
 };
 
 #[derive(Parser, Debug)]
-#[command(name = "sglang-router")]
+#[command(name = "sglang-router", alias = "smg", alias = "amg")]
 #[command(about = "SGLang Model Gateway - High-performance inference gateway")]
 #[command(args_conflicts_with_subcommands = true)]
 #[command(version = version::get_version_string())]
@@ -59,7 +54,6 @@ pub struct Cli {
     #[arg(
         long,
         global = true,
-        exclusive = true,
         help = "Print detailed version information and exit"
     )]
     version_verbose: bool,
@@ -703,8 +697,6 @@ impl CliArgs {
                 max_idle_secs: self.max_idle_secs,
                 assignment_mode: self.assignment_mode,
             },
-            // TODO: impl bucket policy
-            _ => PolicyConfig::RoundRobin,
         }
     }
 
@@ -873,20 +865,30 @@ impl CliArgs {
         });
 
         let address = format!("{}:{}", self.mesh_host, self.mesh_port);
-        let self_addr = address.parse().map_err(|_| ConfigError::InvalidValue {
-            field: "mesh perr".to_string(),
-            value: address.clone(),
-            reason: "must be a valid socket address".to_string(),
-        })?;
-
-        let init_peer = match self.mesh_peer_urls.first() {
-            Some(peer) => Some(peer.parse().map_err(|_| ConfigError::InvalidValue {
-                field: "mesh peer".to_string(),
-                value: peer.clone(),
-                reason: "must be a valid socket address".to_string(),
-            })?),
-            None => None,
+        let self_addr = match address.parse() {
+            Ok(addr) => addr,
+            Err(_) => {
+                eprintln!(
+                    "WARNING: Invalid mesh server address '{}'; mesh server will not be started",
+                    address
+                );
+                return Ok(None);
+            }
         };
+
+        let init_peer = self
+            .mesh_peer_urls
+            .first()
+            .and_then(|peer| match peer.parse() {
+                Ok(addr) => Some(addr),
+                Err(_) => {
+                    eprintln!(
+                        "WARNING: Invalid mesh peer address '{}'; peer will be ignored",
+                        peer
+                    );
+                    None
+                }
+            });
 
         Ok(Some(MeshConfig {
             self_name,
@@ -948,18 +950,16 @@ impl CliArgs {
             .then(|| self.build_redis_config())
             .transpose()?;
 
-        let discovery = self.service_discovery.then(|| GatewayDiscoveryConfig {
+        let discovery = self.service_discovery.then(|| DiscoveryConfig {
             selector: parse_label_selectors(&self.selector),
             namespace: self.service_discovery_namespace.clone(),
             port: self.service_discovery_port,
             check_interval_secs: 60,
-            pd_mode: self.pd_disaggregation,
             prefill_selector: parse_label_selectors(&self.prefill_selector),
             decode_selector: parse_label_selectors(&self.decode_selector),
             bootstrap_port_annotation: "sglang.ai/bootstrap-port".to_string(),
             router_selector: HashMap::new(),
             router_mesh_port_annotation: "sglang.ai/ha-port".to_string(),
-            igw_mode: enable_igw,
         });
 
         let control_plane_auth = self.build_control_plane_auth_config();
@@ -987,7 +987,7 @@ impl CliArgs {
                 queue_timeout_secs: self.queue_timeout_secs,
                 rate_limit_tokens_per_second: self.rate_limit_tokens_per_second,
             },
-            workers: WorkerPoolConfig {
+            workers: WorkerConfig {
                 connection_mode,
                 request_timeout_secs: self.request_timeout_secs,
                 startup_timeout_secs: self.worker_startup_timeout_secs,
@@ -1105,7 +1105,6 @@ enum PolicyKind {
     CacheAware,
     PowerOfTwo,
     PrefixHash,
-    Bucket,
     Manual,
 }
 

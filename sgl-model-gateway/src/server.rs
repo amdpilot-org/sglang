@@ -10,6 +10,7 @@ use wfaas::LoggingSubscriber;
 
 use crate::{
     app_context::AppContext,
+    app_state::AppState,
     config::{GatewayConfig, ObservabilityConfig, RoutingMode},
     core::{
         job_queue::{JobQueue, JobQueueConfig},
@@ -23,12 +24,12 @@ use crate::{
         metrics::{self, PrometheusConfig},
         otel_trace,
     },
-    routers::{router_manager::RouterManager, RouterTrait},
+    routers::{app::build_app, router_manager::RouterManager, RouterTrait},
     service_discovery::{start_service_discovery, ServiceDiscoveryConfig},
     tokenizer::TokenizerRegistry,
 };
-pub use crate::{app_state::AppState, routers::app::build_app};
 
+/// Starts gateway components, serves HTTP traffic, then stops owned background services.
 pub async fn startup(config: GatewayConfig) -> Result<()> {
     log_startup(&config);
 
@@ -44,7 +45,7 @@ pub async fn startup(config: GatewayConfig) -> Result<()> {
     let app_context = initialize_app_context(&config).await?;
     submit_startup_jobs(&app_context, &config).await?;
 
-    // start mcp
+    // start mcp manager
     if let Some(mcp_manager) = app_context.mcp_manager.get() {
         Arc::clone(mcp_manager).spawn_background_refresh_all(Duration::from_secs(600));
         debug!("Started background refresh for all MCP servers (every 10 minutes)");
@@ -60,9 +61,11 @@ pub async fn startup(config: GatewayConfig) -> Result<()> {
 
     let (concurrency_queue_tx, concurrency_processor) =
         start_concurrency_queue(&app_context, &config);
+
     configure_mesh_sync(&app_context, mesh_sync_manager.as_ref());
 
     let router_manager = create_router_manager(&app_context, &config).await?;
+
     let app_state = build_app_state(
         app_context.clone(),
         router_manager,
@@ -70,6 +73,7 @@ pub async fn startup(config: GatewayConfig) -> Result<()> {
         mesh_handler,
         mesh_sync_manager,
     );
+
     start_service_discovery_if_enabled(&config, &app_state).await;
 
     let app = build_http_app(&config, app_state).await;
@@ -86,6 +90,7 @@ pub async fn startup(config: GatewayConfig) -> Result<()> {
     server_result
 }
 
+/// Stops background services that outlive the HTTP server.
 async fn shutdown_background_services(
     app_context: &Arc<AppContext>,
     health_checker: Option<crate::core::worker::HealthChecker>,
@@ -126,50 +131,45 @@ async fn shutdown_background_services(
     }
 }
 
+/// Logs the effective HTTP, routing policy, and worker configuration.
 fn log_startup(config: &GatewayConfig) {
-    info!("SGLang Router starting...");
-
-    let mode = if config.routing.enable_igw {
-        "IGW (Inference Gateway)"
-    } else {
-        match &config.routing.mode {
-            RoutingMode::OpenAI { .. } => "OpenAI Backend",
-            RoutingMode::PrefillDecode { .. } => "PD Disaggregated",
-            RoutingMode::Regular { .. } => "Regular",
-        }
-    };
     info!(
         host = %config.server.host,
         port = config.server.port,
-        mode,
-        "starting gateway"
+        "HTTP server configured"
     );
 
-    if !config.routing.enable_igw {
-        info!(
-            policy = config.routing.policy.name(),
-            "configured routing policy"
-        );
+    if config.routing.enable_igw {
+        return;
+    }
 
-        if let RoutingMode::PrefillDecode {
+    info!(policy = config.routing.policy.name(), "routing configured");
+
+    match &config.routing.mode {
+        RoutingMode::Regular { worker_urls } | RoutingMode::OpenAI { worker_urls } => {
+            info!(
+                worker_count = worker_urls.len(),
+                worker_urls = ?worker_urls,
+                "workers configured"
+            );
+        }
+        RoutingMode::PrefillDecode {
             prefill_urls,
             decode_urls,
             ..
-        } = &config.routing.mode
-        {
-            if !prefill_urls.is_empty() {
-                info!(
-                    prefill_worker_count = prefill_urls.len(),
-                    decode_worker_count = decode_urls.len(),
-                    prefill_worker_urls = ?prefill_urls,
-                    decode_worker_urls = ?decode_urls,
-                    "configured PD workers"
-                );
-            }
+        } => {
+            info!(
+                prefill_worker_count = prefill_urls.len(),
+                decode_worker_count = decode_urls.len(),
+                prefill_worker_urls = ?prefill_urls,
+                decode_worker_urls = ?decode_urls,
+                "PD workers configured"
+            );
         }
     }
 }
 
+/// Starts the optional mesh server and returns its request and synchronization handles.
 fn start_mesh(
     mesh_config: Option<&crate::config::MeshConfig>,
 ) -> (Option<Arc<MeshServerHandler>>, Option<Arc<MeshSyncManager>>) {
@@ -218,6 +218,7 @@ fn start_mesh(
     (Some(Arc::new(handler)), Some(sync_manager))
 }
 
+/// Creates shared application state and the job-processing infrastructure.
 async fn initialize_app_context(config: &GatewayConfig) -> Result<Arc<AppContext>> {
     info!(
         "Starting router on {}:{} | mode: {:?} | policy: {:?} | max_payload: {}MB",
@@ -256,6 +257,7 @@ async fn initialize_app_context(config: &GatewayConfig) -> Result<Arc<AppContext
     Ok(app_context)
 }
 
+/// Queues startup work for configured tokenizers, workers, and MCP servers.
 async fn submit_startup_jobs(app_context: &Arc<AppContext>, config: &GatewayConfig) -> Result<()> {
     let job_queue = app_context
         .worker_job_queue
@@ -312,6 +314,7 @@ async fn submit_startup_jobs(app_context: &Arc<AppContext>, config: &GatewayConf
     Ok(())
 }
 
+/// Builds the router implementation for the resolved gateway configuration.
 async fn create_router_manager(
     app_context: &Arc<AppContext>,
     config: &GatewayConfig,
@@ -329,6 +332,7 @@ async fn create_router_manager(
     Ok(router_manager)
 }
 
+/// Starts periodic worker health probes unless they are disabled.
 fn start_health_checker(
     app_context: &Arc<AppContext>,
     config: &GatewayConfig,
@@ -347,6 +351,7 @@ fn start_health_checker(
     Some(health_checker)
 }
 
+/// Starts the optional queue used when concurrent-request limiting is enabled.
 fn start_concurrency_queue(
     app_context: &Arc<AppContext>,
     config: &GatewayConfig,
@@ -382,6 +387,7 @@ fn start_concurrency_queue(
     }
 }
 
+/// Shares mesh synchronization with registries that replicate worker and policy state.
 fn configure_mesh_sync(app_context: &Arc<AppContext>, sync_manager: Option<&Arc<MeshSyncManager>>) {
     let Some(sync_manager) = sync_manager else {
         return;
@@ -396,6 +402,7 @@ fn configure_mesh_sync(app_context: &Arc<AppContext>, sync_manager: Option<&Arc<
     info!("Mesh sync manager set on worker and policy registries");
 }
 
+/// Combines routing and component handles into the state injected into HTTP handlers.
 fn build_app_state(
     app_context: Arc<AppContext>,
     router_manager: Arc<RouterManager>,
@@ -414,6 +421,7 @@ fn build_app_state(
     })
 }
 
+/// Starts Kubernetes discovery when discovery configuration is present.
 async fn start_service_discovery_if_enabled(config: &GatewayConfig, app_state: &Arc<AppState>) {
     let Some(discovery) = config.discovery.clone() else {
         return;
@@ -425,13 +433,13 @@ async fn start_service_discovery_if_enabled(config: &GatewayConfig, app_state: &
         check_interval: Duration::from_secs(discovery.check_interval_secs),
         port: discovery.port,
         namespace: discovery.namespace,
-        pd_mode: discovery.pd_mode,
+        pd_mode: config.routing.is_pd_mode(),
         prefill_selector: discovery.prefill_selector,
         decode_selector: discovery.decode_selector,
         bootstrap_port_annotation: discovery.bootstrap_port_annotation,
         router_selector: discovery.router_selector,
         router_mesh_port_annotation: discovery.router_mesh_port_annotation,
-        igw_mode: discovery.igw_mode,
+        igw_mode: config.routing.enable_igw,
     };
     let mesh_cluster_state = app_state
         .mesh_handler
@@ -462,6 +470,7 @@ async fn start_service_discovery_if_enabled(config: &GatewayConfig, app_state: &
     }
 }
 
+/// Builds the Axum application with authentication and request middleware.
 async fn build_http_app(config: &GatewayConfig, app_state: Arc<AppState>) -> Router {
     info!(
         "Router ready | workers: {:?}",
@@ -493,6 +502,7 @@ async fn build_http_app(config: &GatewayConfig, app_state: Arc<AppState>) -> Rou
     )
 }
 
+/// Binds and serves HTTP or HTTPS until a shutdown signal is received.
 async fn serve_http(app: Router, config: &GatewayConfig) -> Result<()> {
     let bind_addr = format!("{}:{}", config.server.host, config.server.port);
     info!("Starting server on {bind_addr}");
@@ -502,6 +512,7 @@ async fn serve_http(app: Router, config: &GatewayConfig) -> Result<()> {
         .map_err(|error| anyhow!("Invalid address: {error}"))?;
     let handle = axum_server::Handle::new();
 
+    // graceful shutdown for server
     let shutdown_handle = handle.clone();
     let grace_period = Duration::from_secs(config.server.shutdown_grace_period_secs);
     spawn(async move {
@@ -566,6 +577,7 @@ async fn shutdown_signal() {
     }
 }
 
+/// Initializes OpenTelemetry and the global tracing subscriber.
 pub fn init_tracing(config: &ObservabilityConfig) -> Result<LogGuard> {
     // init OTel first
     otel_trace::otel_tracing_init(config.enable_trace, Some(&config.otlp_traces_endpoint))
@@ -583,6 +595,7 @@ pub fn init_tracing(config: &ObservabilityConfig) -> Result<LogGuard> {
     }
 }
 
+/// Flushes tracing data and releases logging resources.
 pub async fn shutdown_tracing(log_guard: LogGuard) -> Result<()> {
     let enabled = otel_trace::is_otel_enabled();
 

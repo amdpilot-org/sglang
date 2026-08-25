@@ -28,12 +28,12 @@ use tracing::{debug, error, field::Empty, info, info_span, warn, Span};
 
 pub use crate::core::token_bucket::TokenBucket;
 use crate::{
+    app_state::AppState,
     observability::{
         inflight_tracker::InFlightRequestTracker,
         metrics::{method_to_static_str, metrics_labels, Metrics},
     },
     routers::error::extract_error_code_from_response,
-    server::AppState,
     wasm::{
         module::{MiddlewareAttachPoint, WasmModuleAttachPoint},
         spec::{

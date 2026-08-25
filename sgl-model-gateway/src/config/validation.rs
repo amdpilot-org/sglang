@@ -1,11 +1,9 @@
 use super::{
-    gateway::GatewayConfig,
-    infrastructure::{DiscoveryConfig as GatewayDiscoveryConfig, MeshConfig, ObservabilityConfig},
-    model::TokenizerCacheConfig,
-    routing::{PolicyConfig, RoutingConfig, RoutingMode},
-    server::{HttpServerConfig, SecurityConfig},
-    storage::{HistoryBackend, OracleConfig, StorageConfig},
-    worker_pool::{CircuitBreakerConfig, RetryConfig, WorkerPoolConfig},
+    gateway::{
+        CircuitBreakerConfig, DiscoveryConfig, GatewayConfig, HistoryBackend, HttpServerConfig,
+        MeshConfig, ObservabilityConfig, OracleConfig, PolicyConfig, RetryConfig, RoutingConfig,
+        RoutingMode, SecurityConfig, StorageConfig, TokenizerCacheConfig, WorkerConfig,
+    },
     ConfigError, ConfigResult,
 };
 
@@ -119,7 +117,7 @@ impl ConfigValidator {
         Ok(())
     }
 
-    fn validate_worker_pool(workers: &WorkerPoolConfig) -> ConfigResult<()> {
+    fn validate_worker_pool(workers: &WorkerConfig) -> ConfigResult<()> {
         for (field, value) in [
             ("workers.request_timeout_secs", workers.request_timeout_secs),
             ("workers.startup_timeout_secs", workers.startup_timeout_secs),
@@ -248,17 +246,12 @@ impl ConfigValidator {
     }
 
     fn validate_gateway_discovery(
-        discovery: &GatewayDiscoveryConfig,
+        discovery: &DiscoveryConfig,
         routing: &RoutingConfig,
     ) -> ConfigResult<()> {
         if discovery.port == 0 || discovery.check_interval_secs == 0 {
             return Err(ConfigError::ValidationFailed {
                 reason: "Discovery port and check interval must be > 0".to_string(),
-            });
-        }
-        if discovery.pd_mode != routing.is_pd_mode() || discovery.igw_mode != routing.enable_igw {
-            return Err(ConfigError::IncompatibleConfig {
-                reason: "Discovery mode flags must match routing configuration".to_string(),
             });
         }
         match &routing.mode {

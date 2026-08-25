@@ -9,8 +9,8 @@ use axum::{
 use criterion::{criterion_group, criterion_main, Criterion};
 use http_body_util::BodyExt;
 use smg::{
-    app_context::AppContext, config::GatewayConfig, middleware::wasm_middleware,
-    protocols::chat::ChatCompletionRequest, routers::RouterTrait, server::AppState,
+    app_context::AppContext, app_state::AppState, config::GatewayConfig,
+    middleware::wasm_middleware, protocols::chat::ChatCompletionRequest, routers::RouterTrait,
 };
 use tokio::runtime::Runtime;
 use tower::{Layer, Service};
