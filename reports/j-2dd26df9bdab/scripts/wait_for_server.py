@@ -8,7 +8,12 @@ from pathlib import Path
 
 def get(url: str, timeout: int = 30) -> dict:
     with urllib.request.urlopen(url, timeout=timeout) as response:
-        return {"status": response.status, "body": json.loads(response.read().decode("utf-8"))}
+        raw_body = response.read().decode("utf-8")
+        try:
+            body = json.loads(raw_body) if raw_body else None
+        except json.JSONDecodeError:
+            body = raw_body
+        return {"status": response.status, "body": body}
 
 
 def main() -> None:
