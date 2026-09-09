@@ -29,12 +29,6 @@ from sglang.srt.layers.activation import SiluAndMul
 from sglang.srt.layers.layernorm import RMSNorm
 
 _FUSED_SHARD_ORDER = {"q": 0, "k": 1, "v": 2}
-_FUSED_SHARD_COUNTS = {
-    ".qkv_proj.weight": 3,
-    ".qkv_proj.bias": 3,
-    ".gate_up_proj.weight": 2,
-    ".gate_up_proj.bias": 2,
-}
 
 
 class Qwen3MLP(nn.Module):
@@ -402,6 +396,15 @@ class Qwen3ForCausalLM(TextEncoder):
         )
         distributed_param._local_tensor.copy_(distributed_weight._local_tensor)
 
+    def _fused_shard_count(self, name: str) -> int | None:
+        shard_ids = {
+            shard_id
+            for param_name, _, shard_id in self.config.arch_config.stacked_params_mapping
+            if name.endswith(f"{param_name}.weight")
+            or name.endswith(f"{param_name}.bias")
+        }
+        return len(shard_ids) or None
+
     def forward(
         self,
         input_ids: torch.Tensor | None = None,
@@ -540,14 +543,7 @@ class Qwen3ForCausalLM(TextEncoder):
 
         for name, shards in fused_shards.items():
             param = params_dict[name]
-            shard_count = next(
-                (
-                    count
-                    for suffix, count in _FUSED_SHARD_COUNTS.items()
-                    if name.endswith(suffix)
-                ),
-                None,
-            )
+            shard_count = self._fused_shard_count(name)
             if shard_count is None or set(shards) != set(range(shard_count)):
                 raise ValueError(
                     f"Incomplete fused weight shards for {name}: "
