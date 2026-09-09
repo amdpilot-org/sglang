@@ -64,6 +64,8 @@ python -m sglang.launch_server
 --random-seed 12345
 ```
 
+No FP8 macros were hand-added or removed. Both arms used the normal production `gfx942` architecture flags emitted by the JIT build system.
+
 Imported `sglang.__file__`, `sglang.srt.layers.quantization.fp8.__file__`, and `encoding_dsv4.__file__` were asserted to resolve to each arm’s private source tree before launch. All eight ranks logged FP4-to-FP8 expert dequantization and completed target decode graph capture for batch sizes `[1, 2, 4, 8]`.
 
 ## Official framing and requests
