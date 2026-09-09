@@ -1,0 +1,47 @@
+diff --git a/python/sglang/kernels/ops/kvcache/triton_store_cache.py b/python/sglang/kernels/ops/kvcache/triton_store_cache.py
+index dfb577764..d48387f73 100644
+--- a/python/sglang/kernels/ops/kvcache/triton_store_cache.py
++++ b/python/sglang/kernels/ops/kvcache/triton_store_cache.py
+@@ -95,8 +95,18 @@ def _triton_store_cache_fp8_kernel(
+         else:
+             v = tl.div_rn(v, v_scale_value)
+ 
+-    k = tl.clamp(k, FP8_MIN, FP8_MAX).to(k_cache_ptr.dtype.element_ty)
+-    v = tl.clamp(v, FP8_MIN, FP8_MAX).to(v_cache_ptr.dtype.element_ty)
++    k_is_nan = k != k
++    k = tl.clamp(k, FP8_MIN, FP8_MAX)
++    k = k.to(k_cache_ptr.dtype.element_ty)
++    k_bits = k.to(tl.uint8, bitcast=True)
++    k_bits = tl.where(k_is_nan, 128, k_bits)
++    k = k_bits.to(k_cache_ptr.dtype.element_ty, bitcast=True)
++    v_is_nan = v != v
++    v = tl.clamp(v, FP8_MIN, FP8_MAX)
++    v = v.to(v_cache_ptr.dtype.element_ty)
++    v_bits = v.to(tl.uint8, bitcast=True)
++    v_bits = tl.where(v_is_nan, 128, v_bits)
++    v = v_bits.to(v_cache_ptr.dtype.element_ty, bitcast=True)
+     tl.store(
+         k_cache_ptr + loc * K_ROW_DIM + offsets, k, mask=k_mask
+     )
+diff --git a/test/registered/unit/mem_cache/test_mha_fp8_kv_write_hip.py b/test/registered/unit/mem_cache/test_mha_fp8_kv_write_hip.py
+index 49815dd72..e62e56c30 100644
+--- a/test/registered/unit/mem_cache/test_mha_fp8_kv_write_hip.py
++++ b/test/registered/unit/mem_cache/test_mha_fp8_kv_write_hip.py
+@@ -125,6 +125,17 @@ class TestMHAFP8KVWriteHIP(unittest.TestCase):
+         k = values.view(1, 1, 8).expand(1, 2, 8).contiguous()
+         self._run_write(pool, k, k, loc)
+ 
++    def test_fp16_zero_scale_nan_payload(self):
++        pool = _build_pool(head_dim=8, v_head_dim=8)
++        loc = torch.tensor([1], device="cuda")
++        values = torch.tensor(
++            [1.0, -1.0, 2.0, -2.0, 4.0, -4.0, 8.0, -8.0],
++            device="cuda",
++            dtype=torch.float16,
++        )
++        k = values.view(1, 1, 8).expand(1, 2, 8).contiguous()
++        self._run_write(pool, k, k, loc, 0.0, 0.0)
++
+     def test_noncontiguous_fallback(self):
+         pool = _build_pool()
+         loc = torch.tensor([2, 4], device="cuda")
