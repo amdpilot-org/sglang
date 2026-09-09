@@ -1,12 +1,13 @@
 import pytest
 import torch
+from aiter.ops.shuffle import shuffle_scale, shuffle_weight
 
 from sglang.srt.layers.quantization.fp8 import Fp8Config, Fp8MoEMethod
 
 
 FP4_VALUES = torch.tensor(
     [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0]
-    + [-0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0],
+    + [0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0],
     dtype=torch.float32,
 )
 
@@ -78,9 +79,7 @@ def _reference_fp4_dequant(packed, scale_bytes):
 def _expected_fp8_conversion(packed, scale_bytes):
     values, expanded_scales = _reference_fp4_dequant(packed, scale_bytes)
     output_size, input_size = values.shape[-2:]
-    block_values = values.view(
-        output_size // 128, 128, input_size // 128, 128
-    )
+    block_values = values.view(output_size // 128, 128, input_size // 128, 128)
     block_scales = (
         expanded_scales.view(output_size // 128, 128, input_size // 128, 128)
         .amax(dim=(1, 3), keepdim=True)
@@ -94,25 +93,52 @@ def _expected_fp8_conversion(packed, scale_bytes):
     return expected_weight.to(torch.float8_e4m3fn), block_scales.squeeze((1, 3))
 
 
-def _assert_rocm_conversion(weight, scale, packed, scale_bytes, shuffle_weight):
+def _expected_rocm_conversion(packed, scale_bytes, shuffle_weight_fn):
     expected_weight, expected_block_scale = _expected_fp8_conversion(
         packed, scale_bytes
     )
     expected_weight = expected_weight.view(torch.int8)
     expected_weight[expected_weight == -128] = 0
     expected_weight = expected_weight.view(torch.float8_e4m3fnuz)
-    shuffled_weight = shuffle_weight(expected_weight.contiguous(), (16, 16))
+    fnuz_weight = expected_weight
+    shuffled_weight = shuffle_weight_fn(expected_weight.contiguous(), (16, 16))
     expected_scale = expected_block_scale * 2.0
+    return fnuz_weight, shuffled_weight, expected_scale
+
+
+def _assert_rocm_conversion(weight, scale, packed, scale_bytes, shuffle_weight_fn):
+    expected_weights = []
+    expected_scales = []
+    fnuz_weights = []
+    for expert_id in range(packed.shape[0]):
+        expert_fnuz_weight, expert_weight, expert_scale = _expected_rocm_conversion(
+            packed[expert_id], scale_bytes[expert_id], shuffle_weight_fn
+        )
+        fnuz_weights.append(expert_fnuz_weight)
+        expected_weights.append(expert_weight)
+        expected_scales.append(expert_scale)
+    expected_weight = torch.stack(expected_weights)
+    expected_scale = torch.stack(expected_scales)
+    fnuz_weight = torch.stack(fnuz_weights)
 
     assert weight.dtype == torch.float8_e4m3fnuz
     assert scale.dtype == torch.float32
-    assert torch.equal(weight.view(torch.int8), shuffled_weight.view(torch.int8))
+    assert torch.equal(weight.view(torch.int8), expected_weight.view(torch.int8))
     assert torch.equal(scale, expected_scale)
 
-    reconstructed = expected_weight.float() * expected_scale.repeat_interleave(
-        128, dim=0
-    ).repeat_interleave(128, dim=1)
-    reference_values, reference_scales = _reference_fp4_dequant(packed, scale_bytes)
+    reconstructed = fnuz_weight.float() * expected_scale.repeat_interleave(
+        128, dim=1
+    ).repeat_interleave(128, dim=2)
+    reference_values = []
+    reference_scales = []
+    for expert_id in range(packed.shape[0]):
+        values, scales = _reference_fp4_dequant(
+            packed[expert_id], scale_bytes[expert_id]
+        )
+        reference_values.append(values)
+        reference_scales.append(scales)
+    reference_values = torch.stack(reference_values)
+    reference_scales = torch.stack(reference_scales)
     assert torch.equal(reconstructed, reference_values * reference_scales)
 
 
@@ -131,10 +157,10 @@ def test_rocm_dequant_fp4_to_fp8(
 
     monkeypatch.setattr(fp8_quant, "_use_aiter", True)
     monkeypatch.setattr(fp8_quant, "_is_fp8_fnuz", True)
+    monkeypatch.setattr(fp8_quant, "shuffle_scale", shuffle_scale, raising=False)
+    monkeypatch.setattr(fp8_quant, "shuffle_weight", shuffle_weight, raising=False)
 
-    layer = _make_layer(
-        num_experts, 2 * intermediate_size, hidden_size, "cuda"
-    )
+    layer = _make_layer(num_experts, 2 * intermediate_size, hidden_size, "cuda")
     _add_w2(layer, num_experts, hidden_size, intermediate_size, "cuda")
     original_w13 = layer.w13_weight.data.clone()
     original_w13_scales = layer.w13_weight_scale_inv.data.clone()
@@ -152,16 +178,16 @@ def test_rocm_dequant_fp4_to_fp8(
     _assert_rocm_conversion(
         layer.w13_weight.data,
         layer.w13_weight_scale_inv.data,
-        original_w13[0],
-        original_w13_scales[0].view(torch.uint8),
-        fp8_quant.shuffle_weight,
+        original_w13,
+        original_w13_scales.view(torch.uint8),
+        shuffle_weight,
     )
     _assert_rocm_conversion(
         layer.w2_weight.data,
         layer.w2_weight_scale_inv.data,
-        original_w2[0],
-        original_w2_scales[0].view(torch.uint8),
-        fp8_quant.shuffle_weight,
+        original_w2,
+        original_w2_scales.view(torch.uint8),
+        shuffle_weight,
     )
 
 
@@ -174,6 +200,8 @@ def test_rocm_native_fp4_default(monkeypatch):
 
     monkeypatch.setattr(fp8_quant, "_use_aiter", True)
     monkeypatch.setattr(fp8_quant, "_is_fp8_fnuz", True)
+    monkeypatch.setattr(fp8_quant, "shuffle_scale", shuffle_scale, raising=False)
+    monkeypatch.setattr(fp8_quant, "shuffle_weight", shuffle_weight, raising=False)
 
     layer = _make_layer(2, 256, 128, "cuda")
     _add_w2(layer, 2, 128, 128, "cuda")
@@ -215,9 +243,18 @@ def test_non_rocm_dequant_fp4_to_fp8(monkeypatch):
     config.dequant_fp4_to_fp8 = True
     Fp8MoEMethod(config).process_weights_after_loading_block_quant(layer)
 
-    expected_weight, expected_scale = _expected_fp8_conversion(
-        original_w13[0], original_w13_scales[0].view(torch.uint8)
-    )
+    expected_weights = []
+    expected_scales = []
+    for expert_id in range(original_w13.shape[0]):
+        expert_weight, expert_scale = _expected_fp8_conversion(
+            original_w13[expert_id],
+            original_w13_scales[expert_id].view(torch.uint8),
+        )
+        expected_weights.append(expert_weight)
+        expected_scales.append(expert_scale)
+    expected_weight = torch.stack(expected_weights)
+    expected_scale = torch.stack(expected_scales)
+
     assert layer.w13_weight.dtype == torch.float8_e4m3fn
     assert layer.w13_weight_scale_inv.dtype == torch.float32
     assert torch.equal(
