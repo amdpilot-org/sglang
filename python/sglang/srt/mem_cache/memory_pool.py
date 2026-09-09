@@ -47,6 +47,9 @@ from sglang.kernels.ops.kvcache.cache_move import (
     set_kv_buffer_prefix_valid_tiled,
 )
 from sglang.kernels.ops.kvcache.kvcache import can_use_store_cache, store_cache
+from sglang.kernels.ops.kvcache.triton_store_cache import (
+    try_triton_store_cache_fp8,
+)
 from sglang.kernels.ops.quantization.fp8_kernel import fp8_dtype, is_fp8_fnuz
 from sglang.srt.configs.mamba_utils import BaseLinearStateParams
 from sglang.srt.constants import GPU_MEMORY_TYPE_KV_CACHE
@@ -2553,12 +2556,40 @@ class MHATokenToKVPool(KVCache):
             return
 
         if cache_k.dtype != self.dtype:
-            if k_scale is not None:
-                cache_k.div_(k_scale)
-            if v_scale is not None:
-                cache_v.div_(v_scale)
+            if (
+                _is_hip
+                and dcp_kv_mask is None
+                and not self.use_hnd
+                and self.kv_cache_layout == "nhd"
+                and self.dtype == torch.float8_e4m3fnuz
+            ):
+                layer_idx = layer_id - self.start_layer
+                if try_triton_store_cache_fp8(
+                    cache_k,
+                    cache_v,
+                    self.k_buffer[layer_idx],
+                    self.v_buffer[layer_idx],
+                    loc,
+                    k_scale,
+                    v_scale,
+                ):
+                    return
+
+            if _is_hip:
+                if k_scale is not None:
+                    cache_k = cache_k / k_scale
+                if v_scale is not None:
+                    cache_v = cache_v / v_scale
+            else:
+                if k_scale is not None:
+                    cache_k.div_(k_scale)
+                if v_scale is not None:
+                    cache_v.div_(v_scale)
             cache_k = cache_k.to(self.dtype)
             cache_v = cache_v.to(self.dtype)
+            if _is_hip:
+                cache_k = cache_k.contiguous()
+                cache_v = cache_v.contiguous()
 
         if self.store_dtype != self.dtype:
             cache_k = cache_k.view(self.store_dtype)

@@ -27,7 +27,206 @@ _MLA_ROPE_TILE_ID = 7  # tile id reserved for the rope copy
 # C4 indexer paged FP8 cache layout
 _INDEXER_HEAD_DIM = 128
 
+_ALIGNMENT_BYTES = 16
+
 _UE8M0_EXPONENT_BIAS = 127
+
+
+@triton.jit(
+    do_not_specialize=[
+        "k_ptr",
+        "v_ptr",
+        "k_cache_ptr",
+        "v_cache_ptr",
+        "indices_ptr",
+        "k_scale_ptr",
+        "v_scale_ptr",
+        "k_scale_value",
+        "v_scale_value",
+        "size_limit",
+    ]
+)
+def _triton_store_cache_fp8_kernel(
+    k_ptr,
+    v_ptr,
+    k_cache_ptr,
+    v_cache_ptr,
+    indices_ptr,
+    k_scale_ptr,
+    v_scale_ptr,
+    k_scale_value,
+    v_scale_value,
+    size_limit,
+    K_ROW_DIM: tl.constexpr,
+    V_ROW_DIM: tl.constexpr,
+    BLOCK: tl.constexpr,
+    USE_K_SCALE: tl.constexpr,
+    USE_V_SCALE: tl.constexpr,
+    K_SCALE_IS_PTR: tl.constexpr,
+    V_SCALE_IS_PTR: tl.constexpr,
+    FP8_MIN: tl.constexpr,
+    FP8_MAX: tl.constexpr,
+):
+    token_id = tl.program_id(0).to(tl.int64)
+    loc = tl.load(indices_ptr + token_id).to(tl.int64)
+    tl.device_assert(loc >= 0 and loc < size_limit, "KV cache index out of bounds")
+    if loc == 0:
+        return
+
+    offsets = tl.program_id(1) * BLOCK + tl.arange(0, BLOCK)
+    k_mask = offsets < K_ROW_DIM
+    v_mask = offsets < V_ROW_DIM
+
+    k = tl.load(
+        k_ptr + token_id * K_ROW_DIM + offsets, mask=k_mask, other=0.0
+    ).to(tl.float32)
+    v = tl.load(
+        v_ptr + token_id * V_ROW_DIM + offsets, mask=v_mask, other=0.0
+    ).to(tl.float32)
+
+    if USE_K_SCALE:
+        if K_SCALE_IS_PTR:
+            k = tl.div_rn(k, tl.load(k_scale_ptr).to(tl.float32))
+        else:
+            k = tl.div_rn(k, k_scale_value)
+    if USE_V_SCALE:
+        if V_SCALE_IS_PTR:
+            v = tl.div_rn(v, tl.load(v_scale_ptr).to(tl.float32))
+        else:
+            v = tl.div_rn(v, v_scale_value)
+
+    k = tl.clamp(k, FP8_MIN, FP8_MAX).to(k_cache_ptr.dtype.element_ty)
+    v = tl.clamp(v, FP8_MIN, FP8_MAX).to(v_cache_ptr.dtype.element_ty)
+    tl.store(
+        k_cache_ptr + loc * K_ROW_DIM + offsets, k, mask=k_mask
+    )
+    tl.store(
+        v_cache_ptr + loc * V_ROW_DIM + offsets, v, mask=v_mask
+    )
+
+
+def _valid_fp8_scale(scale, device: torch.device) -> bool:
+    return (
+        scale is None
+        or isinstance(scale, (float, int))
+        or (
+            isinstance(scale, torch.Tensor)
+            and scale.numel() == 1
+            and scale.dtype == torch.float32
+            and scale.device == device
+            and scale.is_contiguous()
+        )
+    )
+
+
+def _is_16_byte_aligned(*tensors: torch.Tensor) -> bool:
+    return all(tensor.data_ptr() % _ALIGNMENT_BYTES == 0 for tensor in tensors)
+
+
+def try_triton_store_cache_fp8(
+    k: torch.Tensor,
+    v: torch.Tensor,
+    k_cache: torch.Tensor,
+    v_cache: torch.Tensor,
+    indices: torch.Tensor,
+    k_scale,
+    v_scale,
+) -> bool:
+    """Try a one-launch BF16/FP16-to-FP8 scale/cast/scatter store.
+
+    The caller must use the unfused path when this returns False. The conditions
+    are deliberately conservative: NHD rows must be contiguous and 16-byte
+    aligned, and device scales must be one-element float32 tensors.
+    """
+    if (
+        k.dtype not in (torch.bfloat16, torch.float16)
+        or _FP8_DTYPE != torch.float8_e4m3fnuz
+        or k_cache.dtype != torch.uint8
+        or v_cache.dtype != torch.uint8
+        or k.ndim != 3
+        or v.ndim != 3
+        or k.shape[0] != v.shape[0]
+        or k.shape[1] != v.shape[1]
+        or k.device != v.device
+        or k.device != k_cache.device
+        or k.device != v_cache.device
+        or k.device != indices.device
+        or indices.ndim != 1
+        or indices.shape[0] != k.shape[0]
+        or indices.dtype not in (torch.int32, torch.int64)
+        or not (
+            k.is_contiguous()
+            and v.is_contiguous()
+            and k_cache.is_contiguous()
+            and v_cache.is_contiguous()
+            and indices.is_contiguous()
+        )
+        or not _is_16_byte_aligned(k, v, k_cache, v_cache, indices)
+        or not _valid_fp8_scale(k_scale, k.device)
+        or not _valid_fp8_scale(v_scale, v.device)
+    ):
+        return False
+
+    k_row_dim = k.shape[1] * k.shape[2]
+    v_row_dim = v.shape[1] * v.shape[2]
+    if (
+        k_row_dim == 0
+        or v_row_dim == 0
+        or k_cache.shape[1:] != k.shape[1:]
+        or v_cache.shape[1:] != v.shape[1:]
+        or k_row_dim * k.element_size() % _ALIGNMENT_BYTES != 0
+        or v_row_dim * v.element_size() % _ALIGNMENT_BYTES != 0
+        or k_row_dim * k_cache.element_size() % _ALIGNMENT_BYTES != 0
+        or v_row_dim * v_cache.element_size() % _ALIGNMENT_BYTES != 0
+    ):
+        return False
+
+    num_tokens = k.shape[0]
+    if num_tokens == 0:
+        return True
+
+    k_cache_rows = k_cache.view(_FP8_DTYPE).view(-1, k_row_dim)
+    v_cache_rows = v_cache.view(_FP8_DTYPE).view(-1, v_row_dim)
+    block = triton.next_power_of_2(max(k_row_dim, v_row_dim))
+    k_scale_ptr = k_scale if isinstance(k_scale, torch.Tensor) else k
+    v_scale_ptr = v_scale if isinstance(v_scale, torch.Tensor) else v
+    k_scale_value = (
+        1.0
+        if k_scale is None or isinstance(k_scale, torch.Tensor)
+        else float(k_scale)
+    )
+    v_scale_value = (
+        1.0
+        if v_scale is None or isinstance(v_scale, torch.Tensor)
+        else float(v_scale)
+    )
+
+    grid = (num_tokens, triton.cdiv(max(k_row_dim, v_row_dim), block))
+    args = (
+        k,
+        v,
+        k_cache_rows,
+        v_cache_rows,
+        indices,
+        k_scale_ptr,
+        v_scale_ptr,
+        k_scale_value,
+        v_scale_value,
+        k_cache_rows.shape[0],
+    )
+    kwargs = {
+        "K_ROW_DIM": k_row_dim,
+        "V_ROW_DIM": v_row_dim,
+        "BLOCK": block,
+        "USE_K_SCALE": k_scale is not None,
+        "USE_V_SCALE": v_scale is not None,
+        "K_SCALE_IS_PTR": isinstance(k_scale, torch.Tensor),
+        "V_SCALE_IS_PTR": isinstance(v_scale, torch.Tensor),
+        "FP8_MIN": _FP8_INFO.min,
+        "FP8_MAX": _FP8_INFO.max,
+    }
+    _triton_store_cache_fp8_kernel[grid](*args, **kwargs)
+    return True
 
 
 @triton.jit
