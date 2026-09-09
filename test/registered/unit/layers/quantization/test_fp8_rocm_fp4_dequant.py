@@ -1,8 +1,6 @@
 import pytest
 import torch
 
-from sglang.srt.layers.quantization.fp8 import Fp8Config, Fp8MoEMethod
-
 
 FP4_VALUES = torch.tensor(
     [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0]
@@ -153,6 +151,7 @@ def test_rocm_dequant_fp4_to_fp8(
     monkeypatch, num_experts, hidden_size, intermediate_size
 ):
     from sglang.srt.layers.quantization import fp8 as fp8_quant
+    from sglang.srt.layers.quantization.fp8 import Fp8Config, Fp8MoEMethod
 
     shuffle_mod = pytest.importorskip("aiter.ops.shuffle")
     shuffle_scale = shuffle_mod.shuffle_scale
@@ -200,6 +199,7 @@ def test_rocm_dequant_fp4_to_fp8(
 )
 def test_rocm_native_fp4_default(monkeypatch):
     from sglang.srt.layers.quantization import fp8 as fp8_quant
+    from sglang.srt.layers.quantization.fp8 import Fp8Config, Fp8MoEMethod
 
     shuffle_mod = pytest.importorskip("aiter.ops.shuffle")
     shuffle_scale = shuffle_mod.shuffle_scale
@@ -232,6 +232,7 @@ def test_rocm_native_fp4_default(monkeypatch):
 
 def test_non_rocm_dequant_fp4_to_fp8(monkeypatch):
     from sglang.srt.layers.quantization import fp8 as fp8_quant
+    from sglang.srt.layers.quantization.fp8 import Fp8Config, Fp8MoEMethod
 
     monkeypatch.setattr(fp8_quant, "_use_aiter", False)
     monkeypatch.setattr(fp8_quant, "_is_fp8_fnuz", False)
