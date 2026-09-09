@@ -114,6 +114,7 @@ Raw outputs and pass status are in `/job/tp8_validation.json` and `/job/tp8_vali
 - `/job/artifact_manifest.json` — SHA256 checksums and sizes for all required artifacts.
 - `/job/pr56_synthetic_regression.log` — first patched synthetic regression run.
 - `/job/pr56_synthetic_regression_rerun.log` — final patched synthetic regression rerun.
+- `/job/pr56_synthetic_regression_stable_final.log` — stable final patched synthetic regression rerun.
 - `/job/pr56_baseline_regression.log` — unpatched baseline synthetic regression.
 - `/job/server_full_graph_tilelang_failure.log` — default TileLang capture failure.
 - `/job/server.log` — successful TP8 server log.
