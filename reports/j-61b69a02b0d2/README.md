@@ -8,6 +8,10 @@ At the exact PR head `817319afcdf93e6830bc1e3ac8d63b9dd6b0df73`, the admitted FP
 
 The smallest kernel correction is preserved in [pr55-fp16-nan-payload.patch](pr55-fp16-nan-payload.patch). Its exact base is `817319afcdf93e6830bc1e3ac8d63b9dd6b0df73`; it is not applied to this current-main report branch. The correction detects NaN before `tl.clamp`, canonicalizes the FP8 payload to `0x80`, and adds a zero-scale FP16 regression test. With that patch, all focused FP16 cases pass byte-exactly and the neighboring BF16 test file passes (`8 passed`). No FP16 case remains unresolved after the candidate patch.
 
+## Final handoff
+
+The current-main mirror PR is [PR 63](https://github.com/amdpilot-org/sglang/pull/63), opened as a draft and left unmerged. Its report-only branch is `amdpilot/j-61b69a02b0d2`, cut from `main` at `ffe98a4279ba6e42d1f87dc4eeb6edb4887b9ea4`. The exact-base candidate patch remains clearly identified and unmerged; it is not silently claimed to be part of current `main`.
+
 ## Environment and checkouts
 
 - Validation control: `/job/sglang-validation-817319`, detached at `817319afcdf93e6830bc1e3ac8d63b9dd6b0df73`, clean.
