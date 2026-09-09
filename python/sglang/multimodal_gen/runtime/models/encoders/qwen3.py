@@ -3,6 +3,7 @@ from typing import Any
 
 import torch
 from torch import nn
+from torch.distributed.tensor import DTensor, distribute_tensor
 
 from sglang.multimodal_gen.configs.models.encoders import BaseEncoderOutput
 from sglang.multimodal_gen.configs.models.encoders.qwen3 import Qwen3TextConfig
@@ -26,6 +27,9 @@ from sglang.multimodal_gen.runtime.loader.weight_utils import (
 from sglang.multimodal_gen.runtime.models.encoders.base import TextEncoder
 from sglang.srt.layers.activation import SiluAndMul
 from sglang.srt.layers.layernorm import RMSNorm
+
+_FUSED_SHARD_ORDER = {"q": 0, "k": 1, "v": 2}
+_FUSED_SHARD_COUNTS = {".qkv_proj.weight": 3, ".gate_up_proj.weight": 2}
 
 
 class Qwen3MLP(nn.Module):
@@ -364,6 +368,35 @@ class Qwen3ForCausalLM(TextEncoder):
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
 
+    @staticmethod
+    def _get_distributed_param(
+        param: torch.Tensor,
+    ) -> DTensor | None:
+        if isinstance(param, DTensor):
+            return param
+        if isinstance(param.data, DTensor):
+            return param.data
+        return None
+
+    def _copy_distributed_weight(
+        self,
+        param: torch.Tensor,
+        loaded_weight: torch.Tensor,
+    ) -> None:
+        distributed_param = self._get_distributed_param(param)
+        assert distributed_param is not None
+        if tuple(distributed_param.shape) != tuple(loaded_weight.shape):
+            raise ValueError(
+                f"Tried to load sharded weight of size {loaded_weight.size()} "
+                f"to parameter {param.size()}"
+            )
+        distributed_weight = distribute_tensor(
+            loaded_weight.to(distributed_param.dtype),
+            distributed_param.device_mesh,
+            distributed_param.placements,
+        )
+        distributed_param._local_tensor.copy_(distributed_weight._local_tensor)
+
     def forward(
         self,
         input_ids: torch.Tensor | None = None,
@@ -428,6 +461,7 @@ class Qwen3ForCausalLM(TextEncoder):
         """Load weights with support for tensor parallelism and weight remapping."""
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
+        fused_shards: dict[str, dict[int, torch.Tensor]] = {}
 
         for name, loaded_weight in weights:
             # Strip 'model.' prefix from HuggingFace Qwen3 weights
@@ -466,6 +500,16 @@ class Qwen3ForCausalLM(TextEncoder):
                     continue
 
                 param = params_dict[name]
+                distributed_param = self._get_distributed_param(param)
+                if distributed_param is not None:
+                    if shard_id is None:
+                        self._copy_distributed_weight(param, loaded_weight)
+                        loaded_params.add(name)
+                    else:
+                        shard_index = _FUSED_SHARD_ORDER.get(shard_id, shard_id)
+                        fused_shards.setdefault(name, {})[shard_index] = loaded_weight
+                    break
+
                 weight_loader = param.weight_loader
                 weight_loader(param, loaded_weight, shard_id)
                 break
@@ -478,9 +522,37 @@ class Qwen3ForCausalLM(TextEncoder):
                     continue
 
                 param = params_dict[name]
-                weight_loader = getattr(param, "weight_loader", default_weight_loader)
-                weight_loader(param, loaded_weight)
+                if self._get_distributed_param(param) is not None:
+                    self._copy_distributed_weight(param, loaded_weight)
+                else:
+                    weight_loader = getattr(
+                        param, "weight_loader", default_weight_loader
+                    )
+                    weight_loader(param, loaded_weight)
 
+            if name not in fused_shards:
+                loaded_params.add(name)
+
+        for name, shards in fused_shards.items():
+            param = params_dict[name]
+            shard_count = next(
+                (
+                    count
+                    for suffix, count in _FUSED_SHARD_COUNTS.items()
+                    if name.endswith(suffix)
+                ),
+                None,
+            )
+            if shard_count is None or set(shards) != set(range(shard_count)):
+                raise ValueError(
+                    f"Incomplete fused weight shards for {name}: "
+                    f"{sorted(shards)!r}"
+                )
+            output_dim = getattr(param, "output_dim", 0)
+            loaded_weight = torch.cat(
+                [shards[index] for index in range(shard_count)], dim=output_dim
+            )
+            self._copy_distributed_weight(param, loaded_weight)
             loaded_params.add(name)
 
         return loaded_params
