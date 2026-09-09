@@ -2562,6 +2562,7 @@ class MHATokenToKVPool(KVCache):
                 and not self.use_hnd
                 and self.kv_cache_layout == "nhd"
                 and self.dtype == torch.float8_e4m3fnuz
+                and (k_scale is not None or v_scale is not None)
             ):
                 layer_idx = layer_id - self.start_layer
                 if try_triton_store_cache_fp8(
