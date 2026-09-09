@@ -2,7 +2,7 @@
 
 ## Status
 
-**Semantic A/B: PENDING.** This draft records the durable setup and exact planned experiment. It does not claim startup, graph capture, microprobe, or single-GPU qualification as whole-model generation success.
+**Semantic A/B: FAILED.** The isolated PR60 FP8 software-conversion patch did not turn the failed long-generation control into coherent, correct, repeatable, EOS-completed generation. See `A_B_RESULT.md` for the full measured result and limits.
 
 ## Identities
 
