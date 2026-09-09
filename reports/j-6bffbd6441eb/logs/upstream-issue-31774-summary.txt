@@ -1,0 +1,71 @@
+number=31774
+title=[RFC] Backend, KV dtype and platform compatibility is checked case by case, and the responses are inconsistent
+state=OPEN
+url=https://github.com/sgl-project/sglang/issues/31774
+
+### Motivation
+
+While fixing #31346 I noticed that the bug I was fixing is one instance of a pattern, and that the project handles that pattern in at least four different ways depending on who wrote the code.
+
+The concrete bug: `--kv-cache-dtype fp8_e4m3` together with `--dsa-decode-backend tilelang` is accepted on CUDA. The tilelang sparse kernel only has an fp8 path under ROCm, and on CUDA the kernel is compiled for bfloat16, so the server boots, loads the weights, and dies at decode CUDA-graph capture with `kernel main input KV dtype expected bfloat16, but got float8_e4m3fn`. I verified this on H100 at kernel level and on a DSA model across 4 nodes. The fix is three lines in argument resolution.
+
+That fix is fine on its own. What bothers me is how it got there.
+
+### The pattern
+
+Constraints of the form "backend X only works on platform Y" or "backend X only supports kv-cache-dtype Z" are written by hand, one at a time, usually inside the PR that integrated the backend. `arg_groups/overrides.py` currently has 13 `raise ValueError` guards and `server_args.py` has 98 plus 101 asserts. Two of the DSA ones sit a few hundred lines below the guard I added and have exactly the same shape:
+
+```python
+if not is_blackwell_supported():
+    raise ValueError("TRTLLM MLA backend is only supported on Blackwell GPUs (SM100/SM12x). Please use a different backend.")
+if view.kv_cache_dtype not in ["fp8_e4m3", "fp4_e2m1", "bf16", "auto"]:
+    raise ValueError("TensorRT-LLM MLA backend only supports kv-cache-dtype of fp8_e4m3, fp4_e2m1, bf16, or auto.")
+```
+
+Because each one is added independently, two things drift.
+
+**The coverage is uneven.** In the DSA arm, of the 7 entries in `DSA_CHOICES` only 3 appear in any validation condition at all. `flashmla_sparse`, `flashmla_kv`, `flashmla_auto` and `trtllm` have none. This is awkward in my own case, because the error message I just added tells users to switch to `flashmla_kv` on Hopper or `trtllm` on Blackwell, and nothing checks that those accept what the user passes.
+
+**The response is inconsistent.** Looking at merged PRs that deal with an unsupported combination, there are at least four different behaviours, all reasonable in isolation:
+
+#23903 rejects the combination with an error. #31532 silently auto-disables one of the two features. #30463 keeps going and logs a warning. #23139 silently falls back to a different backend. #28689 is interesting because it was explicitly about deduplicating such asserts and filling one missing guard, which suggests I am not the first person to notice the shape.
+
+From a user's point of view these are very different contracts. One tells you to fix your flags, one changes your configuration without asking, one changes it and mentions it in the log, and one changes it quietly. Today which of the four you get depends on which subsystem you happened to touch.
+
+### Why it costs something
+
+Because the check is missing rather than wrong, the failure surfaces late. In my case the server allocated the KV pool and reached decode CUDA-graph capture first, so on a multi-node deployment every attempt costs a full model load. Related reports look similar from the outside: #22277 is an fp8 KV dtype mismatch in Triton extend attention, #5700 is an fp8 KV cache producing nonsense output on fa3, #20163 is about incompatible KV layouts between trtllm and flashMLA.
+
+### Prior work I found
+
+#20481 refactored `server_args.py` and mentioned that each argument group could own its validation, but it was about code organisation rather than about whether the matrix is complete. #29630 is about the kernel namespace and notes in passing that backend coverage is hard to inspect. I did not find anything that treats the compatibility matrix itself as a thing to be filled in, so please point me at it if it exists.
+
+### What I propose
+
+Two steps, deliberately small, and the second one does not depend on the first.
+
+**Step 1: fill one arm and see whether the shape holds.** Make the DSA compatibility matrix explicit as a declarative table living next to `_dsa_split_backend_resolution`, covering the 7 entries of `DSA_CHOICES` against the KV dtypes and platforms, with unit tests for every cell and hardware checks for the cells I can reach. Scope stays inside the DSA arm, nothing else changes, and it is easy to revert if the shape turns out to be wrong. The point of starting here is that the gaps are already known and I can verify them rather than guess.
+
+**Step 2: write down which response is correct.** Independently of any table, agree on when an unsupported combination should raise, when it should auto-disable a feature, when it should fall back to another backend, and when a warning is enough. This costs almost nothing, it is a paragraph in the contribution guide plus review attention, and it stops the four behaviours above from multiplying further.
+
+If step 1 works out, the natural continuation is to push the declarations from the table into the backends themselves, so each backend states its own platforms and dtypes and the resolver checks generically. I am deliberately not proposing that now: the DSA backends are plain strings in `DSA_CHOICES` dispatched through if/elif rather than registered objects, so doing it properly means introducing a registry first, and that is a much larger change than the problem currently justifies. Attention backends are in better shape for it, since they already have classes.
+
+I also considered simply continuing to add guards by hand as gaps are found. That is the status quo, it is cheap per fix, and it needs no agreement from anyone, but the gaps keep being found by users in production and the inconsistent response stays. My own fix was found that way, which is what prompted this.
+
+### What I am asking
+
+Does this seem worth doing, or is case-by-case the deliberate choice here? If it is worth doing, is step 1 scoped the way you would want it, and does anyone object to starting in the DSA arm specifically? I am happy to write it, and I have hardware to verify the DSA cells on.
+
+
+--- comments ---
+[2026-07-27T21:56:04Z] mosya415:
+I want to take the DSA slice of this as a first concrete step, continuing #31346 which is now merged.
+
+The idea: replace the if/elif in `_dsa_split_backend_resolution` with one declarative table. Each backend declares the cells it supports: platform (sm90, sm100, hip), kv-cache dtype, and phase (prefill or decode, since flashmla_auto is prefill-only, see #31344), plus a priority used for defaulting. The table is the single source for three things. Defaulting picks the highest-priority supported cell. Validation rejects any combination outside the table with one uniform error that lists the valid backends for the given dtype and platform, generated from the table instead of hand-written like in #31346. A parametrized test iterates the full product of axes, so every supported and unsupported cell is asserted, and a backend added without declared cells fails the test by itself.
+
+The first PR keeps all current defaults unchanged, only the rejection behavior becomes uniform, so the diff is easy to check. The real cells I can verify on H100.
+
+Field names (backend, platform, dtype, phase, priority) are picked so the wider 1.3 metadata (scheme, granularity, kernel) can extend the same shape later. If the registry format is planned differently, I will adapt the table to it.
+
+[2026-07-27T22:15:31Z] mosya415:
+The DSA table described above is now up as #32576. Defaults are unchanged (the old branches are pinned as the spec in the unit test over the full input product), rejections are limited to combinations already proven unsupported, and every cell of the matrix is asserted. Feedback on the cell format welcome, I will align it with the wider 1.3 metadata shape if it is planned differently.
