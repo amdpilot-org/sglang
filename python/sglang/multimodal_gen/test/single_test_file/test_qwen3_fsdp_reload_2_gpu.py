@@ -242,6 +242,9 @@ def _worker() -> int:
     assert len(reloaded_params) == len(initial_params)
 
     reference = Qwen3ForCausalLM(config).to(device).eval()
+    assert all(
+        _distributed_param(param) is None for _, param in reference.named_parameters()
+    )
     torch.cuda.synchronize()
     torch.distributed.barrier()
     unsharded_reload_start = time.perf_counter()
