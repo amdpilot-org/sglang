@@ -221,6 +221,8 @@ def _worker() -> int:
     initial_dir = Path(checkpoint_root) / "initial" / "text_encoder"
     initial_params = _load_checkpoint(model, initial_dir, device)
     assert len(initial_params) == len(dict(model.named_parameters()))
+    assert "layers.0.self_attn.qkv_proj.weight" in initial_params
+    assert "layers.0.mlp.gate_up_proj.weight" in initial_params
     shard_model(
         model,
         cpu_offload=False,
