@@ -107,3 +107,16 @@ Raw outputs and pass status are in `/job/tp8_validation.json` and `/job/tp8_vali
 - The default TileLang FlashMLA path fails during graph capture on this runtime; the successful control explicitly selected the Triton backend.
 - Longer greedy continuations can diverge after the expected answer. `/job/tp8_validation_longer_nondeterminism.log` preserves that observation. The declared deterministic sample therefore checks exact two-token numerical answers and a stable factual answer.
 - The container did not expose its Docker image name or digest; the actual runtime versions and image-installed source commit are recorded above.
+
+## Artifact index
+
+- `/job/commands.log` — every baseline, patched, server, inference, recovery, and publish command.
+- `/job/pr56_synthetic_regression.log` — first patched synthetic regression run.
+- `/job/pr56_synthetic_regression_rerun.log` — final patched synthetic regression rerun.
+- `/job/pr56_baseline_regression.log` — unpatched baseline synthetic regression.
+- `/job/server_full_graph_tilelang_failure.log` — default TileLang capture failure.
+- `/job/server.log` — successful TP8 server log.
+- `/job/graph_capture_summary.json` — all-rank capture/dequantization summary.
+- `/job/tp8_validation.json` — fixed inference requests and deterministic numerical results.
+- `/job/model_identity.json`, `/job/gpu_identities.json`, `/job/torch_hip.json` — checkpoint and runtime identity.
+- `/job/recovery-latest.patch` — complete base-to-current binary diff.
