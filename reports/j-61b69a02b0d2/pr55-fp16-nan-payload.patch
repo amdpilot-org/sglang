@@ -1,5 +1,5 @@
 diff --git a/python/sglang/kernels/ops/kvcache/triton_store_cache.py b/python/sglang/kernels/ops/kvcache/triton_store_cache.py
-index dfb577764..d48387f73 100644
+index dfb577764c31ecce5af6943af1ca4f5c554a9a0e..d48387f73d06d5d959ebe08cb81e107cf82aaa37 100644
 --- a/python/sglang/kernels/ops/kvcache/triton_store_cache.py
 +++ b/python/sglang/kernels/ops/kvcache/triton_store_cache.py
 @@ -95,8 +95,18 @@ def _triton_store_cache_fp8_kernel(
@@ -24,9 +24,20 @@ index dfb577764..d48387f73 100644
          k_cache_ptr + loc * K_ROW_DIM + offsets, k, mask=k_mask
      )
 diff --git a/test/registered/unit/mem_cache/test_mha_fp8_kv_write_hip.py b/test/registered/unit/mem_cache/test_mha_fp8_kv_write_hip.py
-index 49815dd72..e62e56c30 100644
+index 49815dd727dd74ca5a712af888459a7c8ef41ca7..d8cc70c47ceb4afd81369d76851c1d393cce1174 100644
 --- a/test/registered/unit/mem_cache/test_mha_fp8_kv_write_hip.py
 +++ b/test/registered/unit/mem_cache/test_mha_fp8_kv_write_hip.py
+@@ -86,8 +86,8 @@ class TestMHAFP8KVWriteHIP(unittest.TestCase):
+         expected_k, expected_v = _reference(
+             pool, k, v, loc, k_scale, v_scale
+         )
+-        self.assertTrue(torch.equal(k, k_before))
+-        self.assertTrue(torch.equal(v, v_before))
++        self.assertTrue(torch.equal(k.view(torch.uint8), k_before.view(torch.uint8)))
++        self.assertTrue(torch.equal(v.view(torch.uint8), v_before.view(torch.uint8)))
+         self.assertTrue(torch.equal(pool.k_buffer[0], expected_k))
+         self.assertTrue(torch.equal(pool.v_buffer[0], expected_v))
+ 
 @@ -125,6 +125,17 @@ class TestMHAFP8KVWriteHIP(unittest.TestCase):
          k = values.view(1, 1, 8).expand(1, 2, 8).contiguous()
          self._run_write(pool, k, k, loc)
@@ -35,7 +46,7 @@ index 49815dd72..e62e56c30 100644
 +        pool = _build_pool(head_dim=8, v_head_dim=8)
 +        loc = torch.tensor([1], device="cuda")
 +        values = torch.tensor(
-+            [1.0, -1.0, 2.0, -2.0, 4.0, -4.0, 8.0, -8.0],
++            [0.0, -0.0, float("nan"), float("nan"), 1.0, -1.0, 8.0, -8.0],
 +            device="cuda",
 +            dtype=torch.float16,
 +        )

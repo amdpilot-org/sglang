@@ -4,9 +4,9 @@
 
 This report continues the unresolved FP16 verification for [PR 55](https://github.com/amdpilot-org/sglang/pull/55), which addresses [sgl-project/sglang issue 30815](https://github.com/sgl-project/sglang/issues/30815). It does not duplicate or merge PR 55's runtime change into current `main`.
 
-At the exact PR head `817319afcdf93e6830bc1e3ac8d63b9dd6b0df73`, the admitted FP16 fused path is byte-exact for finite values, scalar/device scales, changed graph-replay slots and scales, asymmetric rows, no-scale fallback, noncontiguous fallback, and row-alignment fallback. Two admitted adversarial cases failed exact byte comparison: direct NaN input and zero scale producing NaN. The existing GPU fallback and independent CPU cast encode this NaN as `0x80`; the fused Triton cast encoded it as `0xff`.
+At the exact PR head `817319afcdf93e6830bc1e3ac8d63b9dd6b0df73`, the admitted FP16 fused path is byte-exact for finite values, scalar/device scales, changed graph-replay slots and scales, asymmetric rows, no-scale fallback, noncontiguous fallback, and row-alignment fallback. Two admitted adversarial cases failed exact byte comparison: direct NaN input and zero scale producing NaN. The existing GPU fallback and independent CPU cast encode this NaN as `0x80`; the fused Triton cast encoded it as `0xff`. In E4M3FNUZ, `0xff` decodes to finite `-240`, while `0x80` is NaN: this changes numerical semantics, not merely a NaN payload.
 
-The smallest kernel correction is preserved in [pr55-fp16-nan-payload.patch](pr55-fp16-nan-payload.patch). Its exact base is `817319afcdf93e6830bc1e3ac8d63b9dd6b0df73`; it is not applied to this current-main report branch. The correction detects NaN before `tl.clamp`, canonicalizes the FP8 payload to `0x80`, and adds a zero-scale FP16 regression test. With that patch, all focused FP16 cases pass byte-exactly and the neighboring BF16 test file passes (`8 passed`). No FP16 case remains unresolved after the candidate patch.
+The smallest kernel correction is preserved in [pr55-fp16-nan-payload.patch](pr55-fp16-nan-payload.patch). Its exact base is `817319afcdf93e6830bc1e3ac8d63b9dd6b0df73`; it is not applied to this current-main report branch. The correction detects NaN before `tl.clamp`, canonicalizes the FP8 payload to `0x80`, and adds a zero-scale FP16 regression test. With that patch, all focused FP16 cases pass byte-exactly and the neighboring BF16 test file passes (`8 passed`). Every case in the bounded FP16 matrix passed after the candidate patch.
 
 ## Final handoff
 
@@ -53,7 +53,7 @@ The synchronized latency harness records CUDA-event elapsed time after warmup an
 
 - Baseline matrix: [pr55_fp16_baseline_validation.json](pr55_fp16_baseline_validation.json)
 - Candidate matrix: [pr55_fp16_candidate_validation.json](pr55_fp16_candidate_validation.json)
-- Candidate neighboring test log: [pr55_candidate_existing_and_nan_test.log](pr55_candidate_existing_and_nan_test.log)
+- Candidate neighboring test log: [operator-regression/candidate-neighbors.log](operator-regression/candidate-neighbors.log)
 - Latency rounds: [pr55_baseline_latency_round1.json](pr55_baseline_latency_round1.json), [pr55_baseline_latency_round2.json](pr55_baseline_latency_round2.json), [pr55_candidate_latency_round1.json](pr55_candidate_latency_round1.json), [pr55_candidate_latency_round2.json](pr55_candidate_latency_round2.json)
 
 ### Validation matrix
@@ -66,8 +66,8 @@ The synchronized latency harness records CUDA-event elapsed time after warmup an
 | FP16 device scales | PASS | PASS |
 | FP16 no-scale existing fallback | PASS | PASS |
 | FP16 asymmetric rows | PASS | PASS |
-| FP16 saturation/underflow/sign boundaries | PASS for finite values; FAIL for NaN payload | PASS |
-| FP16 zero scale (publicly admitted) | FAIL: NaN payload `0xff` vs expected `0x80` | PASS |
+| FP16 saturation/underflow/sign boundaries | PASS for finite values; FAIL for NaN encoding | PASS |
+| FP16 zero scale (publicly admitted) | FAIL: finite `-240` (`0xff`) vs expected NaN (`0x80`) | PASS |
 | FP16 noncontiguous input fallback | PASS | PASS |
 | FP16 unsupported device-scale dtype fallback | PASS | PASS |
 | FP16 row-alignment fallback | PASS | PASS |
@@ -75,7 +75,7 @@ The synchronized latency harness records CUDA-event elapsed time after warmup an
 | BF16 device-scale control | PASS | PASS |
 | FP16 CUDA graph with changed slots/device scales | PASS | PASS |
 
-All passing comparisons had zero mismatched K and V cache bytes. The baseline failures were isolated to NaN payload bytes; finite saturation, underflow, sign, zero, infinity, and negative-zero values matched exactly.
+All passing comparisons had zero mismatched K and V cache bytes. The baseline failures were isolated to NaN encodings; finite saturation, underflow, sign, zero, infinity, and negative-zero values matched exactly.
 
 ### Paired latency
 
@@ -88,3 +88,35 @@ The runtime candidate changes the fused kernel, so synchronized paired baseline/
 | 64 tokens, 8 heads, 192/128, scalar scales | 37.350, 34.795 | 36.201, 35.409 | 36.072 | 35.805 | -0.74% |
 
 These are microbenchmarks of the cache-write entrypoint only. No full model or overall inference speedup is claimed.
+
+## Independent regression review — 2026-09-09
+
+The original added test contained only nonzero finite inputs with zero scales.
+It passed against the unfixed kernel, so it did not guard the discovered NaN
+conversion defect. The corrected patch includes zero and NaN inputs, and
+compares input storage bytes to verify nonmutation: ordinary `torch.equal`
+returns false for unchanged NaNs.
+
+Scheduler job `j-9d17007881d8` ran the following on one MI300X/gfx942 with
+Torch 2.9.1, HIP 7.2.26015 and Triton 3.7.0:
+
+- Original test on the exact unfixed PR55 head: **1 passed**, confirming the
+  missing regression coverage.
+- Corrected test with bytewise input checks on the unfixed head: **1 failed**
+  at the cache/reference comparison.
+- The identical corrected test with the candidate kernel: **1 passed**.
+- Candidate neighboring test file: **8 passed**.
+- Independent dtype decoding: `0xff -> -240.0`, `0x80 -> NaN`.
+
+The initial operator attempt, `j-034c781ad5f4`, used ordinary input equality
+with NaNs and failed that assertion in both variants. It was not counted as
+a kernel regression. The later run above fixes the test oracle and supplies
+the valid red/green evidence.
+
+The complete corrected exact-base patch replaces the earlier patch file in
+this report. Only its test inputs and input-nonmutation checks changed; the
+measured production kernel correction is unchanged. The original matrix and
+latency data remain historical measurements of that same kernel. The patch
+is still an unmerged artifact, not runtime code in this report branch.
+
+Proof, commands and raw logs are under [operator-regression](operator-regression/).
