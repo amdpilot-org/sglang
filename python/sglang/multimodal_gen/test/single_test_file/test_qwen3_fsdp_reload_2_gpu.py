@@ -38,6 +38,8 @@ def _tiny_config():
             num_attention_heads=2,
             num_key_value_heads=2,
             head_dim=8,
+            attention_bias=True,
+            mlp_bias=True,
             max_position_embeddings=8,
             text_len=8,
         ),
@@ -57,14 +59,14 @@ def _checkpoint_weights(seed: int) -> dict[str, torch.Tensor]:
         if name == "embed_tokens.weight":
             value = value[: config.vocab_size]
         full_name = f"model.{name}"
-        if name.endswith(".qkv_proj.weight"):
+        if name.endswith((".qkv_proj.weight", ".qkv_proj.bias")):
             for shard_name, shard in zip(
                 ("q_proj", "k_proj", "v_proj"), value.chunk(3, dim=0)
             ):
                 weights[
                     full_name.replace("qkv_proj", shard_name)
                 ] = shard.contiguous()
-        elif name.endswith(".gate_up_proj.weight"):
+        elif name.endswith((".gate_up_proj.weight", ".gate_up_proj.bias")):
             for shard_name, shard in zip(
                 ("gate_proj", "up_proj"), value.chunk(2, dim=0)
             ):

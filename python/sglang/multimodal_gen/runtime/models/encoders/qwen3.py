@@ -29,7 +29,12 @@ from sglang.srt.layers.activation import SiluAndMul
 from sglang.srt.layers.layernorm import RMSNorm
 
 _FUSED_SHARD_ORDER = {"q": 0, "k": 1, "v": 2}
-_FUSED_SHARD_COUNTS = {".qkv_proj.weight": 3, ".gate_up_proj.weight": 2}
+_FUSED_SHARD_COUNTS = {
+    ".qkv_proj.weight": 3,
+    ".qkv_proj.bias": 3,
+    ".gate_up_proj.weight": 2,
+    ".gate_up_proj.bias": 2,
+}
 
 
 class Qwen3MLP(nn.Module):
