@@ -99,4 +99,19 @@ export PYTHONPATH=/job/sglang-pr38226/python
   python/sglang/multimodal_gen/test/unit/test_longlive2_pipeline_config.py \
   python/sglang/multimodal_gen/test/unit/test_longlive2_causal_frame_admission.py \
   -vv 2>&1 | tee /job/sglang/reports/j-1f4b84f307e4/pytest-pr-38226.log
+
+# Create the required delivery branch, commit, push, and open a draft PR.
+git checkout -b amdpilot/j-1f4b84f307e4
+git add python/sglang/multimodal_gen/test/unit/test_longlive2_causal_frame_admission.py \
+  reports/j-1f4b84f307e4
+git add -f reports/j-1f4b84f307e4/pytest-current-main.log \
+  reports/j-1f4b84f307e4/pytest-pr-38226.log
+git commit -m "test: validate LongLive2 causal frame admission"
+git push -u origin amdpilot/j-1f4b84f307e4
+git push --force-with-lease=refs/heads/amdpilot/j-1f4b84f307e4:3208edbb37ac2234ad953abc5b817eb1e6b3ac2e \
+  origin amdpilot/j-1f4b84f307e4
+gh pr create --repo amdpilot-org/sglang \
+  --base main --head amdpilot/j-1f4b84f307e4 --draft \
+  --title "test: validate LongLive2 causal frame admission" \
+  --body "<PR body summarized in README.md>"
 ```
