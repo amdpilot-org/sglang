@@ -95,7 +95,7 @@ SGL_DEVICE uint8_t cvt_float_to_fp8_e4m3(float val) {
   int32_t exp8;
   uint8_t mant3;
 
-  if (exp32 < kMinSubnormExp) {
+  if (exp32 < kMinSubnormExp - 1) {
 #if HIP_FP8_TYPE_FNUZ
     // E4M3FNUZ (gfx942) has no negative zero: byte 0x80 is NaN, not -0.0.
     // Returning `sign` (0x80) for an underflowing negative injects NaN into the
@@ -107,26 +107,35 @@ SGL_DEVICE uint8_t cvt_float_to_fp8_e4m3(float val) {
 #endif
   } else if (exp32 < kMinNormExp) {
     // Subnormal range
-    int32_t shift = -(kBias - 1) - exp32;  // 1..3
+    int32_t shift = -(kBias - 1) - exp32;  // 1..4
     uint32_t subnorm_mant = (0x800000 | mant23) >> (shift + 20);
     uint32_t round_bit = ((0x800000 | mant23) >> (shift + 19)) & 1;
-    subnorm_mant += round_bit;
+    uint32_t sticky = (0x800000 | mant23) & ((1u << (shift + 19)) - 1);
+    if (round_bit && (sticky || (subnorm_mant & 1))) subnorm_mant++;
     mant3 = static_cast<uint8_t>(subnorm_mant & 0x07);
     exp8 = 0;
     if (subnorm_mant > 7) {
       exp8 = 1;
       mant3 = 0;
     }
+#if HIP_FP8_TYPE_FNUZ
+    if (subnorm_mant == 0) return 0;
+#endif
   } else {
     exp8 = exp32 + kBias;
     mant3 = static_cast<uint8_t>(mant23 >> 20);
     uint32_t round_bit = (mant23 >> 19) & 1;
-    mant3 += round_bit;
+    uint32_t sticky = mant23 & 0x7FFFF;
+    if (round_bit && (sticky || (mant3 & 1))) mant3++;
     if (mant3 > 7) {
       mant3 = 0;
       exp8++;
     }
+#if HIP_FP8_TYPE_FNUZ
+    if (exp8 > kMaxExp) return sign | kSaturate;
+#else
     if (exp8 >= kMaxExp) return sign | kSaturate;
+#endif
   }
   return sign | (static_cast<uint8_t>(exp8) << 3) | mant3;
 }
