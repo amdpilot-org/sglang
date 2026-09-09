@@ -655,3 +655,62 @@ def test_mps_admission_requires_layerwise_residency_for_every_h3_component():
         modes["audio_vae"] = RESIDENT
         with pytest.raises(ValueError, match="audio_vae"):
             MiniMaxH3PipelineConfig.validate_server_args(config, server_args)
+
+
+def test_full_loop_denoise_admits_rocm_and_preserves_unsupported_error():
+    batch = SimpleNamespace(
+        extra={
+            "minimax_h3_text_embeddings": {},
+            "minimax_h3_denoise_state": {
+                "latent_t": 2,
+                "latent_h": 4,
+                "latent_w": 4,
+                "audio_t": 3,
+            },
+            "minimax_h3_sigmas": {"video": [1.0, 0.0], "audio": [1.0, 0.0]},
+        }
+    )
+    stage = SimpleNamespace(
+        _maybe_enable_cache_dit_and_torch_compile=lambda *_args, **_kwargs: None
+    )
+    platform_flags = {
+        "is_cuda": False,
+        "is_cpu": False,
+        "is_hip": True,
+        "is_mps": False,
+        "is_npu": False,
+        "is_xpu": False,
+    }
+
+    platform_mocks = {
+        name: lambda value=value: value for name, value in platform_flags.items()
+    }
+    with patch.multiple(current_platform, **platform_mocks):
+        with (
+            patch.object(
+                MiniMaxH3DenoisingStage,
+                "_maybe_enable_cache_dit_and_torch_compile",
+                lambda *_args, **_kwargs: None,
+            ),
+            patch(
+                "sglang.multimodal_gen.runtime.pipelines_core.stages.model_specific_stages.minimax_h3.stages.denoising._assemble_condition_rows",
+                side_effect=AssertionError("admitted past platform guard"),
+            ),
+        ):
+            with pytest.raises(AssertionError, match="admitted past platform guard"):
+                MiniMaxH3DenoisingStage._run_full_loop(
+                    stage, batch, SimpleNamespace()
+                )
+
+    platform_flags["is_hip"] = False
+    platform_mocks = {
+        name: lambda value=value: value for name, value in platform_flags.items()
+    }
+    with patch.multiple(current_platform, **platform_mocks):
+        with pytest.raises(
+            RuntimeError,
+            match="MiniMax H3 full-loop denoise requires CPU, CUDA, ROCm, MPS, XPU, or Ascend NPU",
+        ):
+            MiniMaxH3DenoisingStage._run_full_loop(
+                stage, batch, SimpleNamespace()
+            )

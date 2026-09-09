@@ -1,0 +1,121 @@
+=== upstream PR state ===
+{"closedAt":"2026-08-24T02:57:26Z","mergeCommit":null,"mergedAt":null,"number":35520,"state":"CLOSED","url":"https://github.com/sgl-project/sglang/pull/35520"}
+=== upstream main guard ===
+637-
+638-        if MINIMAX_H3_TEXT_EMBEDDINGS_EXTRA_KEY in batch.extra:
+639-            for required in (
+640-                MINIMAX_H3_DENOISE_STATE_EXTRA_KEY,
+641-                MINIMAX_H3_SIGMAS_EXTRA_KEY,
+642-            ):
+643-                if required not in batch.extra:
+644-                    raise ValueError(
+645:                        f"direct full-loop denoise requires batch.extra[{required!r}]"
+646-                    )
+647-            self._run_full_loop(batch, server_args)
+648-            return batch
+649-        if (
+650-            batch.latents is not None
+651-            or batch.audio_latents is not None
+652-            or batch.timestep is not None
+653-            or batch.timesteps is not None
+--
+677-        if not (
+678-            current_platform.is_cuda()
+679-            or current_platform.is_cpu()
+680-            or current_platform.is_mps()
+681-            or current_platform.is_npu()
+682-            or current_platform.is_xpu()
+683-        ):
+684-            raise RuntimeError(
+685:                "MiniMax H3 full-loop denoise requires CPU, CUDA, MPS, XPU, or Ascend NPU"
+686-            )
+687-
+688-        device = current_platform.get_local_torch_device()
+689-        sigmas_video = [float(v) for v in ctx.sigmas["video"]]
+690-        self._maybe_enable_cache_dit_and_torch_compile(
+691-            len(sigmas_video) - 1,
+692-            batch,
+693-        )
+=== related upstream PRs ===
+[{"mergedAt":null,"number":38671,"state":"OPEN","title":"[Fix] MiniMax H3: honor requested inference step count","url":"https://github.com/sgl-project/sglang/pull/38671"},{"mergedAt":null,"number":37940,"state":"OPEN","title":"[diffusion][post-training] Shared Flow-GRPO hooks for custom denoise loops (H3 / Cosmos / LTX2)","url":"https://github.com/sgl-project/sglang/pull/37940"},{"mergedAt":null,"number":35803,"state":"OPEN","title":"[diffusion] feat: make the MiniMax-H3 ref2va reference-image short edge configurable","url":"https://github.com/sgl-project/sglang/pull/35803"},{"mergedAt":null,"number":34695,"state":"OPEN","title":"[AMD] Speed up Wan2.2 DiT FP8 attention per-tensor quantization","url":"https://github.com/sgl-project/sglang/pull/34695"},{"mergedAt":null,"number":33552,"state":"OPEN","title":"[diffusion] fix: MiniMax H3 sigma schedule off-by-one","url":"https://github.com/sgl-project/sglang/pull/33552"},{"mergedAt":null,"number":37139,"state":"OPEN","title":"[diffusion] Support MiniMax-H3 FastH3 Preview v1 LoRA (Dense + VSA-H3)","url":"https://github.com/sgl-project/sglang/pull/37139"},{"mergedAt":null,"number":35990,"state":"OPEN","title":"[diffusion] Add MiniMax-H3 to ComfyUI integrated mode","url":"https://github.com/sgl-project/sglang/pull/35990"},{"mergedAt":null,"number":36767,"state":"OPEN","title":"[diffusion] feat: TeaCache coefficient calibration","url":"https://github.com/sgl-project/sglang/pull/36767"},{"mergedAt":null,"number":36318,"state":"OPEN","title":"[Diffusion] Add MiniMax-H3 packed varlen path for sla_attn backend","url":"https://github.com/sgl-project/sglang/pull/36318"},{"mergedAt":null,"number":36192,"state":"OPEN","title":"[diffusion] In-place LoRA merge/unmerge under layerwise offload","url":"https://github.com/sgl-project/sglang/pull/36192"},{"mergedAt":null,"number":37400,"state":"OPEN","title":"[diffusion] Extend MiniMax-H3 quality=\"high\" SM100 B200","url":"https://github.com/sgl-project/sglang/pull/37400"},{"mergedAt":null,"number":37662,"state":"OPEN","title":"[diffusion] perf: fold the FastH3 VSA gate, fuse the H3 VAE qk-norm+RoPE under quality, scope the VSA-H3 recipe to the transformer","url":"https://github.com/sgl-project/sglang/pull/37662"},{"mergedAt":null,"number":37903,"state":"OPEN","title":"[diffusion] model: support VDN-H3 (hybrid window softmax + Video Delta linear attention MiniMax-H3, 8-NFE distill) with a hybrid_window_attn_h3 backend","url":"https://github.com/sgl-project/sglang/pull/37903"},{"mergedAt":null,"number":37822,"state":"OPEN","title":"[Diffusion] Map checkpoints read-only where host copies are redundant","url":"https://github.com/sgl-project/sglang/pull/37822"},{"mergedAt":null,"number":37809,"state":"OPEN","title":"[diffusion] Calibrate residency probes that run a single iteration and honor pipeline step minimums","url":"https://github.com/sgl-project/sglang/pull/37809"},{"mergedAt":null,"number":37680,"state":"OPEN","title":"[Diffusion] Stream mapped weights on a shared pool: O_DIRECT reader, populator, host-memory debug aids","url":"https://github.com/sgl-project/sglang/pull/37680"},{"mergedAt":null,"number":35520,"state":"CLOSED","title":"[diffusion] Fix MiniMax H3 full-loop denoise on ROCm","url":"https://github.com/sgl-project/sglang/pull/35520"},{"mergedAt":null,"number":36244,"state":"OPEN","title":"[diffusion] MiniMax-H3: shard QKV weights across TP and Ulysses","url":"https://github.com/sgl-project/sglang/pull/36244"},{"mergedAt":"2026-09-08T02:56:43Z","number":35147,"state":"MERGED","title":"[Diffusion][CPU] Enable MiniMax-H3 on Xeon CPU","url":"https://github.com/sgl-project/sglang/pull/35147"},{"mergedAt":"2026-08-26T11:04:47Z","number":36463,"state":"MERGED","title":"[diffusion] make benchmark caches seedable and cover missing native families","url":"https://github.com/sgl-project/sglang/pull/36463"}]
+=== working diff ===
+diff --git a/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/stages/denoising.py b/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/stages/denoising.py
+index 5d5901b24..9b0c81378 100644
+--- a/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/stages/denoising.py
++++ b/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/stages/denoising.py
+@@ -677,12 +677,13 @@ class MiniMaxH3DenoisingStage(DenoisingStage):
+         if not (
+             current_platform.is_cuda()
+             or current_platform.is_cpu()
++            or current_platform.is_hip()
+             or current_platform.is_mps()
+             or current_platform.is_npu()
+             or current_platform.is_xpu()
+         ):
+             raise RuntimeError(
+-                "MiniMax H3 full-loop denoise requires CPU, CUDA, MPS, XPU, or Ascend NPU"
++                "MiniMax H3 full-loop denoise requires CPU, CUDA, ROCm, MPS, XPU, or Ascend NPU"
+             )
+ 
+         device = current_platform.get_local_torch_device()
+diff --git a/python/sglang/multimodal_gen/test/unit/test_minimax_h3_admission.py b/python/sglang/multimodal_gen/test/unit/test_minimax_h3_admission.py
+index def45664d..73309753a 100644
+--- a/python/sglang/multimodal_gen/test/unit/test_minimax_h3_admission.py
++++ b/python/sglang/multimodal_gen/test/unit/test_minimax_h3_admission.py
+@@ -655,3 +655,56 @@ def test_mps_admission_requires_layerwise_residency_for_every_h3_component():
+         modes["audio_vae"] = RESIDENT
+         with pytest.raises(ValueError, match="audio_vae"):
+             MiniMaxH3PipelineConfig.validate_server_args(config, server_args)
++
++
++def test_full_loop_denoise_admits_rocm_and_preserves_unsupported_error():
++    batch = SimpleNamespace(
++        extra={
++            "minimax_h3_text_embeddings": {},
++            "minimax_h3_denoise_state": {
++                "latent_t": 2,
++                "latent_h": 4,
++                "latent_w": 4,
++                "audio_t": 3,
++            },
++            "minimax_h3_sigmas": {"video": [1.0, 0.0], "audio": [1.0, 0.0]},
++        }
++    )
++    stage = SimpleNamespace(
++        _maybe_enable_cache_dit_and_torch_compile=lambda *_args, **_kwargs: None
++    )
++    platform_flags = {
++        "is_cuda": False,
++        "is_cpu": False,
++        "is_hip": True,
++        "is_mps": False,
++        "is_npu": False,
++        "is_xpu": False,
++    }
++
++    with patch.multiple(current_platform, **{name: lambda value=value: value for name, value in platform_flags.items()}):
++        with (
++            patch.object(
++                MiniMaxH3DenoisingStage,
++                "_maybe_enable_cache_dit_and_torch_compile",
++                lambda *_args, **_kwargs: None,
++            ),
++            patch(
++                "sglang.multimodal_gen.runtime.pipelines_core.stages.model_specific_stages.minimax_h3.stages.denoising._assemble_condition_rows",
++                side_effect=AssertionError("admitted past platform guard"),
++            ),
++        ):
++            with pytest.raises(AssertionError, match="admitted past platform guard"):
++                MiniMaxH3DenoisingStage._run_full_loop(
++                    stage, batch, SimpleNamespace()
++                )
++
++    platform_flags["is_hip"] = False
++    with patch.multiple(current_platform, **{name: lambda value=value: value for name, value in platform_flags.items()}):
++        with pytest.raises(
++            RuntimeError,
++            match="MiniMax H3 full-loop denoise requires CPU, CUDA, ROCm, MPS, XPU, or Ascend NPU",
++        ):
++            MiniMaxH3DenoisingStage._run_full_loop(
++                stage, batch, SimpleNamespace()
++            )
