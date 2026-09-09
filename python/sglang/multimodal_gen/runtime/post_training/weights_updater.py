@@ -58,6 +58,7 @@ from sglang.multimodal_gen.runtime.managers.memory_managers.layerwise_offload im
     is_layerwise_offloaded_module,
 )
 from sglang.multimodal_gen.runtime.models.dits.base import BaseDiT
+from sglang.multimodal_gen.runtime.models.encoders.base import TextEncoder
 from sglang.multimodal_gen.runtime.pipelines.diffusers_pipeline import DiffusersPipeline
 from sglang.multimodal_gen.runtime.pipelines_core.lora.pipeline import (
     LoRAPipeline,
@@ -173,6 +174,8 @@ def _load_weights_into_module(module: torch.nn.Module, weights_iter) -> None:
 
     For offloaded modules, updates CPU buffers directly via
     update_cpu_weights(); non-offloaded parameters use in-place copy.
+    FSDP-sharded text encoders delegate to their model-owned loader, which
+    preserves checkpoint key mapping and fused-parameter shard ownership.
 
     The in-place copies below (param.data.copy_, DTensor _local_tensor.copy_,
     and the offload manager's CPU-buffer copies) mutate tensors that were
@@ -185,14 +188,20 @@ def _load_weights_into_module(module: torch.nn.Module, weights_iter) -> None:
     and returns an HTTP error.
     """
     with torch.inference_mode():
-        model_params = dict(module.named_parameters())
-        weights_iter = _iter_module_weight_updates(module, weights_iter, model_params)
-
         offload_managers: list = []
         if is_layerwise_offloaded_module(module):
             offload_managers = [
                 m for m in module.layerwise_offload_managers if m.enabled
             ]
+
+        if not offload_managers and isinstance(
+            module, TextEncoder
+        ) and _has_distributed_parameters(module):
+            module.load_weights(weights_iter)
+            return
+
+        model_params = dict(module.named_parameters())
+        weights_iter = _iter_module_weight_updates(module, weights_iter, model_params)
 
         if offload_managers:
             entries = list(weights_iter)
@@ -211,6 +220,13 @@ def _load_weights_into_module(module: torch.nn.Module, weights_iter) -> None:
             load_weights_into_model(remaining, model_params)
         else:
             load_weights_into_model(weights_iter, model_params)
+
+
+def _has_distributed_parameters(module: torch.nn.Module) -> bool:
+    return any(
+        isinstance(param, DTensor) or isinstance(param.data, DTensor)
+        for _, param in module.named_parameters()
+    )
 
 
 def _build_module_weight_name_mapper(module: torch.nn.Module):
