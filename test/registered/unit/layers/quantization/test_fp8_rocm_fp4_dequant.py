@@ -120,6 +120,8 @@ def _assert_rocm_conversion(weight, scale, packed, scale_bytes, shuffle_weight_f
 
     assert weight.dtype == torch.float8_e4m3fnuz
     assert scale.dtype == torch.float32
+    assert weight.shape == expected_weight.shape
+    assert scale.shape == expected_scale.shape
     assert torch.equal(weight.view(torch.int8), expected_weight.view(torch.int8))
     assert torch.equal(scale, expected_scale)
 
@@ -265,6 +267,8 @@ def test_non_rocm_dequant_fp4_to_fp8(monkeypatch):
 
     assert layer.w13_weight.dtype == torch.float8_e4m3fn
     assert layer.w13_weight_scale_inv.dtype == torch.float32
+    assert layer.w13_weight.shape == expected_weight.shape
+    assert layer.w13_weight_scale_inv.shape == expected_scale.shape
     assert torch.equal(
         layer.w13_weight.data.view(torch.int8),
         expected_weight.view(torch.int8),
