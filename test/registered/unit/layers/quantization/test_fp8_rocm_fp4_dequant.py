@@ -1,6 +1,5 @@
 import pytest
 import torch
-from aiter.ops.shuffle import shuffle_scale, shuffle_weight
 
 from sglang.srt.layers.quantization.fp8 import Fp8Config, Fp8MoEMethod
 
@@ -155,6 +154,10 @@ def test_rocm_dequant_fp4_to_fp8(
 ):
     from sglang.srt.layers.quantization import fp8 as fp8_quant
 
+    shuffle_mod = pytest.importorskip("aiter.ops.shuffle")
+    shuffle_scale = shuffle_mod.shuffle_scale
+    shuffle_weight = shuffle_mod.shuffle_weight
+
     monkeypatch.setattr(fp8_quant, "_use_aiter", True)
     monkeypatch.setattr(fp8_quant, "_is_fp8_fnuz", True)
     monkeypatch.setattr(fp8_quant, "shuffle_scale", shuffle_scale, raising=False)
@@ -197,6 +200,10 @@ def test_rocm_dequant_fp4_to_fp8(
 )
 def test_rocm_native_fp4_default(monkeypatch):
     from sglang.srt.layers.quantization import fp8 as fp8_quant
+
+    shuffle_mod = pytest.importorskip("aiter.ops.shuffle")
+    shuffle_scale = shuffle_mod.shuffle_scale
+    shuffle_weight = shuffle_mod.shuffle_weight
 
     monkeypatch.setattr(fp8_quant, "_use_aiter", True)
     monkeypatch.setattr(fp8_quant, "_is_fp8_fnuz", True)
