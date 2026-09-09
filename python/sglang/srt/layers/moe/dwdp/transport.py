@@ -9,7 +9,12 @@ from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
-from cuda.bindings import driver as cuda
+
+try:
+    from cuda.bindings import driver as cuda
+except ImportError:
+    # For non-cuda platform.
+    cuda = None
 
 from sglang.srt.layers.moe.dwdp.layout import (
     DwdpExpertLayout,
@@ -106,6 +111,12 @@ class DWDPTransport:
         layout: DwdpExpertLayout,
         device_id: int,
     ) -> DWDPTransport:
+        if cuda is None:
+            raise RuntimeError(
+                "DWDP transport requires cuda.bindings, which is unavailable "
+                "on this platform"
+            )
+
         transport = cls()
         sorted_keys = sorted(local_params.keys())
 
