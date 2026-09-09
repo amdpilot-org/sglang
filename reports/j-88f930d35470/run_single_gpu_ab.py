@@ -237,7 +237,7 @@ def run_producer_page(
         "scale_equal": bool(scale_equal),
         "rope_equal": bool(rope_equal),
         "decoded_nope_equal": bool(decoded_equal),
-        "mismatch_count": int(mismatch.numel()),
+        "mismatch_count": int(mismatch.shape[0]),
         "first_mismatch_flat_indices": mismatch_indices,
         "first_mismatch_actual_hex": [f"{value:02X}" for value in mismatch_actual],
         "first_mismatch_expected_hex": [f"{value:02X}" for value in mismatch_expected],

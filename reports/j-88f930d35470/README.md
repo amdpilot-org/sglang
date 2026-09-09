@@ -30,11 +30,17 @@ ordinary-worker pool shapes `(page_size, compression_ratio) = (64,4)` and
 On one AMD Instinct MI300X (`gfx942:sramecc+:xnack-`):
 
 - Control at exact commit `484c2286c993d36e862343c390a77439a003d244` failed
-  the complete-cache comparison with 1,344 mismatched bytes for each pool shape.
+  the complete-cache comparison with 672 mismatched bytes for each pool shape.
 - Candidate at that same exact commit plus only the supplied FP8 header patch
   passed both complete-cache comparisons with zero mismatched bytes.
 - Candidate also passed every asymmetric-lane/swapped pack case, including
   signed zero, both sides of `±2^-11`, RNE ties, and the top segment.
+
+Reporting correction: the retained historical JSON and logs report 1,344 because
+`mismatch.numel()` counted both coordinates of each mismatch in the 2D cache.
+Direct comparison of the saved actual/expected buffers gives 672 differing bytes
+per control pool and zero per candidate pool. The driver now counts mismatch
+rows; the historical raw evidence is unchanged.
 
 This is single-GPU producer evidence only. It does not load a checkpoint, start
 a server, or claim whole-model generation success. It authorizes preparation
