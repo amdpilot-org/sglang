@@ -147,7 +147,7 @@ def _assert_rocm_conversion(weight, scale, packed, scale_bytes, shuffle_weight_f
 )
 @pytest.mark.parametrize(
     "num_experts,hidden_size,intermediate_size",
-    [(2, 128, 128), (3, 256, 256)],
+    [(2, 128, 128), (3, 256, 256), (4, 384, 384)],
 )
 def test_rocm_dequant_fp4_to_fp8(
     monkeypatch, num_experts, hidden_size, intermediate_size
