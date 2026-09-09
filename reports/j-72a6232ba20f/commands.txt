@@ -1,0 +1,19 @@
+git clone --filter=blob:none https://github.com/amdpilot-org/sglang.git /job/sglang
+cd /job/sglang
+git switch -c amdpilot/j-72a6232ba20f
+gh issue view 18262 --repo sgl-project/sglang --json title,body,state,author,createdAt,updatedAt,url,comments
+gh pr view 18263 --repo sgl-project/sglang --json title,state,url,author,createdAt,updatedAt,headRefName,baseRefName,body,commits
+gh pr view 20890 --repo sgl-project/sglang --json title,state,url,author,createdAt,updatedAt,headRefName,baseRefName,body,commits
+gh pr diff 18263 --repo sgl-project/sglang
+gh pr diff 20890 --repo sgl-project/sglang
+git fetch --depth=1 https://github.com/sgl-project/sglang.git 236f1244f2a2b8b59f5641bae493bb5db33603af
+git worktree add --detach /job/candidate-20890 236f1244f2a2b8b59f5641bae493bb5db33603af
+git fetch --depth=1 https://github.com/sgl-project/sglang.git aa321d382c56a78ce6ee6cb2a1961dbb675dc56e
+git worktree add --detach /job/candidate-18263 aa321d382c56a78ce6ee6cb2a1961dbb675dc56e
+/opt/venv/bin/python reports/j-72a6232ba20f/measure_aiter_workspace.py --source /job/sglang --label current-main-64mib --budget-gib 0.0625 --context-len 131072 --num-attention-heads 32 --num-kv-heads 8 --head-dim 128 --num-layers 2 --output /tmp/current-main-64mib.json
+/opt/venv/bin/python reports/j-72a6232ba20f/measure_aiter_workspace_legacy.py --source /job/candidate-20890 --label upstream-pr-20890-236f1244-64mib --budget-gib 0.0625 --context-len 131072 --num-attention-heads 32 --num-kv-heads 8 --head-dim 128 --num-layers 2 --output /tmp/candidate-20890-64mib.json
+/opt/venv/bin/python reports/j-72a6232ba20f/measure_aiter_workspace.py --source /job/sglang --label current-main-20gib --budget-gib 20 --context-len 131072 --num-attention-heads 32 --num-kv-heads 8 --head-dim 128 --num-layers 2 --output /tmp/current-main-20gib.json
+/opt/venv/bin/python reports/j-72a6232ba20f/measure_aiter_workspace.py --source /job/candidate-18263 --label upstream-pr-18263-aa321d382-20gib --budget-gib 20 --context-len 131072 --num-attention-heads 32 --num-kv-heads 8 --head-dim 128 --num-layers 2 --output /tmp/candidate-18263-20gib.json
+rocminfo | rg "gfx|Marketing Name"
+/opt/venv/bin/python -m py_compile reports/j-72a6232ba20f/measure_aiter_workspace.py reports/j-72a6232ba20f/measure_aiter_workspace_legacy.py
+git diff --check
