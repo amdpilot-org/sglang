@@ -111,6 +111,7 @@ Raw outputs and pass status are in `/job/tp8_validation.json` and `/job/tp8_vali
 ## Artifact index
 
 - `/job/commands.log` — every baseline, patched, server, inference, recovery, and publish command.
+- `/job/artifact_manifest.json` — SHA256 checksums and sizes for all required artifacts.
 - `/job/pr56_synthetic_regression.log` — first patched synthetic regression run.
 - `/job/pr56_synthetic_regression_rerun.log` — final patched synthetic regression rerun.
 - `/job/pr56_baseline_regression.log` — unpatched baseline synthetic regression.
@@ -120,3 +121,9 @@ Raw outputs and pass status are in `/job/tp8_validation.json` and `/job/tp8_vali
 - `/job/tp8_validation.json` — fixed inference requests and deterministic numerical results.
 - `/job/model_identity.json`, `/job/gpu_identities.json`, `/job/torch_hip.json` — checkpoint and runtime identity.
 - `/job/recovery-latest.patch` — complete base-to-current binary diff.
+
+## Final verification
+
+- Final synthetic rerun: **5 passed**.
+- Artifact checksums: verified against `/job/artifact_manifest.json`.
+- PR comment: https://github.com/amdpilot-org/sglang/pull/57#issuecomment-5601592985
