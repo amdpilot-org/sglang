@@ -1,0 +1,23 @@
+ninja_required_version = 1.3
+cxx = c++
+nvcc = /opt/rocm/bin/hipcc
+cxxflags = -fPIC -std=c++20 -O3 -I/opt/venv/lib/python3.10/site-packages/tvm_ffi/include -I/opt/rocm/include -I/tmp/sglang-j88/candidate/python/sglang/kernels/jit/include
+cudaflags = -fPIC -D__HIP_PLATFORM_AMD__=1 -fno-gpu-rdc --offload-arch=gfx942:sramecc+:xnack- -DUSE_ROCM -std=c++20 -O3 -DHIP_FP8_TYPE_FNUZ=1 -I/opt/venv/lib/python3.10/site-packages/tvm_ffi/include -I/opt/rocm/include -I/tmp/sglang-j88/candidate/python/sglang/kernels/jit/include
+ldflags = -shared -L/opt/venv/lib/python3.10/site-packages/tvm_ffi/lib -ltvm_ffi -L/opt/rocm/lib -lamdhip64
+
+rule compile_cxx
+  depfile = $out.d
+  command = $cxx -MD -MF "$out.d" $cxxflags -c "$in" -o "$out"
+
+rule compile_cuda
+  depfile = $out.d
+  command = $nvcc -MD -MF "$out.d" $cudaflags -c "$in" -o "$out"
+
+rule link
+  command = $cxx $in $ldflags -o "$out"
+
+build cuda_0.o: compile_cuda cuda.cu
+
+build sgl_kernel_jit_dpsk_v4_fused_norm_rope_v2_bf16_t_512_64_2_false_0_false.so: link cuda_0.o
+
+default sgl_kernel_jit_dpsk_v4_fused_norm_rope_v2_bf16_t_512_64_2_false_0_false.so
