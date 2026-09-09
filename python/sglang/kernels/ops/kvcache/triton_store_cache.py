@@ -225,7 +225,7 @@ def try_triton_store_cache_fp8(
         "FP8_MIN": _FP8_INFO.min,
         "FP8_MAX": _FP8_INFO.max,
     }
-    _triton_store_cache_fp8_kernel[grid](*args, **kwargs)
+    _triton_store_cache_fp8_kernel[grid](*args, **kwargs, num_warps=8)
     return True
 
 
