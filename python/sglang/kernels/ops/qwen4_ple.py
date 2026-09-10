@@ -64,7 +64,9 @@ def _qwen4_ngram_hash_kernel(
 
     vocab_size = tl.load(vocab_sizes_ptr + head_idx, mask=mask, other=1)
     offset = tl.load(offsets_ptr + head_idx, mask=mask, other=0)
-    tl.store(output_ptr + output_idx, mixed % vocab_size + offset, mask=mask)
+    remainder = mixed % vocab_size
+    remainder = tl.where(remainder < 0, remainder + vocab_size, remainder)
+    tl.store(output_ptr + output_idx, remainder + offset, mask=mask)
 
 
 def can_fuse_qwen4_ngram_hash(
