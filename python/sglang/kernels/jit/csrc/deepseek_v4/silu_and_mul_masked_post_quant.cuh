@@ -12,7 +12,9 @@
 
 #include <algorithm>
 #include <cstdint>
+#ifndef USE_ROCM
 #include <cuda_fp8.h>
+#endif
 #include <type_traits>
 
 namespace sglang {
@@ -43,7 +45,7 @@ SGL_DEVICE uint32_t warp_inclusive_sum(uint32_t lane_id, uint32_t val) {
   static_assert(device::kWarpThreads == 32);
 #pragma unroll
   for (uint32_t offset = 1; offset < 32; offset *= 2) {
-    uint32_t n = __shfl_up_sync(0xFFFFFFFF, val, offset);
+    uint32_t n = __shfl_up_sync(device::kFullMask, val, offset);
     if (lane_id >= offset) val += n;
   }
   return val;
@@ -333,8 +335,12 @@ struct SiluAndMulMaskedPostQuantKernel {
     };
 
     const auto num_threads = hidden_dim / 8;
+    RuntimeCheck(num_threads > 0 && num_threads <= 1024, "hidden_dim/8 exceeds CUDA block limit");
     RuntimeCheck(num_threads % device::kWarpThreads == 0);
     RuntimeCheck(num_threads >= num_experts);
+    if (num_tokens == 0 || topk == 0) {
+      return;
+    }
     const auto kernel = transposed ? kernel_transposed : kernel_normal;
     LaunchKernel(num_tokens * topk, num_threads, device.unwrap())  //
         .enable_pdl(kUsePDL)(kernel, params);
@@ -552,7 +558,11 @@ struct SiluAndMulContigPostQuantKernel {
     };
 
     const auto num_threads = hidden_dim / 8;
+    RuntimeCheck(num_threads > 0 && num_threads <= 1024, "hidden_dim/8 exceeds CUDA block limit");
     RuntimeCheck(num_threads % device::kWarpThreads == 0);
+    if (num_tokens == 0) {
+      return;
+    }
     const auto kernel = transposed ? kernel_transposed : kernel_normal;
     LaunchKernel(num_tokens, num_threads, device.unwrap())  //
         .enable_pdl(kUsePDL)(kernel, params);
