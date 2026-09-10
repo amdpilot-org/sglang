@@ -7,6 +7,10 @@
 #include <dlpack/dlpack.h>
 #include <tvm/ffi/container/tensor.h>
 
+#ifdef USE_ROCM
+#include <hip/hip_fp8.h>
+#endif
+
 #include <cstdint>
 
 namespace sglang {
@@ -19,6 +23,7 @@ struct FusedQkvParams {
   void* __restrict__ k_cache;
   void* __restrict__ v_cache;
   const void* __restrict__ cache_loc;
+  const float* __restrict__ q_scale;
   const float* __restrict__ k_scale;
   const float* __restrict__ v_scale;
   int64_t q_stride;
@@ -30,6 +35,14 @@ struct FusedQkvParams {
 };
 
 constexpr uint32_t kBlockSize = 128;
+
+SGL_DEVICE fp8_e4m3_t to_fp8_e4m3(float value) {
+#ifdef USE_ROCM
+  return __hip_cvt_float_to_fp8(value, __HIP_SATFINITE, __HIP_E4M3_FNUZ);
+#else
+  return static_cast<fp8_e4m3_t>(value);
+#endif
+}
 
 template <typename T, int kVecN>
 SGL_DEVICE void quant_row(const T* __restrict__ src, fp8_e4m3_t* __restrict__ dst, uint32_t n, float inv_scale) {
@@ -44,14 +57,14 @@ SGL_DEVICE void quant_row(const T* __restrict__ src, fp8_e4m3_t* __restrict__ ds
     out_vec ov;
 #pragma unroll
     for (int i = 0; i < kVecN; ++i) {
-      ov[i] = static_cast<fp8_e4m3_t>(static_cast<float>(iv[i]) * inv_scale);
+      ov[i] = to_fp8_e4m3(static_cast<float>(iv[i]) * inv_scale);
     }
     ov.store(dst, vi);
   }
 
   const uint32_t base = n_vec * kVecN;
   for (uint32_t i = base + threadIdx.x; i < n; i += blockDim.x) {
-    dst[i] = static_cast<fp8_e4m3_t>(static_cast<float>(src[i]) * inv_scale);
+    dst[i] = to_fp8_e4m3(static_cast<float>(src[i]) * inv_scale);
   }
 }
 
@@ -64,6 +77,7 @@ __global__ void fused_fp8_qkv_kv_cache_kernel(const __grid_constant__ FusedQkvPa
   PDLWaitPrimary<kUsePDL>();
 
   const IdxT slot = static_cast<const IdxT*>(params.cache_loc)[token];
+  const float inv_q = 1.0f / (*params.q_scale);
   const float inv_k = 1.0f / (*params.k_scale);
   const float inv_v = 1.0f / (*params.v_scale);
 
@@ -72,7 +86,7 @@ __global__ void fused_fp8_qkv_kv_cache_kernel(const __grid_constant__ FusedQkvPa
         static_cast<const T*>(params.q) + static_cast<size_t>(token) * params.q_stride,
         static_cast<fp8_e4m3_t*>(params.q_out) + static_cast<size_t>(token) * params.q_dim,
         params.q_dim,
-        1.0f);
+        inv_q);
   }
   quant_row<T, kVecN>(
       static_cast<const T*>(params.k) + static_cast<size_t>(token) * params.k_stride,
@@ -115,6 +129,7 @@ struct FusedFp8QkvKvCache {
       const tvm::ffi::TensorView k_cache,
       const tvm::ffi::TensorView v_cache,
       const tvm::ffi::TensorView cache_loc,
+      const tvm::ffi::TensorView q_scale,
       const tvm::ffi::TensorView k_scale,
       const tvm::ffi::TensorView v_scale) {
     using namespace host;
@@ -135,6 +150,7 @@ struct FusedFp8QkvKvCache {
     TensorMatcher({N, Dkv}).with_strides({SV, 1}).with_dtype<T>().with_device(device).verify(v);
     TensorMatcher({S, Dkv}).with_dtype<fp8_e4m3_t>().with_device(device).verify(k_cache).verify(v_cache);
     TensorMatcher({N}).with_dtype<int32_t, int64_t>(idx_dtype).with_device(device).verify(cache_loc);
+    TensorMatcher({1}).with_dtype<fp32_t>().with_device(device).verify(q_scale);
     TensorMatcher({1}).with_dtype<fp32_t>().with_device(device).verify(k_scale).verify(v_scale);
 
     uint32_t q_dim = 0;
@@ -177,6 +193,7 @@ struct FusedFp8QkvKvCache {
         .k_cache = k_cache.data_ptr(),
         .v_cache = v_cache.data_ptr(),
         .cache_loc = cache_loc.data_ptr(),
+        .q_scale = static_cast<const float*>(q_scale.data_ptr()),
         .k_scale = static_cast<const float*>(k_scale.data_ptr()),
         .v_scale = static_cast<const float*>(v_scale.data_ptr()),
         .q_stride = q_stride,

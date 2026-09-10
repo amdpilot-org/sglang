@@ -41,6 +41,7 @@ def fused_fp8_qkv_kv_cache(
     cache_loc: torch.Tensor,
     k_scale: Optional[torch.Tensor] = None,
     v_scale: Optional[torch.Tensor] = None,
+    q_scale: Optional[torch.Tensor] = None,
 ) -> torch.Tensor | None:
     """Fused FP8 quant of K/V (+ optional Q) + paged KV-cache write."""
     if k.dtype not in (torch.bfloat16, torch.float16):
@@ -54,17 +55,29 @@ def fused_fp8_qkv_kv_cache(
     k_cache2 = k_cache.view(-1, kv_dim)
     v_cache2 = v_cache.view(-1, kv_dim)
 
+    qs = _scale_to_f32(q_scale, k.device)
     ks = _scale_to_f32(k_scale, k.device)
     vs = _scale_to_f32(v_scale, k.device)
+    is_hip = torch.version.hip is not None
 
     q2 = None
     q_out = None
     if q is not None:
         q2 = q.reshape(num_tokens, -1)
-        q_out = torch.empty(q2.shape, dtype=torch.float8_e4m3fn, device=q.device)
+        q_out = torch.empty(
+            q2.shape,
+            dtype=torch.uint8 if is_hip else torch.float8_e4m3fn,
+            device=q.device,
+        )
+
+    if is_hip:
+        k_cache2 = k_cache2.view(torch.uint8)
+        v_cache2 = v_cache2.view(torch.uint8)
 
     module = _jit_fused_fp8_qkv_kv_cache_module(k.dtype, is_arch_support_pdl())
     module.fused_fp8_qkv_kv_cache(
-        q2, k2, v2, q_out, k_cache2, v_cache2, cache_loc, ks, vs
+        q2, k2, v2, q_out, k_cache2, v_cache2, cache_loc, qs, ks, vs
     )
+    if q_out is not None and is_hip:
+        q_out = q_out.view(torch.float8_e4m3fnuz)
     return q_out
