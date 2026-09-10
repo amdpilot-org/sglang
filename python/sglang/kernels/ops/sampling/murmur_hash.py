@@ -101,7 +101,10 @@ def murmur_hash32_kernel(
     tl.store(output_ptr + row_idx * num_cols + col_offsets, h, mask=mask)
 
 
+@torch.compiler.disable
 def murmur_hash32(seed, positions, col_indices):
+    """Keep the Triton launcher outside Inductor graphs."""
+
     assert seed.shape == positions.shape, (
         "Seed and positions must have the same shape (n,)"
     )
