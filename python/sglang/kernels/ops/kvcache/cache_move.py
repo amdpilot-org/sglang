@@ -102,6 +102,21 @@ def copy_all_layer_kv_cache_func(
     num_locs_upper: int,
     kv_copy_config: dict,
 ):
+    if not _is_cpu:
+        if data_ptrs.dtype is not torch.uint64:
+            raise TypeError(
+                f"data_ptrs must have dtype torch.uint64, got {data_ptrs.dtype}"
+            )
+        if strides.dtype is not torch.int64:
+            raise TypeError(
+                f"strides must have dtype torch.int64, got {strides.dtype}"
+            )
+        if tgt_loc.dtype is not torch.int64 or src_loc.dtype is not torch.int64:
+            raise TypeError(
+                "tgt_loc and src_loc must have dtype torch.int64, got "
+                f"{tgt_loc.dtype} and {src_loc.dtype}"
+            )
+
     if _is_cpu:
         copy_all_layer_kv_cache_cpu(
             data_ptrs,
