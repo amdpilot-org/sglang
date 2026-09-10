@@ -11,6 +11,12 @@ def aiter_dsv3_router_gemm(
     weight: torch.Tensor,
 ):
     """Use aiter tuned GEMM dispatcher (tgemm.mm) to automatically select the GEMM kernel."""
+    if hidden_states.stride(-1) != 1:
+        raise RuntimeError(
+            "aiter_dsv3_router_gemm requires hidden_states to have a unit inner stride"
+        )
+    if not weight.is_contiguous():
+        raise RuntimeError("aiter_dsv3_router_gemm requires a contiguous weight")
     return tgemm.mm(hidden_states, weight.detach(), otype=hidden_states.dtype)
 
 
