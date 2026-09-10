@@ -1,0 +1,218 @@
+{
+  "campaign": "repo-e2e-20260909",
+  "upstream_context": {
+    "repository": "sgl-project/sglang",
+    "issue": 32312,
+    "issue_state": "OPEN",
+    "issue_summary": "Feature request to consider warp-decode-style low-latency small-batch MoE kernels",
+    "comments_read": 0,
+    "related_candidate_pr": 34131,
+    "related_candidate_commit": "4ba78e8ba97491479afc96a9e4a3dfbb5c36ece1",
+    "related_candidate_state": "OPEN",
+    "upstream_repository_modified": false
+  },
+  "delivery": {
+    "repository": "amdpilot-org/sglang",
+    "branch": "amdpilot/j-674bccaf9bf0",
+    "base_commit": "0084030179bfba86bfeb6d43f7997d4076329d2c",
+    "checkout_path": "/job/sglang"
+  },
+  "environment": {
+    "image": "amdpilotv2/open-job-mi300:jit-config-readable-35122-260909",
+    "operator_provided_local_image_id": "sha256:dfc9419089c338b5712da4841768b38b1ab79f3da41f8c58c3cd4dfcc1147ff1",
+    "image_id_inside_container": "not exposed by container runtime metadata; hostname is not used as image identity",
+    "python": "/opt/venv/bin/python",
+    "python_version": "3.10.12",
+    "torch": "2.9.1+rocm7.2.0.git7e1940d4",
+    "torch_path": "/opt/venv/lib/python3.10/site-packages/torch/__init__.py",
+    "hip": "7.2.26015-fc0010cf6a",
+    "triton": "3.7.0",
+    "installed_sglang_source": "/sgl-workspace/sglang/python/sglang",
+    "installed_sglang_commit": "8eaffdf382e06b7dc50fc5c76cc5aad9c36bb0e4",
+    "delivery_sglang_source": "/job/sglang/python/sglang",
+    "sgl_kernel_python": "/opt/venv/lib/python3.10/site-packages/sgl_kernel/__init__.py",
+    "sgl_kernel_native": "/opt/venv/lib/python3.10/site-packages/sgl_kernel/common_ops.cpython-310-x86_64-linux-gnu.so",
+    "aiter_native": "/sgl-workspace/aiter/aiter/jit/module_aiter_core.so",
+    "gpu": {
+      "assigned_count": 1,
+      "name": "AMD Instinct MI300X",
+      "gfx": "gfx942",
+      "device_id": "0x74a1",
+      "serial_number": "692440004372",
+      "unique_id": "0xe7489e11c2edad7d",
+      "vram_bytes": 206141652992,
+      "torch_device_count": 1
+    },
+    "cache_root": "/tmp/sglang-cache-j-674bccaf9bf0"
+  },
+  "installed_source_first_baseline": {
+    "label": "installed-source baseline; not proof for later checkout changes",
+    "command": "/opt/venv/bin/python -m pytest -q -s /sgl-workspace/sglang/test/registered/moe/test_fused_moe.py::TestFusedMOE::test_various_configurations --maxfail=1",
+    "test": "TestFusedMOE::test_various_configurations",
+    "reference": "independent torch_naive_moe expert loop with torch.matmul, SiluAndMul, softmax/topk, and weighted sum",
+    "numerical_gate": "torch.testing.assert_close with dtype-dependent tolerances",
+    "result": "passed",
+    "subtests_passed": 384,
+    "pytest_seconds": 105.98,
+    "first_gpu_execution_wall_seconds": 111.079,
+    "timing_method": "date nanosecond timestamps around one bounded pytest process",
+    "raw_artifact": "/job/baseline-first.json"
+  },
+  "delivery_base_controls": {
+    "small_align_test": {
+      "command": "PYTHONPATH=/job/sglang/python /opt/venv/bin/python -m pytest -q -s /job/sglang/test/registered/kernels/ops/moe/test_moe_align_small_numel.py --maxfail=1",
+      "result": "passed",
+      "tests_passed": 245,
+      "pytest_seconds": 11.51,
+      "wall_seconds": 13.660,
+      "reference": "plain-Torch moe_align contract oracle"
+    }
+  },
+  "low_token_align_cases": [
+    {
+      "num_tokens": 1,
+      "topk": 2,
+      "num_experts": 8,
+      "block_size": 128,
+      "aot": {
+        "passed": true,
+        "comparison": "blockwise multiset against plain-Torch reference",
+        "mean_us_per_call": 9.77834,
+        "profiler_kernel": "moe_align_block_size_small_batch_expert_kernel<int, 256>"
+      },
+      "triton_pairwise": {
+        "passed": true,
+        "comparison": "exact against plain-Torch reference",
+        "mean_us_per_call": 19.51738,
+        "profiler_kernel": "_moe_align_small_numel_kernel"
+      }
+    },
+    {
+      "num_tokens": 1,
+      "topk": 7,
+      "num_experts": 64,
+      "block_size": 128,
+      "aot": {
+        "passed": true,
+        "comparison": "blockwise multiset against plain-Torch reference",
+        "mean_us_per_call": 11.13073,
+        "profiler_kernel": "moe_align_block_size_kernel<int>"
+      },
+      "triton_pairwise": {
+        "passed": true,
+        "comparison": "exact against plain-Torch reference",
+        "mean_us_per_call": 25.75415,
+        "profiler_kernel": "_moe_align_small_numel_kernel"
+      }
+    },
+    {
+      "num_tokens": 1,
+      "topk": 7,
+      "num_experts": 257,
+      "block_size": 128,
+      "aot": {
+        "passed": true,
+        "comparison": "blockwise multiset against plain-Torch reference",
+        "mean_us_per_call": 10.82213,
+        "profiler_kernel": "moe_align_block_size_kernel<int>"
+      },
+      "triton_pairwise": {
+        "passed": true,
+        "comparison": "exact against plain-Torch reference",
+        "mean_us_per_call": 28.99636,
+        "profiler_kernel": "_moe_align_small_numel_kernel"
+      }
+    },
+    {
+      "num_tokens": 1,
+      "topk": 16,
+      "num_experts": 896,
+      "block_size": 128,
+      "aot": {
+        "passed": true,
+        "comparison": "blockwise multiset against plain-Torch reference",
+        "mean_us_per_call": 10.83453,
+        "profiler_kernel": "moe_align_block_size_kernel<int>"
+      },
+      "triton_pairwise": {
+        "passed": true,
+        "comparison": "exact against plain-Torch reference",
+        "mean_us_per_call": 24.71586,
+        "profiler_kernel": "_moe_align_small_numel_kernel"
+      }
+    },
+    {
+      "num_tokens": 5,
+      "topk": 7,
+      "num_experts": 257,
+      "block_size": 128,
+      "aot": {
+        "passed": true,
+        "comparison": "blockwise multiset against plain-Torch reference",
+        "mean_us_per_call": 7.74191,
+        "profiler_kernel": "moe_align_block_size_kernel<int>"
+      },
+      "triton_pairwise": {
+        "passed": true,
+        "comparison": "exact against plain-Torch reference",
+        "mean_us_per_call": 19.63176,
+        "profiler_kernel": "_moe_align_small_numel_kernel"
+      }
+    },
+    {
+      "num_tokens": 4,
+      "topk": 16,
+      "num_experts": 896,
+      "block_size": 128,
+      "aot": {
+        "passed": true,
+        "comparison": "blockwise multiset against plain-Torch reference",
+        "mean_us_per_call": 10.55795,
+        "profiler_kernel": "moe_align_block_size_kernel<int>"
+      },
+      "triton_pairwise": {
+        "passed": true,
+        "comparison": "exact against plain-Torch reference",
+        "mean_us_per_call": 24.52648,
+        "profiler_kernel": "_moe_align_small_numel_kernel"
+      }
+    }
+  ],
+  "low_token_timing": {
+    "command": "PYTHONPATH=/job/sglang/python SGLANG_JIT_CACHE_DIR=/tmp/sglang-cache-j-674bccaf9bf0/sglang-jit TVM_FFI_CACHE_DIR=/tmp/sglang-cache-j-674bccaf9bf0/tvm-ffi TRITON_CACHE_DIR=/tmp/sglang-cache-j-674bccaf9bf0/triton TORCHINDUCTOR_CACHE_DIR=/tmp/sglang-cache-j-674bccaf9bf0/torch-inductor SGLANG_TEST_COMMIT=0084030179bfba86bfeb6d43f7997d4076329d2c /opt/venv/bin/python /job/sglang/reports/j-674bccaf9bf0/gfx942_low_token_moe.py",
+    "method": "5 warmups, 100 calls, one synchronize after the timed loop; wall clock around preallocated kernel calls",
+    "wall_seconds": 6.052,
+    "result": "passed"
+  },
+  "candidate_results": [
+    {
+      "name": "upstream PR 34131 exact head",
+      "commit": "4ba78e8ba97491479afc96a9e4a3dfbb5c36ece1",
+      "command": "PYTHONPATH=/job/sglang/python TVM_FFI_CACHE_DIR=/tmp/sglang-cache-j-674bccaf9bf0/tvm-ffi TRITON_CACHE_DIR=/tmp/sglang-cache-j-674bccaf9bf0/triton TORCHINDUCTOR_CACHE_DIR=/tmp/sglang-cache-j-674bccaf9bf0/torch-inductor /opt/venv/bin/python -m pytest -q -s /job/sglang/test/registered/kernels/ops/moe/test_moe_align_v2.py::test_tiny_batch_takes_any_expert_count --maxfail=1",
+      "result": "unsupported on gfx942",
+      "gpu_kernel_launched": false,
+      "wall_seconds": 27.768,
+      "compile_errors": [
+        "no type named 'Event' in namespace 'sglang::device::atomic'",
+        "use of undeclared identifier 'cudaMemsetAsync'; did you mean 'hipMemsetAsync'"
+      ]
+    },
+    {
+      "name": "current-main JIT align_single_token",
+      "commit": "0084030179bfba86bfeb6d43f7997d4076329d2c",
+      "command": "PYTHONPATH=/job/sglang/python /opt/venv/bin/python - <<'PY' # calls moe_align_single_token for topk 2, 7, and 16",
+      "result": "unsupported on gfx942",
+      "gpu_kernel_launched": false,
+      "wall_seconds": 9.589,
+      "compile_error": "HIP static assertion: shuffle mask must be a 64-bit integer; align_single_token.cuh passes 32-bit 0xffffffff"
+    }
+  ],
+  "architecture_limitations": [
+    "MI300X gfx942 has a 64-lane wavefront; CUDA warp32 constants and 32-bit full-lane shuffle masks are not portable assumptions.",
+    "The AOT small-batch expert kernel is reached only for expert counts no greater than 64; wider low-token cases use the generic AOT align kernel.",
+    "The Triton pairwise path has no expert-count limit and passes exact reference checks, but it is slower than the measured AOT paths on these gfx942 align shapes.",
+    "PR 34131 is a tiny-batch align candidate, not a complete warp-decode MoE implementation, and does not compile on gfx942 without CUDA-only Event and memset API adaptation.",
+    "The align timings characterize dispatch overhead only; they are not full MoE FFN latency or an end-to-end model benchmark.",
+    "No full model weights or another framework stack were downloaded."
+  ]
+}
