@@ -1179,6 +1179,22 @@ def aiter_w8a8_block_fp8_linear(
     input_scale: Optional[torch.Tensor] = None,
     bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
+    if not _use_aiter:
+        raise RuntimeError(
+            "aiter_w8a8_block_fp8_linear requires AMD HIP with SGLANG_USE_AITER=1"
+        )
+    if input_scale is None:
+        if input.dtype not in (torch.bfloat16, torch.float16):
+            raise ValueError(
+                "aiter_w8a8_block_fp8_linear supports bfloat16 and float16 inputs "
+                f"when input_scale is None, got {input.dtype}"
+            )
+    elif input.dtype != aiter.dtypes.fp8:
+        raise ValueError(
+            "aiter_w8a8_block_fp8_linear requires its native fp8 input dtype "
+            f"when input_scale is provided, got {input.dtype}"
+        )
+
     # assert input_scale is None
     input_2d = input.view(-1, input.shape[-1])
     output_shape = [*input.shape[:-1], weight.shape[0]]
