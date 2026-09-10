@@ -1,5 +1,6 @@
 """Coverage for the AITER FP8-Q unified-attention decode path."""
 
+import json
 import math
 import unittest
 from types import SimpleNamespace
@@ -39,6 +40,87 @@ class _FakeKVPool:
 
 @unittest.skipUnless(_RUNNABLE, "requires HIP with AITER unified attention")
 class TestAiterFP8QUnifiedAttention(CustomTestCase):
+    def _run_unified_attention(
+        self,
+        q,
+        k,
+        v,
+        output,
+        seq_len,
+        softmax_scale,
+        q_descale=None,
+        k_descale=None,
+        v_descale=None,
+    ):
+        batch = q.shape[0]
+        page_size = k.shape[1]
+        pages_per_seq = seq_len // page_size
+        block_table = torch.arange(
+            batch * pages_per_seq, dtype=torch.int32, device=q.device
+        ).view(batch, pages_per_seq)
+
+        unified_attention(
+            q=q,
+            k=k,
+            v=v,
+            out=output,
+            cu_seqlens_q=torch.arange(
+                batch + 1, dtype=torch.int32, device=q.device
+            ),
+            seqused_k=torch.full(
+                (batch,), seq_len, dtype=torch.int32, device=q.device
+            ),
+            max_seqlen_q=1,
+            max_seqlen_k=seq_len,
+            softmax_scale=softmax_scale,
+            causal=True,
+            window_size=(-1, -1),
+            block_table=block_table,
+            softcap=0,
+            q_descale=q_descale,
+            k_descale=k_descale,
+            v_descale=v_descale,
+            sinks=None,
+        )
+
+    def _reference_attention(self, q, k, v, softmax_scale):
+        scores = torch.einsum("bhd,btd->bht", q.float(), k[:, :, 0, :].float())
+        scores = scores * softmax_scale
+        probabilities = torch.softmax(scores, dim=-1)
+        return torch.einsum(
+            "bht,btd->bhd", probabilities, v[:, :, 0, :].float()
+        )
+
+    def _comparison_metrics(self, actual, expected):
+        actual = actual.float()
+        expected = expected.float()
+        difference = actual - expected
+        mismatch = difference.abs() > 0.15 + 0.15 * expected.abs()
+        return {
+            "max_abs": difference.abs().max().item(),
+            "mean_abs": difference.abs().mean().item(),
+            "mismatch_fraction": mismatch.float().mean().item(),
+            "cosine": torch.nn.functional.cosine_similarity(
+                actual.flatten(), expected.flatten(), dim=0
+            ).item(),
+        }
+
+    def _timed_attention(self, run_attention, warmups=3, measurements=5):
+        for _ in range(warmups):
+            run_attention()
+        torch.cuda.synchronize()
+
+        samples = []
+        for _ in range(measurements):
+            start = torch.cuda.Event(enable_timing=True)
+            end = torch.cuda.Event(enable_timing=True)
+            start.record()
+            run_attention()
+            end.record()
+            torch.cuda.synchronize()
+            samples.append(start.elapsed_time(end))
+        return samples
+
     def _make_backend_case(self, branch, kv_cache_dtype=None):
         if kv_cache_dtype is None:
             kv_cache_dtype = fp8_dtype
@@ -298,6 +380,189 @@ class TestAiterFP8QUnifiedAttention(CustomTestCase):
             actual.flatten(), expected.flatten(), dim=0
         ).item()
         self.assertGreater(cosine, 0.99)
+
+    def test_fp8_context_growth_matches_bf16_and_dequantized_references(self):
+        batch, num_q_heads, num_kv_heads = 4, 16, 1
+        head_dim, page_size = 256, 16
+        sequence_lengths = (256, 1024, 4096, 8192, 16384)
+        max_sequence_length = sequence_lengths[-1]
+        device = "cuda"
+        softmax_scale = 1 / math.sqrt(head_dim)
+        torch.manual_seed(0)
+        torch.cuda.manual_seed_all(0)
+
+        q_bf16 = (
+            0.1
+            * torch.randn(
+                batch,
+                num_q_heads,
+                head_dim,
+                device=device,
+                dtype=torch.float32,
+            )
+        ).to(torch.bfloat16)
+        k_bf16 = (
+            0.1
+            * torch.randn(
+                batch,
+                max_sequence_length,
+                num_kv_heads,
+                head_dim,
+                device=device,
+                dtype=torch.float32,
+            )
+        ).to(torch.bfloat16)
+        v_bf16 = (
+            0.75
+            + 0.25
+            * torch.randn(
+                batch,
+                max_sequence_length,
+                num_kv_heads,
+                head_dim,
+                device=device,
+                dtype=torch.float32,
+            )
+        ).to(torch.bfloat16)
+
+        fp8_max = torch.finfo(fp8_dtype).max
+        q_scale = (q_bf16.abs().float().amax() / fp8_max).clamp(min=1e-9).view(1)
+        k_scale = (k_bf16.abs().float().amax() / fp8_max).clamp(min=1e-9).view(1)
+        v_scale = (v_bf16.abs().float().amax() / fp8_max).clamp(min=1e-9).view(1)
+        q_fp8, _ = scaled_fp8_quant(q_bf16.reshape(batch, -1), q_scale)
+        q_fp8 = q_fp8.view(batch, num_q_heads, head_dim)
+
+        output_bf16 = torch.empty_like(q_bf16)
+        output_fp8 = torch.empty_like(q_bf16)
+        records = []
+        bf16_outputs = []
+
+        for sequence_length in sequence_lengths:
+            with self.subTest(sequence_length=sequence_length):
+                k_prefix = k_bf16[:, :sequence_length]
+                v_prefix = v_bf16[:, :sequence_length]
+                k_prefix_fp8, _ = scaled_fp8_quant(
+                    k_prefix.reshape(-1, head_dim), k_scale
+                )
+                v_prefix_fp8, _ = scaled_fp8_quant(
+                    v_prefix.reshape(-1, head_dim), v_scale
+                )
+                k_prefix_fp8 = k_prefix_fp8.view(
+                    -1, page_size, num_kv_heads, head_dim
+                )
+                v_prefix_fp8 = v_prefix_fp8.view(
+                    -1, page_size, num_kv_heads, head_dim
+                )
+
+                def run_bf16():
+                    self._run_unified_attention(
+                        q_bf16,
+                        k_prefix.reshape(
+                            -1, page_size, num_kv_heads, head_dim
+                        ),
+                        v_prefix.reshape(
+                            -1, page_size, num_kv_heads, head_dim
+                        ),
+                        output_bf16,
+                        sequence_length,
+                        softmax_scale,
+                    )
+
+                def run_fp8():
+                    self._run_unified_attention(
+                        q_fp8,
+                        k_prefix_fp8,
+                        v_prefix_fp8,
+                        output_fp8,
+                        sequence_length,
+                        softmax_scale,
+                        q_descale=q_scale,
+                        k_descale=k_scale,
+                        v_descale=v_scale,
+                    )
+
+                run_bf16()
+                run_fp8()
+                torch.cuda.synchronize()
+                bf16_outputs.append(output_bf16.clone())
+
+                bf16_reference = self._reference_attention(
+                    q_bf16, k_prefix, v_prefix, softmax_scale
+                )
+                q_dequantized = q_fp8.float() * q_scale
+                k_dequantized = k_prefix_fp8.view(
+                    batch, sequence_length, num_kv_heads, head_dim
+                ).float() * k_scale
+                v_dequantized = v_prefix_fp8.view(
+                    batch, sequence_length, num_kv_heads, head_dim
+                ).float() * v_scale
+                dequantized_reference = self._reference_attention(
+                    q_dequantized,
+                    k_dequantized,
+                    v_dequantized,
+                    softmax_scale,
+                )
+
+                comparisons = {
+                    "bf16_vs_reference": self._comparison_metrics(
+                        output_bf16, bf16_reference
+                    ),
+                    "fp8_vs_dequantized_reference": self._comparison_metrics(
+                        output_fp8, dequantized_reference
+                    ),
+                    "fp8_vs_bf16": self._comparison_metrics(
+                        output_fp8, output_bf16
+                    ),
+                }
+                bf16_samples = self._timed_attention(run_bf16)
+                fp8_samples = self._timed_attention(run_fp8)
+                record = {
+                    "sequence_length": sequence_length,
+                    "comparisons": comparisons,
+                    "timing_ms": {
+                        "bf16_median": sorted(bf16_samples)[
+                            len(bf16_samples) // 2
+                        ],
+                        "fp8_median": sorted(fp8_samples)[
+                            len(fp8_samples) // 2
+                        ],
+                        "bf16_samples": bf16_samples,
+                        "fp8_samples": fp8_samples,
+                    },
+                }
+                records.append(record)
+
+                self.assertTrue(
+                    bool(torch.isfinite(output_bf16).all()),
+                    "BF16 output contains non-finite values",
+                )
+                self.assertTrue(
+                    bool(torch.isfinite(output_fp8).all()),
+                    "FP8 output contains non-finite values",
+                )
+                self.assertGreater(bf16_reference.abs().mean().item(), 0.25)
+                for comparison_name, comparison in comparisons.items():
+                    self.assertLess(
+                        comparison["mismatch_fraction"],
+                        0.005,
+                        f"{comparison_name} mismatch fraction exceeds 0.5%",
+                    )
+                    self.assertGreater(
+                        comparison["cosine"],
+                        0.99,
+                        f"{comparison_name} cosine similarity is too low",
+                    )
+
+                print(json.dumps(record, sort_keys=True), flush=True)
+
+        output_change = (
+            bf16_outputs[0].float() - bf16_outputs[-1].float()
+        ).abs().max().item()
+        self.assertGreater(
+            output_change,
+            1e-3,
+            "Synthetic prefixes did not exercise context-length growth",
+        )
 
 
 if __name__ == "__main__":
