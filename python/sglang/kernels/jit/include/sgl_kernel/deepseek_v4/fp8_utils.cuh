@@ -126,7 +126,7 @@ SGL_DEVICE uint8_t cvt_float_to_fp8_e4m3(float val) {
       mant3 = 0;
       exp8++;
     }
-    if (exp8 >= kMaxExp) return sign | kSaturate;
+    if (exp8 > kMaxExp) return sign | kSaturate;
   }
   return sign | (static_cast<uint8_t>(exp8) << 3) | mant3;
 }

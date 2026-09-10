@@ -200,12 +200,13 @@ def silu_and_mul_masked_post_quant(
     swizzle: bool = False,
 ) -> None:
     apply_swiglu_limit = swiglu_limit is not None
+    kernel_output = output.view(torch.uint8) if is_hip_runtime() else output
     module = _jit_silu_mul_quant_varlen_module(
         quant_group_size, scale_ue8m0, swizzle, apply_swiglu_limit
     )
     module.run(
         input,
-        output,
+        kernel_output,
         output_scale,
         masked_m,
         topk,
@@ -225,12 +226,13 @@ def silu_and_mul_contig_post_quant(
     swizzle: bool = False,
 ) -> None:
     apply_swiglu_limit = swiglu_limit is not None
+    kernel_output = output.view(torch.uint8) if is_hip_runtime() else output
     module = _jit_silu_mul_quant_contig_module(
         quant_group_size, scale_ue8m0, swizzle, apply_swiglu_limit
     )
     module.run(
         input,
-        output,
+        kernel_output,
         output_scale,
         transposed,
         float(swiglu_limit) if apply_swiglu_limit else 0.0,
