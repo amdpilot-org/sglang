@@ -4,6 +4,7 @@ import pytest
 import torch
 from torch import nn
 
+from sglang.kernels.ops.qwen4_ple import fused_qwen4_ngram_hash
 from sglang.srt.layers.quantization.unquant import UnquantizedEmbeddingMethod
 from sglang.srt.layers.vocab_parallel_embedding import (
     VocabParallelEmbeddingShardIndices,
@@ -147,6 +148,42 @@ def test_qwen4_ple_pinned_gather_empty_input():
     actual = offloaded.gather(ids)
     assert actual.shape == (0, 3, 7)
     assert actual.numel() == 0
+
+
+def test_qwen4_fused_ngram_hash_matches_eager_remainder_after_int64_wrap():
+    torch.manual_seed(38731)
+    contexts = torch.randint(
+        0, 151000, (128, 3), dtype=torch.long, device="cuda"
+    )
+    multipliers = torch.tensor(
+        [190734863281251, 953674316406251, 4768371582031251],
+        dtype=torch.long,
+        device="cuda",
+    )
+    sizes = torch.tensor(
+        [17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79],
+        dtype=torch.long,
+        device="cuda",
+    )
+    offsets = sizes.cumsum(0) - sizes
+
+    actual = fused_qwen4_ngram_hash(contexts, multipliers, sizes, offsets, 0)
+
+    previous = torch.where(
+        (contexts[:, 0] == 0) | (contexts[:, 1] == 0), 0, contexts[:, 0]
+    )
+    mixed = (contexts[:, 2] * multipliers[0]) ^ (
+        contexts[:, 1] * multipliers[1]
+    )
+    mixed_three = mixed ^ (previous * multipliers[2])
+    expected = torch.cat(
+        (
+            torch.remainder(mixed[:, None], sizes[:8]) + offsets[:8],
+            torch.remainder(mixed_three[:, None], sizes[8:]) + offsets[8:],
+        ),
+        dim=1,
+    )
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
 
 
 def test_qwen4_ple_pinned_embedding_rejects_unsupported_weights():

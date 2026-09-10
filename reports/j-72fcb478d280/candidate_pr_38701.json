@@ -1,0 +1,32 @@
+{
+  "candidate": {
+    "repository": "sgl-project/sglang",
+    "pull_request": 38701,
+    "tested_commit": "b254e1fd3a6f9f1c9ee48724c62c13168642efba",
+    "title": "[Qwen3.8-Next] Fuse PLE hash and pinned-host embedding gather",
+    "state": "open"
+  },
+  "focused_test": {
+    "command": "PYTHONPATH=/job/sglang/python SGLANG_JIT_CACHE_DIR=/tmp/sglang-cache-j-72fcb478d280 SGLANG_HOME=/job/sglang /opt/venv/bin/python -m pytest -q -p no:cacheprovider /job/sglang/test/registered/kernel/embeddings/test_qwen4_ple_offload.py",
+    "passed": 41,
+    "failed": 0,
+    "pytest_seconds": 21.11,
+    "wall_clock_seconds": 26
+  },
+  "benchmark": {
+    "command": "PYTHONPATH=/job/sglang/python SGLANG_JIT_CACHE_DIR=/tmp/sglang-cache-j-72fcb478d280 SGLANG_HOME=/job/sglang /opt/venv/bin/python /job/sglang/test/registered/kernels/benchmark/embeddings/bench_qwen4_ple_prefetch.py --tp-size 8 --rows-per-head 65537 --dtype fp8 --tokens 1 16 64 256 1024",
+    "method": "triton.testing.do_bench_cudagraph mean; values below are microseconds per call",
+    "rows": [
+      {"tokens": 1, "separate_us": 4.392, "fused_us": 2.779},
+      {"tokens": 16, "separate_us": 4.858, "fused_us": 3.068},
+      {"tokens": 64, "separate_us": 5.501, "fused_us": 4.113},
+      {"tokens": 256, "separate_us": 8.541, "fused_us": 8.985},
+      {"tokens": 1024, "separate_us": 23.341, "fused_us": 28.025}
+    ]
+  },
+  "independent_finding": {
+    "summary": "The candidate's Triton hash uses signed % after int64 wrap. On gfx942 this can return a negative remainder, while the eager path uses torch.remainder and returns a nonnegative ID.",
+    "observed_with": "Random contexts in [0, 151000), Qwen4 multipliers, and an independent CPU torch.remainder reference.",
+    "candidate_tests_missed_it": "The candidate tests use small contexts that do not exercise int64 wrap."
+  }
+}
