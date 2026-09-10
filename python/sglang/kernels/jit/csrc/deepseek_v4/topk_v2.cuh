@@ -532,6 +532,11 @@ struct TopKKernel {
         .with_device(device_)
         .verify(metadata);
 
+    RuntimeCheck(
+        page_indices.data_ptr() != scores.data_ptr() && page_indices.data_ptr() != seq_lens.data_ptr() &&
+            (!page_table.has_value() || page_indices.data_ptr() != page_table.value().data_ptr()) &&
+            page_indices.data_ptr() != metadata.data_ptr(),
+        "topk output must not alias an input");
     RuntimeCheck(std::has_single_bit(page_size), "page_size must be power of 2");
     RuntimeCheck(S.unwrap() % 4 == 0, "score_stride must be a multiple of 4 (16-byte vectorized load)");
     RuntimeCheck(Bp1.unwrap() == B.unwrap() + 1, "invalid metadata shape");
@@ -664,6 +669,11 @@ struct TopKKernel {
       row_starts_ptr = static_cast<const int32_t*>(row_starts.value().data_ptr());
     }
 
+    RuntimeCheck(
+        topk_indices.data_ptr() != scores.data_ptr() && topk_indices.data_ptr() != seq_lens.data_ptr() &&
+            topk_indices.data_ptr() != out_offsets.data_ptr() &&
+            (!row_starts.has_value() || topk_indices.data_ptr() != row_starts.value().data_ptr()),
+        "topk output must not alias an input");
     RuntimeCheck(S.unwrap() % 4 == 0, "score_stride must be a multiple of 4 (16-byte vectorized load)");
     const auto topk = static_cast<uint32_t>(K.unwrap());
     RuntimeCheck(topk > 0 && topk <= kMaxTopK, "topk must be in (0, 2048]");

@@ -270,6 +270,104 @@ def test_topk_v2_output_indices(batch: int, seq: int, k: int) -> None:
     _assert_topk_close(scores.cpu(), ref_raw, our_raw, batch, seq_lens.cpu(), k)
 
 
+@torch.inference_mode()
+def test_topk_v2_output_storage_reuse_and_contracts() -> None:
+    """Compare fresh and safely reused outputs across distinct input batches."""
+    torch.manual_seed(24061)
+    device = "cuda"
+    batch, seq, k = 4, 65540, 2048
+    sentinel = -12345
+    scores_a = torch.randn(batch, seq, dtype=torch.float32, device=device)
+    scores_b = torch.randn(batch, seq, dtype=torch.float32, device=device)
+    lengths_a = torch.full((batch,), seq, dtype=torch.int32, device=device)
+    lengths_b = torch.tensor(
+        [65537, 4096, 2048, 2047], dtype=torch.int32, device=device
+    )
+    page_table = (
+        torch.arange(
+            (seq + PAGE_SIZE - 1) // PAGE_SIZE, dtype=torch.int32, device=device
+        )
+        .unsqueeze(0)
+        .expand(batch, -1)
+        .contiguous()
+    )
+
+    def run_and_check(scores, lengths, out):
+        out.fill_(sentinel)
+        metadata = plan_topk_v2(lengths)
+        torch.cuda.synchronize()
+        topk_transform_paged_v2(scores, lengths, page_table, out, PAGE_SIZE, metadata)
+        torch.cuda.synchronize()
+        assert not torch.any(out == sentinel).item()
+        for row, length in enumerate(lengths.cpu().tolist()):
+            valid = out[row][out[row] != -1]
+            expected = min(k, length)
+            assert valid.numel() == expected
+            reference = torch.topk(scores[row, :length], expected, sorted=False).indices
+            assert set(valid.tolist()) == set(reference.tolist())
+
+    fresh_a = torch.empty((batch, k), dtype=torch.int32, device=device)
+    fresh_b = torch.empty((batch, k), dtype=torch.int32, device=device)
+    run_and_check(scores_a, lengths_a, fresh_a)
+    run_and_check(scores_b, lengths_b, fresh_b)
+
+    reused = torch.empty((batch, k), dtype=torch.int32, device=device)
+    reused_address = reused.data_ptr()
+    run_and_check(scores_a, lengths_a, reused)
+    run_and_check(scores_b, lengths_b, reused)
+    assert reused.data_ptr() == reused_address
+
+    # Production refreshes the plan in place so a captured graph keeps its address.
+    plan = plan_topk_v2(lengths_a)
+    torch.cuda.synchronize()
+    plan_address = plan.data_ptr()
+    plan.copy_(plan_topk_v2(lengths_b))
+    torch.cuda.synchronize()
+    assert plan.data_ptr() == plan_address
+    if torch.version.hip is None:
+        assert not torch.equal(plan, plan_topk_v2(lengths_a))
+
+    alias_seq = k + PAGE_SIZE
+    alias_scores = torch.randn(1, alias_seq, dtype=torch.float32, device=device)
+    alias_lengths = torch.full((1,), alias_seq, dtype=torch.int32, device=device)
+    alias_page_table = torch.arange(
+        alias_seq, dtype=torch.int32, device=device
+    ).unsqueeze(0)
+    alias_out = alias_page_table[:, :k]
+    alias_plan = plan_topk_v2(alias_lengths)
+    with pytest.raises(RuntimeError, match="topk output must not alias an input"):
+        topk_transform_paged_v2(
+            alias_scores,
+            alias_lengths,
+            alias_page_table,
+            alias_out,
+            1,
+            alias_plan,
+        )
+
+    bad_output = torch.empty((batch, k), dtype=torch.int64, device=device)
+    with pytest.raises(RuntimeError, match="Tensor match failed"):
+        topk_transform_paged_v2(
+            scores_a,
+            lengths_a,
+            page_table,
+            bad_output,
+            PAGE_SIZE,
+            plan_topk_v2(lengths_a),
+        )
+
+    bad_scores = scores_a.to(torch.float16)
+    with pytest.raises(RuntimeError, match="Tensor match failed"):
+        topk_transform_paged_v2(
+            bad_scores,
+            lengths_a,
+            page_table,
+            torch.empty((batch, k), dtype=torch.int32, device=device),
+            PAGE_SIZE,
+            plan_topk_v2(lengths_a),
+        )
+
+
 # --- ragged entry point ------------------------------------------------------
 # Rows select inside `[row_start, row_start + seq_len)` of their score row and
 # emit `position + offset`. The window start is an arbitrary token offset, so
