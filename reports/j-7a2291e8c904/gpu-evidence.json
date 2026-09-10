@@ -1,0 +1,142 @@
+{
+  "label": "persistent-checkout gfx942 evidence for sgl-project/sglang issue 36481",
+  "recorded_at": "2026-09-10T03:30:39Z",
+  "campaign": "repo-e2e-20260909",
+  "read_only_context": {
+    "upstream_issue": "sgl-project/sglang issue 36481",
+    "issue_state": "open",
+    "issue_comments": 0,
+    "upstream_changes_posted": false
+  },
+  "environment": {
+    "interpreter": "/opt/venv/bin/python",
+    "python_version": "3.10.12",
+    "torch_version": "2.9.1+rocm7.2.0.git7e1940d4",
+    "torch_path": "/opt/venv/lib/python3.10/site-packages/torch/__init__.py",
+    "hip_version": "7.2.26015-fc0010cf6a",
+    "triton_path": "/opt/venv/lib/python3.10/site-packages/triton/__init__.py",
+    "sgl_kernel_path": "/opt/venv/lib/python3.10/site-packages/sgl_kernel/__init__.py",
+    "sgl_kernel_native": "/opt/venv/lib/python3.10/site-packages/sgl_kernel/common_ops.cpython-310-x86_64-linux-gnu.so",
+    "sgl_kernel_native_sha256": "d38b79daf2c5dd193d49837c903798e6ff5440cbf31d899c2fd8ca68fed6aa98",
+    "gpu": {
+      "assigned_count": 1,
+      "name": "AMD Instinct MI300X",
+      "gfx": "gfx942",
+      "serial": "692440004420",
+      "driver": "6.19.14.31400000",
+      "node_id": 3,
+      "guid": 39656
+    },
+    "image": {
+      "operator_qualified_image": "amdpilotv2/open-job-mi300:jit-config-readable-35122-260909",
+      "operator_local_image_id": "sha256:dfc9419089c338b5712da4841768b38b1ab79f3da41f8c58c3cd4dfcc1147ff1",
+      "container_id_from_mount": "f997bad9f67b06c1559adedf38088f28ffedc09ab4498af82fda3100ee414c24"
+    },
+    "job_private_cache_root": "/tmp/sglang-cache-j-7a2291e8c904"
+  },
+  "installed_source_baseline": {
+    "label": "installed-source baseline; not proof for later checkout changes",
+    "source_commit": "8eaffdf382e06b7dc50fc5c76cc5aad9c36bb0e4",
+    "source_path": "/sgl-workspace/sglang",
+    "python_package_path": "/sgl-workspace/sglang/python/sglang",
+    "artifact": "/job/baseline-first.json",
+    "control": "test/registered/layers/mamba/test_mamba_ssm_ssd.py::test_mamba_chunk_scan_single_example[seq_len_chunk_size0-5-3-itype0]",
+    "case": "Mamba chunk scan, batch 1, sequence 112, chunk 16, 3 heads, head dimension 5, float32",
+    "reference": "ssd_minimal_discrete independent PyTorch recurrence",
+    "result": "1 passed; output and final-state assert_close gates passed",
+    "first_gpu_execution_elapsed_ms": 19041,
+    "pytest_reported_test_seconds": 9.63
+  },
+  "persistent_checkout": {
+    "repository": "amdpilot-org/sglang",
+    "base_branch": "main",
+    "base_commit": "0084030179bfba86bfeb6d43f7997d4076329d2c",
+    "delivery_branch": "amdpilot/j-7a2291e8c904",
+    "python_package_path": "/job/sglang/python/sglang"
+  },
+  "implementation": {
+    "production_change": "Require attn_backend.supports_ragged_verify_graph before enabling compact target-verify graph capture.",
+    "tests": [
+      "test/registered/attention/test_ragged_verify_extend_attention.py",
+      "test/registered/spec/dspark/test_ragged_verify_backend_capability.py"
+    ],
+    "compact_fixture": {
+      "verify_lens": [3, 1, 2, 4],
+      "graph_num_tokens": 16,
+      "active_tokens": 10
+    },
+    "padded_fixture": {
+      "verify_lens": [3, 1, 2, 4, 3, 3],
+      "graph_num_tokens": 16,
+      "active_tokens": 16
+    },
+    "reference": "Explicit per-request/per-position PyTorch softmax recurrence, independent of extend_attention_fwd and its production Torch helper",
+    "graph_check": "Three warmups on a side stream, HIP graph capture, replay, and replay after q mutation compared to a fresh independent reference"
+  },
+  "unsupported_graph_paths_and_bounds": {
+    "base_backend_flag": "AttentionBackend.supports_ragged_verify_graph defaults false",
+    "triton_backend_flag": "TritonAttnBackend does not override supports_ragged_verify_graph and is therefore unsupported",
+    "hybrid_wrapper_flag": "HybridLinearAttnBackend requires both full-attention and linear-attention backend support",
+    "root_cause": "DecodeCudaGraphRunner previously enabled compact capture from spec support and SGLANG_RAGGED_VERIFY_MODE alone, before checking the selected backend; unsupported Triton/hybrid paths could therefore enter target-verify capture",
+    "fix": "ragged_verify_compact_graphs_enabled now takes the selected attention backend and requires supports_ragged_verify_graph",
+    "zero_length_padding_bounds": {
+      "verify_lens": [4, 4, 0, 0, 0, 0],
+      "qo_indptr": [0, 4, 8, 8, 8, 8, 8]
+    },
+    "sentinel_candidate_not_duplicated": {
+      "mirror_pr": "amdpilot-org/sglang pull 148",
+      "tested_commit": "4e284c3c350de3e64eaa57aea2220a4efb616a56",
+      "result": "2 passed; -1 padded-row accept-length sentinel is clamped before bonus gathers",
+      "elapsed_ms": 18164
+    }
+  },
+  "validation": {
+    "current_main_compact_grid_control": {
+      "command": "PYTHONPATH=/job/sglang/python TRITON_CACHE_DIR=/tmp/sglang-cache-j-7a2291e8c904/triton TORCHINDUCTOR_CACHE_DIR=/tmp/sglang-cache-j-7a2291e8c904/torchinductor timeout 240 /opt/venv/bin/python -m pytest -q -s -p no:cacheprovider test/registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention_compact_grid",
+      "result": "1 passed in 17.06s",
+      "wall_elapsed_ms": 20042,
+      "unchanged_gate": "torch.allclose(rtol=1e-2, atol=1e-3)"
+    },
+    "new_reference_and_graph_test": {
+      "command": "PYTHONPATH=/job/sglang/python TRITON_CACHE_DIR=/tmp/sglang-cache-j-7a2291e8c904/triton TORCHINDUCTOR_CACHE_DIR=/tmp/sglang-cache-j-7a2291e8c904/torchinductor timeout 300 /opt/venv/bin/python -m pytest -q -s -p no:cacheprovider test/registered/attention/test_ragged_verify_extend_attention.py",
+      "result": "2 passed, 2 subtests passed in 23.44s",
+      "wall_elapsed_ms": 27279,
+      "unchanged_gate": "torch.testing.assert_close(rtol=2e-3, atol=2e-3) for compact and padded active outputs"
+    },
+    "admission_and_ragged_geometry": {
+      "command": "PYTHONPATH=/job/sglang/python timeout 300 /opt/venv/bin/python -m pytest -q -s -p no:cacheprovider test/registered/spec/dspark/test_ragged_verify_backend_capability.py test/registered/spec/dspark/test_ragged_verify.py",
+      "result": "13 passed, 3 subtests passed in 17.41s",
+      "wall_elapsed_ms": 20610
+    },
+    "final_affected_set": {
+      "command": "PYTHONPATH=/job/sglang/python TRITON_CACHE_DIR=/tmp/sglang-cache-j-7a2291e8c904/triton TORCHINDUCTOR_CACHE_DIR=/tmp/sglang-cache-j-7a2291e8c904/torchinductor timeout 600 /opt/venv/bin/python -m pytest -q -s -p no:cacheprovider test/registered/attention/test_ragged_verify_extend_attention.py test/registered/spec/dspark/test_ragged_verify_backend_capability.py test/registered/spec/dspark/test_ragged_verify.py test/registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention_compact_grid",
+      "result": "16 passed, 5 subtests passed in 25.25s",
+      "wall_elapsed_ms": 29315
+    },
+    "lint": "pre-commit run --files <three changed files> passed after isort ordering",
+    "timing_method": "Bash date +%s%N around each timeout-wrapped command; wall time includes process startup and JIT/cache reuse"
+  },
+  "diagnostics": [
+    {
+      "stage": "first new-test iteration",
+      "error": "The independent reference sliced every request prefix from index zero; eager output mismatched",
+      "resolution": "Use kv_indptr request ranges in the reference; fresh process passed"
+    },
+    {
+      "stage": "second new-test iteration",
+      "error": "HIP error hipErrorStreamCaptureUnsupported while capture attempted layout.verify_lens.cpu().tolist() inside torch.cuda.graph",
+      "resolution": "Hoist max_len_extend and extend_seq_lens_cpu to host constants before capture; this was a test fixture issue, not a production kernel failure. The corrected raw extend_attention_fwd capture and replay passed on gfx942."
+    },
+    {
+      "stage": "sentinel candidate worktree",
+      "error": "One retry used a mistyped SHA and created no worktree; no GPU test ran",
+      "resolution": "Reran exact commit 4e284c3c350de3e64eaa57aea2220a4efb616a56; 2 tests passed"
+    }
+  ],
+  "architecture_specific_limitations": [
+    "Validation used one AMD Instinct MI300X gfx942; it does not reproduce or disprove the reported B300 illegal-memory-access failure.",
+    "The tiny raw extend_attention_fwd HIP graph capture passed on gfx942 after host constants were hoisted, but this is not a full-model or full CUDA-graph-runner capture claim.",
+    "No model weights were downloaded; no full DSpark server, multi-rank execution, or end-to-end Qwen hybrid model run was attempted.",
+    "The already-open mirror PR 148 sentinel fix was tested at its preserved commit and intentionally not duplicated in this branch."
+  ]
+}
