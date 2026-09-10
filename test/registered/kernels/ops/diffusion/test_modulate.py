@@ -555,6 +555,28 @@ def test_timestep_embedding_matches_diffusers(
     )
 
 
+def test_timestep_embedding_scalar_broadcast_endpoints_and_dtype():
+    values = [0.0, 1.0, 999.0, 1000.0]
+    t = torch.tensor(values, dtype=torch.int64, device=DEVICE)
+    t_before = t.clone()
+    kwargs = dict(flip_sin_to_cos=True, downscale_freq_shift=0, scale=1)
+
+    out = timestep_embedding(t, 32, dtype=torch.float32, **kwargs)
+    expected = timestep_embedding_reference(
+        t.to(torch.float32), 32, **kwargs, max_period=10000
+    )
+    torch.testing.assert_close(out, expected, atol=1e-3, rtol=1e-3)
+    assert torch.equal(t, t_before)
+
+    scalar = torch.tensor([0.375], dtype=torch.float32, device=DEVICE)
+    broadcast = torch.full((8,), 0.375, dtype=torch.float32, device=DEVICE)
+    scalar_out = timestep_embedding(scalar, 32, **kwargs)
+    broadcast_out = timestep_embedding(broadcast, 32, **kwargs)
+    torch.testing.assert_close(
+        broadcast_out, scalar_out.expand(8, 32), atol=0.0, rtol=0.0
+    )
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
 
