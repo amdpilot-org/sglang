@@ -169,7 +169,8 @@ def accept_sampling(
         cutoff_verify_lens=cutoff_verify_lens,
     )
     row_ids = torch.arange(bs, dtype=torch.long, device=device)
-    accept_pos = accept_index[row_ids, correct_len.to(torch.long)].to(torch.long)
+    safe_correct_len = correct_len.clamp(min=0)
+    accept_pos = accept_index[row_ids, safe_correct_len.to(torch.long)].to(torch.long)
     bonus = predicts[accept_pos].to(torch.int64)
     return correct_len, bonus, cap_trim_lens
 
@@ -187,6 +188,7 @@ def _gather_two_level_bonus_kernel(
     offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
     mask = offs < n
     cl = tl.load(correct_len_ptr + offs, mask=mask, other=0).to(tl.int64)
+    cl = tl.maximum(cl, 0)
     accept_pos = tl.load(accept_index_ptr + offs * cols + cl, mask=mask, other=0).to(
         tl.int64
     )
@@ -618,7 +620,8 @@ def accept_greedy(
             correct_len=correct_len, verify_lens=cutoff_verify_lens
         )
         row_ids = torch.arange(bs, device=target_predict.device)
-        bonus = target_predict[row_ids, correct_len.to(torch.long)].to(torch.int64)
+        safe_correct_len = correct_len.clamp(min=0)
+        bonus = target_predict[row_ids, safe_correct_len.to(torch.long)].to(torch.int64)
     return correct_len, bonus, cap_trim_lens
 
 
@@ -634,6 +637,7 @@ def _gather_row_bonus_kernel(
     offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
     mask = offs < n
     idx = tl.load(idx_ptr + offs, mask=mask, other=0).to(tl.int64)
+    idx = tl.maximum(idx, 0)
     val = tl.load(table_ptr + offs * cols + idx, mask=mask, other=0)
     tl.store(out_ptr + offs, val.to(tl.int64), mask=mask)
 
