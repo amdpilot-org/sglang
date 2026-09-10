@@ -440,6 +440,96 @@ class TestTritonAttentionWindowSink(CustomTestCase):
                 sinks=torch.zeros(q.shape[1] + 1, device=q.device),
             )
 
+    @requires_cuda
+    def test_kernel_ignores_masked_out_nan_and_sentinels(self):
+        q, k, v, cu, seq_lens, max_len = make_varlen_inputs(
+            [64], num_heads=1, head_dim=64, seed=15
+        )
+        scale = 1.0 / math.sqrt(q.shape[-1])
+        window = (8, 8)
+        masked_keys = (window[1] + 1, 63 - window[0] - 1)
+        sinks = rand_sinks(q.shape[1], seed=16)
+        clean_reference = ref_varlen_attention(
+            q, k, v, cu.tolist(), scale, window_size=window
+        )
+        clean_reference_with_sink = ref_varlen_attention(
+            q, k, v, cu.tolist(), scale, window_size=window, sinks=sinks
+        )
+
+        poison_cases = (
+            ("nan_key", "k", float("nan")),
+            ("finite_sentinel_key", "k", torch.finfo(q.dtype).max),
+            ("nan_value", "v", float("nan")),
+            ("finite_sentinel_value", "v", torch.finfo(q.dtype).max),
+        )
+        for use_sinks in (False, True):
+            for name, tensor, sentinel in poison_cases:
+                with self.subTest(name=name, use_sinks=use_sinks):
+                    poisoned = (k if tensor == "k" else v).clone()
+                    poisoned[list(masked_keys)] = sentinel
+                    o = torch.empty_like(q)
+                    context_attention_fwd(
+                        q,
+                        poisoned if tensor == "k" else k,
+                        v if tensor == "k" else poisoned,
+                        o,
+                        cu,
+                        seq_lens,
+                        max_len,
+                        is_causal=False,
+                        sm_scale=scale,
+                        window_size=window,
+                        sinks=sinks if use_sinks else None,
+                    )
+                    for query_index in (0, 63):
+                        expected = (
+                            clean_reference_with_sink
+                            if use_sinks
+                            else clean_reference
+                        )[query_index]
+                        self.assertFalse(torch.isnan(o[query_index].float()).any())
+                        torch.testing.assert_close(
+                            o[query_index].float(),
+                            expected.float(),
+                            atol=ATOL,
+                            rtol=RTOL,
+                        )
+
+    @requires_cuda
+    def test_kernel_preserves_valid_nan_inputs(self):
+        q, k, v, cu, seq_lens, max_len = make_varlen_inputs(
+            [64], num_heads=1, head_dim=64, seed=17
+        )
+        scale = 1.0 / math.sqrt(q.shape[-1])
+        window = (8, 8)
+        valid_query = 32
+        masked_query = 0
+        poisoned_key = 32
+
+        for tensor in ("k", "v"):
+            with self.subTest(tensor=tensor):
+                poisoned_k = k.clone()
+                poisoned_v = v.clone()
+                if tensor == "k":
+                    poisoned_k[poisoned_key] = float("nan")
+                else:
+                    poisoned_v[poisoned_key] = float("nan")
+                o = torch.empty_like(q)
+                context_attention_fwd(
+                    q,
+                    poisoned_k,
+                    poisoned_v,
+                    o,
+                    cu,
+                    seq_lens,
+                    max_len,
+                    is_causal=False,
+                    sm_scale=scale,
+                    window_size=window,
+                )
+                self.assertTrue(torch.isnan(o[valid_query].float()).all())
+                self.assertFalse(torch.isnan(o[masked_query].float()).any())
+
     # ------------------------------------------------------------------
     # 3. Backend integration: VisionTritonAttention must forward the kwargs
     # ------------------------------------------------------------------

@@ -145,7 +145,7 @@ def _fwd_kernel(
             mask = mask & (start_n + offs_n[None, :] >= offs_m[:, None] - WINDOW_LEFT)
         if WINDOW_RIGHT != -1:
             mask = mask & (start_n + offs_n[None, :] <= offs_m[:, None] + WINDOW_RIGHT)
-        qk += tl.where(mask, 0, float("-inf"))
+        qk = tl.where(mask, qk, float("-inf"))
 
         # -- compute m_ij, p, l_ij
         m_ij = tl.max(qk, 1)
@@ -179,9 +179,15 @@ def _fwd_kernel(
             mask=((start_n + offs_n[:, None]) < cur_batch_seq_len) & (mask_d[None, :]),
             other=0.0,
         )
+        nan_key = tl.max(tl.where(v != v, 1, 0), axis=1)
+        valid_nan = tl.max(
+            tl.where(mask & (nan_key[None, :] != 0), 1, 0), axis=1
+        )
+        v = tl.where(v != v, 0.0, v)
 
         p = p.to(v.dtype)
         acc += tl.dot(p, v)
+        acc = tl.where(valid_nan[:, None] != 0, float("nan"), acc)
         # update m_i and l_i
         l_i = l_i_new
         m_i = m_i_new
