@@ -28,6 +28,7 @@ from sglang.srt.utils import (
     cpu_has_amx_support,
     is_cpu,
     is_cuda,
+    is_hip,
     is_host_cpu_arm64,
     set_weight_attrs,
     use_intel_amx_backend,
@@ -38,12 +39,15 @@ if TYPE_CHECKING:
     from sglang.srt.layers.moe.token_dispatcher import StandardDispatchOutput
 
 _is_cuda = is_cuda()
+_is_hip = is_hip()
 _is_cpu_amx_available = cpu_has_amx_support()
 _is_cpu = is_cpu()
 _is_cpu_arm64 = is_host_cpu_arm64()
 
 if _is_cuda:
     from sgl_kernel import int8_scaled_mm
+elif _is_hip:
+    from sglang.kernels.ops.quantization.fp8_kernel import triton_scaled_mm
 
     @register_fake_if_exists("sgl_kernel::int8_scaled_mm")
     def _int8_scaled_mm_abstract(
@@ -222,14 +226,24 @@ class W8A8Int8LinearMethod(LinearMethodBase):
         x_scale_2d = x_scale.view(-1, x_scale.shape[-1])
         output_shape = [*x_q.shape[:-1], layer.weight.shape[1]]
 
-        output = int8_scaled_mm(
-            x_q_2d,
-            layer.weight,
-            x_scale_2d,
-            layer.weight_scale,
-            out_dtype=x.dtype,
-            bias=bias,
-        )
+        if _is_hip:
+            output = triton_scaled_mm(
+                x_q_2d,
+                layer.weight,
+                x_scale_2d,
+                layer.weight_scale,
+                out_dtype=x.dtype,
+                bias=bias,
+            )
+        else:
+            output = int8_scaled_mm(
+                x_q_2d,
+                layer.weight,
+                x_scale_2d,
+                layer.weight_scale,
+                out_dtype=x.dtype,
+                bias=bias,
+            )
 
         return output.view(output_shape)
 

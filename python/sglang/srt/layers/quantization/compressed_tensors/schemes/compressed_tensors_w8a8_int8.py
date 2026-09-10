@@ -21,13 +21,16 @@ from sglang.srt.layers.quantization.compressed_tensors.schemes import (
     CompressedTensorsLinearScheme,
 )
 from sglang.srt.layers.quantization.utils import requantize_with_max_scale
-from sglang.srt.utils import is_cuda
+from sglang.srt.utils import is_cuda, is_hip
 
 __all__ = ["CompressedTensorsW8A8Int8", "NPUCompressedTensorsW8A8Int8"]
 
 _is_cuda = is_cuda()
+_is_hip = is_hip()
 if _is_cuda:
     from sgl_kernel import int8_scaled_mm
+elif _is_hip:
+    from sglang.kernels.ops.quantization.fp8_kernel import triton_scaled_mm
 
 
 class CompressedTensorsW8A8Int8(CompressedTensorsLinearScheme):
@@ -173,6 +176,15 @@ class CompressedTensorsW8A8Int8(CompressedTensorsLinearScheme):
         # TODO: add cutlass_scaled_mm_azp support
         x_q, x_scale = per_token_quant_int8(x)
 
+        if _is_hip:
+            return triton_scaled_mm(
+                x_q,
+                layer.weight,
+                x_scale,
+                layer.weight_scale,
+                out_dtype=x.dtype,
+                bias=bias,
+            )
         return int8_scaled_mm(
             x_q, layer.weight, x_scale, layer.weight_scale, out_dtype=x.dtype, bias=bias
         )

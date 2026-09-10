@@ -9,8 +9,12 @@ per-token int8 activations) and blockwise (BlockInt8LinearMethod,
 import unittest
 
 import torch
+from compressed_tensors.quantization import QuantizationStrategy
 
 from sglang.srt.layers.quantization.blockwise_int8 import BlockInt8Config
+from sglang.srt.layers.quantization.compressed_tensors.schemes import (
+    CompressedTensorsW8A8Int8,
+)
 from sglang.srt.layers.quantization.w8a8_int8 import W8A8Int8Config
 from sglang.srt.runtime_context import get_parallel
 from sglang.srt.utils import get_device_sm
@@ -103,6 +107,58 @@ class TestW8A8Int8Linear(_Int8LinearCheck):
 
     def test_channel(self):
         self._check(CHANNEL_SHAPES, self._build_layer)
+
+    def test_channel_zero_scale(self):
+        layer, _ = TestW8A8Int8Linear._build_layer(160, 336)
+        layer.weight_scale.zero_()
+        layer.quant_method.process_weights_after_loading(layer)
+        x = torch.randn((5, 336), device="cuda", dtype=torch.bfloat16) / 10
+        out, _ = layer(x)
+        self.assertTrue(torch.equal(out, torch.zeros_like(out)))
+
+
+class TestCompressedTensorsW8A8Int8(CustomTestCase):
+    @staticmethod
+    def _build_scheme_layer(n: int, k: int, weight: torch.Tensor, scale: torch.Tensor):
+        layer = torch.nn.Module()
+        layer.weight = weight
+        layer.weight_scale = scale
+        scheme = CompressedTensorsW8A8Int8(
+            strategy=QuantizationStrategy.CHANNEL,
+            is_static_input_scheme=False,
+            input_symmetric=True,
+        )
+        scheme.process_weights_after_loading(layer)
+        return scheme, layer
+
+    def test_channel_matches_w8a8_int8(self):
+        torch.manual_seed(15194)
+        m, n, k = 5, 160, 336
+        w = torch.randn((n, k), device="cuda", dtype=torch.bfloat16) / 10
+        w_int8, scale, w_dequant = _quantize_int8_channel(w)
+        x = torch.randn((m, k), device="cuda", dtype=torch.bfloat16) / 10
+
+        w8a8_layer = make_tp1_column_parallel_linear(W8A8Int8Config({}), n, k)
+        load_linear_weights(w8a8_layer, weight=w_int8, weight_scale=scale)
+        w8a8_layer.quant_method.process_weights_after_loading(w8a8_layer)
+        w8a8_out, _ = w8a8_layer(x)
+
+        scheme, compressed_layer = self._build_scheme_layer(n, k, w_int8, scale)
+        compressed_out = scheme.apply_weights(compressed_layer, x, None)
+        ref = x.float() @ w_dequant.T
+
+        self.assertTrue(torch.equal(w8a8_out, compressed_out))
+        assert_output_close(self, compressed_out, ref, rtol=5e-2, atol=1e-1)
+
+    def test_channel_zero_scale(self):
+        torch.manual_seed(15194)
+        n, k = 160, 336
+        w_int8 = torch.randint(-127, 128, (n, k), device="cuda", dtype=torch.int8)
+        scale = torch.zeros((n, 1), device="cuda", dtype=torch.float32)
+        x = torch.randn((5, k), device="cuda", dtype=torch.bfloat16) / 10
+        scheme, layer = self._build_scheme_layer(n, k, w_int8, scale)
+        out = scheme.apply_weights(layer, x, None)
+        self.assertTrue(torch.equal(out, torch.zeros_like(out)))
 
 
 class TestBlockInt8Linear(_Int8LinearCheck):
