@@ -683,6 +683,7 @@ class CompressedTensorsConfig(QuantizationConfig):
         weight_quant: BaseModel,
         input_quant: BaseModel,
         format: Optional[str] = None,
+        layer_name: Optional[str] = None,
     ) -> CompressedTensorsLinearScheme:
         # The format of the config_group this layer matched, when it declares
         # one. Falls back to the top-level format, which is "mixed-precision"
@@ -777,7 +778,14 @@ class CompressedTensorsConfig(QuantizationConfig):
                         input_symmetric=input_quant.symmetric,
                     )
 
-        raise NotImplementedError("No compressed-tensors compatible scheme was found.")
+        message = "No compressed-tensors compatible scheme was found"
+        if layer_name is not None:
+            message += f" for layer {layer_name!r}"
+        message += (
+            ". If this layer is unquantized in the checkpoint, add its name or "
+            "parent prefix to quantization_config.ignore."
+        )
+        raise NotImplementedError(message)
 
     def get_moe_scheme(
         self, layer: torch.nn.Module, layer_name: Optional[str] = None
@@ -973,6 +981,7 @@ class CompressedTensorsConfig(QuantizationConfig):
                 weight_quant=weight_quant,
                 input_quant=input_quant,
                 format=scheme_format,
+                layer_name=layer_name,
             )
 
         # Raise error if device does not support the scheme
