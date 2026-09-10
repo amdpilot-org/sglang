@@ -1,0 +1,79 @@
+{
+  "campaign": "repo-e2e-20260909",
+  "scope": "DSA top-k v2 output-storage reuse follow-up; distinct from amdpilot-org/sglang issue 221's tied-threshold overflow trigger",
+  "environment": {
+    "gpu": "AMD Instinct MI300X",
+    "gpu_arch": "gfx942",
+    "torch_capability": [9, 4],
+    "torch": "2.9.1+rocm7.2.0.git7e1940d4",
+    "interpreter": "/opt/venv/bin/python",
+    "image": "amdpilotv2/open-job-mi300:jit-config-readable-35122-260909",
+    "local_image_id": "sha256:dfc9419089c338b5712da4841768b38b1ab79f3da41f8c58c3cd4dfcc1147ff1"
+  },
+  "source": {
+    "mirror_base": "0084030179bfba86bfeb6d43f7997d4076329d2c",
+    "python_wrapper": "python/sglang/kernels/ops/attention/dsv4/topk.py",
+    "host_kernel": "python/sglang/kernels/jit/csrc/deepseek_v4/topk_v2.cuh",
+    "device_implementation": "python/sglang/kernels/jit/include/sgl_kernel/deepseek_v4/topk_impl.cuh",
+    "jit_cache": "/tmp/sglang-cache-j-fa24c8498610",
+    "native_module": "/tmp/sglang-cache-j-fa24c8498610/gfx942/sgl_kernel_jit_dpsk_v4_topk_v2/build-730e162b06c22f86/deps-e850c321d4cd4ce9/sgl_kernel_jit_dpsk_v4_topk_v2.so",
+    "native_dispatch": "void sglang::topk_main_kernel<true, 0, (sglang::TopKMode)1>(sglang::TopKPagedParams)"
+  },
+  "installed_source_baseline": {
+    "label": "installed-source only; not evidence for mirror checkout changes",
+    "python_path": "/sgl-workspace/sglang/python/sglang/__init__.py",
+    "topk_python_path": "/sgl-workspace/sglang/python/sglang/kernels/ops/attention/dsv4/topk.py",
+    "first_execution_elapsed_seconds": 25.327,
+    "result": "unsupported",
+    "error": "JIT build failed for sgl_kernel_jit_dpsk_v4_topk_v2: cooperative_groups.h not found while compiling topk_impl.cuh for gfx942",
+    "neighboring_control": "torch.topk",
+    "control_timing_ms": {
+      "batch_1": {"median": 0.17396081238985062, "min": 0.1680571585893631, "max": 0.23162085562944412},
+      "batch_2": {"median": 0.12965500354766846, "min": 0.12689100354766846, "max": 0.16084499657154083},
+      "batch_4": {"median": 0.1232316717505455, "min": 0.12088008224964142, "max": 0.2454360946215455}
+    }
+  },
+  "reuse_experiment": {
+    "input": {
+      "score_dtype": "float32",
+      "output_dtype": "int32",
+      "topk": 2048,
+      "page_size": 64,
+      "sentinel": -12345,
+      "distinct_batches": [
+        {"lengths": [4096, 4096, 4096, 4096]},
+        {"lengths": [4096, 3072, 2048, 2047]}
+      ]
+    },
+    "reference": "torch.topk selected-index set per row",
+    "fresh_output": "pass",
+    "reused_output": "pass",
+    "sentinel_survivors": 0,
+    "plan_address_stable": true,
+    "unsupported_output_alias": "clear RuntimeError after fix; dispatched before fix",
+    "unsupported_output_dtype_int64": "clear TensorMatcher RuntimeError",
+    "unsupported_score_dtype_float16": "clear TensorMatcher RuntimeError"
+  },
+  "timing": {
+    "method": "3 warmups plus 10 measured calls per cell; allocation/sentinel fill/kernel/synchronize included; median/min/max wall-clock milliseconds",
+    "matrix_ms": {
+      "fresh_batch_1": {"median": 0.045472290366888046, "min": 0.04422105848789215, "max": 0.05157478153705597},
+      "reused_batch_1": {"median": 0.04012836143374443, "min": 0.03849249333143234, "max": 0.05008932203054428},
+      "fresh_batch_2": {"median": 0.044133514165878296, "min": 0.04337728023529053, "max": 0.04626438021659851},
+      "reused_batch_2": {"median": 0.03918865695595741, "min": 0.03842264413833618, "max": 0.0400962308049202},
+      "fresh_batch_4": {"median": 0.04407158121466637, "min": 0.04302710294723511, "max": 0.05833897739648819},
+      "reused_batch_4": {"median": 0.0392962247133255, "min": 0.037183985114097595, "max": 0.040990300476551056}
+    }
+  },
+  "validation": {
+    "focused_test": "1 passed",
+    "full_registered_topk_suite": "279 passed",
+    "pre_commit": "passed for changed files",
+    "bounds": "No model weights, no unbounded loops, no synthetic GPU burn"
+  },
+  "upstream_context": {
+    "issue": "sgl-project/sglang issue 35257",
+    "consulted_candidate": "sgl-project/sglang PR 37941 at commit 7a83d7fdd548caf1ed4da9525e1a17724661172c",
+    "candidate_action": "consulted only; not applied or duplicated. This change covers output reuse and ABI rejection, not threshold-bin exactness."
+  }
+}
