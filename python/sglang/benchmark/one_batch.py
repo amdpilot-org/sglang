@@ -309,6 +309,9 @@ class BenchArgs:
 def load_model(server_args, port_args, gpu_id, tp_rank):
     cfg = resolving_view(server_args)
     suppress_other_loggers()
+    initialize_moe_config()
+    initialize_fp8_gemm_config()
+    initialize_fp4_gemm_config()
     rank_print = print if tp_rank == 0 else lambda *args, **kwargs: None
     moe_ep_rank = tp_rank // (cfg.tp_size // cfg.ep_size)
 
@@ -899,9 +902,6 @@ def latency_test(
     # `main` runs this inline for tp_size == 1 and spawns it per rank otherwise;
     # a spawned child arrives with nothing published.
     publish(server_args, role="scheduler")
-    initialize_moe_config()
-    initialize_fp8_gemm_config()
-    initialize_fp4_gemm_config()
 
     if get_bool_env_var("SGLANG_SET_CPU_AFFINITY"):
         parallel = get_parallel()
