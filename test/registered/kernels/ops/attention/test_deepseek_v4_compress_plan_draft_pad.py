@@ -43,6 +43,11 @@ def _max_draft_tokens(compress_ratio: int, ring_size: int) -> int:
     return ring_size - window + 2 if ring_size > window else 0
 
 
+def _ragged_ids(plan_w: torch.Tensor) -> torch.Tensor:
+    words = plan_w.cpu().view(torch.uint32).view(-1, 2)
+    return words[:, 0].to(torch.int64)
+
+
 def _written_positions(plan_w: torch.Tensor, prefix_len: int) -> set[int]:
     """Decode `plan_w` into the set of positions written, for a bs=1 plan.
 
@@ -51,8 +56,7 @@ def _written_positions(plan_w: torch.Tensor, prefix_len: int) -> set[int]:
     equals the token's index within the ragged layout, so for a single request
     `position = prefix_len + ragged_id`.
     """
-    words = plan_w.cpu().view(torch.uint32).view(-1, 2)
-    ragged_ids = words[:, 0]
+    ragged_ids = _ragged_ids(plan_w)
     valid = ragged_ids != 0xFFFFFFFF
     return {prefix_len + int(r) for r in ragged_ids[valid]}
 
@@ -154,6 +158,69 @@ class TestCompressWritePlanDraftPad(CustomTestCase):
                             self._make_plan_positions(**kwargs, on_gpu=False),
                             self._make_plan_positions(**kwargs, on_gpu=True),
                         )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Requires a CUDA/HIP graph device")
+    def test_c128_ragged_plan_replay_and_stream_order(self):
+        """Keep a ragged c128 batch out of the uniform-plan fast path.
+
+        The race in issue 32470 can make a ragged batch look uniform and emit
+        out-of-bounds ragged IDs. This bounded metadata-only fixture checks the
+        producer invariant repeatedly, under graph replay, and after a side-stream
+        handoff; it does not claim full-model or distributed correctness.
+        """
+        batch_size = 96
+        extend_lens = [4] * 72 + [3] * 24
+        seq_lens, extend_lens_tensor, num_q_tokens = to_seq_extend(
+            [(512 + extend_len, extend_len) for extend_len in extend_lens]
+        )
+        expected_ids = torch.arange(num_q_tokens, dtype=torch.int64)
+        context = make_paged_context(
+            bs=batch_size,
+            compress_ratio=128,
+            ring_size=C128_RING_SIZE,
+            num_reqs_capacity=128,
+        )
+        device = context.req_to_token.device
+        seq_lens = seq_lens.to(device)
+        extend_lens = extend_lens_tensor.to(device)
+
+        def assert_plan(plan):
+            ragged_ids = _ragged_ids(plan.plan_w)
+            valid_ids = ragged_ids[ragged_ids != 0xFFFFFFFF]
+            self.assertEqual(valid_ids.numel(), num_q_tokens)
+            self.assertTrue(
+                torch.equal(valid_ids.sort().values, expected_ids),
+                f"invalid ragged IDs: max={int(valid_ids.max())}, "
+                f"expected_max={num_q_tokens - 1}",
+            )
+
+        for _ in range(256):
+            assert_plan(
+                context.make_prefill_plan(seq_lens, extend_lens, num_q_tokens)
+            )
+
+        for _ in range(3):
+            context.make_prefill_plan(seq_lens, extend_lens, num_q_tokens)
+        torch.cuda.synchronize()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            captured_plan = context.make_prefill_plan(
+                seq_lens, extend_lens, num_q_tokens
+            )
+        for _ in range(32):
+            graph.replay()
+        torch.cuda.synchronize()
+        assert_plan(captured_plan)
+
+        side_stream = torch.cuda.Stream()
+        side_event = torch.cuda.Event()
+        with torch.cuda.stream(side_stream):
+            stream_plan = context.make_prefill_plan(
+                seq_lens, extend_lens, num_q_tokens
+            )
+            side_event.record(side_stream)
+        torch.cuda.current_stream().wait_event(side_event)
+        assert_plan(stream_plan)
 
     def test_plain_prefill_write_set(self):
         """A non-speculative ring is exactly one window wide, so the pad is 0 and the
