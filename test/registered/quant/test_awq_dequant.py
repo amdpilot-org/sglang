@@ -26,6 +26,18 @@ register_amd_ci(est_time=2, suite="stage-a-test-1-gpu-small-amd")
 device = get_device()
 
 
+AWQ_PACK_ORDER = [0, 2, 4, 6, 1, 3, 5, 7]
+
+
+def awq_pack(codes: torch.Tensor) -> torch.Tensor:
+    rows, cols = codes.shape
+    codes = codes.reshape(rows, cols // 8, 8)[:, :, AWQ_PACK_ORDER]
+    packed = torch.zeros(rows, cols // 8, dtype=torch.int32, device=codes.device)
+    for i in range(8):
+        packed |= codes[:, :, i].to(torch.int32) << (4 * i)
+    return packed
+
+
 def reverse_awq_order(t: torch.Tensor) -> torch.Tensor:
     bits = 4
     AWQ_REVERSE_ORDER = [0, 4, 1, 5, 2, 6, 3, 7]
@@ -174,6 +186,61 @@ class TestAWQTriton(CustomTestCase):
         )
 
         torch.testing.assert_close(tri_out.cpu(), ref_out.cpu(), atol=1e-1, rtol=1e-1)
+
+    def test_gemm_known_boundaries(self):
+        """Compare fused AWQ GEMM and dequantize+matmul on boundary weights."""
+        K, N, M = 128, 32, 8
+        for group_size in (32, 64, 128):
+            for zero_point in (0, 8, 15):
+                with self.subTest(group_size=group_size, zero_point=zero_point):
+                    torch.manual_seed(15194)
+
+                    weight_codes = torch.tensor(
+                        [0, 15], device=device
+                    ).repeat(K, N // 2)
+                    zero_codes = torch.full(
+                        (K // group_size, N),
+                        zero_point,
+                        dtype=torch.int64,
+                        device=device,
+                    )
+                    scales = torch.linspace(
+                        0.01,
+                        0.05,
+                        (K // group_size) * N,
+                        device=device,
+                    ).reshape(K // group_size, N)
+                    x = torch.randn(M, K, device=device)
+
+                    qweight = awq_pack(weight_codes)
+                    qzeros = awq_pack(zero_codes)
+                    reference_weight = awq_dequantize_torch(
+                        qweight, scales, qzeros, group_size
+                    )
+                    reference = torch.matmul(x, reference_weight)
+
+                    dequantized = awq_dequantize_triton(qweight, scales, qzeros)
+                    shared = torch.matmul(x, dequantized)
+                    fused = awq_gemm_triton(x, qweight, scales, qzeros, split_k_iters=1)
+
+                    torch.testing.assert_close(
+                        dequantized,
+                        reference_weight,
+                        rtol=1e-6,
+                        atol=1e-6,
+                    )
+                    torch.testing.assert_close(
+                        shared,
+                        reference,
+                        rtol=1e-6,
+                        atol=1e-6,
+                    )
+                    torch.testing.assert_close(
+                        fused,
+                        reference,
+                        rtol=2e-2,
+                        atol=2e-2,
+                    )
 
 
 if __name__ == "__main__":
