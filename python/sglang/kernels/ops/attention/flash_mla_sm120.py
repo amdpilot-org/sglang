@@ -459,6 +459,10 @@ def _split_kv_pages_to_64(
     pool). The output buffer is persistent and reused across steps; untouched
     dst pages simply retain their (unreferenced) stale data.
     """
+    assert kv_u8.dtype == torch.uint8, (
+        "_split_kv_pages_to_64 expects a uint8 byte view; "
+        "convert the input with .view(torch.uint8)"
+    )
     assert src_pbs % _PBS_DST == 0 and src_pbs >= _PBS_DST
     if src_pbs == _PBS_DST:
         return kv_u8
