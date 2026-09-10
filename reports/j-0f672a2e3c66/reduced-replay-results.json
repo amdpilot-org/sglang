@@ -1,0 +1,492 @@
+{
+  "schema_version": 1,
+  "label": "reduced DSpark block eager versus captured replay study",
+  "source_commit": "0084030179bfba86bfeb6d43f7997d4076329d2c",
+  "command": "PYTHONPATH=/job/sglang/python /opt/venv/bin/python /job/sglang/reports/j-0f672a2e3c66/reduced_replay.py --output /job/sglang/reports/j-0f672a2e3c66/reduced-replay-results.json --measured-runs 20 --warmup-runs 3 --validation-sets 2",
+  "environment": {
+    "python": "/opt/venv/bin/python",
+    "torch": "2.9.1+rocm7.2.0.git7e1940d4",
+    "torch_path": "/opt/venv/lib/python3.10/site-packages/torch/__init__.py",
+    "sglang_path": "/job/sglang/python/sglang/__init__.py",
+    "triton_path": "/opt/venv/lib/python3.10/site-packages/triton/__init__.py",
+    "gpu": {
+      "name": "AMD Instinct MI300X",
+      "gcn_arch_name": "gfx942:sramecc+:xnack-",
+      "total_memory_bytes": 206141652992,
+      "multi_processor_count": 304
+    }
+  },
+  "limits": {
+    "gpu_count": 1,
+    "workload_cases": 3,
+    "synthetic_weights_limit_bytes": 4294967296,
+    "live_allocations_limit_bytes": 51539607552,
+    "wall_limit_seconds": 7200
+  },
+  "static_buffer_reuse": "One torch.cuda.CUDAGraph per case captures the reduced block over preallocated static input tensors. Each replay copies a fresh input set into those same buffers, replays the complete block, and clones captured outputs outside the timed region.",
+  "accuracy_gates": {
+    "integer_outputs": "rtol=0, atol=0",
+    "bfloat16_outputs": "rtol=1e-2, atol=1e-2"
+  },
+  "unsupported_capture_boundaries": [
+    "No model-specific DSpark constructor is instantiated: DSparkDraftMixin is a mixin and model classes require full HF configuration and checkpoint state; a synthetic adapter supplies the target-hidden projection boundary.",
+    "The full DecodeCudaGraphRunner is not captured because it requires ModelRunner, attention-backend, KV-pool, and distributed runtime state; this study uses one direct torch.cuda.CUDAGraph per reduced case.",
+    "The reduced fake KV pool does not expose the MLA set_swa_key_buffer_radix_fused_norm_rope path, so TargetHiddenKvInjector uses the generic set_kv_buffer path.",
+    "No GLM weights are downloaded and no distributed or model-level throughput claim is made."
+  ],
+  "cases": [
+    {
+      "name": "small",
+      "dimensions": {
+        "batch": 1,
+        "proposal_tokens": 2,
+        "tokens": 3,
+        "hidden_size": 1024,
+        "vocab_size": 512,
+        "kv_heads": 1,
+        "head_dim": 64
+      },
+      "dtypes": {
+        "hidden_logits_kv": "bfloat16",
+        "positions_cache_loc": "int64",
+        "prefix_and_accept_lens": "int32",
+        "tokens": "int64"
+      },
+      "synthetic_weight_bytes": 3539072,
+      "validation": [
+        {
+          "seed": 10203,
+          "eager_vs_reference": {
+            "k_buffer": true,
+            "v_buffer": true,
+            "base_logits": true,
+            "sampled_tokens": true,
+            "corrected_logits": true,
+            "correct_len": true,
+            "bonus": true,
+            "cap_trim_lens": true,
+            "commit_lens": true,
+            "new_seq_lens": true,
+            "commit_cap_trim_lens": true
+          },
+          "graph_vs_reference": {
+            "k_buffer": true,
+            "v_buffer": true,
+            "base_logits": true,
+            "sampled_tokens": true,
+            "corrected_logits": true,
+            "correct_len": true,
+            "bonus": true,
+            "cap_trim_lens": true,
+            "commit_lens": true,
+            "new_seq_lens": true,
+            "commit_cap_trim_lens": true
+          }
+        },
+        {
+          "seed": 10405,
+          "eager_vs_reference": {
+            "k_buffer": true,
+            "v_buffer": true,
+            "base_logits": true,
+            "sampled_tokens": true,
+            "corrected_logits": true,
+            "correct_len": true,
+            "bonus": true,
+            "cap_trim_lens": true,
+            "commit_lens": true,
+            "new_seq_lens": true,
+            "commit_cap_trim_lens": true
+          },
+          "graph_vs_reference": {
+            "k_buffer": true,
+            "v_buffer": true,
+            "base_logits": true,
+            "sampled_tokens": true,
+            "corrected_logits": true,
+            "correct_len": true,
+            "bonus": true,
+            "cap_trim_lens": true,
+            "commit_lens": true,
+            "new_seq_lens": true,
+            "commit_cap_trim_lens": true
+          }
+        }
+      ],
+      "timing": {
+        "warmup_runs": 3,
+        "measured_runs_per_mode": 20,
+        "eager": {
+          "summary": {
+            "mean_ms": 0.5809809505939484,
+            "median_ms": 0.541249006986618,
+            "p90_ms": 0.6541100144386292,
+            "min_ms": 0.504082977771759,
+            "max_ms": 0.9559260010719299
+          },
+          "raw_ms": [
+            0.9559260010719299,
+            0.6984919905662537,
+            0.6187480092048645,
+            0.586313009262085,
+            0.6391149759292603,
+            0.5755689740180969,
+            0.5404070019721985,
+            0.5256929993629456,
+            0.531827986240387,
+            0.5101780295372009,
+            0.5216839909553528,
+            0.5622180104255676,
+            0.5390440225601196,
+            0.510578989982605,
+            0.6541100144386292,
+            0.5420910120010376,
+            0.516431987285614,
+            0.5661460161209106,
+            0.5209630131721497,
+            0.504082977771759
+          ]
+        },
+        "graph_replay": {
+          "summary": {
+            "mean_ms": 0.0870730496942997,
+            "median_ms": 0.08375350013375282,
+            "p90_ms": 0.09529999643564224,
+            "min_ms": 0.08178900182247162,
+            "max_ms": 0.11434400081634521
+          },
+          "raw_ms": [
+            0.0894870012998581,
+            0.08319199830293655,
+            0.08178900182247162,
+            0.08423499763011932,
+            0.11434400081634521,
+            0.08643899857997894,
+            0.08523699641227722,
+            0.08760300278663635,
+            0.09666299819946289,
+            0.09529999643564224,
+            0.08587899804115295,
+            0.08323200047016144,
+            0.08295200020074844,
+            0.08315200358629227,
+            0.0823500007390976,
+            0.08928599953651428,
+            0.08327200263738632,
+            0.08198899775743484,
+            0.08242999762296677,
+            0.08263000100851059
+          ]
+        },
+        "median_graph_speedup_x": 6.4624046293259765
+      },
+      "memory": {
+        "allocated_bytes": 243269632,
+        "reserved_bytes": 268435456,
+        "max_allocated_bytes": 243288576
+      }
+    },
+    {
+      "name": "medium",
+      "dimensions": {
+        "batch": 4,
+        "proposal_tokens": 4,
+        "tokens": 20,
+        "hidden_size": 2048,
+        "vocab_size": 1024,
+        "kv_heads": 1,
+        "head_dim": 64
+      },
+      "dtypes": {
+        "hidden_logits_kv": "bfloat16",
+        "positions_cache_loc": "int64",
+        "prefix_and_accept_lens": "int32",
+        "tokens": "int64"
+      },
+      "synthetic_weight_bytes": 13369472,
+      "validation": [
+        {
+          "seed": 10505,
+          "eager_vs_reference": {
+            "k_buffer": true,
+            "v_buffer": true,
+            "base_logits": true,
+            "sampled_tokens": true,
+            "corrected_logits": true,
+            "correct_len": true,
+            "bonus": true,
+            "cap_trim_lens": true,
+            "commit_lens": true,
+            "new_seq_lens": true,
+            "commit_cap_trim_lens": true
+          },
+          "graph_vs_reference": {
+            "k_buffer": true,
+            "v_buffer": true,
+            "base_logits": true,
+            "sampled_tokens": true,
+            "corrected_logits": true,
+            "correct_len": true,
+            "bonus": true,
+            "cap_trim_lens": true,
+            "commit_lens": true,
+            "new_seq_lens": true,
+            "commit_cap_trim_lens": true
+          }
+        },
+        {
+          "seed": 10707,
+          "eager_vs_reference": {
+            "k_buffer": true,
+            "v_buffer": true,
+            "base_logits": true,
+            "sampled_tokens": true,
+            "corrected_logits": true,
+            "correct_len": true,
+            "bonus": true,
+            "cap_trim_lens": true,
+            "commit_lens": true,
+            "new_seq_lens": true,
+            "commit_cap_trim_lens": true
+          },
+          "graph_vs_reference": {
+            "k_buffer": true,
+            "v_buffer": true,
+            "base_logits": true,
+            "sampled_tokens": true,
+            "corrected_logits": true,
+            "correct_len": true,
+            "bonus": true,
+            "cap_trim_lens": true,
+            "commit_lens": true,
+            "new_seq_lens": true,
+            "commit_cap_trim_lens": true
+          }
+        }
+      ],
+      "timing": {
+        "warmup_runs": 3,
+        "measured_runs_per_mode": 20,
+        "eager": {
+          "summary": {
+            "mean_ms": 0.6825673907995224,
+            "median_ms": 0.6515434980392456,
+            "p90_ms": 0.7239909768104553,
+            "min_ms": 0.6098880171775818,
+            "max_ms": 1.121588945388794
+          },
+          "raw_ms": [
+            1.121588945388794,
+            0.7239909768104553,
+            0.7407900094985962,
+            0.7075129747390747,
+            0.6884289979934692,
+            0.6784049868583679,
+            0.656715989112854,
+            0.6991729736328125,
+            0.6685029864311218,
+            0.6153799891471863,
+            0.6450089812278748,
+            0.626446008682251,
+            0.6463710069656372,
+            0.625603973865509,
+            0.6286510229110718,
+            0.621554970741272,
+            0.6098880171775818,
+            0.6912760138511658,
+            0.6428840160369873,
+            0.6131749749183655
+          ]
+        },
+        "graph_replay": {
+          "summary": {
+            "mean_ms": 0.13104230165481567,
+            "median_ms": 0.12933850288391113,
+            "p90_ms": 0.13054099678993225,
+            "min_ms": 0.12753400206565857,
+            "max_ms": 0.14846299588680267
+          },
+          "raw_ms": [
+            0.1466190069913864,
+            0.12982000410556793,
+            0.1294180005788803,
+            0.1296990066766739,
+            0.13054099678993225,
+            0.13033999502658844,
+            0.13030000030994415,
+            0.12905700504779816,
+            0.14846299588680267,
+            0.1304209977388382,
+            0.12829600274562836,
+            0.12853699922561646,
+            0.12925900518894196,
+            0.1296990066766739,
+            0.1282159984111786,
+            0.12753400206565857,
+            0.12925800681114197,
+            0.12853699922561646,
+            0.12801499664783478,
+            0.12881700694561005
+          ]
+        },
+        "median_graph_speedup_x": 5.037506106159618
+      },
+      "memory": {
+        "allocated_bytes": 340886528,
+        "reserved_bytes": 354418688,
+        "max_allocated_bytes": 341062144
+      }
+    },
+    {
+      "name": "large",
+      "dimensions": {
+        "batch": 8,
+        "proposal_tokens": 4,
+        "tokens": 40,
+        "hidden_size": 4096,
+        "vocab_size": 2048,
+        "kv_heads": 1,
+        "head_dim": 64
+      },
+      "dtypes": {
+        "hidden_logits_kv": "bfloat16",
+        "positions_cache_loc": "int64",
+        "prefix_and_accept_lens": "int32",
+        "tokens": "int64"
+      },
+      "synthetic_weight_bytes": 51904640,
+      "validation": [
+        {
+          "seed": 10905,
+          "eager_vs_reference": {
+            "k_buffer": true,
+            "v_buffer": true,
+            "base_logits": true,
+            "sampled_tokens": true,
+            "corrected_logits": true,
+            "correct_len": true,
+            "bonus": true,
+            "cap_trim_lens": true,
+            "commit_lens": true,
+            "new_seq_lens": true,
+            "commit_cap_trim_lens": true
+          },
+          "graph_vs_reference": {
+            "k_buffer": true,
+            "v_buffer": true,
+            "base_logits": true,
+            "sampled_tokens": true,
+            "corrected_logits": true,
+            "correct_len": true,
+            "bonus": true,
+            "cap_trim_lens": true,
+            "commit_lens": true,
+            "new_seq_lens": true,
+            "commit_cap_trim_lens": true
+          }
+        },
+        {
+          "seed": 11107,
+          "eager_vs_reference": {
+            "k_buffer": true,
+            "v_buffer": true,
+            "base_logits": true,
+            "sampled_tokens": true,
+            "corrected_logits": true,
+            "correct_len": true,
+            "bonus": true,
+            "cap_trim_lens": true,
+            "commit_lens": true,
+            "new_seq_lens": true,
+            "commit_cap_trim_lens": true
+          },
+          "graph_vs_reference": {
+            "k_buffer": true,
+            "v_buffer": true,
+            "base_logits": true,
+            "sampled_tokens": true,
+            "corrected_logits": true,
+            "correct_len": true,
+            "bonus": true,
+            "cap_trim_lens": true,
+            "commit_lens": true,
+            "new_seq_lens": true,
+            "commit_cap_trim_lens": true
+          }
+        }
+      ],
+      "timing": {
+        "warmup_runs": 3,
+        "measured_runs_per_mode": 20,
+        "eager": {
+          "summary": {
+            "mean_ms": 0.7104897499084473,
+            "median_ms": 0.6606850028038025,
+            "p90_ms": 0.7904239892959595,
+            "min_ms": 0.6166229844093323,
+            "max_ms": 1.14131498336792
+          },
+          "raw_ms": [
+            1.1124069690704346,
+            0.7904239892959595,
+            1.14131498336792,
+            0.7060289978981018,
+            0.6592810153961182,
+            0.6611660122871399,
+            0.6775640249252319,
+            0.6470940113067627,
+            0.665615975856781,
+            0.6354269981384277,
+            0.6364290118217468,
+            0.6713889837265015,
+            0.662168025970459,
+            0.6576380133628845,
+            0.6876670122146606,
+            0.6551120281219482,
+            0.6602039933204651,
+            0.6343039870262146,
+            0.6319379806518555,
+            0.6166229844093323
+          ]
+        },
+        "graph_replay": {
+          "summary": {
+            "mean_ms": 0.1800416514277458,
+            "median_ms": 0.1802160069346428,
+            "p90_ms": 0.18185999989509583,
+            "min_ms": 0.17640699446201324,
+            "max_ms": 0.18330299854278564
+          },
+          "raw_ms": [
+            0.18258099257946014,
+            0.18053700029850006,
+            0.1794939935207367,
+            0.18005500733852386,
+            0.17929400503635406,
+            0.17889299988746643,
+            0.17809100449085236,
+            0.18330299854278564,
+            0.18165899813175201,
+            0.17789000272750854,
+            0.18162000179290771,
+            0.1789730042219162,
+            0.180417001247406,
+            0.1799750030040741,
+            0.1811390072107315,
+            0.18185999989509583,
+            0.1809380054473877,
+            0.18037700653076172,
+            0.17733000218868256,
+            0.17640699446201324
+          ]
+        },
+        "median_graph_speedup_x": 3.666072809189512
+      },
+      "memory": {
+        "allocated_bytes": 486821888,
+        "reserved_bytes": 501219328,
+        "max_allocated_bytes": 487493120
+      }
+    }
+  ]
+}
