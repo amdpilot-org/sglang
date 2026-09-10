@@ -1,8 +1,10 @@
 import unittest
+from unittest import mock
 
 import torch
 
 from sglang.kernels.ops.attention.fused_qk_rmsnorm_rope_gate import (
+    _pdl_supported,
     fused_qk_gemma_rmsnorm_rope_gate,
 )
 from sglang.srt.layers.rotary_embedding.mrope import MRotaryEmbedding
@@ -189,6 +191,10 @@ class TestFusedQKRMSNormRoPEGate(CustomTestCase):
             with self.subTest(mrope_positions=positions.dim() == 2):
                 with self.assertRaises(AssertionError):
                     self.call(positions, mrope_axis_map=axis_map_passed)
+
+    def test_pdl_guard_rejects_hip(self):
+        with mock.patch.object(torch.version, "hip", "rocm"):
+            self.assertFalse(_pdl_supported())
 
 
 if __name__ == "__main__":

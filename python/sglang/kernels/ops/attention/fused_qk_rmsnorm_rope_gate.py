@@ -19,6 +19,8 @@ def _pdl_supported() -> bool:
     if not torch.cuda.is_available():
         return False
     try:
+        if torch.version.hip is not None:
+            return False
         major, _ = torch.cuda.get_device_capability()
         return major >= 9
     except Exception:
