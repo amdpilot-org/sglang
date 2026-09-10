@@ -20,6 +20,16 @@ def _build(batch: int, n_heads: int, rope_dim: int):
     return x, freqs
 
 
+def _reference(x: torch.Tensor, freqs: torch.Tensor) -> torch.Tensor:
+    x_real = x[..., 0::2].float()
+    x_imag = x[..., 1::2].float()
+    cos = freqs.real[:, None, :]
+    sin = freqs.imag[:, None, :]
+    out_real = x_real * cos - x_imag * sin
+    out_imag = x_real * sin + x_imag * cos
+    return torch.stack((out_real, out_imag), dim=-1).flatten(-2).to(x.dtype)
+
+
 def _apply(x, freqs, batched: bool):
     previous = getattr(
         sys.modules[apply_rotary_emb_triton.__module__], "_USE_BATCHED_ROPE"
@@ -67,6 +77,34 @@ class TestApplyRotaryEmbFlat:
         assert torch.equal(
             untouched, torch.full_like(untouched, -12345.0)
         ), f"{int((untouched != -12345.0).sum())} sentinel elements past rope_dim were overwritten"
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_matches_independent_reference_and_preserves_suffix(
+        self, rope_dim: int, batch: int, n_heads: int, dtype: torch.dtype
+    ):
+        """Only the first rope_dim columns of each head may change."""
+        torch.manual_seed(0)
+        x = torch.randn(batch, n_heads, rope_dim, device="cuda", dtype=dtype)
+        freqs = precompute_freqs_cis(
+            rope_dim, batch, 0, 10000.0, 1.0, 32, 1
+        ).to("cuda")
+        padded = torch.full(
+            (batch, n_heads, 2 * rope_dim), -12345.0, device="cuda", dtype=dtype
+        )
+        padded[:, :, :rope_dim] = x
+        view = padded[:, :, :rope_dim]
+
+        set_batched_rope(True)
+        try:
+            apply_rotary_emb_triton(view, freqs)
+        finally:
+            set_batched_rope(False)
+
+        reference = _reference(x, freqs)
+        tolerance = 2e-2 if dtype == torch.bfloat16 else 2e-3
+        torch.testing.assert_close(view, reference, rtol=tolerance, atol=tolerance)
+        untouched = padded[:, :, rope_dim:]
+        assert torch.equal(untouched, torch.full_like(untouched, -12345.0))
 
 
 if __name__ == "__main__":
