@@ -45,6 +45,7 @@ from sglang.kernels.ops.quantization.fp8_kernel import fp8_dtype
 # Blockwise quantization group sizes: number of elements sharing one scale factor
 FP8_BLOCK_SIZE = 128
 MXFP4_BLOCK_SIZE = 32
+MIN_MORI_DISPATCH_TOKENS_PER_RANK = 64
 
 _is_hip = is_hip()
 _use_aiter = get_bool_env_var("SGLANG_USE_AITER") and _is_hip
@@ -53,6 +54,15 @@ if _use_aiter:
     from aiter import QuantType, get_hip_quant
 
 logger = logging.getLogger(__name__)
+
+
+def validate_mori_dispatch_capacity(num_max_dispatch_tokens_per_rank: int) -> None:
+    if num_max_dispatch_tokens_per_rank < MIN_MORI_DISPATCH_TOKENS_PER_RANK:
+        raise ValueError(
+            "SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK must be at least "
+            f"{MIN_MORI_DISPATCH_TOKENS_PER_RANK} (reported wave64 assumption), got "
+            f"{num_max_dispatch_tokens_per_rank}"
+        )
 
 
 def _should_record_expert_distribution() -> bool:
@@ -248,6 +258,7 @@ def init_mori_op(
     enable_sdma=False,
     use_external_inp_buf=True,
 ):
+    validate_mori_dispatch_capacity(num_max_dispatch_tokens_per_rank)
 
     import mori
 
@@ -433,6 +444,7 @@ class _MoriEPDispatcherImplBase:
         self.num_max_dispatch_tokens_per_rank = get_int_env_var(
             "SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK", 4096
         )
+        validate_mori_dispatch_capacity(self.num_max_dispatch_tokens_per_rank)
 
         self.enable_sdma = get_bool_env_var("MORI_ENABLE_SDMA", "false")
         self.use_external_inp_buf = True
