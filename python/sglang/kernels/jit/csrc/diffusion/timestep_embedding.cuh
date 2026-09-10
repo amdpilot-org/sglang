@@ -14,7 +14,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#ifndef USE_ROCM
 #include <cuda_runtime.h>
+#else
+#include <hip/hip_runtime.h>
+#endif
 #include <type_traits>
 
 namespace sglang {
@@ -134,14 +138,15 @@ void timestep_embedding(
   auto B = SymbolicSize{"batch_size"};
   auto D = SymbolicSize{"dim"};
   auto device = SymbolicDevice{};
+  device.set_options<kDLCUDA, kDLROCM>();
 
   TensorMatcher({B})  // input
       .with_strides({1})
       .with_dtype<TIn>()
-      .template with_device<kDLCUDA>(device)
+      .with_device(device)
       .verify(input);
 
-  TensorMatcher({B, D}).with_strides({D, 1}).with_dtype<float>().template with_device<kDLCUDA>(device).verify(output);
+  TensorMatcher({B, D}).with_strides({D, 1}).with_dtype<float>().with_device(device).verify(output);
 
   RuntimeCheck(D.unwrap() == dim, "Output dim mismatch: ", D.unwrap(), " vs ", dim);
   RuntimeCheck(dim % 8 == 0, "dim must align to 8, got ", dim);

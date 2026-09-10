@@ -28,7 +28,7 @@ from sglang.multimodal_gen.runtime.layers.linear import ColumnParallelLinear
 from sglang.multimodal_gen.runtime.layers.mlp import MLP
 from sglang.multimodal_gen.runtime.platforms import current_platform
 
-_is_cuda = current_platform.is_cuda()
+_uses_timestep_kernel = current_platform.is_cuda() or current_platform.is_rocm()
 
 
 class PatchEmbed(nn.Module):
@@ -166,7 +166,7 @@ class WanCamControlPatchEmbedding(nn.Module):
 
 class Timesteps(_Timesteps):
     def forward(self, timesteps: torch.Tensor) -> torch.Tensor:
-        if _is_cuda:
+        if _uses_timestep_kernel:
             return timestep_embedding_cuda(
                 timesteps,
                 self.num_channels,
