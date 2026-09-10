@@ -270,6 +270,61 @@ def test_topk_v2_output_indices(batch: int, seq: int, k: int) -> None:
     _assert_topk_close(scores.cpu(), ref_raw, our_raw, batch, seq_lens.cpu(), k)
 
 
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@torch.inference_mode()
+def test_topk_v2_rejects_non_fp32_scores(dtype: torch.dtype) -> None:
+    torch.manual_seed(37892)
+    device = "cuda"
+    batch, seq, k = 2, 4096, 512
+    scores = torch.randn(batch, seq, dtype=torch.float32, device=device).to(dtype)
+    scores_cpu = scores.detach().cpu().clone()
+    reference = torch.topk(scores_cpu, k, dim=-1).indices
+    seq_lens = torch.full((batch,), seq, dtype=torch.int32, device=device)
+    metadata = plan_topk_v2(seq_lens)
+    out = torch.full((batch, k), -12345, dtype=torch.int32, device=device)
+
+    with pytest.raises(RuntimeError, match="not in the allowed options: \\[float32\\]"):
+        topk_transform_paged_v2(scores, seq_lens, None, out, PAGE_SIZE, metadata)
+
+    assert reference.shape == (batch, k)
+    assert torch.all(out == -12345)
+
+
+@torch.inference_mode()
+def test_topk_v2_cuda_graph_replay_reuses_static_addresses() -> None:
+    torch.manual_seed(37892)
+    device = "cuda"
+    batch, seq, k = 4, 4096, 512
+    scores = torch.randn(batch, seq, dtype=torch.float32, device=device)
+    seq_lens = torch.full((batch,), seq, dtype=torch.int32, device=device)
+    metadata = plan_topk_v2(seq_lens)
+    out = torch.full((batch, k), -12345, dtype=torch.int32, device=device)
+    score_address = scores.data_ptr()
+    metadata_address = metadata.data_ptr()
+    out_address = out.data_ptr()
+
+    torch.cuda.synchronize()
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        topk_transform_paged_v2(scores, seq_lens, None, out, PAGE_SIZE, metadata)
+
+    torch.manual_seed(224)
+    scores.copy_(torch.randn(batch, seq, dtype=torch.float32, device=device))
+    graph.replay()
+    torch.cuda.synchronize()
+    scores_cpu = scores.detach().cpu().clone()
+    reference = torch.topk(scores_cpu, k, dim=-1).indices
+
+    assert scores.data_ptr() == score_address
+    assert metadata.data_ptr() == metadata_address
+    assert out.data_ptr() == out_address
+    assert not torch.any(out == -12345)
+    assert torch.equal(
+        torch.sort(out.cpu(), dim=-1).values,
+        torch.sort(reference, dim=-1).values,
+    )
+
+
 # --- ragged entry point ------------------------------------------------------
 # Rows select inside `[row_start, row_start + seq_len)` of their score row and
 # emit `position + offset`. The window start is an arbitrary token offset, so
