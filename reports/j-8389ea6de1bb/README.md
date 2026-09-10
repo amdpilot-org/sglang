@@ -23,9 +23,9 @@ cold and warm calls. All numerical checks passed with zero absolute error, the
 input remained unchanged, every sentinel was overwritten, and the output data
 pointer and storage pointer stayed stable.
 
-The first shape paid 939.483 ms for compilation. The second shape paid
-94.834 ms while Dynamo generalized the shape; the remaining four cold calls
-were already warm and took 0.112-0.146 ms. Warm medians were 0.076-0.122 ms.
+The first shape paid 932.587 ms for compilation. The second shape paid
+98.224 ms while Dynamo generalized the shape; the remaining four cold calls
+were already warm and took 0.124-0.150 ms. Warm medians were 0.078-0.117 ms.
 The profiler recorded the actual runtime dispatch as
 `triton_poi_fused_copy__mul_sum_0` followed by `hipModuleLaunchKernel`; it did
 not dispatch through the eager `aten::sum`/`aten::mul_` path. Raw timings,
@@ -66,6 +66,7 @@ run an unbounded loop.
 - Torch: `2.9.1+rocm7.2.0.git7e1940d4`
 - Triton: `3.7.0`
 - Mirror base commit: `0084030179bfba86bfeb6d43f7997d4076329d2c`
+- Tested code commit: `b7d72ea09072d4e82742c0416eedfa11f8fadcf8`
 
 ## Limitations
 
