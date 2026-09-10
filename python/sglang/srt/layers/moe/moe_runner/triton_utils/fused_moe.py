@@ -577,10 +577,11 @@ def _fused_moe_kernel_sequence(
         # allocation is required, so the downstream all-reduce takes the low-latency
         # symmetric path. Only this output enters the pool; the intermediate caches
         # below stay on the default allocator to bound pool occupancy.
-        with use_symmetric_memory(
-            get_tp_group(), disabled=not is_allocation_symmetric()
-        ):
+        if not is_allocation_symmetric():
             out_hidden_states = torch.empty_like(hidden_states)
+        else:
+            with use_symmetric_memory(get_tp_group()):
+                out_hidden_states = torch.empty_like(hidden_states)
 
     use_fused_moe_sum_all_reduce = (
         get_exec().moe.enable_fused_moe_sum_all_reduce
