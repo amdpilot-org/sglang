@@ -140,6 +140,65 @@ def test_qwen4_ple_pinned_gather_shard_boundaries_and_out_buffer():
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
 
 
+@pytest.mark.parametrize("storage_dtype", [torch.bfloat16, torch.float8_e4m3fn])
+def test_qwen4_ple_pinned_gather_reuses_output_across_batches(storage_dtype):
+    embedding_dim = 13
+    source = _make_source_embedding(
+        dtype=storage_dtype,
+        embedding_dim=embedding_dim,
+        vocab_start=0,
+        vocab_end=8,
+        org_vocab_size=8,
+        tp_size=1,
+    )
+    offloaded = Qwen4ExpPinnedHostEmbedding(source)
+    rows = torch.arange(8 * embedding_dim, dtype=torch.bfloat16, device="cuda")
+    rows = (rows % 15).reshape(8, embedding_dim)
+    _load_rows(offloaded, rows.to(dtype=storage_dtype))
+    reference_rows = rows.to(dtype=storage_dtype).to(dtype=torch.bfloat16)
+
+    input_batches = (
+        torch.tensor([[-1, 3, 4], [7, 8, 100]], device="cuda"),
+        torch.tensor([[5, 100, 6], [-1, 4, 7]], device="cuda"),
+    )
+    output = torch.full(
+        (2, 3, embedding_dim), torch.nan, dtype=torch.bfloat16, device="cuda"
+    )
+    output_pointer = output.data_ptr()
+
+    for input_ids in input_batches:
+        output.fill_(torch.nan)
+        actual = offloaded.gather(input_ids, out=output)
+        expected = torch.zeros_like(output)
+        for token_index, token_ids in enumerate(input_ids.tolist()):
+            for head_index, global_id in enumerate(token_ids):
+                if 0 <= global_id < 8:
+                    expected[token_index, head_index] = reference_rows[global_id]
+
+        assert actual.data_ptr() == output_pointer
+        assert not torch.isnan(actual).any()
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+        fresh = offloaded.gather(input_ids)
+        assert fresh.data_ptr() != output_pointer
+        torch.testing.assert_close(fresh, expected, rtol=0, atol=0)
+
+
+def test_qwen4_ple_pinned_gather_rejects_invalid_output():
+    offloaded = Qwen4ExpPinnedHostEmbedding(_make_source_embedding())
+    _load_rows(offloaded, torch.zeros((8, 7), dtype=torch.bfloat16, device="cuda"))
+    ids = torch.zeros((2, 3), dtype=torch.int64, device="cuda")
+
+    with pytest.raises(ValueError, match="invalid PLE prefetch output shape"):
+        offloaded.gather(ids, out=torch.empty(2, 3, 8, device="cuda"))
+    with pytest.raises(ValueError, match="PLE prefetch output must be bfloat16"):
+        offloaded.gather(
+            ids, out=torch.empty(2, 3, 7, dtype=torch.float16, device="cuda")
+        )
+    with pytest.raises(ValueError, match="PLE prefetch output must be bfloat16"):
+        offloaded.gather(ids, out=torch.empty(2, 3, 7, device="cpu"))
+
+
 def test_qwen4_ple_pinned_gather_empty_input():
     offloaded = Qwen4ExpPinnedHostEmbedding(_make_source_embedding())
     _load_rows(offloaded, torch.zeros((8, 7), dtype=torch.bfloat16, device="cuda"))
