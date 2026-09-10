@@ -1,0 +1,87 @@
+{
+  "job_id": "j-5e16009dc20c",
+  "scope": "local gfx942 kernel behavior; not distributed EP proof",
+  "gpu": {
+    "name": "AMD Instinct MI300X",
+    "architecture": "gfx942:sramecc+:xnack-",
+    "compute_units": 304
+  },
+  "image": {
+    "required_name": "amdpilotv2/open-job-mi300:jit-config-readable-260909-banff5",
+    "operator_provided_local_image_id": "sha256:39fe745feda79ecf4c17f4d806d8ef12150bef720f2f07f5c63a20b3ccfd63f1",
+    "container_marker": "/.dockerenv",
+    "independent_metadata_resolution": "unavailable: no Docker/CRI utility inside job"
+  },
+  "stack": {
+    "python": "/opt/venv/bin/python",
+    "torch": "2.9.1+rocm7.2.0.git7e1940d4",
+    "torch_path": "/opt/venv/lib/python3.10/site-packages/torch/__init__.py",
+    "torch_native": "/opt/venv/lib/python3.10/site-packages/torch/_C.cpython-310-x86_64-linux-gnu.so",
+    "torch_hip": "/opt/venv/lib/python3.10/site-packages/torch/lib/libtorch_hip.so",
+    "triton": "3.7.0+amd.rocm7.2.0.git89002410",
+    "triton_path": "/opt/venv/lib/python3.10/site-packages/triton/__init__.py"
+  },
+  "sources": {
+    "installed_source": "/sgl-workspace/sglang/python/sglang/kernels/ops/moe/ep_moe_kernels.py",
+    "installed_commit": "8eaffdf382e06b7dc50fc5c76cc5aad9c36bb0e4",
+    "mirror_base_commit": "0084030179bfba86bfeb6d43f7997d4076329d2c",
+    "upstream_candidate_commit": "3612e7a1ea60324e9425e7a3d41ed9f2414cad78"
+  },
+  "baseline_first": {
+    "label": "installed-source baseline; not proof for later checkout changes",
+    "first_successful_gpu_execution_wall_seconds": 0.8750913273543119,
+    "mean_cuda_event_ms_over_30_after_3_warmups": 0.018389066060384113,
+    "starts_match": true,
+    "m_indices_match": true,
+    "first_attempt_error": "TypeError: cat(): argument 'tensors' (position 1) must be tuple of Tensors, not generator",
+    "control": "same GPU case with tuple(generator) reference construction"
+  },
+  "cases": [
+    {
+      "padded_counts": [128],
+      "valid_counts": [0],
+      "unfixed_pass": true,
+      "fixed_pass": true,
+      "unfixed_mean_ms": 0.03650423288345337,
+      "fixed_mean_ms": 0.01840513348579407
+    },
+    {
+      "padded_counts": [128, 128, 128],
+      "valid_counts": [0, 128, 127],
+      "unfixed_pass": true,
+      "fixed_pass": true,
+      "unfixed_mean_ms": 0.03490589857101441,
+      "fixed_mean_ms": 0.018069700400034586
+    },
+    {
+      "padded_counts": [128, 256, 0, 128],
+      "valid_counts": [100, 200, 0, 128],
+      "unfixed_pass": true,
+      "fixed_pass": true,
+      "unfixed_mean_ms": 0.035671667257944746,
+      "fixed_mean_ms": 0.01842116713523865
+    },
+    {
+      "padded_counts": [0, 128, 128, 0, 128],
+      "valid_counts": [0, 128, 128, 0, 127],
+      "unfixed_pass": true,
+      "fixed_pass": true,
+      "unfixed_mean_ms": 0.03527073462804158,
+      "fixed_mean_ms": 0.018434532483418784
+    }
+  ],
+  "reference": {
+    "starts": "exclusive torch.cumsum",
+    "expert_ids": "torch.Tensor.scatter_",
+    "padding": "-1",
+    "guards": "-7 before and after m_indices view",
+    "comparison": "exact integer equality"
+  },
+  "architecture_limitation": "gfx942 did not reproduce the reported illegal access in bounded cases, but unfixed AMDGCN has global_store_dword followed by global_load_dword without a barrier; the hazard is latent, not disproven.",
+  "not_proven": [
+    "distributed expert parallel",
+    "DeepEP transport",
+    "cross-architecture behavior",
+    "full-model inference"
+  ]
+}
