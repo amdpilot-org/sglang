@@ -363,7 +363,7 @@ def handle_model_specific_adjustments(server_args: Any):
                 # Only report the fusion as enabled when it actually is
                 # (auto-enable is disabled above; the flag may still be set
                 # explicitly). An unconditional log here misled profiling.
-                if server_args.enable_aiter_allreduce_fusion:
+                if resolved_view(server_args).enable_aiter_allreduce_fusion:
                     logger.info(
                         "Enable Aiter AllReduce Fusion for DeepseekV3ForCausalLM"
                     )
@@ -461,7 +461,7 @@ def handle_model_specific_adjustments(server_args: Any):
             # TODO (Hubert): Put this back later
             # server_args.enable_aiter_allreduce_fusion = True
             # See the DeepseekV3 branch above: log only when the flag is set.
-            if server_args.enable_aiter_allreduce_fusion:
+            if resolved_view(server_args).enable_aiter_allreduce_fusion:
                 logger.info("Enable Aiter AllReduce Fusion for GptOssForCausalLM")
         quantization_config = getattr(hf_config, "quantization_config", None)
         is_mxfp4_quant_format = (
