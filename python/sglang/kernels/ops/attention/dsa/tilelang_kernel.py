@@ -1328,8 +1328,11 @@ def tilelang_sparse_fwd(
     indices: torch.Tensor,
     sm_scale: float,
     d_v: int = 512,
-) -> torch.Tensor:
+    return_lse: bool = False,
+) -> torch.Tensor | Tuple[torch.Tensor, torch.Tensor]:
     assert q.dim() == 3 and kv.dim() == 3 and indices.dim() == 3
+    if return_lse and not _is_hip:
+        raise NotImplementedError("TileLang LSE return is implemented only on HIP")
     num_heads = q.shape[1]
     dim = q.shape[2]
     tail_dim = dim - d_v
@@ -1387,6 +1390,12 @@ def tilelang_sparse_fwd(
             threads=threads,
         )
         out = kernel_combine(partial_o_batched, partial_lse_batched)
+        if return_lse:
+            lse_max = partial_lse_batched.amax(dim=2)
+            lse = lse_max + torch.log2(
+                torch.exp2(partial_lse_batched - lse_max.unsqueeze(2)).sum(dim=2)
+            )
+            return out, lse.squeeze(0)
     else:
         kernel_factory = (
             sparse_attention_fwd_kernel_v1
