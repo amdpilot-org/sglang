@@ -147,6 +147,24 @@ class PagedTokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
     def available_size(self):
         return (len(self.free_pages) + self.num_staged_pages) * self.page_size
 
+    def _validate_kernel_inputs(self, **tensors: torch.Tensor):
+        device = self.free_pages.device
+        for name, tensor in tensors.items():
+            if tensor.device != device:
+                raise ValueError(f"{name} must be on {device}, got {tensor.device}")
+            if tensor.dtype != torch.int64:
+                raise ValueError(
+                    f"{name} must have dtype torch.int64, got {tensor.dtype}"
+                )
+            if tensor.dim() != 1:
+                raise ValueError(
+                    f"{name} must be a 1-D tensor, got shape {list(tensor.shape)}"
+                )
+            if not tensor.is_contiguous():
+                raise ValueError(
+                    f"{name} must be contiguous, got stride {list(tensor.stride())}"
+                )
+
     def get_all_free_pages(self):
         return torch.cat((self.free_pages, *self.staged_pages))
 
@@ -190,6 +208,13 @@ class PagedTokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
         extend_num_tokens: int,
         num_new_pages: int = None,
     ):
+        self._validate_kernel_inputs(
+            prefix_lens=prefix_lens,
+            seq_lens=seq_lens,
+            last_loc=last_loc,
+            free_pages=self.free_pages,
+        )
+
         if self.debug_mode:
             assert torch.all(
                 (last_loc + 1) % self.page_size == prefix_lens % self.page_size
@@ -234,6 +259,12 @@ class PagedTokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
         seq_lens_cpu: torch.Tensor,
         last_loc: torch.Tensor,
     ):
+        self._validate_kernel_inputs(
+            seq_lens=seq_lens,
+            last_loc=last_loc,
+            free_pages=self.free_pages,
+        )
+
         if self.debug_mode:
             assert torch.all(
                 (last_loc + 2) % self.page_size == seq_lens % self.page_size
