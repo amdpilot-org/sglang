@@ -363,10 +363,55 @@ def fused_experts(
         )
 
 
+def _validate_moe_sum_reduce_torch_compile(x: torch.Tensor, out: torch.Tensor):
+    supported_dtypes = (torch.float32, torch.float16, torch.bfloat16)
+    if x.ndim != 3 or out.ndim != 2:
+        raise ValueError(
+            "moe_sum_reduce_torch_compile expects x.ndim == 3 and out.ndim == 2"
+        )
+    if x.shape[0] != out.shape[0] or x.shape[2] != out.shape[1]:
+        raise ValueError(
+            "moe_sum_reduce_torch_compile output shape must be "
+            f"[{x.shape[0]}, {x.shape[2]}], got {list(out.shape)}"
+        )
+    if x.dtype not in supported_dtypes or x.dtype != out.dtype:
+        raise ValueError(
+            "moe_sum_reduce_torch_compile expects matching float32, float16, "
+            f"or bfloat16 input/output dtypes, got x.dtype={x.dtype} and "
+            f"out.dtype={out.dtype}"
+        )
+    if x.device != out.device:
+        raise ValueError(
+            "moe_sum_reduce_torch_compile input and output must use the same device"
+        )
+    if not x.is_contiguous():
+        raise ValueError("moe_sum_reduce_torch_compile input must be contiguous")
+    if not out.is_contiguous():
+        raise ValueError("moe_sum_reduce_torch_compile output must be contiguous")
+
+    x_start = x.storage_offset() * x.element_size()
+    x_end = x_start + x.numel() * x.element_size()
+    out_start = out.storage_offset() * out.element_size()
+    out_end = out_start + out.numel() * out.element_size()
+    if (
+        x.untyped_storage().data_ptr() == out.untyped_storage().data_ptr()
+        and x_start < out_end
+        and out_start < x_end
+    ):
+        raise ValueError(
+            "moe_sum_reduce_torch_compile input and output storage must not overlap"
+        )
+
+
 @torch.compile
-def moe_sum_reduce_torch_compile(x, out, routed_scaling_factor):
+def _moe_sum_reduce_torch_compile_impl(x, out, routed_scaling_factor):
     torch.sum(x, dim=1, out=out)
     out.mul_(routed_scaling_factor)
+
+
+def moe_sum_reduce_torch_compile(x, out, routed_scaling_factor):
+    _validate_moe_sum_reduce_torch_compile(x, out)
+    return _moe_sum_reduce_torch_compile_impl(x, out, routed_scaling_factor)
 
 
 @torch.compile
