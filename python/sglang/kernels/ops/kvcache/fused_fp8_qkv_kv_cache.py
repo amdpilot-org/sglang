@@ -10,10 +10,14 @@ from sglang.kernels.jit.utils import (
     load_jit,
     make_cpp_args,
 )
+from sglang.kernels.ops.quantization.fp8_kernel import is_fp8_fnuz
 
 if TYPE_CHECKING:
     from tvm_ffi.module import Module
 
+
+FP8_DTYPE = torch.float8_e4m3fnuz if is_fp8_fnuz() else torch.float8_e4m3fn
+_IS_HIP = torch.version.hip is not None
 
 @cache_once
 def _jit_fused_fp8_qkv_kv_cache_module(dtype: torch.dtype, use_pdl: bool) -> Module:
@@ -53,6 +57,9 @@ def fused_fp8_qkv_kv_cache(
 
     k_cache2 = k_cache.view(-1, kv_dim)
     v_cache2 = v_cache.view(-1, kv_dim)
+    if _IS_HIP:
+        k_cache2 = k_cache2.view(torch.uint8)
+        v_cache2 = v_cache2.view(torch.uint8)
 
     ks = _scale_to_f32(k_scale, k.device)
     vs = _scale_to_f32(v_scale, k.device)
@@ -61,10 +68,19 @@ def fused_fp8_qkv_kv_cache(
     q_out = None
     if q is not None:
         q2 = q.reshape(num_tokens, -1)
-        q_out = torch.empty(q2.shape, dtype=torch.float8_e4m3fn, device=q.device)
+        q_out = torch.empty(q2.shape, dtype=FP8_DTYPE, device=q.device)
 
     module = _jit_fused_fp8_qkv_kv_cache_module(k.dtype, is_arch_support_pdl())
+    q_native = q_out.view(torch.uint8) if q_out is not None and _IS_HIP else q_out
     module.fused_fp8_qkv_kv_cache(
-        q2, k2, v2, q_out, k_cache2, v_cache2, cache_loc, ks, vs
+        q2,
+        k2,
+        v2,
+        q_native,
+        k_cache2,
+        v_cache2,
+        cache_loc,
+        ks,
+        vs,
     )
     return q_out

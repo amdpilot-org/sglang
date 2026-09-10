@@ -4,6 +4,10 @@
 #include <sgl_kernel/utils.cuh>
 #include <sgl_kernel/vec.cuh>
 
+#ifdef USE_ROCM
+#include <hip/hip_fp8.h>
+#endif
+
 #include <dlpack/dlpack.h>
 #include <tvm/ffi/container/tensor.h>
 
@@ -31,6 +35,18 @@ struct FusedQkvParams {
 
 constexpr uint32_t kBlockSize = 128;
 
+SGL_DEVICE fp8_e4m3_t quantize_to_fp8_e4m3(float value) {
+#ifndef USE_ROCM
+  return static_cast<fp8_e4m3_t>(value);
+#else
+#if HIP_FP8_TYPE_FNUZ
+  return __hip_cvt_float_to_fp8(value, __HIP_SATFINITE, __HIP_E4M3_FNUZ);
+#else
+  return __hip_cvt_float_to_fp8(value, __HIP_SATFINITE, __HIP_E4M3);
+#endif
+#endif
+}
+
 template <typename T, int kVecN>
 SGL_DEVICE void quant_row(const T* __restrict__ src, fp8_e4m3_t* __restrict__ dst, uint32_t n, float inv_scale) {
   using namespace device;
@@ -44,14 +60,14 @@ SGL_DEVICE void quant_row(const T* __restrict__ src, fp8_e4m3_t* __restrict__ ds
     out_vec ov;
 #pragma unroll
     for (int i = 0; i < kVecN; ++i) {
-      ov[i] = static_cast<fp8_e4m3_t>(static_cast<float>(iv[i]) * inv_scale);
+      ov[i] = quantize_to_fp8_e4m3(static_cast<float>(iv[i]) * inv_scale);
     }
     ov.store(dst, vi);
   }
 
   const uint32_t base = n_vec * kVecN;
   for (uint32_t i = base + threadIdx.x; i < n; i += blockDim.x) {
-    dst[i] = static_cast<fp8_e4m3_t>(static_cast<float>(src[i]) * inv_scale);
+    dst[i] = quantize_to_fp8_e4m3(static_cast<float>(src[i]) * inv_scale);
   }
 }
 
