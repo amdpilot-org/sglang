@@ -7,11 +7,12 @@ from sglang.test.ci.ci_register import register_cuda_ci
 register_cuda_ci(est_time=40, stage="base-b-kernel-unit", runner_config="1-gpu-large")
 register_cuda_ci(est_time=40, stage="base-b-kernel-unit", runner_config="4-gpu-b200")
 
-FP8 = torch.float8_e4m3fn
+FP8 = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
 
 
 def _ref_quant(x_f32: torch.Tensor, inv_scale: float) -> torch.Tensor:
-    y = (x_f32 * inv_scale).clamp(-448.0, 448.0)
+    fp8_info = torch.finfo(FP8)
+    y = (x_f32 * inv_scale).clamp(fp8_info.min, fp8_info.max)
     return y.to(FP8)
 
 
@@ -83,6 +84,82 @@ def test_fused_fp8_qkv_kv_cache(
     torch.testing.assert_close(
         _bytes(v_cache.reshape(total_slots, kv_dim)[loc]), _bytes(v_ref), rtol=0, atol=0
     )
+
+
+def test_fused_fp8_qkv_scale_axes_are_independent():
+    torch.manual_seed(0)
+    device = "cuda"
+    dtype = torch.bfloat16
+    num_tokens, hq, hkv, head_dim = 11, 5, 3, 17
+    total_slots = num_tokens + 6
+    q_dim = hq * head_dim
+    kv_dim = hkv * head_dim
+
+    q = torch.randn(num_tokens, hq, head_dim, dtype=dtype, device=device)
+    k = torch.randn(num_tokens, hkv, head_dim, dtype=dtype, device=device)
+    v = torch.randn(num_tokens, hkv, head_dim, dtype=dtype, device=device)
+    sentinel = torch.tensor(0x55, dtype=torch.uint8, device=device)
+    k_cache = sentinel.repeat(total_slots * kv_dim).view(total_slots, kv_dim)
+    v_cache = sentinel.repeat(total_slots * kv_dim).view(total_slots, kv_dim)
+    cache_loc = torch.randperm(total_slots, device=device)[:num_tokens].to(torch.int64)
+
+    q_scale = torch.tensor([0.03125], dtype=torch.float32, device=device)
+    k_scale = torch.tensor([[0.0625]], dtype=torch.float32, device=device)
+    v_scale = torch.tensor([0.125], dtype=torch.float32, device=device)
+    q_out = fused_fp8_qkv_kv_cache(
+        q,
+        k,
+        v,
+        k_cache,
+        v_cache,
+        cache_loc,
+        k_scale=k_scale,
+        v_scale=v_scale,
+        q_scale=q_scale,
+    )
+
+    fp8_info = torch.finfo(FP8)
+    q_ref = q.reshape(num_tokens, q_dim).float() / q_scale
+    k_ref = k.reshape(num_tokens, kv_dim).float() / k_scale
+    v_ref = v.reshape(num_tokens, kv_dim).float() / v_scale
+    q_ref = q_ref.clamp(fp8_info.min, fp8_info.max).to(FP8)
+    k_ref = k_ref.clamp(fp8_info.min, fp8_info.max).to(FP8)
+    v_ref = v_ref.clamp(fp8_info.min, fp8_info.max).to(FP8)
+
+    torch.testing.assert_close(_bytes(q_out), _bytes(q_ref), rtol=0, atol=0)
+    torch.testing.assert_close(q_out.float() * q_scale, q_ref.float() * q_scale)
+    loc = cache_loc.long()
+    torch.testing.assert_close(
+        _bytes(k_cache.reshape(total_slots, kv_dim)[loc]), _bytes(k_ref), rtol=0, atol=0
+    )
+    torch.testing.assert_close(
+        _bytes(v_cache.reshape(total_slots, kv_dim)[loc]), _bytes(v_ref), rtol=0, atol=0
+    )
+    torch.testing.assert_close(
+        k_cache.reshape(total_slots, kv_dim)[loc].view(FP8).float() * k_scale,
+        k_ref.float() * k_scale,
+    )
+    torch.testing.assert_close(
+        v_cache.reshape(total_slots, kv_dim)[loc].view(FP8).float() * v_scale,
+        v_ref.float() * v_scale,
+    )
+
+    used = torch.zeros(total_slots, dtype=torch.bool, device=device)
+    used[loc] = True
+    unused_count = int((~used).sum())
+    torch.testing.assert_close(
+        _bytes(k_cache[~used]),
+        sentinel.repeat(unused_count * kv_dim),
+        rtol=0,
+        atol=0,
+    )
+    torch.testing.assert_close(
+        _bytes(v_cache[~used]),
+        sentinel.repeat(unused_count * kv_dim),
+        rtol=0,
+        atol=0,
+    )
+    assert torch.isfinite(sentinel.view(FP8).float()).all()
 
 
 if __name__ == "__main__":
