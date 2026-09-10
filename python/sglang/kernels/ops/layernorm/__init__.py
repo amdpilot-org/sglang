@@ -131,11 +131,10 @@ class RMSNormOp(BaseFusedOp):
         import torch
         from aiter import rmsnorm2d_fwd
 
-        # Mirrors production srt/layers/layernorm.py: rmsnorm2d_fwd(out, x, w, eps)
-        # writes the normalized result in-place into ``out`` (ROCm path).
+        result = rmsnorm2d_fwd(input, weight, eps)
         if out is None:
-            out = torch.empty_like(input)
-        rmsnorm2d_fwd(out, input, weight, eps)
+            return result
+        out.copy_(result)
         return out
 
     def forward_torch_npu(
