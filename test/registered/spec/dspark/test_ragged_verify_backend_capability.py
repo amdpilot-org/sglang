@@ -5,7 +5,12 @@ wheels (sgl_kernel) at module scope, which fail to import on CPU runners.
 """
 
 import unittest
+from types import SimpleNamespace
 
+from sglang.srt.environ import envs
+from sglang.srt.model_executor.runner.decode_cuda_graph_runner import (
+    ragged_verify_compact_graphs_enabled,
+)
 from sglang.test.ci.ci_register import register_cuda_ci
 from sglang.test.test_utils import CustomTestCase
 
@@ -37,6 +42,22 @@ class TestRaggedVerifyGraphCapability(CustomTestCase):
         ):
             with self.subTest(backend=backend.__name__):
                 self.assertTrue(backend.supports_ragged_verify_graph)
+
+    def test_compact_capture_requires_backend_support(self):
+        spec_algorithm = SimpleNamespace(supports_ragged_verify=lambda: True)
+        with envs.SGLANG_RAGGED_VERIFY_MODE.override("compact"):
+            self.assertTrue(
+                ragged_verify_compact_graphs_enabled(
+                    spec_algorithm,
+                    SimpleNamespace(supports_ragged_verify_graph=True),
+                )
+            )
+            self.assertFalse(
+                ragged_verify_compact_graphs_enabled(
+                    spec_algorithm,
+                    SimpleNamespace(supports_ragged_verify_graph=False),
+                )
+            )
 
 
 if __name__ == "__main__":
