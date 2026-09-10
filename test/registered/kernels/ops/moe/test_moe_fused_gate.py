@@ -104,6 +104,118 @@ def _make_inputs(M: int, num_experts: int, seed: int):
     return scores, bias
 
 
+def _reference_grouped_gate(
+    scores: torch.Tensor,
+    bias: torch.Tensor,
+    topk: int,
+    num_expert_group: int,
+    topk_group: int,
+    renormalize: bool = True,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Tie-aware grouped reference independent of the production top-k path.
+
+    Stable descending sorts choose the lowest group and expert IDs when scores
+    tie. Sorting each group also preserves duplicate values, so a group with two
+    equal maxima contributes both of them to its top-2 group score.
+    """
+    scores_cpu = scores.detach().to(device="cpu", dtype=torch.float32)
+    bias_cpu = bias.detach().to(device="cpu", dtype=torch.float32)
+    num_rows, num_experts = scores_cpu.shape
+    experts_per_group = num_experts // num_expert_group
+    assert topk <= topk_group * experts_per_group
+
+    activated = scores_cpu.sigmoid()
+    biased = activated + bias_cpu.unsqueeze(0)
+    grouped = biased.view(num_rows, num_expert_group, experts_per_group)
+    sorted_grouped, _ = torch.sort(grouped, dim=-1, descending=True, stable=True)
+    group_scores = sorted_grouped[:, :, :2].sum(dim=-1)
+    _, group_indices = torch.sort(
+        group_scores, dim=-1, descending=True, stable=True
+    )
+    kept_groups = group_indices[:, :topk_group]
+
+    group_mask = torch.zeros(
+        (num_rows, num_expert_group), dtype=torch.bool, device=scores_cpu.device
+    )
+    group_mask.scatter_(1, kept_groups, True)
+    expert_mask = group_mask.repeat_interleave(experts_per_group, dim=1)
+    masked_biased = torch.where(
+        expert_mask, biased, torch.full_like(biased, float("-inf"))
+    )
+    _, expert_indices = torch.sort(
+        masked_biased, dim=-1, descending=True, stable=True
+    )
+    routed_indices = expert_indices[:, :topk]
+    routed_weights = activated.gather(1, routed_indices)
+    if renormalize:
+        routed_sum = routed_weights.sum(dim=1, keepdim=True)
+        routed_sum = torch.where(
+            routed_sum > 0.0, routed_sum, torch.ones_like(routed_sum)
+        )
+        routed_weights = routed_weights / routed_sum
+    return routed_weights, routed_indices.to(torch.int32)
+
+
+_TIED_GROUP_CASES = [
+    (8, 4, 1, 2),
+    (12, 6, 2, 4),
+    (18, 6, 3, 5),
+    (24, 8, 4, 6),
+]
+
+
+@pytest.mark.parametrize(
+    "num_experts,num_expert_group,topk_group,topk",
+    _TIED_GROUP_CASES,
+)
+def test_moe_fused_gate_grouped_ties_match_independent_reference(
+    num_experts: int,
+    num_expert_group: int,
+    topk_group: int,
+    topk: int,
+) -> None:
+    """Grouped routing must count duplicate tied maxima in per-group top-2 scores."""
+    experts_per_group = num_experts // num_expert_group
+    scores = torch.zeros((3, num_experts), dtype=torch.float32, device=DEVICE)
+
+    # Row 0 makes a tied pair in group 0 compete with a high-plus-lower pair in
+    # group 1. Row 1 ties every logit. Row 2 varies the tied pattern by group.
+    scores[0, :2] = 10.0
+    scores[0, 2:4] = torch.tensor([9.0, 8.0], device=DEVICE)
+    scores[0, 4:6] = torch.tensor([6.0, 5.0], device=DEVICE)
+    scores[1, :] = 1.0
+    for group in range(num_expert_group):
+        start = group * experts_per_group
+        scores[2, start : start + experts_per_group] = torch.arange(
+            experts_per_group, dtype=torch.float32, device=DEVICE
+        ) % 2
+
+    bias = torch.zeros(num_experts, dtype=torch.float32, device=DEVICE)
+    tri_w, tri_i = moe_fused_gate(
+        scores,
+        bias,
+        topk=topk,
+        scoring_func="sigmoid",
+        renormalize=True,
+        num_expert_group=num_expert_group,
+        topk_group=topk_group,
+    )
+    ref_w, ref_i = _reference_grouped_gate(
+        scores,
+        bias,
+        topk=topk,
+        num_expert_group=num_expert_group,
+        topk_group=topk_group,
+    )
+    torch.cuda.synchronize()
+
+    torch.testing.assert_close(tri_w.cpu(), ref_w, rtol=1e-5, atol=1e-6)
+    torch.testing.assert_close(tri_i.cpu(), ref_i)
+    torch.testing.assert_close(
+        tri_w.sum(dim=1).cpu(), torch.ones(3, dtype=torch.float32), rtol=0, atol=1e-6
+    )
+
+
 # Keep CI coverage representative without exploding into a large cartesian grid.
 _REFERENCE_CASES = get_ci_test_range(
     [

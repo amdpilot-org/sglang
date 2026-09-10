@@ -186,8 +186,10 @@ def _router_triton_kernel(
             in_g = (group_of_n[None, :] == g) & mask_n[None, :]
             vals = tl.where(in_g, biased, -float("inf"))
             top1 = tl.max(vals, axis=1)[:, None]  # [BLOCK_M, 1]
-            vals2 = tl.where(vals >= top1, -float("inf"), vals)
-            top2 = tl.max(vals2, axis=1)[:, None]  # [BLOCK_M, 1]
+            lower_vals = tl.where(vals < top1, vals, -float("inf"))
+            lower_max = tl.max(lower_vals, axis=1)[:, None]  # [BLOCK_M, 1]
+            tie_count = tl.sum((vals == top1).to(tl.int32), axis=1)[:, None]
+            top2 = tl.where(tie_count >= 2, top1, lower_max)  # [BLOCK_M, 1]
             group_score = tl.where(offs_g[None, :] == g, top1 + top2, group_score)
 
         gcur = group_score
