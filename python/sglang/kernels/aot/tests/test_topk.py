@@ -292,6 +292,91 @@ def test_deepseek_v4_topk_transform(bs: int, c4_len: int) -> None:
     )
 
 
+@pytest.mark.skipif(
+    torch.version.hip is None,
+    reason="deepseek_v4_topk_transform_512 is only built on ROCm",
+)
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@torch.inference_mode()
+def test_deepseek_v4_topk_transform_rejects_non_fp32(dtype: torch.dtype) -> None:
+    from sgl_kernel import deepseek_v4_topk_transform_512
+
+    torch.manual_seed(37892)
+    batch, seq_len, topk, page_size = 2, 4096, 512, 64
+    scores = torch.randn(
+        batch, seq_len, dtype=torch.float32, device="cuda"
+    ).to(dtype)
+    scores_cpu = scores.detach().cpu().clone()
+    reference = torch.topk(scores_cpu, topk, dim=-1).indices
+    seq_lens = torch.full((batch,), seq_len, dtype=torch.int32, device="cuda")
+    num_pages = (seq_len + page_size - 1) // page_size
+    page_table = (
+        torch.arange(num_pages, dtype=torch.int32, device="cuda")
+        .unsqueeze(0)
+        .expand(batch, -1)
+        .contiguous()
+    )
+    page_indices = torch.full(
+        (batch, topk), -12345, dtype=torch.int32, device="cuda"
+    )
+
+    with pytest.raises(RuntimeError, match="scores must be float32"):
+        deepseek_v4_topk_transform_512(
+            scores, seq_lens, page_table, page_indices, page_size
+        )
+
+    assert reference.shape == (batch, topk)
+    assert torch.all(page_indices == -12345)
+
+
+@pytest.mark.skipif(
+    torch.version.hip is None,
+    reason="deepseek_v4_topk_transform_512 is only built on ROCm",
+)
+@torch.inference_mode()
+def test_deepseek_v4_topk_transform_cuda_graph_replay() -> None:
+    from sgl_kernel import deepseek_v4_topk_transform_512
+
+    torch.manual_seed(37892)
+    batch, seq_len, topk, page_size = 4, 4096, 512, 64
+    scores = torch.randn(batch, seq_len, dtype=torch.float32, device="cuda")
+    seq_lens = torch.full((batch,), seq_len, dtype=torch.int32, device="cuda")
+    num_pages = (seq_len + page_size - 1) // page_size
+    page_table = (
+        torch.arange(num_pages, dtype=torch.int32, device="cuda")
+        .unsqueeze(0)
+        .expand(batch, -1)
+        .contiguous()
+    )
+    page_indices = torch.full(
+        (batch, topk), -12345, dtype=torch.int32, device="cuda"
+    )
+    score_address = scores.data_ptr()
+    page_indices_address = page_indices.data_ptr()
+
+    torch.cuda.synchronize()
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        deepseek_v4_topk_transform_512(
+            scores, seq_lens, page_table, page_indices, page_size
+        )
+
+    torch.manual_seed(224)
+    scores.copy_(torch.randn(batch, seq_len, dtype=torch.float32, device="cuda"))
+    graph.replay()
+    torch.cuda.synchronize()
+    scores_cpu = scores.detach().cpu().clone()
+    reference = torch.topk(scores_cpu, topk, dim=-1).indices
+
+    assert scores.data_ptr() == score_address
+    assert page_indices.data_ptr() == page_indices_address
+    assert not torch.any(page_indices == -12345)
+    assert torch.equal(
+        torch.sort(page_indices.cpu(), dim=-1).values,
+        torch.sort(reference, dim=-1).values,
+    )
+
+
 def _make_scores(kind: str, bs: int, width: int, seed: int) -> torch.Tensor:
     """Score distributions that stress the coarse stage of a histogram top-k.
 
