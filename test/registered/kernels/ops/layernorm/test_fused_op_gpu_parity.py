@@ -50,6 +50,23 @@ def test_rmsnorm(dtype, shape):
 
 
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+def test_rmsnorm_out_contract(dtype):
+    from sglang.kernels.ops.layernorm import _RMSNORM
+
+    torch.manual_seed(0)
+    x = torch.randn(7, 2048, dtype=dtype, device="cuda")
+    x_before = x.clone()
+    w = torch.randn(2048, dtype=dtype, device="cuda")
+    ref = _RMSNORM.forward_native(x, w, 1e-6)
+    for backend in _eligible(_RMSNORM):
+        out = torch.full_like(x, 123.0)
+        result = _RMSNORM.forward(x, w, 1e-6, out=out, backend=backend)
+        assert result is out
+        assert torch.equal(x, x_before)
+        _close(out, ref, dtype, f"rmsnorm out {backend.value}")
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("shape", [(1, 4096), (128, 4096)])
 def test_fused_add_rmsnorm(dtype, shape):
     from sglang.kernels.ops.layernorm import _FUSED_ADD_RMSNORM
