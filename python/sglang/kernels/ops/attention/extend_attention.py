@@ -1514,6 +1514,16 @@ def extend_attention_fwd_unified(
                          (None if sliding window not used)
         xai_temperature_len: XAI temperature length
     """
+    expected_output_dtype = (
+        torch.bfloat16
+        if v_buffer.dtype in (torch.float8_e4m3fn, torch.float8_e5m2)
+        else v_buffer.dtype
+    )
+    if o.dtype != expected_output_dtype:
+        raise ValueError(
+            f"Unified extend attention output dtype must be {expected_output_dtype}, got {o.dtype}"
+        )
+
     Lq, Lv = q.shape[-1], v_buffer.shape[-1]
 
     # Get block sizes and configuration

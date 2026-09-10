@@ -1071,6 +1071,147 @@ class TestTritonAttention(CustomTestCase):
                     B, N_CTX, H_Q, H_KV, D
                 )
 
+    def test_extend_attention_unified_output_reuse(self):
+        """Test that a fixed output buffer can be reused across input batches."""
+        q_dtype = torch.float16
+        kv_dtype = torch.bfloat16
+        device = get_device()
+        H_Q, H_KV, D = 4, 2, 64
+        prefix_lens = [3, 5]
+        extend_lens = [4, 2]
+        total_tokens = sum(prefix_lens) + sum(extend_lens)
+        extend_tokens = sum(extend_lens)
+
+        q = torch.empty((extend_tokens, H_Q, D), dtype=q_dtype, device=device)
+        k_buffer = torch.empty((total_tokens, H_KV, D), dtype=kv_dtype, device=device)
+        v_buffer = torch.empty((total_tokens, H_KV, D), dtype=kv_dtype, device=device)
+        o_reused = torch.empty_like(q, dtype=kv_dtype)
+
+        qo_indptr = torch.tensor([0, 4, 6], dtype=torch.int32, device=device)
+        kv_indptr = torch.tensor([0, 7, 14], dtype=torch.int32, device=device)
+        prefix_kv_indptr = torch.tensor([0, 3, 8], dtype=torch.int32, device=device)
+        unified_kv_indices = torch.arange(
+            total_tokens, dtype=torch.int64, device=device
+        )
+        prefix_kv_indices = torch.tensor(
+            [0, 1, 2, 7, 8, 9, 10, 11], dtype=torch.int64, device=device
+        )
+        prefix_lens_tensor = torch.tensor(prefix_lens, dtype=torch.int32, device=device)
+        max_len_extend = max(extend_lens)
+
+        fixed_addresses = {
+            "q": q.data_ptr(),
+            "k": k_buffer.data_ptr(),
+            "v": v_buffer.data_ptr(),
+            "o": o_reused.data_ptr(),
+        }
+
+        def fill_inputs(seed):
+            generator = torch.Generator(device="cpu").manual_seed(seed)
+            q.copy_(
+                torch.randn(q.shape, generator=generator).to(
+                    dtype=q_dtype, device=device
+                )
+            )
+            k_buffer.copy_(
+                torch.randn(k_buffer.shape, generator=generator).to(
+                    dtype=kv_dtype, device=device
+                )
+            )
+            v_buffer.copy_(
+                torch.randn(v_buffer.shape, generator=generator).to(
+                    dtype=kv_dtype, device=device
+                )
+            )
+
+        def build_extend_tensors():
+            k_extend = torch.empty(
+                (extend_tokens, H_KV, D), dtype=kv_dtype, device=device
+            )
+            v_extend = torch.empty(
+                (extend_tokens, H_KV, D), dtype=kv_dtype, device=device
+            )
+            k_extend[:4] = k_buffer[3:7]
+            v_extend[:4] = v_buffer[3:7]
+            k_extend[4:] = k_buffer[12:14]
+            v_extend[4:] = v_buffer[12:14]
+            return k_extend, v_extend
+
+        def run_reference():
+            k_extend, v_extend = build_extend_tensors()
+            output = torch.empty_like(q, dtype=kv_dtype)
+            extend_attention_fwd_torch(
+                q.to(kv_dtype),
+                k_extend,
+                v_extend,
+                output,
+                k_buffer,
+                v_buffer,
+                qo_indptr,
+                prefix_kv_indptr,
+                prefix_kv_indices,
+                sliding_window_size=-1,
+            )
+            return output
+
+        def run_unified(output):
+            output.fill_(float("nan"))
+            extend_attention_fwd_unified(
+                q,
+                output,
+                k_buffer,
+                v_buffer,
+                1.0,
+                1.0,
+                qo_indptr,
+                kv_indptr,
+                unified_kv_indices,
+                prefix_lens_tensor,
+                max_len_extend=max_len_extend,
+                custom_mask=None,
+                mask_indptr=None,
+                sm_scale=None,
+                logit_cap=0.0,
+                is_causal=True,
+            )
+
+        previous_q = None
+        for seed in (1234, 5678):
+            fill_inputs(seed)
+            if previous_q is not None:
+                self.assertFalse(torch.equal(q, previous_q))
+            previous_q = q.clone()
+
+            reference = run_reference()
+            o_fresh = torch.empty_like(q, dtype=kv_dtype)
+            run_unified(o_fresh)
+            run_unified(o_reused)
+
+            self.assertTrue(torch.isfinite(o_fresh).all())
+            self.assertTrue(torch.isfinite(o_reused).all())
+            self.assertFalse(torch.isnan(o_fresh).any())
+            self.assertFalse(torch.isnan(o_reused).any())
+            self.assertTrue(torch.equal(o_fresh, o_reused))
+            self.assertTrue(
+                torch.allclose(o_fresh, reference, rtol=0.05, atol=0.05),
+                f"Unified output differs from Torch reference. "
+                f"Max diff: {(o_fresh - reference).abs().max()}",
+            )
+
+        unsupported_output = torch.empty_like(q, dtype=torch.float32)
+        with self.assertRaises(ValueError):
+            run_unified(unsupported_output)
+
+        self.assertEqual(
+            {
+                "q": q.data_ptr(),
+                "k": k_buffer.data_ptr(),
+                "v": v_buffer.data_ptr(),
+                "o": o_reused.data_ptr(),
+            },
+            fixed_addresses,
+        )
+
     def test_build_unified_kv_indices(self):
         """Test build_unified_kv_indices correctness."""
         B = 4
