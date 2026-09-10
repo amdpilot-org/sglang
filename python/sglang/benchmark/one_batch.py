@@ -306,7 +306,7 @@ class BenchArgs:
         return cls(**result)
 
 
-def load_model(server_args, port_args, gpu_id, tp_rank):
+def load_model(server_args, port_args, gpu_id, tp_rank, load_tokenizer=True):
     cfg = resolving_view(server_args)
     suppress_other_loggers()
     rank_print = print if tp_rank == 0 else lambda *args, **kwargs: None
@@ -373,7 +373,7 @@ def load_model(server_args, port_args, gpu_id, tp_rank):
         cfg.tokenizer_path,
         tokenizer_mode=cfg.tokenizer_mode,
         trust_remote_code=cfg.trust_remote_code,
-    )
+    ) if load_tokenizer else None
     if cfg.tp_size > 1:
         dist.barrier()
 
