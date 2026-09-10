@@ -2,6 +2,7 @@
 standard aiter FP8 path. Skipped on CPU (Triton requires a GPU)."""
 
 import unittest
+from unittest import mock
 
 import torch
 
@@ -169,6 +170,172 @@ class TestFusedFp8KvWrite(unittest.TestCase):
             0.0,
             "fused wrote into non-target V slots",
         )
+
+    def test_structured_inputs_match_dequantized_references(self):
+        """Complete-cache check for fixed BF16/FP8 KV writes.
+
+        The cases use identical shapes and explicit per-tensor scales:
+        zeros, tiny finite values, mixed magnitudes, cancellation, and a
+        skewed sparse state.  The FP8 reference is independent of the fused
+        kernel: float32 divide, FP8 cast, scatter, then dequantize.
+        """
+        from sglang.kernels.ops.attention import utils as attention_utils
+        from sglang.kernels.ops.quantization.fp8_kernel import fp8_dtype
+
+        torch.manual_seed(0xC0FFEE)
+        dev = "cuda"
+        num_tokens = 32
+        num_heads = 4
+        head_dim = 128
+        total_slots = 64
+        page_size = 1
+        shape = (num_tokens, num_heads, head_dim)
+        cache_shape = (total_slots, page_size, num_heads, head_dim)
+        scale = 0.5
+        fp8_max = torch.finfo(fp8_dtype).max
+
+        def make_case(name):
+            if name == "zeros":
+                return torch.zeros(shape, dtype=torch.bfloat16, device=dev)
+            if name == "tiny":
+                return torch.full(
+                    shape, 1e-6, dtype=torch.bfloat16, device=dev
+                )
+            if name == "mixed":
+                values = torch.tensor(
+                    [1e-3, 0.1, 1.0, 10.0, 50.0], device=dev
+                )
+                indices = torch.arange(
+                    num_tokens * num_heads * head_dim, device=dev
+                ) % values.numel()
+                return values[indices].reshape(shape).to(torch.bfloat16)
+            if name == "cancel":
+                return torch.linspace(
+                    -50.0,
+                    50.0,
+                    num_tokens * num_heads * head_dim,
+                    device=dev,
+                ).reshape(shape).to(torch.bfloat16)
+            if name == "skew":
+                result = torch.zeros(shape, dtype=torch.float32, device=dev)
+                flat = result.view(-1)
+                flat[::997] = 50.0
+                flat[::1231] = -25.0
+                return result.to(torch.bfloat16)
+            raise ValueError(f"unknown structured case: {name}")
+
+        loc = (
+            torch.randperm(total_slots, device=dev)[:num_tokens]
+            .to(torch.int64)
+            .contiguous()
+        )
+        cases = ("zeros", "tiny", "mixed", "cancel", "skew")
+        expected_cache_bytes = (
+            total_slots * page_size * num_heads * head_dim
+        )
+
+        for case_name in cases:
+            with self.subTest(case_name):
+                key = make_case(case_name)
+                value = make_case(case_name).flip(dims=[-1]).contiguous()
+                self.assertTrue(torch.isfinite(key.float()).all())
+                self.assertTrue(torch.isfinite(value.float()).all())
+                self.assertLessEqual(key.abs().amax().item() / scale, fp8_max)
+                self.assertLessEqual(value.abs().amax().item() / scale, fp8_max)
+
+                bf16_key_cache = torch.zeros(
+                    cache_shape, dtype=torch.bfloat16, device=dev
+                )
+                bf16_value_cache = torch.zeros_like(bf16_key_cache)
+                fp8_key_cache = torch.zeros(
+                    cache_shape, dtype=fp8_dtype, device=dev
+                )
+                fp8_value_cache = torch.zeros_like(fp8_key_cache)
+                self.assertEqual(
+                    bf16_key_cache.nbytes,
+                    expected_cache_bytes * bf16_key_cache.element_size(),
+                )
+                self.assertEqual(
+                    fp8_key_cache.nbytes,
+                    expected_cache_bytes * fp8_key_cache.element_size(),
+                )
+
+                scale_tensor = torch.tensor([scale], device=dev)
+                with mock.patch.object(
+                    attention_utils,
+                    "launch_reshape_and_cache_flash",
+                    wraps=attention_utils.launch_reshape_and_cache_flash,
+                ) as launch_mock:
+                    attention_utils.launch_reshape_and_cache_flash(
+                        key,
+                        value,
+                        bf16_key_cache,
+                        bf16_value_cache,
+                        loc,
+                    )
+                    attention_utils.launch_reshape_and_cache_flash(
+                        key,
+                        value,
+                        fp8_key_cache,
+                        fp8_value_cache,
+                        loc,
+                        k_scale=scale_tensor,
+                        v_scale=scale_tensor,
+                    )
+                    self.assertEqual(launch_mock.call_count, 2)
+                    self.assertIsNone(
+                        launch_mock.call_args_list[0].kwargs.get("k_scale")
+                    )
+                    self.assertEqual(
+                        launch_mock.call_args_list[1]
+                        .kwargs.get("k_scale")
+                        .item(),
+                        scale,
+                    )
+
+                bf16_key_reference = torch.zeros_like(bf16_key_cache)
+                bf16_value_reference = torch.zeros_like(bf16_value_cache)
+                bf16_key_reference[loc, 0] = key
+                bf16_value_reference[loc, 0] = value
+                self.assertTrue(
+                    torch.equal(bf16_key_cache, bf16_key_reference)
+                )
+                self.assertTrue(
+                    torch.equal(bf16_value_cache, bf16_value_reference)
+                )
+
+                fp8_key_reference = torch.zeros_like(fp8_key_cache)
+                fp8_value_reference = torch.zeros_like(fp8_value_cache)
+                fp8_key_reference[loc, 0] = (
+                    key.float() / scale
+                ).to(fp8_dtype)
+                fp8_value_reference[loc, 0] = (
+                    value.float() / scale
+                ).to(fp8_dtype)
+                self.assertTrue(
+                    torch.equal(
+                        fp8_key_cache.view(torch.uint8),
+                        fp8_key_reference.view(torch.uint8),
+                    )
+                )
+                self.assertTrue(
+                    torch.equal(
+                        fp8_value_cache.view(torch.uint8),
+                        fp8_value_reference.view(torch.uint8),
+                    )
+                )
+                self.assertTrue(
+                    torch.equal(
+                        fp8_key_cache.float(),
+                        fp8_key_reference.float(),
+                    )
+                )
+                self.assertTrue(
+                    torch.equal(
+                        fp8_value_cache.float(),
+                        fp8_value_reference.float(),
+                    )
+                )
 
 
 class _StopForward(Exception):
