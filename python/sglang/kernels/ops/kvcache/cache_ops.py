@@ -171,7 +171,8 @@ def reshape_and_cache_flash(
     HEAD_BLOCK: tl.constexpr,
     BLOCK_D: tl.constexpr,
     HAS_SWA: tl.constexpr,
-    USE_SCALE: tl.constexpr,
+    USE_K_SCALE: tl.constexpr,
+    USE_V_SCALE: tl.constexpr,
 ):
     """
     Triton kernel for reshaping per-token K/V tensors into paged KV cache layout.
@@ -259,12 +260,10 @@ def reshape_and_cache_flash(
     # ----------------------------------
     # optional scale
     # ----------------------------------
-    if USE_SCALE:
-        k_scale = tl.load(k_scale_ptr)
-        v_scale = tl.load(v_scale_ptr)
-
-        k = k / k_scale
-        v = v / v_scale
+    if USE_K_SCALE:
+        k = k / tl.load(k_scale_ptr)
+    if USE_V_SCALE:
+        v = v / tl.load(v_scale_ptr)
 
     # ----------------------------------
     # target layout
@@ -324,7 +323,7 @@ def launch_reshape_and_cache_flash(
         slot_mapping,
         swa_slot_mapping,
         k_scale if k_scale is not None else key,
-        v_scale if v_scale is not None else key,
+        v_scale if v_scale is not None else value,
         key_cache.stride(0),
         key.stride(0),
         value.stride(0),
@@ -334,7 +333,8 @@ def launch_reshape_and_cache_flash(
         HEAD_BLOCK=HEAD_BLOCK,
         BLOCK_D=BLOCK_D,
         HAS_SWA=(swa_slot_mapping is not None),
-        USE_SCALE=(k_scale is not None),
+        USE_K_SCALE=(k_scale is not None),
+        USE_V_SCALE=(v_scale is not None),
     )
 
 
