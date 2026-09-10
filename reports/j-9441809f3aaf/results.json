@@ -1,0 +1,140 @@
+{
+  "campaign": "repo-e2e-20260909",
+  "coordination_tracker": "amdpilot-org/amdpilotv2 issue 402",
+  "scope": "generic gfx942 vocabulary-parallel embedding/gather; distinct from GLM NextN TP-shard behavior",
+  "upstream_context": {
+    "issue": "sgl-project/sglang issue 29630",
+    "candidate_pr": {
+      "number": 30948,
+      "title": "[2/3] [EAGLE] perf: Fuse TP vocab-parallel embedding",
+      "state": "MERGED",
+      "head": "fbe4b1393947721f537d629fb884161b81b696cd"
+    },
+    "conclusion": "already fixed and tested at the mirror base; no duplicate code change"
+  },
+  "environment": {
+    "image": "amdpilotv2/open-job-mi300:jit-config-readable-35122-260909",
+    "local_image_id": "sha256:dfc9419089c338b5712da4841768b38b1ab79f3da41f8c58c3cd4dfcc1147ff1",
+    "gpu": {
+      "name": "AMD Instinct MI300X",
+      "gfx": "gfx942",
+      "serial": "692412003101",
+      "node_id": 9
+    },
+    "python": "/opt/venv/bin/python",
+    "torch": "2.9.1+rocm7.2.0.git7e1940d4",
+    "triton": "3.7.0",
+    "installed_sglang": "/sgl-workspace/sglang/python/sglang/__init__.py",
+    "installed_source_head": "8eaffdf382e06b7dc50fc5c76cc5aad9c36bb0e4",
+    "installed_aot_package": "/opt/venv/lib/python3.10/site-packages/sgl_kernel/__init__.py",
+    "checkout_sglang": "/job/sglang/python/sglang/__init__.py",
+    "checkout_head": "0084030179bfba86bfeb6d43f7997d4076329d2c",
+    "public_op": "/job/sglang/python/sglang/kernels/ops/embeddings/vocab_parallel_embedding.py",
+    "public_layer": "/job/sglang/python/sglang/srt/layers/vocab_parallel_embedding.py"
+  },
+  "installed_source_baseline": {
+    "label": "installed-source only; not proof for later checkout changes",
+    "command": "/opt/venv/bin/python -m pytest -q /sgl-workspace/sglang/test/registered/kernels/ops/embeddings/test_vocab_parallel_embedding.py",
+    "timing_method": "one cold subprocess.run measured with time.monotonic()",
+    "first_gpu_execution_elapsed_seconds": 28.782759,
+    "pytest_reported_elapsed_seconds": 24.89,
+    "passed": 22,
+    "failed": 0,
+    "return_code": 0
+  },
+  "persistent_checkout_test": {
+    "command": "cd /job/sglang && PYTHONPATH=/job/sglang/python HOME=/tmp/sglang-cache-j-9441809f3aaf/home /opt/venv/bin/python -m pytest -q /job/sglang/test/registered/kernels/ops/embeddings/test_vocab_parallel_embedding.py",
+    "timing_method": "one cold subprocess.run measured with time.monotonic()",
+    "elapsed_seconds": 25.014917,
+    "pytest_reported_elapsed_seconds": 19.62,
+    "passed": 22,
+    "failed": 0,
+    "return_code": 0,
+    "numerical_gate": {
+      "rtol": 0,
+      "atol": 0
+    }
+  },
+  "direct_gpu_comparison": {
+    "config": {
+      "org_vocab_start_index": 10,
+      "org_vocab_end_index": 18,
+      "num_org_vocab_padding": 4,
+      "added_vocab_start_index": 100,
+      "added_vocab_end_index": 103
+    },
+    "reference_method": "independent Torch advanced indexing weight[local_ids], then torch.where(valid, gathered, 0)",
+    "cases": [
+      {
+        "input_dtype": "int32",
+        "weight_layout": "contiguous",
+        "weight_strides": [257, 1],
+        "output_shape": [2, 8, 257],
+        "output_strides": [2056, 257, 1],
+        "invalid_rows_all_zero": true,
+        "exact_reference_match": true
+      },
+      {
+        "input_dtype": "int32",
+        "weight_layout": "strided_weight",
+        "weight_strides": [300, 1],
+        "output_shape": [2, 8, 257],
+        "output_strides": [2056, 257, 1],
+        "invalid_rows_all_zero": true,
+        "exact_reference_match": true
+      },
+      {
+        "input_dtype": "int64",
+        "weight_layout": "contiguous",
+        "weight_strides": [257, 1],
+        "output_shape": [2, 8, 257],
+        "output_strides": [2056, 257, 1],
+        "invalid_rows_all_zero": true,
+        "exact_reference_match": true
+      },
+      {
+        "input_dtype": "int64",
+        "weight_layout": "strided_weight",
+        "weight_strides": [300, 1],
+        "output_shape": [2, 8, 257],
+        "output_strides": [2056, 257, 1],
+        "invalid_rows_all_zero": true,
+        "exact_reference_match": true
+      }
+    ],
+    "dispatch": {
+      "backend": "Triton JIT",
+      "kernel_name": "_vocab_parallel_embedding_kernel",
+      "kernel_module": "sglang.kernels.ops.embeddings.vocab_parallel_embedding",
+      "recorded_grid": [16, 1],
+      "public_layer_gate": {
+        "tp2_unquantized_cuda_contiguous": true,
+        "tp1_fallback": false,
+        "int16_fallback": false,
+        "noncontiguous_weight_fallback": false
+      }
+    },
+    "unsupported_input_diagnostics": [
+      {"name": "int16 index dtype", "type": "AssertionError"},
+      {"name": "noncontiguous input", "type": "AssertionError"},
+      {"name": "weight stride(1) != 1", "type": "AssertionError"},
+      {"name": "weight ndim != 2", "type": "AssertionError"},
+      {"name": "CPU weight", "type": "AssertionError"}
+    ]
+  },
+  "async_oob_diagnostic": {
+    "environment": "SGLANG_ENABLE_ASYNC_ASSERT=1",
+    "valid_input_synchronized_without_error": true,
+    "invalid_input": [-1, 200],
+    "bounds": "[0, 16)",
+    "raised": true,
+    "type": "AcceleratorError",
+    "message": "HIP error: unspecified launch failure; device-side assertion from _assert_async_cuda_kernel"
+  },
+  "notes": [
+    "The first /usr/bin/time attempt failed with exit 127 before GPU work because /usr/bin/time is absent.",
+    "The first checkout pytest attempt failed during collection because HOME was omitted and Torch attempted to create /home/amd; the job-private HOME rerun passed.",
+    "The first direct-probe construction used int32 boundary values in an int16 fixture and failed during tensor construction; the diagnostic was rerun with in-range int16 IDs.",
+    "No full model weights, node-wide changes, upstream posts, or upstream edits were made."
+  ]
+}
