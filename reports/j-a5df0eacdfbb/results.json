@@ -1,0 +1,707 @@
+{
+  "label": "bounded gfx942 BF16/FP8 KV reduced-attention comparison",
+  "timestamp_utc": "2026-09-10T04:32:02Z",
+  "environment": {
+    "python": "/opt/venv/bin/python",
+    "torch": "2.9.1+rocm7.2.0.git7e1940d4",
+    "hip": "7.2.26015-fc0010cf6a",
+    "gpu": "AMD Instinct MI300X",
+    "gpu_capability": [
+      9,
+      4
+    ],
+    "gpu_total_bytes": 206141652992,
+    "multi_processor_count": 304,
+    "sglang_source": "/job/sglang",
+    "aiter_source": "/sgl-workspace/aiter/aiter/ops/triton/attention/unified_attention.py",
+    "image": "amdpilotv2/open-job-mi300:jit-config-readable-260909-banff5",
+    "image_id": "sha256:39fe745feda79ecf4c17f4d806d8ef12150bef720f2f07f5c63a20b3ccfd63f1"
+  },
+  "method": {
+    "kernel": "aiter unified_attention",
+    "reference": "independent float32 einsum/softmax; FP8 reference dequantizes q/k/v with explicit scales",
+    "input_data": "identical generated BF16 base tensors per sequence-length case; FP8 tensors are quantized from the same base",
+    "timing": "CUDA events around real forward; 5 warmups and 20 measured calls; milliseconds",
+    "shared_hardware_uncertainty": "all cases ran on the same MI300X; report sample stdev and 95% normal CI for the mean"
+  },
+  "numerical_gates": {
+    "bf16": "finite, max_abs <= 0.02, cosine >= 0.9999",
+    "fp8": "finite, mismatch_fraction <= 0.005, cosine >= 0.99"
+  },
+  "limits": {
+    "workload_cases": 4,
+    "kernel_dispatch_configurations": 4,
+    "warmup_calls_per_run": 5,
+    "measured_calls_per_run": 20,
+    "weights_bytes": 0,
+    "total_live_allocations_limit_bytes": 51539607552,
+    "wall_limit_seconds": 7200
+  },
+  "cases": [
+    {
+      "case_id": "seq1024",
+      "seq_len": 1024,
+      "seed": 31783,
+      "batch": 4,
+      "num_query_heads": 16,
+      "num_kv_heads": 1,
+      "head_dim": 256,
+      "page_size": 16,
+      "runs": {
+        "bf16": {
+          "dtype": "torch.bfloat16",
+          "dispatch": {
+            "kernel": "kernel_unified_attention_3d",
+            "use_2d": false,
+            "block_m": 16,
+            "block_q": 1,
+            "attn_config": {
+              "TILE_SIZE": 16,
+              "NUM_SEGMENTS_PER_SEQ": 64,
+              "num_warps": 2,
+              "waves_per_eu": 2,
+              "num_stages": 2
+            },
+            "reduce_config": {
+              "TILE_SIZE": 16,
+              "NUM_SEGMENTS_PER_SEQ": 64,
+              "num_warps": 2,
+              "waves_per_eu": 2,
+              "num_stages": 1
+            },
+            "num_segments": 64,
+            "tile_size": 16,
+            "num_warps": 2,
+            "num_stages": 2,
+            "waves_per_eu": 2,
+            "kernel_workspace_bytes": 4227072
+          },
+          "accuracy": {
+            "finite": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0,
+            "mismatch_fraction": 0.0,
+            "cosine": 1.0000001192092896,
+            "passed": true,
+            "rejected": false
+          },
+          "timing": {
+            "samples_ms": [
+              0.13911999762058258,
+              0.10929200053215027,
+              0.1035190001130104,
+              0.10223600268363953,
+              0.10135400295257568,
+              0.10171499848365784,
+              0.10271699726581573,
+              0.1030379980802536,
+              0.1003120020031929,
+              0.10119300335645676,
+              0.10039199888706207,
+              0.10243599861860275,
+              0.09979099780321121,
+              0.09794600307941437,
+              0.10199499875307083,
+              0.10091300308704376,
+              0.10119400173425674,
+              0.1015940010547638,
+              0.10191500186920166,
+              0.10195600241422653
+            ],
+            "median_ms": 0.10181500017642975,
+            "mean_ms": 0.10373140051960945,
+            "stdev_ms": 0.008599760714943125,
+            "ci95_mean_ms": 0.0037690113115736233,
+            "min_ms": 0.09794600307941437,
+            "max_ms": 0.13911999762058258
+          },
+          "memory": {
+            "cache_bytes": 6374400,
+            "kernel_workspace_bytes": 4227072,
+            "allocated_before_bytes": 6344192,
+            "allocated_after_bytes": 86134272,
+            "reserved_before_bytes": 25165824,
+            "reserved_after_bytes": 104857600,
+            "peak_allocated_bytes": 90852864
+          }
+        },
+        "fp8": {
+          "dtype": "torch.float8_e4m3fnuz",
+          "dispatch": {
+            "kernel": "kernel_unified_attention_3d",
+            "use_2d": false,
+            "block_m": 16,
+            "block_q": 1,
+            "attn_config": {
+              "TILE_SIZE": 32,
+              "NUM_SEGMENTS_PER_SEQ": 64,
+              "num_warps": 2,
+              "waves_per_eu": 2,
+              "num_stages": 2
+            },
+            "reduce_config": {
+              "TILE_SIZE": 32,
+              "NUM_SEGMENTS_PER_SEQ": 64,
+              "num_warps": 2,
+              "waves_per_eu": 2,
+              "num_stages": 1
+            },
+            "num_segments": 64,
+            "tile_size": 32,
+            "num_warps": 2,
+            "num_stages": 2,
+            "waves_per_eu": 2,
+            "kernel_workspace_bytes": 4227072
+          },
+          "accuracy": {
+            "finite": true,
+            "max_abs": 0.0026041269302368164,
+            "mean_abs": 0.0009465424809604883,
+            "mismatch_fraction": 0.0,
+            "cosine": 0.9999989867210388,
+            "passed": true,
+            "rejected": false
+          },
+          "timing": {
+            "samples_ms": [
+              0.11197900027036667,
+              0.1666650027036667,
+              0.11402300000190735,
+              0.10973300039768219,
+              0.10808899998664856,
+              0.10636500269174576,
+              0.10652600228786469,
+              0.1055229976773262,
+              0.10608500242233276,
+              0.10841000080108643,
+              0.10484199970960617,
+              0.10311800241470337,
+              0.10584399849176407,
+              0.10564400255680084,
+              0.10315799713134766,
+              0.10355900228023529,
+              0.10592400282621384,
+              0.10965300351381302,
+              0.10440099984407425,
+              0.10496199876070023
+            ],
+            "median_ms": 0.1060045026242733,
+            "mean_ms": 0.1097251508384943,
+            "stdev_ms": 0.013704387279788812,
+            "ci95_mean_ms": 0.006006212543327877,
+            "min_ms": 0.10311800241470337,
+            "max_ms": 0.1666650027036667
+          },
+          "memory": {
+            "cache_bytes": 6374400,
+            "kernel_workspace_bytes": 4227072,
+            "allocated_before_bytes": 86134272,
+            "allocated_after_bytes": 86134272,
+            "reserved_before_bytes": 104857600,
+            "reserved_after_bytes": 104857600,
+            "peak_allocated_bytes": 98782720
+          }
+        }
+      }
+    },
+    {
+      "case_id": "seq2048",
+      "seq_len": 2048,
+      "seed": 31784,
+      "batch": 4,
+      "num_query_heads": 16,
+      "num_kv_heads": 1,
+      "head_dim": 256,
+      "page_size": 16,
+      "runs": {
+        "bf16": {
+          "dtype": "torch.bfloat16",
+          "dispatch": {
+            "kernel": "kernel_unified_attention_3d",
+            "use_2d": false,
+            "block_m": 16,
+            "block_q": 1,
+            "attn_config": {
+              "TILE_SIZE": 16,
+              "NUM_SEGMENTS_PER_SEQ": 128,
+              "num_warps": 2,
+              "waves_per_eu": 2,
+              "num_stages": 2
+            },
+            "reduce_config": {
+              "TILE_SIZE": 16,
+              "NUM_SEGMENTS_PER_SEQ": 128,
+              "num_warps": 2,
+              "waves_per_eu": 2,
+              "num_stages": 1
+            },
+            "num_segments": 128,
+            "tile_size": 16,
+            "num_warps": 2,
+            "num_stages": 2,
+            "waves_per_eu": 2,
+            "kernel_workspace_bytes": 8454144
+          },
+          "accuracy": {
+            "finite": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0,
+            "mismatch_fraction": 0.0,
+            "cosine": 1.0,
+            "passed": true,
+            "rejected": false
+          },
+          "timing": {
+            "samples_ms": [
+              0.11442399770021439,
+              0.12512899935245514,
+              0.11049500107765198,
+              0.10881099849939346,
+              0.11037500202655792,
+              0.11322200298309326,
+              0.11053500324487686,
+              0.10832999646663666,
+              0.10861100256443024,
+              0.10837099701166153,
+              0.10760899633169174,
+              0.10684700310230255,
+              0.1074879989027977,
+              0.1082490012049675,
+              0.1074879989027977,
+              0.1070069968700409,
+              0.10732699930667877,
+              0.10688699781894684,
+              0.10804899781942368,
+              0.10548300296068192
+            ],
+            "median_ms": 0.10828949883580208,
+            "mean_ms": 0.10953684970736503,
+            "stdev_ms": 0.0042634001566435875,
+            "ci95_mean_ms": 0.0018685175028455092,
+            "min_ms": 0.10548300296068192,
+            "max_ms": 0.12512899935245514
+          },
+          "memory": {
+            "cache_bytes": 12666880,
+            "kernel_workspace_bytes": 8454144,
+            "allocated_before_bytes": 92328448,
+            "allocated_after_bytes": 92426752,
+            "reserved_before_bytes": 125829120,
+            "reserved_after_bytes": 125829120,
+            "peak_allocated_bytes": 101863936
+          }
+        },
+        "fp8": {
+          "dtype": "torch.float8_e4m3fnuz",
+          "dispatch": {
+            "kernel": "kernel_unified_attention_3d",
+            "use_2d": false,
+            "block_m": 16,
+            "block_q": 1,
+            "attn_config": {
+              "TILE_SIZE": 32,
+              "NUM_SEGMENTS_PER_SEQ": 128,
+              "num_warps": 2,
+              "waves_per_eu": 2,
+              "num_stages": 2
+            },
+            "reduce_config": {
+              "TILE_SIZE": 32,
+              "NUM_SEGMENTS_PER_SEQ": 128,
+              "num_warps": 2,
+              "waves_per_eu": 2,
+              "num_stages": 1
+            },
+            "num_segments": 128,
+            "tile_size": 32,
+            "num_warps": 2,
+            "num_stages": 2,
+            "waves_per_eu": 2,
+            "kernel_workspace_bytes": 8454144
+          },
+          "accuracy": {
+            "finite": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0,
+            "mismatch_fraction": 0.0,
+            "cosine": 1.0,
+            "passed": true,
+            "rejected": false
+          },
+          "timing": {
+            "samples_ms": [
+              0.14705899357795715,
+              0.1185540035367012,
+              0.11354199796915054,
+              0.1118990033864975,
+              0.11073599755764008,
+              0.11262000352144241,
+              0.11089599877595901,
+              0.11081600189208984,
+              0.11125700175762177,
+              0.11065500229597092,
+              0.11053500324487686,
+              0.11025500297546387,
+              0.109934002161026,
+              0.11053500324487686,
+              0.11021500080823898,
+              0.11025500297546387,
+              0.1104549989104271,
+              0.11089599877595901,
+              0.10961300134658813,
+              0.11001399904489517
+            ],
+            "median_ms": 0.1106954999268055,
+            "mean_ms": 0.11303705088794232,
+            "stdev_ms": 0.0082430677128013,
+            "ci95_mean_ms": 0.0036126837107956543,
+            "min_ms": 0.10961300134658813,
+            "max_ms": 0.14705899357795715
+          },
+          "memory": {
+            "cache_bytes": 12666880,
+            "kernel_workspace_bytes": 8454144,
+            "allocated_before_bytes": 92426752,
+            "allocated_after_bytes": 92426752,
+            "reserved_before_bytes": 125829120,
+            "reserved_after_bytes": 125829120,
+            "peak_allocated_bytes": 117658112
+          }
+        }
+      }
+    },
+    {
+      "case_id": "seq4096",
+      "seq_len": 4096,
+      "seed": 31785,
+      "batch": 4,
+      "num_query_heads": 16,
+      "num_kv_heads": 1,
+      "head_dim": 256,
+      "page_size": 16,
+      "runs": {
+        "bf16": {
+          "dtype": "torch.bfloat16",
+          "dispatch": {
+            "kernel": "kernel_unified_attention_3d",
+            "use_2d": false,
+            "block_m": 16,
+            "block_q": 1,
+            "attn_config": {
+              "TILE_SIZE": 16,
+              "NUM_SEGMENTS_PER_SEQ": 128,
+              "num_warps": 2,
+              "waves_per_eu": 2,
+              "num_stages": 2
+            },
+            "reduce_config": {
+              "TILE_SIZE": 16,
+              "NUM_SEGMENTS_PER_SEQ": 128,
+              "num_warps": 2,
+              "waves_per_eu": 2,
+              "num_stages": 1
+            },
+            "num_segments": 128,
+            "tile_size": 16,
+            "num_warps": 2,
+            "num_stages": 2,
+            "waves_per_eu": 2,
+            "kernel_workspace_bytes": 8454144
+          },
+          "accuracy": {
+            "finite": true,
+            "max_abs": 1.1175870895385742e-08,
+            "mean_abs": 1.1823431123048067e-11,
+            "mismatch_fraction": 0.0,
+            "cosine": 1.0,
+            "passed": true,
+            "rejected": false
+          },
+          "timing": {
+            "samples_ms": [
+              0.14156700670719147,
+              0.11394300311803818,
+              0.11065500229597092,
+              0.10929200053215027,
+              0.10864999890327454,
+              0.10877099633216858,
+              0.10852999985218048,
+              0.10820899903774261,
+              0.10792899876832962,
+              0.10720700025558472,
+              0.10885100066661835,
+              0.10752800107002258,
+              0.10724800080060959,
+              0.10764800012111664,
+              0.10744799673557281,
+              0.10720700025558472,
+              0.10732799768447876,
+              0.10043100267648697,
+              0.10688699781894684,
+              0.10768900066614151
+            ],
+            "median_ms": 0.10780899971723557,
+            "mean_ms": 0.1096509002149105,
+            "stdev_ms": 0.00788033612599774,
+            "ci95_mean_ms": 0.0034537095836025457,
+            "min_ms": 0.10043100267648697,
+            "max_ms": 0.14156700670719147
+          },
+          "memory": {
+            "cache_bytes": 25251840,
+            "kernel_workspace_bytes": 8454144,
+            "allocated_before_bytes": 104913408,
+            "allocated_after_bytes": 105011712,
+            "reserved_before_bytes": 159383552,
+            "reserved_after_bytes": 159383552,
+            "peak_allocated_bytes": 123886080
+          }
+        },
+        "fp8": {
+          "dtype": "torch.float8_e4m3fnuz",
+          "dispatch": {
+            "kernel": "kernel_unified_attention_3d",
+            "use_2d": false,
+            "block_m": 16,
+            "block_q": 1,
+            "attn_config": {
+              "TILE_SIZE": 32,
+              "NUM_SEGMENTS_PER_SEQ": 128,
+              "num_warps": 2,
+              "waves_per_eu": 2,
+              "num_stages": 2
+            },
+            "reduce_config": {
+              "TILE_SIZE": 32,
+              "NUM_SEGMENTS_PER_SEQ": 128,
+              "num_warps": 2,
+              "waves_per_eu": 2,
+              "num_stages": 1
+            },
+            "num_segments": 128,
+            "tile_size": 32,
+            "num_warps": 2,
+            "num_stages": 2,
+            "waves_per_eu": 2,
+            "kernel_workspace_bytes": 8454144
+          },
+          "accuracy": {
+            "finite": true,
+            "max_abs": 0.002604246139526367,
+            "mean_abs": 0.0008270759717561305,
+            "mismatch_fraction": 0.0,
+            "cosine": 0.9999990463256836,
+            "passed": true,
+            "rejected": false
+          },
+          "timing": {
+            "samples_ms": [
+              0.13050100207328796,
+              0.11763100326061249,
+              0.11366300284862518,
+              0.11277999728918076,
+              0.11302100121974945,
+              0.11406400054693222,
+              0.11514600366353989,
+              0.11221899837255478,
+              0.11430399864912033,
+              0.11169800162315369,
+              0.11354199796915054,
+              0.1143840029835701,
+              0.1133819967508316,
+              0.11322099715471268,
+              0.11237899959087372,
+              0.11205799877643585,
+              0.11169800162315369,
+              0.11217900365591049,
+              0.11326099932193756,
+              0.11306100338697433
+            ],
+            "median_ms": 0.11324099823832512,
+            "mean_ms": 0.11420960053801536,
+            "stdev_ms": 0.004070549472796027,
+            "ci95_mean_ms": 0.0017839969640817779,
+            "min_ms": 0.11169800162315369,
+            "max_ms": 0.13050100207328796
+          },
+          "memory": {
+            "cache_bytes": 25251840,
+            "kernel_workspace_bytes": 8454144,
+            "allocated_before_bytes": 105011712,
+            "allocated_after_bytes": 105011712,
+            "reserved_before_bytes": 159383552,
+            "reserved_after_bytes": 176160768,
+            "peak_allocated_bytes": 155408896
+          }
+        }
+      }
+    },
+    {
+      "case_id": "seq8192",
+      "seq_len": 8192,
+      "seed": 31786,
+      "batch": 4,
+      "num_query_heads": 16,
+      "num_kv_heads": 1,
+      "head_dim": 256,
+      "page_size": 16,
+      "runs": {
+        "bf16": {
+          "dtype": "torch.bfloat16",
+          "dispatch": {
+            "kernel": "kernel_unified_attention_3d",
+            "use_2d": false,
+            "block_m": 16,
+            "block_q": 1,
+            "attn_config": {
+              "TILE_SIZE": 16,
+              "NUM_SEGMENTS_PER_SEQ": 128,
+              "num_warps": 2,
+              "waves_per_eu": 2,
+              "num_stages": 2
+            },
+            "reduce_config": {
+              "TILE_SIZE": 16,
+              "NUM_SEGMENTS_PER_SEQ": 128,
+              "num_warps": 2,
+              "waves_per_eu": 2,
+              "num_stages": 1
+            },
+            "num_segments": 128,
+            "tile_size": 16,
+            "num_warps": 2,
+            "num_stages": 2,
+            "waves_per_eu": 2,
+            "kernel_workspace_bytes": 8454144
+          },
+          "accuracy": {
+            "finite": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0,
+            "mismatch_fraction": 0.0,
+            "cosine": 1.0,
+            "passed": true,
+            "rejected": false
+          },
+          "timing": {
+            "samples_ms": [
+              0.14393199980258942,
+              0.11354199796915054,
+              0.11326199769973755,
+              0.1092120036482811,
+              0.10812900215387344,
+              0.10832999646663666,
+              0.10836999863386154,
+              0.10756800323724747,
+              0.10953299701213837,
+              0.10648500174283981,
+              0.10660599917173386,
+              0.10688699781894684,
+              0.10812900215387344,
+              0.10632500052452087,
+              0.10732699930667877,
+              0.10652600228786469,
+              0.10652600228786469,
+              0.10608500242233276,
+              0.10740800201892853,
+              0.10744799673557281
+            ],
+            "median_ms": 0.10750799998641014,
+            "mean_ms": 0.10988150015473366,
+            "stdev_ms": 0.008272969162820392,
+            "ci95_mean_ms": 0.003625788599069881,
+            "min_ms": 0.10608500242233276,
+            "max_ms": 0.14393199980258942
+          },
+          "memory": {
+            "cache_bytes": 50421760,
+            "kernel_workspace_bytes": 8454144,
+            "allocated_before_bytes": 130083328,
+            "allocated_after_bytes": 130181632,
+            "reserved_before_bytes": 243269632,
+            "reserved_after_bytes": 243269632,
+            "peak_allocated_bytes": 167930368
+          }
+        },
+        "fp8": {
+          "dtype": "torch.float8_e4m3fnuz",
+          "dispatch": {
+            "kernel": "kernel_unified_attention_3d",
+            "use_2d": false,
+            "block_m": 16,
+            "block_q": 1,
+            "attn_config": {
+              "TILE_SIZE": 32,
+              "NUM_SEGMENTS_PER_SEQ": 128,
+              "num_warps": 2,
+              "waves_per_eu": 2,
+              "num_stages": 2
+            },
+            "reduce_config": {
+              "TILE_SIZE": 32,
+              "NUM_SEGMENTS_PER_SEQ": 128,
+              "num_warps": 2,
+              "waves_per_eu": 2,
+              "num_stages": 1
+            },
+            "num_segments": 128,
+            "tile_size": 32,
+            "num_warps": 2,
+            "num_stages": 2,
+            "waves_per_eu": 2,
+            "kernel_workspace_bytes": 8454144
+          },
+          "accuracy": {
+            "finite": true,
+            "max_abs": 0.0031249523162841797,
+            "mean_abs": 0.0009713019244372845,
+            "mismatch_fraction": 0.0,
+            "cosine": 0.9999991655349731,
+            "passed": true,
+            "rejected": false
+          },
+          "timing": {
+            "samples_ms": [
+              0.13916100561618805,
+              0.11719100177288055,
+              0.11410299688577652,
+              0.11153700202703476,
+              0.11358200013637543,
+              0.11458499729633331,
+              0.11486499756574631,
+              0.11350200325250626,
+              0.11274000257253647,
+              0.11346100270748138,
+              0.11230000108480453,
+              0.11129699647426605,
+              0.11205799877643585,
+              0.11113599687814713,
+              0.11133699864149094,
+              0.11342199891805649,
+              0.11217900365591049,
+              0.11286100000143051,
+              0.12087900191545486,
+              0.11258000135421753
+            ],
+            "median_ms": 0.1131414994597435,
+            "mean_ms": 0.11473880037665367,
+            "stdev_ms": 0.00617872667399315,
+            "ci95_mean_ms": 0.0027079463600582134,
+            "min_ms": 0.11113599687814713,
+            "max_ms": 0.13916100561618805
+          },
+          "memory": {
+            "cache_bytes": 50421760,
+            "kernel_workspace_bytes": 8454144,
+            "allocated_before_bytes": 130181632,
+            "allocated_after_bytes": 130181632,
+            "reserved_before_bytes": 243269632,
+            "reserved_after_bytes": 276824064,
+            "peak_allocated_bytes": 230910464
+          }
+        }
+      }
+    }
+  ],
+  "wall_elapsed_seconds": 6.23168487008661
+}
