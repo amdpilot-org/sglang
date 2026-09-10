@@ -10,9 +10,10 @@ from sglang.srt.models.dflash import (
     _grouped_conv,
 )
 from sglang.srt.speculative.dflash_utils import parse_dflash_draft_config
-from sglang.test.ci.ci_register import register_cpu_ci
+from sglang.test.ci.ci_register import register_amd_ci, register_cpu_ci
 
 register_cpu_ci(est_time=38, suite="base-a-test-cpu")
+register_amd_ci(est_time=40, suite="stage-b-test-1-gpu-small-amd")
 
 
 def test_dflash_unary_logit_transform():
@@ -210,6 +211,78 @@ def test_selector_gathers_global_candidates_across_vocab_shards(monkeypatch):
     )
     torch.testing.assert_close(candidate_ids, expected_ids)
     torch.testing.assert_close(unary_logits, expected_logits.float())
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="A GPU is required")
+def test_selector_local_gpu_gather_selects_vocab_boundaries(monkeypatch):
+    """Check the local gather with synthetic rank metadata, not a TP collective.
+
+    Rank 1 owns global IDs 6..11, with two padded columns. The forced top-k
+    crosses both shard boundaries (5/6) and both vocabulary edges (0/11).
+    """
+    device = torch.device("cuda")
+    k = 4
+    hidden = torch.zeros(2, 4, dtype=torch.bfloat16, device=device)
+    hidden[0, 0] = 1
+    hidden[1, 1] = 1
+    full_weight = torch.zeros(12, 4, dtype=torch.bfloat16, device=device)
+    full_weight[:, 0] = torch.tensor(
+        [10, 1, 2, 3, 4, 20, 30, 5, 6, 7, 8, 40],
+        dtype=torch.bfloat16,
+        device=device,
+    )
+    full_weight[:, 1] = torch.tensor(
+        [9, 10, 1, 2, 3, 20, 30, 4, 5, 6, 7, 40],
+        dtype=torch.bfloat16,
+        device=device,
+    )
+
+    quant_method = _FakeQuantMethod(full_weight[6:], num_padded=2)
+    lm_head = SimpleNamespace(
+        weight=torch.empty(8, 2, dtype=torch.int8, device=device),
+        quant_method=quant_method,
+        shard_indices=SimpleNamespace(num_org_elements=6, org_vocab_start_index=6),
+    )
+    model = SimpleNamespace(
+        lm_head=lm_head,
+        candidate_selector=SimpleNamespace(top_k=k),
+        _transform_unary_logits=lambda logits: logits.float(),
+    )
+
+    rank0_logits = torch.matmul(hidden, full_weight[:6].T)
+    rank0_vals, rank0_ids = _flashinfer_contract_topk(
+        rank0_logits, k, sorted=True, deterministic=True
+    )
+
+    def fake_all_gather(x, dim):
+        if x.is_floating_point():
+            assert x.dtype == torch.float32
+            assert x.is_cuda
+            return torch.cat([rank0_vals.float(), x], dim=dim)
+        assert x.dtype == torch.int64
+        assert x.is_cuda
+        return torch.cat([rank0_ids.long(), x], dim=dim)
+
+    monkeypatch.setattr(
+        "sglang.srt.models.dflash.get_parallel",
+        lambda: SimpleNamespace(tp_size=2),
+    )
+    monkeypatch.setattr(
+        "sglang.srt.models.dflash.tensor_model_parallel_all_gather", fake_all_gather
+    )
+    monkeypatch.setattr(
+        "sglang.srt.models.dflash._flashinfer_top_k", _flashinfer_contract_topk
+    )
+
+    candidate_ids, unary_logits = DFlash2DraftModel.compute_candidates(model, hidden)
+
+    expected_logits, expected_ids = _flashinfer_contract_topk(
+        torch.matmul(hidden, full_weight.T), k, sorted=True, deterministic=True
+    )
+    assert candidate_ids.is_cuda
+    assert candidate_ids.tolist() == [[11, 6, 5, 0], [11, 6, 5, 1]]
+    assert torch.equal(candidate_ids, expected_ids)
+    assert torch.equal(unary_logits, expected_logits.float())
 
 
 def test_worker_folds_a_gate_admitted_quantized_selector_head(monkeypatch):
