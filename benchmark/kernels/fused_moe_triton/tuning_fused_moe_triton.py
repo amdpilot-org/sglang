@@ -19,6 +19,7 @@ from common_utils import (
     get_model_config,
     save_configs,
     sort_config,
+    validate_unquantized_moe_output,
 )
 from ray.experimental.tqdm_ray import tqdm
 
@@ -57,6 +58,7 @@ def benchmark_config(
     per_channel_quant: bool,
     block_shape: List[int] = None,
     num_iters: int = 100,
+    validate_output: bool = False,
 ) -> float:
     init_dtype = torch.float16 if use_fp8_w8a8 else dtype
     x = torch.randn(num_tokens, hidden_size, dtype=dtype)
@@ -168,6 +170,29 @@ def benchmark_config(
     )
     topk_output = select_experts(x, input_gating, topk_config)
 
+    model_config = get_config(args.model, trust_remote_code=True)
+    architecture = model_config.architectures[0]
+    is_dsv4 = architecture == "DeepseekV4ForCausalLM"
+    moe_runner_config = MoeRunnerConfig(
+        inplace=True,
+        swiglu_limit=10.0 if is_dsv4 else None,
+    )
+
+    if validate_output:
+        if (
+            use_fp8_w8a8
+            or use_int8_w8a8
+            or use_int8_w8a16
+            or use_int4_w4a16
+            or moe_runner_config.swiglu_limit is not None
+        ):
+            raise ValueError(
+                "Output validation is only implemented for the unquantized "
+                "standard SiLU fused MoE path; use --skip-output-validation "
+                "only if you accept that invalid-output candidates may win."
+            )
+        validate_unquantized_moe_output(config, x, w1, w2, topk_output)
+
     def prepare(i: int):
         input_gating = gating_output[i]
         new_topk_output = select_experts(x, input_gating, topk_config)
@@ -176,14 +201,6 @@ def benchmark_config(
         topk_output.router_logits.copy_(new_topk_output.router_logits)
 
     def run():
-        model_config = get_config(args.model, trust_remote_code=True)
-        architecture = model_config.architectures[0]
-        is_dsv4 = architecture == "DeepseekV4ForCausalLM"
-        moe_runner_config = MoeRunnerConfig(
-            inplace=True,
-            swiglu_limit=10.0 if is_dsv4 else None,
-        )
-
         with override_config(config):
             fused_moe(
                 x,
@@ -337,6 +354,7 @@ class BenchmarkWorker:
         per_channel_quant: bool,
         block_shape: List[int],
         search_space: List[Dict[str, int]],
+        validate_output: bool = True,
     ) -> Dict[str, int]:
         best_config = None
         best_time = float("inf")
@@ -362,8 +380,13 @@ class BenchmarkWorker:
                         per_channel_quant,
                         block_shape,
                         num_iters=10,
+                        validate_output=validate_output,
                     )
-                except (triton.runtime.autotuner.OutOfResources, RuntimeError):
+                except (
+                    triton.runtime.autotuner.OutOfResources,
+                    RuntimeError,
+                    AssertionError,
+                ):
                     # Some configurations may be invalid and fail to compile.
                     continue
 
@@ -474,6 +497,7 @@ def main(args: argparse.Namespace):
                     use_int4_w4a16,
                     per_channel_quant,
                     block_shape,
+                    not args.skip_output_validation,
                     search_space,
                 )
                 for batch_size in batch_sizes
@@ -541,6 +565,14 @@ if __name__ == "__main__":
         help="Tune or benchmark an explicit set of token counts in parallel.",
     )
     parser.add_argument("--tune", action="store_true")
+    parser.add_argument(
+        "--skip-output-validation",
+        action="store_true",
+        help=(
+            "Skip the independent output check before timing. Invalid-output "
+            "candidates may then become tuning winners."
+        ),
+    )
     parser.add_argument(
         "--search-space-file",
         type=str,
