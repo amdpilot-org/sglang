@@ -434,6 +434,145 @@ def test_causal_conv1d_varlen_mixed_input_and_state_dtype():
     torch.testing.assert_close(conv_states, conv_states_ref, rtol=1e-2, atol=5e-2)
 
 
+def test_causal_conv1d_update_uses_tail_of_oversized_state():
+    """An oversized state cache must use its trailing convolution window."""
+    device = get_device()
+    torch.manual_seed(0)
+    batch, dim, seqlen, width, state_len = 2, 7, 3, 2, 8
+    x = torch.randn(batch, dim, seqlen, device=device)
+    conv_state = torch.randn(batch, dim, state_len, device=device)
+    weight = torch.randn(dim, width, device=device)
+    bias = torch.randn(dim, device=device)
+
+    conv_state_ref = conv_state.clone()
+    out = causal_conv1d_update(x.clone(), conv_state, weight, bias, activation="silu")
+    out_ref = causal_conv1d_update_ref(
+        x.clone(), conv_state_ref, weight, bias, activation="silu"
+    )
+
+    torch.testing.assert_close(out, out_ref, rtol=1e-4, atol=1e-4)
+    torch.testing.assert_close(conv_state, conv_state_ref, rtol=0, atol=0)
+
+
+def test_causal_conv1d_update_supports_circular_state():
+    """Circular state reads and writes must follow cache_seqlens."""
+    device = get_device()
+    torch.manual_seed(1)
+    batch, dim, seqlen, width, state_len = 2, 7, 2, 3, 4
+    x = torch.randn(batch, dim, seqlen, device=device)
+    conv_state = torch.randn(batch, dim, state_len, device=device)
+    cache_seqlens = torch.tensor([0, 3], dtype=torch.int32, device=device)
+    weight = torch.randn(dim, width, device=device)
+    bias = torch.randn(dim, device=device)
+
+    conv_state_ref = conv_state.clone()
+    out = causal_conv1d_update(
+        x.clone(),
+        conv_state,
+        weight,
+        bias,
+        activation="silu",
+        cache_seqlens=cache_seqlens,
+    )
+    out_ref = causal_conv1d_update_ref(
+        x.clone(),
+        conv_state_ref,
+        weight,
+        bias,
+        activation="silu",
+        cache_seqlens=cache_seqlens,
+    )
+
+    torch.testing.assert_close(out, out_ref, rtol=1e-4, atol=1e-4)
+    torch.testing.assert_close(conv_state, conv_state_ref, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("circular", [False, True])
+def test_causal_conv1d_update_half_precision_cache_layout_contracts(dtype, circular):
+    """Half-precision cache layouts preserve storage, dtype, and sentinels."""
+    device = get_device()
+    torch.manual_seed(38622)
+    batch, dim = 2, 7
+    if circular:
+        seqlen, width, state_len = 2, 4, 5
+        cache_seqlens = torch.tensor([0, 4], dtype=torch.int32)
+    else:
+        seqlen, width, state_len = 3, 4, 8
+        cache_seqlens = None
+
+    x_ref = torch.randn(batch, dim, seqlen, dtype=torch.float32)
+    state_ref = torch.randn(batch, dim, state_len, dtype=torch.float32)
+    weight_ref = torch.randn(dim, width, dtype=torch.float32)
+    bias_ref = torch.randn(dim, dtype=torch.float32)
+
+    state_numel = batch * dim * state_len
+    sentinel_count = 8
+    state_storage = torch.full(
+        (state_numel + sentinel_count,), 1024.0, device=device, dtype=dtype
+    )
+    conv_state = state_storage[:state_numel].view(batch, dim, state_len)
+    conv_state.copy_(state_ref)
+    x = x_ref.to(device=device, dtype=dtype)
+    weight = weight_ref.to(device=device, dtype=dtype)
+    bias = bias_ref.to(device=device, dtype=dtype)
+    cache_seqlens_device = (
+        cache_seqlens.to(device=device) if cache_seqlens is not None else None
+    )
+
+    state_address = conv_state.data_ptr()
+    storage_address = state_storage.data_ptr()
+    out = causal_conv1d_update(
+        x,
+        conv_state,
+        weight,
+        bias,
+        activation="silu",
+        cache_seqlens=cache_seqlens_device,
+    )
+    out_ref = causal_conv1d_update_ref(
+        x_ref,
+        state_ref,
+        weight_ref,
+        bias_ref,
+        activation="silu",
+        cache_seqlens=cache_seqlens,
+    )
+
+    assert conv_state.data_ptr() == state_address
+    assert state_storage.data_ptr() == storage_address
+    assert out.dtype == dtype
+    assert conv_state.dtype == dtype
+    assert torch.equal(
+        state_storage[state_numel:],
+        torch.full((sentinel_count,), 1024.0, device=device, dtype=dtype),
+    )
+    torch.testing.assert_close(out.float().cpu(), out_ref, rtol=1e-2, atol=5e-2)
+    torch.testing.assert_close(
+        conv_state.float().cpu(),
+        state_ref.to(dtype).float().cpu(),
+        rtol=0,
+        atol=0,
+    )
+
+
+def test_causal_conv1d_update_rejects_unsupported_width():
+    """Widths outside the implemented Triton taps must fail before dispatch."""
+    device = get_device()
+    torch.manual_seed(38622)
+    dim, width, state_len, seqlen = 7, 5, 4, 1
+    x = torch.randn(1, dim, seqlen, device=device, dtype=torch.bfloat16)
+    conv_state = torch.randn(1, dim, state_len, device=device, dtype=torch.bfloat16)
+    conv_state_before = conv_state.clone()
+    weight = torch.randn(dim, width, device=device, dtype=torch.bfloat16)
+    bias = torch.randn(dim, device=device, dtype=torch.bfloat16)
+
+    with pytest.raises(ValueError, match="supports width between 2 and 4"):
+        causal_conv1d_update(x, conv_state, weight, bias, activation="silu")
+
+    assert torch.equal(conv_state, conv_state_before)
+
+
 if __name__ == "__main__":
     import sys
 
