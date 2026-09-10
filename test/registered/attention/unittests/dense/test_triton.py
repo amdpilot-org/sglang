@@ -95,6 +95,99 @@ class TestTritonDenseAttentionBackendCorrectness(CustomTestCase):
             4,
         ),
     )
+    GQA_DECODE_RELIABILITY_CASES = (
+        (
+            DenseAttentionCase(
+                name="gqa_decode_ragged_ratio1_head16",
+                backend="triton",
+                forward_mode=ForwardMode.DECODE,
+                num_heads=8,
+                num_kv_heads=8,
+                page_size=16,
+                prefix_lens=(1, 15, 17, 31),
+            ),
+            16,
+            torch.float16,
+        ),
+        (
+            DenseAttentionCase(
+                name="gqa_decode_ragged_ratio2_head32",
+                backend="triton",
+                forward_mode=ForwardMode.DECODE,
+                num_heads=8,
+                num_kv_heads=4,
+                page_size=16,
+                prefix_lens=(13, 17, 31),
+            ),
+            32,
+            torch.bfloat16,
+        ),
+        (
+            DenseAttentionCase(
+                name="gqa_decode_ragged_ratio4_head64",
+                backend="triton",
+                forward_mode=ForwardMode.DECODE,
+                num_heads=8,
+                num_kv_heads=2,
+                page_size=16,
+                prefix_lens=(7, 16, 33),
+            ),
+            64,
+            torch.float16,
+        ),
+        (
+            DenseAttentionCase(
+                name="gqa_decode_ragged_ratio8_head80",
+                backend="triton",
+                forward_mode=ForwardMode.DECODE,
+                num_heads=8,
+                num_kv_heads=1,
+                page_size=16,
+                prefix_lens=(1, 15, 17, 31),
+            ),
+            80,
+            torch.bfloat16,
+        ),
+        (
+            DenseAttentionCase(
+                name="gqa_decode_ragged_ratio2_head96",
+                backend="triton",
+                forward_mode=ForwardMode.DECODE,
+                num_heads=8,
+                num_kv_heads=4,
+                page_size=16,
+                prefix_lens=(13, 17, 31),
+            ),
+            96,
+            torch.float16,
+        ),
+        (
+            DenseAttentionCase(
+                name="gqa_decode_ragged_ratio4_head112",
+                backend="triton",
+                forward_mode=ForwardMode.DECODE,
+                num_heads=8,
+                num_kv_heads=2,
+                page_size=16,
+                prefix_lens=(7, 16, 33),
+            ),
+            112,
+            torch.bfloat16,
+        ),
+        (
+            DenseAttentionCase(
+                name="gqa_decode_ragged_ratio8_head128",
+                backend="triton",
+                forward_mode=ForwardMode.DECODE,
+                num_heads=8,
+                num_kv_heads=1,
+                page_size=16,
+                prefix_lens=(1, 15, 17, 31),
+            ),
+            128,
+            torch.float16,
+        ),
+    )
     SPEC_VERIFY_CASES = (
         (
             DenseAttentionCase(
@@ -307,6 +400,15 @@ class TestTritonDenseAttentionBackendCorrectness(CustomTestCase):
         for case in self.CASES:
             with self.subTest(case=case.name, backend=case.backend):
                 run_dense_attention_case(self, case)
+
+    def test_gqa_decode_reliability_cases(self):
+        for case, head_dim, dtype in self.GQA_DECODE_RELIABILITY_CASES:
+            with self.subTest(
+                case=case.name,
+                head_dim=head_dim,
+                dtype=str(dtype).removeprefix("torch."),
+            ):
+                run_dense_attention_case(self, case, head_dim=head_dim, dtype=dtype)
 
     # Layout-robustness: re-run a representative extend + decode under
     # non-tidy `(req_to_token, out_cache_loc)` mappings. The fixture's
