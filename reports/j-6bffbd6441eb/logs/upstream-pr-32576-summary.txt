@@ -1,0 +1,49 @@
+number=32576
+title=feat(dsa): drive DSA backend defaulting and validation from a declarative compatibility table
+state=OPEN
+url=https://github.com/sgl-project/sglang/pull/32576
+head=feat/dsa-backend-compat-table
+owner=mosya415
+base=main
+
+## Motivation
+
+First concrete step of RFC #31774, claimed in that thread and listed in the H2 2026 quantization roadmap #31783 under 1.3 and 7. DSA backend compatibility knowledge is currently spread over three places that can drift apart: the shared `DSA_CHOICES` argparse list, the if/elif defaulting plus one hand-written guard in `_dsa_split_backend_resolution`, and the construction-time checks in `dsa_backend.py`. This PR makes the matrix explicit as one declarative table next to the resolver and drives defaulting, validation and tests from it, so they cannot disagree by construction.
+
+## Modifications
+
+`arg_groups/dsa_compat.py` declares per-cell support (backend, platform sm90/sm100/hip, kv dtype bucket, phase) with a status, an optional default priority, and a reason plus evidence for unsupported cells. Undeclared cells are UNKNOWN: never picked as a default, never rejected, so absence of evidence is not a rejection. The resolver now takes its defaults and its validation from the table. Defaults are unchanged: the new unit test keeps the historical branches verbatim as the spec and asserts equality over the full input product, including the preserved quirk that the HIP tilelang default only applies when neither side was set by the user. Rejection changes are limited to combinations already proven unsupported: tilelang with fp8_e4m3 KV on CUDA (#31346), and the flashmla_sparse_q8 misuse cases that `dsa_backend.py` already rejects at construction, which now fail at resolution with an error that lists the supported alternatives generated from the table. The flashmla_auto decode cells stay unknown on purpose, their rejection lands separately in #31344. `dsa_backend.py` itself is untouched here, pointing it at the same table is a follow-up.
+
+## Accuracy Tests
+
+Not applicable: no kernel or model forward changes. Defaults are proven unchanged by `test_dsa_compat_table.py`, which pins the historical resolver branches as the spec and asserts equality over all 128 input combinations.
+
+## Speed Tests and Profiling
+
+Not applicable: the change is resolution-time only, nothing on the inference path.
+
+## Checklist
+
+- [x] Format your code according to the [Format code with pre-commit](https://docs.sglang.io/developer_guide/contribution_guide.html#format-code-with-pre-commit).
+- [x] Add unit tests according to the [Run and add unit tests](https://docs.sglang.io/developer_guide/contribution_guide.html#run-and-add-unit-tests).
+- [ ] Update documentation according to [Write documentations](https://docs.sglang.io/developer_guide/contribution_guide.html#write-documentations).
+- [ ] Provide accuracy and speed benchmark results according to [Test the accuracy](https://docs.sglang.io/developer_guide/contribution_guide.html#test-the-accuracy) and [Benchmark the speed](https://docs.sglang.io/developer_guide/contribution_guide.html#benchmark-the-speed).
+- [x] Follow the SGLang code style [guidance](https://docs.sglang.io/developer_guide/contribution_guide.html#code-style-guidance).
+
+<!-- pr-states:start -->
+---
+### CI States
+
+Latest PR Test (Base): <!-- slot:pr-test:start -->:x: [Run #30313894903](https://github.com/sgl-project/sglang/actions/runs/30313894903)<!-- slot:pr-test:end -->
+Latest PR Test (Extra): <!-- slot:pr-test-extra:start -->:x: [Run #30313894803](https://github.com/sgl-project/sglang/actions/runs/30313894803)<!-- slot:pr-test-extra:end -->
+<!-- pr-states:end -->
+
+--- commits ---
+0b4e0d5f719aaeed7752e90e168805ca49915d3c feat(dsa): drive DSA backend defaulting and validation from a declara…
+
+--- files ---
+python/sglang/srt/arg_groups/dsa_compat.py
+python/sglang/srt/arg_groups/overrides.py
+test/registered/unit/test_dsa_compat_table.py
+test/registered/unit/test_dsa_tilelang_fp8_validation.py
+test/registered/unit/test_model_overrides.py
