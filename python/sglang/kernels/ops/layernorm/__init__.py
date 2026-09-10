@@ -131,11 +131,12 @@ class RMSNormOp(BaseFusedOp):
         import torch
         from aiter import rmsnorm2d_fwd
 
-        # Mirrors production srt/layers/layernorm.py: rmsnorm2d_fwd(out, x, w, eps)
-        # writes the normalized result in-place into ``out`` (ROCm path).
+        # AIter returns a new output tensor. Honor the optional ``out`` contract
+        # without passing it where the weight belongs in AIter's schema.
         if out is None:
-            out = torch.empty_like(input)
-        rmsnorm2d_fwd(out, input, weight, eps)
+            return rmsnorm2d_fwd(input, weight, eps)
+        result = rmsnorm2d_fwd(input, weight, eps)
+        out.copy_(result)
         return out
 
     def forward_torch_npu(
@@ -244,12 +245,11 @@ class FusedAddRMSNormOp(BaseFusedOp):
         import torch
         from aiter import rmsnorm2d_fwd_with_add
 
-        # aiter writes the normalized value and the new residual into separate
-        # out buffers (production call order: out, x, residual_out, residual, w,
-        # eps); copy them back to honor this op's in-place contract.
+        # AIter writes the normalized value and the new residual into separate
+        # output buffers; copy them back to honor this op's in-place contract.
         out = torch.empty_like(input)
         residual_out = torch.empty_like(residual)
-        rmsnorm2d_fwd_with_add(out, input, residual_out, residual, weight, eps)
+        rmsnorm2d_fwd_with_add(out, input, residual, residual_out, weight, eps)
         input.copy_(out)
         residual.copy_(residual_out)
 
