@@ -1071,6 +1071,167 @@ class TestTritonAttention(CustomTestCase):
                     B, N_CTX, H_Q, H_KV, D
                 )
 
+    def test_extend_attention_unified_xai_temperature_reference(self):
+        dtype = torch.bfloat16
+        device = get_device()
+        batch_size = 2
+        head_num_q = 8
+        head_num_kv = 2
+        head_dim = 64
+        prefix_lens = [7, 11]
+        extend_lens = [9, 13]
+        xai_temperature_len = 4
+        total_token_num = sum(prefix_lens) + sum(extend_lens)
+        extend_token_num = sum(extend_lens)
+
+        torch.manual_seed(32942)
+        k_buffer = torch.randn(
+            total_token_num, head_num_kv, head_dim, dtype=dtype, device=device
+        )
+        v_buffer = torch.randn(
+            total_token_num, head_num_kv, head_dim, dtype=dtype, device=device
+        )
+        q_extend = torch.randn(
+            extend_token_num, head_num_q, head_dim, dtype=dtype, device=device
+        )
+
+        sequence_starts = [0, prefix_lens[0] + extend_lens[0]]
+        qo_indptr = torch.tensor(
+            [0, extend_lens[0], extend_token_num], dtype=torch.int32, device=device
+        )
+        prefix_kv_indptr = torch.tensor(
+            [0, prefix_lens[0], sum(prefix_lens)], dtype=torch.int32, device=device
+        )
+        prefix_kv_indices = torch.cat(
+            [
+                torch.arange(
+                    sequence_starts[sequence_idx],
+                    sequence_starts[sequence_idx] + prefix_lens[sequence_idx],
+                    device=device,
+                )
+                for sequence_idx in range(batch_size)
+            ]
+        ).to(torch.int64)
+        extend_kv_indices = torch.cat(
+            [
+                torch.arange(
+                    sequence_starts[sequence_idx] + prefix_lens[sequence_idx],
+                    sequence_starts[sequence_idx]
+                    + prefix_lens[sequence_idx]
+                    + extend_lens[sequence_idx],
+                    device=device,
+                )
+                for sequence_idx in range(batch_size)
+            ]
+        ).to(torch.int64)
+
+        k_extend = torch.empty(
+            extend_token_num, head_num_kv, head_dim, dtype=dtype, device=device
+        )
+        v_extend = torch.empty_like(k_extend)
+        for sequence_idx in range(batch_size):
+            buffer_start = sequence_starts[sequence_idx] + prefix_lens[sequence_idx]
+            buffer_end = buffer_start + extend_lens[sequence_idx]
+            q_start = int(qo_indptr[sequence_idx])
+            q_end = int(qo_indptr[sequence_idx + 1])
+            k_extend[q_start:q_end] = k_buffer[buffer_start:buffer_end]
+            v_extend[q_start:q_end] = v_buffer[buffer_start:buffer_end]
+
+        o_regular = torch.empty_like(q_extend)
+        extend_attention_fwd(
+            q_extend,
+            k_extend,
+            v_extend,
+            o_regular,
+            k_buffer,
+            v_buffer,
+            qo_indptr,
+            prefix_kv_indptr,
+            prefix_kv_indices,
+            custom_mask=None,
+            is_causal=True,
+            mask_indptr=None,
+            max_len_extend=max(extend_lens),
+            k_scale=1.0,
+            v_scale=1.0,
+            xai_temperature_len=xai_temperature_len,
+        )
+
+        extend_start_loc = torch.tensor(
+            [0, extend_lens[0]], dtype=torch.int32, device=device
+        )
+        extend_lens_tensor = torch.tensor(extend_lens, dtype=torch.int32, device=device)
+        unified_kv_indptr, unified_kv_indices, prefix_lens_tensor = (
+            build_unified_kv_indices(
+                prefix_kv_indptr,
+                prefix_kv_indices,
+                extend_start_loc,
+                extend_lens_tensor,
+                extend_kv_indices,
+                batch_size,
+            )
+        )
+        o_unified = torch.empty_like(q_extend)
+        extend_attention_fwd_unified(
+            q_extend,
+            o_unified,
+            k_buffer,
+            v_buffer,
+            1.0,
+            1.0,
+            qo_indptr,
+            unified_kv_indptr,
+            unified_kv_indices,
+            prefix_lens_tensor,
+            max_len_extend=max(extend_lens),
+            custom_mask=None,
+            mask_indptr=None,
+            sm_scale=None,
+            logit_cap=0.0,
+            is_causal=True,
+            xai_temperature_len=xai_temperature_len,
+        )
+
+        reference = torch.empty_like(q_extend, dtype=torch.float32)
+        group_size = head_num_q // head_num_kv
+        sm_scale = 1.0 / (head_dim**0.5)
+        for sequence_idx in range(batch_size):
+            sequence_start = sequence_starts[sequence_idx]
+            sequence_len = prefix_lens[sequence_idx] + extend_lens[sequence_idx]
+            keys = k_buffer[sequence_start : sequence_start + sequence_len]
+            values = v_buffer[sequence_start : sequence_start + sequence_len]
+            if group_size != 1:
+                keys = keys.repeat_interleave(group_size, dim=1)
+                values = values.repeat_interleave(group_size, dim=1)
+            for local_q_idx in range(extend_lens[sequence_idx]):
+                query_idx = int(qo_indptr[sequence_idx]) + local_q_idx
+                query_position = prefix_lens[sequence_idx] + local_q_idx
+                temperature_scale = (
+                    torch.log2(torch.tensor(float(query_position))).item()
+                    / torch.log2(torch.tensor(float(xai_temperature_len))).item()
+                    if query_position > xai_temperature_len
+                    else 1.0
+                )
+                logits = (
+                    torch.einsum(
+                        "hd,khd->hk",
+                        q_extend[query_idx].float(),
+                        keys[: query_position + 1].float(),
+                    )
+                    * sm_scale
+                    * temperature_scale
+                )
+                weights = torch.softmax(logits, dim=-1)
+                reference[query_idx] = torch.einsum(
+                    "hk,khd->hd", weights, values[: query_position + 1].float()
+                )
+
+        torch.testing.assert_close(o_regular.float(), reference, rtol=2e-2, atol=2e-2)
+        torch.testing.assert_close(o_unified.float(), reference, rtol=2e-2, atol=2e-2)
+        torch.testing.assert_close(
+            o_unified.float(), o_regular.float(), rtol=2e-2, atol=2e-2
+        )
+
     def test_build_unified_kv_indices(self):
         """Test build_unified_kv_indices correctness."""
         B = 4
