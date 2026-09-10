@@ -245,11 +245,11 @@ class FusedAddRMSNormOp(BaseFusedOp):
         from aiter import rmsnorm2d_fwd_with_add
 
         # aiter writes the normalized value and the new residual into separate
-        # out buffers (production call order: out, x, residual_out, residual, w,
-        # eps); copy them back to honor this op's in-place contract.
+        # out buffers (call order: out, x, residual_in, residual_out, w, eps);
+        # copy them back to honor this op's in-place contract.
         out = torch.empty_like(input)
         residual_out = torch.empty_like(residual)
-        rmsnorm2d_fwd_with_add(out, input, residual_out, residual, weight, eps)
+        rmsnorm2d_fwd_with_add(out, input, residual, residual_out, weight, eps)
         input.copy_(out)
         residual.copy_(residual_out)
 
