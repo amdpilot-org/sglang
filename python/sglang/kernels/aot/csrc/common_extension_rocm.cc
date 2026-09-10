@@ -67,6 +67,12 @@ TORCH_LIBRARY_EXPAND(sgl_kernel, m) {
   m.impl("dsv4_fused_q_indexer_rope_hadamard_quant", torch::kCUDA, &dsv4_fused_q_indexer_rope_hadamard_quant);
 
   /*
+   * From csrc/attention
+   */
+  m.def("merge_state_v2(Tensor v_a, Tensor s_a, Tensor v_b, Tensor s_b, Tensor! v_merged, Tensor! s_merged) -> ()");
+  m.impl("merge_state_v2", torch::kCUDA, &merge_state_v2);
+
+  /*
    * From csrc/allreduce
    */
   m.def(
