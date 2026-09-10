@@ -2565,6 +2565,7 @@ class MHATokenToKVPool(KVCache):
             cache_v = cache_v.view(self.store_dtype)
 
         if dcp_kv_mask is not None:
+            _validate_masked_set_kv_buffer_layout(cache_k, cache_v)
             N, H, D = cache_k.shape
             masked_set_kv_buffer_kernel[(N,)](
                 cache_k,
@@ -5178,6 +5179,21 @@ def move_kv_cache_native(
     for k_cache, v_cache in zip(k_buffer, v_buffer):
         k_cache[tgt_loc_flat] = k_cache[src_loc_flat]
         v_cache[tgt_loc_flat] = v_cache[src_loc_flat]
+
+
+def _validate_masked_set_kv_buffer_layout(
+    cache_k: torch.Tensor, cache_v: torch.Tensor
+):
+    if cache_k.dim() != 3 or cache_v.dim() != 3:
+        raise ValueError(
+            "masked_set_kv_buffer_kernel requires unpacked [N, H, D] K/V tensors; "
+            f"got shapes {tuple(cache_k.shape)} and {tuple(cache_v.shape)}"
+        )
+    if cache_k.stride(2) != 1 or cache_v.stride(2) != 1:
+        raise ValueError(
+            "masked_set_kv_buffer_kernel requires unit stride on the final D "
+            f"dimension; got K/V strides {cache_k.stride()} and {cache_v.stride()}"
+        )
 
 
 @triton.jit
