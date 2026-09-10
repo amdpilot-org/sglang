@@ -191,6 +191,36 @@ class FusedAddRMSNormOp(BaseFusedOp):
         ),
     }
 
+    @staticmethod
+    def _aiter_unsupported_reason(
+        input: torch.Tensor,
+        residual: torch.Tensor,
+        weight: torch.Tensor,
+    ) -> Optional[str]:
+        import torch
+
+        supported = (
+            input.dim() == 2
+            and input.shape == residual.shape
+            and input.dtype in (torch.float16, torch.bfloat16)
+            and residual.dtype == input.dtype
+            and weight.dtype == input.dtype
+            and weight.shape == input.shape[-1:]
+            and weight.is_contiguous()
+            and input.shape[-1] <= 8192
+            and input.stride(-1) == 1
+            and residual.stride(-1) == 1
+        )
+        return (
+            None
+            if supported
+            else (
+                "aiter fused_add_rmsnorm requires matching 2-D fp16/bf16 "
+                "input/residual/weight, hidden_size <= 8192, unit-stride last "
+                "dimensions, and a contiguous weight"
+            )
+        )
+
     def forward_native(
         self,
         input: torch.Tensor,
@@ -219,6 +249,13 @@ class FusedAddRMSNormOp(BaseFusedOp):
 
         return sgl_kernel.fused_add_rmsnorm(input, residual, weight, eps, enable_pdl)
 
+    def backend_eligible(self, backend: KernelBackend, *args, **kwargs) -> bool:
+        if not super().backend_eligible(backend, *args, **kwargs):
+            return False
+        if backend is KernelBackend.AITER and len(args) >= 3:
+            return self._aiter_unsupported_reason(*args[:3]) is None
+        return True
+
     def forward_jit(
         self,
         input: torch.Tensor,
@@ -244,14 +281,21 @@ class FusedAddRMSNormOp(BaseFusedOp):
         import torch
         from aiter import rmsnorm2d_fwd_with_add
 
+        unsupported_reason = self._aiter_unsupported_reason(input, residual, weight)
+        if unsupported_reason is not None:
+            raise RuntimeError(unsupported_reason)
+
         # aiter writes the normalized value and the new residual into separate
-        # out buffers (production call order: out, x, residual_out, residual, w,
-        # eps); copy them back to honor this op's in-place contract.
-        out = torch.empty_like(input)
-        residual_out = torch.empty_like(residual)
-        rmsnorm2d_fwd_with_add(out, input, residual_out, residual, weight, eps)
-        input.copy_(out)
+        # out buffers (out, x, residual_in, residual_out, w, eps). Copy the
+        # residual first so exact input/residual aliasing keeps the native
+        # contract: the shared storage ends up holding the normalized value.
+        out = torch.empty(input.shape, dtype=input.dtype, device=input.device)
+        residual_out = torch.empty(
+            residual.shape, dtype=residual.dtype, device=residual.device
+        )
+        rmsnorm2d_fwd_with_add(out, input, residual, residual_out, weight, eps)
         residual.copy_(residual_out)
+        input.copy_(out)
 
     def forward_torch_npu(
         self,
