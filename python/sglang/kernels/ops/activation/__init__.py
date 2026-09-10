@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
+import sglang.kernels.fused_op as _fused_op
 from sglang.kernels.fused_op import BaseFusedOp, register_fused_op
 from sglang.kernels.registry import register_kernel
 from sglang.kernels.spec import (
@@ -37,6 +38,12 @@ _ACT_PRIORITY = (
     KernelBackend.AOT,
     KernelBackend.TORCH,
 )
+_AOT_VECTOR_BYTES = 16
+
+
+def _aot_gated_activation_supported(input: torch.Tensor) -> bool:
+    width = input.shape[-1] // 2
+    return width * input.dtype.itemsize % _AOT_VECTOR_BYTES == 0
 
 
 class _GatedActivationOp(BaseFusedOp):
@@ -48,7 +55,7 @@ class _GatedActivationOp(BaseFusedOp):
     priority = _ACT_PRIORITY
     capabilities = {
         KernelBackend.AOT: _CUDA_HIP,
-        KernelBackend.JIT: _CUDA,
+        KernelBackend.JIT: _CUDA_HIP,
     }
     format_signature = FormatSignature(
         supported_dtypes=_ACT_DTYPES,
@@ -57,6 +64,14 @@ class _GatedActivationOp(BaseFusedOp):
 
     def _act(self, gate: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
+
+    def _auto_backend_candidates(self) -> tuple[KernelBackend, ...]:
+        candidates = super()._auto_backend_candidates()
+        if _fused_op._platform().is_hip:
+            # JIT is explicitly selectable on HIP, but AOT remains the production
+            # default there (and is faster on measured gfx942 shapes).
+            return tuple(sorted(candidates, key=lambda b: b is not KernelBackend.AOT))
+        return candidates
 
     def forward_native(
         self, input: torch.Tensor, out: Optional[torch.Tensor] = None
@@ -71,6 +86,11 @@ class _GatedActivationOp(BaseFusedOp):
     def forward_aot(
         self, input: torch.Tensor, out: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
+        if not _aot_gated_activation_supported(input):
+            raise ValueError(
+                "gated activation output width must be a multiple of "
+                f"{_AOT_VECTOR_BYTES} bytes for the AOT backend"
+            )
         import sgl_kernel
 
         return getattr(sgl_kernel, self.kernel_attr)(input, out)
@@ -114,7 +134,7 @@ class SiluAndMulOp(_GatedActivationOp):
     )
     capabilities = {
         KernelBackend.AOT: _CUDA_HIP,
-        KernelBackend.JIT: _CUDA,
+        KernelBackend.JIT: _CUDA_HIP,
         KernelBackend.AITER: _HIP,
     }
     descriptions = {

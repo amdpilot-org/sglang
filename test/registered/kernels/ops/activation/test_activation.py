@@ -5,11 +5,13 @@ import torch
 import torch.nn.functional as F
 
 from sglang.kernels.jit.utils import get_ci_test_range
+from sglang.kernels.ops.activation import _GELU_AND_MUL, _SILU_AND_MUL
 from sglang.kernels.ops.activation.activation import (
     SUPPORTED_ACTIVATIONS,
     relu2,
     run_activation,
 )
+from sglang.kernels.spec import KernelBackend
 from sglang.test.ci.ci_register import register_amd_ci, register_cuda_ci
 
 register_cuda_ci(est_time=20, stage="base-b-kernel-unit", runner_config="1-gpu-large")
@@ -19,6 +21,15 @@ register_amd_ci(est_time=20, stage="jit-kernel-unit", runner_config="amd")
 
 
 OPS = SUPPORTED_ACTIVATIONS
+_PUBLIC_OPS = {"silu": _SILU_AND_MUL, "gelu": _GELU_AND_MUL}
+_PUBLIC_BACKEND_WIDTH_CASES = [
+    (KernelBackend.AOT, 8),
+    (KernelBackend.AOT, 64),
+    (KernelBackend.AOT, 4096),
+    (KernelBackend.JIT, 8),
+    (KernelBackend.JIT, 64),
+    (KernelBackend.JIT, 4096),
+]
 DTYPES = [torch.float16, torch.bfloat16, torch.float32]
 # The kernel requires hidden % (kMaxVecBytes / sizeof(T)) == 0, and kMaxVecBytes
 # is 32 on Blackwell vs 16 before it -- so the tightest constraint is a 16-element
@@ -84,6 +95,41 @@ def test_activation_out_param(
     expected = _reference(op_name, x)
     atol, rtol = _tolerances(dtype)
     torch.testing.assert_close(out, expected, atol=atol, rtol=rtol)
+
+
+@pytest.mark.parametrize("op_name", ["silu", "gelu"])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("backend, width", _PUBLIC_BACKEND_WIDTH_CASES)
+def test_public_namespace_activation_backend_parity(
+    op_name: str,
+    dtype: torch.dtype,
+    backend: KernelBackend,
+    width: int,
+) -> None:
+    """Public dispatch and explicit JIT/AOT paths agree with an independent reference."""
+    rows = 128
+    x_cpu = torch.randn((rows, width * 2), dtype=dtype)
+    x = x_cpu.to("cuda")
+    out = torch.full((rows, width), 123.0, dtype=dtype).to("cuda")
+    result = _PUBLIC_OPS[op_name].forward(x, out, backend=backend)
+    assert result is out
+    expected = _reference(op_name, x_cpu)
+    torch.testing.assert_close(result.cpu(), expected, atol=1e-2, rtol=1e-2)
+
+
+@pytest.mark.parametrize("op_name", ["silu", "gelu"])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+def test_public_namespace_activation_rejects_unsupported_aot_width(
+    op_name: str, dtype: torch.dtype
+) -> None:
+    """AOT must reject sub-vector output widths instead of silently leaving out unchanged."""
+    rows, width = 128, 4
+    x = torch.randn((rows, width * 2), dtype=dtype).to("cuda")
+    out = torch.full((rows, width), 123.0, dtype=dtype).to("cuda")
+    sentinel = out.cpu().clone()
+    with pytest.raises(ValueError, match="multiple of 16 bytes"):
+        _PUBLIC_OPS[op_name].forward(x, out, backend=KernelBackend.AOT)
+    assert torch.equal(out.cpu(), sentinel)
 
 
 FILTER_SHAPES = get_ci_test_range(

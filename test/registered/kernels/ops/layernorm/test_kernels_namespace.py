@@ -65,6 +65,14 @@ def test_activation_default_backend(monkeypatch, device, expect):
     assert _SILU_AND_MUL.auto_selected_backend().value == expect
 
 
+def test_activation_jit_is_hip_capable_but_not_hip_default(monkeypatch):
+    from sglang.kernels.ops.activation import _SILU_AND_MUL
+
+    monkeypatch.setattr(fo, "_platform", lambda: _HIP)
+    assert _SILU_AND_MUL.backend_eligible(KernelBackend.JIT)
+    assert _SILU_AND_MUL.auto_selected_backend() is KernelBackend.AOT
+
+
 @pytest.mark.parametrize(
     "op_attr, device, expect",
     [
