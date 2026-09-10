@@ -526,6 +526,150 @@ class TestTritonAttention(CustomTestCase):
             f"Max diff: {(o_legacy - o_compact).abs().max()}",
         )
 
+    def test_extend_attention_token_head_strided_layout(self):
+        dtype = torch.bfloat16
+        device = get_device()
+        H_Q, H_KV, D = 2, 1, 64
+        prefix_lens = [2, 3]
+        extend_lens = [3, 1]
+        extend_token_num = sum(extend_lens)
+        prefix_token_num = sum(prefix_lens)
+        sentinel = -12345.0
+
+        def padded_heads(heads):
+            storage = torch.full(
+                (heads + 1, extend_token_num, D),
+                sentinel,
+                dtype=dtype,
+                device=device,
+            )
+            return storage, storage[:heads].transpose(0, 1)
+
+        q_storage, q = padded_heads(H_Q)
+        k_storage, k = padded_heads(H_KV)
+        v_storage, v = padded_heads(H_KV)
+        o_storage, o = padded_heads(H_Q)
+        q_storage[:H_Q].normal_()
+        k_storage[:H_KV].normal_()
+        v_storage[:H_KV].normal_()
+
+        k_buffer = torch.randn((prefix_token_num, H_KV, D), dtype=dtype, device=device)
+        v_buffer = torch.randn((prefix_token_num, H_KV, D), dtype=dtype, device=device)
+        qo_indptr = torch.tensor([0, 3, 4], dtype=torch.int32, device=device)
+        kv_indptr = torch.tensor([0, 2, 5], dtype=torch.int32, device=device)
+        kv_indices = torch.arange(prefix_token_num, dtype=torch.int32, device=device)
+
+        def run(output, query=q):
+            extend_attention_fwd(
+                query,
+                k,
+                v,
+                output,
+                k_buffer,
+                v_buffer,
+                qo_indptr,
+                kv_indptr,
+                kv_indices,
+                custom_mask=None,
+                is_causal=True,
+                mask_indptr=None,
+                max_len_extend=max(extend_lens),
+                k_scale=1.0,
+                v_scale=1.0,
+                extend_seq_lens_cpu=extend_lens,
+            )
+
+        run(o)
+        reference = torch.empty_like(o)
+        extend_attention_fwd_torch(
+            q,
+            k,
+            v,
+            reference,
+            k_buffer,
+            v_buffer,
+            qo_indptr,
+            kv_indptr,
+            kv_indices,
+            sliding_window_size=None,
+        )
+        torch.testing.assert_close(o, reference, rtol=1e-2, atol=2e-2)
+        self.assertTrue(
+            torch.all(q_storage[H_Q] == sentinel),
+            "query sentinel head was modified",
+        )
+        self.assertTrue(
+            torch.all(o_storage[H_Q] == sentinel),
+            "output sentinel head was modified",
+        )
+
+        run_warmup = torch.empty_like(o)
+        run(run_warmup)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            run(o)
+        q_storage[:H_Q].normal_()
+        graph.replay()
+        torch.cuda.synchronize()
+        replay_reference = torch.empty_like(o)
+        extend_attention_fwd_torch(
+            q,
+            k,
+            v,
+            replay_reference,
+            k_buffer,
+            v_buffer,
+            qo_indptr,
+            kv_indptr,
+            kv_indices,
+            sliding_window_size=None,
+        )
+        torch.testing.assert_close(o, replay_reference, rtol=1e-2, atol=2e-2)
+
+        q_last_dim = torch.empty(
+            (extend_token_num, H_Q, 2 * D), dtype=dtype, device=device
+        )[..., ::2]
+        with self.assertRaisesRegex(ValueError, "unit stride"):
+            extend_attention_fwd(
+                q_last_dim,
+                k,
+                v,
+                o,
+                k_buffer,
+                v_buffer,
+                qo_indptr,
+                kv_indptr,
+                kv_indices,
+                None,
+                True,
+                None,
+                max(extend_lens),
+                1.0,
+                1.0,
+                extend_seq_lens_cpu=extend_lens,
+            )
+
+        v_mixed_dtype = v.to(torch.float16)
+        with self.assertRaisesRegex(ValueError, "same dtype"):
+            extend_attention_fwd(
+                q,
+                k,
+                v_mixed_dtype,
+                o,
+                k_buffer,
+                v_buffer,
+                qo_indptr,
+                kv_indptr,
+                kv_indices,
+                None,
+                True,
+                None,
+                max(extend_lens),
+                1.0,
+                1.0,
+                extend_seq_lens_cpu=extend_lens,
+            )
+
     def _test_extend_attention_sliding_window_once(
         self, B, N_CTX, H_Q, H_KV, D, WINDOW_SIZE
     ):
