@@ -134,6 +134,42 @@ def merge_state_torch(
     return output, output_lse
 
 
+def merge_state_float64_reference(
+    prefix_output: torch.Tensor,
+    prefix_lse: torch.Tensor,
+    suffix_output: torch.Tensor,
+    suffix_lse: torch.Tensor,
+):
+    prefix_lse = prefix_lse.to(torch.float64).clone()
+    suffix_lse = suffix_lse.to(torch.float64).clone()
+    prefix_lse = torch.where(
+        torch.isinf(prefix_lse), -torch.inf * torch.ones_like(prefix_lse), prefix_lse
+    )
+    suffix_lse = torch.where(
+        torch.isinf(suffix_lse), -torch.inf * torch.ones_like(suffix_lse), suffix_lse
+    )
+    max_lse = torch.maximum(prefix_lse, suffix_lse)
+    prefix_lse = prefix_lse - max_lse
+    suffix_lse = suffix_lse - max_lse
+    prefix_sum_exp = torch.exp(prefix_lse)
+    suffix_sum_exp = torch.exp(suffix_lse)
+    sum_exp = prefix_sum_exp + suffix_sum_exp
+    output_lse = torch.log(sum_exp) + max_lse
+    prefix_scale = (prefix_sum_exp / sum_exp).unsqueeze(2)
+    suffix_scale = (suffix_sum_exp / sum_exp).unsqueeze(2)
+    output = (
+        prefix_output.to(torch.float64) * prefix_scale
+        + suffix_output.to(torch.float64) * suffix_scale
+    )
+    return output, output_lse
+
+
+def allocate_sentinel_output(shape, dtype, sentinel, guard_count=7):
+    numel = torch.Size(shape).numel()
+    storage = torch.full((numel + guard_count,), sentinel, dtype=dtype, device="cuda")
+    return storage[:numel].view(shape), storage[numel:]
+
+
 NUM_BATCH_TOKENS = [256, 512, 613, 1024, 1536]
 NUM_QUERY_HEADS = [8, 16, 32]
 HEAD_SIZES = [32, 48, 64, 128, 256]
@@ -375,6 +411,156 @@ def test_merge_attn_states(
         len(NUM_BATCH_TOKENS) * len(HEAD_SIZES) * len(NUM_QUERY_HEADS) * len(DTYPES)
     ):
         generate_markdown_table()
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(),
+    reason="merge_state_v2 contracts require a CUDA/HIP tensor",
+)
+@torch.inference_mode()
+def test_merge_attn_states_float32_contracts():
+    torch.manual_seed(1715)
+    shape = (17, 3, 32)
+    prefix_output = torch.randn(shape, dtype=torch.float32, device="cuda")
+    suffix_output = torch.randn(shape, dtype=torch.float32, device="cuda")
+    prefix_lse = torch.randn(shape[:2], dtype=torch.float32, device="cuda")
+    suffix_lse = torch.randn(shape[:2], dtype=torch.float32, device="cuda")
+    output, output_lse = merge_state_float64_reference(
+        prefix_output.cpu(), prefix_lse.cpu(), suffix_output.cpu(), suffix_lse.cpu()
+    )
+
+    v_merged, v_guard = allocate_sentinel_output(shape, torch.float32, float("nan"))
+    s_merged, s_guard = allocate_sentinel_output(
+        shape[:2], torch.float32, -12345.0, guard_count=11
+    )
+    returned_v, returned_lse = merge_state_v2(
+        prefix_output,
+        prefix_lse,
+        suffix_output,
+        suffix_lse,
+        v_merged,
+        s_merged,
+    )
+
+    assert returned_v is v_merged
+    assert returned_lse is s_merged
+    assert torch.isnan(v_guard).all()
+    assert (s_guard == -12345.0).all()
+    assert torch.isfinite(returned_v).all()
+    assert torch.isfinite(returned_lse).all()
+    torch.testing.assert_close(
+        returned_v.cpu(), output.to(torch.float32), atol=2e-6, rtol=2e-6
+    )
+    torch.testing.assert_close(
+        returned_lse.cpu(), output_lse.to(torch.float32), atol=2e-6, rtol=2e-6
+    )
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(),
+    reason="merge_state_v2 contracts require a CUDA/HIP tensor",
+)
+@torch.inference_mode()
+def test_merge_attn_states_aliasing_and_static_storage_reuse():
+    torch.manual_seed(1715)
+    shape = (19, 5, 32)
+    prefix_output = torch.randn(shape, dtype=torch.float32, device="cuda")
+    suffix_output = torch.randn(shape, dtype=torch.float32, device="cuda")
+    prefix_lse = torch.randn(shape[:2], dtype=torch.float32, device="cuda")
+    suffix_lse = torch.randn(shape[:2], dtype=torch.float32, device="cuda")
+    output, output_lse = merge_state_float64_reference(
+        prefix_output.cpu(), prefix_lse.cpu(), suffix_output.cpu(), suffix_lse.cpu()
+    )
+
+    returned_v, returned_lse = merge_state_v2(
+        prefix_output,
+        prefix_lse,
+        suffix_output,
+        suffix_lse,
+        prefix_output,
+        prefix_lse,
+    )
+    assert returned_v is prefix_output
+    assert returned_lse is prefix_lse
+    torch.testing.assert_close(
+        returned_v.cpu(), output.to(torch.float32), atol=2e-6, rtol=2e-6
+    )
+    torch.testing.assert_close(
+        returned_lse.cpu(), output_lse.to(torch.float32), atol=2e-6, rtol=2e-6
+    )
+
+    v_merged = torch.empty(shape, dtype=torch.float32, device="cuda")
+    s_merged = torch.empty(shape[:2], dtype=torch.float32, device="cuda")
+    v_address = v_merged.data_ptr()
+    s_address = s_merged.data_ptr()
+    for step in range(2):
+        prefix_output = torch.randn(shape, dtype=torch.float32, device="cuda")
+        suffix_output = torch.randn(shape, dtype=torch.float32, device="cuda")
+        prefix_lse = torch.randn(shape[:2], dtype=torch.float32, device="cuda")
+        suffix_lse = torch.randn(shape[:2], dtype=torch.float32, device="cuda")
+        output, output_lse = merge_state_float64_reference(
+            prefix_output.cpu(), prefix_lse.cpu(), suffix_output.cpu(), suffix_lse.cpu()
+        )
+        returned_v, returned_lse = merge_state_v2(
+            prefix_output,
+            prefix_lse,
+            suffix_output,
+            suffix_lse,
+            v_merged,
+            s_merged,
+        )
+        assert returned_v.data_ptr() == v_address
+        assert returned_lse.data_ptr() == s_address
+        torch.testing.assert_close(
+            returned_v.cpu(), output.to(torch.float32), atol=2e-6, rtol=2e-6
+        )
+        torch.testing.assert_close(
+            returned_lse.cpu(), output_lse.to(torch.float32), atol=2e-6, rtol=2e-6
+        )
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(),
+    reason="merge_state_v2 contracts require a CUDA/HIP tensor",
+)
+@torch.inference_mode()
+def test_merge_attn_states_rejects_unsupported_contracts():
+    torch.manual_seed(1715)
+    shape = (7, 3, 32)
+    prefix_output = torch.randn(shape, dtype=torch.float32, device="cuda")
+    suffix_output = torch.randn(shape, dtype=torch.float32, device="cuda")
+    prefix_lse = torch.randn(shape[:2], dtype=torch.float32, device="cuda")
+    suffix_lse = torch.randn(shape[:2], dtype=torch.float32, device="cuda")
+
+    with pytest.raises(RuntimeError, match="v_a, v_b, and v_merged must have the same dtype"):
+        merge_state_v2(
+            prefix_output,
+            prefix_lse,
+            suffix_output,
+            suffix_lse,
+            torch.empty(shape, dtype=torch.float16, device="cuda"),
+            torch.empty(shape[:2], dtype=torch.float32, device="cuda"),
+        )
+
+    with pytest.raises(RuntimeError, match="v_merged must have the same shape as v_a"):
+        merge_state_v2(
+            prefix_output,
+            prefix_lse,
+            suffix_output,
+            suffix_lse,
+            torch.empty((shape[0] + 1, *shape[1:]), dtype=torch.float32, device="cuda"),
+            torch.empty(shape[:2], dtype=torch.float32, device="cuda"),
+        )
+
+    with pytest.raises(RuntimeError, match="Unsupported data type of O"):
+        merge_state_v2(
+            prefix_output.to(torch.float64),
+            prefix_lse,
+            suffix_output.to(torch.float64),
+            suffix_lse,
+            torch.empty(shape, dtype=torch.float64, device="cuda"),
+            torch.empty(shape[:2], dtype=torch.float32, device="cuda"),
+        )
 
 
 if __name__ == "__main__":
