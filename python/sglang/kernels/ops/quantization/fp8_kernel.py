@@ -1190,110 +1190,39 @@ def _w8a8_block_fp8_matmul_unrolledx4(
     offs_bsn = offs_bn // group_n
     Bs_ptrs = Bs + offs_bsn * stride_Bs_n
     scale_step_k = BLOCK_SIZE_K // group_k
+    num_k_tiles = tl.cdiv(K, BLOCK_SIZE_K)
 
     accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
     # manually unroll to 4 iterations
     UNROLL_FACTOR = 4
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K * UNROLL_FACTOR)):
-        # 1st iteration
-        if needs_masking:
-            a = tl.load(
-                a_ptrs,
-                mask=offs_k[None, :] < K - (k * UNROLL_FACTOR) * BLOCK_SIZE_K,
-                other=0.0,
-            )
-            b = tl.load(
-                b_ptrs,
-                mask=offs_k[:, None] < K - (k * UNROLL_FACTOR) * BLOCK_SIZE_K,
-                other=0.0,
-            )
-        else:
-            a = tl.load(a_ptrs)
-            b = tl.load(b_ptrs)
+        for unroll_offset in tl.static_range(4):
+            k_tile = k * UNROLL_FACTOR + unroll_offset
+            if k_tile < num_k_tiles:
+                if needs_masking:
+                    a = tl.load(
+                        a_ptrs,
+                        mask=offs_k[None, :] < K - k_tile * BLOCK_SIZE_K,
+                        other=0.0,
+                    )
+                    b = tl.load(
+                        b_ptrs,
+                        mask=offs_k[:, None] < K - k_tile * BLOCK_SIZE_K,
+                        other=0.0,
+                    )
+                else:
+                    a = tl.load(a_ptrs)
+                    b = tl.load(b_ptrs)
 
-        a_s = tl.load(As_ptrs)
-        b_s = tl.load(Bs_ptrs)
+                a_s = tl.load(As_ptrs)
+                b_s = tl.load(Bs_ptrs)
 
-        accumulator += tl.dot(a, b) * a_s[:, None] * b_s[None, :]
-        a_ptrs += BLOCK_SIZE_K * stride_ak
-        b_ptrs += BLOCK_SIZE_K * stride_bk
-        As_ptrs += scale_step_k * stride_As_k
-        Bs_ptrs += scale_step_k * stride_Bs_k
+                accumulator += tl.dot(a, b) * a_s[:, None] * b_s[None, :]
 
-        # 2nd iteration
-        if needs_masking:
-            a = tl.load(
-                a_ptrs,
-                mask=offs_k[None, :] < K - (k * UNROLL_FACTOR + 1) * BLOCK_SIZE_K,
-                other=0.0,
-            )
-            b = tl.load(
-                b_ptrs,
-                mask=offs_k[:, None] < K - (k * UNROLL_FACTOR + 1) * BLOCK_SIZE_K,
-                other=0.0,
-            )
-        else:
-            a = tl.load(a_ptrs)
-            b = tl.load(b_ptrs)
-
-        a_s = tl.load(As_ptrs)
-        b_s = tl.load(Bs_ptrs)
-
-        accumulator += tl.dot(a, b) * a_s[:, None] * b_s[None, :]
-        a_ptrs += BLOCK_SIZE_K * stride_ak
-        b_ptrs += BLOCK_SIZE_K * stride_bk
-        As_ptrs += scale_step_k * stride_As_k
-        Bs_ptrs += scale_step_k * stride_Bs_k
-
-        # 3rd iteration
-        if needs_masking:
-            a = tl.load(
-                a_ptrs,
-                mask=offs_k[None, :] < K - (k * UNROLL_FACTOR + 2) * BLOCK_SIZE_K,
-                other=0.0,
-            )
-            b = tl.load(
-                b_ptrs,
-                mask=offs_k[:, None] < K - (k * UNROLL_FACTOR + 2) * BLOCK_SIZE_K,
-                other=0.0,
-            )
-        else:
-            a = tl.load(a_ptrs)
-            b = tl.load(b_ptrs)
-
-        a_s = tl.load(As_ptrs)
-        b_s = tl.load(Bs_ptrs)
-
-        accumulator += tl.dot(a, b) * a_s[:, None] * b_s[None, :]
-        a_ptrs += BLOCK_SIZE_K * stride_ak
-        b_ptrs += BLOCK_SIZE_K * stride_bk
-        As_ptrs += scale_step_k * stride_As_k
-        Bs_ptrs += scale_step_k * stride_Bs_k
-
-        # 4th iteration
-        if needs_masking:
-            a = tl.load(
-                a_ptrs,
-                mask=offs_k[None, :] < K - (k * UNROLL_FACTOR + 3) * BLOCK_SIZE_K,
-                other=0.0,
-            )
-            b = tl.load(
-                b_ptrs,
-                mask=offs_k[:, None] < K - (k * UNROLL_FACTOR + 3) * BLOCK_SIZE_K,
-                other=0.0,
-            )
-        else:
-            a = tl.load(a_ptrs)
-            b = tl.load(b_ptrs)
-
-        a_s = tl.load(As_ptrs)
-        b_s = tl.load(Bs_ptrs)
-
-        accumulator += tl.dot(a, b) * a_s[:, None] * b_s[None, :]
-        a_ptrs += BLOCK_SIZE_K * stride_ak
-        b_ptrs += BLOCK_SIZE_K * stride_bk
-        As_ptrs += scale_step_k * stride_As_k
-        Bs_ptrs += scale_step_k * stride_Bs_k
+            a_ptrs += BLOCK_SIZE_K * stride_ak
+            b_ptrs += BLOCK_SIZE_K * stride_bk
+            As_ptrs += scale_step_k * stride_As_k
+            Bs_ptrs += scale_step_k * stride_Bs_k
 
     if C.dtype.element_ty == tl.bfloat16:
         c = accumulator.to(tl.bfloat16)
@@ -1439,7 +1368,7 @@ if _is_hip:
         num_workgroups = triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(
             N, META["BLOCK_SIZE_N"]
         )
-        num_workgroups <= get_device_core_count()
+        return num_workgroups <= get_device_core_count()
 
     def select_w8a8_block_fp8_matmul_kernel(M, N, META):
         if use_w8a8_block_fp8_matmul_unrolledx4(M, N, META):
@@ -1584,6 +1513,8 @@ def w8a8_block_fp8_matmul_triton(
         kernel = _w8a8_block_fp8_matmul_gfx1250
     else:
         kernel = select_w8a8_block_fp8_matmul_kernel(M, N, config)
+        if kernel is _w8a8_block_fp8_matmul_unrolledx4:
+            config = {**config, "num_stages": 1}
 
     needs_masking = bool(K % config["BLOCK_SIZE_K"] != 0)
 
