@@ -1,0 +1,111 @@
+{
+  "campaign": "repo-e2e-20260909",
+  "recorded_at_utc": "2026-09-10T03:59:00Z",
+  "scope": {
+    "upstream_issue": "sgl-project/sglang issue 32470",
+    "mirror_issue": "amdpilot-org/sglang issue 272",
+    "distinct_from": [
+      "amdpilot-org/sglang issue 222",
+      "amdpilot-org/sglang PR 145",
+      "sgl-project/sglang PR 32467"
+    ],
+    "tested_property": "permuted batch rows and inverse row order across repeated bounded capture/replay cycles",
+    "result": "no demonstrated mismatch"
+  },
+  "environment": {
+    "gpu": {
+      "device": "AMD Instinct MI300X",
+      "gfx": "gfx942",
+      "unique_id": "0x1c3c92ede7b2dcb0",
+      "serial": "692440003982",
+      "driver": "6.19.14.31400000",
+      "device_count": 1
+    },
+    "image": {
+      "qualified": "amdpilotv2/open-job-mi300:jit-config-readable-260909-banff5",
+      "local_image_id": "sha256:39fe745feda79ecf4c17f4d806d8ef12150bef720f2f07f5c63a20b3ccfd63f1"
+    },
+    "interpreter": "/opt/venv/bin/python",
+    "python_version": "3.10.12",
+    "torch": {
+      "version": "2.9.1+rocm7.2.0.git7e1940d4",
+      "path": "/opt/venv/lib/python3.10/site-packages/torch/__init__.py"
+    },
+    "sglang": {
+      "version": "0.5.18.dev20260826+g937af8538b",
+      "installed_source": "/sgl-workspace/sglang/python/sglang",
+      "checkout_source": "/job/sglang/python/sglang"
+    },
+    "sgl_kernel": {
+      "version": "0.4.6.post1",
+      "path": "/opt/venv/lib/python3.10/site-packages/sgl_kernel/__init__.py",
+      "native_module": "/opt/venv/lib/python3.10/site-packages/sgl_kernel/common_ops.cpython-310-x86_64-linux-gnu.so"
+    },
+    "job_private_cache_root": "/tmp/sglang-cache-j-74a5e0c24583"
+  },
+  "installed_source_baseline": {
+    "label": "installed-source baseline; not proof for later checkout changes",
+    "artifact": "/job/baseline-first.json",
+    "test": "/sgl-workspace/sglang/python/sglang/kernels/aot/tests/test_dsv4_norm_rope.py::test_fused_q_norm_rope_correctness[192-8-16]",
+    "result": "1 passed in 1.92s",
+    "first_gpu_execution_elapsed_seconds": 7.626
+  },
+  "persistent_checkout": {
+    "repository": "amdpilot-org/sglang",
+    "base_branch": "main",
+    "base_commit": "0084030179bfba86bfeb6d43f7997d4076329d2c",
+    "delivery_branch": "amdpilot/j-74a5e0c24583",
+    "python_package_path": "/job/sglang/python/sglang"
+  },
+  "investigation": {
+    "operations": [
+      "CompactRowIndex",
+      "CompactVerifyIds",
+      "ScatterCompactToStrided"
+    ],
+    "input_matrix": {
+      "base_verify_lens": [1, 4, 2, 5, 3, 1, 4, 2],
+      "patterns": [
+        "base",
+        "perm",
+        "inverse",
+        "reverse"
+      ],
+      "graph_num_tokens": 32,
+      "stride": 5,
+      "gamma": 5,
+      "dim": 3,
+      "cycles": 4
+    },
+    "method": "Capture each operation once, mutate verify_lens and compact inputs in place across four row-order patterns, replay the same graph, and compare against explicit independent references.",
+    "commands": [
+      "cd /job/sglang && PYTHONPATH=/job/sglang/python TRITON_CACHE_DIR=/tmp/sglang-cache-j-74a5e0c24583/triton TORCHINDUCTOR_CACHE_DIR=/tmp/sglang-cache-j-74a5e0c24583/torchinductor timeout 240 /opt/venv/bin/python reports/j-74a5e0c24583/probe_row_order_batch8.py"
+    ],
+    "raw_results": [
+      "cycle=1 pattern=base row_ok=True ids_ok=True scatter_ok=True",
+      "cycle=2 pattern=perm row_ok=True ids_ok=True scatter_ok=True",
+      "cycle=3 pattern=inverse row_ok=True ids_ok=True scatter_ok=True",
+      "cycle=4 pattern=reverse row_ok=True ids_ok=True scatter_ok=True",
+      "BATCH8_ROW_ORDER_PROBE_OK"
+    ],
+    "elapsed_milliseconds": 13916,
+    "false_mismatch": {
+      "description": "An initial CompactVerifyIds reuse probe reported a mismatch on the permuted pattern.",
+      "root_cause": "The independent reference indexed draft inputs by the original request ID instead of the new row position.",
+      "resolution": "The reference was corrected to index by the new request position; the identical bounded cycles then passed.",
+      "preserved": true
+    }
+  },
+  "validation": {
+    "focused_command": "cd /job/sglang && PYTHONPATH=/job/sglang/python TRITON_CACHE_DIR=/tmp/sglang-cache-j-74a5e0c24583/triton TORCHINDUCTOR_CACHE_DIR=/tmp/sglang-cache-j-74a5e0c24583/torchinductor timeout 240 /opt/venv/bin/python reports/j-74a5e0c24583/probe_row_order_batch8.py",
+    "focused_result": "4 cycles passed for CompactRowIndex, CompactVerifyIds, and ScatterCompactToStrided in 13.916 seconds",
+    "production_code_changed": false
+  },
+  "explicit_non_claims": [
+    "full-model serving or end-to-end DSpark execution",
+    "multi-GPU or distributed execution",
+    "CUDA-graph runner integration beyond the three kernel-level operations",
+    "row orders beyond the documented finite adversarial matrix",
+    "full model weights or environment replacement"
+  ]
+}
