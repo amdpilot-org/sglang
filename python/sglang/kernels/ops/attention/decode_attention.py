@@ -209,6 +209,11 @@ def _extract_kv_strides(buf, page_size: int):
     """
     if buf.ndim != 3:
         raise ValueError(f"unexpected KV buffer ndim={buf.ndim}, shape={buf.shape}")
+    if buf.stride(2) != 1:
+        raise ValueError(
+            f"KV buffer must have a contiguous last dim, got shape={tuple(buf.shape)} "
+            f"stride={tuple(buf.stride())}"
+        )
     slot_stride = buf.stride(0)
     head_stride = buf.stride(1)
     page_stride = slot_stride * page_size
@@ -427,6 +432,11 @@ def _decode_att_m_fwd(
     score_mod=None,
     aux_tensors=None,
 ):
+    if q.stride(2) != 1:
+        raise ValueError(
+            f"q must have a contiguous last dim, got shape={tuple(q.shape)} "
+            f"stride={tuple(q.stride())}"
+        )
     BLOCK = 64
     # [TODO] work around SGPR limit on MI3xx
     if _is_hip:
@@ -786,6 +796,11 @@ def _decode_grouped_att_m_fwd(
     tune_mla: bool = False,
     forced_kv_splits: int = 0,
 ):
+    if q.stride(2) != 1:
+        raise ValueError(
+            f"q must have a contiguous last dim, got shape={tuple(q.shape)} "
+            f"stride={tuple(q.stride())}"
+        )
     BLOCK = 32
     Lk = k_buffer.shape[-1]
     Lv = v_buffer.shape[-1]
@@ -1001,6 +1016,11 @@ def _decode_softmax_reducev_fwd(
     use_pdl=False,
     forced_kv_splits: int = 0,
 ):
+    if o.stride(2) != 1:
+        raise ValueError(
+            f"o must have a contiguous last dim, got shape={tuple(o.shape)} "
+            f"stride={tuple(o.stride())}"
+        )
     batch, head_num = q.shape[0], q.shape[1]
     Lv = v_buffer.shape[-1]
     BLOCK_DV = triton.next_power_of_2(Lv)
@@ -1962,6 +1982,16 @@ def _decode_lean_attention_fwd(
     selects the KV address math over the ``[N, head, dim]`` buffer (strides via
     ``_extract_kv_strides``).
     """
+    if q.stride(2) != 1:
+        raise ValueError(
+            f"q must have a contiguous last dim, got shape={tuple(q.shape)} "
+            f"stride={tuple(q.stride())}"
+        )
+    if o.stride(2) != 1:
+        raise ValueError(
+            f"o must have a contiguous last dim, got shape={tuple(o.shape)} "
+            f"stride={tuple(o.stride())}"
+        )
     batch, head_num = q.shape[0], q.shape[1]
     num_kv_heads = k_buffer.shape[-2]
     Lk = k_buffer.shape[-1]
