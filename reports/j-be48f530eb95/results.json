@@ -1,0 +1,87 @@
+{
+  "campaign": "repo-e2e-20260909",
+  "issue": "sgl-project/sglang#34947",
+  "upstream_candidate": {
+    "pr": 34948,
+    "commit": "7b7177ab9ab04fcde80c8b72f0aa394e1b7d1084",
+    "result": "cherry-picked and supplemented with an architecture-independent boundary test"
+  },
+  "gpu": {
+    "name": "AMD Instinct MI300X",
+    "gfx": "gfx942",
+    "unique_id": "0x586343f382a69f1d",
+    "serial": "692440003949",
+    "vram_bytes": 206141652992
+  },
+  "baseline": {
+    "test": "test/registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention_compact_grid",
+    "result": "1 passed, 11 deselected",
+    "reference_gate": "torch.allclose(rtol=1e-2, atol=1e-3)",
+    "outer_elapsed_seconds": 19.114
+  },
+  "unsupported": [
+    {
+      "control": "sgl_kernel.flash_mla_sparse_fwd",
+      "error": "ImportError: cannot import name 'flashmla_ops' from 'sgl_kernel'; ensure CUDA Driver >= 12.4"
+    },
+    {
+      "control": "sgl_kernel.sparse_flash_attn",
+      "error": "torch.ops.sgl_kernel has no fwd_sparse, varlen_fwd_sparse, or convert_vertical_slash_indexes ops on ROCm"
+    },
+    {
+      "control": "stock DSA fixture",
+      "error": "HIP legacy DSA path requires page_size == 1, got 64"
+    }
+  ],
+  "supported_sparse_control": {
+    "kernel": "aiter.mla.mla_decode_fwd",
+    "native_module": "/sgl-workspace/aiter/aiter/jit/module_aiter_core.so",
+    "fixture": {
+      "page_size": 1,
+      "prefix_tokens": 2048,
+      "extend_tokens": 1,
+      "heads": 4,
+      "topk": 128
+    },
+    "reference": "DSA unit-test PyTorch reference",
+    "result": "passed",
+    "outer_elapsed_seconds": 31.146
+  },
+  "boundary_control": {
+    "kernel": "aiter.mla.mla_decode_fwd",
+    "timing_method": "time.perf_counter around each launch with torch.cuda.synchronize before and after",
+    "reference_gate": "torch.allclose(atol=1.6e-1, rtol=1.6e-1)",
+    "split_chunk": 32768,
+    "cases": [
+      {
+        "query_rows": 4,
+        "full_elapsed_seconds": 0.8977864938788116,
+        "split_elapsed_seconds_sum": 0.0008880388922989368,
+        "max_abs_diff": 0.0001220703125,
+        "allclose": true,
+        "full_vs_split_bitwise": true
+      },
+      {
+        "query_rows": 65535,
+        "full_elapsed_seconds": 0.006152001209557056,
+        "split_elapsed_seconds_sum": 0.00410275487229278,
+        "max_abs_diff": 0.000244140625,
+        "allclose": true,
+        "full_vs_split_bitwise": true
+      },
+      {
+        "query_rows": 65536,
+        "full_elapsed_seconds": 0.009368655271828175,
+        "split_elapsed_seconds_sum": 0.004202759359031916,
+        "max_abs_diff": 0.000244140625,
+        "allclose": true,
+        "full_vs_split_bitwise": true
+      }
+    ]
+  },
+  "guard_test": {
+    "command": "PYTHONPATH=python /opt/venv/bin/python -m pytest test/registered/attention/unittests/dsa/test_dsa.py -q -k test_trtllm_query_row_limit_guard",
+    "result": "1 passed",
+    "boundary": "65535 accepted; 65536 raises ValueError before kernel launch"
+  }
+}

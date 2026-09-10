@@ -2,6 +2,7 @@ import unittest
 
 import torch
 
+from sglang.srt.layers.attention.dsa_backend import check_trtllm_query_row_limit
 from sglang.srt.model_executor.forward_batch_info import ForwardMode
 from sglang.test.ci.ci_register import register_cuda_ci
 from sglang.test.kits.attention_unittest.attention_methods.dsa_attention import (
@@ -38,6 +39,15 @@ register_cuda_ci(est_time=14, stage="base-b", runner_config="1-gpu-large")
 class TestDSAAttentionBackendCorrectness(CustomTestCase):
     CASES = make_dsa_dense_fallback_cases("dsa")
     SPARSE_CASES = make_dsa_sparse_cases("dsa")
+
+    def test_trtllm_query_row_limit_guard(self):
+        check_trtllm_query_row_limit(65535)
+        with self.assertRaisesRegex(
+            ValueError,
+            r"got 65536 query rows.*gridDim\.z limit of 65535",
+        ):
+            check_trtllm_query_row_limit(65536)
+
     # PCG/BCG split-op extend coverage is *not* added here — DSA's
     # MHA_ONE_SHOT dense fallback passes K as concatenated prefix+extend
     # (length = sum(seq_lens)) to `module.attn`, but

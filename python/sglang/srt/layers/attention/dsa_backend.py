@@ -306,6 +306,21 @@ _DSA_IMPL_T: TypeAlias = Literal[
     "intel_xpu",
 ]
 
+TRTLLM_GEN_MAX_QUERY_ROWS = 65535
+
+
+def check_trtllm_query_row_limit(batch_size: int) -> None:
+    if batch_size <= TRTLLM_GEN_MAX_QUERY_ROWS:
+        return
+    raise ValueError(
+        f"DSA trtllm backend got {batch_size} query rows in one forward, "
+        "exceeding the CUDA gridDim.z limit of 65535. This path launches one "
+        "row per token (tokens are flattened into the batch dimension); the "
+        "launch would otherwise fail silently and leave the attention output "
+        "uninitialized. Keep aggregate rows per forward at or below 65535, "
+        "e.g. via chunked prefill."
+    )
+
 
 class DeepseekSparseAttnBackend(
     DeepseekSparseAttnBackendKPoolMixin,
@@ -3529,6 +3544,14 @@ class DeepseekSparseAttnBackend(
 
         batch_size = page_table_1.shape[0]
         _, num_heads, head_dim = q_all.shape
+
+        # The trtllm-gen MLA kernel maps its batch dimension onto gridDim.z, which CUDA
+        # caps at 65535. This path flattens every token into its own batch row, so a
+        # single long extend can exceed the cap. The launch then fails with
+        # CUDA_ERROR_INVALID_VALUE, which the trtllm-gen wrapper only prints instead of
+        # raising -- no attention kernel runs and the caller silently receives an
+        # uninitialized output buffer. Fail loudly rather than return wrong output.
+        check_trtllm_query_row_limit(batch_size)
 
         self._multi_ctas_kv_counter_buffer = (
             grow_multi_ctas_kv_counter_buffer_if_needed(
