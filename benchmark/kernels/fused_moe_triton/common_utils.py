@@ -3,8 +3,14 @@ from types import SimpleNamespace
 from typing import Dict, List, TypedDict
 
 import torch
+import torch.nn.functional as F
 
-from sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe import get_config_dtype_str
+from sglang.srt.layers.moe.fused_moe_triton import override_config
+from sglang.srt.layers.moe.moe_runner import MoeRunnerConfig
+from sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe import (
+    fused_moe,
+    get_config_dtype_str,
+)
 from sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe_triton_config import (
     get_config_file_name,
 )
@@ -326,6 +332,69 @@ def get_config_filename(
     )
 
     return filename
+
+
+def reference_unquantized_moe(
+    x: torch.Tensor,
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    topk_weights: torch.Tensor,
+    topk_ids: torch.Tensor,
+) -> torch.Tensor:
+    batch, hidden = x.shape
+    topk = topk_ids.shape[1]
+    expanded_x = x.unsqueeze(1).expand(batch, topk, hidden).reshape(-1, hidden)
+    output = torch.zeros(
+        batch * topk, w2.shape[1], dtype=x.dtype, device=x.device
+    )
+    for expert in range(w1.shape[0]):
+        mask = (topk_ids == expert).reshape(-1)
+        if not mask.any():
+            continue
+        gate_up = expanded_x[mask] @ w1[expert].transpose(0, 1)
+        half = gate_up.shape[-1] // 2
+        output[mask] = (
+            F.silu(gate_up[..., :half]) * gate_up[..., half:]
+        ) @ w2[expert].transpose(0, 1)
+    return (
+        output.view(batch, topk, w2.shape[1])
+        * topk_weights.unsqueeze(-1).to(output.dtype)
+    ).sum(dim=1)
+
+
+def validate_unquantized_moe_output(
+    config: BenchmarkConfig,
+    x: torch.Tensor,
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    topk_output,
+) -> None:
+    validation_scale = 0.01
+    validation_x = x * validation_scale
+    validation_w1 = w1 * validation_scale
+    validation_w2 = w2 * validation_scale
+    expected = reference_unquantized_moe(
+        validation_x,
+        validation_w1,
+        validation_w2,
+        topk_output.topk_weights,
+        topk_output.topk_ids,
+    )
+    actual_x = validation_x.clone()
+    with override_config(config):
+        actual = fused_moe(
+            actual_x,
+            validation_w1,
+            validation_w2,
+            topk_output,
+            moe_runner_config=MoeRunnerConfig(inplace=True),
+        )
+    torch.cuda.synchronize()
+    if x.dtype == torch.float32:
+        rtol, atol = 1e-3, 1e-5
+    else:
+        rtol, atol = 1e-1, 1e-2
+    torch.testing.assert_close(actual, expected, rtol=rtol, atol=atol)
 
 
 def get_default_batch_sizes() -> List[int]:
