@@ -123,6 +123,22 @@ def _sparse_gqa_prefill(
 
 
 def sparse_gqa_fwd_interface_triton(q, k, v, max_seqlen_k, indices, cu_seqlens, scale):
+    if q.ndim != 3 or k.ndim != 3 or v.ndim != 3:
+        raise ValueError("q, k and v must be rank-3 tensors")
+    if q.dtype != k.dtype or q.dtype != v.dtype:
+        raise ValueError(
+            "q, k and v must have the same dtype, got "
+            f"{q.dtype}, {k.dtype} and {v.dtype}"
+        )
+    if q.shape[-1] != k.shape[-1] or q.shape[-1] != v.shape[-1]:
+        raise ValueError("q, k and v head dimensions must match")
+    if q.shape[1] % k.shape[1] != 0:
+        raise ValueError("query heads must be divisible by KV heads")
+    if indices.ndim not in (2, 3):
+        raise ValueError("indices must be a rank-2 or rank-3 tensor")
+    if cu_seqlens.dtype != torch.int32:
+        raise ValueError(f"cu_seqlens must be int32, got {cu_seqlens.dtype}")
+
     total_q, num_q_heads, head_dim = q.shape
     num_kv_heads = k.shape[1]
     group_size = num_q_heads // num_kv_heads

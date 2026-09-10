@@ -28,6 +28,7 @@ from sglang.srt.layers.attention.qsa.qsa_indexer import QSAIndexer
 from sglang.srt.layers.attention.qsa.sparse_attn import (
     qwen_sparse_fa2_cu_seqlens_triton,
     qwen_sparse_kv_extraction_compact_triton,
+    sparse_gqa_fwd_interface_triton,
 )
 from sglang.srt.layers.attention.qwen_sparse_attn_backend import (
     QwenSparseAttnBackend,
@@ -191,6 +192,103 @@ def test_qsa_sm121_compaction_and_attention_match_sparse_reference():
     expected = qsa_sparse_attention(q, k_cache, v_cache, slots, scale)
     assert valid_counts.tolist() == valid_counts_cpu
     torch.testing.assert_close(actual, expected, rtol=2e-2, atol=2e-2)
+
+
+def test_qsa_sparse_prefill_supports_non_contiguous_qkv():
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA-only Triton kernel")
+
+    torch.manual_seed(2029)
+    device = torch.device("cuda")
+    sequence_lengths = [17, 31]
+    total_q = sum(sequence_lengths)
+    num_q_heads, num_kv_heads, head_dim, topk = 4, 2, 64, 8
+
+    def non_contiguous_tensor(rows, heads, sentinel):
+        storage = torch.full(
+            (rows * heads * head_dim * 2 + 32,),
+            sentinel,
+            device=device,
+            dtype=torch.bfloat16,
+        )
+        view = storage[16 : 16 + rows * heads * head_dim * 2].view(
+            rows, heads, head_dim * 2
+        )
+        return (
+            view[:, :, :head_dim],
+            storage,
+            storage[:16].clone(),
+            storage[-16:].clone(),
+        )
+
+    q, q_storage, q_guard_before, q_guard_after = non_contiguous_tensor(
+        total_q, num_q_heads, -123.0
+    )
+    k, k_storage, k_guard_before, k_guard_after = non_contiguous_tensor(
+        total_q, num_kv_heads, 321.0
+    )
+    v, v_storage, v_guard_before, v_guard_after = non_contiguous_tensor(
+        total_q, num_kv_heads, 654.0
+    )
+    q.normal_()
+    k.normal_()
+    v.normal_()
+
+    indices = torch.full((total_q, topk), -1, dtype=torch.int32, device=device)
+    slots = torch.full_like(indices, -1)
+    for batch, sequence_length in enumerate(sequence_lengths):
+        start = sum(sequence_lengths[:batch])
+        for position in range(sequence_length):
+            valid_count = min(topk, position + 1)
+            selected = torch.randperm(position + 1, device=device)[:valid_count]
+            indices[start + position, :valid_count] = selected.to(torch.int32)
+            slots[start + position, :valid_count] = start + selected.to(torch.int32)
+
+    cu_seqlens = torch.tensor(
+        [0, sequence_lengths[0], total_q], dtype=torch.int32, device=device
+    )
+    actual = sparse_gqa_fwd_interface_triton(
+        q,
+        k,
+        v,
+        max(sequence_lengths),
+        indices,
+        cu_seqlens,
+        head_dim**-0.5,
+    )
+    expected = qsa_sparse_attention(q, k, v, slots, head_dim**-0.5)
+
+    assert not q.is_contiguous()
+    assert not k.is_contiguous()
+    assert not v.is_contiguous()
+    assert actual.dtype == q.dtype
+    assert actual.data_ptr() not in {
+        q.data_ptr(),
+        k.data_ptr(),
+        v.data_ptr(),
+    }
+    assert torch.equal(q_storage[:16], q_guard_before)
+    assert torch.equal(q_storage[-16:], q_guard_after)
+    assert torch.equal(k_storage[:16], k_guard_before)
+    assert torch.equal(k_storage[-16:], k_guard_after)
+    assert torch.equal(v_storage[:16], v_guard_before)
+    assert torch.equal(v_storage[-16:], v_guard_after)
+    torch.testing.assert_close(actual, expected, rtol=2e-2, atol=2e-2)
+
+
+def test_qsa_sparse_prefill_rejects_mixed_qkv_dtypes():
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA-only Triton kernel")
+
+    device = torch.device("cuda")
+    q = torch.zeros(1, 4, 64, dtype=torch.bfloat16, device=device)
+    k = torch.zeros(1, 2, 64, dtype=torch.float16, device=device)
+    v = torch.zeros_like(k)
+    indices = torch.zeros((1, 8), dtype=torch.int32, device=device)
+    cu_seqlens = torch.tensor([0, 1], dtype=torch.int32, device=device)
+
+    with pytest.raises(ValueError, match="same dtype"):
+        sparse_gqa_fwd_interface_triton(q, k, v, 1, indices, cu_seqlens, 64**-0.5)
 
 
 def _compressed_config_namespace(**overrides):
