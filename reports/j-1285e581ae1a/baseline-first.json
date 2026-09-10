@@ -1,0 +1,88 @@
+{
+  "label": "installed-source baseline; not proof for later checkout changes",
+  "recorded_at_utc": "2026-09-10T03:19:00Z",
+  "campaign": "repo-e2e-20260909",
+  "job_id": "j-1285e581ae1a",
+  "gpu": {
+    "assigned_count": 1,
+    "device_name": "AMD Instinct MI300X",
+    "gfx": "gfx942",
+    "torch_device_capability": [9, 4],
+    "rocm_smi_serial": "692440003970",
+    "rocm_smi_node_id": 4,
+    "rocm_driver": "6.19.14.31400000"
+  },
+  "image": {
+    "requested_qualified_image": "amdpilotv2/open-job-mi300:jit-config-readable-35122-260909",
+    "requested_local_image_id": "sha256:dfc9419089c338b5712da4841768b38b1ab79f3da41f8c58c3cd4dfcc1147ff1",
+    "in_container_verification": "No Docker/Podman socket or image metadata API was available; hostname was not used as image identity."
+  },
+  "stack": {
+    "python": "/opt/venv/bin/python",
+    "python_version": "3.10.12",
+    "torch": "/opt/venv/lib/python3.10/site-packages/torch/__init__.py",
+    "torch_version": "2.9.1+rocm7.2.0.git7e1940d4",
+    "torch_hip": "7.2.26015-fc0010cf6a",
+    "torch_cuda": null,
+    "sglang_imported": "/sgl-workspace/sglang/python/sglang/__init__.py",
+    "sgl_kernel_imported": "/opt/venv/lib/python3.10/site-packages/sgl_kernel/__init__.py",
+    "sgl_kernel_native": "/opt/venv/lib/python3.10/site-packages/sgl_kernel/common_ops.cpython-310-x86_64-linux-gnu.so",
+    "torch_hip_native": "/opt/venv/lib/python3.10/site-packages/torch/lib/libtorch_hip.so"
+  },
+  "installed_source": {
+    "path": "/sgl-workspace/sglang",
+    "commit": "8eaffdf382e06b7dc50fc5c76cc5aad9c36bb0e4",
+    "commit_subject": "docs: point the Qwen3.8-Flash-Next cookbook at model support PR #36497 (#36499)",
+    "commit_date": "2026-08-26T20:53:55+08:00",
+    "working_tree_note": "Environment-context checkout was already modified/untracked; it was not used for delivery changes."
+  },
+  "commands": [
+    {
+      "purpose": "installed relevant gather kernel/test",
+      "command": "timeout 180s /opt/venv/bin/python -m pytest -q /sgl-workspace/sglang/test/registered/kernels/ops/test_get_block_table.py::test_get_block_table_supports_tp_local_head_group -s",
+      "timeout_seconds": 180,
+      "wall_timing_method": "GNU date CLOCK_REALTIME nanoseconds around the bounded command",
+      "wall_elapsed_ms": 33356,
+      "pytest_elapsed_seconds": 31.62,
+      "exit_code": 1,
+      "status": "unsupported on ROCm",
+      "raw_log": "baseline-first-installed-jit.txt",
+      "error": "RuntimeError: Tensor match failed for Tensor<1, 64, 96>[strides=<6144, 96, 1>, dtype=int32, device=rocm:0] at /sgl-workspace/sglang/python/sglang/kernels/jit/csrc/minicpm_sala/get_block_table.cuh:139 - Root cause: Device value [rocm:0] not in the allowed options: [cuda]"
+    },
+    {
+      "purpose": "meaningful supported neighboring gather control",
+      "command": "timeout 60s /opt/venv/bin/python (inline script: seeded torch.gather on cuda:0, 10 trials, independent output tensor per trial, CPU torch.gather reference, CUDA Event timing)",
+      "timeout_seconds": 60,
+      "wall_timing_method": "GNU date CLOCK_REALTIME nanoseconds around the bounded command; per-trial torch.cuda.Event(enable_timing=True)",
+      "wall_elapsed_ms": 2169,
+      "exit_code": 0,
+      "source_shape": [4096, 8192],
+      "index_shape": [4096, 512],
+      "trials": 10,
+      "independent_outputs": true,
+      "reference": "CPU torch.gather(source.cpu(), 1, index.cpu())",
+      "comparison": "maximum absolute difference",
+      "all_trials_exact": true,
+      "all_trials_max_abs_diff": 0.0,
+      "median_event_ms": 0.22620099782943726,
+      "trial_event_ms": [
+        9.759556770324707,
+        0.27282899618148804,
+        0.06090100109577179,
+        0.24227799475193024,
+        0.05384400114417076,
+        0.22620099782943726,
+        0.050074998289346695,
+        0.23995299637317657,
+        0.05135900154709816,
+        0.12043800204992294
+      ],
+      "raw_log": "baseline-first-native-gather.txt"
+    }
+  ],
+  "architecture_limitations": [
+    "The installed minicpm_sala get_block_table JIT wrapper rejects rocm:0 because its device matcher allows only cuda; this is an architecture-specific test/kernel limitation, not a numerical mismatch.",
+    "The successful control uses native PyTorch gather and does not exercise SGLang EAGLE scheduling, speculative state, grammar compilation, or the later checkout.",
+    "The baseline therefore establishes a valid gfx942 gather numerical/timing control only; it is not evidence that any later source change is fixed."
+  ]
+}
