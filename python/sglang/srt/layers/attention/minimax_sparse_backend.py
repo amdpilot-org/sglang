@@ -266,17 +266,16 @@ class MiniMaxSparseAttnBackend(AttentionBackend):
             not _decode_cuda_graph or envs.SGLANG_OPT_USE_MSA_DECODE_UNDER_GRAPH.get()
         )
 
-        # MSA + spec decode + cuda graph crashes mid-capture: TARGET_VERIFY batches
-        # route to forward_extend, dereferencing absent extend metadata. Fail at startup.
-        if (
-            self.use_msa
-            and _decode_cuda_graph
-            and spec.speculative_algorithm is not None
-        ):
+        # GPU TARGET_VERIFY batches route to forward_extend but do not necessarily
+        # populate extend metadata. Ordinary decode and extend are supported; a
+        # reference-tested speculative verify path is required before enabling it.
+        if spec.speculative_algorithm is not None and not self.is_npu:
             raise NotImplementedError(
-                "MiniMax-M3 MSA attention does not support speculative decoding under "
-                "CUDA graph. Use --disable-cuda-graph, set SGLANG_DISABLE_MSA=1, or "
-                "disable speculative decoding."
+                "MiniMax-M3 sparse attention on GPU supports ordinary decode and "
+                "extend, but speculative decoding is unsupported: TARGET_VERIFY is "
+                "extend-shaped and may leave extend_seq_lens None, and the GPU "
+                "backend has no reference-tested verify path. Disable speculative "
+                "decoding; the NPU backend has a native TARGET_VERIFY path."
             )
         self._msa_owns_decode = self._use_msa_decode and not (
             self.use_dense_sparse_decode and self.kv_pool.main_pool.head_num == 1
