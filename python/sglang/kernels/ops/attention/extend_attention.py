@@ -878,7 +878,9 @@ def extend_attention_fwd(
     identity_kv_indices: bool = False,
 ):
     """
-    q_extend, k_extend, v_extend, o_extend: contiguous tensors
+    q_extend, k_extend, v_extend, o_extend: tensors with unit-stride last
+    dimensions. Token and head strides are passed to the Triton kernel, so
+    non-contiguous token/head views are supported.
 
     k_buffer, v_buffer: (prefix + extend) tensors in mem_manager
 
@@ -891,6 +893,23 @@ def extend_attention_fwd(
     ``identity_kv_indices`` promises that the prefix buffer is densely packed,
     allowing direct addressing instead of loading an index for every token.
     """
+    for name, tensor in (
+        ("q_extend", q_extend),
+        ("k_extend", k_extend),
+        ("v_extend", v_extend),
+        ("o_extend", o_extend),
+    ):
+        if tensor.stride(-1) != 1:
+            raise ValueError(
+                f"{name} must have unit stride in its last dimension; "
+                f"got stride {tensor.stride(-1)}"
+            )
+    if len({q_extend.dtype, k_extend.dtype, v_extend.dtype}) != 1:
+        raise ValueError(
+            "q_extend, k_extend, and v_extend must have the same dtype; "
+            f"got {q_extend.dtype}/{k_extend.dtype}/{v_extend.dtype}"
+        )
+
     Lq, Lk, Lv = (
         q_extend.shape[-1],
         k_extend.shape[-1],

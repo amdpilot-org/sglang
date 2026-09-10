@@ -1,0 +1,122 @@
+{
+  "campaign": "repo-e2e-20260909",
+  "scope": "Distinct execution-representation follow-up for extend_attention_fwd; not a repetition of amdpilot-org/sglang issue 223 or mirror PR 328",
+  "upstream_context": {
+    "repository": "sgl-project/sglang",
+    "issue": 36481,
+    "title": "SGLANG_RAGGED_VERIFY_MODE=compact crashes decode CUDA-graph capture in extend_attention_fwd",
+    "upstream_changes_made": false
+  },
+  "environment": {
+    "image": "amdpilotv2/open-job-mi300:jit-config-readable-35122-260909",
+    "local_image_id": "sha256:dfc9419089c338b5712da4841768b38b1ab79f3da41f8c58c3cd4dfcc1147ff1",
+    "python": "/opt/venv/bin/python",
+    "torch": "2.9.1+rocm7.2.0.git7e1940d4",
+    "torch_native_path": "/opt/venv/lib/python3.10/site-packages/torch/__init__.py",
+    "hip": "7.2.26015-fc0010cf6a",
+    "gpu": {
+      "name": "AMD Instinct MI300X",
+      "arch": "gfx942:sramecc+:xnack-",
+      "serial": "692440004372",
+      "driver": "6.19.14.31400000"
+    },
+    "cache_root": "/tmp/sglang-cache-j-d1b4f1034595"
+  },
+  "source_identity": {
+    "mirror_base_commit": "0084030179bfba86bfeb6d43f7997d4076329d2c",
+    "checkout_path": "/job/sglang",
+    "kernel_source": "/job/sglang/python/sglang/kernels/ops/attention/extend_attention.py",
+    "test_source": "/job/sglang/test/registered/attention/test_triton_attention_kernels.py",
+    "native_dispatch": {
+      "kernel": "_fwd_kernel",
+      "grid_for_timing_fixture": [
+        2,
+        2,
+        1
+      ],
+      "triton_cache_root": "/tmp/sglang-cache-j-d1b4f1034595/triton",
+      "native_artifact_suffix": "_fwd_kernel.hsaco"
+    }
+  },
+  "installed_source_baseline": {
+    "label": "installed-source baseline; not proof for later checkout changes",
+    "sglang_version": "0.5.18.dev20260826+g937af8538b",
+    "sglang_import_path": "/sgl-workspace/sglang/python/sglang",
+    "kernel_source_path": "/sgl-workspace/sglang/python/sglang/kernels/ops/attention/extend_attention.py",
+    "command": "/opt/venv/bin/python -m pytest -q /sgl-workspace/sglang/test/registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention -x --tb=short",
+    "reference": "extend_attention_fwd_torch independent Torch reference",
+    "numerical_gate": "torch.allclose rtol=1e-2 atol=1e-3",
+    "result": "1 passed",
+    "first_gpu_execution_elapsed_seconds": 54,
+    "timing_method": "date-based wall clock around one bounded pytest invocation, including Triton JIT and five head-dim cases",
+    "first_attempt_error": "/usr/bin/time is not installed; no GPU work ran in that attempt"
+  },
+  "representation_experiment": {
+    "supported_case": "token/head-strided q/k/v/o views with unit-stride last dimension",
+    "unsupported_cases": [
+      "last-dimension stride != 1",
+      "q/k/v dtype mismatch"
+    ],
+    "reference": "extend_attention_fwd_torch independent per-request/per-position softmax",
+    "sentinel": "-12345.0 in an extra head of each padded q/k/v/o storage",
+    "static_graph_address_check": "capture with the same strided views, mutate q storage, replay, compare to a fresh independent reference",
+    "new_numerical_gate": "torch.testing.assert_close rtol=1e-2 atol=2e-2 (established BF16 gate)",
+    "unchanged_numerical_gates": [
+      "test_extend_attention: rtol=1e-2 atol=1e-3",
+      "test_extend_attention_compact_grid: rtol=1e-2 atol=1e-3"
+    ]
+  },
+  "timing_matrix": {
+    "method": "time.perf_counter around one native dispatch plus torch.cuda.synchronize; one warmup then five bounded iterations per variant",
+    "shape": {
+      "batch_size": 2,
+      "extend_lens": [
+        3,
+        1
+      ],
+      "prefix_lens": [
+        2,
+        3
+      ],
+      "h_q": 2,
+      "h_kv": 1,
+      "head_dim": 64,
+      "dtype": "torch.bfloat16"
+    },
+    "contiguous": {
+      "strides": [
+        128,
+        64,
+        1
+      ],
+      "median_seconds": 0.000088803471351,
+      "min_seconds": 0.00008498411626,
+      "max_seconds": 0.000236578285694
+    },
+    "token_head_strided": {
+      "strides": [
+        64,
+        256,
+        1
+      ],
+      "median_seconds": 0.000081467442215,
+      "min_seconds": 0.000080257654200,
+      "max_seconds": 0.000092325732119
+    }
+  },
+  "validation": {
+    "commands": [
+      "PYTHONPATH=/job/sglang/python TRITON_CACHE_DIR=/tmp/sglang-cache-j-d1b4f1034595/triton TORCHINDUCTOR_CACHE_DIR=/tmp/sglang-cache-j-d1b4f1034595/torchinductor /opt/venv/bin/python -m pytest -q -s -p no:cacheprovider test/registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention test/registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention_compact_grid test/registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention_token_head_strided_layout --tb=short",
+      "PYTHONPATH=/job/sglang/python TRITON_CACHE_DIR=/tmp/sglang-cache-j-d1b4f1034595/triton TORCHINDUCTOR_CACHE_DIR=/tmp/sglang-cache-j-d1b4f1034595/torchinductor /opt/venv/bin/python -m pytest -q -s -p no:cacheprovider test/registered/attention/test_verify_shared_kv.py test/registered/attention/test_verify_splitkv.py --tb=short"
+    ],
+    "affected_result": "3 passed in 33.83 seconds; wall time 38 seconds",
+    "adjacent_result": "16 passed, 18 subtests passed in 41.93 seconds; wall time 45 seconds",
+    "final_focused_result": "1 passed in 18.24 seconds after formatting",
+    "precommit_result": "passed on all three changed files after one automatic ruff-format pass"
+  },
+  "limitations": [
+    "This is a tiny raw-kernel representation and graph-address check, not a full CUDA-graph runner or end-to-end DSpark serving claim.",
+    "The reported B300 illegal-memory-access trigger was not reproduced; gfx942 evidence only establishes the documented representation contract and bounded behavior on MI300X.",
+    "No model weights were downloaded, no node-wide state was modified, and no upstream issue, PR, or comment was changed."
+  ]
+}
