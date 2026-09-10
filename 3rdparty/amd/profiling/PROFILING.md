@@ -421,5 +421,30 @@ index 62d1ff9..6ecd78c 100644
 3. Modify the included server.sh by removing "loadTracer.sh" before python command and launch script ./server.sh in one terminal inside the docker container.
 
 4. Similar to step 6 in RPD profiling section, but remove the last 2 lines in client.sh, which converted rpd file into csv and json files. Run modified client.sh for PyTorch profiling.
+
+#### HIP graph replay attribution
+
+On ROCm, `torch.profiler` can record HIP graph-replay kernels without placing their
+timestamps under the CPU step markers that launched them. The kernels may instead be
+reported as a deferred burst after the last marker. This is a profiler attribution
+limitation, not evidence that the GPU executed all steps after the CPU markers.
+
+Use HIP events (or another synchronized timing method) when actual execution order
+matters. Record an event before and after each finite step, synchronize the end event
+before starting the next step, and use the event elapsed time for that step. Do not
+infer per-step GPU order from CPU marker intervals alone.
+
+For per-step and per-pass attribution on ROCm, run with `--disable-cuda-graph`. Eager
+traces can compare individual kernel durations, but they do not preserve graph-mode
+wall time or overlapping graph streams. PyTorch's in-trace graph annotation feature is
+CUDA-only and is not available on ROCm. A dispatch-level ROCm profiler is required for
+graph-node attribution, and the current SGLang PyTorch profiler path does not provide it.
+
+ROCm 7.2.0 roctracer can also partially drop graph-replay dispatch events. A small
+two-kernel graph is not a sufficient control: on MI300X (gfx942), a 64-node graph
+replayed eight times recorded 448 of 512 expected kernel events while eager execution
+recorded 512 of 512. Use a graph large enough to expose partial loss, and compare the
+recorded count with the launched count rather than checking only that the trace is
+non-empty.
 -------
 - [Torch Profiler](https://pytorch.org/tutorials/recipes/recipes/profiler_recipe.html)
