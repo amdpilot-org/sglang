@@ -7,6 +7,9 @@ import triton.language as tl
 from sglang.kernels.jit.utils import is_arch_support_pdl
 
 
+SUPPORTED_STATE_DTYPES = (torch.float32, torch.float16, torch.bfloat16)
+
+
 @triton.jit(do_not_specialize=["T"])
 def fused_sigmoid_gating_delta_rule_update_kernel(
     A_log,
@@ -388,6 +391,30 @@ def fused_sigmoid_gating_delta_rule_update(
     - target_verify: multi-step with intermediate state caching, optional tree attention,
                      and optional state update disable
     """
+    if initial_state_source is not None and (
+        initial_state_source.dtype not in SUPPORTED_STATE_DTYPES
+    ):
+        raise ValueError(
+            f"Unsupported initial state dtype {initial_state_source.dtype}; "
+            f"expected one of {SUPPORTED_STATE_DTYPES}"
+        )
+    if intermediate_states_buffer is not None:
+        if intermediate_states_buffer.dtype not in SUPPORTED_STATE_DTYPES:
+            raise ValueError(
+                f"Unsupported intermediate state dtype "
+                f"{intermediate_states_buffer.dtype}; "
+                f"expected one of {SUPPORTED_STATE_DTYPES}"
+            )
+        if (
+            initial_state_source is not None
+            and intermediate_states_buffer.dtype != initial_state_source.dtype
+        ):
+            raise ValueError(
+                "Initial and intermediate state dtypes must match: "
+                f"{initial_state_source.dtype} != "
+                f"{intermediate_states_buffer.dtype}"
+            )
+
     B, T, H, K, V = *k.shape, v.shape[-1]
     stride_q = q.stride()[1]
     stride_k = k.stride()[1]
