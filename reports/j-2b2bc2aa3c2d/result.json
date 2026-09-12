@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38710",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Corrected the ROCm model-adjustment diagnostics so DeepSeek/GLM and GPT-OSS only log that AITER all-reduce fusion is enabled when the resolved enable_aiter_allreduce_fusion value is true. The intentionally disabled auto-enable behavior remains unchanged because no capability evidence justified restoring it. Added a full-resolution regression over DeepseekV3ForCausalLM, the reported GlmMoeDsaForCausalLM architecture, and GptOssForCausalLM using enabled/disabled, DP-attention, and node-count decision inputs.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-2b2bc2aa3c2d/venv/bin/python -m pytest -q test/registered/unit/test_model_overrides.py::TestGoldenModelOverrides::test_aiter_allreduce_fusion_log_matches_resolved_flag (with the original log condition temporarily restored)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: both DeepseekV3ForCausalLM and GptOssForCausalLM logged enablement while the resolved fusion flag was false. Raw output: /job/artifacts/j-2b2bc2aa3c2d/regression-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2b2bc2aa3c2d/venv/bin/python -m pytest -q test/registered/unit/test_model_overrides.py::TestGoldenModelOverrides::test_aiter_allreduce_fusion_log_matches_resolved_flag",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after full argument-resolution regression: 12 subtests across DeepSeek V3, GLM MoE DSA, and GPT-OSS verified the resolved flag and matching log decision for disabled, enabled, DP-attention, and multi-node inputs. Raw output: /job/artifacts/j-2b2bc2aa3c2d/regression-after-final.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2b2bc2aa3c2d/venv/bin/python -m pytest -q test/registered/unit/test_model_overrides.py",
+      "exit_code": 1,
+      "what_was_measured": "Broader file result: 91 passed and 4 unrelated host-dependent tests failed because CUDA/SM100 expectations were evaluated on the prepared ROCm host. Raw output: /job/artifacts/j-2b2bc2aa3c2d/test-model-overrides.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-2b2bc2aa3c2d/venv/bin/python <single-GPU CPU-reference matmul check>",
+      "exit_code": 0,
+      "what_was_measured": "One MI350X (gfx950) executed a 128x128 by 128x64 float32 matmul; max absolute difference from an independently computed CPU result was 1.71661377e-05. This only confirms the assigned GPU environment, not distributed all-reduce. Raw output: /job/artifacts/j-2b2bc2aa3c2d/gpu-numerical.txt"
+    },
+    {
+      "command": "git diff --check && /tmp/amdpilot-repo-j-2b2bc2aa3c2d/venv/bin/python -m py_compile python/sglang/srt/arg_groups/model_hook.py test/registered/unit/test_model_overrides.py",
+      "exit_code": 0,
+      "what_was_measured": "Whitespace correctness and Python syntax for both changed source files."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2b2bc2aa3c2d/venv/bin/python -m ruff check python/sglang/srt/arg_groups/model_hook.py test/registered/unit/test_model_overrides.py",
+      "exit_code": 1,
+      "what_was_measured": "The prepared interpreter has no ruff module, so lint execution was unavailable. Raw output: /job/artifacts/j-2b2bc2aa3c2d/ruff.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A single-GPU numerical matmul ran on AMD Instinct MI350X gfx950 under Torch 2.11.0+rocm7.2 and matched an independently computed CPU reference. No distributed or AITER all-reduce execution was performed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one GPU was assigned, so multi-rank AITER fused all-reduce execution and performance were not validated.",
+    "The change corrects diagnostics and deliberately does not restore auto-enable; the existing TODO provides no supported-device/version capability contract that would justify broad automatic enablement.",
+    "The complete test_model_overrides.py file has four unrelated ROCm-host failures in CUDA/SM100-specific expectations; the focused regression passes.",
+    "No native code changed, and repository-environment.json specifies no prepared native component, so no native rebuild was applicable."
+  ],
+  "artifacts": {
+    "raw_output_directory": "/job/artifacts/j-2b2bc2aa3c2d",
+    "source_paths": [
+      "/job/repo/python/sglang/srt/arg_groups/model_hook.py",
+      "/job/repo/test/registered/unit/test_model_overrides.py"
+    ],
+    "native_paths": []
+  }
+}
