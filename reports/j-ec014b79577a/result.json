@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32475",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "Independently reproduced the original token-versus-page metric mismatch on the recorded base and verified exact candidate d1822c9272066f86263a87de1c8f7bfb39abce3e. The candidate passes page_size from the scheduler's sole production constructor call site and computes both block metrics from max_total_num_tokens // page_size. The reported example, candidate regression, adjacent tests, and six independent boundary cases pass. This is a full production fix with regression coverage, not test-only hardening or an unverified claim.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ec014b79577a/venv/bin/python -c '<independent direct emit_kv_metrics reproduction>' (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "The checked-out source module emitted kv_total_blocks=8192 and kv_active_blocks=4096 for max_total_num_tokens=8192 and token_usage=0.5, versus independent page_size=16 references of 512 and 256."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ec014b79577a/venv/bin/python -m pytest -q test/registered/unit/managers/scheduler_components/test_kv_events_publisher.py (candidate d1822c9272066f86263a87de1c8f7bfb39abce3e)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression passed: 1 test and 4 subtests covering the reported page_size=16 case, page_size=1 compatibility, zero usage, and a partial trailing page."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ec014b79577a/venv/bin/python -c '<six independent metric cases>' (candidate d1822c9272066f86263a87de1c8f7bfb39abce3e)",
+      "exit_code": 0,
+      "what_was_measured": "All six independent references matched, including 8192/16 at 50%, page_size=1, non-divisible capacities, capacity smaller than page size, fractional usage truncation, and page_size=32."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ec014b79577a/venv/bin/python -m pytest -q test/registered/unit/managers/scheduler_components/test_output_sender.py test/registered/unit/disaggregation/test_kv_events.py",
+      "exit_code": 0,
+      "what_was_measured": "Adjacent coverage passed: 16 tests and 22 subtests."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ec014b79577a/venv/bin/python -m py_compile python/sglang/srt/managers/scheduler.py python/sglang/srt/managers/scheduler_components/kv_events_publisher.py test/registered/unit/managers/scheduler_components/test_kv_events_publisher.py",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python source and test files compiled."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..d1822c9272066f86263a87de1c8f7bfb39abce3e",
+      "exit_code": 2,
+      "what_was_measured": "The candidate's committed raw pytest logs contain trailing whitespace, contrary to its PR prose; production and test source were not implicated."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "rocminfo and rocm-smi identify the assigned single GPU as AMD Instinct MI355X gfx950. GPU execution was not used because the original contract is CPU-side metric arithmetic and message construction; no unrelated GPU smoke is presented as proof."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No full serving/model or multi-node run was performed; weights, semantic accuracy, transport, and distributed behavior are outside this arithmetic metric defect.",
+    "No C++/HIP/native files changed and repository-environment.json reports native=null, so no native rebuild was applicable.",
+    "The candidate's complete diff fails git diff --check only in retained raw pytest logs; this is a non-functional evidence-formatting issue."
+  ]
+}
