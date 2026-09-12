@@ -114,10 +114,12 @@ def _get_dcp_extend_metadata(forward_batch: ForwardBatch):
     live_seq_lens_cpu = getattr(forward_batch.spec_info, "live_seq_lens_cpu", None)
     if live_seq_lens_cpu is not None:
         prefix_lens_cpu = live_seq_lens_cpu.tolist()
-    elif forward_batch.seq_lens_cpu is None:
-        prefix_lens_cpu = prefix_lens.tolist()
     else:
-        prefix_lens_cpu = forward_batch.seq_lens_cpu.tolist()
+        # run_non_compact may snapshot draft_input.nxt_kv_lens_cpu into the
+        # ForwardBatch host mirror after live_seq_lens_cpu was captured as
+        # None.  Those values already include the verify block, so using them
+        # here would disagree with the committed prefix tensor above.
+        prefix_lens_cpu = prefix_lens.tolist()
 
     return (
         seq_lens,

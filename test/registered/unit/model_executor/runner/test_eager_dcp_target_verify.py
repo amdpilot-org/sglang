@@ -54,11 +54,13 @@ def test_dcp_target_verify_derives_prefix_and_verify_geometry(device):
     assert seq_lens_sum == 48
 
 
-def test_dcp_target_verify_uses_forward_cpu_mirror_without_live_lengths():
+def test_dcp_target_verify_uses_committed_prefix_without_live_lengths():
     prefix = torch.tensor([3], dtype=torch.int32)
     batch = _target_verify_batch(
         seq_lens=prefix,
-        seq_lens_cpu=torch.tensor([3], dtype=torch.int32),
+        # run_non_compact can install nxt_kv_lens_cpu here after capturing a
+        # missing live host mirror.  This is an expanded total, not a prefix.
+        seq_lens_cpu=torch.tensor([10], dtype=torch.int32),
         live_seq_lens_cpu=None,
     )
 

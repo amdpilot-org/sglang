@@ -1,0 +1,52 @@
+Prepared base: 358c163250ad3b1f62939b01ce1314a0a31a0365
+Candidate PR: https://github.com/amdpilot-org/sglang/pull/1523
+Candidate commit reproduced: dc8a878577b35c207a96d45ad671584be75f925b
+Independent review PR: https://github.com/amdpilot-org/sglang/pull/1589
+
+Original planner failure, executed on the assigned GPU (exit 1):
+  torch=2.11.0+rocm7.2, HIP=7.2.26015
+  GPU=AMD Instinct MI350X, capability=(9, 5) / gfx950
+  prepare_decode_context_parallel_metadata(... extend_prefix_lens=None ...)
+  TypeError at python/sglang/srt/layers/dcp/planner.py:64 because
+  torch.cumsum received NoneType.
+
+Independent exact-candidate counterexample (exit 1):
+  input committed GPU prefix: [3]
+  input expanded ForwardBatch.seq_lens_cpu total: [10]
+  draft_token_num: 7
+  candidate output seq_lens: [10]
+  candidate output prefix GPU: [3]
+  candidate output prefix CPU: [10]
+  candidate output extend: [7]
+  candidate output total: 10
+  AssertionError: expanded total host lengths were returned as CPU prefixes
+
+Corrected focused pytest (exit 0):
+  /tmp/amdpilot-repo-j-554d79e58c5c/venv/bin/python -m pytest -q \
+    test/registered/unit/model_executor/runner/test_eager_dcp_target_verify.py
+  5 passed, 17 warnings in 13.34s
+  The parameterized CUDA case ran on ROCm; no test was skipped.
+
+Focused pre-commit checks (exit 0):
+  /tmp/amdpilot-repo-j-554d79e58c5c/venv/bin/python -m pre_commit run --files
+  against the changed source, regression test, and report files.
+  All applicable hooks passed.
+
+Corrected independent GPU planner case (exit 0):
+  input committed GPU prefix: [3]
+  input expanded ForwardBatch.seq_lens_cpu total: [10]
+  corrected output seq_lens: [10]
+  corrected output prefix GPU: [3]
+  corrected output prefix CPU: [3]
+  corrected output extend: [7]
+  corrected output total: 10
+  actual planner KV buffer shape: [10, 1]
+  actual planner prefix sum: 3
+  Index-generation kernels were replaced with no-op test doubles to isolate the
+  metadata handoff; tensor construction and planner allocation ran on gfx950.
+
+Limitations:
+  Kimi K3 weights were unavailable. The assigned environment has one gfx950,
+  not the reported two-node/eight-B300-per-side setup. This does not validate
+  Mooncake PD disaggregation, TP/EP/DCP 8, the Kimi K3 architecture, or model
+  semantic accuracy. No native source changed, so no native rebuild was needed.

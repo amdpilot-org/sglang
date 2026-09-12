@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34920",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1622",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1523",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/1589",
+  "candidate_commit": "dc8a878577b35c207a96d45ad671584be75f925b",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved the candidate's DCP-local target-verify geometry fix and corrected its remaining DSpark fallback inconsistency: when live_seq_lens_cpu is absent, the committed GPU seq_lens tensor now supplies CPU prefix lengths instead of a ForwardBatch host mirror that may already contain nxt_kv_lens_cpu expanded totals.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-554d79e58c5c/venv/bin/python direct call to prepare_decode_context_parallel_metadata with extend_prefix_lens=None on gfx950",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced the original TypeError at the actual planner torch.cumsum call before applying normalized target-verify metadata."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-554d79e58c5c/venv/bin/python independent exact-candidate _get_dcp_extend_metadata assertion",
+      "exit_code": 1,
+      "what_was_measured": "At candidate dc8a878577b35c207a96d45ad671584be75f925b, committed prefix [3], absent live host lengths, and expanded seq_lens_cpu [10] produced inconsistent CPU prefix [10]."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-554d79e58c5c/venv/bin/python -m pytest -q test/registered/unit/model_executor/runner/test_eager_dcp_target_verify.py",
+      "exit_code": 0,
+      "what_was_measured": "Five corrected regression and boundary cases passed, including the ROCm CUDA-device parameter and the expanded-host-total fallback."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-554d79e58c5c/venv/bin/python independent corrected helper plus actual DCP planner call on gfx950",
+      "exit_code": 0,
+      "what_was_measured": "Corrected fallback produced total [10], matching GPU/CPU prefixes [3], extend [7], a [10, 1] planner KV buffer, and prefix sum 3; index kernels were mocked to isolate metadata."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-554d79e58c5c/venv/bin/python -m pre_commit run --files python/sglang/srt/model_executor/runner/eager_runner.py test/registered/unit/model_executor/runner/test_eager_dcp_target_verify.py reports/j-554d79e58c5c/result.json reports/j-554d79e58c5c/evidence.txt",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, repository policy, and registered-test validation hooks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X (gfx950), Torch 2.11.0+rocm7.2 and HIP 7.2.26015; regression CUDA tensors and the real DCP planner allocation executed on the GPU."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Kimi K3 weights were unavailable, so no full model-serving reproduction or semantic validation was performed.",
+    "One gfx950 GPU was available rather than the reported two-node, eight-B300-per-side topology.",
+    "Mooncake PD disaggregation and TP/EP/DCP 8 were not exercised.",
+    "The focused GPU planner check mocked index-generation kernels to isolate the sequence-metadata handoff."
+  ]
+}
