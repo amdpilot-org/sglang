@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35582",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "1fefcc22ba785ac966c77bef6c7a9a93a4b3fae4",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate prevents the common one-image plus one contiguous literal-marker request from reaching the legacy loader mismatch, and text-only input remains unchanged. It does not preserve exact ordinary user/tool text in mixed requests: the escaped re-render is the prompt that is encoded for the model. More importantly, a literal marker split across adjacent user text parts is reassembled by the chat template after the per-part neutralization, producing two complete markers for one attachment and reproducing the original empty-detail RuntimeError. The candidate regression passes because it inspects the discarded first render rather than asserting the encoded model input and does not test cross-part marker assembly.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-2798488beb51/venv/bin/python /job/review-evidence-j-2798488beb51/reproduce_loader.py",
+      "exit_code": 1,
+      "what_was_measured": "On recorded base 358c163, one real image marker plus one literal complete marker enters legacy_load_mm_data and raises RuntimeError('An exception occurred while loading multimodal data: '); a one-marker control loads exactly one 1x1 PNG."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2798488beb51/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py -k 'qwen_vl or malformed_image_references'",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit 1fefcc22, candidate-selected regression tests: 4 passed, 9 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2798488beb51/venv/bin/python /job/review-evidence-j-2798488beb51/candidate_adversarial.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, the encoded mixed user and tool prompts contain escaped rather than exact literal content. A marker split across adjacent text parts yields two complete markers for one image and the legacy loader raises the same empty-detail RuntimeError."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2798488beb51/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, the full serving_chat unit file passed: 139 tests and 77 subtests."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-2798488beb51/venv/bin/python [deterministic 64x64 torch matmul check]",
+      "exit_code": 0,
+      "what_was_measured": "One AMD Instinct MI350X was visible under torch 2.11.0+rocm7.2 / HIP 7.2.26015; GPU versus CPU max absolute error was 7.62939453125e-06 and allclose was true. This establishes GPU availability only, not Qwen-VL serving correctness."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A deterministic torch matrix multiplication ran on the assigned AMD Instinct MI350X. No Qwen3.8-27B weights were available, so no model-serving inference was run."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With one real image, splitting <|vision_start|><|image_pad|><|vision_end|> across two adjacent user text parts bypasses per-part neutralization; template concatenation recreates the full marker and legacy_load_mm_data still raises the original empty-detail RuntimeError.",
+    "In mixed image plus user text, the exact literal special-token spelling is replaced with spaced spellings in the prompt encoded for the model.",
+    "In mixed image plus tool-result text, the exact literal special-token spelling is replaced with spaced spellings in the prompt encoded for the model."
+  ],
+  "remaining_limitations": [
+    "Qwen3.8-27B weights and a qualified Qwen-VL runtime were unavailable, so full OpenAI HTTP serving and semantic inference were not verified.",
+    "The deterministic tiny Llama fixture was not used because it cannot qualify Qwen-VL prompt rendering or multimodal processing.",
+    "No C/C++/CUDA/HIP/native files differ between the recorded base and candidate, so a native rebuild was not applicable.",
+    "The parser and loader paths were exercised with the repository implementation and a real decoded 1x1 PNG; model architecture behavior beyond these boundaries remains unverified."
+  ]
+}
