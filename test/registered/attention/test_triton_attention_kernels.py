@@ -40,6 +40,7 @@ def extend_attention_fwd_torch(
     kv_indptr: torch.Tensor,  # [B+1]
     kv_indices: torch.Tensor,  # [prefix_tokens]
     sliding_window_size: int,
+    image_spans=None,
 ):
     B = qo_indptr.size(0) - 1
     _, H_Q, D = q.shape
@@ -91,6 +92,14 @@ def extend_attention_fwd_torch(
         else:
             start = torch.zeros_like(t)
         window_mask = pos_keys.unsqueeze(0) >= start.unsqueeze(1)
+
+        if image_spans is not None:
+            same_image_mask = torch.zeros_like(causal_mask)
+            for image_begin, image_end in image_spans[i]:
+                q_in_image = (t >= image_begin) & (t < image_end)
+                k_in_image = (pos_keys >= image_begin) & (pos_keys < image_end)
+                same_image_mask |= q_in_image.unsqueeze(1) & k_in_image.unsqueeze(0)
+            causal_mask |= same_image_mask
 
         final_mask = causal_mask & window_mask
 
@@ -319,6 +328,143 @@ class TestTritonAttention(CustomTestCase):
         # Loop through the values and call the method
         for value in attention_values:
             self._test_extend_attention_once(19, 12331, 12, 4, value)
+
+    def test_extend_attention_image_spans(self):
+        """Image spans match an independent dense reference in both kernels."""
+        device = get_device()
+        dtype = torch.float16
+        batch_size, num_q_heads, num_kv_heads, head_dim = 2, 4, 2, 64
+        prefix_lens = torch.tensor([16, 32], dtype=torch.int32, device=device)
+        extend_lens = torch.tensor([384, 320], dtype=torch.int32, device=device)
+        seq_lens = prefix_lens + extend_lens
+        seq_start = torch.zeros(batch_size, dtype=torch.int32, device=device)
+        seq_start[1:] = torch.cumsum(seq_lens[:-1], dim=0)
+        qo_indptr = torch.zeros(batch_size + 1, dtype=torch.int32, device=device)
+        qo_indptr[1:] = torch.cumsum(extend_lens, dim=0)
+        kv_indptr = torch.zeros(batch_size + 1, dtype=torch.int32, device=device)
+        kv_indptr[1:] = torch.cumsum(prefix_lens, dim=0)
+
+        total_tokens = int(seq_lens.sum().item())
+        extend_tokens = int(extend_lens.sum().item())
+        torch.manual_seed(1)
+        k_buffer = torch.randn(
+            total_tokens, num_kv_heads, head_dim, dtype=dtype, device=device
+        )
+        v_buffer = torch.randn_like(k_buffer)
+        q_extend = torch.randn(
+            extend_tokens, num_q_heads, head_dim, dtype=dtype, device=device
+        )
+        k_extend = torch.empty(
+            extend_tokens, num_kv_heads, head_dim, dtype=dtype, device=device
+        )
+        v_extend = torch.empty_like(k_extend)
+        kv_indices = torch.empty(
+            int(prefix_lens.sum().item()), dtype=torch.int64, device=device
+        )
+        extend_kv_indices = torch.empty(extend_tokens, dtype=torch.int64, device=device)
+
+        for i in range(batch_size):
+            q_start = int(qo_indptr[i].item())
+            q_end = int(qo_indptr[i + 1].item())
+            physical_start = int(seq_start[i].item())
+            prefix_len = int(prefix_lens[i].item())
+            extend_len = int(extend_lens[i].item())
+            physical_extend_start = physical_start + prefix_len
+            physical_extend_end = physical_extend_start + extend_len
+            k_extend[q_start:q_end] = k_buffer[
+                physical_extend_start:physical_extend_end
+            ]
+            v_extend[q_start:q_end] = v_buffer[
+                physical_extend_start:physical_extend_end
+            ]
+            kv_indices[kv_indptr[i] : kv_indptr[i + 1]] = torch.arange(
+                physical_start,
+                physical_extend_start,
+                dtype=torch.int64,
+                device=device,
+            )
+            extend_kv_indices[q_start:q_end] = torch.arange(
+                physical_extend_start,
+                physical_extend_end,
+                dtype=torch.int64,
+                device=device,
+            )
+
+        # Covers multiple requests/images, a span crossing query blocks, and a
+        # span ending at the final token of a request.
+        image_spans = [[(80, 304), (340, 400)], [(64, 352)]]
+        image_span_indptr = torch.tensor([0, 2, 3], dtype=torch.int64, device=device)
+        image_span_begin = torch.tensor([80, 340, 64], dtype=torch.int64, device=device)
+        image_span_end = torch.tensor([304, 400, 352], dtype=torch.int64, device=device)
+
+        expected = torch.empty_like(q_extend)
+        extend_attention_fwd_torch(
+            q_extend,
+            k_extend,
+            v_extend,
+            expected,
+            k_buffer,
+            v_buffer,
+            qo_indptr,
+            kv_indptr,
+            kv_indices,
+            sliding_window_size=-1,
+            image_spans=image_spans,
+        )
+
+        actual = torch.empty_like(q_extend)
+        extend_attention_fwd(
+            q_extend,
+            k_extend,
+            v_extend,
+            actual,
+            k_buffer,
+            v_buffer,
+            qo_indptr,
+            kv_indptr,
+            kv_indices,
+            custom_mask=None,
+            is_causal=True,
+            mask_indptr=None,
+            max_len_extend=int(extend_lens.max().item()),
+            k_scale=1.0,
+            v_scale=1.0,
+            image_span_indptr=image_span_indptr,
+            image_span_begin=image_span_begin,
+            image_span_end=image_span_end,
+        )
+
+        extend_start_loc = qo_indptr[:-1]
+        unified_kv_indptr, unified_kv_indices, unified_prefix_lens = (
+            build_unified_kv_indices(
+                kv_indptr,
+                kv_indices,
+                extend_start_loc,
+                extend_lens,
+                extend_kv_indices,
+                batch_size,
+            )
+        )
+        actual_unified = torch.empty_like(q_extend)
+        extend_attention_fwd_unified(
+            q_extend,
+            actual_unified,
+            k_buffer,
+            v_buffer,
+            1.0,
+            1.0,
+            qo_indptr,
+            unified_kv_indptr,
+            unified_kv_indices,
+            unified_prefix_lens,
+            max_len_extend=int(extend_lens.max().item()),
+            image_span_indptr=image_span_indptr,
+            image_span_begin=image_span_begin,
+            image_span_end=image_span_end,
+        )
+
+        torch.testing.assert_close(actual, expected, rtol=0.03, atol=0.03)
+        torch.testing.assert_close(actual_unified, expected, rtol=0.03, atol=0.03)
 
     def test_extend_attention_block_sizes(self):
         from sglang.kernels.ops.attention import extend_attention as ea

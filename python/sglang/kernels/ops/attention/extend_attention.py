@@ -337,6 +337,9 @@ def _fwd_kernel(
     kv_indices,
     mask_ptr,
     mask_indptr,
+    image_span_indptr,
+    image_span_begin,
+    image_span_end,
     sink_ptr,
     window_kv_offset_ptr,
     sm_scale,
@@ -375,6 +378,7 @@ def _fwd_kernel(
     BLOCK_N: tl.constexpr,
     BLOCK_N_PREFIX: tl.constexpr,
     USE_CUSTOM_MASK: tl.constexpr,
+    USE_IMAGE_SPANS: tl.constexpr,
     IS_CAUSAL: tl.constexpr,
     SKIP_PREFIX_CUSTOM_MASK: tl.constexpr,
     STORE_LSE: tl.constexpr,
@@ -439,6 +443,9 @@ def _fwd_kernel(
 
     if USE_CUSTOM_MASK:
         cur_seq_mask_start_idx = tl.load(mask_indptr + cur_seq)
+    if USE_IMAGE_SPANS:
+        cur_seq_image_span_start = tl.load(image_span_indptr + cur_seq)
+        cur_seq_image_span_end = tl.load(image_span_indptr + cur_seq + 1)
 
     # For SWA, we should only load the mask in the sliding window
     window_kv_offset = 0
@@ -449,6 +456,17 @@ def _fwd_kernel(
     offs_dv = tl.arange(0, BLOCK_DV)
     offs_m = tl.arange(0, BLOCK_M)
     mask_m = (cur_block_m * BLOCK_M + offs_m) < cur_seq_len_extend
+
+    if USE_IMAGE_SPANS:
+        q_pos = cur_seq_len_prefix + cur_block_m * BLOCK_M + offs_m
+        q_image_begin = tl.full([BLOCK_M], -1, dtype=tl.int32)
+        q_image_end = tl.full([BLOCK_M], -1, dtype=tl.int32)
+        for span_idx in range(cur_seq_image_span_start, cur_seq_image_span_end):
+            span_begin = tl.load(image_span_begin + span_idx).to(tl.int32)
+            span_end = tl.load(image_span_end + span_idx).to(tl.int32)
+            q_in_image = (q_pos >= span_begin) & (q_pos < span_end)
+            q_image_begin = tl.where(q_in_image, span_begin, q_image_begin)
+            q_image_end = tl.where(q_in_image, span_end, q_image_end)
 
     mask_d = offs_d < Lq
     mask_dv = offs_dv < Lv
@@ -671,6 +689,11 @@ def _fwd_kernel(
         if not IS_CAUSAL
         else tl.minimum(cur_seq_len_extend, (cur_block_m + 1) * BLOCK_M)
     )
+    if IS_CAUSAL and USE_IMAGE_SPANS:
+        cur_block_m_end = tl.maximum(
+            cur_block_m_end, tl.max(q_image_end, axis=0) - cur_seq_len_prefix
+        )
+        cur_block_m_end = tl.minimum(cur_block_m_end, cur_seq_len_extend)
     extend_end = 0 if SKIP_EXTEND else cur_block_m_end
     for start_n in range(0, extend_end, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
@@ -693,11 +716,19 @@ def _fwd_kernel(
             custom_mask &= mask_m[:, None] & mask_n[None, :]
             final_mask &= custom_mask
         elif IS_CAUSAL:
-            mask_causual = (cur_block_m * BLOCK_M + offs_m[:, None]) >= (
+            causal_mask = (cur_block_m * BLOCK_M + offs_m[:, None]) >= (
                 start_n + offs_n[None, :]
             )
-            mask_causual &= mask_m[:, None] & mask_n[None, :]
-            final_mask &= mask_causual
+            if USE_IMAGE_SPANS:
+                k_pos = cur_seq_len_prefix + start_n + offs_n[None, :]
+                same_image = (
+                    (q_image_begin[:, None] >= 0)
+                    & (k_pos >= q_image_begin[:, None])
+                    & (k_pos < q_image_end[:, None])
+                )
+                causal_mask |= same_image
+            causal_mask &= mask_m[:, None] & mask_n[None, :]
+            final_mask &= causal_mask
         else:
             mask_non_causal = mask_m[:, None] & mask_n[None, :]
             final_mask &= mask_non_causal
@@ -710,7 +741,7 @@ def _fwd_kernel(
             final_mask &= window_mask
 
         SKIP_TILE = False
-        if USE_CUSTOM_MASK or SLIDING_WINDOW_SIZE > 0:
+        if USE_CUSTOM_MASK or USE_IMAGE_SPANS or SLIDING_WINDOW_SIZE > 0:
             SKIP_TILE = tl.max(tl.max(final_mask.to(tl.int32), axis=1), axis=0) == 0
 
         if not SKIP_TILE:
@@ -876,6 +907,9 @@ def extend_attention_fwd(
     aux_tensors=None,
     extend_seq_lens_cpu=None,
     identity_kv_indices: bool = False,
+    image_span_indptr=None,
+    image_span_begin=None,
+    image_span_end=None,
 ):
     """
     q_extend, k_extend, v_extend, o_extend: contiguous tensors
@@ -947,6 +981,12 @@ def extend_attention_fwd(
     )
 
     USE_CUSTOM_MASK = custom_mask is not None
+    USE_IMAGE_SPANS = image_span_indptr is not None
+    assert not (
+        USE_CUSTOM_MASK and USE_IMAGE_SPANS
+    ), "custom_mask and image spans are mutually exclusive"
+    assert USE_IMAGE_SPANS == (image_span_begin is not None)
+    assert USE_IMAGE_SPANS == (image_span_end is not None)
     # Skip custom mask for prefix part
     SKIP_PREFIX_CUSTOM_MASK = skip_prefix_custom_mask
 
@@ -1037,6 +1077,9 @@ def extend_attention_fwd(
         kv_indices,
         custom_mask,
         mask_indptr,
+        image_span_indptr,
+        image_span_begin,
+        image_span_end,
         sinks,
         window_kv_offsets,
         sm_scale,
@@ -1074,6 +1117,7 @@ def extend_attention_fwd(
         Lq=Lq,
         Lv=Lv,
         USE_CUSTOM_MASK=USE_CUSTOM_MASK,
+        USE_IMAGE_SPANS=USE_IMAGE_SPANS,
         IS_CAUSAL=is_causal,
         SKIP_PREFIX_CUSTOM_MASK=SKIP_PREFIX_CUSTOM_MASK,
         STORE_LSE=STORE_LSE,
@@ -1149,6 +1193,9 @@ def _fwd_kernel_unified(
     prefix_lens,
     mask_ptr,
     mask_indptr,
+    image_span_indptr,
+    image_span_begin,
+    image_span_end,
     sink_ptr,
     window_start_pos,
     sm_scale_withk,
@@ -1179,6 +1226,7 @@ def _fwd_kernel_unified(
     BLOCK_N: tl.constexpr,
     IS_CAUSAL: tl.constexpr,
     USE_CUSTOM_MASK: tl.constexpr,
+    USE_IMAGE_SPANS: tl.constexpr,
     HAS_SINK: tl.constexpr,
     IS_GFX1250: tl.constexpr = False,
     PAGE_SIZE: tl.constexpr = 1,
@@ -1217,11 +1265,24 @@ def _fwd_kernel_unified(
     # Load custom mask start index if using custom mask (for speculative decoding)
     if USE_CUSTOM_MASK:
         cur_seq_mask_start_idx = tl.load(mask_indptr + cur_seq)
+    if USE_IMAGE_SPANS:
+        cur_seq_image_span_start = tl.load(image_span_indptr + cur_seq)
+        cur_seq_image_span_end = tl.load(image_span_indptr + cur_seq + 1)
 
     offs_d = tl.arange(0, BLOCK_DMODEL)
     offs_dv = tl.arange(0, BLOCK_DV)
     offs_m = tl.arange(0, BLOCK_M)
     mask_m = (cur_block_m * BLOCK_M + offs_m) < cur_seq_q_len
+    if USE_IMAGE_SPANS:
+        q_pos = cur_window_start + cur_seq_prefix_len + cur_block_m * BLOCK_M + offs_m
+        q_image_begin = tl.full([BLOCK_M], -1, dtype=tl.int32)
+        q_image_end = tl.full([BLOCK_M], -1, dtype=tl.int32)
+        for span_idx in range(cur_seq_image_span_start, cur_seq_image_span_end):
+            span_begin = tl.load(image_span_begin + span_idx).to(tl.int32)
+            span_end = tl.load(image_span_end + span_idx).to(tl.int32)
+            q_in_image = (q_pos >= span_begin) & (q_pos < span_end)
+            q_image_begin = tl.where(q_in_image, span_begin, q_image_begin)
+            q_image_end = tl.where(q_in_image, span_end, q_image_end)
     mask_d = offs_d < Lq
     mask_dv = offs_dv < Lv
 
@@ -1294,6 +1355,14 @@ def _fwd_kernel_unified(
                 q_idx >= k_idx_in_extend,
                 True,  # No causal mask for prefix
             )
+            if USE_IMAGE_SPANS:
+                k_pos = cur_window_start + k_idx_in_total
+                same_image = (
+                    (q_image_begin[:, None] >= 0)
+                    & (k_pos >= q_image_begin[:, None])
+                    & (k_pos < q_image_end[:, None])
+                )
+                causal_mask |= same_image
             final_mask &= causal_mask
 
         if SLIDING_WINDOW_SIZE > 0:
@@ -1315,7 +1384,7 @@ def _fwd_kernel_unified(
 
         # Check if we can skip this tile
         SKIP_TILE = False
-        if USE_CUSTOM_MASK or SLIDING_WINDOW_SIZE > 0:
+        if USE_CUSTOM_MASK or USE_IMAGE_SPANS or SLIDING_WINDOW_SIZE > 0:
             SKIP_TILE = tl.max(tl.max(final_mask.to(tl.int32), axis=1), axis=0) == 0
 
         if not SKIP_TILE:
@@ -1489,6 +1558,9 @@ def extend_attention_fwd_unified(
     page_size: int = 1,
     score_mod=None,
     aux_tensors=None,
+    image_span_indptr=None,
+    image_span_begin=None,
+    image_span_end=None,
 ):
     """
     Unified 1-stage extend attention for deterministic inference.
@@ -1528,6 +1600,12 @@ def extend_attention_fwd_unified(
     kv_group_num = q.shape[1] // kv_head_num
 
     USE_CUSTOM_MASK = custom_mask is not None
+    USE_IMAGE_SPANS = image_span_indptr is not None
+    assert not (
+        USE_CUSTOM_MASK and USE_IMAGE_SPANS
+    ), "custom_mask and image spans are mutually exclusive"
+    assert USE_IMAGE_SPANS == (image_span_begin is not None)
+    assert USE_IMAGE_SPANS == (image_span_end is not None)
     HAS_SINK = sinks is not None
 
     # For sliding window attention, window_start_pos tracks the absolute position
@@ -1565,6 +1643,9 @@ def extend_attention_fwd_unified(
         prefix_lens,
         custom_mask,
         mask_indptr,
+        image_span_indptr,
+        image_span_begin,
+        image_span_end,
         sinks,
         window_start_pos,
         sm_scale * k_scale,
@@ -1594,6 +1675,7 @@ def extend_attention_fwd_unified(
         Lv=Lv,
         IS_CAUSAL=is_causal,
         USE_CUSTOM_MASK=USE_CUSTOM_MASK,
+        USE_IMAGE_SPANS=USE_IMAGE_SPANS,
         HAS_SINK=HAS_SINK,
         IS_GFX1250=_is_gfx1250,
         PAGE_SIZE=page_size,
