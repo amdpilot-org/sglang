@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33577",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1875",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1834",
+  "candidate_commit": "8bc9359ab72a5f79dc605345ea16be01c8c58472",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a narrow, source-level fix for both reported defects. On the exact base, its regression fails for the disabled-pynccl eager path and for missing pre-profile symmetric allocation; at the exact candidate commit it passes with the existing DCP layout suite. Independent cases confirmed communicator state restoration on transport exceptions and correct early-call arguments for disabled symmetric memory and draft workers. Acceptance is recommended on code and regression evidence, while full resolution of the original CUDA/NCCL TP=8/DCP=8 concurrency-64 incident remains unverified on the assigned single AMD GPU.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-2fb145fcb246/venv/bin/python -m pytest -q /job/review-evidence/base/test_dcp_a2a_and_symm_mem_init.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before control flow: 2 failed, 2 passed. Disabled pynccl fell through to torch.distributed and pre-profile symmetric reservation was absent."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2fb145fcb246/venv/bin/python -m pytest -q test/registered/unit/test_dcp_a2a_and_symm_mem_init.py test/registered/dcp/test_dcp_layout_unit.py (candidate 8bc9359ab72a5f79dc605345ea16be01c8c58472)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and existing DCP layout coverage: 21 passed and 18 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2fb145fcb246/venv/bin/python -m pytest -q /job/review-evidence/independent/test_candidate_boundaries.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Four independent adversarial cases passed: old enabled/disabled state is restored after a pynccl transport exception, and early reservation receives the correct disabled-feature and draft-worker guards before profiling."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2fb145fcb246/venv/bin/python -m compileall -q python/sglang/srt/distributed/parallel_state.py python/sglang/srt/model_executor/model_runner.py python/sglang/srt/model_executor/model_runner_components/cuda_graph_setup.py test/registered/unit/test_dcp_a2a_and_symm_mem_init.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python source and the regression compile successfully."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2fb145fcb246/venv/bin/python < import and GPU numerical probe (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Imports resolved to /job/repo/python/sglang; torch 2.11.0+rocm7.2 reported one AMD Instinct MI350X, capability (9, 5), and GPU sum-of-squares 10416 matched an independent CPU reference."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "A simple numerical probe executed on the sole assigned AMD Instinct MI350X (gfx950) and matched the CPU reference. It did not exercise multi-rank DCP or CUDA/NCCL.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The exact TP=8/DCP=8, concurrency-64 eager-decode workload on CUDA with NCCL 2.27.7 was not executable on the single-GPU ROCm host, so the reported pyncclGroupEnd crash is not end-to-end disproved.",
+    "The 4 GiB symmetric-memory allocation and real KV-cache budget were not exercised with the reporter's model weights, so startup OOM avoidance is established by ordering/control-flow evidence rather than a full model launch."
+  ],
+  "remaining_limitations": [
+    "Only one AMD Instinct MI350X (gfx950) was available; the report requires eight CUDA GPUs.",
+    "The environment uses ROCm 7.2/RCCL rather than CUDA/NCCL 2.27.7.",
+    "No model weights were available, and no semantic, full-serving, or multi-node claim is made.",
+    "The candidate changes Python only; no native library changed, so no native rebuild was applicable."
+  ]
+}
