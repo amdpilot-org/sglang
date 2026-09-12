@@ -160,6 +160,104 @@ def test_strict_schema_accepts_native_xtml_values():
     )
 
 
+def test_strict_nested_additional_properties_preserve_named_property_schema():
+    case_schema = {
+        "type": "object",
+        "properties": {"data": {"type": "integer"}},
+        "additionalProperties": {
+            "type": "object",
+            "properties": {"data": {"type": "string"}},
+            "additionalProperties": True,
+        },
+    }
+    tool = Tool(
+        type="function",
+        function=Function(
+            name="case",
+            strict=True,
+            parameters={
+                "type": "object",
+                "required": ["value"],
+                "additionalProperties": False,
+                "properties": {"value": case_schema},
+            },
+        ),
+    )
+    grammar = _grammar([tool], tool_choice="required")
+
+    assert _accepts(
+        grammar,
+        _tools_section(
+            _call("case", 1, _argument("value", "object", '{"data":0}'))
+        ),
+    )
+    assert not _accepts(
+        grammar,
+        _tools_section(
+            _call(
+                "case",
+                1,
+                _argument("value", "object", '{"data":{"data":""}}'),
+            )
+        ),
+    )
+    assert _accepts(
+        grammar,
+        _tools_section(
+            _call(
+                "case",
+                1,
+                _argument("value", "object", '{"extra":{"data":"ok"}}'),
+            )
+        ),
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "xgrammar 0.2.2 through 0.2.6 reject a valid additional property "
+        "when it precedes a declared property"
+    ),
+)
+def test_strict_nested_additional_properties_allow_either_member_order():
+    case_schema = {
+        "type": "object",
+        "properties": {"data": {"type": "integer"}},
+        "additionalProperties": {
+            "type": "object",
+            "properties": {"data": {"type": "string"}},
+            "required": ["data"],
+            "additionalProperties": True,
+        },
+    }
+    tool = Tool(
+        type="function",
+        function=Function(
+            name="case",
+            strict=True,
+            parameters={
+                "type": "object",
+                "required": ["value"],
+                "additionalProperties": False,
+                "properties": {"value": case_schema},
+            },
+        ),
+    )
+    grammar = _grammar([tool], tool_choice="required")
+
+    for value in (
+        '{"data":2,"extra":{"data":"ok"}}',
+        '{"extra":{"data":"ok"},"data":2}',
+    ):
+        assert _accepts(
+            grammar,
+            _tools_section(
+                _call("case", 1, _argument("value", "object", value))
+            ),
+        )
+
+
 @pytest.mark.parametrize(
     "arguments",
     [
