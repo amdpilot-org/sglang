@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34572",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the independent review's duplicate-sequence payload-divergence failure at candidate commit aae252eb457f1f0358ae4b98897f3a8fa6eda50d, preserved the candidate's valid PP bootstrap and HiCache consensus fixes, made duplicate acceptance conditional on exact payload identity, and added the missing PD router rule that permits retry only before any upstream dispatch may have occurred.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-462148c2530d/venv/bin/python -m pytest -q test/registered/unit/managers/test_pp_abort_consensus.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction at exact candidate commit aae252eb457f1f0358ae4b98897f3a8fa6eda50d: a repeated sequence 0 with a different good/bad payload was silently ignored; 20 other tests and 4 subtests passed. Raw output: evidence/candidate_failing_before.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-462148c2530d/venv/bin/python -m pytest -q test/registered/unit/managers/test_pp_abort_consensus.py test/registered/unit/managers/test_pp_hicache_prefetch_consensus.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after ordered decision, exact duplicate, divergent duplicate, older replay, abort ordering, local KV failure, metadata-finalize, and HiCache readiness boundaries: 26 passed plus 4 parameterized subtests. Raw output: evidence/pytest_protocol_after.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-462148c2530d/venv/bin/python -m py_compile python/sglang/srt/managers/scheduler_pp_mixin.py python/sglang/srt/managers/io_struct.py python/sglang/srt/disaggregation/prefill.py",
+      "exit_code": 0,
+      "what_was_measured": "Python syntax/import compilation for the modified PP protocol paths."
+    },
+    {
+      "command": "cargo fmt --check",
+      "exit_code": 127,
+      "what_was_measured": "Rust validation prerequisite check; the prepared environment has no cargo executable, so router compilation and Rust tests could not be run. Raw output: evidence/cargo_fmt_check.txt."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the consolidated correction."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The corrected paths are deterministic scheduler protocol and HTTP router logic. The available single gfx950 cannot represent the reported PP=8 disaggregated Mooncake topology, so no GPU or full-model claim is made.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported PP=8, Mooncake KV transfer, HiCache L2-only, 32K shared-prefix cancellation storm and NCCL watchdog behavior were not reproduced because the required distributed topology and model weights were unavailable.",
+    "The Rust router changes could not be compiled or exercised because cargo/rustc are absent from the prepared image. The source change and tests mirror upstream router PR https://github.com/sgl-project/sglang/pull/34570, but passing native Rust evidence is not claimed.",
+    "No seven-hour production soak or semantic model-accuracy validation was performed."
+  ]
+}

@@ -276,6 +276,27 @@ class TestBootstrapDecisionSequencing(unittest.TestCase):
 
         queue.pop_bootstrapped.assert_called_once()
 
+    def test_duplicate_sequence_with_divergent_payload_fails_loudly(self):
+        scheduler = self._make_scheduler([], pp_rank=2)
+
+        scheduler.process_bootstrapped_queue(
+            PPBootstrapDecision(0, ("rid-good",), ())
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "payload divergence"):
+            scheduler.process_bootstrapped_queue(
+                PPBootstrapDecision(0, (), ("rid-good",))
+            )
+
+    def test_older_replay_cannot_bypass_payload_validation(self):
+        scheduler = self._make_scheduler([], pp_rank=2)
+
+        scheduler.process_bootstrapped_queue(PPBootstrapDecision(0, (), ()))
+        scheduler.process_bootstrapped_queue(PPBootstrapDecision(1, (), ()))
+
+        with self.assertRaisesRegex(RuntimeError, "payload divergence"):
+            scheduler.process_bootstrapped_queue(PPBootstrapDecision(0, (), ()))
+
     def test_sequence_gap_fails_loudly(self):
         scheduler = self._make_scheduler([], pp_rank=4)
 

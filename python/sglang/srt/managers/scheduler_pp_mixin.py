@@ -587,6 +587,7 @@ class SchedulerPPMixin:
         )
         self._pp_bootstrap_next_decision_sequence = 0
         self._pp_bootstrap_expected_decision_sequence = 0
+        self._pp_bootstrap_last_applied_decision = None
         self._pp_deferred_abort_reqs = deque()
 
     def _pp_ensure_bootstrap_decision_state(self: Scheduler) -> None:
@@ -595,6 +596,8 @@ class SchedulerPPMixin:
             self._pp_bootstrap_next_decision_sequence = 0
         if not hasattr(self, "_pp_bootstrap_expected_decision_sequence"):
             self._pp_bootstrap_expected_decision_sequence = 0
+        if not hasattr(self, "_pp_bootstrap_last_applied_decision"):
+            self._pp_bootstrap_last_applied_decision = None
         if not hasattr(self, "_pp_deferred_abort_reqs"):
             self._pp_deferred_abort_reqs = deque()
         if not hasattr(self, "_pp_pending_bootstrap_failures"):
@@ -735,6 +738,12 @@ class SchedulerPPMixin:
         self._pp_ensure_bootstrap_decision_state()
         expected = self._pp_bootstrap_expected_decision_sequence
         if decision.sequence < expected:
+            if decision != self._pp_bootstrap_last_applied_decision:
+                raise RuntimeError(
+                    "PP bootstrap decision duplicate payload divergence: "
+                    f"expected_sequence={expected}, received={decision}, "
+                    f"last_applied={self._pp_bootstrap_last_applied_decision}"
+                )
             logger.warning(
                 "Ignoring duplicate PP bootstrap decision sequence=%d expected=%d",
                 decision.sequence,
@@ -785,6 +794,7 @@ class SchedulerPPMixin:
         )
         self.waiting_queue.extend(good_reqs)
         self._pp_bootstrap_expected_decision_sequence = decision.sequence + 1
+        self._pp_bootstrap_last_applied_decision = decision
 
         # A bad candidate can overtake the request's physical queue state: an
         # earlier good decision may already have moved it to waiting/running/
