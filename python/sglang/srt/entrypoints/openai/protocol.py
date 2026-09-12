@@ -828,6 +828,10 @@ ReasoningEffortType = Optional[
 ]
 
 
+class ChatCompletionThinkingParam(BaseModel):
+    type: Literal["disabled", "adaptive"]
+
+
 def _has_message_level_tools(messages: Any) -> bool:
     if not isinstance(messages, list):
         return False
@@ -900,6 +904,11 @@ class ChatCompletionRequest(BaseModel):
         "'max' is an sglang extension to the OpenAI schema for "
         "models that expose a maximum-effort tier above 'high'; models that don't "
         "support it treat it the same as 'high'.",
+    )
+    thinking: Optional[ChatCompletionThinkingParam] = Field(
+        default=None,
+        description="MiniMax reasoning control. 'disabled' disables reasoning and "
+        "'adaptive' lets the model decide whether to reason.",
     )
     task: Optional[
         Literal["action", "query", "authority", "domain", "title", "read_url"]
@@ -1007,6 +1016,15 @@ class ChatCompletionRequest(BaseModel):
     def normalize_reasoning_inputs(cls, values: Dict):
         r = values.get("reasoning")
         thinking = None
+        minimax_thinking = values.get("thinking")
+        if isinstance(minimax_thinking, dict):
+            thinking_type = minimax_thinking.get("type")
+            if thinking_type in {"disabled", "adaptive"}:
+                ctk = values.get("chat_template_kwargs")
+                if not isinstance(ctk, dict):
+                    ctk = {}
+                ctk.setdefault("thinking_mode", thinking_type)
+                values["chat_template_kwargs"] = ctk
 
         if r is not None and isinstance(r, dict):
             effort = r.get("effort")
@@ -1057,6 +1075,11 @@ class ChatCompletionRequest(BaseModel):
             # - "enable_thinking" for qwen3, glm45, nemotron_3, interns1
             ctk.setdefault("thinking", thinking)
             ctk.setdefault("enable_thinking", thinking)
+            # MiniMax-M3 uses a string mode. Only map the model-independent
+            # disable signal here; enabling has no equivalent adaptive/forced
+            # distinction in reasoning_effort.
+            if not thinking:
+                ctk.setdefault("thinking_mode", "disabled")
             values["chat_template_kwargs"] = ctk
 
         return values
