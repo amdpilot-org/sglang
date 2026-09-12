@@ -171,7 +171,10 @@ def matmul_kernel_persistent(
 
 
 def _matmul_persistent_triton(
-    a: torch.Tensor, b: torch.Tensor, bias: torch.Tensor | None = None
+    a: torch.Tensor,
+    b: torch.Tensor,
+    bias: torch.Tensor | None = None,
+    out_dtype: torch.dtype | None = None,
 ):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
@@ -183,8 +186,10 @@ def _matmul_persistent_triton(
     M, K = a.shape
     K, N = b.shape
     dtype = a.dtype
+    out_dtype = out_dtype or dtype
+    assert out_dtype in {dtype, torch.float32}, f"unsupported output dtype: {out_dtype}"
     # Allocates output.
-    c = torch.empty((M, N), device=a.device, dtype=dtype)
+    c = torch.empty((M, N), device=a.device, dtype=out_dtype)
 
     # 1D launch kernel where each block gets its own program.
     def grid(META):
@@ -273,9 +278,19 @@ def _matmul_persistent_deepgemm(
 
 
 def matmul_persistent(
-    a: torch.Tensor, b: torch.Tensor, bias: torch.Tensor | None = None
+    a: torch.Tensor,
+    b: torch.Tensor,
+    bias: torch.Tensor | None = None,
+    out_dtype: torch.dtype | None = None,
 ):
     K, N = b.shape
+    out_dtype = out_dtype or a.dtype
+
+    # DeepGEMM's bf16_gemm_nn interface stores BF16. Sending an FP32 request to
+    # it and widening the result afterward would lose the accumulator bits that
+    # the caller requested, so use the deterministic Triton kernel instead.
+    if out_dtype != a.dtype:
+        return _matmul_persistent_triton(a=a, b=b, bias=bias, out_dtype=out_dtype)
 
     # DeepGEMM has minimum dimension requirements for TMA descriptors
     MIN_DEEPGEMM_DIM = 16
@@ -965,7 +980,7 @@ def _rms_norm_aten_compat(input, normalized_shape, weight=None, eps=None):
 
 
 def _mm_dtype_compat(self, mat2, out_dtype):
-    return matmul_persistent(self.contiguous(), mat2.contiguous()).to(out_dtype)
+    return matmul_persistent(self.contiguous(), mat2.contiguous(), out_dtype=out_dtype)
 
 
 _batch_invariant_MODE = False
