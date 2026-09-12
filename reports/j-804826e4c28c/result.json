@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38341",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared base already contains upstream PR #36911's issue-specific DFlash post-capture verify rehearsal and measured sampling-headroom reservation, plus PR #38596's independent KV-canary workspace reservation. No production source correction was needed.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-804826e4c28c/venv/bin/python -m pytest -q test/registered/unit/model_executor/runner_utils/test_graph_pool_borrow.py::TestGraphPoolBorrow::test_dflash_verify_output_buffers_predate_the_borrow_scope test/registered/unit/model_executor/test_kv_canary_headroom.py test/registered/unit/model_executor/model_runner_components/test_startup_weight_load.py --junitxml=reports/j-804826e4c28c/evidence/focused_passing.xml",
+      "exit_code": 0,
+      "what_was_measured": "Current-source startup ordering, DFlash verify buffer lifetime, post-capture sampling/canary headroom accounting, target/draft maximum-workspace boundary, and canary-disabled byte-budget boundary; 26 tests and 27 subtests passed."
+    },
+    {
+      "command": "Focused Python regression equivalent to TestGraphPoolBorrow.test_dflash_prewarm_falls_back_when_the_rehearsal_exhausts_the_pool with only pool.is_cuda and DFlash kernel availability mocked true",
+      "exit_code": 0,
+      "what_was_measured": "Issue-specific fallback sequence [warm outside borrow, borrowed rehearsal OOM, retry outside borrow] = [false, true, false], and persistence of 2048 bytes measured headroom for a 1024-byte synthetic sampling input. Tensor allocations executed on the assigned gfx950 GPU."
+    },
+    {
+      "command": "Unmodified focused pytest invocation including TestGraphPoolBorrow.test_dflash_prewarm_falls_back_when_the_rehearsal_exhausts_the_pool; JUnit: reports/j-804826e4c28c/evidence/focused_current.xml",
+      "exit_code": 1,
+      "what_was_measured": "13 tests passed; the CUDA-only borrow regression was incorrectly selected on ROCm because torch.cuda.is_available() is true under HIP, then failed because production graph_pool_borrow_enabled() correctly returns false on non-CUDA. This is retained as a platform/test limitation, not issue reproduction."
+    },
+    {
+      "command": "Real-gfx950 DFlash HIP top-p normalization compared with an independent CPU float64 sort/cumulative-sum/scatter reference; exact tensor-byte scaling checked for draft counts 1, 8, and 16",
+      "exit_code": 0,
+      "what_was_measured": "Maximum absolute numerical difference 8.738910914352083e-10; maximum probability-row sum error 1.1920928955078125e-07; probability input bytes 1048576, 8388608, and 16777216, confirming linear draft-token scaling."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI350X, gfx950:sramecc+:xnack-, ROCm torch 2.11.0+rocm7.2. GPU tensors were used in the fallback fixture and numerical reference. The CUDA-only DFlash sampling-verify kernel reported unavailable.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original 2x8 A800 TP8 mooncake-RDMA PD deployment and 122B target/6-layer draft weights were unavailable.",
+    "The CUDA/SM80 DFlash sampling-verify kernel and original HTTP 500 mid-traffic failure could not be executed on the assigned ROCm gfx950 GPU.",
+    "No full-model, multi-GPU, or multi-node reproduction was performed or claimed.",
+    "The upstream CUDA-only fallback test is mis-gated on ROCm by torch.cuda.is_available(); the intended logic was validated with the platform predicate mocked, without changing unrelated production code."
+  ]
+}
