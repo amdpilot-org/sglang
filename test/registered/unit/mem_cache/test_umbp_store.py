@@ -31,6 +31,7 @@ class MockStorageConfig:
     tp_lcm_size: Optional[int] = None
     should_split_heads: bool = False
     extra_config: Optional[dict] = None
+    kv_cache_dtype: Optional[str] = None
 
 
 class MockHostKVCache:
@@ -121,6 +122,25 @@ def make_indices(indices):
 
 
 class TestUMBPStore(unittest.TestCase):
+    def test_config_prefix_isolates_kv_cache_dtype(self):
+        from sglang.srt.mem_cache.storage.umbp import umbp_store
+
+        imported = list(umbp_store._import_umbp_client())
+        imported[0] = lambda config: MagicMock()
+        with patch.object(
+            umbp_store, "_import_umbp_client", return_value=tuple(imported)
+        ):
+            e4m3 = umbp_store.UMBPStore(
+                MockStorageConfig(kv_cache_dtype="torch.float8_e4m3fn")
+            )
+            e5m2 = umbp_store.UMBPStore(
+                MockStorageConfig(kv_cache_dtype="torch.float8_e5m2")
+            )
+
+        self.assertNotEqual(e4m3.config_prefix, e5m2.config_prefix)
+        self.assertIn("dtype_torch.float8_e4m3fn", e4m3.config_prefix)
+        self.assertIn("dtype_torch.float8_e5m2", e5m2.config_prefix)
+
     def test_standalone_process_configuration(self):
         from sglang.srt.mem_cache.storage.umbp import umbp_store
 

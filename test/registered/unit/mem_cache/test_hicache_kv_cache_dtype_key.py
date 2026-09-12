@@ -9,6 +9,8 @@ Issue: https://github.com/sgl-project/sglang/issues/33268
 
 import os
 import tempfile
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -20,6 +22,57 @@ from sglang.srt.mem_cache.hicache_storage import (
 from sglang.test.ci.ci_register import register_cpu_ci
 
 register_cpu_ci(est_time=5, suite="base-a-test-cpu")
+
+
+def _production_storage_config(
+    configured_dtype, logical_dtype, storage_dtype=torch.uint8
+):
+    from sglang.srt.managers import cache_controller
+
+    controller = cache_controller.HiCacheController.__new__(
+        cache_controller.HiCacheController
+    )
+    controller.mem_pool_device = SimpleNamespace(dtype=logical_dtype)
+    controller.mem_pool_host = SimpleNamespace(
+        dtype=storage_dtype, layout="page_first"
+    )
+    controller.enable_storage_metrics = False
+    controller.get_attn_cp_rank_and_size = lambda: (0, 1)
+    parallel = SimpleNamespace(tp_rank=0, tp_size=1, pp_rank=0, pp_size=1)
+    with (
+        patch.object(cache_controller, "is_dp_attention_enabled", return_value=False),
+        patch.object(cache_controller, "get_parallel", return_value=parallel),
+        patch.object(
+            cache_controller,
+            "get_model",
+            return_value=SimpleNamespace(kv_cache_dtype=configured_dtype),
+        ),
+    ):
+        return controller._generate_storage_config(model_name="model")
+
+
+def _umbp_direct_storage_config(configured_dtype, logical_dtype):
+    from sglang.srt.mem_cache.storage.umbp import umbp_direct_linker
+
+    kvcache = SimpleNamespace(dtype=logical_dtype)
+    params = SimpleNamespace(
+        pp_rank=0, pp_size=1, attn_cp_rank=0, attn_cp_size=1
+    )
+    with (
+        patch.object(
+            umbp_direct_linker,
+            "get_parallel",
+            return_value=SimpleNamespace(tp_size=1),
+        ),
+        patch.object(
+            umbp_direct_linker,
+            "get_model",
+            return_value=SimpleNamespace(model_path="model"),
+        ),
+    ):
+        return umbp_direct_linker._make_storage_config(
+            kvcache, params, 0, {}, configured_dtype
+        )
 
 
 def _make_config(
@@ -65,6 +118,28 @@ class TestHiCacheDtypeKeyCollision:
             )
             assert "dtype_torch.bfloat16" in cache_bf16.config_suffix
             assert "dtype_torch.float8_e4m3fn" in cache_fp8.config_suffix
+
+    def test_production_config_preserves_logical_fp8_format(self):
+        native_fp8_dtype = torch.float8_e4m3fnuz
+        e4m3 = _production_storage_config("fp8_e4m3", native_fp8_dtype)
+        e5m2 = _production_storage_config("fp8_e5m2", native_fp8_dtype)
+
+        assert e4m3.kv_cache_dtype == "fp8_e4m3"
+        assert e5m2.kv_cache_dtype == "fp8_e5m2"
+        assert e4m3.kv_cache_dtype != e5m2.kv_cache_dtype
+
+    def test_production_config_resolves_auto_from_device_dtype(self):
+        config = _production_storage_config("auto", torch.bfloat16)
+
+        assert config.kv_cache_dtype == "torch.bfloat16"
+
+    def test_umbp_direct_config_preserves_logical_fp8_format(self):
+        native_fp8_dtype = torch.float8_e4m3fnuz
+        e4m3 = _umbp_direct_storage_config("fp8_e4m3", native_fp8_dtype)
+        e5m2 = _umbp_direct_storage_config("fp8_e5m2", native_fp8_dtype)
+
+        assert e4m3.kv_cache_dtype == "fp8_e4m3"
+        assert e5m2.kv_cache_dtype == "fp8_e5m2"
 
     def test_dtype_in_suffixed_key(self):
         """The suffixed key must contain the dtype segment."""

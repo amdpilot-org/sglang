@@ -1,0 +1,28 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33268",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced both remaining counterexamples at candidate d38922c9: production configuration collapsed explicit FP8 E4M3/E5M2 to the host uint8 dtype, and UMBP omitted dtype from its prefix and direct-linker config. Preserved the candidate's valid fixes, keyed explicit formats from runtime configuration with an auto/device-dtype fallback, and completed UMBP propagation.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f71c861885b9/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_kv_cache_dtype_key.py::TestHiCacheDtypeKeyCollision::test_production_config_preserves_logical_fp8_format test/registered/unit/mem_cache/test_umbp_store.py::TestUMBPStore::test_config_prefix_isolates_kv_cache_dtype",
+      "exit_code": 1,
+      "what_was_measured": "At exact candidate d38922c9, E4M3/E5M2 both produced torch.uint8 in production storage config and UMBP produced identical test-model prefixes; two tests failed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f71c861885b9/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_kv_cache_dtype_key.py test/registered/unit/mem_cache/test_mem_pool_host.py test/registered/unit/mem_cache/test_mooncake_tenant_config.py test/registered/unit/mem_cache/test_umbp_store.py",
+      "exit_code": 0,
+      "what_was_measured": "60 tests passed after correction, covering explicit E4M3/E5M2 separation despite a shared native FP8 dtype, auto fallback, direct UMBP config propagation, UMBP prefix isolation, candidate backend key paths, and hf3fs mock round trips."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defects are deterministic CPU-side configuration and key construction. No GPU result is claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No external hf3fs, Mooncake, NIXL, EIC, UMBP, FlexKV, or LMCache service was available for end-to-end integration testing.",
+    "No model weights, serving run, or multi-node workload was used or claimed.",
+    "Mock clients validate namespace construction and local symmetry, not remote-service interoperability."
+  ]
+}

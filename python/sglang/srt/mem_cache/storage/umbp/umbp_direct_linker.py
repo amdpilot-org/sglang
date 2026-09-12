@@ -172,6 +172,25 @@ def _parse_storage_extra_config(raw_config):
     return extra_config
 
 
+def _make_storage_config(kvcache, params, tp_rank, extra_config, kv_cache_dtype):
+    return HiCacheStorageConfig(
+        tp_rank=tp_rank,
+        tp_size=get_parallel().tp_size,
+        pp_rank=params.pp_rank,
+        pp_size=params.pp_size,
+        attn_cp_rank=params.attn_cp_rank,
+        attn_cp_size=params.attn_cp_size,
+        is_mla_model=True,
+        enable_storage_metrics=False,
+        is_page_first_layout=False,
+        model_name=get_model().model_path,
+        extra_config=extra_config,
+        kv_cache_dtype=(
+            str(kvcache.dtype) if kv_cache_dtype == "auto" else kv_cache_dtype
+        ),
+    )
+
+
 class UMBPDirectLinker(UnifiedCacheLinker):
     def __init__(
         self,
@@ -280,18 +299,8 @@ class UMBPDirectLinker(UnifiedCacheLinker):
                 )
             extra_config["dram_page_size"] = dram_page_size
 
-        storage_config = HiCacheStorageConfig(
-            tp_rank=tp_rank,
-            tp_size=get_parallel().tp_size,
-            pp_rank=params.pp_rank,
-            pp_size=params.pp_size,
-            attn_cp_rank=params.attn_cp_rank,
-            attn_cp_size=params.attn_cp_size,
-            is_mla_model=True,
-            enable_storage_metrics=False,
-            is_page_first_layout=False,
-            model_name=get_model().model_path,
-            extra_config=extra_config,
+        storage_config = _make_storage_config(
+            kvcache, params, tp_rank, extra_config, server_args.kv_cache_dtype
         )
 
         if _storage is None:

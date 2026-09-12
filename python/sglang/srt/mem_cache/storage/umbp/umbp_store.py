@@ -293,6 +293,8 @@ class UMBPStore(HiCacheStorage):
             prefix_parts.append(str(extra["extra_backend_tag"]))
         if storage_config is not None and storage_config.model_name:
             prefix_parts.append("-".join(storage_config.model_name.split("/")))
+        if storage_config is not None and storage_config.kv_cache_dtype:
+            prefix_parts.append(f"dtype_{storage_config.kv_cache_dtype}")
         self.config_prefix = "_".join(prefix_parts) if prefix_parts else None
         explicit_tenant_id = (
             os.getenv("UMBP_SPDK_PROXY_TENANT_ID") is not None
