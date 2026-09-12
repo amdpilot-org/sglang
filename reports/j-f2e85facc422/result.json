@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/11762",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "476b730e789427a42b363114e5523c1dec4264cb",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "outcome": "candidate_rejected",
+  "summary": "The exact candidate adds only a relay regression and reports. That regression passes unchanged on the recorded base, while end-to-end overlap NGRAM remains blocked because the pinned loaded kernel egg lacks the CPU and GPU reconstruction operators. This is test-only hardening, not an original-issue fix.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f2e85facc422/venv/bin/python -m pytest -q /job/review-evidence/base/test_ngram_overlap_relay.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's exact four-case relay regression against recorded-base implementation: 4 passed, proving there is no base failure for this test."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f2e85facc422/venv/bin/python -m pytest -q test/registered/cpu/test_ngram_overlap_relay.py",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate at 476b730: 4 passed; behavior is unchanged from base."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f2e85facc422/venv/bin/python -m pytest -q /job/review-evidence/candidate/test_ngram_overlap_adversarial.py",
+      "exit_code": 0,
+      "what_was_measured": "Two independent relay edge cases passed: zero/full accepted-row isolation with max-depth truncation, and empty-batch fixed-width behavior."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f2e85facc422/venv/bin/python -m pytest -q test/registered/cpu/test_spec_kernels.py::TestReconstructIndicesFromTreeMask::test_tree_and_chain",
+      "exit_code": 1,
+      "what_was_measured": "At base and candidate, direct CPU wrapper execution fails because torch.ops.sgl_kernel.reconstruct_indices_from_tree_mask_cpu is absent."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f2e85facc422/venv/bin/python python/sglang/kernels/aot/tests/speculative/test_ngram_utils.py",
+      "exit_code": 1,
+      "what_was_measured": "At base and candidate on the assigned MI355X, direct GPU wrapper execution fails because torch.ops.sgl_kernel.reconstruct_indices_from_tree_mask is absent."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f2e85facc422/venv/bin/python -m pytest -q test/registered/kernel/speculative/test_spec_kv_indices_grid.py",
+      "exit_code": 0,
+      "what_was_measured": "Three adjacent real-GPU speculative KV-index cases passed, including top-k 4/page-size 16 against a Python reference; NGRAM serving was not exercised."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI355X (gfx950), ROCm 7.2/Torch 2.11.0+rocm7.2. The NGRAM reconstruction call reached the loaded wrapper but failed on the missing registered GPU op; adjacent KV-index numerical-reference tests passed.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The candidate has no implementation/native change and its added relay regression already passes on the recorded base.",
+    "End-to-end overlap NGRAM cannot execute because the pinned loaded sglang-kernel 0.4.6.post1 egg lacks reconstruct_indices_from_tree_mask_cpu and reconstruct_indices_from_tree_mask.",
+    "Combined top-k/page-size serving, memory over-allocation optimization, optional verify synchronization, penalty support, universal worker parity, high-throughput specialization, EP/DeepEP, PD disaggregation, and a separate plan stream remain unimplemented or unqualified.",
+    "No independent EAGLE model-accuracy, attention-backend matrix, distributed DP/EP, PD-disaggregation, or LoRA serving result is provided.",
+    "Passing adjacent speculative KV-index tests do not prove the NGRAM serving contract or the full overlap-spec roadmap."
+  ],
+  "remaining_limitations": [
+    "The prepared environment supplies one AMD Instinct MI355X only; NVIDIA-specific backends and distributed topologies were unavailable.",
+    "No qualified EAGLE/NGRAM model weights were supplied for semantic serving accuracy.",
+    "The required interpreter loads sgl_kernel from the pinned 0.4.6.post1 egg rather than repository AOT Python sources; repository-environment.json provides no native artifact or rebuild command.",
+    "The deterministic tiny Llama fixture can qualify transport/engine execution only and cannot overcome the missing operator or establish another model architecture's semantic accuracy."
+  ]
+}
