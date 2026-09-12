@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37393",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1068",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1035",
+  "candidate_commit": "5247b13d80bb3e7549c5517a7da17ca469ac8cd0",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate adds test-only coverage for a DSpark TP synchronization mechanism already present in the recorded base. Its regression passes unchanged on that base and does not reproduce or execute the original unequal-row VocabParallelEmbedding collective. The pre-existing synchronization is a plausible partial mitigation relative to v0.5.18, but the candidate's full-fix/verification claim is unsupported by the available evidence.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1e9005587aeb/venv/bin/python -m pytest -q /job/review-evidence/meta/test_spec_tp_sync.py (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's exact five tests passed on the unmodified recorded base, demonstrating that the candidate is not failing-before/passing-after and makes no runtime behavioral change."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-1e9005587aeb/venv/bin/python -m pytest -q test/registered/unit/spec/test_spec_tp_sync.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Five candidate unit checks passed, using a local fake TP broadcast; this did not execute multi-rank RCCL/NCCL or unequal collective shapes."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1e9005587aeb/venv/bin/python source comparison of v0.5.18 and recorded base DSparkWorkerV2",
+      "exit_code": 0,
+      "what_was_measured": "Commit 71de97b264b04dcd514cf904003028aefe9775c8 lacks the DSPARK_TARGET prefill synchronization call, while the recorded base contains it."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-1e9005587aeb/venv/bin/python independent import/default/GPU boundary script",
+      "exit_code": 0,
+      "what_was_measured": "Imports resolved to checkout source; default and rng presets include DSPARK_TARGET; off excludes it; one gfx950 device-tensor overwrite produced [17, 23, 42]."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 5247b13d80bb3e7549c5517a7da17ca469ac8cd0",
+      "exit_code": 0,
+      "what_was_measured": "The candidate diff has no whitespace errors and changes only reports plus one Python test file."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A same-device tensor overwrite and the candidate CUDA-like parameter ran on one AMD Instinct MI355X gfx950. No real multi-rank collective was executed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The candidate never constructs ranks with the original unequal embedding row counts (628 versus 1140 or 6098 versus 9682), so the reported collective contract is not reproduced.",
+    "SGLANG_SPEC_TP_SYNC=off disables the asserted protection; the candidate does not test detection or safe failure when TP state has already diverged.",
+    "The fake broadcast only copies same-shaped tensors locally and cannot expose distributed ordering, shape, process-group, or NCCL/RCCL failures.",
+    "Other DSpark or scheduler transitions can still theoretically diverge batch membership or sequence lengths; the AST test covers only one target-prefill call site.",
+    "No evidence connects the two recorded production sequence numbers to rank-local sampling divergence rather than another upstream scheduler/multimodal state divergence."
+  ],
+  "remaining_limitations": [
+    "Only one AMD gfx950 GPU was available, not eight NVIDIA B300 GPUs.",
+    "Kimi-K3 and DSpark weights were unavailable.",
+    "CUDA 13.0 and NCCL 2.28.3 were unavailable; the environment used ROCm 7.2 and PyTorch 2.11.0+rocm7.2.",
+    "Full-model TP=8 multimodal chunked prefill, sustained traffic, semantic accuracy, and watchdog behavior remain unverified.",
+    "No native source changed in the candidate, so a native rebuild was not applicable."
+  ]
+}
