@@ -1589,6 +1589,7 @@ class Qwen4ExpModel(Qwen3_5ForCausalLM):
         super().__init__(config, quant_config, prefix, is_nextn)
         self.hc_count = config.hc_count
         self.hidden_size = config.hidden_size
+        self.dflash_capture = False
         self.has_ple = bool(config.ple_layer_ids)
         self.ple_ngram_size = int(config.ngram_size) if self.has_ple else None
         self.ple_ngram_eos_token_id = (
@@ -1605,6 +1606,28 @@ class Qwen4ExpModel(Qwen3_5ForCausalLM):
             hc_per_branch_norm=True,
         )
         self.hyper_connection_mixer = GatedResidual(hc_config, use_combine=False)
+
+    def set_dflash_layers_to_capture(self, layers_to_capture: list[int]):
+        self.dflash_capture = True
+        super().set_dflash_layers_to_capture(layers_to_capture)
+
+    def _prepare_aux_hidden_state(
+        self,
+        layer: nn.Module,
+        hidden_states: torch.Tensor,
+        residual: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        aux_hidden_state = (
+            hidden_states if residual is None else hidden_states + residual
+        )
+        if aux_hidden_state.shape[-1] == self.hidden_size:
+            aux_hidden_state = torch.cat(
+                [aux_hidden_state for _ in range(self.hc_count)], dim=-1
+            )
+        # Capture the exact learned contraction that this layer uses as its
+        # attention input. A uniform branch mean has the right width but the
+        # wrong semantics because Qwen4's gate is input- and layer-dependent.
+        return layer.attn_hyper_connection.mix(aux_hidden_state)[0]
 
     def forward(
         self,
@@ -1632,6 +1655,10 @@ class Qwen4ExpModel(Qwen3_5ForCausalLM):
         aux_hidden_states = []
         for i in range(self.start_layer, self.end_layer):
             layer = self.layers[i]
+            if getattr(layer, "_is_layer_to_capture", False):
+                aux_hidden_states.append(
+                    self._prepare_aux_hidden_state(layer, hidden_states, residual)
+                )
             if i + 1 < self.end_layer:
                 next_ple = getattr(self.layers[i + 1], "ple", None)
                 if next_ple is not None:
@@ -1643,17 +1670,14 @@ class Qwen4ExpModel(Qwen3_5ForCausalLM):
                     residual=residual,
                     forward_batch=forward_batch,
                     ple_batch=ple_batch,
-                    captured_last_layer_outputs=(
-                        aux_hidden_states
-                        if getattr(layer, "_is_layer_to_capture", False)
-                        else None
-                    ),
                 )
 
         _commit_ple_batch(ple_batch, forward_batch)
 
         hc_hidden_states = hidden_states
         hidden_states, _ = self.hyper_connection_mixer.mix(hidden_states)
+        if self.dflash_capture:
+            return hidden_states, hc_hidden_states, aux_hidden_states
         if not forward_batch.forward_mode.is_idle():
             return hidden_states, hc_hidden_states
 
@@ -1695,6 +1719,13 @@ class Qwen4ExpVLModel(Qwen4ExpModel):
             forward_batch=forward_batch,
             inputs_embeds=input_embeds,
         )
+        if isinstance(model_output, tuple) and len(model_output) == 3:
+            (
+                hidden_states,
+                self.last_hc_hidden_states,
+                aux_hidden_states,
+            ) = model_output
+            return hidden_states, aux_hidden_states
         if isinstance(model_output, tuple):
             hidden_states, self.last_hc_hidden_states = model_output
             return hidden_states
@@ -1733,7 +1764,11 @@ class Qwen4ExpForConditionalGeneration(Qwen3VLForConditionalGeneration):
     def forward(self, *args, **kwargs):
         output = super().forward(*args, **kwargs)
         hc_hidden_states = self.model.last_hc_hidden_states
-        if hc_hidden_states is not None and isinstance(output, LogitsProcessorOutput):
+        if (
+            not self.capture_aux_hidden_states
+            and hc_hidden_states is not None
+            and isinstance(output, LogitsProcessorOutput)
+        ):
             output.hidden_states = hc_hidden_states
         return output
 
