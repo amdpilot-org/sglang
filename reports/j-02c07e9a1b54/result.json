@@ -1,0 +1,26 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32485",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "RunaiModelStreamerLoader now reads the cached safetensors index and restricts the RunAI input file list to shards containing the requested MTP layer plus draft-wide shared MTP parameters. Native DeepSeek and Hugging Face MTP key layouts are supported, including the split between remote object-storage shard URIs and the local metadata cache. Unsafe or unrecognized indexes retain all prepared shards.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-02c07e9a1b54/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_runai_model_streamer_loader.py",
+      "exit_code": 0,
+      "what_was_measured": "15 loader tests passed, including regression coverage that observes the exact file list passed to runai_safetensors_weights_iterator for HF and native MTP layouts; object-storage metadata-cache path coverage; shared-parameter inclusion; and fallbacks for missing, malformed, structurally invalid, unknown-layout, requested-layer-absent, and missing-shard indexes. Raw output: reports/j-02c07e9a1b54/pytest-runai-loader.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "The source, tests, and report contain no whitespace errors."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "This change performs JSON metadata parsing and filename selection before tensor streaming; it contains no GPU kernel or numerical operation. A GPU smoke or numerical comparison would not measure the requested behavior.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No credentials, object-storage endpoint, or large sharded MTP checkpoint were used. The remote-path test uses a real cached index and remote URI-shaped shard paths while mocking only the deterministic metadata-cache lookup.",
+    "Shard granularity cannot avoid reading unrelated tensors when a selected shard co-locates them with requested or shared MTP tensors; tensor-level filtering remains downstream of RunAI.",
+    "Unknown MTP layer naming layouts intentionally fall back to all shards until explicitly supported."
+  ]
+}
