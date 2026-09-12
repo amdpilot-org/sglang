@@ -97,6 +97,7 @@ from sglang.multimodal_gen.runtime.distributed.communication_op import (
 )
 from sglang.multimodal_gen.runtime.distributed.parallel_state import (
     get_classifier_free_guidance_world_size,
+    get_replica_group,
     world_group_is_initialized,
 )
 from sglang.multimodal_gen.runtime.layers.attention.backends.skip_softmax import (
@@ -147,6 +148,10 @@ from sglang.multimodal_gen.runtime.pipelines_core.stages.validators import (
 )
 from sglang.multimodal_gen.runtime.pipelines_core.stages.validators import (
     VerificationResult,
+)
+from sglang.multimodal_gen.runtime.pipelines_core.step_reuse import (
+    StepReuseController,
+    StepReuseDecision,
 )
 from sglang.multimodal_gen.runtime.platforms import (
     AttentionBackendEnum,
@@ -1433,6 +1438,29 @@ class DenoisingStage(PipelineStage, RolloutDenoisingMixin):
         self._reset_scheduler_loop_state(ctx.scheduler)
         ctx.scheduler.set_begin_index(0)
         self._init_cfg_gate_state(ctx, batch, server_args)
+        self._init_step_reuse(ctx, batch, server_args)
+
+    def _init_step_reuse(
+        self, ctx: DenoisingContext, batch: Req, server_args: ServerArgs
+    ) -> None:
+        adapter = server_args.pipeline_config.get_step_reuse_adapter(batch)
+        if adapter is None:
+            return
+
+        group = get_replica_group() if model_parallel_is_initialized() else None
+
+        def synchronize(decision):
+            if group is None or group.world_size == 1:
+                return decision
+            return group.broadcast_object(decision, src=0)
+
+        controller = StepReuseController(
+            adapter,
+            synchronize_decision=synchronize,
+            is_control_rank=group is None or group.rank_in_group == 0,
+        )
+        controller.begin_scope(batch)
+        ctx.extra["step_reuse_controller"] = controller
 
     def _reset_scheduler_loop_state(self, scheduler) -> None:
         if hasattr(scheduler, "_step_index"):
@@ -1637,23 +1665,37 @@ class DenoisingStage(PipelineStage, RolloutDenoisingMixin):
             latent_model_input, step.t_device
         )
 
-        # 4. Run the model prediction path, including CFG when enabled.
-        with maybe_nvtx_range("predict_noise", use_nvtx):
-            noise_pred = self._predict_noise_with_cfg(
-                current_model=step.current_model,
-                latent_model_input=latent_model_input,
-                timestep=timestep,
-                batch=batch,
-                timestep_index=step.step_index,
-                attn_metadata=step.attn_metadata,
-                target_dtype=ctx.target_dtype,
-                current_guidance_scale=step.current_guidance_scale,
-                cfg_policy=ctx.cfg_policy,
-                cfg_gate_state=ctx.extra.get("cfg_gate_state"),
-                server_args=server_args,
-                guidance=ctx.guidance,
-                latents=ctx.latents,
-            )
+        # 4. Reuse a post-CFG prediction or run the full prediction path.
+        controller = ctx.extra.get("step_reuse_controller")
+        decision = (
+            controller.before_step(step.step_index, len(ctx.timesteps))
+            if controller is not None
+            else StepReuseDecision(False, "disabled")
+        )
+        execute_real = not decision.reuse or controller.policy.trace_only
+        if decision.reuse and controller.policy.trace_only:
+            controller.record_trace_only_reuse()
+        if execute_real:
+            with maybe_nvtx_range("predict_noise", use_nvtx):
+                noise_pred = self._predict_noise_with_cfg(
+                    current_model=step.current_model,
+                    latent_model_input=latent_model_input,
+                    timestep=timestep,
+                    batch=batch,
+                    timestep_index=step.step_index,
+                    attn_metadata=step.attn_metadata,
+                    target_dtype=ctx.target_dtype,
+                    current_guidance_scale=step.current_guidance_scale,
+                    cfg_policy=ctx.cfg_policy,
+                    cfg_gate_state=ctx.extra.get("cfg_gate_state"),
+                    server_args=server_args,
+                    guidance=ctx.guidance,
+                    latents=ctx.latents,
+                )
+            if controller is not None:
+                controller.after_real_forward(noise_pred, step.step_index)
+        else:
+            noise_pred = controller.reused_prediction()
         if server_args.comfyui_mode:
             batch.noise_pred = noise_pred
 
@@ -1670,6 +1712,8 @@ class DenoisingStage(PipelineStage, RolloutDenoisingMixin):
             if latents.dtype != latents_dtype and latents.device.type == "mps":
                 latents = latents.to(latents_dtype)
             ctx.latents = latents
+        if controller is not None:
+            controller.after_scheduler_step()
 
         # 6. Re-apply any model-specific latent constraints after the update.
         ctx.latents = self.post_forward_for_ti2v_task(
@@ -1698,6 +1742,11 @@ class DenoisingStage(PipelineStage, RolloutDenoisingMixin):
     ) -> None:
         """Finalize the shared loop by handing state to post-denoising processing."""
         self._log_cfg_gate_summary(ctx, batch)
+        controller = ctx.extra.get("step_reuse_controller")
+        if controller is not None:
+            metrics = controller.finalize_scope()
+            ctx.extra["step_reuse_metrics"] = metrics
+            batch.extra["step_reuse_metrics"] = metrics
         self._post_denoising_loop(
             batch=batch,
             latents=ctx.latents,
