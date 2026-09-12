@@ -1,0 +1,98 @@
+diff --git a/python/sglang/srt/managers/scheduler.py b/python/sglang/srt/managers/scheduler.py
+index f0914b1..ac9ef71 100644
+--- a/python/sglang/srt/managers/scheduler.py
++++ b/python/sglang/srt/managers/scheduler.py
+@@ -2415,7 +2415,11 @@ class Scheduler(
+             tp_worker=self.tp_worker,
+             token_to_kv_pool_allocator=self.token_to_kv_pool_allocator,
+             spec_algorithm=self.spec_algorithm,
+-            get_running_batch=lambda: self.running_batch,
++            get_running_batches=lambda: (
++                self.running_mbs
++                if self.ps.pp_size > 1 and hasattr(self, "running_mbs")
++                else (self.running_batch,)
++            ),
+             get_waiting_queue=lambda: self.waiting_queue,
+             waiting_queue_prefix_matched=lambda: (
+                 self.policy.waiting_queue_prefix_matched(self.waiting_queue)
+diff --git a/python/sglang/srt/managers/scheduler_components/load_inquirer.py b/python/sglang/srt/managers/scheduler_components/load_inquirer.py
+index bb1f5d4..fff90ae 100644
+--- a/python/sglang/srt/managers/scheduler_components/load_inquirer.py
++++ b/python/sglang/srt/managers/scheduler_components/load_inquirer.py
+@@ -41,7 +41,7 @@ class SchedulerLoadInquirer:
+     tp_worker: BaseTpWorker
+     token_to_kv_pool_allocator: BaseTokenToKVPoolAllocator
+     spec_algorithm: SpeculativeAlgorithm
+-    get_running_batch: Callable
++    get_running_batches: Callable
+     get_waiting_queue: Callable
+     waiting_queue_prefix_matched: Callable
+     get_recent_cache_hit_rate: Callable
+@@ -97,7 +97,7 @@ class SchedulerLoadInquirer:
+     def get_loads(self) -> LoadSnapshot:
+         """Build the per-DP-rank load snapshot for DP balancing and /v1/loads."""
+         stats = self.get_stats()
+-        num_running_reqs = len(self.get_running_batch().reqs)
++        num_running_reqs = self._get_num_running_reqs()
+
+         waiting_queues = [self.get_waiting_queue()]
+         pending_token_queues = [self.get_waiting_queue()]
+@@ -239,3 +239,9 @@ class SchedulerLoadInquirer:
+             total_prefill_busy_us=self.get_total_prefill_busy_us(),
+             decode_moments=decode_moments,
+         )
++
++    def _get_num_running_reqs(self) -> int:
++        """Count unique requests retained in the scheduler's running batches."""
++        return len(
++            {req.rid for batch in self.get_running_batches() for req in batch.reqs}
++        )
+diff --git a/test/registered/unit/managers/scheduler_components/test_load_inquirer.py b/test/registered/unit/managers/scheduler_components/test_load_inquirer.py
+new file mode 100644
+index 0000000..a4d4550
+--- /dev/null
++++ b/test/registered/unit/managers/scheduler_components/test_load_inquirer.py
+@@ -0,0 +1,43 @@
++from types import SimpleNamespace
++
++from sglang.srt.managers.scheduler_components.load_inquirer import (
++    SchedulerLoadInquirer,
++)
++from sglang.test.ci.ci_register import register_cpu_ci
++
++register_cpu_ci(est_time=12, suite="base-a-test-cpu")
++
++
++def _batch(*rids: str):
++    return SimpleNamespace(reqs=[SimpleNamespace(rid=rid) for rid in rids])
++
++
++def test_num_running_reqs_counts_all_pipeline_slots():
++    inquirer = object.__new__(SchedulerLoadInquirer)
++    object.__setattr__(
++        inquirer,
++        "get_running_batches",
++        lambda: [_batch("req-0"), _batch("req-1", "req-2"), _batch("req-3")],
++    )
++
++    assert inquirer._get_num_running_reqs() == 4
++
++
++def test_num_running_reqs_deduplicates_requests_across_slots():
++    inquirer = object.__new__(SchedulerLoadInquirer)
++    object.__setattr__(
++        inquirer,
++        "get_running_batches",
++        lambda: [_batch("req-0", "req-1"), _batch("req-1", "req-2")],
++    )
++
++    assert inquirer._get_num_running_reqs() == 3
++
++
++def test_num_running_reqs_handles_single_and_empty_batches():
++    inquirer = object.__new__(SchedulerLoadInquirer)
++    object.__setattr__(inquirer, "get_running_batches", lambda: [_batch("req-0")])
++    assert inquirer._get_num_running_reqs() == 1
++
++    object.__setattr__(inquirer, "get_running_batches", lambda: [])
++    assert inquirer._get_num_running_reqs() == 0
