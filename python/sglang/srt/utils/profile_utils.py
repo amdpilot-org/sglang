@@ -175,7 +175,9 @@ class ProfileManager:
 
 
 def _get_stage_from_forward_mode(forward_mode: ForwardMode):
-    if forward_mode.is_prefill():
+    if forward_mode in (ForwardMode.TARGET_VERIFY, ForwardMode.DRAFT_EXTEND_V2):
+        return "decode"
+    elif forward_mode.is_prefill():
         return "prefill"
     elif forward_mode.is_decode():
         return "decode"

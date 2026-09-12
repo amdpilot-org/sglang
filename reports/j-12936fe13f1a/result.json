@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34943",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the default profiler's speculative stage misclassification and synchronous trace export in focused tests. TARGET_VERIFY was counted as prefill, DRAFT_EXTEND_V2 was rejected, and a blocked export blocked _stop_profile. Speculative steps now count as decode, and the default profiler exports, performs its export barrier, and optionally merges traces on a tracked background thread after synchronously stopping collection.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-12936fe13f1a/venv/bin/python -m pytest -q test/registered/unit/managers/test_profiler_manager_stage_stop.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: TARGET_VERIFY incremented prefill, DRAFT_EXTEND_V2 raised unsupported profile stage, and synchronous export held _stop_profile for the export fixture's 5 second timeout. Raw output: /tmp/amdpilot-repo-j-12936fe13f1a/evidence/failing-before.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-12936fe13f1a/venv/bin/python -m pytest -q test/registered/unit/managers/test_profiler_manager_stage_stop.py test/registered/unit/hardware_backend/mlx/test_metal_profiler.py",
+      "exit_code": 0,
+      "what_was_measured": "4 passed plus 2 speculative-mode subtests; 10 MLX-only tests skipped. Covers TARGET_VERIFY and DRAFT_EXTEND_V2 decode classification, unchanged EXTEND/DECODE boundaries, profile-v2 classification, and nonblocking default-profiler export. Raw output: /tmp/amdpilot-repo-j-12936fe13f1a/evidence/final-tests.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-12936fe13f1a/venv/bin/python < retained gfx950 profiler script",
+      "exit_code": 0,
+      "what_was_measured": "A real single-rank ROCm torch-profiler run through SchedulerProfilerManager generated gfx950-TP-0.trace.json.gz (42,211 bytes). A 256x256 GPU matmul had max absolute error 3.0517578125e-05 against the CPU reference. Raw output: /tmp/amdpilot-repo-j-12936fe13f1a/evidence/gpu-profiler.txt; trace: /tmp/amdpilot-repo-j-12936fe13f1a/gpu-profile/gfx950-TP-0.trace.json.gz"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the delivered patch. Ruff and Black were unavailable in the prepared interpreter."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI355X (gfx950) executed a profiled matrix multiplication and exported a nonempty trace; retained paths are listed in tests."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No B200, TP8, GLM-5.2 weights, or multi-node resources were available, so the reported 25 second export duration and full serving TTFT impact were not reproduced.",
+    "The single-gfx950 fixture validates the manager's GPU collection/export path and numerical execution only; it does not qualify EAGLE/MTP model semantics or distributed behavior.",
+    "SGLANG_PROFILE_V2 is disabled by default. Its speculative stage mapping is fixed here, but its separate exporter remains synchronous and was not redesigned in this narrow correction.",
+    "The background export barrier was validated at world size one; multi-rank completion and optional trace merging are covered structurally but were not executed on this single-GPU assignment."
+  ]
+}
