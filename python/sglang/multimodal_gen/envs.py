@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     SGLANG_DIFFUSION_DISABLE_AUTO_RESIDENCY: bool = False
     SGLANG_DIFFUSION_MINIMAX_H3_ADALN_GPU_PLANS: int = 64
     SGLANG_DIFFUSION_MINIMAX_H3_ADALN_FP32: bool = False
+    SGLANG_DIFFUSION_STARTUP_PROFILE: bool = False
     SGLANG_DIFFUSION_CFG_GATE_STEP: float = 1.0
     # cache-dit env vars (primary transformer)
     # on by default; engages only on 2 ranks with peer-to-peer access and falls
@@ -303,6 +304,9 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "SGLANG_DIFFUSION_MINIMAX_H3_ADALN_FP32": _lazy_bool(
         "SGLANG_DIFFUSION_MINIMAX_H3_ADALN_FP32"
     ),
+    # If set, log a hierarchical breakdown of server launch / pipeline load time
+    # (distributed init, per-component weight loading, ...). See #19087.
+    "SGLANG_DIFFUSION_STARTUP_PROFILE": _lazy_bool("SGLANG_DIFFUSION_STARTUP_PROFILE"),
     # Fraction of denoising steps that run both CFG branches before reusing the
     # last conditional-minus-unconditional residual. Keep 1.0 to disable.
     "SGLANG_DIFFUSION_CFG_GATE_STEP": _lazy_float(

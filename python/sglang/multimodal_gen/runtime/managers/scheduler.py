@@ -65,6 +65,7 @@ from sglang.multimodal_gen.runtime.server_warmup import (
 from sglang.multimodal_gen.runtime.utils.common import get_zmq_socket
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 from sglang.multimodal_gen.runtime.utils.profiler import maybe_record_function
+from sglang.multimodal_gen.runtime.utils.startup_profiler import startup_phase
 from sglang.multimodal_gen.runtime.utils.trace_wrapper import DiffStage, trace_slice
 
 logger = init_logger(__name__)
@@ -111,28 +112,30 @@ class Scheduler(SchedulerWarmupMixin, SchedulerPostTrainingMixin, SchedulerDisag
         # construction -- fans requests out within the replica only.
         gpus_per_replica = max(1, server_args.num_gpus // server_args.dp_size)
         self.dp_replica = gpu_id // gpus_per_replica
-        self.context = zmq.Context(io_threads=2)
-        if gpu_id % gpus_per_replica == 0:
-            endpoint = server_args.scheduler_endpoint_for(self.dp_replica)
-            # router allocates identify (envelope) for each connection
-            self.receiver, actual_endpoint = get_zmq_socket(
-                self.context, zmq.ROUTER, endpoint, True
-            )
-            logger.info(
-                f"Scheduler (dp replica {self.dp_replica}) bind at endpoint: "
-                f"{actual_endpoint}"
-            )
-        else:
-            self.receiver = None
+        with startup_phase("init_zmq_context"):
+            self.context = zmq.Context(io_threads=2)
+            if gpu_id % gpus_per_replica == 0:
+                endpoint = server_args.scheduler_endpoint_for(self.dp_replica)
+                # router allocates identify (envelope) for each connection
+                self.receiver, actual_endpoint = get_zmq_socket(
+                    self.context, zmq.ROUTER, endpoint, True
+                )
+                logger.info(
+                    f"Scheduler (dp replica {self.dp_replica}) bind at endpoint: "
+                    f"{actual_endpoint}"
+                )
+            else:
+                self.receiver = None
         from sglang.multimodal_gen.runtime.platforms import current_platform
 
         Exec_worker = CPUWorker if current_platform.is_cpu() else GPUWorker
-        worker = Exec_worker(
-            local_rank=local_rank,
-            master_port=port_args.master_port,
-            rank=gpu_id,
-            server_args=server_args,
-        )
+        with startup_phase("init_gpu_worker"):
+            worker = Exec_worker(
+                local_rank=local_rank,
+                master_port=port_args.master_port,
+                rank=gpu_id,
+                server_args=server_args,
+            )
         self.worker = worker
         self.task_pipes_to_slaves = task_pipes_to_slaves
         self.result_pipes_from_slaves = result_pipes_from_slaves
