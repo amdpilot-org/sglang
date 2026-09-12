@@ -1,0 +1,31 @@
+Prepared base: 358c163250ad3b1f62939b01ce1314a0a31a0365
+Candidate: f06c14a3339a03ed7b89f0a8737344fee0c7c080
+Candidate parent: 358c163250ad3b1f62939b01ce1314a0a31a0365
+Source imports: /job/repo/python/sglang/srt/models/olmo2.py and /job/repo/python/sglang/srt/layers/layernorm.py
+Environment: torch 2.11.0+rocm7.2; HIP 7.2.26015; AMD Instinct MI350X; gfx950; one visible GPU
+
+BASE independent eager harness, exit 0:
+- BF16/FP16/FP32, tokens 1/7/129, contiguous and packed-QKV split views
+- every case: forward_hip calls 0, forward_native calls 2
+- maximum FP64-reference errors: BF16 0.0078125; FP16 0.001953125; FP32 7.152557e-7
+
+CANDIDATE regression:
+/tmp/amdpilot-repo-j-fbc23fdf2716/venv/bin/python -m pytest -q test/registered/unit/models/test_olmo2_qk_norm.py
+exit 0; 2 passed, 17 warnings in 13.85s
+
+CANDIDATE independent eager harness, default environment, exit 0:
+- every case entered forward_hip twice; installed backend then entered forward_native twice
+- confirms OLMo-2 uses normal dispatch; default ROCm backend has no enabled fused provider
+
+CANDIDATE independent eager harness with SGLANG_USE_AITER=1, exit 0:
+- selected forward_aiter; instrumented forward_hip/native calls both 0
+- built and loaded /tmp/amdpilot-repo-j-fbc23fdf2716/cache/aiter/module_rmsnorm.so
+- all BF16/FP16/FP32 cases matched independent FP64 reference
+- maximum errors: BF16 0.0078125; FP16 0.001953125; FP32 4.768372e-7
+
+CANDIDATE independent graph harness with SGLANG_USE_AITER=1, exit 0:
+{"q_dispatch":"forward_aiter","k_dispatch":"forward_aiter","q_max_error":0.0,"k_max_error":0.0,"graph_replay":true}
+
+Static checks, exit 0:
+/tmp/amdpilot-repo-j-fbc23fdf2716/venv/bin/python -m compileall -q python/sglang/srt/models/olmo2.py test/registered/unit/models/test_olmo2_qk_norm.py
+git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 f06c14a3339a03ed7b89f0a8737344fee0c7c080
