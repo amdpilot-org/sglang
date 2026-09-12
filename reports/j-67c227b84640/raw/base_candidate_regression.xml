@@ -1,0 +1,256 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="6" skipped="0" tests="6" time="3.974" timestamp="2026-09-12T04:47:54.201232+00:00" hostname="smci355-ccs-aus-n08-13"><testcase classname="review-evidence-j-67c227b84640.test_fla_decode_beta_precision" name="test_gdn_packed_decode_keeps_beta_in_fp32[1]" time="0.719"><failure message="AssertionError: Tensor-likes are not close!&#10;&#10;Mismatched elements: 225 / 256 (87.9%)&#10;Greatest absolute difference: 0.0002640560269355774 at index (6, 7) (up to 2e-06 allowed)&#10;Greatest relative difference: 0.0021939158905297518 at index (8, 8) (up to 2e-06 allowed)">steps = 1
+
+    @pytest.mark.parametrize("steps", [1, 32, 256])
+    def test_gdn_packed_decode_keeps_beta_in_fp32(steps):
+        k_dim = v_dim = 16
+        state = torch.zeros((1, 1, v_dim, k_dim), device="cuda", dtype=torch.float32)
+        reference = torch.zeros((v_dim, k_dim), dtype=torch.float32)
+        out = torch.empty((1, 1, 1, v_dim), device="cuda", dtype=torch.bfloat16)
+        indices = torch.zeros(1, device="cuda", dtype=torch.int32)
+        a = torch.full((1, 1), -20.0, device="cuda", dtype=torch.bfloat16)
+        b = torch.full((1, 1), 0.5, device="cuda", dtype=torch.bfloat16)
+        params = torch.zeros(1, device="cuda", dtype=torch.bfloat16)
+        beta = torch.sigmoid(torch.tensor(0.5, dtype=torch.float32))
+    
+        for step in range(steps):
+            q, k, v = _inputs(step, k_dim, v_dim)
+            mixed = torch.cat((q, k, v)).to(device="cuda", dtype=torch.bfloat16)[None]
+            fused_recurrent_gated_delta_rule_packed_decode(
+                mixed, a, b, params, params, 1.0, state, out, indices
+            )
+            # a=-20 makes the fp32 decay indistinguishable from one.  Keep every
+            # other operation fp32 and only cast the observable output to bf16.
+            delta = beta * (v - reference @ k)
+            reference = reference + delta[:, None] * k[None, :]
+            expected_out = (reference @ q).to(torch.bfloat16)
+    
+&gt;       torch.testing.assert_close(state[0, 0].cpu(), reference, rtol=2e-6, atol=2e-6)
+E       AssertionError: Tensor-likes are not close!
+E       
+E       Mismatched elements: 225 / 256 (87.9%)
+E       Greatest absolute difference: 0.0002640560269355774 at index (6, 7) (up to 2e-06 allowed)
+E       Greatest relative difference: 0.0021939158905297518 at index (8, 8) (up to 2e-06 allowed)
+
+../review-evidence-j-67c227b84640/test_fla_decode_beta_precision.py:66: AssertionError</failure></testcase><testcase classname="review-evidence-j-67c227b84640.test_fla_decode_beta_precision" name="test_gdn_packed_decode_keeps_beta_in_fp32[32]" time="0.003"><failure message="AssertionError: Tensor-likes are not close!&#10;&#10;Mismatched elements: 252 / 256 (98.4%)&#10;Greatest absolute difference: 0.001177072525024414 at index (15, 2) (up to 2e-06 allowed)&#10;Greatest relative difference: 0.18025797605514526 at index (2, 1) (up to 2e-06 allowed)">steps = 32
+
+    @pytest.mark.parametrize("steps", [1, 32, 256])
+    def test_gdn_packed_decode_keeps_beta_in_fp32(steps):
+        k_dim = v_dim = 16
+        state = torch.zeros((1, 1, v_dim, k_dim), device="cuda", dtype=torch.float32)
+        reference = torch.zeros((v_dim, k_dim), dtype=torch.float32)
+        out = torch.empty((1, 1, 1, v_dim), device="cuda", dtype=torch.bfloat16)
+        indices = torch.zeros(1, device="cuda", dtype=torch.int32)
+        a = torch.full((1, 1), -20.0, device="cuda", dtype=torch.bfloat16)
+        b = torch.full((1, 1), 0.5, device="cuda", dtype=torch.bfloat16)
+        params = torch.zeros(1, device="cuda", dtype=torch.bfloat16)
+        beta = torch.sigmoid(torch.tensor(0.5, dtype=torch.float32))
+    
+        for step in range(steps):
+            q, k, v = _inputs(step, k_dim, v_dim)
+            mixed = torch.cat((q, k, v)).to(device="cuda", dtype=torch.bfloat16)[None]
+            fused_recurrent_gated_delta_rule_packed_decode(
+                mixed, a, b, params, params, 1.0, state, out, indices
+            )
+            # a=-20 makes the fp32 decay indistinguishable from one.  Keep every
+            # other operation fp32 and only cast the observable output to bf16.
+            delta = beta * (v - reference @ k)
+            reference = reference + delta[:, None] * k[None, :]
+            expected_out = (reference @ q).to(torch.bfloat16)
+    
+&gt;       torch.testing.assert_close(state[0, 0].cpu(), reference, rtol=2e-6, atol=2e-6)
+E       AssertionError: Tensor-likes are not close!
+E       
+E       Mismatched elements: 252 / 256 (98.4%)
+E       Greatest absolute difference: 0.001177072525024414 at index (15, 2) (up to 2e-06 allowed)
+E       Greatest relative difference: 0.18025797605514526 at index (2, 1) (up to 2e-06 allowed)
+
+../review-evidence-j-67c227b84640/test_fla_decode_beta_precision.py:66: AssertionError</failure></testcase><testcase classname="review-evidence-j-67c227b84640.test_fla_decode_beta_precision" name="test_gdn_packed_decode_keeps_beta_in_fp32[256]" time="0.017"><failure message="AssertionError: Tensor-likes are not close!&#10;&#10;Mismatched elements: 256 / 256 (100.0%)&#10;Greatest absolute difference: 0.0012260675430297852 at index (0, 3) (up to 2e-06 allowed)&#10;Greatest relative difference: 0.4359636604785919 at index (12, 1) (up to 2e-06 allowed)">steps = 256
+
+    @pytest.mark.parametrize("steps", [1, 32, 256])
+    def test_gdn_packed_decode_keeps_beta_in_fp32(steps):
+        k_dim = v_dim = 16
+        state = torch.zeros((1, 1, v_dim, k_dim), device="cuda", dtype=torch.float32)
+        reference = torch.zeros((v_dim, k_dim), dtype=torch.float32)
+        out = torch.empty((1, 1, 1, v_dim), device="cuda", dtype=torch.bfloat16)
+        indices = torch.zeros(1, device="cuda", dtype=torch.int32)
+        a = torch.full((1, 1), -20.0, device="cuda", dtype=torch.bfloat16)
+        b = torch.full((1, 1), 0.5, device="cuda", dtype=torch.bfloat16)
+        params = torch.zeros(1, device="cuda", dtype=torch.bfloat16)
+        beta = torch.sigmoid(torch.tensor(0.5, dtype=torch.float32))
+    
+        for step in range(steps):
+            q, k, v = _inputs(step, k_dim, v_dim)
+            mixed = torch.cat((q, k, v)).to(device="cuda", dtype=torch.bfloat16)[None]
+            fused_recurrent_gated_delta_rule_packed_decode(
+                mixed, a, b, params, params, 1.0, state, out, indices
+            )
+            # a=-20 makes the fp32 decay indistinguishable from one.  Keep every
+            # other operation fp32 and only cast the observable output to bf16.
+            delta = beta * (v - reference @ k)
+            reference = reference + delta[:, None] * k[None, :]
+            expected_out = (reference @ q).to(torch.bfloat16)
+    
+&gt;       torch.testing.assert_close(state[0, 0].cpu(), reference, rtol=2e-6, atol=2e-6)
+E       AssertionError: Tensor-likes are not close!
+E       
+E       Mismatched elements: 256 / 256 (100.0%)
+E       Greatest absolute difference: 0.0012260675430297852 at index (0, 3) (up to 2e-06 allowed)
+E       Greatest relative difference: 0.4359636604785919 at index (12, 1) (up to 2e-06 allowed)
+
+../review-evidence-j-67c227b84640/test_fla_decode_beta_precision.py:66: AssertionError</failure></testcase><testcase classname="review-evidence-j-67c227b84640.test_fla_decode_beta_precision" name="test_kda_replay_decode_keeps_beta_in_fp32[1]" time="0.189"><failure message="AssertionError: Tensor-likes are not close!&#10;&#10;Mismatched elements: 225 / 256 (87.9%)&#10;Greatest absolute difference: 0.0002640560269355774 at index (6, 7) (up to 2e-06 allowed)&#10;Greatest relative difference: 0.0021939158905297518 at index (8, 8) (up to 2e-06 allowed)">steps = 1
+
+    @pytest.mark.parametrize("steps", [1, 32, 256])
+    def test_kda_replay_decode_keeps_beta_in_fp32(steps):
+        k_dim = v_dim = 16
+        state = torch.zeros((1, 1, v_dim, k_dim), device="cuda", dtype=torch.float32)
+        reference = torch.zeros((v_dim, k_dim), dtype=torch.float32)
+        out = torch.empty((1, 1, 1, v_dim), device="cuda", dtype=torch.bfloat16)
+        d_cache = torch.zeros((1, 1, 1, v_dim), device="cuda", dtype=torch.bfloat16)
+        k_cache = torch.zeros((1, 1, 1, k_dim), device="cuda", dtype=torch.bfloat16)
+        g_cache = torch.zeros((1, 1, 1, k_dim), device="cuda", dtype=torch.float32)
+        indices = torch.zeros(1, device="cuda", dtype=torch.int32)
+        write_pos = torch.zeros(1, device="cuda", dtype=torch.int32)
+        force_flush = torch.ones(1, device="cuda", dtype=torch.int32)
+        a = torch.full((1, 1, k_dim), -20.0, device="cuda", dtype=torch.bfloat16)
+        b = torch.full((1, 1), 0.5, device="cuda", dtype=torch.bfloat16)
+        A_log = torch.zeros(1, device="cuda", dtype=torch.bfloat16)
+        dt_bias = torch.zeros((1, k_dim), device="cuda", dtype=torch.bfloat16)
+        beta = torch.sigmoid(torch.tensor(0.5, dtype=torch.float32))
+    
+        for step in range(steps):
+            q, k, v = _inputs(step, k_dim, v_dim)
+            mixed = torch.cat((q, k, v)).to(device="cuda", dtype=torch.bfloat16)[None]
+            fused_recurrent_linear_replayssm_decode(
+                mixed,
+                a,
+                b,
+                A_log,
+                dt_bias,
+                1.0,
+                state,
+                d_cache,
+                k_cache,
+                g_cache,
+                out,
+                indices,
+                write_pos,
+                force_flush=force_flush,
+                is_kda=True,
+                nk=1,
+            )
+            delta = beta * (v - reference @ k)
+            reference = reference + delta[:, None] * k[None, :]
+            expected_out = (reference @ q).to(torch.bfloat16)
+    
+&gt;       torch.testing.assert_close(state[0, 0].cpu(), reference, rtol=2e-6, atol=2e-6)
+E       AssertionError: Tensor-likes are not close!
+E       
+E       Mismatched elements: 225 / 256 (87.9%)
+E       Greatest absolute difference: 0.0002640560269355774 at index (6, 7) (up to 2e-06 allowed)
+E       Greatest relative difference: 0.0021939158905297518 at index (8, 8) (up to 2e-06 allowed)
+
+../review-evidence-j-67c227b84640/test_fla_decode_beta_precision.py:113: AssertionError</failure></testcase><testcase classname="review-evidence-j-67c227b84640.test_fla_decode_beta_precision" name="test_kda_replay_decode_keeps_beta_in_fp32[32]" time="0.003"><failure message="AssertionError: Tensor-likes are not close!&#10;&#10;Mismatched elements: 252 / 256 (98.4%)&#10;Greatest absolute difference: 0.001177072525024414 at index (15, 2) (up to 2e-06 allowed)&#10;Greatest relative difference: 0.18025797605514526 at index (2, 1) (up to 2e-06 allowed)">steps = 32
+
+    @pytest.mark.parametrize("steps", [1, 32, 256])
+    def test_kda_replay_decode_keeps_beta_in_fp32(steps):
+        k_dim = v_dim = 16
+        state = torch.zeros((1, 1, v_dim, k_dim), device="cuda", dtype=torch.float32)
+        reference = torch.zeros((v_dim, k_dim), dtype=torch.float32)
+        out = torch.empty((1, 1, 1, v_dim), device="cuda", dtype=torch.bfloat16)
+        d_cache = torch.zeros((1, 1, 1, v_dim), device="cuda", dtype=torch.bfloat16)
+        k_cache = torch.zeros((1, 1, 1, k_dim), device="cuda", dtype=torch.bfloat16)
+        g_cache = torch.zeros((1, 1, 1, k_dim), device="cuda", dtype=torch.float32)
+        indices = torch.zeros(1, device="cuda", dtype=torch.int32)
+        write_pos = torch.zeros(1, device="cuda", dtype=torch.int32)
+        force_flush = torch.ones(1, device="cuda", dtype=torch.int32)
+        a = torch.full((1, 1, k_dim), -20.0, device="cuda", dtype=torch.bfloat16)
+        b = torch.full((1, 1), 0.5, device="cuda", dtype=torch.bfloat16)
+        A_log = torch.zeros(1, device="cuda", dtype=torch.bfloat16)
+        dt_bias = torch.zeros((1, k_dim), device="cuda", dtype=torch.bfloat16)
+        beta = torch.sigmoid(torch.tensor(0.5, dtype=torch.float32))
+    
+        for step in range(steps):
+            q, k, v = _inputs(step, k_dim, v_dim)
+            mixed = torch.cat((q, k, v)).to(device="cuda", dtype=torch.bfloat16)[None]
+            fused_recurrent_linear_replayssm_decode(
+                mixed,
+                a,
+                b,
+                A_log,
+                dt_bias,
+                1.0,
+                state,
+                d_cache,
+                k_cache,
+                g_cache,
+                out,
+                indices,
+                write_pos,
+                force_flush=force_flush,
+                is_kda=True,
+                nk=1,
+            )
+            delta = beta * (v - reference @ k)
+            reference = reference + delta[:, None] * k[None, :]
+            expected_out = (reference @ q).to(torch.bfloat16)
+    
+&gt;       torch.testing.assert_close(state[0, 0].cpu(), reference, rtol=2e-6, atol=2e-6)
+E       AssertionError: Tensor-likes are not close!
+E       
+E       Mismatched elements: 252 / 256 (98.4%)
+E       Greatest absolute difference: 0.001177072525024414 at index (15, 2) (up to 2e-06 allowed)
+E       Greatest relative difference: 0.18025797605514526 at index (2, 1) (up to 2e-06 allowed)
+
+../review-evidence-j-67c227b84640/test_fla_decode_beta_precision.py:113: AssertionError</failure></testcase><testcase classname="review-evidence-j-67c227b84640.test_fla_decode_beta_precision" name="test_kda_replay_decode_keeps_beta_in_fp32[256]" time="0.019"><failure message="AssertionError: Tensor-likes are not close!&#10;&#10;Mismatched elements: 256 / 256 (100.0%)&#10;Greatest absolute difference: 0.0012260675430297852 at index (0, 3) (up to 2e-06 allowed)&#10;Greatest relative difference: 0.4359636604785919 at index (12, 1) (up to 2e-06 allowed)">steps = 256
+
+    @pytest.mark.parametrize("steps", [1, 32, 256])
+    def test_kda_replay_decode_keeps_beta_in_fp32(steps):
+        k_dim = v_dim = 16
+        state = torch.zeros((1, 1, v_dim, k_dim), device="cuda", dtype=torch.float32)
+        reference = torch.zeros((v_dim, k_dim), dtype=torch.float32)
+        out = torch.empty((1, 1, 1, v_dim), device="cuda", dtype=torch.bfloat16)
+        d_cache = torch.zeros((1, 1, 1, v_dim), device="cuda", dtype=torch.bfloat16)
+        k_cache = torch.zeros((1, 1, 1, k_dim), device="cuda", dtype=torch.bfloat16)
+        g_cache = torch.zeros((1, 1, 1, k_dim), device="cuda", dtype=torch.float32)
+        indices = torch.zeros(1, device="cuda", dtype=torch.int32)
+        write_pos = torch.zeros(1, device="cuda", dtype=torch.int32)
+        force_flush = torch.ones(1, device="cuda", dtype=torch.int32)
+        a = torch.full((1, 1, k_dim), -20.0, device="cuda", dtype=torch.bfloat16)
+        b = torch.full((1, 1), 0.5, device="cuda", dtype=torch.bfloat16)
+        A_log = torch.zeros(1, device="cuda", dtype=torch.bfloat16)
+        dt_bias = torch.zeros((1, k_dim), device="cuda", dtype=torch.bfloat16)
+        beta = torch.sigmoid(torch.tensor(0.5, dtype=torch.float32))
+    
+        for step in range(steps):
+            q, k, v = _inputs(step, k_dim, v_dim)
+            mixed = torch.cat((q, k, v)).to(device="cuda", dtype=torch.bfloat16)[None]
+            fused_recurrent_linear_replayssm_decode(
+                mixed,
+                a,
+                b,
+                A_log,
+                dt_bias,
+                1.0,
+                state,
+                d_cache,
+                k_cache,
+                g_cache,
+                out,
+                indices,
+                write_pos,
+                force_flush=force_flush,
+                is_kda=True,
+                nk=1,
+            )
+            delta = beta * (v - reference @ k)
+            reference = reference + delta[:, None] * k[None, :]
+            expected_out = (reference @ q).to(torch.bfloat16)
+    
+&gt;       torch.testing.assert_close(state[0, 0].cpu(), reference, rtol=2e-6, atol=2e-6)
+E       AssertionError: Tensor-likes are not close!
+E       
+E       Mismatched elements: 256 / 256 (100.0%)
+E       Greatest absolute difference: 0.0012260675430297852 at index (0, 3) (up to 2e-06 allowed)
+E       Greatest relative difference: 0.4359636604785919 at index (12, 1) (up to 2e-06 allowed)
+
+../review-evidence-j-67c227b84640/test_fla_decode_beta_precision.py:113: AssertionError</failure></testcase></testsuite></testsuites>
