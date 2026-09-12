@@ -1,0 +1,56 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38516",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "Exact candidate 811f07d correctly skips two CUDA JIT eligibility paths below sm_80, but leaves the original issue's standalone sgl_kernel_jit_qknorm path able to probe and compile on sm_75. This is a partial fix, not a full original-issue fix.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-eec3b3165201/venv/bin/python -m pytest -q /job/review-evidence/test_jit_arch_gate.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Candidate regression failed 12/12 on exact base 358c163 because the architecture gate was absent."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-eec3b3165201/venv/bin/python -m pytest -q test/registered/kernels/ops/diffusion/test_jit_arch_gate.py (candidate 811f07d)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate's regression passed 12/12 for its two covered modules and mocked sm_75/sm_80/sm_90/sm_121/ROCm boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-eec3b3165201/venv/bin/python <independent simulated-sm75 loader checks> (candidate 811f07d)",
+      "exit_code": 0,
+      "what_was_measured": "Fused QKNorm+RoPE and residual-gate rejected sm_75 before loading, but standalone layernorm.norm can_use_fused_inplace_qknorm returned true and invoked _jit_qknorm_module once."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-eec3b3165201/review-jit-cache /tmp/amdpilot-repo-j-eec3b3165201/venv/bin/python <gfx950 residual-gate numerical check> (candidate 811f07d)",
+      "exit_code": 0,
+      "what_was_measured": "HIP gate stayed enabled on AMD Instinct MI350X/gfx950 and the JIT kernel matched a CPU-fp64 expression with max_abs=0.0 for the fp32 fixture."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..811f07d456adfd5744b1cb703c5a67e989a39fff",
+      "exit_code": 2,
+      "what_was_measured": "Candidate evidence text contains trailing whitespace in three raw-output files; source changes themselves showed no whitespace error."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "Assigned AMD Instinct MI350X, gfx950:sramecc+:xnack-, torch 2.11.0+rocm7.2. Candidate residual-gate HIP JIT executed and matched the independent numerical expression.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "On simulated CUDA sm_75, python/sglang/kernels/ops/layernorm/norm.py::can_use_fused_inplace_qknorm still calls _jit_qknorm_module; this corresponds to the original issue's sgl_kernel_jit_qknorm_* failure and is reachable from diffusion apply_qk_norm.",
+    "The exact pip CUDA 13 plus host glibc rsqrt/rsqrtf clash was not runnable on the ROCm-only assigned host, so compiler-level success or latency elimination remains unverified.",
+    "No FLUX.2-klein-4B weights were available, so full denoise first-step latency was not measured."
+  ],
+  "remaining_limitations": [
+    "Available GPU was AMD Instinct MI350X/gfx950 under ROCm 7.2, not NVIDIA RTX 2080 Ti/sm_75 with CUDA 13.",
+    "No CUDA nvcc or reporter model weights were available.",
+    "The real GPU execution validates only the candidate's ROCm non-regression boundary, not the reported CUDA compiler failure."
+  ],
+  "source_paths": [
+    "python/sglang/kernels/ops/diffusion/rope/qknorm_rope_jit.py",
+    "python/sglang/kernels/kda_kernels/residual_gate_add_jit.py",
+    "python/sglang/kernels/ops/layernorm/norm.py",
+    "python/sglang/multimodal_gen/runtime/layers/layernorm.py"
+  ],
+  "native_paths": [],
+  "raw_output_directory": "reports/j-eec3b3165201/raw"
+}
