@@ -1,0 +1,104 @@
+..FFF                                                                    [100%]
+=================================== FAILURES ===================================
+_ TestRetractAllCacheRelease.test_evicts_all_radix_prefixes_after_every_request_unlocks _
+
+self = <test_candidate_regression.TestRetractAllCacheRelease testMethod=test_evicts_all_radix_prefixes_after_every_request_unlocks>
+release_req = <MagicMock name='release_req' id='125930106402480'>
+
+    @patch("sglang.srt.managers.schedule_batch.release_req")
+    def test_evicts_all_radix_prefixes_after_every_request_unlocks(self, release_req):
+        tree_cache = MagicMock()
+        tree_cache.is_chunk_cache.return_value = False
+        tree_cache.supports_swa.return_value = False
+        tree_cache.supports_mamba.return_value = False
+        tree_cache.evictable_size.return_value = 37
+    
+        self._retract(tree_cache)
+    
+        self.assertEqual(release_req.call_count, 2)
+>       tree_cache.evictable_size.assert_called_once_with()
+
+/tmp/amdpilot-repo-j-16b88e6898be/review-evidence/test_candidate_regression.py:60: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock name='mock.evictable_size' id='125930106395088'>, args = ()
+kwargs = {}
+msg = "Expected 'evictable_size' to be called once. Called 0 times."
+
+    def assert_called_once_with(self, /, *args, **kwargs):
+        """assert that the mock was called exactly once and that that call was
+        with the specified arguments."""
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to be called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'evictable_size' to be called once. Called 0 times.
+
+/usr/lib/python3.12/unittest/mock.py:955: AssertionError
+______ TestRetractAllCacheRelease.test_evicts_each_hybrid_cache_component ______
+
+self = <test_candidate_regression.TestRetractAllCacheRelease testMethod=test_evicts_each_hybrid_cache_component>
+release_req = <MagicMock name='release_req' id='125930106504304'>
+
+    @patch("sglang.srt.managers.schedule_batch.release_req")
+    def test_evicts_each_hybrid_cache_component(self, release_req):
+        tree_cache = MagicMock()
+        tree_cache.is_chunk_cache.return_value = False
+        tree_cache.supports_swa.return_value = True
+        tree_cache.supports_mamba.return_value = True
+        tree_cache.full_evictable_size.return_value = 23
+        tree_cache.swa_evictable_size.return_value = 11
+        tree_cache.mamba_evictable_size.return_value = 2
+    
+        self._retract(tree_cache, reqs=[MagicMock()])
+    
+>       params = tree_cache.evict.call_args.args[0]
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'NoneType' object has no attribute 'args'
+
+/tmp/amdpilot-repo-j-16b88e6898be/review-evidence/test_candidate_regression.py:78: AttributeError
+___ TestRetractAllCacheRelease.test_retracted_prefix_is_no_longer_matchable ____
+
+self = <test_candidate_regression.TestRetractAllCacheRelease testMethod=test_retracted_prefix_is_no_longer_matchable>
+release_req = <MagicMock name='release_req' id='125930106456784'>
+
+    @patch("sglang.srt.managers.schedule_batch.release_req")
+    def test_retracted_prefix_is_no_longer_matchable(self, release_req):
+        allocator = MagicMock()
+        allocator.device = torch.device("cpu")
+        tree_cache = RadixCache.create_simulated(mock_allocator=allocator)
+        key = RadixKey(array("q", [1, 2, 3, 4]))
+        tree_cache.insert(
+            InsertParams(key=key, value=torch.tensor([10, 11, 12, 13]))
+        )
+        match = tree_cache.match_prefix(MatchPrefixParams(key=key))
+        tree_cache.inc_lock_ref(match.last_device_node)
+        release_req.side_effect = lambda **_: tree_cache.dec_lock_ref(
+            match.last_device_node
+        )
+    
+        self._retract(tree_cache, reqs=[MagicMock()])
+    
+        rematch = tree_cache.match_prefix(MatchPrefixParams(key=key))
+>       self.assertEqual(len(rematch.device_indices), 0)
+E       AssertionError: 4 != 0
+
+/tmp/amdpilot-repo-j-16b88e6898be/review-evidence/test_candidate_regression.py:45: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../../tmp/amdpilot-repo-j-16b88e6898be/review-evidence/test_candidate_regression.py::TestRetractAllCacheRelease::test_evicts_all_radix_prefixes_after_every_request_unlocks
+FAILED ../../tmp/amdpilot-repo-j-16b88e6898be/review-evidence/test_candidate_regression.py::TestRetractAllCacheRelease::test_evicts_each_hybrid_cache_component
+FAILED ../../tmp/amdpilot-repo-j-16b88e6898be/review-evidence/test_candidate_regression.py::TestRetractAllCacheRelease::test_retracted_prefix_is_no_longer_matchable
+3 failed, 2 passed, 16 warnings in 19.44s
