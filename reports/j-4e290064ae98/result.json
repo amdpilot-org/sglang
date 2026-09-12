@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37585",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared main checkout still aligned eager hybrid target-verify token counts only to attention TP size. The focused regression reproduced 228 -> 232 rows for B=38,D=6,A=8 and 198 -> 200 for B=33. The candidate aligns fixed-width hybrid verify batches to lcm(attention TP size, tokens per request), and makes convolution/recurrent dummy rows state-free and initialized. Focused layout tests and gfx950 kernel tests pass after the change.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-4e290064ae98/venv/bin/python -m pytest -q /tmp/test_hybrid_verify_group_padding.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before execution against the prepared checkout: 5 failures, 2 passes and 5 passing subtests. Observed B=38 padding 228 -> 232 instead of 240, B=33 padding 198 -> 200 instead of 216, plus incorrect DP active/idle group boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4e290064ae98/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_hybrid_verify_group_padding.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after fixed-width alignment, output trimming, non-hybrid control, ragged-layout control, and DP MAX_LEN/SUM_LEN active/idle boundaries: 5 passed and 7 subtests passed."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-4e290064ae98/venv/bin/python -m pytest -q test/registered/kernel/linear_attention/test_linear_verify_dummy_requests.py",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI355X gfx950, 17 numerical kernel cases verified real-row equality to an independently executed unpadded reference, zero initialization of dummy output rows, and unchanged persistent/intermediate state for dummy requests across convolution, recurrent GDN and fused KDA paths."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4e290064ae98/venv/bin/python -m compileall -q <four changed Python source files> && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python modules compile and the patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-4e290064ae98/raw/gfx950-dummy-kernels.log records 17 passing GPU tests; reports/j-4e290064ae98/raw/gpu-info.log identifies the assigned AMD Instinct MI355X as gfx950."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported Qwen3.5-35B-A3B weights and 8x NVIDIA H20 TP8/EP8 environment were unavailable, so the full HTTP/model workload was not reproduced.",
+    "The single-gfx950 fixture validates the shared padding contract and affected GPU kernels, not multi-rank collective execution, model semantic accuracy, CUDA behavior, or the separate GLM DSA KPool request-plan issue tracked by upstream #37588.",
+    "No native C++ source changed, so no native rebuild was applicable."
+  ]
+}
