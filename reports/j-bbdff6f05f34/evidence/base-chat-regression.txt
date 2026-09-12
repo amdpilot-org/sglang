@@ -1,0 +1,47 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ ServingChatTestCase.test_non_streaming_request_metrics_are_isolated_per_choice _
+
+self = <test_serving_chat.ServingChatTestCase testMethod=test_non_streaming_request_metrics_are_isolated_per_choice>
+
+    def test_non_streaming_request_metrics_are_isolated_per_choice(self):
+        req = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "Hi?"}],
+            max_tokens=2,
+            n=2,
+            return_request_metrics=True,
+        )
+        ret = [_spec_result(index) for index in range(2)]
+        ret[0]["meta_info"].update(
+            {"time_to_first_token": 0.2, "e2e_latency": 0.8}
+        )
+        ret[1]["meta_info"].update(
+            {"time_to_first_token": 0.4, "e2e_latency": 1.2}
+        )
+
+        response = self.chat._build_chat_response(req, ret, 1234567890)
+>       metrics = response.model_dump()["sglext"]["request_metrics"]
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'sglext'
+
+test/registered/unit/entrypoints/openai/test_serving_chat.py:3048: KeyError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/entrypoints/openai/test_serving_chat.py::ServingChatTestCase::test_non_streaming_request_metrics_are_isolated_per_choice
+1 failed, 135 deselected, 17 warnings in 12.81s

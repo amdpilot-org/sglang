@@ -1,0 +1,60 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36678",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/562",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/561",
+  "candidate_commit": "ec65961db8684a89360088fc59216140660d76d7",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate adds functional opt-in request metrics for ordinary single-prompt OpenAI chat/completion requests and its focused tests pass. It does not fully satisfy the original multiple-output contract: a completions request with two prompts and n=1 returns two choices but serializes sglext.request_metrics as a scalar containing only the first choice's metrics. The default opt-out response remained unchanged in the independent test. This is a partial implementation requiring changes, not a full original-issue fix.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-bbdff6f05f34/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py -k request_metrics (candidate test copied onto prepared base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction on base: the OpenAI chat response had no sglext request_metrics. Raw output: evidence/base-chat-regression.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bbdff6f05f34/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_completions.py -k request_metrics (candidate tests copied onto prepared base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction on base: all three request-metrics completion tests failed, covering propagation, non-streaming response data, and terminal streaming extension data. Raw output: evidence/base-completions-regression.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bbdff6f05f34/venv/bin/python -m pytest -q test/registered/unit/observability/test_req_time_stats.py -k RequestMetricsOutput (candidate tests copied onto prepared base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction on base: derived generation metrics and opt-in timing transport were absent; two tests failed and the existing single-token omission behavior passed. Raw output: evidence/base-stats-regression.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bbdff6f05f34/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py -k request_metrics",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate commit: its chat multi-choice synthetic response regression passed (1 passed). Raw output: evidence/candidate-chat-regression.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bbdff6f05f34/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_completions.py -k request_metrics",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate commit: propagation, ordinary non-streaming, and ordinary streaming completion regressions passed (3 passed). Raw output: evidence/candidate-completions-regression.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bbdff6f05f34/venv/bin/python -m pytest -q test/registered/unit/observability/test_req_time_stats.py -k RequestMetricsOutput",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate commit: timing derivation, single-token omission, and timing pickle transport tests passed (3 passed). Raw output: evidence/candidate-stats-regression.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bbdff6f05f34/venv/bin/python -m pytest -q /job/review_adversarial.py",
+      "exit_code": 1,
+      "what_was_measured": "Independent original-contract cases. Opt-out schema isolation passed, but two prompts with n=1 lost the second output's metrics because response shape is selected from request.n rather than actual output count (1 failed, imported completion suite also passed). Raw test and output: evidence/review_adversarial.py and evidence/candidate-adversarial.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The pinned Torch/ROCm interpreter detected one AMD Instinct MI350X (Torch 2.11.0+rocm7.2, HIP 7.2.26015), recorded in evidence/*-environment.txt. No model server or GPU numerical generation was run; device discovery is not claimed as issue-fix evidence.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "POST /v1/completions semantics with prompt=[\"first\", \"second\"], n=1 and return_request_metrics=true produce two choices, but candidate line 585 chooses a scalar from metrics[0] because request.n is 1, dropping the second choice's metrics. The streaming path has the same request.n-based selection at line 464."
+  ],
+  "remaining_limitations": [
+    "No end-to-end model server was launched because no local model/weights path was supplied in the prepared environment. Actual HTTP transport with live generation remains unverified; direct serving, serialization, timing, and stream-generator paths were tested.",
+    "The embedded Rust server is outside the original issue's requested initial scope and was not reviewed.",
+    "No C++, FlyDSL, or other native source changed between the recorded base and exact candidate, so a native rebuild was not applicable.",
+    "The available AMD MI350X architecture was detected, but this Python protocol/serving change has no GPU kernel output to compare; no GPU execution is claimed."
+  ]
+}
