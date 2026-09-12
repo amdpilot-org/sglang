@@ -1,0 +1,53 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38319",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "reject",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is test-only and its regression substitutes a direct request-table-view free that is not used by either real paged cache_unfinished_req path. Both Python RadixCache and native RadixCacheCpp preserved correct ownership even when the claimed clone fix was disabled. The original QSA serving corruption was not reproduced, and no implementation fix is present.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-4a03297e3091/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_radix_cache_unit.py::TestRadixCache::test_cache_unfinished_req_deferred_paged_free_owns_original_indices test/registered/unit/mem_cache/test_radix_cache_unit.py::TestRadixCache::test_cache_unfinished_req_deferred_free_owns_original_indices",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit 4d68007d1345b03fd894dcc23e56f3f2bc687f8f, both the candidate's synthetic direct-view test and the existing token test passed. This does not establish reachability from the reported lifecycle."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4a03297e3091/venv/bin/python /job/review-evidence-j-4a03297e3091/adversarial_actual_path.py cpu no_clone",
+      "exit_code": 0,
+      "what_was_measured": "The real Python RadixCache.cache_unfinished_req(chunked=True) path freed the duplicate request page, retained the canonical radix page, and rebound the request row correctly even with _copy_for_free_group disabled."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4a03297e3091/venv/bin/python /job/review-evidence-j-4a03297e3091/adversarial_cpp_path.py cpu no_clone",
+      "exit_code": 0,
+      "what_was_measured": "The real native RadixCacheCpp.cache_unfinished_req path also retained correct ownership with the clone disabled because it copies request-table indices before freeing."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4a03297e3091/venv/bin/python /job/review-evidence-j-4a03297e3091/adversarial_actual_path.py cuda && /tmp/amdpilot-repo-j-4a03297e3091/venv/bin/python /job/review-evidence-j-4a03297e3091/adversarial_cpp_path.py cuda",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI355X/gfx950 GPU, both real cache paths retained the radix page and freed the duplicate request page. This measured allocator ownership, not model output."
+    },
+    {
+      "command": "same real-path scripts on prepared base 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "The prepared base did not reproduce ownership corruption in the deterministic Python or C++ paged cache paths."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Independent real-path ownership checks ran on one AMD Instinct MI355X, with rocminfo reporting gfx950; both returned request_page_freed=true and tree_page_freed=false. No QSA model forward was available."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The actual Python paged cache_unfinished_req path remains correct when _copy_for_free_group is replaced by identity, contradicting the candidate test's claimed dependency on that clone.",
+    "The actual native C++ radix cache_unfinished_req path remains correct when the clone is replaced by identity because it already copies kv_indices before deferring the free.",
+    "No candidate test invokes retract or abort, so the reported ownership interaction with those lifecycle operations is untested.",
+    "No candidate test demonstrates corrupted KV payload or repeated bad first-token output through the real QSA pool."
+  ],
+  "remaining_limitations": [
+    "The original DGX Spark GB10 / SM121 architecture is unsupported in this ROCm MI355X/gfx950 environment.",
+    "RadixArk/Qwen3.8-Flash-Next-NVFP4 weights, QSA KDA, NVFP4 KV cache, EAGLE speculative decoding, 262144 context, and the reported abort/retract timing were unavailable.",
+    "The impossible token 248319, persistent same-prefix corruption, cache flush recovery, and end-to-end logits remain unverified.",
+    "The candidate changes no native source, so no native rebuild was applicable; the checkout-local C++ radix extension was imported and exercised.",
+    "The candidate's archived GPU log says MI350X, while the prepared device independently identifies as MI355X."
+  ]
+}
