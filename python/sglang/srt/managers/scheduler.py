@@ -2084,18 +2084,15 @@ class Scheduler(
             if get_mm().mm_feature_transport == "cuda_vmm":
                 vmm_errors = self._materialize_cuda_vmm_inputs(recv_req)
 
-            # Health probes must not enter normal request admission. In DP mode a
-            # probe is routed to one scheduler, so admitting it while that rank is
-            # idle can make only that rank prefillable and perturb cross-rank
-            # PrefillDelayer negotiation. Busy schedulers can piggyback the reply
-            # on their next output; an idle scheduler replies immediately.
-            if is_health_check_generate_req(recv_req):
-                was_fully_idle = self.is_fully_idle(for_health_check=True)
+            # A busy scheduler can use its next completed forward as health
+            # evidence. When fully idle, admit the probe so /health_generate
+            # still exercises the model/device path and produces a real token.
+            if is_health_check_generate_req(recv_req) and not self.is_fully_idle(
+                for_health_check=True
+            ):
                 self.return_health_check_ipcs.append(
                     getattr(recv_req, "http_worker_ipc", None)
                 )
-                if was_fully_idle:
-                    self.maybe_send_health_check_signal()
                 continue
 
             if vmm_errors is not None and any(vmm_errors):
