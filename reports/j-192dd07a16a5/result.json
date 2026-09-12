@@ -1,0 +1,56 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36830",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1364",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1332",
+  "candidate_commit": "4715cafc4ac41e4fb29369ed4afef8d52c386399",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is a substantive source correction and independently fixes the reviewed zero-tail counterexample on gfx950. Its focused suite and independent multi-key zero-tail and nonzero-tail numerical probes pass. No exercised source counterexample remains, but the original CUDA SM90/H20 GLM-5.3-Flash contract could not be run on the assigned ROCm GPU, so full resolution is unverified rather than accepted as proven.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-192dd07a16a5/venv/bin/python -c <CUDA TileLang FP8 validation probe> (base commit)",
+      "exit_code": 0,
+      "what_was_measured": "The probe caught and recorded the expected base ValueError rejecting CUDA fp8_e4m3 with TileLang/TileLang, reproducing the original source-level configuration blocker. Imports resolved to the prepared checkout."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-192dd07a16a5/venv/bin/python -m pytest -q test/registered/unit/test_dsa_tilelang_fp8_validation.py (base commit)",
+      "exit_code": 0,
+      "what_was_measured": "5 tests passed; the base suite encoded rejection of CUDA TileLang FP8 and therefore did not demonstrate the requested functionality."
+    },
+    {
+      "command": "ROCM_PATH=/opt/rocm PYTHONPATH=/job/repo/python TILELANG_CACHE_DIR=/tmp/amdpilot-repo-j-192dd07a16a5/review-tilelang-cache /tmp/amdpilot-repo-j-192dd07a16a5/venv/bin/python -m pytest -q test/registered/unit/test_dsa_tilelang_fp8_validation.py test/registered/attention/test_dsa_tilelang_fp8_kv_cuda.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "11 passed and 2 CUDA-only tests skipped. The cross-vendor GLM-5.3-Flash zero-tail regression compiled and executed on gfx950."
+    },
+    {
+      "command": "ROCM_PATH=/opt/rocm PYTHONPATH=/job/repo/python TILELANG_CACHE_DIR=/tmp/amdpilot-repo-j-192dd07a16a5/review-adversarial-cache /tmp/amdpilot-repo-j-192dd07a16a5/venv/bin/python /job/review-evidence-j-192dd07a16a5/adversarial_probe.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent GPU probes: zero-tail multi-key/repeated/scrambled-index output had 0.027627935633063316 relative error against an FP32 attention reference; nonzero-tail d_tail=64 one-hot output had 0.0 relative error."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-192dd07a16a5/venv/bin/python -m pytest -q test/registered/unit/test_model_overrides.py -k 'tilelang or dsa_split_backend_resolution' (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "1 selected test and 6 subtests passed, with 93 tests deselected, exercising backend-resolution integration boundaries."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..4715cafc4ac41e4fb29369ed4afef8d52c386399",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "Candidate TileLang kernels compiled and executed on one assigned AMD Instinct MI350X/gfx950 under ROCm 7.2. Both independent numerical boundary probes synchronized successfully. No CUDA kernel executed.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Exact candidate commit 4715caf was not executed on CUDA SM90/H20, so CUDA compilation, graph capture, and serving behavior remain unverified locally.",
+    "GLM-5.3-Flash weights were unavailable, so the full model path with index_kpool=4, speculative decoding, capacity gain, and semantic accuracy remains unverified locally.",
+    "Upstream sm_121 feedback reports a repeatable HumanEval decrease for raw-layout FP8 KV (85.4% versus 90.2% BF16); this review did not reproduce or resolve that quality tradeoff."
+  ],
+  "remaining_limitations": [
+    "Assigned architecture was AMD gfx950/ROCm 7.2, not NVIDIA H20/SM90 CUDA.",
+    "No full-model, multi-GPU, multi-node, capacity, or broad accuracy run was possible without the model weights and requested hardware.",
+    "No native rebuild was applicable because the candidate changes Python and TileLang DSL only; TileLang runtime compilation used /opt/tilelang/build."
+  ]
+}
