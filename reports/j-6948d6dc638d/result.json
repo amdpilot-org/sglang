@@ -1,0 +1,31 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33687",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source already removes the reported world-shared lock. Upstream PR #33949 replaced the POSIX shared-memory counter and global flock with generation-tagged, stream-ordered GPU control words; the old module is now only a compatibility re-export. No product-source change was justified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-6948d6dc638d/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_cuda_ipc_pool_budget.py test/registered/unit/multimodal/test_gpu_feature_transport.py",
+      "exit_code": 0,
+      "what_was_measured": "Focused CPU transport behavior and boundary coverage: 40 tests and 2 subtests passed, including pool budgeting, setup/teardown, error cleanup, packing, invalid inputs, and disabled transport behavior."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 timeout 90s /tmp/amdpilot-repo-j-6948d6dc638d/venv/bin/python -m pytest -vv -s test/registered/unit/multimodal/test_cuda_ipc_transport.py::TestCudaIpcTransport::test_pooled_tensor_reconstructs_in_spawned_process",
+      "exit_code": 1,
+      "what_was_measured": "Attempted the production cross-process pooled CUDA IPC reconstruction on the assigned gfx950 GPU. The producer was blocked before IPC transfer by ModuleNotFoundError: No module named 'cuda'; this NVIDIA CUDA-only path is unsupported by the prepared ROCm environment."
+    },
+    {
+      "command": "rg -n 'SHM_LOCK_FILE|shm_wr_lock|fcntl|flock' python/sglang/srt/multimodal/transport python/sglang/srt/utils/cuda_ipc_transport_utils.py",
+      "exit_code": 1,
+      "what_was_measured": "No legacy lock symbol, path, fcntl import, or flock call exists in the active CUDA IPC transport, shared pool implementation, or compatibility module. For ripgrep, exit code 1 means no matches."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The assigned AMD Instinct MI350X gfx950 was detected through PyTorch ROCm, but issue-specific cross-process cuda_ipc execution could not proceed because the transport imports NVIDIA CUDA driver bindings and the environment has no 'cuda' module.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No NVIDIA GPU was available, so the replacement CUDA stream wait/write protocol was not executed end-to-end here.",
+    "No multimodal model weights were available; no full VLM HTTP serving reproduction was attempted or claimed.",
+    "The deterministic tiny Llama fixture is not multimodal and cannot qualify this VLM CUDA IPC transport issue."
+  ]
+}
