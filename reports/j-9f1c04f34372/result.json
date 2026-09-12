@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/11186",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes the independently reported Rust generation-egress omission and passes Python and rebuilt-Rust validation. It is still a partial original-issue fix because Rust-server mode replaces the HTTP worker's watch-plus-piggyback behavior with a piggyback-only in-memory cache: idle/no-generation ranks have no watch fallback. The Rust /v1/loads implementation also lacks the existing Prometheus format and accelerator metadata parity.",
+  "tests": [
+    {
+      "command": "git show 358c163250ad3b1f62939b01ce1314a0a31a0365:python/sglang/srt/rust_server/server.py | sed -n '/def push_generation/,/def _build_mm_spec/p' | rg load_snapshot",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before evidence on the recorded base: RustServer.push_generation had no load_snapshot encoder path, so token egress could not carry the scheduler report."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9f1c04f34372/venv/bin/python -m pytest -q test/registered/unit/managers/test_piggyback_load.py test/registered/unit/managers/test_multi_tokenizer_mixin.py",
+      "exit_code": 0,
+      "what_was_measured": "13 focused Python tests passed at exact candidate commit, including the generation-frame column, best-effort collection, timestamp arbitration, watch merge on the Python path, and multi-tokenizer fanout."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-9f1c04f34372/cargo-target cargo test -p sglang-server",
+      "exit_code": 0,
+      "what_was_measured": "With private pinned Rust 1.92, all 265 sglang-server tests passed, including decoding and newest-per-rank cache coverage."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-9f1c04f34372/cargo-target cargo build --release -p sglang-server",
+      "exit_code": 0,
+      "what_was_measured": "Built the changed optimized native Rust library from the exact candidate source. Direct import resolved to /tmp/amdpilot-repo-j-9f1c04f34372/cargo-target/release/libsglang_server.so and exposed the native Server class."
+    },
+    {
+      "command": "rg -n 'load_snapshots|LoadSnapshots|load_snapshot_reader|ShmLoad|Zmq' rust/sglang-server/src",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial architecture check: every Rust load cache write originates in decoded generation frames; there is no watch/SHM/ZMQ reader feeding the Rust HTTP cache. Therefore idle and pre-generation ranks are absent rather than backed by the required watching mode."
+    },
+    {
+      "command": "source comparison of python/sglang/srt/entrypoints/v1_loads.py with candidate rust/sglang-server/src/api_server/common.rs",
+      "exit_code": 0,
+      "what_was_measured": "The established endpoint supports format=prometheus and reports accelerator topology; the candidate Rust endpoint explicitly returns HTTP 400 for non-JSON and returns null topology fields."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "One AMD Instinct MI355X was visible to the prepared interpreter (Torch 2.11.0+rocm7.2, HIP 7.2), but this deterministic Rust transport/cache review did not execute model inference or GPU numerical work.",
+  "native_rebuilt": true,
+  "remaining_counterexamples": [
+    "With Rust server mode enabled, /v1/loads is backed only by snapshots consumed from generation frames. Before the first generated response, during idle-only operation, or when best-effort snapshot collection returns None, no watch-mode snapshot feeds the Rust cache, so the rank is absent despite the original requirement to keep watching mode and always retain the latest load for external query.",
+    "Rust /v1/loads rejects format=prometheus with HTTP 400 even though the existing endpoint contract supports Prometheus output.",
+    "Rust /v1/loads returns accelerator and num_accelerators as null rather than preserving the established endpoint metadata contract."
+  ],
+  "remaining_limitations": [
+    "No live tiny-model server was launched; the decisive remaining defect is a deterministic missing Rust watch-data source, while the native encoder/decoder was compiled and unit-tested.",
+    "No multi-rank or multi-node serving environment was exercised.",
+    "The available deterministic tiny Llama fixture could validate transport and engine execution only, not semantic accuracy or distributed behavior; no such model claim is made.",
+    "NVIDIA, CPU-only serving, and non-Llama model architectures were not tested."
+  ]
+}
