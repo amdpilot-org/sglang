@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37326",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1056",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1018",
+  "candidate_commit": "23038059316616b7a083187745858d5eeb021674",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "prepared_checkout_difference": "none; prepared HEAD exactly matched the recorded base",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Verified a real narrow fix for empty finished-request insertion and resource/lock ownership in the active UnifiedRadixCache path. This is a partial original-issue fix; the reported long-uptime Qwen4Exp NEXTN acceptance decay was not reproducible in the available architecture and model environment.",
+  "tests": [
+    {
+      "command": "python -m pytest -q /job/review-evidence/test_candidate.py (base 358c163)",
+      "exit_code": 1,
+      "what_was_measured": "Candidate regression on the exact base: 2 failed and 2 passed; empty finished insertion incorrectly changed last_node to root and direct empty insertion returned a root node."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/mem_cache/test_unified_cache_finished_empty_insert.py (candidate 2303805)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression on exact candidate source: 4 passed, covering empty finish cleanup, non-empty boundary insertion, zero-length finish, and direct empty insert."
+    },
+    {
+      "command": "python -m pytest -q /job/review-evidence/adversarial_candidate.py (candidate 2303805)",
+      "exit_code": 0,
+      "what_was_measured": "10 passed, including independent 256-request accumulation/resource stability and existing matched-node preservation cases."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/mem_cache/test_registry.py test/registered/unit/mem_cache/test_unified_radix_lock_ref.py test/registered/unit/mem_cache/test_mamba_path_state_cap.py (candidate 2303805)",
+      "exit_code": 0,
+      "what_was_measured": "37 passed and 2 subtests passed across cache selection, lock-reference, and Mamba state-cap adjacent behavior."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "PyTorch 2.11.0+rocm7.2 reported CUDA-compatible execution on AMD Instinct MI355X, gcnArchName gfx950:sramecc+:xnack-. GPU-backed cache fixtures executed in all regression and adversarial tests.",
+  "native_rebuilt": false,
+  "native_rebuild_reason": "Candidate changes only Python source and tests; repository-environment.json records native=null and wheel=null. Source imports were confirmed from /job/repo/python, so no native rebuild was applicable.",
+  "remaining_counterexamples": [
+    "No 16-24 hour Qwen3.8/Qwen4Exp NVFP4 NEXTN serving run was possible, so acceptance decay may persist through another path.",
+    "The upstream issue records a relapse after both speculative clamp sites and the legacy cache fix, establishing that those fixes alone were insufficient but not proving this unified-cache fix is sufficient.",
+    "The reported NVIDIA SM121, two-node TP=2 architecture was not tested; this review used one AMD gfx950 GPU.",
+    "No model weights were available, so model semantics, throughput restoration, restart recovery, multi-node behavior, and full HTTP serving behavior remain unverified."
+  ],
+  "remaining_limitations": [
+    "Single AMD Instinct MI355X gfx950 GPU with ROCm 7.2 instead of two NVIDIA SM121 nodes.",
+    "No RadixArk/Qwen3.8-Flash-Next-NVFP4 checkpoint weights.",
+    "Deterministic cache-level GPU fixtures cannot qualify full-model long-uptime acceptance behavior.",
+    "No native code changed; native rebuild was not applicable."
+  ]
+}
