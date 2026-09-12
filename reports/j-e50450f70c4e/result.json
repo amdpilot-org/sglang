@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33408",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1985",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1950",
+  "candidate_commit": "bb628ab987cc37b358b1e4f366e5f8b15c19cd83",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The base reproducibly raises at the reported unconditional torch.stack when crop counts differ. The exact candidate adds a heterogeneous-shape path that encodes each item independently and concatenates embeddings in request order, while retaining the homogeneous batched path. Candidate tests and an independent three-item CPU/gfx950 oracle passed. This verifies the source-level contract for valid heterogeneous gundam inputs; the full baidu/Unlimited-OCR HTTP server was not run because weights were unavailable.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e50450f70c4e/venv/bin/python /job/review_evidence/adversarial_unlimited_ocr.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Independent three-item heterogeneous crop fixture failed at unlimited_ocr.py torch.stack with [1,12,3,2,2] versus [1,1,3,2,2], using the prepared source import. Evidence: raw/base_adversarial.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e50450f70c4e/venv/bin/python -m pytest -q test/registered/unit/models/test_unlimited_ocr.py (candidate bb628ab)",
+      "exit_code": 0,
+      "what_was_measured": "All four candidate regressions passed, covering heterogeneous order and flags, homogeneous fast-path batching, absent flags, and GPU execution. Evidence: raw/candidate_tests.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e50450f70c4e/venv/bin/python /job/review_evidence/adversarial_unlimited_ocr.py (candidate bb628ab)",
+      "exit_code": 0,
+      "what_was_measured": "Independent oracle verified three crop counts (12,1,3), output values/order, spatial metadata, per-item flags, and one encoder invocation per item on CPU and gfx950. Evidence: raw/candidate_adversarial.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e50450f70c4e/venv/bin/python script calling dynamic_preprocess on reported dimensions",
+      "exit_code": 0,
+      "what_was_measured": "The prepared revision produced 24 and 12 crops for (2925,4454) and (2242,3157), confirming heterogeneous real preprocessing despite counts differing from the older issue snapshot. Evidence: raw/preprocess.txt."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Independent candidate execution created tensors, dispatched the corrected control flow, concatenated results, and checked exact values on GPU 0: AMD Instinct MI355X, gfx950:sramecc+:xnack-, torch 2.11.0+rocm7.2. This was a model-method fixture, not a full server/model run."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The baidu/Unlimited-OCR weights were unavailable, so the original full HTTP serving scenario, scheduler survival, and semantic model output were not executed.",
+    "The issue reported CUDA on an RTX 3090; the available accelerator was one ROCm AMD MI355X/gfx950. The failing torch.stack and corrected tensor/control-flow contract are architecture-independent and were exercised on CPU and gfx950.",
+    "General scheduler-level isolation from unrelated multimodal encoder exceptions is not added by this candidate; that broader blast-radius concern is outside the valid heterogeneous-tile counterexample fixed here.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
