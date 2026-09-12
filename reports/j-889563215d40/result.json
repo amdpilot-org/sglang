@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32728",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Advertised the optional engine KV replay endpoint through /server_info, discovered it in both Rust introspection paths, and added a bounded Rust DEALER client that detects live sequence gaps, validates a complete contiguous replay range, and forwards recovered batches before the newer live batch. Truncated, malformed, or timed-out replay responses are rejected without advancing the subscriber cursor. Added process metrics for detected gaps, unavailable replay, requests, successes, failures, and recovered batches.",
+  "tests": [
+    {
+      "command": "cargo test --manifest-path experimental/sgl-router/Cargo.toml --lib",
+      "exit_code": 0,
+      "what_was_measured": "Full rebuilt Rust library suite: 548 tests passed, including native ROUTER/DEALER replay framing, live PUB gap repair, truncated-buffer rejection, discovery, metrics, compatibility, and existing router regressions. Raw output: reports/j-889563215d40/raw/cargo-lib-full.log"
+    },
+    {
+      "command": "cargo test --manifest-path experimental/sgl-router/Cargo.toml --test component kv_events -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Six component KV-event tests passed, covering independent subscribers, multi-publisher isolation, concurrency, and Python/Rust hash parity. Raw output: reports/j-889563215d40/raw/cargo-component-kv-events.log"
+    },
+    {
+      "command": "cargo build --manifest-path experimental/sgl-router/Cargo.toml --bin sgl-router",
+      "exit_code": 0,
+      "what_was_measured": "Built the changed native sgl-router binary with repository-pinned Rust 1.90 into the private runtime target directory. Raw output: reports/j-889563215d40/raw/cargo-native-build.log"
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/entrypoints/test_server_info.py",
+      "exit_code": 0,
+      "what_was_measured": "29 /server_info tests and 12 subtests passed, including replay endpoint advertisement and load-range coexistence. Raw output: reports/j-889563215d40/raw/python-server-info.log"
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/server_args/test_server_args.py -k TestDcpKvEventContract",
+      "exit_code": 0,
+      "what_was_measured": "Three descriptor contract tests passed, including optional replay fields and backward-compatible omission. Raw output: reports/j-889563215d40/raw/python-kv-descriptor.log"
+    },
+    {
+      "command": "cargo clippy --manifest-path experimental/sgl-router/Cargo.toml --lib --tests -- -D warnings",
+      "exit_code": 101,
+      "what_was_measured": "Clippy reached the rebuilt router but is blocked by a pre-existing unrelated nonminimal_bool warning in experimental/sgl-router/src/policies/buckets.rs:167. No replay-path lint diagnostic was emitted. Raw output: reports/j-889563215d40/raw/cargo-clippy.log"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The feature is HTTP discovery plus CPU/network ZMQ sequencing in the experimental Rust router; it has no GPU numerical output. No model weights or GPU execution were needed, and startup smoke was not used as correctness evidence.",
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "No model-serving or distributed workload was run because replay correctness is independent of model architecture and GPU numerics; the native socket-level near-E2E test exercises the actual transport and wire contract.",
+    "A replay gap whose earliest missing batch has already been evicted is intentionally left unapplied and counted as a replay failure; the router cannot reconstruct unavailable engine state.",
+    "The repository-wide clippy -D warnings gate remains blocked by the unrelated pre-existing warning in policies/buckets.rs:167."
+  ]
+}

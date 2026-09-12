@@ -39,6 +39,12 @@
 //! | `sgl_router_cache_pressure_guard_override_total` | Counter | — |
 //! | `sgl_router_cache_monitor_decisions_total` | Counter | `source` |
 //! | `sgl_router_ingress_tokenize_errors_total` | Counter | `model_id` |
+//! | `sgl_router_kv_replay_requests_total` | Counter | — |
+//! | `sgl_router_kv_event_gaps_total` | Counter | — |
+//! | `sgl_router_kv_replay_unavailable_total` | Counter | — |
+//! | `sgl_router_kv_replay_successes_total` | Counter | — |
+//! | `sgl_router_kv_replay_failures_total` | Counter | — |
+//! | `sgl_router_kv_replay_batches_total` | Counter | — |
 //!
 //! The four `sgl_router_worker*` gauges and `sgl_router_workers` are sampled
 //! at scrape time from the live [`crate::workers::WorkerRegistry`] (passed to
@@ -711,6 +717,8 @@ impl MetricsRegistry {
             ));
         }
         drop(guard);
+
+        crate::policies::kv_events::subscriber::render_replay_metrics(&mut out);
 
         // active_load gauge
         out.push_str(

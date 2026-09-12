@@ -3150,6 +3150,25 @@ class TestDcpKvEventContract(CustomTestCase):
         )
         self.assertEqual(describe_kv_events_publisher(args)["block_size"], 64)
 
+    def test_kv_events_descriptor_advertises_optional_replay_endpoint(self):
+        args = ServerArgs(
+            model_path="dummy",
+            page_size=64,
+            kv_events_config=(
+                '{"publisher":"zmq","topic":"kv",'
+                '"endpoint":"tcp://*:5557",'
+                '"replay_endpoint":"tcp://0.0.0.0:6550"}'
+            ),
+        )
+        descriptor = describe_kv_events_publisher(args)
+        self.assertEqual(descriptor["replay_endpoint_host"], "0.0.0.0")
+        self.assertEqual(descriptor["replay_endpoint_port_base"], 6550)
+
+        args.kv_events_config = self.KV_EVENTS
+        descriptor = describe_kv_events_publisher(args)
+        self.assertNotIn("replay_endpoint_host", descriptor)
+        self.assertNotIn("replay_endpoint_port_base", descriptor)
+
     def test_kv_event_block_size_widens_a_single_token_page(self):
         # page_size=1 + DCP is a real deployment shape: the allocator is still
         # paged, at dcp_size.

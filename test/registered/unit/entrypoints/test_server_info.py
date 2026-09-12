@@ -156,6 +156,8 @@ class TestServerInfoKvEventsField(CustomTestCase):
 
         info = _call_server_info_with(args)
 
+        self.assertEqual(info["kv_events"]["replay_endpoint_host"], "*")
+        self.assertEqual(info["kv_events"]["replay_endpoint_port_base"], 5558)
         self.assertEqual(info["kv_events"]["load_endpoint_port_base"], 5560)
         self.assertEqual(info["kv_events"]["load_topic"], "load")
 

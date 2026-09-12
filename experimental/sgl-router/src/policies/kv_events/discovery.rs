@@ -39,6 +39,10 @@ pub struct EventConfig {
     pub port_base: u16,
     /// ZMQ topic prefix the gateway should SUBSCRIBE to.
     pub topic: String,
+    /// Optional ROUTER replay socket advertised by the worker. Per-rank port
+    /// is `replay_port_base + dp_rank`. Older workers omit both fields.
+    pub replay_host: Option<String>,
+    pub replay_port_base: Option<u16>,
     /// Base port of the worker's dedicated load-snapshot socket range
     /// (per-rank load port = `load_port_base + dp_rank`). `None` when the
     /// worker predates load publishing — the load subscriber is then skipped
@@ -126,15 +130,28 @@ pub async fn fetch_event_config(
         block.endpoint_host.as_str(),
         "*" | "0.0.0.0" | "::" | "[::]"
     ) {
-        worker_host
+        worker_host.clone()
     } else {
         block.endpoint_host
+    };
+    let replay_host = block.replay_endpoint_host.as_deref().map(|reported| {
+        if matches!(reported, "*" | "0.0.0.0" | "::" | "[::]") {
+            worker_host.clone()
+        } else {
+            reported.to_owned()
+        }
+    });
+    let replay = match (replay_host, block.replay_endpoint_port_base) {
+        (Some(replay_host), Some(port)) => Some((replay_host, port)),
+        _ => None,
     };
 
     Ok(Some(EventConfig {
         host,
         port_base: block.endpoint_port_base,
         topic: block.topic,
+        replay_host: replay.as_ref().map(|(host, _)| host.clone()),
+        replay_port_base: replay.as_ref().map(|(_, port)| *port),
         load_port_base: block.load_endpoint_port_base,
         load_topic: block.load_topic,
         block_size: block.block_size,
@@ -262,6 +279,10 @@ struct KvEventsBlock {
     endpoint_port_base: u16,
     #[serde(default)]
     topic: String,
+    #[serde(default)]
+    replay_endpoint_host: Option<String>,
+    #[serde(default)]
+    replay_endpoint_port_base: Option<u16>,
     /// Base port of the dedicated load-snapshot socket range. Absent on
     /// workers that predate load publishing (`None` ⇒ no load subscriber).
     #[serde(default)]
@@ -322,6 +343,8 @@ mod tests {
                 "endpoint_host": "*",
                 "endpoint_port_base": 5557,
                 "topic": "kv",
+                "replay_endpoint_host": "0.0.0.0",
+                "replay_endpoint_port_base": 5558,
                 "load_endpoint_port_base": 5559,
                 "load_topic": "load",
                 "block_size": 64,
@@ -336,6 +359,8 @@ mod tests {
                 host: "127.0.0.1".to_string(),
                 port_base: 5557,
                 topic: "kv".to_string(),
+                replay_host: Some("127.0.0.1".to_string()),
+                replay_port_base: Some(5558),
                 load_port_base: Some(5559),
                 load_topic: Some("load".to_string()),
                 block_size: 64,
