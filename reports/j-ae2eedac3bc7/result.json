@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34152",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes and correctly values the issue's fully-past-prompt EAGLE3 draft-extend case, but remains cardinality-incorrect when an extend starts inside precomputed multimodal positions and crosses their end. Because that independent boundary case still provides fewer mRoPE columns than forwarded tokens, this is a partial source fix rather than a complete enforcement of the original contract.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ae2eedac3bc7/venv/bin/python /job/review-evidence-j-ae2eedac3bc7/repro_contract.py (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "The untouched base produced [3,10] positions for 40 tokens in the original scenario and [3,2] positions for a four-token crossing extend."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ae2eedac3bc7/venv/bin/python test/registered/unit/spec/test_mrope_draft_extend_positions.py -v (candidate 95c8c67)",
+      "exit_code": 0,
+      "what_was_measured": "All four candidate CPU tests passed against the exact checked-out candidate source."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ae2eedac3bc7/venv/bin/python /job/review-evidence-j-ae2eedac3bc7/repro_contract.py (candidate 95c8c67)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate fixed the original fully-past-prompt shape to [3,40], but the independent cross-boundary case remained [3,2] instead of [3,4]."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ae2eedac3bc7/venv/bin/python /job/review-evidence-j-ae2eedac3bc7/gpu_contract.py (candidate 95c8c67)",
+      "exit_code": 1,
+      "what_was_measured": "On gfx950, the ordinary ragged candidate output exactly matched an independent reference, then the cross-boundary assertion failed because four tokens received only two positions."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-ae2eedac3bc7/raw/gpu-inventory.log identifies one AMD Instinct MI355X with capability (9,5); candidate-gpu-contract.log records exact reference equality and the failing boundary assertion on cuda:0 (PyTorch's ROCm device API)."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    {
+      "case": "A multimodal extend begins two tokens before the end of a 16-column precomputed mRoPE tensor and extends four tokens.",
+      "expected": "mrope_positions shape [3,4], one column per forwarded token",
+      "actual": "mrope_positions shape [3,2] on both CPU and gfx950 because the non-empty partial slice bypasses the fallback"
+    }
+  ],
+  "remaining_limitations": "No Qwen3-VL or EAGLE3 weights were available. The full serving path, CUDA/H100 fused Triton kernel, semantic output comparison, performance, multi-GPU, and multi-node behavior remain unverified. The available architecture was one AMD Instinct MI355X (gfx950) under ROCm 7.2. The change is Python-only, so no native rebuild was applicable."
+}
