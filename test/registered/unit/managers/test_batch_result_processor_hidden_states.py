@@ -121,6 +121,90 @@ class _DecodeReq:
 
 
 class TestPrefillHiddenStateOffsets(CustomTestCase):
+    def test_non_requesting_prompt_advances_before_requesting_prompt(self):
+        """Every FULL-capture request owns rows, even when it does not return them."""
+        processor = _make_processor(self)
+        hidden_states = torch.arange(8, dtype=torch.float32).unsqueeze(1)
+        logits_output = SimpleNamespace(hidden_states=hidden_states)
+        non_requesting = _PrefillReq(
+            rid="non-requesting",
+            inflight_middle_chunks=0,
+            return_hidden_states=False,
+        )
+        requesting = _PrefillReq(
+            rid="requesting",
+            inflight_middle_chunks=0,
+            return_hidden_states=True,
+        )
+
+        offset = processor._append_prefill_hidden_states(
+            req=non_requesting,
+            logits_output=logits_output,
+            hidden_state_offset=0,
+            capture_hidden_mode=CaptureHiddenMode.FULL,
+            extend_input_len=5,
+        )
+        offset = processor._append_prefill_hidden_states(
+            req=requesting,
+            logits_output=logits_output,
+            hidden_state_offset=offset,
+            capture_hidden_mode=CaptureHiddenMode.FULL,
+            extend_input_len=3,
+        )
+
+        self.assertEqual(offset, 8)
+        self.assertEqual(non_requesting.hidden_states, [])
+        self.assertEqual(requesting.hidden_states, [[[5.0], [6.0], [7.0]]])
+
+    def test_forwarded_lengths_and_unstored_rows_keep_later_slice_aligned(self):
+        """Cached/chunked and discarded requests advance by forwarded row count."""
+        processor = _make_processor(self)
+        hidden_states = torch.arange(6, dtype=torch.float32).unsqueeze(1)
+        logits_output = SimpleNamespace(hidden_states=hidden_states)
+        cached_request = _PrefillReq(
+            rid="cached",
+            inflight_middle_chunks=0,
+            return_hidden_states=True,
+        )
+        discarded_request = _PrefillReq(
+            rid="discarded",
+            inflight_middle_chunks=0,
+            return_hidden_states=True,
+        )
+        later_request = _PrefillReq(
+            rid="later",
+            inflight_middle_chunks=0,
+            return_hidden_states=True,
+        )
+
+        offset = processor._append_prefill_hidden_states(
+            req=cached_request,
+            logits_output=logits_output,
+            hidden_state_offset=0,
+            capture_hidden_mode=CaptureHiddenMode.FULL,
+            extend_input_len=2,
+        )
+        offset = processor._append_prefill_hidden_states(
+            req=discarded_request,
+            logits_output=logits_output,
+            hidden_state_offset=offset,
+            capture_hidden_mode=CaptureHiddenMode.FULL,
+            extend_input_len=1,
+            store=False,
+        )
+        offset = processor._append_prefill_hidden_states(
+            req=later_request,
+            logits_output=logits_output,
+            hidden_state_offset=offset,
+            capture_hidden_mode=CaptureHiddenMode.FULL,
+            extend_input_len=3,
+        )
+
+        self.assertEqual(offset, 6)
+        self.assertEqual(cached_request.hidden_states, [[[0.0], [1.0]]])
+        self.assertEqual(discarded_request.hidden_states, [])
+        self.assertEqual(later_request.hidden_states, [[[3.0], [4.0], [5.0]]])
+
     def test_active_middle_chunk_advances_before_new_last_request(self):
         cases = (
             (

@@ -1,0 +1,29 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32089",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared base already contains the issue's required correction, introduced upstream in a0b7bcf59289a6cf916fa5ee44e3cfa865a25f3d: forwarded lengths are snapshotted for hidden-state output, every contributing request advances the offset, and FULL capture slices by extend_input_len. Added exact and independent boundary regressions without duplicating the production fix.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ab009cac3813/venv/bin/python (inline reconstruction of the pre-fix algorithm; see raw/regression_before.log)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: a 5-token non-requesting prompt followed by a 3-token requesting prompt incorrectly selected hidden-state rows 0-2 instead of 5-7. The nonzero exit is expected and captured by the surrounding successful harness."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ab009cac3813/venv/bin/python -m pytest -q test/registered/unit/managers/test_batch_result_processor_hidden_states.py",
+      "exit_code": 0,
+      "what_was_measured": "Nine focused processor tests plus two subtests passed, including exact mixed-request offset accounting, forwarded-length slicing, unstored-row advancement, and existing FULL/LAST middle-chunk coverage."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ab009cac3813/venv/bin/python (inline production-helper gfx950 check; see raw/gfx950_hidden_state_offsets.log)",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, the actual production helper returned rows 5-7 for the original mixed-request case and preserved alignment across forwarded lengths 2/1/3 with the middle result discarded."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No full HTTP/model-serving reproduction was performed; no model weights were available or necessary for the processor-level accounting check.",
+    "The GPU fixture validates hidden-state buffer slicing and transfer through the production processor helper, not model semantic accuracy, another architecture, or a distributed/multi-node workload."
+  ]
+}
