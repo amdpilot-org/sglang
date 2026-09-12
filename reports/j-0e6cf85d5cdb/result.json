@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38074",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "907fefbb2c13615b1b960f525fa1b451e35f174f",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces immediate-lifetime failure in the real Qwen4 loader: its self-referential nested PLE helper creates a closure cycle retaining the FQN params_dict and superseded Parameters until cyclic GC. The exact candidate replaces function-owned warning state with a per-load nonlocal boolean. Candidate regression and independent with-PLE/without-PLE adversarial cases pass, warning frequency and values are preserved, and no counterexample was found. Original L20 full-checkpoint execution was unavailable locally, but the original reporter's issue comment records successful A/B validation of this exact fix on the reported setup.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-0e6cf85d5cdb/venv/bin/python /job/review-evidence-j-0e6cf85d5cdb/qwen4_lifetime_adversarial.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before independent probe of the actual loader. With cyclic GC disabled, replaced Parameters remained alive through the FQN-keyed params_dict both with and without PLE; baseline warning frequency and values were correct."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-0e6cf85d5cdb/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen4_loader_lifetime.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: immediate release without cyclic GC, warning once per load, matching-dtype silence, and loaded-value preservation; 3 tests, 4 subtests passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-0e6cf85d5cdb/venv/bin/python /job/review-evidence-j-0e6cf85d5cdb/qwen4_lifetime_adversarial.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent passing-after probe: both retained-Parameter cases released immediately, no FQN dict referrer remained, warnings counted 1 then 2 across two loads, and values matched exactly."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0e6cf85d5cdb/venv/bin/python -m py_compile python/sglang/srt/models/qwen4_exp.py test/registered/unit/models/test_qwen4_loader_lifetime.py && git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 907fefbb2c13615b1b960f525fa1b451e35f174f",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python syntax and patch whitespace."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X/gfx950 with ROCm 7.2 was visible, but the issue's NVFP4 Marlin fallback requires NVIDIA SM80-SM90x. Tests exercised CPU tensor lifetime only; no local CUDA Marlin or full-model claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The original 2x NVIDIA L20 sm_89, TP2, 48-layer Qwen3.8-Flash-Next NVFP4 checkpoint and weights were unavailable locally.",
+    "The assigned gfx950 device cannot execute NVIDIA Marlin, so this review did not directly remeasure the reported CUDA allocation curve or kernel numerics.",
+    "Local verification covers the real Qwen4 loader lifetime contract, not full-model serving, distributed loading, or semantic accuracy.",
+    "Original-environment A/B evidence in the upstream issue was reviewed as corroboration, not claimed as execution by this job."
+  ]
+}
