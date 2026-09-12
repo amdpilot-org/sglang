@@ -6,6 +6,7 @@ from unittest.mock import patch
 import torch
 
 import sglang.srt.models.deepseek_v2 as deepseek_v2
+from sglang.srt.layers.moe.topk import biased_grouped_topk_cpu
 from sglang.srt.models.deepseek_v2 import MoEGate
 from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import CustomTestCase
@@ -27,10 +28,14 @@ class TestDeepseekAmxRouterLogits(CustomTestCase):
 
         with (
             patch.object(deepseek_v2, "_is_cuda", False),
+            patch.object(deepseek_v2, "use_intel_amx_backend", return_value=True),
             patch.object(
                 torch.ops.sgl_kernel,
                 "weight_packed_linear",
                 create=True,
+                return_value=torch.tensor(
+                    [[1.0, 1.0]], dtype=torch.bfloat16
+                ),
             ) as packed_linear,
         ):
             logits = gate(hidden_states)
@@ -69,6 +74,57 @@ class TestDeepseekAmxRouterLogits(CustomTestCase):
 
         self.assertGreater(fp32_logits[0, 1], fp32_logits[0, 0])
         self.assertEqual(bf16_roundtrip[0, 1], bf16_roundtrip[0, 0])
+
+    def test_cpu_topk_rejects_bf16_router_logits_before_native_dispatch(self):
+        """The CPU TopK boundary must not silently accept pre-rounded logits."""
+        hidden_states = torch.zeros((1, 2), dtype=torch.bfloat16)
+        gating_output = torch.tensor([[1.001, 1.002]], dtype=torch.bfloat16)
+        correction_bias = torch.zeros(2, dtype=torch.float32)
+
+        with patch.object(
+            torch.ops.sgl_kernel, "biased_grouped_topk_cpu", create=True
+        ) as native_topk:
+            with self.assertRaisesRegex(ValueError, "requires FP32 gating_output"):
+                biased_grouped_topk_cpu(
+                    hidden_states,
+                    gating_output,
+                    correction_bias,
+                    topk=1,
+                    renormalize=False,
+                    num_expert_group=1,
+                    topk_group=1,
+                )
+
+        native_topk.assert_not_called()
+
+    def test_cpu_topk_forwards_fp32_router_logits(self):
+        """FP32 router logits remain accepted and reach the native kernel unchanged."""
+        hidden_states = torch.zeros((1, 2), dtype=torch.bfloat16)
+        gating_output = torch.tensor([[1.001, 1.002]], dtype=torch.float32)
+        correction_bias = torch.zeros(2, dtype=torch.float32)
+        expected = (
+            torch.ones((1, 1), dtype=torch.float32),
+            torch.ones((1, 1), dtype=torch.int32),
+        )
+
+        with patch.object(
+            torch.ops.sgl_kernel,
+            "biased_grouped_topk_cpu",
+            create=True,
+            return_value=expected,
+        ) as native_topk:
+            actual = biased_grouped_topk_cpu(
+                hidden_states,
+                gating_output,
+                correction_bias,
+                topk=1,
+                renormalize=False,
+                num_expert_group=1,
+                topk_group=1,
+            )
+
+        self.assertIs(actual, expected)
+        self.assertIs(native_topk.call_args.args[1], gating_output)
 
 
 if __name__ == "__main__":
