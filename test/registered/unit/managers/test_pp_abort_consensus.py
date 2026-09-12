@@ -48,11 +48,13 @@ def _make_queue(reqs, *, pp_size: int = 8):
     queue = object.__new__(PrefillBootstrapQueue)
     queue.queue = list(reqs)
     queue.pp_size = pp_size
+    queue.scheduler_stage_metrics = None
     queue.scheduler = SimpleNamespace(
         attn_cp_cpu_group=None,
         attn_tp_cpu_group=None,
         handle_bootstrap_failure=MagicMock(),
         _pp_record_pending_bootstrap_failure=MagicMock(),
+        processed_tokens_counter=0,
         server_args=SimpleNamespace(optimistic_prefill_attempts=0),
     )
     queue.finalize_bootstrap = MagicMock(return_value=True)
