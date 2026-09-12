@@ -212,10 +212,18 @@ def retraction_backup(
     token_to_kv_pool_allocator: BaseTokenToKVPoolAllocator,
     backend: str,
 ) -> bool:
-    """Returns False when the host pool cannot hold the backup; the caller
-    aborts the request since its KV cannot be preserved."""
+    """Returns False when the request KV cannot be preserved; the caller
+    aborts that request instead of resuming it without its prior state."""
     if backend == "cpu_tensor":
-        req.offload_kv_cache(req_to_token_pool, token_to_kv_pool_allocator)
+        try:
+            req.offload_kv_cache(req_to_token_pool, token_to_kv_pool_allocator)
+        except NotImplementedError:
+            logger.exception(
+                "CPU-tensor retraction backup is unsupported for request %s; "
+                "aborting the request instead of crashing the scheduler",
+                req.rid,
+            )
+            return False
         return True
     if backend != "host_pool":
         raise ValueError(f"Unknown retraction backup backend: {backend}")
