@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38360",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Sequence-classification scoring now wraps scalar single-label logits in one-element rows before constructing ScoringResponse, while preserving existing multi-label vectors.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-5dc2398c1b94/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_score_results.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Issue-specific failing-before regression: scalar logits produced [5.875, -10.109375] instead of [[5.875], [-10.109375]]; the multi-label vector boundary case passed. Raw output: reports/j-5dc2398c1b94/raw/failing_before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5dc2398c1b94/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_score_results.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression and boundary cases for raw scalar logits, scalar softmax, prompt-token accounting, and unchanged multi-label vectors (3 passed). Raw output: reports/j-5dc2398c1b94/raw/passing_after.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-5dc2398c1b94/venv/bin/python < gfx950 pooler/score validation script",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned gfx950, the actual CrossEncodingPooler produced shape (2,) and scalar values [5.875, -10.109375], exactly matching an independent input-tensor reference; the patched score processor and ScoringResponse validated [[5.875], [-10.109375]]. Raw script output: reports/j-5dc2398c1b94/raw/gfx950_pooler_score_validation.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5dc2398c1b94/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_score_results.py test/registered/unit/layers/test_pooler_score_and_pool.py test/registered/prefill_only/test_serving_rerank.py",
+      "exit_code": 0,
+      "what_was_measured": "Focused regression plus adjacent pooler and rerank behavior (24 passed). Raw output: reports/j-5dc2398c1b94/raw/adjacent_tests.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Executed CrossEncodingPooler and numerical comparison on one AMD Instinct MI350X, gfx950:sramecc+:xnack-. See reports/j-5dc2398c1b94/raw/gfx950_pooler_score_validation.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "BAAI/bge-reranker-v2-m3 weights were not available locally, so the full model server and HTTP curl reproduction were not run.",
+    "The deterministic GPU fixture validates the reported pooler scalar shape, score-result normalization, and response schema only; it does not validate BGE model semantics or numerical accuracy.",
+    "No native code changed, so no native rebuild was applicable."
+  ]
+}
