@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39096",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Live ROCm testing reproduced inert preferred sampling parameters for omitted /v1/chat/completions fields at the prepared baseline and verified that exact candidate fc25fb0ed902605ed7aaf5592a72e42979219965 restores explicit-client > server-preference > model/protocol-default precedence. The deterministic tiny model validates request handling and GPU engine execution, not semantic quality.",
+  "tests": [
+    {
+      "command": "python scripts/ci/generate_tiny_sampling_model.py /tmp/amdpilot-repo-j-77a1da77d260/models/tiny-llama",
+      "exit_code": 0,
+      "what_was_measured": "Created deterministic random Llama weights and tokenizer; model.safetensors SHA256 1407483bbc21bd0a4f84eb72acb2eb0d4b23019e5db843029e151f348e8fe108."
+    },
+    {
+      "command": "baseline server at 358c163250ad3b1f62939b01ce1314a0a31a0365 plus probe_sampling_precedence.py",
+      "exit_code": 1,
+      "what_was_measured": "All requested HTTP paths executed, but omitted chat output (' five ten nine H user') differed from explicit-preferred output (' A C assistant gamma six F F'), reproducing lost server preferences."
+    },
+    {
+      "command": "candidate server at fc25fb0ed902605ed7aaf5592a72e42979219965 plus probe_sampling_precedence.py --expect-chat-precedence",
+      "exit_code": 0,
+      "what_was_measured": "Omitted and explicit-preferred chat outputs both equaled ' A C assistant gamma six F F'; explicit override remained distinct; chat/completions streaming ended with [DONE]; the two-prompt completion request returned two choices."
+    },
+    {
+      "command": "transformers AutoModelForCausalLM CPU greedy reference versus live candidate greedy chat request",
+      "exit_code": 0,
+      "what_was_measured": "Reference token IDs [24,26,3,5,10,26,18,18] decoded to the same token sequence as live output (the API retained one leading space)."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-77a1da77d260/venv/bin/python -m pytest -q test/registered/unit/managers/test_chat_preferred_sampling_params.py test/registered/unit/entrypoints/openai/test_protocol.py (at candidate fc25fb0ed902605ed7aaf5592a72e42979219965)",
+      "exit_code": 0,
+      "what_was_measured": "48 tests and 25 subtests passed, including the candidate's complete explicit-key precedence regression suite."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One visible AMD Instinct MI350X (gfx950) executed baseline and candidate inference. Server logs show LlamaForCausalLM weight loading, GPU KV-cache allocation, successful prefill/decode batches, and HTTP 200 responses. Attention backend was explicitly torch_native; prefill and decode graph backends resolved to disabled and logs reported cuda graph: False."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Tiny random weights establish protocol, precedence, batching, streaming, and ROCm engine execution only; they do not establish semantic model quality.",
+    "The candidate is scoped to chat completions. Completion endpoint observations are protocol coverage, not a claim that its omitted-field precedence changed.",
+    "Raw run artifacts are retained at /tmp/amdpilot-repo-j-77a1da77d260/artifacts/raw and the generated fixture at /tmp/amdpilot-repo-j-77a1da77d260/models/tiny-llama.",
+    "A non-fatal Torch Dynamo metrics logger error (function not JSON serializable) appeared during warmup on both revisions; inference still completed successfully."
+  ]
+}
