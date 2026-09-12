@@ -33,13 +33,20 @@ from test_swa_locked_full_recover_unified import _DEV, _FakeUnifiedSWAKVPool
 from sglang.srt.mem_cache.allocator.unified_hybrid_swa import (
     UnifiedSWATokenToKVPoolAllocator,
 )
+from sglang.srt.mem_cache.common import free_kv_row_segments
 from sglang.srt.mem_cache.unified_memory_pool import MHASubPoolSpec, UnifiedKVPool
 from sglang.test.ci.ci_register import register_cpu_ci
 
 register_cpu_ci(est_time=8, suite="base-a-test-cpu")
 
 
-def _build(n_full: int, n_swa: int, full_layers: int, swa_layers: int):
+def _build(
+    n_full: int,
+    n_swa: int,
+    full_layers: int,
+    swa_layers: int,
+    page_size: int = 1,
+):
     """A composite whose sides have different per-page byte costs. `full_layers
     < swa_layers` is the gemma-4 shape: the cheap side is the id owner and ends
     up with far more pages than the side that has to address them."""
@@ -71,12 +78,27 @@ def _build(n_full: int, n_swa: int, full_layers: int, swa_layers: int):
         device=_DEV,
         full_max_total_num_tokens=n_full,
         swa_max_total_num_tokens=n_swa,
+        page_size=page_size,
         need_sort=False,
         forward_stream=None,
     )
 
 
 class TestSharedVirtualIdSpace(unittest.TestCase):
+    def test_touching_cleanup_retry_is_idempotent(self):
+        alloc = _build(32, 32, full_layers=1, swa_layers=1, page_size=4)
+        row = alloc.alloc(8)[:7]
+        segments = [(row[:5], 0), (row[5:], 5)]
+
+        free_kv_row_segments(alloc, segments, swa_evicted_seqlen=0)
+        full_after_first = alloc.full_available_size()
+        swa_after_first = alloc.swa_available_size()
+
+        free_kv_row_segments(alloc, segments, swa_evicted_seqlen=0)
+        self.assertEqual(alloc.full_available_size(), full_after_first)
+        self.assertEqual(alloc.swa_available_size(), swa_after_first)
+        self.assertEqual(alloc.verify_byte_accounting(), [])
+
     def test_swa_table_spans_the_owners_id_space(self):
         """Static form: the table has to be wide enough before any alloc runs."""
         for full_layers, swa_layers in ((1, 5), (5, 1), (2, 2)):

@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38981",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/687",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/525",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/652",
+  "candidate_commit": "97c33ff61442e589812954f6d71d59bcddae5c2c",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved the candidate's coalescing of touching KV-row slices, independently reproduced the review's same-cleanup retry failure (free_pages grew 62 -> 64 -> 66), and made identical consecutive free_kv_row_segments retries no-ops after the first successful cleanup. Regression coverage exercises ordinary paged, legacy hybrid SWA, and unified hybrid SWA allocators through free_kv_row_segments, while existing synchronization-contract tests continue to pass.",
+  "tests": [
+    {
+      "command": "git switch --detach 97c33ff61442e589812954f6d71d59bcddae5c2c && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-21802d4e5e62/venv/bin/python -m pytest -q /job/retry_repro.py",
+      "exit_code": 1,
+      "what_was_measured": "Exact candidate commit through the real free_kv_row_segments and PagedTokenToKVPoolAllocator path. The first cleanup grew free_pages from 62 to 64 and the identical retry incorrectly grew it to 66."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-21802d4e5e62/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_paged_free_segment.py test/registered/unit/mem_cache/test_swa_unittest.py test/registered/unit/mem_cache/test_unified_swa_shared_virtual_ids.py",
+      "exit_code": 0,
+      "what_was_measured": "54 tests and 41 subtests passed, including touching and interleaved segment coalescing, identical cleanup retries through free_kv_row_segments for paged and both hybrid SWA allocator families, byte-accounting checks, overlap rejection, and existing no-host-synchronization free-path checks."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-21802d4e5e62/venv/bin/python GPU sum-of-squares check",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X, int64 sum(i^2, i=1..4096) was 22914881536, exactly equal to the independent closed-form value 4096*4097*8193/6."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Focused allocator tests and an independent numerical reference ran with ROCR_VISIBLE_DEVICES=0 and HIP_VISIBLE_DEVICES=0 on AMD Instinct MI350X, capability (9, 5), using PyTorch 2.11.0+rocm7.2 and HIP 7.2.26015.",
+  "native_rebuilt": false,
+  "native_rebuild_reason": "Not applicable: only Python source and Python tests changed; no C++, FlyDSL, compiler, or ISA source changed.",
+  "source_paths": {
+    "checkout": "/job/repo",
+    "sglang_module": "/job/repo/python/sglang/srt/mem_cache/common.py",
+    "python": "/tmp/amdpilot-repo-j-21802d4e5e62/venv/bin/python",
+    "raw_output": "/job/raw/j-21802d4e5e62"
+  },
+  "remaining_limitations": [
+    "The reported 8x NVIDIA B300 (SM103) Kimi-K3/DSpark deployment and model weights were unavailable, so the full multi-rank CUDA server abort replay remains unverified.",
+    "Validation covered the actual Python cleanup and allocator paths on the assigned AMD GPU; it does not claim NVIDIA-specific or model-level equivalence."
+  ]
+}
