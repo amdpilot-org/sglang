@@ -1,0 +1,89 @@
+"""Regression tests for MoE runtime initialization in bench_one_batch."""
+
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from sglang.test.ci.ci_register import register_cpu_ci
+
+register_cpu_ci(est_time=2, suite="base-a-test-cpu")
+
+from sglang.benchmark import one_batch
+from sglang.srt.layers.moe import get_moe_runner_backend
+from sglang.srt.runtime_context import reset_context
+from sglang.srt.server_args import ServerArgs
+from sglang.test.test_utils import CustomTestCase
+
+
+class TestOneBatchMoeConfig(CustomTestCase):
+    def tearDown(self):
+        reset_context()
+        super().tearDown()
+
+    def _backend_observed_by_load_model(self, *, correctness, requested_backend):
+        reset_context()
+        server_args = ServerArgs(
+            model_path="dummy",
+            load_format="dummy",
+            moe_runner_backend=requested_backend,
+            disable_cuda_graph=True,
+        )
+        server_args.resolve_once()
+        bench_args = one_batch.BenchArgs(
+            batch_size=(1,),
+            input_len=(1,),
+            output_len=(1,),
+            correctness_test=correctness,
+        )
+        observed = []
+
+        def stop_after_observation(*args, **kwargs):
+            # ModelConfig construction is the first model-loading operation.
+            # Stop there so the test needs no weights or accelerator.
+            observed.append(get_moe_runner_backend().value)
+            raise RuntimeError("stop after backend observation")
+
+        work_func = one_batch.correctness_test if correctness else one_batch.latency_test
+        with patch.object(one_batch, "configure_logger"), patch.object(
+            one_batch.ModelConfig,
+            "from_server_args",
+            side_effect=stop_after_observation,
+        ), self.assertRaisesRegex(RuntimeError, "stop after backend observation"):
+            work_func(
+                server_args,
+                SimpleNamespace(nccl_port=1),
+                bench_args,
+                gpu_id=0,
+                tp_rank=0,
+            )
+
+        return observed[0]
+
+    def test_correctness_path_honors_explicit_backend(self):
+        self.assertEqual(
+            self._backend_observed_by_load_model(
+                correctness=True, requested_backend="aiter"
+            ),
+            "aiter",
+        )
+
+    def test_latency_path_still_honors_explicit_backend(self):
+        self.assertEqual(
+            self._backend_observed_by_load_model(
+                correctness=False, requested_backend="aiter"
+            ),
+            "aiter",
+        )
+
+    def test_correctness_path_preserves_auto_backend(self):
+        self.assertEqual(
+            self._backend_observed_by_load_model(
+                correctness=True, requested_backend="auto"
+            ),
+            "auto",
+        )
+
+
+if __name__ == "__main__":
+    import unittest
+
+    unittest.main()

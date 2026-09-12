@@ -312,6 +312,10 @@ class BenchArgs:
 
 def load_model(server_args, port_args, gpu_id, tp_rank):
     cfg = resolving_view(server_args)
+    # Both latency and correctness benchmarks construct ModelRunner directly,
+    # bypassing the scheduler initialization that normally materializes the
+    # configured MoE backend before quantization methods inspect it.
+    initialize_moe_config()
     suppress_other_loggers()
     rank_print = print if tp_rank == 0 else lambda *args, **kwargs: None
     moe_ep_rank = tp_rank // (cfg.tp_size // cfg.ep_size)
@@ -903,7 +907,6 @@ def latency_test(
     # `main` runs this inline for tp_size == 1 and spawns it per rank otherwise;
     # a spawned child arrives with nothing published.
     publish(server_args, role="scheduler")
-    initialize_moe_config()
     initialize_fp8_gemm_config()
     initialize_fp4_gemm_config()
 
