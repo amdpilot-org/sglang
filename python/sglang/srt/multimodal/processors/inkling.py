@@ -52,7 +52,7 @@ from sglang.srt.parser.inkling_tokenizer import IMAGE_TOKEN_ID as INKLING_IMAGE_
 from sglang.srt.parser.inkling_tokenizer import (
     INKLING_SPECIAL_TOKEN_IDS,
 )
-from sglang.srt.utils.common import download_remote_media
+from sglang.srt.utils.common import download_remote_media, observe_media_load
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ def _cfg(obj, name, default=None):
     return getattr(obj, name, default) if obj is not None else default
 
 
-def _resolve_media_item(item):
+def _resolve_media_item(item, metrics_collector=None, modality=None):
     """Resolve a request media item to raw bytes for Inkling preprocessing.
 
     The OpenAI chat path hands ImageData/AudioData objects or data:/http(s) URLs; the
@@ -82,7 +82,8 @@ def _resolve_media_item(item):
         header, _, payload = url.partition(",")
         return base64.b64decode(payload) if ";base64" in header else payload.encode()
     if url.startswith(("http://", "https://")):
-        return download_remote_media(url, timeout=30)
+        with observe_media_load(metrics_collector, modality):
+            return download_remote_media(url, timeout=30)
     return url  # plain path / file:// -> handled by the per-modality byte loader
 
 
@@ -311,7 +312,13 @@ class InklingMultimodalProcessor(SGLangBaseProcessor):
         # Resolve request media (data:/http URLs, ImageData objects) to bytes so the
         # Inkling preprocessors can consume them; bytes / paths pass through unchanged.
         if image_data:
-            image_data = [_resolve_media_item(it) for it in image_data]
+            image_data = [
+                _resolve_media_item(it, self.metrics_collector, "image")
+                for it in image_data
+            ]
         if audio_data:
-            audio_data = [_resolve_media_item(it) for it in audio_data]
+            audio_data = [
+                _resolve_media_item(it, self.metrics_collector, "audio")
+                for it in audio_data
+            ]
         return self.assemble(list(input_ids), image_data, audio_data)
