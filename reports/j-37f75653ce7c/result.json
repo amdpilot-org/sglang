@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31011",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The base source still used integer all_reduce(MIN) for TP token-ID synchronization on every backend. The candidate avoids XCCL's reported integer MIN-to-SUM fallback by using XPU all_gather_into_tensor followed by a device-local minimum, preserving the prior minimum-token semantics; other backends retain all_reduce(MIN).",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-37f75653ce7c/venv/bin/python -m pytest -q test/registered/unit/layers/test_sampler_xpu_token_sync.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before simulation of the reported XCCL integer MIN fallback: [42, 42] became 84, differing values [17, 5] became 22, and the zero boundary still proved the forbidden all_reduce was called. Raw output: reports/j-37f75653ce7c/raw/pytest_before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-37f75653ce7c/venv/bin/python -m pytest -q test/registered/unit/layers/test_sampler_xpu_token_sync.py",
+      "exit_code": 0,
+      "what_was_measured": "Four passing cases: identical positive token IDs, disagreeing rank IDs with exact minimum preservation, zero across four ranks, and unchanged non-XPU MIN all-reduce dispatch. Raw output: reports/j-37f75653ce7c/raw/pytest_after_final.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-37f75653ce7c/venv/bin/python reports/j-37f75653ce7c/gfx950_local_min_check.py",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned gfx950, the candidate local int64 reduction returned [42, 3, 4], matching independent Python minima for synthetic gathered rank values. Raw output: reports/j-37f75653ce7c/raw/gfx950_local_min_check.txt"
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files python/sglang/srt/layers/sampler.py test/registered/unit/layers/test_sampler_xpu_token_sync.py reports/j-37f75653ce7c/gfx950_local_min_check.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, syntax, and registered-test metadata checks passed."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Intel XPU hardware, xccl/oneCCL backend, or XPU PyTorch build was available, so the reported collective failure and candidate workaround were not executed on the affected backend.",
+    "Only one assigned GPU was available; no genuine tensor-parallel or multi-rank GPU transport run was performed.",
+    "No model weights were needed or used. Grammar/structured decoding and a full HTTP serving path were not exercised because those would not qualify the missing XPU backend behavior.",
+    "Final XPU/xccl confirmation remains required before describing the upstream issue as fixed."
+  ]
+}

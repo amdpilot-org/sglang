@@ -31,6 +31,7 @@ from sglang.srt.utils.common import (
     is_hip,
     is_musa,
     is_npu,
+    is_xpu,
 )
 
 if is_cuda():
@@ -655,11 +656,28 @@ class Sampler(nn.Module):
             # In such cases, enable this env variable to prevent hanging due to TP ranks becoming desynchronized.
             # When using xgrammar, this becomes more likely so we also do the sync when grammar is used.
 
-            torch.distributed.all_reduce(
-                batch_next_token_ids,
-                op=dist.ReduceOp.MIN,
-                group=self.tp_sync_group,
-            )
+            if is_xpu():
+                # XCCL does not support MIN for integer tensors and silently
+                # performs SUM instead. Gather first and reduce locally to keep
+                # the existing minimum-token synchronization semantics.
+                world_size = torch.distributed.get_world_size(self.tp_sync_group)
+                gathered_token_ids = torch.empty(
+                    (world_size,) + tuple(batch_next_token_ids.shape),
+                    dtype=batch_next_token_ids.dtype,
+                    device=batch_next_token_ids.device,
+                )
+                torch.distributed.all_gather_into_tensor(
+                    gathered_token_ids,
+                    batch_next_token_ids,
+                    group=self.tp_sync_group,
+                )
+                torch.amin(gathered_token_ids, dim=0, out=batch_next_token_ids)
+            else:
+                torch.distributed.all_reduce(
+                    batch_next_token_ids,
+                    op=dist.ReduceOp.MIN,
+                    group=self.tp_sync_group,
+                )
 
     def compute_logprobs_only(
         self,
