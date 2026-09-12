@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/6622",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "5eec3ac5f2f27be36c9c785b36c6071cb7297155",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate was independently verified. At the recorded base, the original 10 MiB failure no longer reproduces because related work already supplies a 512 MiB default, a --max-payload-size CLI option, and active Axum/tower request-body limit layers. The base still ignores SGLANG_MAX_PAYLOAD_SIZE in the Python launcher. The candidate completes the requested environment-variable path in both native Rust and Python parsing, preserves explicit CLI precedence, and strengthens real gateway boundary tests. Thus the combined implementation at the candidate fully resolves the open issue, while this candidate itself is a completion of pre-existing partial work rather than the whole original implementation.",
+  "tests": [
+    {
+      "command": "SGLANG_MAX_PAYLOAD_SIZE=12582912 PYTHONPATH=/job/repo/sgl-model-gateway/bindings/python/src /tmp/amdpilot-repo-j-125861e70323/venv/bin/python <independent base parser probe>",
+      "exit_code": 0,
+      "what_was_measured": "On recorded base 358c163, the environment variable was ignored and max_payload_size remained 536870912; explicit --max-payload-size parsed correctly. This reproduced the remaining environment-support defect, not the already-fixed historical 10 MiB default-limit failure."
+    },
+    {
+      "command": "RUSTUP_HOME=/tmp/amdpilot-repo-j-125861e70323/rustup CARGO_HOME=/tmp/amdpilot-repo-j-125861e70323/cargo CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-125861e70323/gateway-target cargo test --bin sgl-model-gateway max_payload_size -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, the rebuilt native CLI read a valid environment value, rejected a non-integer value, and gave an explicit CLI value precedence; 3 tests passed."
+    },
+    {
+      "command": "RUSTUP_HOME=/tmp/amdpilot-repo-j-125861e70323/rustup CARGO_HOME=/tmp/amdpilot-repo-j-125861e70323/cargo CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-125861e70323/gateway-target cargo test --test routing_tests payload_size_tests -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "The rebuilt gateway accepted small, within-limit, exact-limit, and 3 MiB-under-4 MiB bodies and rejected an over-limit body; 5 tests passed. The 3 MiB case independently crosses Axum's historical 2 MiB default."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/sgl-model-gateway/bindings/python/src /tmp/amdpilot-repo-j-125861e70323/venv/bin/python <independent candidate parser/import adversarial probe>",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the candidate source import path, valid 10 MiB environment parsing, whitespace handling, CLI precedence, prefixed launcher parsing, and current acceptance of zero/negative/arbitrarily large Python integers."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/sgl-model-gateway/bindings/python/src /tmp/amdpilot-repo-j-125861e70323/venv/bin/python -m pytest -q sgl-model-gateway/bindings/python/tests/test_arg_parser.py -k max_payload_size",
+      "exit_code": 2,
+      "what_was_measured": "Collection was blocked because the prepared interpreter lacks sglang_router.sglang_router_rs; this records the Python native-extension limitation rather than treating an isolated parser probe as full binding coverage."
+    },
+    {
+      "command": "SGLANG_MAX_PAYLOAD_SIZE=bad /tmp/amdpilot-repo-j-125861e70323/gateway-target/debug/sgl-model-gateway",
+      "exit_code": 2,
+      "what_was_measured": "The independently rebuilt x86-64 native executable rejected an invalid environment value before startup."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "No GPU was used. Payload admission is CPU HTTP transport behavior before model execution, and the candidate contains no GPU numerical or architecture-specific code.",
+  "native_rebuilt": true,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The prepared interpreter lacks sglang_router.sglang_router_rs, so the full Python router test module and an end-to-end Python-binding server launch were unavailable; direct source parser checks and the rebuilt standalone Rust gateway were used instead.",
+    "Python argparse accepts zero, negative, and arbitrarily large values and defers failure to later binding/config validation, matching its pre-existing CLI behavior. Rust usize parsing and configuration validation are stricter.",
+    "No multimodal model semantic-accuracy or distributed deployment claim was tested; the issue's request-body boundary is model-independent.",
+    "The recorded base differs from the historical issue state: it already accepts 10 MiB under a 512 MiB default and already implements the CLI option and enforcement layers."
+  ]
+}
