@@ -1,0 +1,27 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35949",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source already maps 2-D multimodal positions through MRotaryEmbedding.axis_map in the fused QK RMSNorm + RoPE + gate kernel and includes an issue-specific numerical regression against the native MRoPE implementation. No further source change was justified.",
+  "tests": [
+    {
+      "command": "CUDA_VISIBLE_DEVICES=0 TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-d125a50639ad/cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d125a50639ad/venv/bin/python test/registered/kernels/ops/attention/test_fused_qk_rmsnorm_rope_gate.py",
+      "exit_code": 1,
+      "what_was_measured": "Attempted the unmodified registered fused-kernel suite on gfx950. Compilation failed because the AMD assembler rejected the emitted CUDA PDL instruction griddepcontrol.launch_dependents; no numerical result was produced."
+    },
+    {
+      "command": "CUDA_VISIBLE_DEVICES=0 TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-d125a50639ad/cache-no-pdl PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d125a50639ad/venv/bin/python <in-process runner setting fused_qk_rmsnorm_rope_gate._ENABLE_PDL=False and loading test_fused_qk_rmsnorm_rope_gate.py>",
+      "exit_code": 0,
+      "what_was_measured": "All 3 registered tests passed on gfx950: fused output versus independent native MRoPE for distinct temporal/height/width positions across interleaved and non-interleaved layouts and full/partial rotary dimensions; 1-D RoPE Q/K output; exact gate copy; and invalid position/map pairing boundaries."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X, gfx950, unique ID 0xcdce14c4ed97e350; the no-PDL numerical suite ran 3 tests successfully on CUDA_VISIBLE_DEVICES=0.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported RTX 5090 CUDA/SM120 path was unavailable, so CUDA compiler and runtime behavior remain unverified.",
+    "The RadixArk/Qwen3.8-27B-NVFP4 weights, original image, and prompt were unavailable; end-to-end grounding coordinates and semantic accuracy were not reproduced.",
+    "The unmodified kernel suite is blocked on this ROCm environment by CUDA-only PDL code generation; the numerical rerun disabled that launch hint only in-process and did not change repository source.",
+    "The prepared checkout is shallow at the recorded base, so the exact earlier commit that introduced the existing MRoPE correction could not be established locally."
+  ]
+}
