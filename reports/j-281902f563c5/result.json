@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32569",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The candidate is test-only hardening. The recorded base already contains the production ROCm Triton imports and guarded PyTorch fallbacks that fix the original missing top-k callable. The candidate's focused regression and independent adversarial GPU cases passed.",
+  "tests": [
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-281902f563c5/venv/bin/python -m pytest -q test/registered/spec/dspark/test_dspark_sampling_renorm.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit 2a22c55e25a978d621fc3627d8ba4dd715edeef4, both the live ROCm Triton renormalizer test and forced-missing-optional-kernel DSPARK builder regression passed (2 tests)."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-281902f563c5/venv/bin/python /job/review-evidence-j-281902f563c5/adversarial.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent randomized comparisons covered dense and sparse paths, live Triton and forced fallback implementations, top-k boundaries 1/2/17/vocabulary/above-vocabulary, and top-p 0.01/0.5/0.9/0.999/1.0. All matched an independent PyTorch reference with maximum absolute error <= 1.49e-08."
+    },
+    {
+      "command": "At historical commit 578edb240a6d6f6f2fa4c31497276955d7f73432: ROCR_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-281902f563c5/venv/bin/python <issue-specific reproduction>",
+      "exit_code": 1,
+      "what_was_measured": "Actual pre-fix production build_dflash_verify_target_probs failed on gfx950 with NameError for top_k_renorm_prob when top-k sampling was enabled; this historical revision left the missing HIP callable undefined."
+    },
+    {
+      "command": "pre-commit run ruff-format --files test/registered/spec/dspark/test_dspark_sampling_renorm.py && pre-commit run ruff --files test/registered/spec/dspark/test_dspark_sampling_renorm.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression formatting and lint passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI355X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2, HIP 7.2.26015. Both historical failure and candidate validation executed on GPU 0."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": "Kimi-K3 and RadixArk/Kimi-K3-DSpark weights were unavailable. The environment has one MI355X rather than eight MI350X GPUs, so TP8/full-model startup, HTTP serving, semantic accuracy, long-run behavior, and distributed execution remain unverified. Candidate changes are Python tests/reports only; no native source changed, so a native rebuild was not applicable."
+}
