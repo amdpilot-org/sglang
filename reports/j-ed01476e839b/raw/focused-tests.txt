@@ -1,0 +1,2432 @@
+.............FFFFFFF......................................       [100%]
+=================================== FAILURES ===================================
+_ TestUnifiedCacheLinkerRustBackend.test_eagle_lookup_uses_bigram_tail_hashes __
+
+command = 'cargo', cwd = PosixPath('/job/repo/rust/sglang-radix-tree')
+arguments = ('--version', '--verbose')
+
+    def _command_version(command: str, *arguments: str, cwd: Path) -> str:
+        try:
+>           result = subprocess.run(
+                [command, *arguments],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+            )
+
+python/sglang/srt/rust_extensions/loader.py:334:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/usr/lib/python3.12/subprocess.py:548: in run
+    with Popen(*popenargs, **kwargs) as process:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/subprocess.py:1026: in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <Popen: returncode: 255 args: ['cargo', '--version', '--verbose']>
+args = ['cargo', '--version', '--verbose'], executable = b'cargo'
+preexec_fn = None, close_fds = True, pass_fds = ()
+cwd = PosixPath('/job/repo/rust/sglang-radix-tree'), env = None
+startupinfo = None, creationflags = 0, shell = False, p2cread = -1
+p2cwrite = -1, c2pread = 13, c2pwrite = 14, errread = 16, errwrite = 17
+restore_signals = True, gid = None, gids = None, uid = None, umask = -1
+start_new_session = False, process_group = -1
+
+    def _execute_child(self, args, executable, preexec_fn, close_fds,
+                       pass_fds, cwd, env,
+                       startupinfo, creationflags, shell,
+                       p2cread, p2cwrite,
+                       c2pread, c2pwrite,
+                       errread, errwrite,
+                       restore_signals,
+                       gid, gids, uid, umask,
+                       start_new_session, process_group):
+        """Execute program (POSIX version)"""
+
+        if isinstance(args, (str, bytes)):
+            args = [args]
+        elif isinstance(args, os.PathLike):
+            if shell:
+                raise TypeError('path-like args is not allowed when '
+                                'shell is true')
+            args = [args]
+        else:
+            args = list(args)
+
+        if shell:
+            # On Android the default shell is at '/system/bin/sh'.
+            unix_shell = ('/system/bin/sh' if
+                      hasattr(sys, 'getandroidapilevel') else '/bin/sh')
+            args = [unix_shell, "-c"] + args
+            if executable:
+                args[0] = executable
+
+        if executable is None:
+            executable = args[0]
+
+        sys.audit("subprocess.Popen", executable, args, cwd, env)
+
+        if (_USE_POSIX_SPAWN
+                and os.path.dirname(executable)
+                and preexec_fn is None
+                and not close_fds
+                and not pass_fds
+                and cwd is None
+                and (p2cread == -1 or p2cread > 2)
+                and (c2pwrite == -1 or c2pwrite > 2)
+                and (errwrite == -1 or errwrite > 2)
+                and not start_new_session
+                and process_group == -1
+                and gid is None
+                and gids is None
+                and uid is None
+                and umask < 0):
+            self._posix_spawn(args, executable, env, restore_signals,
+                              p2cread, p2cwrite,
+                              c2pread, c2pwrite,
+                              errread, errwrite)
+            return
+
+        orig_executable = executable
+
+        # For transferring possible exec failure from child to parent.
+        # Data format: "exception name:hex errno:description"
+        # Pickle is not used; it is complex and involves memory allocation.
+        errpipe_read, errpipe_write = os.pipe()
+        # errpipe_write must not be in the standard io 0, 1, or 2 fd range.
+        low_fds_to_close = []
+        while errpipe_write < 3:
+            low_fds_to_close.append(errpipe_write)
+            errpipe_write = os.dup(errpipe_write)
+        for low_fd in low_fds_to_close:
+            os.close(low_fd)
+        try:
+            try:
+                # We must avoid complex work that could involve
+                # malloc or free in the child process to avoid
+                # potential deadlocks, thus we do all this here.
+                # and pass it to fork_exec()
+
+                if env is not None:
+                    env_list = []
+                    for k, v in env.items():
+                        k = os.fsencode(k)
+                        if b'=' in k:
+                            raise ValueError("illegal environment variable name")
+                        env_list.append(k + b'=' + os.fsencode(v))
+                else:
+                    env_list = None  # Use execv instead of execve.
+                executable = os.fsencode(executable)
+                if os.path.dirname(executable):
+                    executable_list = (executable,)
+                else:
+                    # This matches the behavior of os._execvpe().
+                    executable_list = tuple(
+                        os.path.join(os.fsencode(dir), executable)
+                        for dir in os.get_exec_path(env))
+                fds_to_keep = set(pass_fds)
+                fds_to_keep.add(errpipe_write)
+                self.pid = _fork_exec(
+                        args, executable_list,
+                        close_fds, tuple(sorted(map(int, fds_to_keep))),
+                        cwd, env_list,
+                        p2cread, p2cwrite, c2pread, c2pwrite,
+                        errread, errwrite,
+                        errpipe_read, errpipe_write,
+                        restore_signals, start_new_session,
+                        process_group, gid, gids, uid, umask,
+                        preexec_fn, _USE_VFORK)
+                self._child_created = True
+            finally:
+                # be sure the FD is closed no matter what
+                os.close(errpipe_write)
+
+            self._close_pipe_fds(p2cread, p2cwrite,
+                                 c2pread, c2pwrite,
+                                 errread, errwrite)
+
+            # Wait for exec to fail or succeed; possibly raising an
+            # exception (limited in size)
+            errpipe_data = bytearray()
+            while True:
+                part = os.read(errpipe_read, 50000)
+                errpipe_data += part
+                if not part or len(errpipe_data) > 50000:
+                    break
+        finally:
+            # be sure the FD is closed no matter what
+            os.close(errpipe_read)
+
+        if errpipe_data:
+            try:
+                pid, sts = os.waitpid(self.pid, 0)
+                if pid == self.pid:
+                    self._handle_exitstatus(sts)
+                else:
+                    self.returncode = sys.maxsize
+            except ChildProcessError:
+                pass
+
+            try:
+                exception_name, hex_errno, err_msg = (
+                        errpipe_data.split(b':', 2))
+                # The encoding here should match the encoding
+                # written in by the subprocess implementations
+                # like _posixsubprocess
+                err_msg = err_msg.decode()
+            except ValueError:
+                exception_name = b'SubprocessError'
+                hex_errno = b'0'
+                err_msg = 'Bad exception data from child: {!r}'.format(
+                              bytes(errpipe_data))
+            child_exception_type = getattr(
+                    builtins, exception_name.decode('ascii'),
+                    SubprocessError)
+            if issubclass(child_exception_type, OSError) and hex_errno:
+                errno_num = int(hex_errno, 16)
+                if err_msg == "noexec:chdir":
+                    err_msg = ""
+                    # The error must be from chdir(cwd).
+                    err_filename = cwd
+                elif err_msg == "noexec":
+                    err_msg = ""
+                    err_filename = None
+                else:
+                    err_filename = orig_executable
+                if errno_num != 0:
+                    err_msg = os.strerror(errno_num)
+                if err_filename is not None:
+>                   raise child_exception_type(errno_num, err_msg, err_filename)
+E                   PermissionError: [Errno 13] Permission denied: 'cargo'
+
+/usr/lib/python3.12/subprocess.py:1955: PermissionError
+
+The above exception was the direct cause of the following exception:
+
+self = <test_unified_cache_linker.TestUnifiedCacheLinkerRustBackend testMethod=test_eagle_lookup_uses_bigram_tail_hashes>
+
+    def test_eagle_lookup_uses_bigram_tail_hashes(self):
+        cfg = CacheConfig(
+            page_size=2,
+            is_eagle=True,
+            kv_size=64,
+            max_context_len=64,
+        )
+        self.cfg = cfg
+        stored_keys = defaultdict(set)
+        tokens = list(range(1, 10))
+
+>       producer, producer_allocator, producer_req_pool = build_fixture(cfg)
+                                                          ^^^^^^^^^^^^^^^^^^
+
+test/registered/unit/mem_cache/test_unified_cache_linker.py:432:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py:591: in build_fixture
+    from rust_unified_tree_core_inspector import RustUnifiedTreeCoreInspector
+test/registered/unit/mem_cache/rust_unified_tree_core_inspector.py:13: in <module>
+    from sglang.srt.mem_cache.rust_tree_core.adapter import (
+python/sglang/srt/mem_cache/rust_tree_core/adapter.py:30: in <module>
+    from sglang.srt.mem_cache.rust_tree_core.extension import bindings
+python/sglang/srt/mem_cache/rust_tree_core/extension.py:33: in <module>
+    bindings = load_tree_core_extension()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/mem_cache/rust_tree_core/extension.py:24: in load_tree_core_extension
+    return load_rust_extension(
+python/sglang/srt/rust_extensions/loader.py:125: in load_rust_extension
+    context = _build_context(
+python/sglang/srt/rust_extensions/loader.py:259: in _build_context
+    "cargo": _command_version(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+command = 'cargo', cwd = PosixPath('/job/repo/rust/sglang-radix-tree')
+arguments = ('--version', '--verbose')
+
+    def _command_version(command: str, *arguments: str, cwd: Path) -> str:
+        try:
+            result = subprocess.run(
+                [command, *arguments],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+>           raise RuntimeError(
+                f"failed to query the Rust toolchain with `{command} {' '.join(arguments)}`"
+            ) from exc
+E           RuntimeError: failed to query the Rust toolchain with `cargo --version --verbose`
+
+python/sglang/srt/rust_extensions/loader.py:342: RuntimeError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7fe20719c720>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7feaeaf6d800>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestUnifiedCacheLinkerRustBackend.test_eagle_lookup_uses_bigram_tail_hashes
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 334, in _command_version
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 548, in run
+    with Popen(*popenargs, **kwargs) as process:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 1026, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/usr/lib/python3.12/subprocess.py", line 1955, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+PermissionError: [Errno 13] Permission denied: 'cargo'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/mem_cache/test_unified_cache_linker.py", line 432, in test_eagle_lookup_uses_bigram_tail_hashes
+    producer, producer_allocator, producer_req_pool = build_fixture(cfg)
+                                                      ^^^^^^^^^^^^^^^^^^
+  File "/job/repo/test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py", line 591, in build_fixture
+    from rust_unified_tree_core_inspector import RustUnifiedTreeCoreInspector
+  File "/job/repo/test/registered/unit/mem_cache/rust_unified_tree_core_inspector.py", line 13, in <module>
+    from sglang.srt.mem_cache.rust_tree_core.adapter import (
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/adapter.py", line 30, in <module>
+    from sglang.srt.mem_cache.rust_tree_core.extension import bindings
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/extension.py", line 33, in <module>
+    bindings = load_tree_core_extension()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/extension.py", line 24, in load_tree_core_extension
+    return load_rust_extension(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 125, in load_rust_extension
+    context = _build_context(
+              ^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 259, in _build_context
+    "cargo": _command_version(
+             ^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 342, in _command_version
+    raise RuntimeError(
+RuntimeError: failed to query the Rust toolchain with `cargo --version --verbose`
+_ TestUnifiedCacheLinkerRustBackend.test_failed_split_offload_retries_and_reset_releases_locks _
+
+command = 'cargo', cwd = PosixPath('/job/repo/rust/sglang-radix-tree')
+arguments = ('--version', '--verbose')
+
+    def _command_version(command: str, *arguments: str, cwd: Path) -> str:
+        try:
+>           result = subprocess.run(
+                [command, *arguments],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+            )
+
+python/sglang/srt/rust_extensions/loader.py:334:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/usr/lib/python3.12/subprocess.py:548: in run
+    with Popen(*popenargs, **kwargs) as process:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/subprocess.py:1026: in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <Popen: returncode: 255 args: ['cargo', '--version', '--verbose']>
+args = ['cargo', '--version', '--verbose'], executable = b'cargo'
+preexec_fn = None, close_fds = True, pass_fds = ()
+cwd = PosixPath('/job/repo/rust/sglang-radix-tree'), env = None
+startupinfo = None, creationflags = 0, shell = False, p2cread = -1
+p2cwrite = -1, c2pread = 13, c2pwrite = 14, errread = 16, errwrite = 17
+restore_signals = True, gid = None, gids = None, uid = None, umask = -1
+start_new_session = False, process_group = -1
+
+    def _execute_child(self, args, executable, preexec_fn, close_fds,
+                       pass_fds, cwd, env,
+                       startupinfo, creationflags, shell,
+                       p2cread, p2cwrite,
+                       c2pread, c2pwrite,
+                       errread, errwrite,
+                       restore_signals,
+                       gid, gids, uid, umask,
+                       start_new_session, process_group):
+        """Execute program (POSIX version)"""
+
+        if isinstance(args, (str, bytes)):
+            args = [args]
+        elif isinstance(args, os.PathLike):
+            if shell:
+                raise TypeError('path-like args is not allowed when '
+                                'shell is true')
+            args = [args]
+        else:
+            args = list(args)
+
+        if shell:
+            # On Android the default shell is at '/system/bin/sh'.
+            unix_shell = ('/system/bin/sh' if
+                      hasattr(sys, 'getandroidapilevel') else '/bin/sh')
+            args = [unix_shell, "-c"] + args
+            if executable:
+                args[0] = executable
+
+        if executable is None:
+            executable = args[0]
+
+        sys.audit("subprocess.Popen", executable, args, cwd, env)
+
+        if (_USE_POSIX_SPAWN
+                and os.path.dirname(executable)
+                and preexec_fn is None
+                and not close_fds
+                and not pass_fds
+                and cwd is None
+                and (p2cread == -1 or p2cread > 2)
+                and (c2pwrite == -1 or c2pwrite > 2)
+                and (errwrite == -1 or errwrite > 2)
+                and not start_new_session
+                and process_group == -1
+                and gid is None
+                and gids is None
+                and uid is None
+                and umask < 0):
+            self._posix_spawn(args, executable, env, restore_signals,
+                              p2cread, p2cwrite,
+                              c2pread, c2pwrite,
+                              errread, errwrite)
+            return
+
+        orig_executable = executable
+
+        # For transferring possible exec failure from child to parent.
+        # Data format: "exception name:hex errno:description"
+        # Pickle is not used; it is complex and involves memory allocation.
+        errpipe_read, errpipe_write = os.pipe()
+        # errpipe_write must not be in the standard io 0, 1, or 2 fd range.
+        low_fds_to_close = []
+        while errpipe_write < 3:
+            low_fds_to_close.append(errpipe_write)
+            errpipe_write = os.dup(errpipe_write)
+        for low_fd in low_fds_to_close:
+            os.close(low_fd)
+        try:
+            try:
+                # We must avoid complex work that could involve
+                # malloc or free in the child process to avoid
+                # potential deadlocks, thus we do all this here.
+                # and pass it to fork_exec()
+
+                if env is not None:
+                    env_list = []
+                    for k, v in env.items():
+                        k = os.fsencode(k)
+                        if b'=' in k:
+                            raise ValueError("illegal environment variable name")
+                        env_list.append(k + b'=' + os.fsencode(v))
+                else:
+                    env_list = None  # Use execv instead of execve.
+                executable = os.fsencode(executable)
+                if os.path.dirname(executable):
+                    executable_list = (executable,)
+                else:
+                    # This matches the behavior of os._execvpe().
+                    executable_list = tuple(
+                        os.path.join(os.fsencode(dir), executable)
+                        for dir in os.get_exec_path(env))
+                fds_to_keep = set(pass_fds)
+                fds_to_keep.add(errpipe_write)
+                self.pid = _fork_exec(
+                        args, executable_list,
+                        close_fds, tuple(sorted(map(int, fds_to_keep))),
+                        cwd, env_list,
+                        p2cread, p2cwrite, c2pread, c2pwrite,
+                        errread, errwrite,
+                        errpipe_read, errpipe_write,
+                        restore_signals, start_new_session,
+                        process_group, gid, gids, uid, umask,
+                        preexec_fn, _USE_VFORK)
+                self._child_created = True
+            finally:
+                # be sure the FD is closed no matter what
+                os.close(errpipe_write)
+
+            self._close_pipe_fds(p2cread, p2cwrite,
+                                 c2pread, c2pwrite,
+                                 errread, errwrite)
+
+            # Wait for exec to fail or succeed; possibly raising an
+            # exception (limited in size)
+            errpipe_data = bytearray()
+            while True:
+                part = os.read(errpipe_read, 50000)
+                errpipe_data += part
+                if not part or len(errpipe_data) > 50000:
+                    break
+        finally:
+            # be sure the FD is closed no matter what
+            os.close(errpipe_read)
+
+        if errpipe_data:
+            try:
+                pid, sts = os.waitpid(self.pid, 0)
+                if pid == self.pid:
+                    self._handle_exitstatus(sts)
+                else:
+                    self.returncode = sys.maxsize
+            except ChildProcessError:
+                pass
+
+            try:
+                exception_name, hex_errno, err_msg = (
+                        errpipe_data.split(b':', 2))
+                # The encoding here should match the encoding
+                # written in by the subprocess implementations
+                # like _posixsubprocess
+                err_msg = err_msg.decode()
+            except ValueError:
+                exception_name = b'SubprocessError'
+                hex_errno = b'0'
+                err_msg = 'Bad exception data from child: {!r}'.format(
+                              bytes(errpipe_data))
+            child_exception_type = getattr(
+                    builtins, exception_name.decode('ascii'),
+                    SubprocessError)
+            if issubclass(child_exception_type, OSError) and hex_errno:
+                errno_num = int(hex_errno, 16)
+                if err_msg == "noexec:chdir":
+                    err_msg = ""
+                    # The error must be from chdir(cwd).
+                    err_filename = cwd
+                elif err_msg == "noexec":
+                    err_msg = ""
+                    err_filename = None
+                else:
+                    err_filename = orig_executable
+                if errno_num != 0:
+                    err_msg = os.strerror(errno_num)
+                if err_filename is not None:
+>                   raise child_exception_type(errno_num, err_msg, err_filename)
+E                   PermissionError: [Errno 13] Permission denied: 'cargo'
+
+/usr/lib/python3.12/subprocess.py:1955: PermissionError
+
+The above exception was the direct cause of the following exception:
+
+self = <test_unified_cache_linker.TestUnifiedCacheLinkerRustBackend testMethod=test_failed_split_offload_retries_and_reset_releases_locks>
+
+    def test_failed_split_offload_retries_and_reset_releases_locks(self):
+        cfg = CacheConfig(page_size=1, kv_size=64, max_context_len=64)
+        self.cfg = cfg
+>       cache, allocator, req_to_token_pool = build_fixture(cfg)
+                                              ^^^^^^^^^^^^^^^^^^
+
+test/registered/unit/mem_cache/test_unified_cache_linker.py:468:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py:591: in build_fixture
+    from rust_unified_tree_core_inspector import RustUnifiedTreeCoreInspector
+test/registered/unit/mem_cache/rust_unified_tree_core_inspector.py:13: in <module>
+    from sglang.srt.mem_cache.rust_tree_core.adapter import (
+python/sglang/srt/mem_cache/rust_tree_core/adapter.py:30: in <module>
+    from sglang.srt.mem_cache.rust_tree_core.extension import bindings
+python/sglang/srt/mem_cache/rust_tree_core/extension.py:33: in <module>
+    bindings = load_tree_core_extension()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/mem_cache/rust_tree_core/extension.py:24: in load_tree_core_extension
+    return load_rust_extension(
+python/sglang/srt/rust_extensions/loader.py:125: in load_rust_extension
+    context = _build_context(
+python/sglang/srt/rust_extensions/loader.py:259: in _build_context
+    "cargo": _command_version(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+command = 'cargo', cwd = PosixPath('/job/repo/rust/sglang-radix-tree')
+arguments = ('--version', '--verbose')
+
+    def _command_version(command: str, *arguments: str, cwd: Path) -> str:
+        try:
+            result = subprocess.run(
+                [command, *arguments],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+>           raise RuntimeError(
+                f"failed to query the Rust toolchain with `{command} {' '.join(arguments)}`"
+            ) from exc
+E           RuntimeError: failed to query the Rust toolchain with `cargo --version --verbose`
+
+python/sglang/srt/rust_extensions/loader.py:342: RuntimeError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7fe2064a25c0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7feaeaf6d800>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestUnifiedCacheLinkerRustBackend.test_failed_split_offload_retries_and_reset_releases_locks
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 334, in _command_version
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 548, in run
+    with Popen(*popenargs, **kwargs) as process:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 1026, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/usr/lib/python3.12/subprocess.py", line 1955, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+PermissionError: [Errno 13] Permission denied: 'cargo'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/mem_cache/test_unified_cache_linker.py", line 468, in test_failed_split_offload_retries_and_reset_releases_locks
+    cache, allocator, req_to_token_pool = build_fixture(cfg)
+                                          ^^^^^^^^^^^^^^^^^^
+  File "/job/repo/test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py", line 591, in build_fixture
+    from rust_unified_tree_core_inspector import RustUnifiedTreeCoreInspector
+  File "/job/repo/test/registered/unit/mem_cache/rust_unified_tree_core_inspector.py", line 13, in <module>
+    from sglang.srt.mem_cache.rust_tree_core.adapter import (
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/adapter.py", line 30, in <module>
+    from sglang.srt.mem_cache.rust_tree_core.extension import bindings
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/extension.py", line 33, in <module>
+    bindings = load_tree_core_extension()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/extension.py", line 24, in load_tree_core_extension
+    return load_rust_extension(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 125, in load_rust_extension
+    context = _build_context(
+              ^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 259, in _build_context
+    "cargo": _command_version(
+             ^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 342, in _command_version
+    raise RuntimeError(
+RuntimeError: failed to query the Rust toolchain with `cargo --version --verbose`
+_ TestUnifiedCacheLinkerRustBackend.test_full_offload_load_round_trip_and_dedup _
+
+command = 'cargo', cwd = PosixPath('/job/repo/rust/sglang-radix-tree')
+arguments = ('--version', '--verbose')
+
+    def _command_version(command: str, *arguments: str, cwd: Path) -> str:
+        try:
+>           result = subprocess.run(
+                [command, *arguments],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+            )
+
+python/sglang/srt/rust_extensions/loader.py:334:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/usr/lib/python3.12/subprocess.py:548: in run
+    with Popen(*popenargs, **kwargs) as process:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/subprocess.py:1026: in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <Popen: returncode: 255 args: ['cargo', '--version', '--verbose']>
+args = ['cargo', '--version', '--verbose'], executable = b'cargo'
+preexec_fn = None, close_fds = True, pass_fds = ()
+cwd = PosixPath('/job/repo/rust/sglang-radix-tree'), env = None
+startupinfo = None, creationflags = 0, shell = False, p2cread = -1
+p2cwrite = -1, c2pread = 13, c2pwrite = 14, errread = 16, errwrite = 17
+restore_signals = True, gid = None, gids = None, uid = None, umask = -1
+start_new_session = False, process_group = -1
+
+    def _execute_child(self, args, executable, preexec_fn, close_fds,
+                       pass_fds, cwd, env,
+                       startupinfo, creationflags, shell,
+                       p2cread, p2cwrite,
+                       c2pread, c2pwrite,
+                       errread, errwrite,
+                       restore_signals,
+                       gid, gids, uid, umask,
+                       start_new_session, process_group):
+        """Execute program (POSIX version)"""
+
+        if isinstance(args, (str, bytes)):
+            args = [args]
+        elif isinstance(args, os.PathLike):
+            if shell:
+                raise TypeError('path-like args is not allowed when '
+                                'shell is true')
+            args = [args]
+        else:
+            args = list(args)
+
+        if shell:
+            # On Android the default shell is at '/system/bin/sh'.
+            unix_shell = ('/system/bin/sh' if
+                      hasattr(sys, 'getandroidapilevel') else '/bin/sh')
+            args = [unix_shell, "-c"] + args
+            if executable:
+                args[0] = executable
+
+        if executable is None:
+            executable = args[0]
+
+        sys.audit("subprocess.Popen", executable, args, cwd, env)
+
+        if (_USE_POSIX_SPAWN
+                and os.path.dirname(executable)
+                and preexec_fn is None
+                and not close_fds
+                and not pass_fds
+                and cwd is None
+                and (p2cread == -1 or p2cread > 2)
+                and (c2pwrite == -1 or c2pwrite > 2)
+                and (errwrite == -1 or errwrite > 2)
+                and not start_new_session
+                and process_group == -1
+                and gid is None
+                and gids is None
+                and uid is None
+                and umask < 0):
+            self._posix_spawn(args, executable, env, restore_signals,
+                              p2cread, p2cwrite,
+                              c2pread, c2pwrite,
+                              errread, errwrite)
+            return
+
+        orig_executable = executable
+
+        # For transferring possible exec failure from child to parent.
+        # Data format: "exception name:hex errno:description"
+        # Pickle is not used; it is complex and involves memory allocation.
+        errpipe_read, errpipe_write = os.pipe()
+        # errpipe_write must not be in the standard io 0, 1, or 2 fd range.
+        low_fds_to_close = []
+        while errpipe_write < 3:
+            low_fds_to_close.append(errpipe_write)
+            errpipe_write = os.dup(errpipe_write)
+        for low_fd in low_fds_to_close:
+            os.close(low_fd)
+        try:
+            try:
+                # We must avoid complex work that could involve
+                # malloc or free in the child process to avoid
+                # potential deadlocks, thus we do all this here.
+                # and pass it to fork_exec()
+
+                if env is not None:
+                    env_list = []
+                    for k, v in env.items():
+                        k = os.fsencode(k)
+                        if b'=' in k:
+                            raise ValueError("illegal environment variable name")
+                        env_list.append(k + b'=' + os.fsencode(v))
+                else:
+                    env_list = None  # Use execv instead of execve.
+                executable = os.fsencode(executable)
+                if os.path.dirname(executable):
+                    executable_list = (executable,)
+                else:
+                    # This matches the behavior of os._execvpe().
+                    executable_list = tuple(
+                        os.path.join(os.fsencode(dir), executable)
+                        for dir in os.get_exec_path(env))
+                fds_to_keep = set(pass_fds)
+                fds_to_keep.add(errpipe_write)
+                self.pid = _fork_exec(
+                        args, executable_list,
+                        close_fds, tuple(sorted(map(int, fds_to_keep))),
+                        cwd, env_list,
+                        p2cread, p2cwrite, c2pread, c2pwrite,
+                        errread, errwrite,
+                        errpipe_read, errpipe_write,
+                        restore_signals, start_new_session,
+                        process_group, gid, gids, uid, umask,
+                        preexec_fn, _USE_VFORK)
+                self._child_created = True
+            finally:
+                # be sure the FD is closed no matter what
+                os.close(errpipe_write)
+
+            self._close_pipe_fds(p2cread, p2cwrite,
+                                 c2pread, c2pwrite,
+                                 errread, errwrite)
+
+            # Wait for exec to fail or succeed; possibly raising an
+            # exception (limited in size)
+            errpipe_data = bytearray()
+            while True:
+                part = os.read(errpipe_read, 50000)
+                errpipe_data += part
+                if not part or len(errpipe_data) > 50000:
+                    break
+        finally:
+            # be sure the FD is closed no matter what
+            os.close(errpipe_read)
+
+        if errpipe_data:
+            try:
+                pid, sts = os.waitpid(self.pid, 0)
+                if pid == self.pid:
+                    self._handle_exitstatus(sts)
+                else:
+                    self.returncode = sys.maxsize
+            except ChildProcessError:
+                pass
+
+            try:
+                exception_name, hex_errno, err_msg = (
+                        errpipe_data.split(b':', 2))
+                # The encoding here should match the encoding
+                # written in by the subprocess implementations
+                # like _posixsubprocess
+                err_msg = err_msg.decode()
+            except ValueError:
+                exception_name = b'SubprocessError'
+                hex_errno = b'0'
+                err_msg = 'Bad exception data from child: {!r}'.format(
+                              bytes(errpipe_data))
+            child_exception_type = getattr(
+                    builtins, exception_name.decode('ascii'),
+                    SubprocessError)
+            if issubclass(child_exception_type, OSError) and hex_errno:
+                errno_num = int(hex_errno, 16)
+                if err_msg == "noexec:chdir":
+                    err_msg = ""
+                    # The error must be from chdir(cwd).
+                    err_filename = cwd
+                elif err_msg == "noexec":
+                    err_msg = ""
+                    err_filename = None
+                else:
+                    err_filename = orig_executable
+                if errno_num != 0:
+                    err_msg = os.strerror(errno_num)
+                if err_filename is not None:
+>                   raise child_exception_type(errno_num, err_msg, err_filename)
+E                   PermissionError: [Errno 13] Permission denied: 'cargo'
+
+/usr/lib/python3.12/subprocess.py:1955: PermissionError
+
+The above exception was the direct cause of the following exception:
+
+self = <test_unified_cache_linker.TestUnifiedCacheLinkerRustBackend testMethod=test_full_offload_load_round_trip_and_dedup>
+
+    def test_full_offload_load_round_trip_and_dedup(self):
+        cfg = CacheConfig(page_size=2, kv_size=64, max_context_len=64)
+        self.cfg = cfg
+        stored_keys = defaultdict(set)
+
+>       producer, producer_allocator, producer_req_pool = build_fixture(cfg)
+                                                          ^^^^^^^^^^^^^^^^^^
+
+test/registered/unit/mem_cache/test_unified_cache_linker.py:339:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py:591: in build_fixture
+    from rust_unified_tree_core_inspector import RustUnifiedTreeCoreInspector
+test/registered/unit/mem_cache/rust_unified_tree_core_inspector.py:13: in <module>
+    from sglang.srt.mem_cache.rust_tree_core.adapter import (
+python/sglang/srt/mem_cache/rust_tree_core/adapter.py:30: in <module>
+    from sglang.srt.mem_cache.rust_tree_core.extension import bindings
+python/sglang/srt/mem_cache/rust_tree_core/extension.py:33: in <module>
+    bindings = load_tree_core_extension()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/mem_cache/rust_tree_core/extension.py:24: in load_tree_core_extension
+    return load_rust_extension(
+python/sglang/srt/rust_extensions/loader.py:125: in load_rust_extension
+    context = _build_context(
+python/sglang/srt/rust_extensions/loader.py:259: in _build_context
+    "cargo": _command_version(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+command = 'cargo', cwd = PosixPath('/job/repo/rust/sglang-radix-tree')
+arguments = ('--version', '--verbose')
+
+    def _command_version(command: str, *arguments: str, cwd: Path) -> str:
+        try:
+            result = subprocess.run(
+                [command, *arguments],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+>           raise RuntimeError(
+                f"failed to query the Rust toolchain with `{command} {' '.join(arguments)}`"
+            ) from exc
+E           RuntimeError: failed to query the Rust toolchain with `cargo --version --verbose`
+
+python/sglang/srt/rust_extensions/loader.py:342: RuntimeError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7fe20719ca40>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7feaeaf6d800>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestUnifiedCacheLinkerRustBackend.test_full_offload_load_round_trip_and_dedup
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 334, in _command_version
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 548, in run
+    with Popen(*popenargs, **kwargs) as process:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 1026, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/usr/lib/python3.12/subprocess.py", line 1955, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+PermissionError: [Errno 13] Permission denied: 'cargo'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/mem_cache/test_unified_cache_linker.py", line 339, in test_full_offload_load_round_trip_and_dedup
+    producer, producer_allocator, producer_req_pool = build_fixture(cfg)
+                                                      ^^^^^^^^^^^^^^^^^^
+  File "/job/repo/test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py", line 591, in build_fixture
+    from rust_unified_tree_core_inspector import RustUnifiedTreeCoreInspector
+  File "/job/repo/test/registered/unit/mem_cache/rust_unified_tree_core_inspector.py", line 13, in <module>
+    from sglang.srt.mem_cache.rust_tree_core.adapter import (
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/adapter.py", line 30, in <module>
+    from sglang.srt.mem_cache.rust_tree_core.extension import bindings
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/extension.py", line 33, in <module>
+    bindings = load_tree_core_extension()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/extension.py", line 24, in load_tree_core_extension
+    return load_rust_extension(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 125, in load_rust_extension
+    context = _build_context(
+              ^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 259, in _build_context
+    "cargo": _command_version(
+             ^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 342, in _command_version
+    raise RuntimeError(
+RuntimeError: failed to query the Rust toolchain with `cargo --version --verbose`
+_ TestUnifiedCacheLinkerRustBackend.test_swa_partial_hit_loads_only_pages_not_adopted_locally _
+
+command = 'cargo', cwd = PosixPath('/job/repo/rust/sglang-radix-tree')
+arguments = ('--version', '--verbose')
+
+    def _command_version(command: str, *arguments: str, cwd: Path) -> str:
+        try:
+>           result = subprocess.run(
+                [command, *arguments],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+            )
+
+python/sglang/srt/rust_extensions/loader.py:334:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/usr/lib/python3.12/subprocess.py:548: in run
+    with Popen(*popenargs, **kwargs) as process:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/subprocess.py:1026: in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <Popen: returncode: 255 args: ['cargo', '--version', '--verbose']>
+args = ['cargo', '--version', '--verbose'], executable = b'cargo'
+preexec_fn = None, close_fds = True, pass_fds = ()
+cwd = PosixPath('/job/repo/rust/sglang-radix-tree'), env = None
+startupinfo = None, creationflags = 0, shell = False, p2cread = -1
+p2cwrite = -1, c2pread = 13, c2pwrite = 14, errread = 16, errwrite = 17
+restore_signals = True, gid = None, gids = None, uid = None, umask = -1
+start_new_session = False, process_group = -1
+
+    def _execute_child(self, args, executable, preexec_fn, close_fds,
+                       pass_fds, cwd, env,
+                       startupinfo, creationflags, shell,
+                       p2cread, p2cwrite,
+                       c2pread, c2pwrite,
+                       errread, errwrite,
+                       restore_signals,
+                       gid, gids, uid, umask,
+                       start_new_session, process_group):
+        """Execute program (POSIX version)"""
+
+        if isinstance(args, (str, bytes)):
+            args = [args]
+        elif isinstance(args, os.PathLike):
+            if shell:
+                raise TypeError('path-like args is not allowed when '
+                                'shell is true')
+            args = [args]
+        else:
+            args = list(args)
+
+        if shell:
+            # On Android the default shell is at '/system/bin/sh'.
+            unix_shell = ('/system/bin/sh' if
+                      hasattr(sys, 'getandroidapilevel') else '/bin/sh')
+            args = [unix_shell, "-c"] + args
+            if executable:
+                args[0] = executable
+
+        if executable is None:
+            executable = args[0]
+
+        sys.audit("subprocess.Popen", executable, args, cwd, env)
+
+        if (_USE_POSIX_SPAWN
+                and os.path.dirname(executable)
+                and preexec_fn is None
+                and not close_fds
+                and not pass_fds
+                and cwd is None
+                and (p2cread == -1 or p2cread > 2)
+                and (c2pwrite == -1 or c2pwrite > 2)
+                and (errwrite == -1 or errwrite > 2)
+                and not start_new_session
+                and process_group == -1
+                and gid is None
+                and gids is None
+                and uid is None
+                and umask < 0):
+            self._posix_spawn(args, executable, env, restore_signals,
+                              p2cread, p2cwrite,
+                              c2pread, c2pwrite,
+                              errread, errwrite)
+            return
+
+        orig_executable = executable
+
+        # For transferring possible exec failure from child to parent.
+        # Data format: "exception name:hex errno:description"
+        # Pickle is not used; it is complex and involves memory allocation.
+        errpipe_read, errpipe_write = os.pipe()
+        # errpipe_write must not be in the standard io 0, 1, or 2 fd range.
+        low_fds_to_close = []
+        while errpipe_write < 3:
+            low_fds_to_close.append(errpipe_write)
+            errpipe_write = os.dup(errpipe_write)
+        for low_fd in low_fds_to_close:
+            os.close(low_fd)
+        try:
+            try:
+                # We must avoid complex work that could involve
+                # malloc or free in the child process to avoid
+                # potential deadlocks, thus we do all this here.
+                # and pass it to fork_exec()
+
+                if env is not None:
+                    env_list = []
+                    for k, v in env.items():
+                        k = os.fsencode(k)
+                        if b'=' in k:
+                            raise ValueError("illegal environment variable name")
+                        env_list.append(k + b'=' + os.fsencode(v))
+                else:
+                    env_list = None  # Use execv instead of execve.
+                executable = os.fsencode(executable)
+                if os.path.dirname(executable):
+                    executable_list = (executable,)
+                else:
+                    # This matches the behavior of os._execvpe().
+                    executable_list = tuple(
+                        os.path.join(os.fsencode(dir), executable)
+                        for dir in os.get_exec_path(env))
+                fds_to_keep = set(pass_fds)
+                fds_to_keep.add(errpipe_write)
+                self.pid = _fork_exec(
+                        args, executable_list,
+                        close_fds, tuple(sorted(map(int, fds_to_keep))),
+                        cwd, env_list,
+                        p2cread, p2cwrite, c2pread, c2pwrite,
+                        errread, errwrite,
+                        errpipe_read, errpipe_write,
+                        restore_signals, start_new_session,
+                        process_group, gid, gids, uid, umask,
+                        preexec_fn, _USE_VFORK)
+                self._child_created = True
+            finally:
+                # be sure the FD is closed no matter what
+                os.close(errpipe_write)
+
+            self._close_pipe_fds(p2cread, p2cwrite,
+                                 c2pread, c2pwrite,
+                                 errread, errwrite)
+
+            # Wait for exec to fail or succeed; possibly raising an
+            # exception (limited in size)
+            errpipe_data = bytearray()
+            while True:
+                part = os.read(errpipe_read, 50000)
+                errpipe_data += part
+                if not part or len(errpipe_data) > 50000:
+                    break
+        finally:
+            # be sure the FD is closed no matter what
+            os.close(errpipe_read)
+
+        if errpipe_data:
+            try:
+                pid, sts = os.waitpid(self.pid, 0)
+                if pid == self.pid:
+                    self._handle_exitstatus(sts)
+                else:
+                    self.returncode = sys.maxsize
+            except ChildProcessError:
+                pass
+
+            try:
+                exception_name, hex_errno, err_msg = (
+                        errpipe_data.split(b':', 2))
+                # The encoding here should match the encoding
+                # written in by the subprocess implementations
+                # like _posixsubprocess
+                err_msg = err_msg.decode()
+            except ValueError:
+                exception_name = b'SubprocessError'
+                hex_errno = b'0'
+                err_msg = 'Bad exception data from child: {!r}'.format(
+                              bytes(errpipe_data))
+            child_exception_type = getattr(
+                    builtins, exception_name.decode('ascii'),
+                    SubprocessError)
+            if issubclass(child_exception_type, OSError) and hex_errno:
+                errno_num = int(hex_errno, 16)
+                if err_msg == "noexec:chdir":
+                    err_msg = ""
+                    # The error must be from chdir(cwd).
+                    err_filename = cwd
+                elif err_msg == "noexec":
+                    err_msg = ""
+                    err_filename = None
+                else:
+                    err_filename = orig_executable
+                if errno_num != 0:
+                    err_msg = os.strerror(errno_num)
+                if err_filename is not None:
+>                   raise child_exception_type(errno_num, err_msg, err_filename)
+E                   PermissionError: [Errno 13] Permission denied: 'cargo'
+
+/usr/lib/python3.12/subprocess.py:1955: PermissionError
+
+The above exception was the direct cause of the following exception:
+
+self = <test_unified_cache_linker.TestUnifiedCacheLinkerRustBackend testMethod=test_swa_partial_hit_loads_only_pages_not_adopted_locally>
+
+    def test_swa_partial_hit_loads_only_pages_not_adopted_locally(self):
+        cfg = CacheConfig(
+            page_size=1,
+            components=(ComponentType.FULL, ComponentType.SWA),
+            sliding_window_size=2,
+            kv_size=64,
+            max_context_len=64,
+        )
+        self.cfg = cfg
+        stored_keys = defaultdict(set)
+        tokens = list(range(1, 7))
+
+>       producer, producer_allocator, producer_req_pool = build_fixture(cfg)
+                                                          ^^^^^^^^^^^^^^^^^^
+
+test/registered/unit/mem_cache/test_unified_cache_linker.py:543:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py:591: in build_fixture
+    from rust_unified_tree_core_inspector import RustUnifiedTreeCoreInspector
+test/registered/unit/mem_cache/rust_unified_tree_core_inspector.py:13: in <module>
+    from sglang.srt.mem_cache.rust_tree_core.adapter import (
+python/sglang/srt/mem_cache/rust_tree_core/adapter.py:30: in <module>
+    from sglang.srt.mem_cache.rust_tree_core.extension import bindings
+python/sglang/srt/mem_cache/rust_tree_core/extension.py:33: in <module>
+    bindings = load_tree_core_extension()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/mem_cache/rust_tree_core/extension.py:24: in load_tree_core_extension
+    return load_rust_extension(
+python/sglang/srt/rust_extensions/loader.py:125: in load_rust_extension
+    context = _build_context(
+python/sglang/srt/rust_extensions/loader.py:259: in _build_context
+    "cargo": _command_version(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+command = 'cargo', cwd = PosixPath('/job/repo/rust/sglang-radix-tree')
+arguments = ('--version', '--verbose')
+
+    def _command_version(command: str, *arguments: str, cwd: Path) -> str:
+        try:
+            result = subprocess.run(
+                [command, *arguments],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+>           raise RuntimeError(
+                f"failed to query the Rust toolchain with `{command} {' '.join(arguments)}`"
+            ) from exc
+E           RuntimeError: failed to query the Rust toolchain with `cargo --version --verbose`
+
+python/sglang/srt/rust_extensions/loader.py:342: RuntimeError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7fe21fa0c5e0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7feaeaf6d800>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestUnifiedCacheLinkerRustBackend.test_swa_partial_hit_loads_only_pages_not_adopted_locally
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 334, in _command_version
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 548, in run
+    with Popen(*popenargs, **kwargs) as process:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 1026, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/usr/lib/python3.12/subprocess.py", line 1955, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+PermissionError: [Errno 13] Permission denied: 'cargo'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/mem_cache/test_unified_cache_linker.py", line 543, in test_swa_partial_hit_loads_only_pages_not_adopted_locally
+    producer, producer_allocator, producer_req_pool = build_fixture(cfg)
+                                                      ^^^^^^^^^^^^^^^^^^
+  File "/job/repo/test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py", line 591, in build_fixture
+    from rust_unified_tree_core_inspector import RustUnifiedTreeCoreInspector
+  File "/job/repo/test/registered/unit/mem_cache/rust_unified_tree_core_inspector.py", line 13, in <module>
+    from sglang.srt.mem_cache.rust_tree_core.adapter import (
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/adapter.py", line 30, in <module>
+    from sglang.srt.mem_cache.rust_tree_core.extension import bindings
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/extension.py", line 33, in <module>
+    bindings = load_tree_core_extension()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/extension.py", line 24, in load_tree_core_extension
+    return load_rust_extension(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 125, in load_rust_extension
+    context = _build_context(
+              ^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 259, in _build_context
+    "cargo": _command_version(
+             ^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 342, in _command_version
+    raise RuntimeError(
+RuntimeError: failed to query the Rust toolchain with `cargo --version --verbose`
+_ TestUnifiedCacheLinkerTreeCoreRustBackend.test_builds_opaque_external_offload_transfers _
+
+command = 'cargo', cwd = PosixPath('/job/repo/rust/sglang-radix-tree')
+arguments = ('--version', '--verbose')
+
+    def _command_version(command: str, *arguments: str, cwd: Path) -> str:
+        try:
+>           result = subprocess.run(
+                [command, *arguments],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+            )
+
+python/sglang/srt/rust_extensions/loader.py:334:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/usr/lib/python3.12/subprocess.py:548: in run
+    with Popen(*popenargs, **kwargs) as process:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/subprocess.py:1026: in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <Popen: returncode: 255 args: ['cargo', '--version', '--verbose']>
+args = ['cargo', '--version', '--verbose'], executable = b'cargo'
+preexec_fn = None, close_fds = True, pass_fds = ()
+cwd = PosixPath('/job/repo/rust/sglang-radix-tree'), env = None
+startupinfo = None, creationflags = 0, shell = False, p2cread = -1
+p2cwrite = -1, c2pread = 13, c2pwrite = 14, errread = 16, errwrite = 17
+restore_signals = True, gid = None, gids = None, uid = None, umask = -1
+start_new_session = False, process_group = -1
+
+    def _execute_child(self, args, executable, preexec_fn, close_fds,
+                       pass_fds, cwd, env,
+                       startupinfo, creationflags, shell,
+                       p2cread, p2cwrite,
+                       c2pread, c2pwrite,
+                       errread, errwrite,
+                       restore_signals,
+                       gid, gids, uid, umask,
+                       start_new_session, process_group):
+        """Execute program (POSIX version)"""
+
+        if isinstance(args, (str, bytes)):
+            args = [args]
+        elif isinstance(args, os.PathLike):
+            if shell:
+                raise TypeError('path-like args is not allowed when '
+                                'shell is true')
+            args = [args]
+        else:
+            args = list(args)
+
+        if shell:
+            # On Android the default shell is at '/system/bin/sh'.
+            unix_shell = ('/system/bin/sh' if
+                      hasattr(sys, 'getandroidapilevel') else '/bin/sh')
+            args = [unix_shell, "-c"] + args
+            if executable:
+                args[0] = executable
+
+        if executable is None:
+            executable = args[0]
+
+        sys.audit("subprocess.Popen", executable, args, cwd, env)
+
+        if (_USE_POSIX_SPAWN
+                and os.path.dirname(executable)
+                and preexec_fn is None
+                and not close_fds
+                and not pass_fds
+                and cwd is None
+                and (p2cread == -1 or p2cread > 2)
+                and (c2pwrite == -1 or c2pwrite > 2)
+                and (errwrite == -1 or errwrite > 2)
+                and not start_new_session
+                and process_group == -1
+                and gid is None
+                and gids is None
+                and uid is None
+                and umask < 0):
+            self._posix_spawn(args, executable, env, restore_signals,
+                              p2cread, p2cwrite,
+                              c2pread, c2pwrite,
+                              errread, errwrite)
+            return
+
+        orig_executable = executable
+
+        # For transferring possible exec failure from child to parent.
+        # Data format: "exception name:hex errno:description"
+        # Pickle is not used; it is complex and involves memory allocation.
+        errpipe_read, errpipe_write = os.pipe()
+        # errpipe_write must not be in the standard io 0, 1, or 2 fd range.
+        low_fds_to_close = []
+        while errpipe_write < 3:
+            low_fds_to_close.append(errpipe_write)
+            errpipe_write = os.dup(errpipe_write)
+        for low_fd in low_fds_to_close:
+            os.close(low_fd)
+        try:
+            try:
+                # We must avoid complex work that could involve
+                # malloc or free in the child process to avoid
+                # potential deadlocks, thus we do all this here.
+                # and pass it to fork_exec()
+
+                if env is not None:
+                    env_list = []
+                    for k, v in env.items():
+                        k = os.fsencode(k)
+                        if b'=' in k:
+                            raise ValueError("illegal environment variable name")
+                        env_list.append(k + b'=' + os.fsencode(v))
+                else:
+                    env_list = None  # Use execv instead of execve.
+                executable = os.fsencode(executable)
+                if os.path.dirname(executable):
+                    executable_list = (executable,)
+                else:
+                    # This matches the behavior of os._execvpe().
+                    executable_list = tuple(
+                        os.path.join(os.fsencode(dir), executable)
+                        for dir in os.get_exec_path(env))
+                fds_to_keep = set(pass_fds)
+                fds_to_keep.add(errpipe_write)
+                self.pid = _fork_exec(
+                        args, executable_list,
+                        close_fds, tuple(sorted(map(int, fds_to_keep))),
+                        cwd, env_list,
+                        p2cread, p2cwrite, c2pread, c2pwrite,
+                        errread, errwrite,
+                        errpipe_read, errpipe_write,
+                        restore_signals, start_new_session,
+                        process_group, gid, gids, uid, umask,
+                        preexec_fn, _USE_VFORK)
+                self._child_created = True
+            finally:
+                # be sure the FD is closed no matter what
+                os.close(errpipe_write)
+
+            self._close_pipe_fds(p2cread, p2cwrite,
+                                 c2pread, c2pwrite,
+                                 errread, errwrite)
+
+            # Wait for exec to fail or succeed; possibly raising an
+            # exception (limited in size)
+            errpipe_data = bytearray()
+            while True:
+                part = os.read(errpipe_read, 50000)
+                errpipe_data += part
+                if not part or len(errpipe_data) > 50000:
+                    break
+        finally:
+            # be sure the FD is closed no matter what
+            os.close(errpipe_read)
+
+        if errpipe_data:
+            try:
+                pid, sts = os.waitpid(self.pid, 0)
+                if pid == self.pid:
+                    self._handle_exitstatus(sts)
+                else:
+                    self.returncode = sys.maxsize
+            except ChildProcessError:
+                pass
+
+            try:
+                exception_name, hex_errno, err_msg = (
+                        errpipe_data.split(b':', 2))
+                # The encoding here should match the encoding
+                # written in by the subprocess implementations
+                # like _posixsubprocess
+                err_msg = err_msg.decode()
+            except ValueError:
+                exception_name = b'SubprocessError'
+                hex_errno = b'0'
+                err_msg = 'Bad exception data from child: {!r}'.format(
+                              bytes(errpipe_data))
+            child_exception_type = getattr(
+                    builtins, exception_name.decode('ascii'),
+                    SubprocessError)
+            if issubclass(child_exception_type, OSError) and hex_errno:
+                errno_num = int(hex_errno, 16)
+                if err_msg == "noexec:chdir":
+                    err_msg = ""
+                    # The error must be from chdir(cwd).
+                    err_filename = cwd
+                elif err_msg == "noexec":
+                    err_msg = ""
+                    err_filename = None
+                else:
+                    err_filename = orig_executable
+                if errno_num != 0:
+                    err_msg = os.strerror(errno_num)
+                if err_filename is not None:
+>                   raise child_exception_type(errno_num, err_msg, err_filename)
+E                   PermissionError: [Errno 13] Permission denied: 'cargo'
+
+/usr/lib/python3.12/subprocess.py:1955: PermissionError
+
+The above exception was the direct cause of the following exception:
+
+self = <test_unified_cache_linker.TestUnifiedCacheLinkerTreeCoreRustBackend testMethod=test_builds_opaque_external_offload_transfers>
+
+    def test_builds_opaque_external_offload_transfers(self):
+        cfg = shared_cache_suite.CacheConfig(
+            page_size=2, kv_size=64, max_context_len=64
+        )
+        self.cfg = cfg
+>       cache, allocator, req_to_token_pool = shared_cache_suite.build_fixture(cfg)
+                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/registered/unit/mem_cache/test_unified_cache_linker.py:628:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py:591: in build_fixture
+    from rust_unified_tree_core_inspector import RustUnifiedTreeCoreInspector
+test/registered/unit/mem_cache/rust_unified_tree_core_inspector.py:13: in <module>
+    from sglang.srt.mem_cache.rust_tree_core.adapter import (
+python/sglang/srt/mem_cache/rust_tree_core/adapter.py:30: in <module>
+    from sglang.srt.mem_cache.rust_tree_core.extension import bindings
+python/sglang/srt/mem_cache/rust_tree_core/extension.py:33: in <module>
+    bindings = load_tree_core_extension()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/mem_cache/rust_tree_core/extension.py:24: in load_tree_core_extension
+    return load_rust_extension(
+python/sglang/srt/rust_extensions/loader.py:125: in load_rust_extension
+    context = _build_context(
+python/sglang/srt/rust_extensions/loader.py:259: in _build_context
+    "cargo": _command_version(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+command = 'cargo', cwd = PosixPath('/job/repo/rust/sglang-radix-tree')
+arguments = ('--version', '--verbose')
+
+    def _command_version(command: str, *arguments: str, cwd: Path) -> str:
+        try:
+            result = subprocess.run(
+                [command, *arguments],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+>           raise RuntimeError(
+                f"failed to query the Rust toolchain with `{command} {' '.join(arguments)}`"
+            ) from exc
+E           RuntimeError: failed to query the Rust toolchain with `cargo --version --verbose`
+
+python/sglang/srt/rust_extensions/loader.py:342: RuntimeError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7fe20719cc20>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7feaeaf6d800>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestUnifiedCacheLinkerTreeCoreRustBackend.test_builds_opaque_external_offload_transfers
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 334, in _command_version
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 548, in run
+    with Popen(*popenargs, **kwargs) as process:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 1026, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/usr/lib/python3.12/subprocess.py", line 1955, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+PermissionError: [Errno 13] Permission denied: 'cargo'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/mem_cache/test_unified_cache_linker.py", line 628, in test_builds_opaque_external_offload_transfers
+    cache, allocator, req_to_token_pool = shared_cache_suite.build_fixture(cfg)
+                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py", line 591, in build_fixture
+    from rust_unified_tree_core_inspector import RustUnifiedTreeCoreInspector
+  File "/job/repo/test/registered/unit/mem_cache/rust_unified_tree_core_inspector.py", line 13, in <module>
+    from sglang.srt.mem_cache.rust_tree_core.adapter import (
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/adapter.py", line 30, in <module>
+    from sglang.srt.mem_cache.rust_tree_core.extension import bindings
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/extension.py", line 33, in <module>
+    bindings = load_tree_core_extension()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/extension.py", line 24, in load_tree_core_extension
+    return load_rust_extension(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 125, in load_rust_extension
+    context = _build_context(
+              ^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 259, in _build_context
+    "cargo": _command_version(
+             ^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 342, in _command_version
+    raise RuntimeError(
+RuntimeError: failed to query the Rust toolchain with `cargo --version --verbose`
+_ TestUnifiedCacheLinkerTreeCoreRustBackend.test_external_state_updates_are_atomic_and_path_scoped _
+
+command = 'cargo', cwd = PosixPath('/job/repo/rust/sglang-radix-tree')
+arguments = ('--version', '--verbose')
+
+    def _command_version(command: str, *arguments: str, cwd: Path) -> str:
+        try:
+>           result = subprocess.run(
+                [command, *arguments],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+            )
+
+python/sglang/srt/rust_extensions/loader.py:334:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/usr/lib/python3.12/subprocess.py:548: in run
+    with Popen(*popenargs, **kwargs) as process:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/subprocess.py:1026: in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <Popen: returncode: 255 args: ['cargo', '--version', '--verbose']>
+args = ['cargo', '--version', '--verbose'], executable = b'cargo'
+preexec_fn = None, close_fds = True, pass_fds = ()
+cwd = PosixPath('/job/repo/rust/sglang-radix-tree'), env = None
+startupinfo = None, creationflags = 0, shell = False, p2cread = -1
+p2cwrite = -1, c2pread = 13, c2pwrite = 14, errread = 16, errwrite = 17
+restore_signals = True, gid = None, gids = None, uid = None, umask = -1
+start_new_session = False, process_group = -1
+
+    def _execute_child(self, args, executable, preexec_fn, close_fds,
+                       pass_fds, cwd, env,
+                       startupinfo, creationflags, shell,
+                       p2cread, p2cwrite,
+                       c2pread, c2pwrite,
+                       errread, errwrite,
+                       restore_signals,
+                       gid, gids, uid, umask,
+                       start_new_session, process_group):
+        """Execute program (POSIX version)"""
+
+        if isinstance(args, (str, bytes)):
+            args = [args]
+        elif isinstance(args, os.PathLike):
+            if shell:
+                raise TypeError('path-like args is not allowed when '
+                                'shell is true')
+            args = [args]
+        else:
+            args = list(args)
+
+        if shell:
+            # On Android the default shell is at '/system/bin/sh'.
+            unix_shell = ('/system/bin/sh' if
+                      hasattr(sys, 'getandroidapilevel') else '/bin/sh')
+            args = [unix_shell, "-c"] + args
+            if executable:
+                args[0] = executable
+
+        if executable is None:
+            executable = args[0]
+
+        sys.audit("subprocess.Popen", executable, args, cwd, env)
+
+        if (_USE_POSIX_SPAWN
+                and os.path.dirname(executable)
+                and preexec_fn is None
+                and not close_fds
+                and not pass_fds
+                and cwd is None
+                and (p2cread == -1 or p2cread > 2)
+                and (c2pwrite == -1 or c2pwrite > 2)
+                and (errwrite == -1 or errwrite > 2)
+                and not start_new_session
+                and process_group == -1
+                and gid is None
+                and gids is None
+                and uid is None
+                and umask < 0):
+            self._posix_spawn(args, executable, env, restore_signals,
+                              p2cread, p2cwrite,
+                              c2pread, c2pwrite,
+                              errread, errwrite)
+            return
+
+        orig_executable = executable
+
+        # For transferring possible exec failure from child to parent.
+        # Data format: "exception name:hex errno:description"
+        # Pickle is not used; it is complex and involves memory allocation.
+        errpipe_read, errpipe_write = os.pipe()
+        # errpipe_write must not be in the standard io 0, 1, or 2 fd range.
+        low_fds_to_close = []
+        while errpipe_write < 3:
+            low_fds_to_close.append(errpipe_write)
+            errpipe_write = os.dup(errpipe_write)
+        for low_fd in low_fds_to_close:
+            os.close(low_fd)
+        try:
+            try:
+                # We must avoid complex work that could involve
+                # malloc or free in the child process to avoid
+                # potential deadlocks, thus we do all this here.
+                # and pass it to fork_exec()
+
+                if env is not None:
+                    env_list = []
+                    for k, v in env.items():
+                        k = os.fsencode(k)
+                        if b'=' in k:
+                            raise ValueError("illegal environment variable name")
+                        env_list.append(k + b'=' + os.fsencode(v))
+                else:
+                    env_list = None  # Use execv instead of execve.
+                executable = os.fsencode(executable)
+                if os.path.dirname(executable):
+                    executable_list = (executable,)
+                else:
+                    # This matches the behavior of os._execvpe().
+                    executable_list = tuple(
+                        os.path.join(os.fsencode(dir), executable)
+                        for dir in os.get_exec_path(env))
+                fds_to_keep = set(pass_fds)
+                fds_to_keep.add(errpipe_write)
+                self.pid = _fork_exec(
+                        args, executable_list,
+                        close_fds, tuple(sorted(map(int, fds_to_keep))),
+                        cwd, env_list,
+                        p2cread, p2cwrite, c2pread, c2pwrite,
+                        errread, errwrite,
+                        errpipe_read, errpipe_write,
+                        restore_signals, start_new_session,
+                        process_group, gid, gids, uid, umask,
+                        preexec_fn, _USE_VFORK)
+                self._child_created = True
+            finally:
+                # be sure the FD is closed no matter what
+                os.close(errpipe_write)
+
+            self._close_pipe_fds(p2cread, p2cwrite,
+                                 c2pread, c2pwrite,
+                                 errread, errwrite)
+
+            # Wait for exec to fail or succeed; possibly raising an
+            # exception (limited in size)
+            errpipe_data = bytearray()
+            while True:
+                part = os.read(errpipe_read, 50000)
+                errpipe_data += part
+                if not part or len(errpipe_data) > 50000:
+                    break
+        finally:
+            # be sure the FD is closed no matter what
+            os.close(errpipe_read)
+
+        if errpipe_data:
+            try:
+                pid, sts = os.waitpid(self.pid, 0)
+                if pid == self.pid:
+                    self._handle_exitstatus(sts)
+                else:
+                    self.returncode = sys.maxsize
+            except ChildProcessError:
+                pass
+
+            try:
+                exception_name, hex_errno, err_msg = (
+                        errpipe_data.split(b':', 2))
+                # The encoding here should match the encoding
+                # written in by the subprocess implementations
+                # like _posixsubprocess
+                err_msg = err_msg.decode()
+            except ValueError:
+                exception_name = b'SubprocessError'
+                hex_errno = b'0'
+                err_msg = 'Bad exception data from child: {!r}'.format(
+                              bytes(errpipe_data))
+            child_exception_type = getattr(
+                    builtins, exception_name.decode('ascii'),
+                    SubprocessError)
+            if issubclass(child_exception_type, OSError) and hex_errno:
+                errno_num = int(hex_errno, 16)
+                if err_msg == "noexec:chdir":
+                    err_msg = ""
+                    # The error must be from chdir(cwd).
+                    err_filename = cwd
+                elif err_msg == "noexec":
+                    err_msg = ""
+                    err_filename = None
+                else:
+                    err_filename = orig_executable
+                if errno_num != 0:
+                    err_msg = os.strerror(errno_num)
+                if err_filename is not None:
+>                   raise child_exception_type(errno_num, err_msg, err_filename)
+E                   PermissionError: [Errno 13] Permission denied: 'cargo'
+
+/usr/lib/python3.12/subprocess.py:1955: PermissionError
+
+The above exception was the direct cause of the following exception:
+
+self = <test_unified_cache_linker.TestUnifiedCacheLinkerTreeCoreRustBackend testMethod=test_external_state_updates_are_atomic_and_path_scoped>
+
+    def test_external_state_updates_are_atomic_and_path_scoped(self):
+        cfg = shared_cache_suite.CacheConfig(
+            page_size=1, kv_size=64, max_context_len=64
+        )
+        self.cfg = cfg
+>       cache, allocator, req_to_token_pool = shared_cache_suite.build_fixture(cfg)
+                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/registered/unit/mem_cache/test_unified_cache_linker.py:666:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py:591: in build_fixture
+    from rust_unified_tree_core_inspector import RustUnifiedTreeCoreInspector
+test/registered/unit/mem_cache/rust_unified_tree_core_inspector.py:13: in <module>
+    from sglang.srt.mem_cache.rust_tree_core.adapter import (
+python/sglang/srt/mem_cache/rust_tree_core/adapter.py:30: in <module>
+    from sglang.srt.mem_cache.rust_tree_core.extension import bindings
+python/sglang/srt/mem_cache/rust_tree_core/extension.py:33: in <module>
+    bindings = load_tree_core_extension()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/mem_cache/rust_tree_core/extension.py:24: in load_tree_core_extension
+    return load_rust_extension(
+python/sglang/srt/rust_extensions/loader.py:125: in load_rust_extension
+    context = _build_context(
+python/sglang/srt/rust_extensions/loader.py:259: in _build_context
+    "cargo": _command_version(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+command = 'cargo', cwd = PosixPath('/job/repo/rust/sglang-radix-tree')
+arguments = ('--version', '--verbose')
+
+    def _command_version(command: str, *arguments: str, cwd: Path) -> str:
+        try:
+            result = subprocess.run(
+                [command, *arguments],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+>           raise RuntimeError(
+                f"failed to query the Rust toolchain with `{command} {' '.join(arguments)}`"
+            ) from exc
+E           RuntimeError: failed to query the Rust toolchain with `cargo --version --verbose`
+
+python/sglang/srt/rust_extensions/loader.py:342: RuntimeError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7fe2064a3d80>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7feaeaf6d800>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestUnifiedCacheLinkerTreeCoreRustBackend.test_external_state_updates_are_atomic_and_path_scoped
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 334, in _command_version
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 548, in run
+    with Popen(*popenargs, **kwargs) as process:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 1026, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/usr/lib/python3.12/subprocess.py", line 1955, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+PermissionError: [Errno 13] Permission denied: 'cargo'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/mem_cache/test_unified_cache_linker.py", line 666, in test_external_state_updates_are_atomic_and_path_scoped
+    cache, allocator, req_to_token_pool = shared_cache_suite.build_fixture(cfg)
+                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py", line 591, in build_fixture
+    from rust_unified_tree_core_inspector import RustUnifiedTreeCoreInspector
+  File "/job/repo/test/registered/unit/mem_cache/rust_unified_tree_core_inspector.py", line 13, in <module>
+    from sglang.srt.mem_cache.rust_tree_core.adapter import (
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/adapter.py", line 30, in <module>
+    from sglang.srt.mem_cache.rust_tree_core.extension import bindings
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/extension.py", line 33, in <module>
+    bindings = load_tree_core_extension()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/extension.py", line 24, in load_tree_core_extension
+    return load_rust_extension(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 125, in load_rust_extension
+    context = _build_context(
+              ^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 259, in _build_context
+    "cargo": _command_version(
+             ^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 342, in _command_version
+    raise RuntimeError(
+RuntimeError: failed to query the Rust toolchain with `cargo --version --verbose`
+_ TestUnifiedCacheLinkerTreeCoreRustBackend.test_failed_offload_preserves_independently_confirmed_state _
+
+command = 'cargo', cwd = PosixPath('/job/repo/rust/sglang-radix-tree')
+arguments = ('--version', '--verbose')
+
+    def _command_version(command: str, *arguments: str, cwd: Path) -> str:
+        try:
+>           result = subprocess.run(
+                [command, *arguments],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+            )
+
+python/sglang/srt/rust_extensions/loader.py:334:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/usr/lib/python3.12/subprocess.py:548: in run
+    with Popen(*popenargs, **kwargs) as process:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/subprocess.py:1026: in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <Popen: returncode: 255 args: ['cargo', '--version', '--verbose']>
+args = ['cargo', '--version', '--verbose'], executable = b'cargo'
+preexec_fn = None, close_fds = True, pass_fds = ()
+cwd = PosixPath('/job/repo/rust/sglang-radix-tree'), env = None
+startupinfo = None, creationflags = 0, shell = False, p2cread = -1
+p2cwrite = -1, c2pread = 13, c2pwrite = 14, errread = 16, errwrite = 17
+restore_signals = True, gid = None, gids = None, uid = None, umask = -1
+start_new_session = False, process_group = -1
+
+    def _execute_child(self, args, executable, preexec_fn, close_fds,
+                       pass_fds, cwd, env,
+                       startupinfo, creationflags, shell,
+                       p2cread, p2cwrite,
+                       c2pread, c2pwrite,
+                       errread, errwrite,
+                       restore_signals,
+                       gid, gids, uid, umask,
+                       start_new_session, process_group):
+        """Execute program (POSIX version)"""
+
+        if isinstance(args, (str, bytes)):
+            args = [args]
+        elif isinstance(args, os.PathLike):
+            if shell:
+                raise TypeError('path-like args is not allowed when '
+                                'shell is true')
+            args = [args]
+        else:
+            args = list(args)
+
+        if shell:
+            # On Android the default shell is at '/system/bin/sh'.
+            unix_shell = ('/system/bin/sh' if
+                      hasattr(sys, 'getandroidapilevel') else '/bin/sh')
+            args = [unix_shell, "-c"] + args
+            if executable:
+                args[0] = executable
+
+        if executable is None:
+            executable = args[0]
+
+        sys.audit("subprocess.Popen", executable, args, cwd, env)
+
+        if (_USE_POSIX_SPAWN
+                and os.path.dirname(executable)
+                and preexec_fn is None
+                and not close_fds
+                and not pass_fds
+                and cwd is None
+                and (p2cread == -1 or p2cread > 2)
+                and (c2pwrite == -1 or c2pwrite > 2)
+                and (errwrite == -1 or errwrite > 2)
+                and not start_new_session
+                and process_group == -1
+                and gid is None
+                and gids is None
+                and uid is None
+                and umask < 0):
+            self._posix_spawn(args, executable, env, restore_signals,
+                              p2cread, p2cwrite,
+                              c2pread, c2pwrite,
+                              errread, errwrite)
+            return
+
+        orig_executable = executable
+
+        # For transferring possible exec failure from child to parent.
+        # Data format: "exception name:hex errno:description"
+        # Pickle is not used; it is complex and involves memory allocation.
+        errpipe_read, errpipe_write = os.pipe()
+        # errpipe_write must not be in the standard io 0, 1, or 2 fd range.
+        low_fds_to_close = []
+        while errpipe_write < 3:
+            low_fds_to_close.append(errpipe_write)
+            errpipe_write = os.dup(errpipe_write)
+        for low_fd in low_fds_to_close:
+            os.close(low_fd)
+        try:
+            try:
+                # We must avoid complex work that could involve
+                # malloc or free in the child process to avoid
+                # potential deadlocks, thus we do all this here.
+                # and pass it to fork_exec()
+
+                if env is not None:
+                    env_list = []
+                    for k, v in env.items():
+                        k = os.fsencode(k)
+                        if b'=' in k:
+                            raise ValueError("illegal environment variable name")
+                        env_list.append(k + b'=' + os.fsencode(v))
+                else:
+                    env_list = None  # Use execv instead of execve.
+                executable = os.fsencode(executable)
+                if os.path.dirname(executable):
+                    executable_list = (executable,)
+                else:
+                    # This matches the behavior of os._execvpe().
+                    executable_list = tuple(
+                        os.path.join(os.fsencode(dir), executable)
+                        for dir in os.get_exec_path(env))
+                fds_to_keep = set(pass_fds)
+                fds_to_keep.add(errpipe_write)
+                self.pid = _fork_exec(
+                        args, executable_list,
+                        close_fds, tuple(sorted(map(int, fds_to_keep))),
+                        cwd, env_list,
+                        p2cread, p2cwrite, c2pread, c2pwrite,
+                        errread, errwrite,
+                        errpipe_read, errpipe_write,
+                        restore_signals, start_new_session,
+                        process_group, gid, gids, uid, umask,
+                        preexec_fn, _USE_VFORK)
+                self._child_created = True
+            finally:
+                # be sure the FD is closed no matter what
+                os.close(errpipe_write)
+
+            self._close_pipe_fds(p2cread, p2cwrite,
+                                 c2pread, c2pwrite,
+                                 errread, errwrite)
+
+            # Wait for exec to fail or succeed; possibly raising an
+            # exception (limited in size)
+            errpipe_data = bytearray()
+            while True:
+                part = os.read(errpipe_read, 50000)
+                errpipe_data += part
+                if not part or len(errpipe_data) > 50000:
+                    break
+        finally:
+            # be sure the FD is closed no matter what
+            os.close(errpipe_read)
+
+        if errpipe_data:
+            try:
+                pid, sts = os.waitpid(self.pid, 0)
+                if pid == self.pid:
+                    self._handle_exitstatus(sts)
+                else:
+                    self.returncode = sys.maxsize
+            except ChildProcessError:
+                pass
+
+            try:
+                exception_name, hex_errno, err_msg = (
+                        errpipe_data.split(b':', 2))
+                # The encoding here should match the encoding
+                # written in by the subprocess implementations
+                # like _posixsubprocess
+                err_msg = err_msg.decode()
+            except ValueError:
+                exception_name = b'SubprocessError'
+                hex_errno = b'0'
+                err_msg = 'Bad exception data from child: {!r}'.format(
+                              bytes(errpipe_data))
+            child_exception_type = getattr(
+                    builtins, exception_name.decode('ascii'),
+                    SubprocessError)
+            if issubclass(child_exception_type, OSError) and hex_errno:
+                errno_num = int(hex_errno, 16)
+                if err_msg == "noexec:chdir":
+                    err_msg = ""
+                    # The error must be from chdir(cwd).
+                    err_filename = cwd
+                elif err_msg == "noexec":
+                    err_msg = ""
+                    err_filename = None
+                else:
+                    err_filename = orig_executable
+                if errno_num != 0:
+                    err_msg = os.strerror(errno_num)
+                if err_filename is not None:
+>                   raise child_exception_type(errno_num, err_msg, err_filename)
+E                   PermissionError: [Errno 13] Permission denied: 'cargo'
+
+/usr/lib/python3.12/subprocess.py:1955: PermissionError
+
+The above exception was the direct cause of the following exception:
+
+self = <test_unified_cache_linker.TestUnifiedCacheLinkerTreeCoreRustBackend testMethod=test_failed_offload_preserves_independently_confirmed_state>
+
+    def test_failed_offload_preserves_independently_confirmed_state(self):
+        cfg = shared_cache_suite.CacheConfig(
+            page_size=1, kv_size=64, max_context_len=64
+        )
+        self.cfg = cfg
+>       cache, allocator, req_to_token_pool = shared_cache_suite.build_fixture(cfg)
+                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/registered/unit/mem_cache/test_unified_cache_linker.py:738:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py:591: in build_fixture
+    from rust_unified_tree_core_inspector import RustUnifiedTreeCoreInspector
+test/registered/unit/mem_cache/rust_unified_tree_core_inspector.py:13: in <module>
+    from sglang.srt.mem_cache.rust_tree_core.adapter import (
+python/sglang/srt/mem_cache/rust_tree_core/adapter.py:30: in <module>
+    from sglang.srt.mem_cache.rust_tree_core.extension import bindings
+python/sglang/srt/mem_cache/rust_tree_core/extension.py:33: in <module>
+    bindings = load_tree_core_extension()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/mem_cache/rust_tree_core/extension.py:24: in load_tree_core_extension
+    return load_rust_extension(
+python/sglang/srt/rust_extensions/loader.py:125: in load_rust_extension
+    context = _build_context(
+python/sglang/srt/rust_extensions/loader.py:259: in _build_context
+    "cargo": _command_version(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+command = 'cargo', cwd = PosixPath('/job/repo/rust/sglang-radix-tree')
+arguments = ('--version', '--verbose')
+
+    def _command_version(command: str, *arguments: str, cwd: Path) -> str:
+        try:
+            result = subprocess.run(
+                [command, *arguments],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+>           raise RuntimeError(
+                f"failed to query the Rust toolchain with `{command} {' '.join(arguments)}`"
+            ) from exc
+E           RuntimeError: failed to query the Rust toolchain with `cargo --version --verbose`
+
+python/sglang/srt/rust_extensions/loader.py:342: RuntimeError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7fe2064a3ba0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7feaeaf6d800>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestUnifiedCacheLinkerTreeCoreRustBackend.test_failed_offload_preserves_independently_confirmed_state
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 334, in _command_version
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 548, in run
+    with Popen(*popenargs, **kwargs) as process:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 1026, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/usr/lib/python3.12/subprocess.py", line 1955, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+PermissionError: [Errno 13] Permission denied: 'cargo'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/mem_cache/test_unified_cache_linker.py", line 738, in test_failed_offload_preserves_independently_confirmed_state
+    cache, allocator, req_to_token_pool = shared_cache_suite.build_fixture(cfg)
+                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py", line 591, in build_fixture
+    from rust_unified_tree_core_inspector import RustUnifiedTreeCoreInspector
+  File "/job/repo/test/registered/unit/mem_cache/rust_unified_tree_core_inspector.py", line 13, in <module>
+    from sglang.srt.mem_cache.rust_tree_core.adapter import (
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/adapter.py", line 30, in <module>
+    from sglang.srt.mem_cache.rust_tree_core.extension import bindings
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/extension.py", line 33, in <module>
+    bindings = load_tree_core_extension()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/mem_cache/rust_tree_core/extension.py", line 24, in load_tree_core_extension
+    return load_rust_extension(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 125, in load_rust_extension
+    context = _build_context(
+              ^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 259, in _build_context
+    "cargo": _command_version(
+             ^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/rust_extensions/loader.py", line 342, in _command_version
+    raise RuntimeError(
+RuntimeError: failed to query the Rust toolchain with `cargo --version --verbose`
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/mem_cache/test_unified_cache_linker.py::TestUnifiedCacheLinkerRustBackend::test_eagle_lookup_uses_bigram_tail_hashes
+FAILED test/registered/unit/mem_cache/test_unified_cache_linker.py::TestUnifiedCacheLinkerRustBackend::test_failed_split_offload_retries_and_reset_releases_locks
+FAILED test/registered/unit/mem_cache/test_unified_cache_linker.py::TestUnifiedCacheLinkerRustBackend::test_full_offload_load_round_trip_and_dedup
+FAILED test/registered/unit/mem_cache/test_unified_cache_linker.py::TestUnifiedCacheLinkerRustBackend::test_swa_partial_hit_loads_only_pages_not_adopted_locally
+FAILED test/registered/unit/mem_cache/test_unified_cache_linker.py::TestUnifiedCacheLinkerTreeCoreRustBackend::test_builds_opaque_external_offload_transfers
+FAILED test/registered/unit/mem_cache/test_unified_cache_linker.py::TestUnifiedCacheLinkerTreeCoreRustBackend::test_external_state_updates_are_atomic_and_path_scoped
+FAILED test/registered/unit/mem_cache/test_unified_cache_linker.py::TestUnifiedCacheLinkerTreeCoreRustBackend::test_failed_offload_preserves_independently_confirmed_state
+7 failed, 51 passed, 17 warnings, 8 subtests passed in 19.25s

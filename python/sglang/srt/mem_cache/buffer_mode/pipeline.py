@@ -43,11 +43,9 @@ from sglang.srt.mem_cache.base_prefix_cache import (
     MatchPrefixParams,
 )
 from sglang.srt.mem_cache.hicache_storage import (
-    PoolHitPolicy,
-    PoolName,
-    PoolTransfer,
     SidecarPoolSpec,
 )
+from sglang.srt.mem_cache.pool_transfer import PoolHitPolicy, PoolName, PoolTransfer
 from sglang.srt.mem_cache.radix_cache import RadixKey
 from sglang.srt.mem_cache.unified_cache.cache_action import RebuildFullToSWAMapping
 from sglang.srt.mem_cache.unified_cache.components import (
