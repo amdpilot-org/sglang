@@ -642,6 +642,7 @@ fn test_validate_tools_function_missing() {
             server_description: None,
             require_approval: None,
             allowed_tools: None,
+            extra: Default::default(),
         }]),
         ..Default::default()
     };
@@ -666,6 +667,7 @@ fn test_validate_tools_mcp_missing_url() {
             server_description: None,
             require_approval: None,
             allowed_tools: None,
+            extra: Default::default(),
         }]),
         ..Default::default()
     };
@@ -722,6 +724,7 @@ fn test_validate_tool_choice_requires_tools() {
             server_description: None,
             require_approval: None,
             allowed_tools: None,
+            extra: Default::default(),
         }]),
         tool_choice: Some(ToolChoice::Value(ToolChoiceValue::Auto)),
         ..Default::default()
@@ -981,6 +984,7 @@ fn test_normalize_tool_choice_auto() {
             server_description: None,
             require_approval: None,
             allowed_tools: None,
+            extra: Default::default(),
         }]),
         tool_choice: None,
         ..Default::default()
@@ -1049,6 +1053,7 @@ fn test_normalize_tool_choice_no_override() {
             server_description: None,
             require_approval: None,
             allowed_tools: None,
+            extra: Default::default(),
         }]),
         tool_choice: Some(ToolChoice::Value(ToolChoiceValue::Required)),
         ..Default::default()
@@ -1086,6 +1091,7 @@ fn test_normalize_parallel_tool_calls() {
             server_description: None,
             require_approval: None,
             allowed_tools: None,
+            extra: Default::default(),
         }]),
         parallel_tool_calls: None,
         ..Default::default()
@@ -1145,6 +1151,7 @@ fn test_normalize_parallel_tool_calls_no_override() {
             server_description: None,
             require_approval: None,
             allowed_tools: None,
+            extra: Default::default(),
         }]),
         parallel_tool_calls: Some(false),
         ..Default::default()

@@ -20,7 +20,7 @@ use crate::{builders::ResponsesResponseBuilder, validated::Normalizable};
 // Response Tools (MCP and others)
 // ============================================================================
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ResponseTool {
     #[serde(rename = "type")]
     pub r#type: ResponseToolType,
@@ -42,6 +42,62 @@ pub struct ResponseTool {
     pub require_approval: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_tools: Option<Vec<String>>,
+    // Preserve fields belonging to tool variants that this protocol version does
+    // not model yet. The gateway serializes this type again before forwarding it,
+    // so dropping them here would silently corrupt otherwise accepted requests.
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct KnownResponseTool {
+    #[serde(rename = "type")]
+    r#type: ResponseToolType,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    function: Option<Function>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    server_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    authorization: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    server_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    server_description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    require_approval: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    allowed_tools: Option<Vec<String>>,
+}
+
+impl<'de> Deserialize<'de> for ResponseTool {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        let known: KnownResponseTool =
+            serde_json::from_value(value.clone()).map_err(serde::de::Error::custom)?;
+
+        let mut extra = value.as_object().cloned().unwrap_or_default();
+        let serialized_known = serde_json::to_value(&known).map_err(serde::de::Error::custom)?;
+        if let Some(fields) = serialized_known.as_object() {
+            for key in fields.keys() {
+                extra.remove(key);
+            }
+        }
+
+        Ok(Self {
+            r#type: known.r#type,
+            function: known.function,
+            server_url: known.server_url,
+            authorization: known.authorization,
+            server_label: known.server_label,
+            server_description: known.server_description,
+            require_approval: known.require_approval,
+            allowed_tools: known.allowed_tools,
+            extra: extra.into_iter().collect(),
+        })
+    }
 }
 
 impl Default for ResponseTool {
@@ -55,6 +111,7 @@ impl Default for ResponseTool {
             server_description: None,
             require_approval: None,
             allowed_tools: None,
+            extra: HashMap::new(),
         }
     }
 }

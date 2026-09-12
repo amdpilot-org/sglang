@@ -219,6 +219,7 @@ pub(crate) fn convert_mcp_tools_to_response_tools(mcp_tools: &[mcp::Tool]) -> Ve
             server_description: tool_info.description.as_ref().map(|d| d.to_string()),
             require_approval: None,
             allowed_tools: None,
+            extra: Default::default(),
         })
         .collect()
 }

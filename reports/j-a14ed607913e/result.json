@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30781",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced all three independent-review counterexamples at candidate commit c89391648105d687cd6591fb2d501a7ab3c2c5a3, preserved the candidate's expanded accepted tool-type set, and made ResponseTool retain unmodeled fields across the typed gateway deserialize/serialize boundary.",
+  "tests": [
+    {
+      "command": "cargo test --test spec_test review_roundtrip -- --nocapture (candidate before correction)",
+      "exit_code": 101,
+      "what_was_measured": "Exact custom and namespace tool objects, plus unmodeled fields on a known tool type, were accepted but lost fields during ResponsesRequest round-trip; all 3 tests failed."
+    },
+    {
+      "command": "cargo test --test spec_test review_roundtrip -- --nocapture (after correction)",
+      "exit_code": 0,
+      "what_was_measured": "The exact custom object, nested namespace object, and independent future-field case were preserved byte-for-value at the JSON object boundary; 3 passed."
+    },
+    {
+      "command": "cargo test --test spec_test",
+      "exit_code": 0,
+      "what_was_measured": "Full gateway protocol test binary passed: 95 passed, 0 failed, 1 ignored, including the candidate's 12 accepted spellings and unknown-type rejection tests."
+    },
+    {
+      "command": "cargo check --all-targets",
+      "exit_code": 0,
+      "what_was_measured": "All gateway library, binary, and test targets compiled with the changed vendored protocol type and updated ResponseTool constructors."
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "exit_code": 0,
+      "what_was_measured": "Rust formatting check passed (with existing stable-toolchain warnings about nightly-only rustfmt options)."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "This is deterministic CPU-only JSON deserialization and serialization behavior; no GPU execution was relevant or claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "GLM-5.2 weights and the reporter's four-node TP8 gfx942 deployment were unavailable, so no full model, architecture, or distributed-serving claim is made.",
+    "The regression covers the exact typed ResponsesRequest boundary used before gateway forwarding; it does not validate downstream model semantics or tool execution.",
+    "Unknown tool type spellings remain rejected, matching the preserved candidate behavior; fields on accepted tool types are now forwarded losslessly."
+  ]
+}
