@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31103",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is test/report-only and passes its three direct helper cases, but it codifies position 0 as correct for every None mamba_next_track_idx. An independent GPU case based on the real free/overlap lifecycle showed that a freed lingering row resolves to a stale positive cache slot, so later verify commit code can write stale recurrent state rather than skipping the row. The candidate prevents the reported tensor-construction TypeError in the prepared source but does not establish a safe or full original-issue fix.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-6d6487cbbbc7/venv/bin/python -m pytest -q test/registered/unit/managers/test_mamba_track_indices.py (detached at 12863b77a051754759334e8752894f633b3bc5fd)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression executed the actual imported helper on gfx950; all 3 candidate cases passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6d6487cbbbc7/venv/bin/python -m pytest -q /job/review-evidence-j-6d6487cbbbc7/test_mamba_track_indices_candidate.py (recorded base checkout)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate test also passed unchanged on the recorded base, confirming the candidate adds no runtime fix and only hardens existing behavior."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6d6487cbbbc7/venv/bin/python /job/review-evidence-j-6d6487cbbbc7/adversarial_freed_row.py (detached candidate)",
+      "exit_code": 1,
+      "what_was_measured": "A freed/lingering None row selected stale slot 101 instead of skip sentinel -1, while the adjacent live row correctly selected 202."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Review report changes contain no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "PyTorch 2.11.0+rocm7.2 ran candidate and adversarial helper cases on one AMD Instinct MI355X, gfx950:sramecc+:xnack-."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "When free_mamba_cache or reset_for_retract has cleared mamba_next_track_idx but an overlap-lagged TARGET_VERIFY row remains, the current fallback gathers slot 0 from stale mapping data instead of marking the row skipped; observed actual output [101, 202] versus safe expected [-1, 202].",
+    "The downstream update_mamba_state_after_mtp_verify path does not mask last_correct_step_indices for these freed rows, so a non-track commit can also target a stale-but-in-range state slot."
+  ],
+  "remaining_limitations": [
+    "The NVIDIA H20 architecture, Qwen3.6-35B-A3B-FP8 weights, EAGLE draft model, exact launch configuration, and sustained concurrent serving workload were unavailable.",
+    "No full-model, HTTP-serving, NVIDIA FA3, semantic-accuracy, or soak reproduction was possible; the deterministic tiny Llama fixture cannot qualify this hybrid Qwen/Mamba workload and was not substituted.",
+    "GPU evidence is limited to the Python scheduler-helper and lifecycle counterexample on one AMD gfx950 device.",
+    "No native source changed in the candidate, repository-environment.json declares native null, and imports resolved to /job/repo/python; no native rebuild was required."
+  ]
+}
