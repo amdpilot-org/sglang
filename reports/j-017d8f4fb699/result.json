@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38167",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "e17404202ff719a952d605431afe34514bb62643",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the default scheduler RPC deadline and the basic disaggregated encoder loop, but an independent denoiser-prefetch probe still dispatched a second request after the exact fatal device-not-ready error and never latched fatal state. The reported RTX 5070 MiniMax-H3 memory failure and clean admission/error behavior remain unverified or unresolved.",
+  "tests": [
+    {
+      "command": "base Python probe of _resolve_timeout_ms/_configure_recv_timeout with a real ZMQ REQ socket",
+      "exit_code": 0,
+      "what_was_measured": "On recorded base, effective timeout was None and ZMQ RCVTIMEO was -1."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-017d8f4fb699/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_scheduler_device_failure.py python/sglang/multimodal_gen/test/unit/test_scheduler_client.py python/sglang/multimodal_gen/test/unit/test_server_args.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate focused regression suite: 216 passed, 16 warnings, 62 subtests passed."
+    },
+    {
+      "command": "independent direct probe of Scheduler._disagg_prefetch_event_loop with two denoiser transfer_compute items",
+      "exit_code": 0,
+      "what_was_measured": "After r1 raised CUDA driver error: device not ready, r2 was also dispatched and _fatal_error_message remained None."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 candidate source-import and torch numerical probe",
+      "exit_code": 0,
+      "what_was_measured": "Candidate modules imported from /job/repo/python; AMD Instinct MI355X ROCm device calculation returned 14.0."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 e17404202ff719a952d605431afe34514bb62643",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A real tensor calculation ran on AMD Instinct MI355X with Torch 2.11.0+rocm7.2/HIP 7.2 and returned the independent reference value 14.0; no MiniMax-H3 model execution was possible."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Disaggregated denoiser/decoder prefetch event loops do not call _handle_execution_error or consult _fatal_error_message; a second denoiser work item was dispatched after CUDA driver error: device not ready.",
+    "The candidate does not provide admission-time rejection or a clean insufficient-memory error for the reported 1344x768 request; ordinary OOM remains explicitly non-fatal.",
+    "The exact RTX 5070 12 GB / WSL2 / CUDA 13.0 MiniMax-H3 failure and subsequent 480p request remain unverified because that architecture, stack, weights, and LoRA were unavailable."
+  ],
+  "remaining_limitations": [
+    "Prepared hardware/software was AMD Instinct MI355X with ROCm 7.2, not RTX 5070 with CUDA 13.0 under WSL2.",
+    "MiniMax-H3 weights, FL2VA BF16 setup, and reporter LoRA were unavailable.",
+    "No native source changed in the candidate, so native rebuild validation was not applicable."
+  ]
+}
