@@ -455,8 +455,7 @@ class NCCLLibrary:
         Function("ncclCommWindowDeregister", ncclResult_t, [ncclComm_t, ncclWindow_t]),
     ]
 
-    # One-sided RMA primitives (NCCL 2.29-2.30+) plus ncclMemAlloc/Free. Loaded
-    # only when ncclPutSignal is present (see __init__).
+    # One-sided RMA primitives (NCCL 2.30+) plus ncclMemAlloc/Free.
     exported_functions_rma = [
         # ncclResult_t ncclMemAlloc(void** ptr, size_t size);
         Function(
@@ -575,12 +574,16 @@ class NCCLLibrary:
 
         if so_file not in NCCLLibrary.path_to_dict_mapping:
             _funcs: Dict[str, Any] = {}
-            exported_functions = NCCLLibrary.exported_functions
+            # Copy these lists: extending the class-owned list makes a later
+            # load of an older/different NCCL try to resolve optional symbols.
+            exported_functions = list(NCCLLibrary.exported_functions)
             if hasattr(self.lib, "ncclCommWindowRegister"):
                 exported_functions.extend(NCCLLibrary.exported_functions_symm_mem)
-            # One-sided RMA (NCCL 2.29-2.30+). Bound only when the symbol is
-            # present; callers gate on the has_rma flag.
-            self.has_rma = hasattr(self.lib, "ncclPutSignal")
+            rma_names = {func.name for func in NCCLLibrary.exported_functions_rma}
+            # A partially backported/vendor library is not a usable RMA ABI.
+            # Require the complete contract so capability checks cannot pass
+            # and then fail with a late AttributeError.
+            self.has_rma = all(hasattr(self.lib, name) for name in rma_names)
             if self.has_rma:
                 exported_functions.extend(NCCLLibrary.exported_functions_rma)
             for func in exported_functions:
@@ -590,7 +593,8 @@ class NCCLLibrary:
                 _funcs[func.name] = f
             NCCLLibrary.path_to_dict_mapping[so_file] = _funcs
         else:
-            self.has_rma = hasattr(self.lib, "ncclPutSignal")
+            rma_names = {func.name for func in NCCLLibrary.exported_functions_rma}
+            self.has_rma = all(hasattr(self.lib, name) for name in rma_names)
         self._funcs = NCCLLibrary.path_to_dict_mapping[so_file]
 
     def __getattr__(self, name: str):
@@ -800,6 +804,39 @@ class NCCLLibrary:
 
     def ncclCommWindowDeregister(self, comm: ncclComm_t, window: ncclWindow_t) -> None:
         self.NCCL_CHECK(self._funcs["ncclCommWindowDeregister"](comm, window))
+
+    def ncclMemAlloc(self, size: int) -> buffer_type:
+        ptr = buffer_type()
+        self.NCCL_CHECK(self._funcs["ncclMemAlloc"](ctypes.byref(ptr), size))
+        return ptr
+
+    def ncclMemFree(self, ptr: buffer_type) -> None:
+        self.NCCL_CHECK(self._funcs["ncclMemFree"](ptr))
+
+    def ncclPutSignal(self, *args) -> None:
+        self.NCCL_CHECK(self._funcs["ncclPutSignal"](*args))
+
+    def ncclSignal(self, *args) -> None:
+        self.NCCL_CHECK(self._funcs["ncclSignal"](*args))
+
+    def ncclWaitSignal(self, *args) -> None:
+        self.NCCL_CHECK(self._funcs["ncclWaitSignal"](*args))
+
+    def ncclWinGetUserPtr(self, comm, window) -> buffer_type:
+        ptr = buffer_type()
+        self.NCCL_CHECK(
+            self._funcs["ncclWinGetUserPtr"](comm, window, ctypes.byref(ptr))
+        )
+        return ptr
+
+    def ncclGetPeerDevicePointer(self, window, offset: int, peer: int) -> buffer_type:
+        ptr = buffer_type()
+        self.NCCL_CHECK(
+            self._funcs["ncclGetPeerDevicePointer"](
+                window, offset, peer, ctypes.byref(ptr)
+            )
+        )
+        return ptr
 
     def ncclGroupStart(self) -> None:
         self.NCCL_CHECK(self._funcs["ncclGroupStart"]())
