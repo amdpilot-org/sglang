@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35891",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3467",
+  "candidate_commit": "eb9138b0b6a1f795ce4b7090d4242dbf444e9f63",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "outcome": "candidate_verified",
+  "summary": "Independent review reproduced the remaining post-lock dispatch race on the exact recorded base and verified the exact candidate commit. The base already rejects completed futures at group entry and between per-request encodes, but a request completed while waiting for encode_dispatch_lock was still broadcast and passed to batch_encode. Candidate eb9138b re-filters under the lock and rebuilds the request list before broadcast. Candidate regressions and independent adversarial cases confirm that timed-out, cancelled, or completed work reaches neither broadcast nor encoder while live work completes. This is a full fix for the original issue in the current base context, not merely test hardening.",
+  "tests": [
+    {
+      "command": "PYTHONPYCACHEPREFIX=/tmp/amdpilot-repo-j-72fae4693a1d/pycache /tmp/amdpilot-repo-j-72fae4693a1d/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_encoder_scheduler.py -k 'skips_timed_out_request_after_dequeue or rechecks_completed_requests_after_lock or per_request_dispatch_skips_future_completed_between_requests' (candidate tests applied to recorded base implementation)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before comparison on 358c163: dequeue timeout and per-request completion races passed, while the post-lock race failed because batch_encode received ['completed', 'live']. Raw output: raw/base-focused.txt"
+    },
+    {
+      "command": "PYTHONPYCACHEPREFIX=/tmp/amdpilot-repo-j-72fae4693a1d/pycache /tmp/amdpilot-repo-j-72fae4693a1d/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_encoder_scheduler.py -k 'skips_timed_out_request_after_dequeue or rechecks_completed_requests_after_lock or per_request_dispatch_skips_future_completed_between_requests'",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate eb9138b: all three candidate regressions passed using actual PendingRequest and EncoderScheduler dispatch paths; 3 passed. Raw output: raw/candidate-focused.txt"
+    },
+    {
+      "command": "PYTHONPYCACHEPREFIX=/tmp/amdpilot-repo-j-72fae4693a1d/pycache /tmp/amdpilot-repo-j-72fae4693a1d/venv/bin/python -m pytest -q /job/review-evidence/adversarial_test.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent candidate cases: decoded two-socket broadcast payloads contained only the live request after mixed cancellation/completion; an all-abandoned post-lock batch produced no broadcast or encoder call; and a request cancelled while an earlier per-request encode blocked was skipped while the later live request completed. 3 passed. Retained test and output: raw/adversarial_test.py and raw/candidate-adversarial.txt"
+    },
+    {
+      "command": "PYTHONPYCACHEPREFIX=/tmp/amdpilot-repo-j-72fae4693a1d/pycache /tmp/amdpilot-repo-j-72fae4693a1d/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_encoder_scheduler.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate full scheduler unit module: 17 passed. Raw output: raw/candidate-full-scheduler.txt"
+    },
+    {
+      "command": "PYTHONPYCACHEPREFIX=/tmp/amdpilot-repo-j-72fae4693a1d/pycache /tmp/amdpilot-repo-j-72fae4693a1d/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_encode_server.py test/registered/unit/disaggregation/test_encoder_health.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate adjacent CPU serving tests: 75 passed and 4 subtests passed. Raw output: raw/candidate-adjacent.txt"
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 eb9138b0b6a1f795ce4b7090d4242dbf444e9f63",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reported defect is a Python asyncio scheduler race and the issue explicitly identifies the scheduler seam as CPU-reproducible. Tests exercised production PendingRequest, worker/dispatch methods, encode_dispatch_lock, sock_send call sites, batch_encode, and per-request encode. No model or GPU numerical claim was made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": "No native source changed, repository-environment.json reports native=null and wheel=null, so no native rebuild was applicable. The imported runtime source was confirmed as /job/repo/python/sglang/srt/disaggregation/encoder/runtime.py. No real tensor-parallel processes, model weights, HTTP transport, or GPU were used; broadcast exclusion was verified at the production sock_send boundary with decoded payloads, not across a distributed collective. These architecture limitations do not leave a counterexample to the original Python scheduler contract."
+}
