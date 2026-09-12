@@ -1,9 +1,8 @@
 """Admission accounting for multimodal preprocessing.
 
-This module deliberately operates after request parsing.  It bounds work admitted
-to the tokenizer-side multimodal preprocessing pipeline, but it does not bound
-HTTP request-body parsing or memory retained by an ASGI server before the request
-reaches :class:`TokenizerManager`.
+The HTTP frontend takes a provisional one-item lease before consuming a request
+body. Once parsing identifies the actual media count, tokenizer-side admission
+resizes that same lease and holds it through preprocessing and scheduler handoff.
 """
 
 from __future__ import annotations
@@ -101,6 +100,19 @@ class MultimodalPreprocessingAdmissionLease:
             self._controller = None
         controller._release(self.item_count)
 
+    def resize(self, item_count: int) -> None:
+        """Atomically change this reservation to the parsed request's weight."""
+        if item_count < 0:
+            raise ValueError("item_count must be non-negative")
+        with self._lock:
+            controller = self._controller
+            if controller is None or self._owner_released:
+                raise RuntimeError("cannot resize a released reservation")
+            if self._pending_futures:
+                raise RuntimeError("cannot resize after background work starts")
+            controller._resize(self.item_count, item_count)
+            self.item_count = item_count
+
     def track_future(self, future: _DoneCallbackFuture) -> None:
         """Keep the reservation until submitted background work really finishes."""
         with self._lock:
@@ -155,6 +167,13 @@ def track_mm_preprocessing_future(future: _DoneCallbackFuture) -> None:
         lease.track_future(future)
 
 
+def get_mm_preprocessing_admission_lease() -> Optional[
+    MultimodalPreprocessingAdmissionLease
+]:
+    """Return the transport-stage lease active for the current ASGI request."""
+    return _current_lease.get()
+
+
 class MultimodalPreprocessingAdmission:
     """A non-blocking weighted limiter for tokenizer-side MM preprocessing."""
 
@@ -202,3 +221,20 @@ class MultimodalPreprocessingAdmission:
                     "multimodal preprocessing admission accounting underflow"
                 )
             self._inflight_items -= item_count
+
+    def _resize(self, old_item_count: int, new_item_count: int) -> None:
+        with self._lock:
+            if old_item_count > self._inflight_items:
+                raise RuntimeError(
+                    "multimodal preprocessing admission accounting underflow"
+                )
+            if new_item_count > self.max_inflight_items:
+                raise MultimodalPreprocessingRequestTooLarge(
+                    new_item_count, self.max_inflight_items
+                )
+            new_inflight_items = self._inflight_items - old_item_count + new_item_count
+            if new_inflight_items > self.max_inflight_items:
+                raise MultimodalPreprocessingBusy(
+                    new_item_count, self._inflight_items, self.max_inflight_items
+                )
+            self._inflight_items = new_inflight_items

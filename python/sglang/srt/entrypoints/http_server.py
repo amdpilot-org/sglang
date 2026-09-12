@@ -156,6 +156,9 @@ from sglang.srt.managers.multi_tokenizer_mixin import (
     read_from_shared_memory,
     write_data_for_multi_tokenizer,
 )
+from sglang.srt.managers.multimodal_preprocessing_admission import (
+    MultimodalPreprocessingBusy,
+)
 from sglang.srt.managers.tokenizer_manager import ServerStatus, TokenizerManager
 from sglang.srt.observability.func_timer import enable_func_timer
 from sglang.srt.observability.trace import (
@@ -460,6 +463,74 @@ app = FastAPI(
     lifespan=lifespan,
     openapi_url=None if get_bool_env_var("DISABLE_OPENAPI_DOC") else "/openapi.json",
 )
+
+
+class MultimodalBodyAdmissionMiddleware:
+    """Reject excess bodies before ASGI buffers and parses their payloads."""
+
+    _ADMITTED_PATHS = {
+        "/generate",
+        "/encode",
+        "/classify",
+        "/v1/completions",
+        "/v1/chat/completions",
+        "/v1/embeddings",
+        "/v1/classify",
+        "/v1/audio/transcriptions",
+        "/v1/responses",
+        "/v1/messages",
+        "/invocations",
+        os.environ.get("SGLANG_OLLAMA_CHAT_ROUTE", "/api/chat"),
+        os.environ.get("SGLANG_OLLAMA_GENERATE_ROUTE", "/api/generate"),
+        os.environ.get("AIP_PREDICT_ROUTE", "/vertex_generate"),
+    }
+
+    def __init__(self, asgi_app):
+        self.app = asgi_app
+
+    async def __call__(self, scope, receive, send):
+        if (
+            scope["type"] != "http"
+            or scope.get("method") not in {"POST", "PUT"}
+            or scope.get("path") not in self._ADMITTED_PATHS
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        manager = getattr(_global_state, "tokenizer_manager", None)
+        admission = getattr(manager, "mm_preprocessing_admission", None)
+        if admission is None:
+            await self.app(scope, receive, send)
+            return
+
+        try:
+            lease = admission.acquire(1)
+        except MultimodalPreprocessingBusy:
+            response = ORJSONResponse(
+                {
+                    "error": {
+                        "message": (
+                            "Multimodal request admission is at capacity before "
+                            "body parsing."
+                        ),
+                        "type": "server_error",
+                        "code": 503,
+                        "retryable": True,
+                    }
+                },
+                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            await response(scope, receive, send)
+            return
+
+        try:
+            with lease.activate():
+                await self.app(scope, receive, send)
+        finally:
+            lease.release()
+
+
+app.add_middleware(MultimodalBodyAdmissionMiddleware)
 app.router.route_class = ORJSONRoute
 app.add_middleware(
     CORSMiddleware,

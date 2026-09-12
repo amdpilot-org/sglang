@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33035",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2916",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2784",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/2881",
+  "candidate_commit": "e3da2b295dcd70b2c65158c3458006ea03f2b9b4",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved the candidate's weighted tokenizer-side admission and added provisional ASGI admission before request-body consumption. The provisional lease is atomically resized to the parsed media-item count, released for text-only requests, and otherwise retained through the candidate's preprocessing/scheduler-handoff lifetime. This fixes the independently reproduced Python HTTP frontend counterexample without claiming validation of unavailable architectures or the exact Kimi-K2.6 workload.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python <prepared-python> <inline exact-candidate adversarial allocation script>",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before reproduction against exact candidate e3da2b295dcd70b2c65158c3458006ea03f2b9b4: with budget one already occupied, 32 parsed 4 MiB payloads (134218464 bytes) were retained before 32/32 busy rejections; maximum RSS grew 134796 KiB. See evidence/candidate-adversarial-before.log."
+    },
+    {
+      "command": "PYTHONPATH=python:test/registered/unit/entrypoints/openai <prepared-python> -m pytest -q test/registered/unit/managers/test_multimodal_preprocessing_admission.py test/registered/unit/entrypoints/test_mm_body_admission.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after focused regression: 11 passed. The 32-request, 4 MiB-per-body ASGI case allowed one request to call receive(), rejected the remaining 31 with HTTP 503 before receive(), and returned admission accounting to zero. Lease resizing, rollback, background-future ownership, and weighted counting also passed."
+    },
+    {
+      "command": "PYTHONPATH=python:test/registered/unit/entrypoints/openai <prepared-python> -m pytest -q <candidate 13-file regression set plus test_mm_body_admission.py> -k 'not test_canonical_prefill_cp_requires_strategy and not test_context_parallel_handler_initializes_cp_strategy'",
+      "exit_code": 0,
+      "what_was_measured": "Consolidated candidate and correction regression: 457 passed, 2 HIP-inapplicable context-parallel tests deselected, 58 subtests passed. See evidence/consolidated-regression.log."
+    },
+    {
+      "command": "<prepared-python> -m pre_commit run --files <five changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, import sorting, lint, secret, syntax, CI registry, and related source checks passed on the correction files. See evidence/pre-commit-rerun.log."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 HEAD",
+      "exit_code": 0,
+      "what_was_measured": "Consolidated patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU execution applies to this Python ASGI/admission-accounting correction. The prepared environment reports Torch 2.11.0+rocm7.2 / HIP 7.2 and a visible AMD Instinct MI350X, but no model-semantic or GPU numerical claim is made. See evidence/environment.log."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Kimi-K2.6 weights and an equivalent 1.5 TiB host were unavailable, so the exact 200-concurrent-request, 28-images-per-request OOM and end-to-end prevention remain unverified.",
+    "The Rust frontend owns a separate request and multimodal preprocessing pipeline; the option remains rejected there and this Python ASGI correction does not qualify that architecture.",
+    "EPD language-only mode can dispatch preprocessing to a remote encoder; the option remains rejected there because a correct cross-process ownership protocol was not available or validated.",
+    "The deterministic tiny Llama fixture is text-only and cannot qualify multimodal preprocessing, Kimi-K2.6 semantics, or a distributed workload, so it was not used as substitute evidence.",
+    "ASGI admission prevents excess application-level body consumption; transport implementations may still retain bounded per-connection protocol buffers before the application calls receive().",
+    "Two unrelated context-parallel tests invoke prefill CP, which production validation explicitly deprecates on HIP; the consolidated applicable run deselected only those two cases."
+  ],
+  "evidence_directory": "reports/j-4f03df2039cf/evidence"
+}
