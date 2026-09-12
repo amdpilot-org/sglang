@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38863",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced superlinear accumulated CPU time in the checked-out XGrammarGrammar with a real xgrammar GrammarMatcher, then replaced rollback's full-history slice/rebind with guarded in-place truncation. The guard also makes rollback(0) preserve the Python debug history, matching the matcher no-op. Median time for 2,000 to 16,000 committed-token plus speculative accept/rollback iterations changed from 0.005054 to 0.108937 seconds before (21.6x for 8x N) to 0.003257 to 0.025908 seconds after (8.0x for 8x N).",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4d59c080bff5/venv/bin/python -m pytest -q test/registered/unit/constrained/test_xgrammar_rollback.py",
+      "exit_code": 1,
+      "what_was_measured": "Pre-fix regression: actual XGrammarGrammar and GrammarMatcher rollback history identity and boundary semantics. Both tests failed as expected; raw output is reports/j-4d59c080bff5/test_before.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4d59c080bff5/venv/bin/python reports/j-4d59c080bff5/benchmark_xgrammar_rollback.py",
+      "exit_code": 0,
+      "what_was_measured": "Pre-fix controlled host-CPU wall time, five samples per N, for accumulated committed history plus one speculative accept/rollback per iteration on the actual backend. Raw output is reports/j-4d59c080bff5/timing_before.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4d59c080bff5/venv/bin/python -m pytest -q test/registered/unit/constrained/test_xgrammar_rollback.py",
+      "exit_code": 0,
+      "what_was_measured": "Post-fix regression: two tests passed, covering in-place rollback and empty, zero, partial, and full-history boundaries with the actual matcher. Raw output is reports/j-4d59c080bff5/test_after.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4d59c080bff5/venv/bin/python reports/j-4d59c080bff5/benchmark_xgrammar_rollback.py",
+      "exit_code": 0,
+      "what_was_measured": "Post-fix controlled host-CPU wall time under the same five-sample actual-backend workload; doubling ratios were 2.007, 1.978, and 2.004. Raw output is reports/j-4d59c080bff5/timing_after.txt."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The focused regression and benchmark instantiate the CPU-side xgrammar matcher and call XGrammarGrammar.accept_token/rollback only; they do not allocate CUDA/HIP tensors or launch GPU work. No GPU performance claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": "No live speculative-decoding server or model generation was run. The benchmark directly reproduces its reported grammar-state pattern on the checked-out Python backend and installed xgrammar matcher, isolating host rollback complexity from model and GPU variability. This change does not modify native code. Source paths: python/sglang/srt/constrained/xgrammar_backend.py, test/registered/unit/constrained/test_xgrammar_rollback.py, and reports/j-4d59c080bff5/benchmark_xgrammar_rollback.py."
+}
