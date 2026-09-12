@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/21443",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2934",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2901",
+  "candidate_commit": "ad0162d0c4c667916f85904b30cd356d38feee84",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes all three reported paths when PyTorch's Metal memory APIs succeed, but its compatibility fallback restores uncapped host-memory reporting and its new registered test violates the repository CI taxonomy. This is a partial fix, not a complete resolution.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b06daa3dcf17/venv/bin/python /job/review-evidence-j-b06daa3dcf17/independent_mps_contract.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction across the SRT, MPS device-property, and multimodal production paths; observed 56 GiB available and 64 GiB total instead of 40/48 GiB."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b06daa3dcf17/venv/bin/python -m pytest -q test/registered/unit/utils/test_mps_memory.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite; 10 tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b06daa3dcf17/venv/bin/python /job/review-evidence-j-b06daa3dcf17/independent_mps_contract.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent simulated Metal API integration through all three reported production paths; observed 40 GiB available and 48 GiB total."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b06daa3dcf17/venv/bin/python /job/review-evidence-j-b06daa3dcf17/adversarial_mps_fallback.py (candidate)",
+      "exit_code": 1,
+      "what_was_measured": "Absent and raising Metal-limit APIs both returned uncapped 64 GiB total / 56 GiB available against a 48 GiB limit."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/_mps_memory.py python/sglang/_platform_stubs.py python/sglang/srt/utils/common.py python/sglang/multimodal_gen/runtime/platforms/mps.py test/registered/unit/utils/test_mps_memory.py (candidate)",
+      "exit_code": 1,
+      "what_was_measured": "All applicable style checks passed, but check-registered-tests rejected MLX registration from a unit-test directory that permits only CPU suites."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Prepared host is Linux/x86_64 with ROCm; torch.backends.mps.is_built() and is_available() were both false. AMD execution cannot validate Apple Metal accounting."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "If torch.mps.recommended_max_memory is absent, the candidate reports host total/available memory and can exceed Metal's recommended working-set limit.",
+    "If torch.mps.recommended_max_memory raises or returns an invalid/non-positive value, the same unsafe host-memory fallback remains.",
+    "The candidate's registered regression file fails repository pre-commit taxonomy validation because a unit test registers an MLX CI suite."
+  ],
+  "remaining_limitations": [
+    "No Apple Silicon or macOS device was available, so real MTLDevice values and UMA paging/stability were not measured.",
+    "No MPS serving workload or model execution was possible.",
+    "No native rebuild was applicable because the candidate is Python-only.",
+    "The image-prepared checkout matched the recorded base commit; origin/main had advanced to bd45cd5 during review but contained no overlapping fix for these MPS paths."
+  ],
+  "evidence_directory": "/job/review-evidence-j-b06daa3dcf17"
+}
