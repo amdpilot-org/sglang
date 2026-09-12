@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30609",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Preserved the base's valid opt-in Mooncake index batching and rejected candidate b8902dbde7a9d707fc5729883551ed082c110baa's global 1024-index default. The candidate's mechanics pass focused tests, but 1024 was validated only for GLM-5.2-NVFP4 and its KV layout; neither the original FP8 workload nor its H100 multi-node Mooncake/DeepEP topology was reproduced. Added a failing-before/passing-after regression requiring the model-dependent limit to remain opt-in.",
+  "tests": [
+    {
+      "command": "exact-candidate source assertion that SGLANG_MOONCAKE_MAX_TRANSFER_BATCH_INDICES defaults to 0",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: exact candidate b8902dbde7a9d707fc5729883551ed082c110baa sets the global default to 1024, violating the opt-in invariant required while model-independent safety is unproven."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0914be3a8a0a/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_mooncake_transfer_batching.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after: 6 tests and 3 subtests passed, including the new default-is-opt-in regression and existing ordered slicing, boundary, failure, device-index, and custom-memory-pool coverage."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0914be3a8a0a/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_mooncake_transfer_batching.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's own 6 tests and 3 subtests passed, confirming its batching mechanics while not validating the original deployment or a model-independent default."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Torch reported one AMD Instinct MI355X gfx950 with ROCm 7.2. The issue requires NVIDIA H100 multi-node Mooncake/RDMA and DeepEP behavior; no unrelated GPU smoke is presented as issue evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original glm5.2-fp8 deployment was not reproduced before or after the candidate; upstream PR 32758 reports that its failure was not reproduced on FP8 at concurrency 8.",
+    "The original two 2-node prefill instances and 4-node/32-rank decode topology with H100, Mooncake/RDMA, DSA, HiCache, HiSparse, and DeepEP remains untested.",
+    "A source-issue follow-up reports freezing specifically with --moe-a2a-backend deepep; changing Mooncake transfer batch size does not establish that this path is fixed.",
+    "The 1024 value was measured on GLM-5.2-NVFP4 and its per-index byte size. Safety and efficacy for other models and KV layouts remain unverified.",
+    "No native code changed, so no native rebuild was applicable."
+  ]
+}
