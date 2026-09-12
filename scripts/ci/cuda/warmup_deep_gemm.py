@@ -76,7 +76,8 @@ CRASH_MARKERS = (
 # Configure DeepGEMM cache before importing deep_gemm. Read through envs so
 # this warms the directory the server will actually compile into; duplicating
 # the default here is what let the two drift apart.
-os.environ["DG_JIT_CACHE_DIR"] = envs.SGLANG_DG_CACHE_DIR.get()
+if envs.SGLANG_DG_CACHE_DIR.is_set() or "DG_JIT_CACHE_DIR" not in os.environ:
+    os.environ["DG_JIT_CACHE_DIR"] = envs.SGLANG_DG_CACHE_DIR.get()
 os.environ["DG_JIT_USE_NVRTC"] = os.getenv("SGL_DG_USE_NVRTC", "0")
 
 BLOCK_SIZE = 128

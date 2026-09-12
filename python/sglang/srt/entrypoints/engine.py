@@ -1789,11 +1789,11 @@ def _log_legacy_kernel_cache_dirs():
     if not legacy_dirs:
         return
     logger.info(
-        "Compiled-kernel caches now live under SGLANG_CACHE_DIR (%s). These "
+        "Compiled-kernel caches now live under SGLANG_JIT_CACHE_ROOT (%s). These "
         "older directories are no longer used by sglang, but may still be "
         "used by other frameworks on this machine, so they were left alone: "
         "%s. Remove them yourself if nothing else needs them.",
-        envs.SGLANG_CACHE_DIR.get(),
+        envs.SGLANG_JIT_CACHE_ROOT.get(),
         ", ".join(legacy_dirs),
     )
 

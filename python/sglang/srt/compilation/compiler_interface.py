@@ -189,16 +189,15 @@ class InductorAdaptor(CompilerInterface):
         self.base_cache_dir = cache_dir[: -len(prefix)] if prefix else cache_dir
         if disable_cache:
             return
-        # redirect the cache directory to a sub-directory
-        # set flags so that Inductor and Triton store their cache
-        # in the cache_dir, then users only need to copy the cache_dir
-        # to another machine to reuse the cache.
+        # Standalone users of this adaptor retain the historical graph-local
+        # defaults. Normal SGLang imports configure the unified directories
+        # earlier, and those operator-visible settings must not be displaced.
         inductor_cache = os.path.join(self.base_cache_dir, "inductor_cache")
         os.makedirs(inductor_cache, exist_ok=True)
-        os.environ["TORCHINDUCTOR_CACHE_DIR"] = inductor_cache
+        os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", inductor_cache)
         triton_cache = os.path.join(self.base_cache_dir, "triton_cache")
         os.makedirs(triton_cache, exist_ok=True)
-        os.environ["TRITON_CACHE_DIR"] = triton_cache
+        os.environ.setdefault("TRITON_CACHE_DIR", triton_cache)
 
     def compile(
         self,
