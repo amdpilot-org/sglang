@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33901",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the loss of a second complete GLM-4.7 tool call in one final streaming increment. The parser now drains every complete buffered tool call with a progress check while retaining an incomplete suffix. Added regressions for two no-argument calls, two argument-bearing calls, and a complete call followed by a partial call.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-62195d512586/venv/bin/python reports/j-62195d512586/reproduce_glm47_final_delta.py",
+      "exit_code": 0,
+      "what_was_measured": "Before the fix, only tool index 0 was emitted and '<tool_call>second</tool_call>' remained in the detector buffer; after the fix, both tool indices 0 and 1 were emitted and the buffer was empty. Raw outputs are in failing-before.log and passing-after.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-62195d512586/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py::TestGlm47MoeDetector",
+      "exit_code": 0,
+      "what_was_measured": "All 15 GLM-4.7 detector unit tests passed, including the three new final-increment and partial-boundary regressions."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-62195d512586/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py::TestGlm4MoeDetector test/registered/unit/function_call/test_function_call_parser.py::TestGlm47MoeDetector",
+      "exit_code": 0,
+      "what_was_measured": "All 29 related GLM-4 and GLM-4.7 parser tests passed."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/function_call/glm47_moe_detector.py test/registered/unit/function_call/test_function_call_parser.py reports/j-62195d512586/reproduce_glm47_final_delta.py",
+      "exit_code": 0,
+      "what_was_measured": "All configured repository checks applicable to the changed source, tests, and reproduction script passed."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The defect is deterministic CPU-only parsing of already generated text; no model execution, numerical GPU kernel, compiler, or ISA claim is involved.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No GLM-4.7 model weights or serving-path model reproduction was used; validation is limited to the actual streaming detector implementation and parser unit tests.",
+    "No GPU execution was relevant to this text parser defect."
+  ]
+}
