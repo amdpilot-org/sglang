@@ -1,0 +1,315 @@
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+___ TestSkipRadixCacheInsert.test_chunk_cache_still_advances_with_skip_flag ____
+
+self = <test_skip_radix_cache_insert.TestSkipRadixCacheInsert testMethod=test_chunk_cache_still_advances_with_skip_flag>
+
+    def test_chunk_cache_still_advances_with_skip_flag(self):
+        kv_indices = torch.tensor([[201, 202, 203, 204, 205, 206]])
+        cache = ChunkCache.__new__(ChunkCache)
+        cache.req_to_token_pool = SimpleNamespace(req_to_token=kv_indices)
+        req = SimpleNamespace(
+            skip_radix_cache_insert=True,
+            kv=SimpleNamespace(req_pool_idx=0),
+            prefix_indices=kv_indices[0, :2].clone(),
+            extend_range=SimpleNamespace(end=6),
+        )
+    
+        maybe_cache_unfinished_req(req, cache, chunked=True)
+    
+>       torch.testing.assert_close(req.prefix_indices, kv_indices[0])
+E       AssertionError: The values for attribute 'shape' do not match: torch.Size([2]) != torch.Size([6]).
+
+test/registered/unit/mem_cache/test_skip_radix_cache_insert.py:113: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7fc3affcede0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7fcc9618a480>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestSkipRadixCacheInsert.test_chunk_cache_still_advances_with_skip_flag
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/mem_cache/test_skip_radix_cache_insert.py", line 113, in test_chunk_cache_still_advances_with_skip_flag
+    torch.testing.assert_close(req.prefix_indices, kv_indices[0])
+  File "/opt/venv/lib/python3.12/site-packages/torch/testing/_comparison.py", line 1600, in assert_close
+    raise error_metas[0].to_error(msg)
+AssertionError: The values for attribute 'shape' do not match: torch.Size([2]) != torch.Size([6]).
+_ TestSkipRadixCacheInsert.test_chunked_request_advances_across_scheduling_rounds _
+
+self = <test_skip_radix_cache_insert.TestSkipRadixCacheInsert testMethod=test_chunked_request_advances_across_scheduling_rounds>
+
+    def test_chunked_request_advances_across_scheduling_rounds(self):
+        chunk_size = 8
+        num_tokens = 3 * chunk_size
+        kv_indices = torch.arange(num_tokens).unsqueeze(0)
+        cache = RadixCache.__new__(RadixCache)
+        cache.disable = False
+        cache.evictable_size_ = 0
+        cache.req_to_token_pool = SimpleNamespace(req_to_token=kv_indices)
+        req = SimpleNamespace(
+            skip_radix_cache_insert=True,
+            kv=SimpleNamespace(req_pool_idx=0, cache_protected_len=0),
+            prefix_indices=torch.empty(0, dtype=torch.int64),
+            full_untruncated_fill_ids=array("q", range(num_tokens)),
+            output_ids=array("q"),
+            sampling_params=SimpleNamespace(max_new_tokens=1),
+            retracted_stain=False,
+        )
+        req.set_extend_range = lambda start, end: setattr(
+            req, "extend_range", SimpleNamespace(start=start, end=end, length=end - start)
+        )
+        req.get_fill_ids = lambda: req.full_untruncated_fill_ids[: req.extend_range.end]
+    
+        starts = []
+        chunked_req = req
+        for _ in range(3):
+            allocator = MagicMock()
+            allocator.available_size.return_value = num_tokens + chunk_size
+            adder = PrefillAdder(
+                page_size=1,
+                tree_cache=cache,
+                token_to_kv_pool_allocator=allocator,
+                running_batch=None,
+                new_token_ratio=0,
+                rem_input_tokens=num_tokens,
+                rem_chunk_tokens=chunk_size,
+            )
+            chunked_req = adder.add_chunked_req(chunked_req)
+            starts.append(req.extend_range.start)
+            if chunked_req is not None:
+                maybe_cache_unfinished_req(req, cache, chunked=True)
+    
+>       self.assertEqual(starts, [0, chunk_size, 2 * chunk_size])
+E       AssertionError: Lists differ: [0, 0, 0] != [0, 8, 16]
+E       
+E       First differing element 1:
+E       0
+E       8
+E       
+E       - [0, 0, 0]
+E       + [0, 8, 16]
+
+test/registered/unit/mem_cache/test_skip_radix_cache_insert.py:64: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7fc3aff37a60>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7fcc9618a480>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestSkipRadixCacheInsert.test_chunked_request_advances_across_scheduling_rounds
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/mem_cache/test_skip_radix_cache_insert.py", line 64, in test_chunked_request_advances_across_scheduling_rounds
+    self.assertEqual(starts, [0, chunk_size, 2 * chunk_size])
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1091, in assertListEqual
+    self.assertSequenceEqual(list1, list2, msg, seq_type=list)
+  File "/usr/lib/python3.12/unittest/case.py", line 1073, in assertSequenceEqual
+    self.fail(msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: Lists differ: [0, 0, 0] != [0, 8, 16]
+
+First differing element 1:
+0
+8
+
+- [0, 0, 0]
++ [0, 8, 16]
+_ TestSkipRadixCacheInsert.test_skip_keeps_kv_request_owned_and_does_not_publish _
+
+self = <test_skip_radix_cache_insert.TestSkipRadixCacheInsert testMethod=test_skip_keeps_kv_request_owned_and_does_not_publish>
+
+    def test_skip_keeps_kv_request_owned_and_does_not_publish(self):
+        kv_indices = torch.tensor([[101, 102, 103, 104, 105, 106]])
+        cache = RadixCache.__new__(RadixCache)
+        cache.disable = False
+        cache.page_size = 1
+        cache.is_eagle = False
+        cache.req_to_token_pool = SimpleNamespace(req_to_token=kv_indices)
+        cache.token_to_kv_pool_allocator = MagicMock()
+        cache.insert = MagicMock()
+        cache.match_prefix = MagicMock()
+        cache.dec_lock_ref = MagicMock()
+        cache.inc_lock_ref = MagicMock()
+        last_node = object()
+        req = SimpleNamespace(
+            skip_radix_cache_insert=True,
+            kv=SimpleNamespace(req_pool_idx=0, cache_protected_len=2),
+            prefix_indices=kv_indices[0, :2].clone(),
+            last_node=last_node,
+            output_ids=array("q"),
+            extra_key=None,
+            cache_salt=None,
+            get_fill_ids=lambda: array("q", [1, 2, 3, 4, 5, 6]),
+        )
+    
+        maybe_cache_unfinished_req(req, cache, chunked=True)
+    
+>       torch.testing.assert_close(req.prefix_indices, kv_indices[0])
+E       AssertionError: The values for attribute 'shape' do not match: torch.Size([2]) != torch.Size([6]).
+
+test/registered/unit/mem_cache/test_skip_radix_cache_insert.py:93: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7fc3aff37ce0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7fcc9618a480>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestSkipRadixCacheInsert.test_skip_keeps_kv_request_owned_and_does_not_publish
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/mem_cache/test_skip_radix_cache_insert.py", line 93, in test_skip_keeps_kv_request_owned_and_does_not_publish
+    torch.testing.assert_close(req.prefix_indices, kv_indices[0])
+  File "/opt/venv/lib/python3.12/site-packages/torch/testing/_comparison.py", line 1600, in assert_close
+    raise error_metas[0].to_error(msg)
+AssertionError: The values for attribute 'shape' do not match: torch.Size([2]) != torch.Size([6]).
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/mem_cache/test_skip_radix_cache_insert.py::TestSkipRadixCacheInsert::test_chunk_cache_still_advances_with_skip_flag
+FAILED test/registered/unit/mem_cache/test_skip_radix_cache_insert.py::TestSkipRadixCacheInsert::test_chunked_request_advances_across_scheduling_rounds
+FAILED test/registered/unit/mem_cache/test_skip_radix_cache_insert.py::TestSkipRadixCacheInsert::test_skip_keeps_kv_request_owned_and_does_not_publish
+3 failed, 17 warnings in 26.33s
