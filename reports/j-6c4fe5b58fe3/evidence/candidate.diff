@@ -1,0 +1,316 @@
+diff --git a/python/sglang/srt/mem_cache/hybrid_cache/hybrid_cache_controller.py b/python/sglang/srt/mem_cache/hybrid_cache/hybrid_cache_controller.py
+index eb3a2b6..062bd56 100644
+--- a/python/sglang/srt/mem_cache/hybrid_cache/hybrid_cache_controller.py
++++ b/python/sglang/srt/mem_cache/hybrid_cache/hybrid_cache_controller.py
+@@ -597,216 +597,217 @@ class HybridCacheController(BaseHiCacheController):
+         kv_hit_pages = hit_result.kv_hit_pages
+         operation.pool_storage_result.update_kv_hit_pages(kv_hit_pages)
+ 
+         return (
+             hash_value[:kv_hit_pages],
+             kv_hit_pages * self.page_size,
+         )
+ 
+     def move_hybrid_indices(
+         self, operation: CacheOperation
+     ) -> tuple[torch.Tensor, torch.Tensor, Optional[list[PoolTransfer]]]:
+         host_indices, device_indices = self.move_indices(
+             operation.host_indices, operation.device_indices
+         )
+         resolved_pool_transfers = None
+         if operation.pool_transfers:
+             resolved_pool_transfers = []
+             for transfer in operation.pool_transfers:
+                 transfer_host_indices, transfer_device_indices = self.move_indices(
+                     transfer.host_indices, transfer.device_indices
+                 )
+                 # Keep the original PoolTransfer unchanged because tree-owned
+                 # transfers may still reference radix-tree host state. The
+                 # controller only needs a normalized execution-time copy.
+                 resolved_pool_transfers.append(
+                     PoolTransfer(
+                         name=transfer.name,
+                         host_indices=transfer_host_indices,
+                         device_indices=transfer_device_indices,
+                         keys=transfer.keys,
+                         hit_policy=transfer.hit_policy,
+                         indices_from_pool=transfer.indices_from_pool,
+                     )
+                 )
+         return host_indices, device_indices, resolved_pool_transfers
+ 
+     def _page_transfer(self, operation: PrefetchOperation) -> bool:
+         # KV pools and KV-derived pools first — determines actual completed page count
+         kv_completed_pages = super()._page_transfer(operation)
+ 
+         # Read non-KV derived sidecar pool, e.g. SWA, Mamba.
+         self._page_transfer_sidecar(operation, kv_completed_pages)
+ 
+     def _page_transfer_sidecar(
+         self, operation: PrefetchOperation, kv_completed_pages: int
+     ) -> None:
+         if operation.pool_transfers is None:
+             return
+ 
+         # Extra pools only after KV fully completes. If KV terminated early
+         # (IO failure, timeout, TP mismatch), skip extra IO entirely to avoid
+         # data misalignment.
+         pool_hits: dict[str, int] = {}
+         if not operation.is_terminated() and kv_completed_pages == len(
+             operation.hash_value
+         ):
+             # KV-derived sidecar pools are handled in CacheController._page_transfer_kv_batch.
+             # Only handle non-KV-derived sidecar pools here.
+             transfers_nonkv = [
+                 transfer
+                 for transfer in operation.pool_transfers
+                 if transfer.indices_from_pool != PoolName.KV
+             ]
+             self._sync_trailing_keys(
+                 transfers_nonkv, operation.hash_value, kv_completed_pages
+             )
+             self._resolve_sidecar_nonkv_derived_pool_transfers(operation)
+             results = self.storage_backend.batch_get_v2(transfers_nonkv)
+             pool_hits = count_pool_hits(results)
+         # Emit PrefetchAck to prefetch_sync_queue, even the operation has been canceled by the
+         # scheduler thread.  The prefetch sync thread expects the same number of PrefetchAck objects
+         # to perform all_reduce.
+         self.prefetch_sync_queue.put(
+             PrefetchAck(
+                 rid=operation.request_id,
+                 operation=operation,
+                 pool_hits=pool_hits,
+             )
+         )
+         return
+ 
+     def _page_backup(self, operation):
+         # MLA KV is replicated across TP ranks and should still be written only
+         # by TP0. Rank-sharded sidecars still need every TP rank.
+         backup_transfers = [
+             transfer
+             for transfer in operation.pool_transfers or []
+             if self.should_backup(transfer)
+         ]
+ 
+         if backup_transfers:
+             self._resolve_sidecar_kv_derived_pool_transfers(operation)
+             self._resolve_sidecar_nonkv_derived_pool_transfers(operation)
+             results = self.storage_backend.batch_set_v2(backup_transfers)
+             pool_hits = count_pool_hits(results)
+             operation.pool_storage_result.update_extra_pool_hit_pages(pool_hits)
+ 
+         if not self.backup_skip:
+             super()._page_backup(operation)
+         else:
+-            sidecar_ok = bool(backup_transfers)
+-            if sidecar_ok:
+-                for transfer in backup_transfers:
+-                    result = results.get(transfer.name)
+-                    if result is None:
+-                        result = results.get(transfer.name.value)
+-                    expected = len(transfer.keys or [])
+-                    if expected == 0 and transfer.host_indices is not None:
+-                        expected = int(transfer.host_indices.numel())
+-                    if (
+-                        not isinstance(result, (list, tuple))
+-                        or len(result) != expected
+-                        or not all(bool(ok) for ok in result)
+-                    ):
+-                        sidecar_ok = False
+-                        break
++            # A follower with no rank-sharded sidecars has no writes of its own;
++            # TP0 backs up all replicated MLA/DeepSeek-V4 pools.
++            sidecar_ok = True
++            for transfer in backup_transfers:
++                result = results.get(transfer.name)
++                if result is None:
++                    result = results.get(transfer.name.value)
++                expected = len(transfer.keys or [])
++                if expected == 0 and transfer.host_indices is not None:
++                    expected = int(transfer.host_indices.numel())
++                if (
++                    not isinstance(result, (list, tuple))
++                    or len(result) != expected
++                    or not all(bool(ok) for ok in result)
++                ):
++                    sidecar_ok = False
++                    break
+             operation.completed_tokens = (
+                 len(operation.hash_value) * self.page_size if sidecar_ok else 0
+             )
+ 
+     def should_backup(self, transfer: PoolTransfer) -> bool:
+         if not self.backup_skip:
+             return True
+ 
+         # Kimi-K3 Mamba/KDA state is TP-sharded even when the primary MLA KV
+         # pool is replicated.
+         if transfer.name == PoolName.MAMBA:
+             return True
+ 
+         # Mooncake gives MHA draft and draft-SWA objects rank-specific keys.
+         # MLA/DeepSeek-V4 draft pools remain TP0-only.
+         if self.storage_backend_type == "mooncake" and transfer.name in (
+             PoolName.DRAFT,
+             PoolName.DRAFT_SWA,
+         ):
+             entry = self.mem_pool_host.entry_map.get(transfer.name)
+             return entry is not None and isinstance(
+                 entry.host_pool, MHATokenToKVPoolHost
+             )
+ 
+         return False
+ 
+     def backup_thread_func(self):
+         """Back up rank-sharded sidecars on every TP rank.
+ 
+         The base implementation skips the entire operation on non-zero MLA TP
+         ranks. That optimization is valid for replicated MLA KV, but not for
+         hybrid rank-sharded pools such as Kimi-K3 Mamba state.
+         """
+         while not self.storage_stop_event.is_set():
+             try:
+                 operation = self.backup_queue.get(block=True, timeout=1)
+                 if operation is None:
+                     continue
+                 self._page_backup(operation)
+                 self.ack_backup_queue.put(operation)
+             except Empty:
+                 continue
+ 
+     def _resolve_sidecar_kv_derived_pool_transfers(self, operation):
+         for transfer in operation.pool_transfers:
+             if transfer.indices_from_pool == PoolName.KV:
+                 transfer.host_indices = operation.host_indices
+                 if transfer.keys is None:
+                     transfer.keys = operation.hash_value
+ 
+     def _resolve_sidecar_nonkv_derived_pool_transfers(self, operation):
+         for transfer in operation.pool_transfers:
+             if transfer.indices_from_pool is None:
+                 continue
+             if transfer.indices_from_pool != PoolName.KV:
+                 source = next(
+                     (
+                         t
+                         for t in operation.pool_transfers
+                         if t.indices_from_pool is None
+                         and t.name == transfer.indices_from_pool
+                     ),
+                     None,
+                 )
+                 if source is None:
+                     raise AssertionError(
+                         "Storage sidecar derived pool source missing: "
+                         f"{transfer.name} from {transfer.indices_from_pool}."
+                     )
+                 transfer.host_indices = source.host_indices
+                 if transfer.keys is None:
+                     transfer.keys = source.keys
+             else:
+                 pass
+ 
+     def _sync_trailing_keys(
+         self,
+         pool_transfers: list[PoolTransfer],
+         all_hashes: list[str],
+         kv_hit_pages: int,
+     ) -> None:
+         """Re-align trailing-page sidecar keys after KV hit truncation.
+ 
+         When the storage hit is shorter than the original target prefix, each
+         pool transfer's keys must be updated to the last N hashes of the actual
+         hit range instead of the last N hashes of the original target range.
+         For mamba (N=1) this is just the last hit page hash; for SWA (N>1) it
+         is a sliding window of the last N hit pages.
+         """
+         for transfer in pool_transfers:
+             if transfer.hit_policy != PoolHitPolicy.TRAILING_PAGES:
+                 continue
+             trailing_n = len(transfer.keys) if transfer.keys else 1
+             transfer.keys = all_hashes[max(0, kv_hit_pages - trailing_n) : kv_hit_pages]
+             if transfer.host_indices is None:
+                 continue
+             entry = self.mem_pool_host.entry_map.get(transfer.name)
+             pool_page_size = (
+                 entry.host_pool.page_size if entry is not None else self.page_size
+             )
+diff --git a/test/registered/unit/mem_cache/test_hybrid_cache_controller_backup.py b/test/registered/unit/mem_cache/test_hybrid_cache_controller_backup.py
+new file mode 100644
+index 0000000..de603c0
+--- /dev/null
++++ b/test/registered/unit/mem_cache/test_hybrid_cache_controller_backup.py
+@@ -0,0 +1,72 @@
++from types import SimpleNamespace
++from unittest.mock import Mock
++
++from sglang.srt.mem_cache.hicache_storage import PoolName
++from sglang.srt.mem_cache.hybrid_cache.hybrid_cache_controller import (
++    HybridCacheController,
++)
++
++
++def _controller(*, should_backup):
++    controller = object.__new__(HybridCacheController)
++    controller.backup_skip = True
++    controller.page_size = 64
++    controller.should_backup = should_backup
++    controller.storage_backend = Mock()
++    controller._resolve_sidecar_kv_derived_pool_transfers = Mock()
++    controller._resolve_sidecar_nonkv_derived_pool_transfers = Mock()
++    return controller
++
++
++def _operation(pool_transfers):
++    return SimpleNamespace(
++        pool_transfers=pool_transfers,
++        hash_value=["page-0", "page-1"],
++        completed_tokens=None,
++        pool_storage_result=Mock(),
++    )
++
++
++def test_backup_skip_without_rank_local_sidecars_is_successful():
++    """TP followers rely on TP0 for replicated MLA/DSV4 pools."""
++    controller = _controller(should_backup=lambda transfer: False)
++    operation = _operation([])
++
++    controller._page_backup(operation)
++
++    assert operation.completed_tokens == 128
++    controller.storage_backend.batch_set_v2.assert_not_called()
++
++
++def test_backup_skip_with_successful_rank_local_sidecar_is_successful():
++    transfer = SimpleNamespace(
++        name=PoolName.MAMBA,
++        keys=["page-0", "page-1"],
++        host_indices=None,
++    )
++    controller = _controller(should_backup=lambda candidate: candidate is transfer)
++    controller.storage_backend.batch_set_v2.return_value = {
++        PoolName.MAMBA: [True, True]
++    }
++    operation = _operation([transfer])
++
++    controller._page_backup(operation)
++
++    assert operation.completed_tokens == 128
++
++
++def test_backup_skip_with_failed_rank_local_sidecar_is_unsuccessful():
++    transfer = SimpleNamespace(
++        name=PoolName.MAMBA,
++        keys=["page-0", "page-1"],
++        host_indices=None,
++    )
++    controller = _controller(should_backup=lambda candidate: candidate is transfer)
++    controller.storage_backend.batch_set_v2.return_value = {
++        PoolName.MAMBA: [True, False]
++    }
++    operation = _operation([transfer])
++
++    controller._page_backup(operation)
++
++    assert operation.completed_tokens == 0
