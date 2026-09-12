@@ -10,7 +10,7 @@ import torch
 from sglang.srt.mem_cache.memory_pool import MambaPool
 from sglang.srt.mem_cache.pool_host.base import (
     HostKVCache,
-    host_memory_budget_bytes,
+    host_memory_allocation_lock,
     sync_fixed_hicache_size,
     synchronized,
 )
@@ -96,8 +96,10 @@ class MambaPoolHost(HostKVCache):
             )
 
         requested_bytes = self.size * self.size_per_token
-        available_bytes = host_memory_budget_bytes()
+        allocation_lock = host_memory_allocation_lock()
+        available_bytes = allocation_lock.acquire()
         if requested_bytes > available_bytes:
+            allocation_lock.release()
             raise ValueError(
                 f"Not enough host memory available. Requesting "
                 f"{requested_bytes / 1e9:.2f} GB but only have "
@@ -127,7 +129,10 @@ class MambaPoolHost(HostKVCache):
             for conv_state in device_pool.mamba_cache.conv
         ]
 
-        self.kv_buffer = self.init_kv_buffer()
+        try:
+            self.kv_buffer = self.init_kv_buffer()
+        finally:
+            allocation_lock.release()
         self._init_write_back_staging_buffers()
         self.lock = threading.RLock()
         self.clear()

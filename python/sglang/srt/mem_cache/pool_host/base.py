@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import abc
+import fcntl
 import logging
+import os
+import tempfile
 import threading
 from functools import wraps
 from typing import Optional
@@ -35,7 +38,8 @@ def ranks_per_host() -> int:
     Derived as world_size // nnodes: the launcher slices ranks uniformly
     across nodes (resolution asserts divisibility), so no hostname collective
     is needed — a collective here would have to be issued the same number of
-    times on every rank, and ranks build different numbers of host pools.
+    times on every rank, and ranks on different pipeline stages build
+    different numbers of host pools.
     """
     if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
         return 1
@@ -48,15 +52,115 @@ def ranks_per_host() -> int:
     return max(world_group.world_size // get_parallel().nnodes, 1)
 
 
-def host_memory_budget_bytes() -> int:
-    """Host RAM this rank may claim for a HiCache pool.
+def host_memory_sync_group() -> Optional[torch.distributed.ProcessGroup]:
+    """Return the world CPU group used for the initial host-memory snapshot.
 
-    psutil reports the whole machine, so co-located ranks each see the same free
-    memory; without the split every rank sizes its pool against all of it and
-    the host is oversubscribed by the number of ranks it holds.
+    Every rank that enables HiCache constructs a primary host pool, so the first
+    sizing check is common even when later pipeline stages construct different
+    sidecar pools. Synchronizing that check across the whole job also covers
+    multiple TP or in-job DP groups co-located on one host.
     """
-    free = psutil.virtual_memory().available - HICACHE_HOST_MEMORY_RESERVE_BYTES
-    return free // ranks_per_host()
+    if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
+        return None
+    try:
+        world_group = get_world_group()
+    except AssertionError:
+        return None
+    if world_group.world_size <= 1:
+        return None
+    return world_group.cpu_group
+
+
+_initial_host_memory_available_bytes: Optional[int] = None
+_reserved_host_memory_bytes = 0
+_host_memory_budget_lock = threading.Lock()
+_HOST_MEMORY_ALLOCATION_LOCK_PATH = os.path.join(
+    tempfile.gettempdir(), "sglang-hicache-host-memory.lock"
+)
+
+
+class HostMemoryAllocationLock:
+    """Serialize a host-memory check with the allocation it protects."""
+
+    def __init__(self):
+        self._file = None
+
+    def acquire(self) -> int:
+        _host_memory_budget_lock.acquire()
+        try:
+            self._file = open(_HOST_MEMORY_ALLOCATION_LOCK_PATH, "a+")
+            fcntl.flock(self._file.fileno(), fcntl.LOCK_EX)
+            return max(
+                psutil.virtual_memory().available - HICACHE_HOST_MEMORY_RESERVE_BYTES,
+                0,
+            )
+        except BaseException:
+            _host_memory_budget_lock.release()
+            raise
+
+    def release(self):
+        if self._file is None:
+            return
+        try:
+            fcntl.flock(self._file.fileno(), fcntl.LOCK_UN)
+            self._file.close()
+            self._file = None
+        finally:
+            _host_memory_budget_lock.release()
+
+    def __enter__(self) -> int:
+        return self.acquire()
+
+    def __exit__(self, exc_type, exc, traceback):
+        self.release()
+
+    def __del__(self):
+        self.release()
+
+
+def host_memory_allocation_lock() -> HostMemoryAllocationLock:
+    """Coordinate HiCache allocations across ranks and separate local jobs.
+
+    The lock must cover both the live-memory check and the allocation. Merely
+    locking the check leaves a race where another process can pass against the
+    same snapshot before either process has made its allocation visible.
+    """
+    return HostMemoryAllocationLock()
+
+
+def host_memory_budget_bytes(requested_bytes: int = 0) -> int:
+    """Remaining per-rank host RAM before an optional pool reservation.
+
+    Take one job-wide synchronized snapshot before any rank allocates its first
+    pool, then keep that baseline for later pools. This makes the result
+    independent of allocation timing across TP, PP, and in-job DP groups while
+    avoiding collectives for sidecar pools that not every rank constructs.
+
+    Accepted requests are accumulated locally because the baseline no longer
+    falls as this process allocates its earlier pools. The equal per-rank split
+    is intentionally preserved from the original guard.
+    """
+    global _initial_host_memory_available_bytes, _reserved_host_memory_bytes
+
+    with _host_memory_budget_lock:
+        if _initial_host_memory_available_bytes is None:
+            free = psutil.virtual_memory().available
+            sync_group = host_memory_sync_group()
+            if sync_group is not None:
+                reading = torch.tensor(free, dtype=torch.int64)
+                torch.distributed.all_reduce(
+                    reading, op=torch.distributed.ReduceOp.MIN, group=sync_group
+                )
+                free = int(reading.item())
+            _initial_host_memory_available_bytes = free
+
+        total_budget = (
+            _initial_host_memory_available_bytes - HICACHE_HOST_MEMORY_RESERVE_BYTES
+        ) // ranks_per_host()
+        remaining_budget = total_budget - _reserved_host_memory_bytes
+        if requested_bytes <= remaining_budget:
+            _reserved_host_memory_bytes += requested_bytes
+        return remaining_budget
 
 
 def sync_fixed_hicache_size(size: int, host_size: int) -> int:
@@ -170,17 +274,15 @@ class HostKVCache(abc.ABC):
                 device_pool.size,
             )
 
-        # Verify there is enough available host memory.
         requested_bytes = self.size * self.size_per_token
-        available_bytes = host_memory_budget_bytes()
-        if requested_bytes > available_bytes:
-            raise ValueError(
-                f"Not enough host memory available. Requesting "
-                f"{requested_bytes / 1e9:.2f} GB but only have "
-                f"{available_bytes / 1e9:.2f} GB free. Please reduce the "
-                f"size of the hierarchical cache."
-            )
-        else:
+        with host_memory_allocation_lock() as available_bytes:
+            if requested_bytes > available_bytes:
+                raise ValueError(
+                    f"Not enough host memory available. Requesting "
+                    f"{requested_bytes / 1e9:.2f} GB but only have "
+                    f"{available_bytes / 1e9:.2f} GB free. Please reduce the "
+                    f"size of the hierarchical cache."
+                )
             draft_layer_num = self.layer_num - self.target_layer_num
             if draft_layer_num > 0:
                 logger.info(
@@ -202,7 +304,7 @@ class HostKVCache(abc.ABC):
                     requested_bytes / 1e9,
                 )
 
-        self.kv_buffer = self.init_kv_buffer()
+            self.kv_buffer = self.init_kv_buffer()
         self.fd = getattr(self.allocator, "fd", None)
 
         # A lock for synchronized operations on memory allocation and state transitions.

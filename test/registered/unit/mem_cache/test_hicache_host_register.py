@@ -193,8 +193,11 @@ class TestHiCacheHostRegister(unittest.TestCase):
                 with (
                     mock.patch.object(
                         memory_pool_host,
-                        "host_memory_budget_bytes",
-                        return_value=1024**3,
+                        "host_memory_allocation_lock",
+                        return_value=mock.Mock(
+                            acquire=mock.Mock(return_value=1024**3),
+                            release=mock.Mock(),
+                        ),
                     ),
                     mock.patch.dict(ALLOC_MEMORY_FUNCS, {torch.device("cpu"): alloc}),
                 ):
@@ -226,8 +229,11 @@ class TestHiCacheHostRegister(unittest.TestCase):
                 with (
                     mock.patch.object(
                         memory_pool_host,
-                        "host_memory_budget_bytes",
-                        return_value=1024**3,
+                        "host_memory_allocation_lock",
+                        return_value=mock.Mock(
+                            acquire=mock.Mock(return_value=1024**3),
+                            release=mock.Mock(),
+                        ),
                     ),
                     mock.patch.dict(ALLOC_MEMORY_FUNCS, {torch.device("cpu"): alloc}),
                 ):

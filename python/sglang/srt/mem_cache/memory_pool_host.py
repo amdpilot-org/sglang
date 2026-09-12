@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 from sglang.srt.mem_cache.pool_host import HostKVCache
 from sglang.srt.mem_cache.pool_host.base import (
     _WRITE_BACK_STAGING_PAGE_CHUNK,
-    host_memory_budget_bytes,
+    host_memory_allocation_lock,
     synchronized,
 )
 from sglang.srt.mem_cache.pool_host.common import (
@@ -212,8 +212,10 @@ class DeepSeekV4PagedHostPool(HiSparseHostPoolMixin, HostKVCache):
         self.gpu_device = device_buffers[0].device if device_buffers else device
 
         requested_bytes = self.layer_num * num_host_pages * self.item_bytes
-        available_bytes = host_memory_budget_bytes()
+        allocation_lock = host_memory_allocation_lock()
+        available_bytes = allocation_lock.acquire()
         if requested_bytes > available_bytes:
+            allocation_lock.release()
             raise ValueError(
                 f"Not enough host memory for V4 paged pool {pool_name}. "
                 f"Requesting {requested_bytes / 1e9:.2f} GB but only have "
@@ -222,38 +224,41 @@ class DeepSeekV4PagedHostPool(HiSparseHostPoolMixin, HostKVCache):
 
         alloc_func = ALLOC_MEMORY_FUNCS[self.gpu_device]
         self.data_refs = []
-        if self.layout == "layer_first":
-            self.kv_buffer = [
-                alloc_func(
-                    (num_host_pages, self.item_bytes),
+        try:
+            if self.layout == "layer_first":
+                self.kv_buffer = [
+                    alloc_func(
+                        (num_host_pages, self.item_bytes),
+                        dtype=self.dtype,
+                        device=self.device,
+                        pin_memory=self.pin_memory,
+                        allocator=self.allocator,
+                    )
+                    for _ in range(self.layer_num)
+                ]
+                self.data_refs = [self.kv_buffer[i] for i in range(self.layer_num)]
+            elif self.layout == "page_first":
+                self.kv_buffer = alloc_func(
+                    (num_host_pages, self.layer_num, self.item_bytes),
                     dtype=self.dtype,
                     device=self.device,
                     pin_memory=self.pin_memory,
                     allocator=self.allocator,
+                    registration_granularity_bytes=self.layer_num * self.item_bytes,
                 )
-                for _ in range(self.layer_num)
-            ]
-            self.data_refs = [self.kv_buffer[i] for i in range(self.layer_num)]
-        elif self.layout == "page_first":
-            self.kv_buffer = alloc_func(
-                (num_host_pages, self.layer_num, self.item_bytes),
-                dtype=self.dtype,
-                device=self.device,
-                pin_memory=self.pin_memory,
-                allocator=self.allocator,
-                registration_granularity_bytes=self.layer_num * self.item_bytes,
-            )
-        elif self.layout == "page_first_direct":
-            self.kv_buffer = alloc_func(
-                (num_host_pages, self.layer_num, 1, self.item_bytes),
-                dtype=self.dtype,
-                device=self.device,
-                pin_memory=self.pin_memory,
-                allocator=self.allocator,
-                registration_granularity_bytes=self.layer_num * self.item_bytes,
-            )
-        else:
-            raise ValueError(f"Unsupported layout: {self.layout}")
+            elif self.layout == "page_first_direct":
+                self.kv_buffer = alloc_func(
+                    (num_host_pages, self.layer_num, 1, self.item_bytes),
+                    dtype=self.dtype,
+                    device=self.device,
+                    pin_memory=self.pin_memory,
+                    allocator=self.allocator,
+                    registration_granularity_bytes=self.layer_num * self.item_bytes,
+                )
+            else:
+                raise ValueError(f"Unsupported layout: {self.layout}")
+        finally:
+            allocation_lock.release()
 
         logger.info(
             "Allocating %.2f GB host memory for V4 paged pool '%s' "
@@ -630,8 +635,10 @@ class DeepSeekV4StateHostPool(HostKVCache):
         self.size_per_token = self.state_page_bytes
 
         requested_bytes = self.layer_num * num_host_pages * self.state_page_bytes
-        available_bytes = host_memory_budget_bytes()
+        allocation_lock = host_memory_allocation_lock()
+        available_bytes = allocation_lock.acquire()
         if requested_bytes > available_bytes:
+            allocation_lock.release()
             raise ValueError(
                 f"Not enough host memory for V4 state pool {pool_name}. "
                 f"Requesting {requested_bytes / 1e9:.2f} GB but only have "
@@ -640,38 +647,45 @@ class DeepSeekV4StateHostPool(HostKVCache):
 
         alloc_func = ALLOC_MEMORY_FUNCS[self.gpu_device]
         self.data_refs = []
-        if self.layout == "layer_first":
-            self.kv_buffer = [
-                alloc_func(
-                    (num_host_pages, self.state_page_bytes),
+        try:
+            if self.layout == "layer_first":
+                self.kv_buffer = [
+                    alloc_func(
+                        (num_host_pages, self.state_page_bytes),
+                        dtype=self.dtype,
+                        device=self.device,
+                        pin_memory=self.pin_memory,
+                        allocator=self.allocator,
+                    )
+                    for _ in range(self.layer_num)
+                ]
+                self.data_refs = [self.kv_buffer[i] for i in range(self.layer_num)]
+            elif self.layout == "page_first":
+                self.kv_buffer = alloc_func(
+                    (num_host_pages, self.layer_num, self.state_page_bytes),
                     dtype=self.dtype,
                     device=self.device,
                     pin_memory=self.pin_memory,
                     allocator=self.allocator,
+                    registration_granularity_bytes=(
+                        self.layer_num * self.state_page_bytes
+                    ),
                 )
-                for _ in range(self.layer_num)
-            ]
-            self.data_refs = [self.kv_buffer[i] for i in range(self.layer_num)]
-        elif self.layout == "page_first":
-            self.kv_buffer = alloc_func(
-                (num_host_pages, self.layer_num, self.state_page_bytes),
-                dtype=self.dtype,
-                device=self.device,
-                pin_memory=self.pin_memory,
-                allocator=self.allocator,
-                registration_granularity_bytes=(self.layer_num * self.state_page_bytes),
-            )
-        elif self.layout == "page_first_direct":
-            self.kv_buffer = alloc_func(
-                (num_host_pages, self.layer_num, 1, self.state_page_bytes),
-                dtype=self.dtype,
-                device=self.device,
-                pin_memory=self.pin_memory,
-                allocator=self.allocator,
-                registration_granularity_bytes=(self.layer_num * self.state_page_bytes),
-            )
-        else:
-            raise ValueError(f"Unsupported layout: {self.layout}")
+            elif self.layout == "page_first_direct":
+                self.kv_buffer = alloc_func(
+                    (num_host_pages, self.layer_num, 1, self.state_page_bytes),
+                    dtype=self.dtype,
+                    device=self.device,
+                    pin_memory=self.pin_memory,
+                    allocator=self.allocator,
+                    registration_granularity_bytes=(
+                        self.layer_num * self.state_page_bytes
+                    ),
+                )
+            else:
+                raise ValueError(f"Unsupported layout: {self.layout}")
+        finally:
+            allocation_lock.release()
         logger.info(
             "Allocating %.2f GB host memory for V4 state pool '%s' "
             "(layers=%d, pages=%d, state_page_bytes=%d, layout=%s).",

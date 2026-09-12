@@ -19,7 +19,7 @@ from sglang.srt.mem_cache.memory_pool import DSATokenToKVPool
 from sglang.srt.mem_cache.pool_host.base import (
     _WRITE_BACK_STAGING_PAGE_CHUNK,
     HostKVCache,
-    host_memory_budget_bytes,
+    host_memory_allocation_lock,
 )
 from sglang.srt.mem_cache.pool_host.common import (
     ALLOC_MEMORY_FUNCS,
@@ -110,8 +110,10 @@ class DSAIndexerPoolHost(HostKVCache):
 
         buf_elem_size = self.page_num * self.layer_num * self.indexer_page_stride_size
         requested_bytes = buf_elem_size * self.indexer_dtype.itemsize
-        available_bytes = host_memory_budget_bytes()
+        allocation_lock = host_memory_allocation_lock()
+        available_bytes = allocation_lock.acquire()
         if requested_bytes > available_bytes:
+            allocation_lock.release()
             raise ValueError(
                 f"Not enough host memory for DSA indexer hierarchical cache. "
                 f"Requesting {requested_bytes / 1e9:.2f} GB but only have "
@@ -135,7 +137,10 @@ class DSAIndexerPoolHost(HostKVCache):
                 requested_bytes / 1e9,
                 layout,
             )
-        self.init_kv_buffer()
+        try:
+            self.init_kv_buffer()
+        finally:
+            allocation_lock.release()
         self._init_write_back_staging_buffers()
         self.lock = threading.RLock()
         self.clear()
