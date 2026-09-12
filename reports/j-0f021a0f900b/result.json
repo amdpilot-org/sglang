@@ -1,0 +1,60 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34572",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1841",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1797",
+  "candidate_commit": "fd0ffce08d62f7556170a4603a23548c10e8b726",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes the two concrete defects from the prior independent review: divergent duplicate PPBootstrapDecision payloads now raise instead of being accepted, and the PD router now retries only failures explicitly marked as occurring before dispatch. The Python protocol regression suite and independent adversarial cases pass from the repository source tree. Full resolution of the original production incident remains unverified because the PP=8 Mooncake topology was unavailable and the prepared image has no Rust toolchain with which to compile or execute the router regression.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0f021a0f900b/venv/bin/python /job/review-evidence-j-0f021a0f900b/independent_adversarial.py (at aae252eb457f1f0358ae4b98897f3a8fa6eda50d)",
+      "exit_code": 1,
+      "what_was_measured": "Independent failing-before reproduction: after applying sequence 0 with independent-rid good, the earlier candidate silently ignored sequence 0 with the same RID bad."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0f021a0f900b/venv/bin/python -m pytest -q test/registered/unit/managers/test_pp_abort_consensus.py test/registered/unit/managers/test_pp_hicache_prefetch_consensus.py (at fd0ffce08d62f7556170a4603a23548c10e8b726)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 26 tests and 4 parameterized subtests passed, covering immutable decisions, exact duplicates, divergent duplicates, old replays, gaps, abort ordering, local KV failures, metadata reservation/finalize behavior, and HiCache readiness consensus."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0f021a0f900b/venv/bin/python /job/review-evidence-j-0f021a0f900b/independent_adversarial.py (at fd0ffce08d62f7556170a4603a23548c10e8b726)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial cases verified that a divergent duplicate raises without reapplying queue state, a downstream stage rejects an unsequenced mutable payload, and an abort is deferred until its stamped decision boundary crosses the stage."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0f021a0f900b/venv/bin/python -c 'import sglang, sglang.srt.managers.scheduler_pp_mixin as m; ...'",
+      "exit_code": 0,
+      "what_was_measured": "Imports resolved to /job/repo/python/sglang and /job/repo/python/sglang/srt/managers/scheduler_pp_mixin.py, proving the checked-out candidate source was tested."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0f021a0f900b/venv/bin/python -m py_compile python/sglang/srt/managers/scheduler_pp_mixin.py python/sglang/srt/managers/io_struct.py python/sglang/srt/managers/scheduler.py python/sglang/srt/disaggregation/prefill.py",
+      "exit_code": 0,
+      "what_was_measured": "Syntax compilation of every modified Python runtime path."
+    },
+    {
+      "command": "command -v cargo",
+      "exit_code": 1,
+      "what_was_measured": "Rust validation prerequisite: cargo is absent, so the modified model-gateway and its no-replay regression could not be compiled or executed."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 fd0ffce08d62f7556170a4603a23548c10e8b726",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff contains no whitespace errors."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "No GPU claim is made. The assigned environment has one gfx950, while the incident requires an eight-stage PP disaggregated-prefill topology with Mooncake and cancellation storms.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The Rust PD-router test was not executable because cargo/rustc are absent; therefore the no-auto-replay source change is reviewed but not runtime-verified here.",
+    "The full PP=8 Mooncake/HiCache L2-only 32K shared-prefix abort-storm workload was not reproduced, so absence of a distributed deadlock or one-hour NCCL watchdog is not established."
+  ],
+  "remaining_limitations": [
+    "One gfx950 cannot represent the production PP=8 topology, and no full model weights or Mooncake multi-node setup were available.",
+    "No seven-hour soak, semantic model-accuracy validation, or NCCL watchdog reproduction was performed.",
+    "No C++/FlyDSL files changed. The changed Rust native component could not be rebuilt because the prepared environment has no Rust toolchain."
+  ]
+}
