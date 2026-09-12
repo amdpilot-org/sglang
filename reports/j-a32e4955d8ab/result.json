@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38075",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate https://github.com/amdpilot-org/sglang/pull/2873 at exact commit 19b9f743bf6d251f666f43cc6c165a7d375b3efd and corrected the concrete omissions reproduced from independent review https://github.com/amdpilot-org/sglang/pull/2970. Native TextGenerate and Generate now accept image, audio, and video URI or inline-byte inputs and pass them to GenerateReqInput, including alongside disaggregated rendezvous parameters. GetOperationalState exposes accepting-new-requests, draining, ready-to-serve, weight-update-in-progress, and a typed phase. Native and standard health now mean ready to serve: startup, pause/drain, weight update, unhealthy state, and shutdown are not serving.",
+  "tests": [
+    {
+      "command": "git grep/diff inspection of exact candidate 19b9f743bf6d251f666f43cc6c165a7d375b3efd (reports/j-a32e4955d8ab/failing-before.txt)",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before reproduction: the exact candidate proto contained no image/audio/video fields and no accepting/draining/readiness state; its cumulative changes only implemented standard health behavior."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-a32e4955d8ab/cargo-target cargo +1.92.0 test -p sglang-grpc",
+      "exit_code": 0,
+      "what_was_measured": "18 Rust tests passed, including standard-health adversarial cases, aggregated and disaggregated native multimodal conversion, inline byte data-URI conversion, and invalid MIME rejection."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a32e4955d8ab/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_grpc_bridge.py",
+      "exit_code": 0,
+      "what_was_measured": "4 tests passed, including pause/drain, weight-update, readiness/resume, startup, unhealthy, and shutdown lifecycle state and health semantics."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-a32e4955d8ab/cargo-target cargo +1.92.0 clippy -p sglang-grpc --all-targets -- -D warnings",
+      "exit_code": 0,
+      "what_was_measured": "All native gRPC targets passed clippy with warnings denied."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-a32e4955d8ab/cargo-target cargo +1.92.0 build --release --locked -p sglang-grpc",
+      "exit_code": 0,
+      "what_was_measured": "Rebuilt the corrected optimized native library at /tmp/amdpilot-repo-j-a32e4955d8ab/cargo-target/release/libsglang_grpc_core.so."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a32e4955d8ab/venv/bin/python reports/j-a32e4955d8ab/native_contract_probe.py /tmp/amdpilot-repo-j-a32e4955d8ab/cargo-target/release/libsglang_grpc_core.so",
+      "exit_code": 0,
+      "what_was_measured": "Live rebuilt-native wire probe observed SERVING/DRAINING/UPDATING_WEIGHTS/SERVING/NOT_SERVING and verified image, inline audio, video, and disaggregated parameters reached the runtime request dictionary. Raw output is passing-after.txt."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "No GPU execution was used. The available deterministic tiny Llama fixture is text-only and cannot qualify a multimodal architecture, semantic media correctness, or encoder-disaggregated execution; using it as such would be misleading.",
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "No supported multimodal model weights were available, so image/audio/video numerical inference correctness was not measured.",
+    "No encoder-disaggregated multimodal deployment was available. Coverage verifies that multimodal data and disaggregated rendezvous parameters coexist through the native wire and conversion path, not distributed KV-transfer execution.",
+    "The live native lifecycle probe uses a deterministic RuntimeHandle. Python lifecycle tests bind the state to actual TokenizerManager fields and operations, but no weighted model server under inference load or a production RL trainer was run.",
+    "Inline payloads are represented as data URIs at the existing GenerateReqInput boundary; supported media decoding remains model/processor dependent."
+  ]
+}

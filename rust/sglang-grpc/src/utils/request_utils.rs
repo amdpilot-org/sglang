@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::proto;
+use base64::Engine;
 
 fn regex_escape_literal(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
@@ -250,6 +251,13 @@ pub(crate) fn build_text_generate_dict(
         req.max_thinking_tokens,
     );
     insert_disaggregated_params(&mut d, &req.disaggregated_params);
+    insert_multimodal_inputs(
+        &mut d,
+        &req.images,
+        &req.audio,
+        &req.videos,
+        req.use_audio_in_video,
+    )?;
     if let Some(trace) = trace_headers_to_json(&req.trace_headers) {
         d.insert("external_trace_header".into(), trace);
     }
@@ -304,11 +312,78 @@ pub(crate) fn build_generate_dict(
         req.max_thinking_tokens,
     );
     insert_disaggregated_params(&mut d, &req.disaggregated_params);
+    insert_multimodal_inputs(
+        &mut d,
+        &req.images,
+        &req.audio,
+        &req.videos,
+        req.use_audio_in_video,
+    )?;
     if let Some(trace) = trace_headers_to_json(&req.trace_headers) {
         d.insert("external_trace_header".into(), trace);
     }
     d.insert("received_time".into(), serde_json::json!(now_timestamp()));
     Ok(d)
+}
+
+fn media_to_json(
+    media: &[proto::MediaInput],
+    kind: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    media
+        .iter()
+        .map(|item| {
+            let value = match item.source.as_ref() {
+                Some(proto::media_input::Source::Uri(uri)) if !uri.trim().is_empty() => uri.clone(),
+                Some(proto::media_input::Source::Data(data)) if !data.is_empty() => {
+                    let mime = item
+                        .mime_type
+                        .as_deref()
+                        .filter(|v| !v.trim().is_empty())
+                        .ok_or_else(|| format!("{kind} inline data requires mime_type"))?;
+                    format!(
+                        "data:{mime};base64,{}",
+                        base64::engine::general_purpose::STANDARD.encode(data)
+                    )
+                }
+                _ => {
+                    return Err(format!(
+                        "{kind} media input requires a non-empty uri or data"
+                    ));
+                }
+            };
+            Ok(serde_json::json!(value))
+        })
+        .collect()
+}
+
+fn insert_multimodal_inputs(
+    d: &mut HashMap<String, serde_json::Value>,
+    images: &[proto::MediaInput],
+    audio: &[proto::MediaInput],
+    videos: &[proto::MediaInput],
+    use_audio_in_video: Option<bool>,
+) -> Result<(), String> {
+    let mut modalities = Vec::new();
+    if !images.is_empty() {
+        d.insert("image_data".into(), media_to_json(images, "image")?.into());
+        modalities.push("image");
+    }
+    if !audio.is_empty() {
+        d.insert("audio_data".into(), media_to_json(audio, "audio")?.into());
+        modalities.push("audio");
+    }
+    if !videos.is_empty() {
+        d.insert("video_data".into(), media_to_json(videos, "video")?.into());
+        modalities.push("video");
+    }
+    if !modalities.is_empty() {
+        d.insert("modalities".into(), serde_json::json!(modalities));
+    }
+    if let Some(value) = use_audio_in_video {
+        d.insert("use_audio_in_video".into(), serde_json::json!(value));
+    }
+    Ok(())
 }
 
 /// Build a request dict for EmbeddingReqInput from proto TextEmbedRequest.
@@ -556,5 +631,60 @@ mod tests {
         for request in [conflicting, empty_choice, empty_legacy_regex] {
             assert!(build_generate_dict("request", &request).is_err());
         }
+    }
+
+    #[test]
+    fn native_multimodal_inputs_map_for_aggregated_and_disaggregated_requests() {
+        let request = proto::TextGenerateRequest {
+            images: vec![proto::MediaInput {
+                source: Some(proto::media_input::Source::Uri(
+                    "https://example/image.png".into(),
+                )),
+                ..Default::default()
+            }],
+            audio: vec![proto::MediaInput {
+                source: Some(proto::media_input::Source::Data(vec![0, 1, 2])),
+                mime_type: Some("audio/wav".into()),
+                ..Default::default()
+            }],
+            videos: vec![proto::MediaInput {
+                source: Some(proto::media_input::Source::Uri(
+                    "data:video/mp4;base64,AA==".into(),
+                )),
+                ..Default::default()
+            }],
+            use_audio_in_video: Some(true),
+            disaggregated_params: Some(proto::DisaggregatedParams {
+                bootstrap_host: "prefill".into(),
+                bootstrap_port: 30000,
+                bootstrap_room: 7,
+            }),
+            ..Default::default()
+        };
+        let mapped = build_text_generate_dict("mm", &request).unwrap();
+        assert_eq!(mapped["image_data"][0], "https://example/image.png");
+        assert_eq!(mapped["audio_data"][0], "data:audio/wav;base64,AAEC");
+        assert_eq!(mapped["video_data"][0], "data:video/mp4;base64,AA==");
+        assert_eq!(
+            mapped["modalities"],
+            serde_json::json!(["image", "audio", "video"])
+        );
+        assert_eq!(mapped["bootstrap_room"], 7);
+        assert_eq!(mapped["use_audio_in_video"], true);
+    }
+
+    #[test]
+    fn inline_multimodal_data_requires_mime_type() {
+        let request = proto::GenerateRequest {
+            images: vec![proto::MediaInput {
+                source: Some(proto::media_input::Source::Data(vec![1])),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            build_generate_dict("mm", &request).unwrap_err(),
+            "image inline data requires mime_type"
+        );
     }
 }

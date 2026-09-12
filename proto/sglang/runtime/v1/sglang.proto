@@ -15,6 +15,7 @@ service SglangService {
   rpc GetServerInfo(GetServerInfoRequest) returns (GetServerInfoResponse);
   rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
   rpc GetLoad(GetLoadRequest) returns (GetLoadResponse);
+  rpc GetOperationalState(GetOperationalStateRequest) returns (GetOperationalStateResponse);
   rpc Abort(AbortRequest) returns (AbortResponse);
   rpc FlushCache(FlushCacheRequest) returns (FlushCacheResponse);
   rpc PauseGeneration(PauseGenerationRequest) returns (PauseGenerationResponse);
@@ -103,6 +104,10 @@ message TextGenerateRequest {
   optional int32 priority = 15;
   optional bool require_reasoning = 16;
   optional uint32 max_thinking_tokens = 17;
+  repeated MediaInput images = 18;
+  repeated MediaInput audio = 19;
+  repeated MediaInput videos = 20;
+  optional bool use_audio_in_video = 21;
 }
 
 message TextGenerateResponse {
@@ -130,6 +135,21 @@ message GenerateRequest {
   optional int32 priority = 14;
   optional bool require_reasoning = 15;
   optional uint32 max_thinking_tokens = 16;
+  repeated MediaInput images = 17;
+  repeated MediaInput audio = 18;
+  repeated MediaInput videos = 19;
+  optional bool use_audio_in_video = 20;
+}
+
+// A native multimodal input. URI accepts http(s), file paths, and data URIs.
+// Inline bytes are converted to a data URI before entering GenerateReqInput.
+message MediaInput {
+  oneof source {
+    string uri = 1;
+    bytes data = 2;
+  }
+  // Required with data; for example image/png, audio/wav, or video/mp4.
+  optional string mime_type = 3;
 }
 
 message GenerateResponse {
@@ -262,6 +282,27 @@ message GetLoadRequest {
 
 message GetLoadResponse {
   string json_info = 1;
+}
+
+// ---- RL / sidecar lifecycle state ----
+
+message GetOperationalStateRequest {}
+
+enum OperationalPhase {
+  OPERATIONAL_PHASE_UNSPECIFIED = 0;
+  STARTING = 1;
+  SERVING = 2;
+  DRAINING = 3;
+  UPDATING_WEIGHTS = 4;
+  NOT_SERVING = 5;
+}
+
+message GetOperationalStateResponse {
+  OperationalPhase phase = 1;
+  bool accepting_new_requests = 2;
+  bool draining = 3;
+  bool ready_to_serve = 4;
+  bool weight_update_in_progress = 5;
 }
 
 // ---- Flush cache ----

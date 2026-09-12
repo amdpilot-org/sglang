@@ -778,6 +778,37 @@ impl proto::sglang_service_server::SglangService for SglangServiceImpl {
         Ok(Response::new(proto::GetLoadResponse { json_info }))
     }
 
+    async fn get_operational_state(
+        &self,
+        _request: Request<proto::GetOperationalStateRequest>,
+    ) -> Result<Response<proto::GetOperationalStateResponse>, Status> {
+        let json = tokio::task::spawn_blocking({
+            let bridge = self.bridge.clone();
+            move || bridge.get_operational_state()
+        })
+        .await
+        .map_err(|e| Status::internal(format!("Task join error: {e}")))?
+        .map_err(|e| pyerr_to_status(e, "Failed to get operational state"))?;
+        let value: serde_json::Value = serde_json::from_str(&json)
+            .map_err(|e| Status::internal(format!("Invalid operational state: {e}")))?;
+        let phase = match value["phase"].as_str().unwrap_or("NOT_SERVING") {
+            "STARTING" => proto::OperationalPhase::Starting,
+            "SERVING" => proto::OperationalPhase::Serving,
+            "DRAINING" => proto::OperationalPhase::Draining,
+            "UPDATING_WEIGHTS" => proto::OperationalPhase::UpdatingWeights,
+            _ => proto::OperationalPhase::NotServing,
+        };
+        Ok(Response::new(proto::GetOperationalStateResponse {
+            phase: phase as i32,
+            accepting_new_requests: value["accepting_new_requests"].as_bool().unwrap_or(false),
+            draining: value["draining"].as_bool().unwrap_or(false),
+            ready_to_serve: value["ready_to_serve"].as_bool().unwrap_or(false),
+            weight_update_in_progress: value["weight_update_in_progress"]
+                .as_bool()
+                .unwrap_or(false),
+        }))
+    }
+
     async fn abort(
         &self,
         request: Request<proto::AbortRequest>,
