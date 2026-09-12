@@ -1,0 +1,59 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31117",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "39673680441fb67c3934e0139f317742a2aa4353",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "outcome": "candidate_rejected",
+  "summary": "The candidate correctly adds eager single-host-thread stream ordering and passes its focused tests plus an independent gfx950 event-ordering probe. It is only a partial fix: concurrent CUDA graph replays bypass the host guard, and concurrent host threads can race its unlocked state. Because the candidate also omits a device-side deadline, those same-communicator entry paths can retain the original silent permanent spin rather than complete or fail in a bounded way.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a7de22d0ff63/venv/bin/python -m pytest -q /job/review-evidence-j-a7de22d0ff63/test_custom_all_reduce_stream_guard.py (recorded base checkout)",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before mechanism check: candidate regression cannot collect because SingleStreamGuard is absent from the exact recorded base. This is not claimed as reproduction of the two-GPU deadlock."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a7de22d0ff63/venv/bin/python -m pytest -q test/registered/unit/distributed/test_custom_all_reduce_stream_guard.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression passed 5 tests covering stream change, same-stream fast path, capture skip, and both communicator hooks."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a7de22d0ff63/venv/bin/python -m pytest -q test/registered/unit/distributed/test_custom_all_reduce_stream_guard.py test/registered/unit/distributed/test_custom_all_reduce_v2_capability.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Nine focused and adjacent capability tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a7de22d0ff63/venv/bin/python /job/review-evidence-j-a7de22d0ff63/gpu_ordering_probe.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned gfx950, an eager launch on a second stream was event-ordered after the first; numeric result 2 matched CPU reference 2 and an event was created. This did not execute custom all-reduce."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a7de22d0ff63/venv/bin/python /job/review-evidence-j-a7de22d0ff63/adversarial_guard.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Independent boundary case confirmed capture is intentionally omitted from guard state: captured work followed by another stream had no event record or wait, leaving concurrent graph replay unordered."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X gfx950 executed a two-stream host-event ordering probe. No custom all-reduce kernel or multi-GPU collective executed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Two CUDA graphs that contain all-reduces from the same communicator can be replayed concurrently on different streams; replay makes no host guard call, so the original shared rendezvous aliasing and unbounded spin remain possible.",
+    "Two host threads can concurrently issue on different streams and race the guard's unlocked per-communicator state; the omitted device deadline means a resulting protocol collision can still hang permanently.",
+    "The legacy AOT implementation retains an unbounded device spin as well; the eager host guard narrows exposure but does not provide bounded failure for bypasses or races."
+  ],
+  "remaining_limitations": [
+    "The environment had one AMD gfx950 GPU, not the two NVIDIA A100 NVLink GPUs required for the reported reproduction.",
+    "CUDA CustomAllReduceV2, green contexts, two-rank execution, full model serving, and multi-node behavior were not run.",
+    "The candidate changed no native source, so no native rebuild was applicable; no CUDA compiler or ISA evidence could be collected in this ROCm-only environment.",
+    "The base failure evidence verifies absence of the guard, not the original hardware deadlock."
+  ],
+  "source_paths": [
+    "python/sglang/srt/distributed/device_communicators/custom_all_reduce.py",
+    "python/sglang/srt/distributed/device_communicators/custom_all_reduce_utils.py",
+    "python/sglang/srt/distributed/device_communicators/custom_all_reduce_v2.py",
+    "test/registered/unit/distributed/test_custom_all_reduce_stream_guard.py"
+  ],
+  "native_paths": []
+}
