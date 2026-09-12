@@ -1,0 +1,64 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19092",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Exact candidate 03db4be879e92bb6f85cb1fcd9d571346a9028bc is a correct partial implementation. It changes single-rank composed-pipeline scheduling from sequential to concurrent, preserves deterministic assembly and failure propagation, provides an opt-out, and serializes unsafe complete Transformers/Diffusers native loads. The original base failure was independently reproduced and the candidate passed focused, adversarial, compatibility, and one-GPU synthetic numerical tests. It does not demonstrate the reported Qwen-Image speedup or implement the original issue's wake/refit and pinned-checkpoint goals.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-60f8fe608a12/venv/bin/python /job/review-evidence-j-60f8fe608a12/parallel_loading_probe.py (base 358c163)",
+      "exit_code": 1,
+      "what_was_measured": "Original sequential behavior reproduced: three independent 0.2-second component loads reached max_active=1 and took 0.603 seconds."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-60f8fe608a12/venv/bin/python /job/review-evidence-j-60f8fe608a12/parallel_loading_probe.py (candidate 03db4be)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate scheduling overlapped all three independent loads: max_active=3 and elapsed time 0.204 seconds, while preserving component order."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-60f8fe608a12/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_parallel_component_loading.py python/sglang/multimodal_gen/test/unit/test_plain_component_loader.py python/sglang/multimodal_gen/test/unit/test_component_loader_identity.py python/sglang/multimodal_gen/test/unit/test_component_loading_order.py",
+      "exit_code": 0,
+      "what_was_measured": "32 focused scheduler, thread-safety, CLI, failure, ordering, loader compatibility, and GPU regression tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-60f8fe608a12/venv/bin/python reports/j-cc6ddf2e51a6/raw/native_dtype_race_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "Actual Transformers 5.12.1 local_torch_dtype contexts observed their requested dtypes and restored the process default."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-60f8fe608a12/venv/bin/python reports/j-47587d144490/raw/native_overlap_probe.py",
+      "exit_code": 1,
+      "what_was_measured": "Expected counterexample/limitation: two complete native loads did not overlap (max_active_native_loads=1, 0.401 seconds for two 0.2-second calls)."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-60f8fe608a12/venv/bin/python -m pytest -q -rs python/sglang/multimodal_gen/test/unit/test_parallel_component_loading.py::test_parallel_loaded_gpu_modules_match_numpy_reference",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X, synthetic concurrently loaded GPU Linear modules matched independent NumPy references; this does not validate Qwen-Image semantics or startup time."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-60f8fe608a12/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_utility_ownership.py python/sglang/multimodal_gen/test/unit/test_component_quantization_admission.py python/sglang/multimodal_gen/test/unit/test_disagg_roles.py",
+      "exit_code": 0,
+      "what_was_measured": "Extended compatibility: 68 passed and 9 subtests passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X (gfx950) was visible under torch 2.11.0+rocm7.2 / HIP 7.2.26015. The synthetic GPU numerical regression passed against NumPy. No Qwen-Image weights were available."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Complete native Transformers/Diffusers load_native calls are serialized for correctness, so two native components do not overlap.",
+    "The reported Qwen-Image 63.20-second module-load bottleneck and launch-time reduction remain unmeasured with real weights.",
+    "Sleep/wake restoration and post-training refit paths are unchanged and untested.",
+    "Production checkpoint mappings remain pageable; pinned checkpoint loading is not implemented or validated.",
+    "Multi-rank component loading remains sequential by design.",
+    "Peak host memory and storage pressure are neither automatically bounded nor measured with representative checkpoints."
+  ],
+  "remaining_limitations": [
+    "The result verifies a partial initial-load scheduler and its native thread-safety correction, not the complete original feature contract.",
+    "Qwen-Image weights were unavailable in the prepared runtime, preventing representative cold-start, CPU-memory, storage-pressure, and semantic checks.",
+    "The available architecture was one AMD Instinct MI350X; no CUDA/NVIDIA execution was possible.",
+    "No native source changed, so no native rebuild was applicable. The prepared AIter shared object imported from /tmp/amdpilot-repo-j-60f8fe608a12/cache/aiter/module_aiter_core.so."
+  ]
+}
