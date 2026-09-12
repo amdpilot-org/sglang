@@ -190,9 +190,13 @@ def merge_preferred_sampling_params(
         return {**preferred_sampling_params, **sampling_params}
 
     merged = {**sampling_params, **preferred_sampling_params}
-    merged.update(
-        (key, sampling_params[key]) for key in explicit_keys if key in sampling_params
-    )
+    for key in explicit_keys:
+        if key in sampling_params:
+            merged[key] = sampling_params[key]
+        else:
+            # Absence can itself be explicit, notably response_format=text clearing
+            # a preferred output constraint.
+            merged.pop(key, None)
     return merged
 
 

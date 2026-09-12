@@ -1004,16 +1004,31 @@ class ChatCompletionRequest(BaseModel):
         "seed": "sampling_seed",
         "response_format": "json_schema",
     }
+    _CONSTRAINT_SAMPLING_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {"json_schema", "regex", "ebnf", "structural_tag"}
+    )
 
-    def get_explicit_sampling_keys(self) -> List[str]:
+    def get_explicit_sampling_keys(
+        self, tool_call_constraint: Optional[ToolCallConstraint] = None
+    ) -> List[str]:
         """Return sampling keys whose values were explicitly supplied by the client."""
         keys = {
             sampling_key
             for field, sampling_key in self._FIELD_TO_SAMPLING_KEY.items()
             if field in self.model_fields_set
         }
-        if "response_format" in self.model_fields_set:
-            keys.add("structural_tag")
+        has_explicit_constraint = bool(
+            {"response_format", "regex", "ebnf"} & self.model_fields_set
+        )
+        if tool_call_constraint and (
+            self.tool_choice == "required" or isinstance(self.tool_choice, ToolChoice)
+        ):
+            has_explicit_constraint = True
+        if has_explicit_constraint:
+            # Constraint kinds are mutually exclusive. Mark the whole group so an
+            # explicit selection also removes server preferences of another kind;
+            # response_format=text intentionally selects no constraint.
+            keys.update(self._CONSTRAINT_SAMPLING_KEYS)
         if (
             "chat_template_kwargs" in self.model_fields_set
             and self.chat_template_kwargs is not None

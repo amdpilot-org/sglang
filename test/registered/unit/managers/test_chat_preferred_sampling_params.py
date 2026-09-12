@@ -4,12 +4,91 @@ from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
 from sglang.srt.managers.tokenizer_manager import (
     merge_preferred_sampling_params,
 )
+from sglang.srt.sampling.sampling_params import SamplingParams
 from sglang.test.ci.ci_register import register_cpu_ci
 
 register_cpu_ci(est_time=10, suite="base-a-test-cpu")
 
 
 class TestChatPreferredSamplingParams(unittest.TestCase):
+    def test_required_tool_constraint_overrides_preferred_regex(self):
+        request = ChatCompletionRequest(
+            model="m",
+            messages=[{"role": "user", "content": "hi"}],
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "lookup",
+                        "description": "Look up a value",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ],
+            tool_choice="required",
+        )
+        constraint = ("regex", "CLIENT_TOOL_REGEX")
+        converted = request.to_sampling_params([], {}, tool_call_constraint=constraint)
+
+        effective = merge_preferred_sampling_params(
+            converted,
+            {"regex": "SERVER_PREFERRED_REGEX"},
+            request.get_explicit_sampling_keys(tool_call_constraint=constraint),
+        )
+
+        self.assertEqual(effective["regex"], "CLIENT_TOOL_REGEX")
+
+    def test_explicit_text_response_format_clears_preferred_constraints(self):
+        request = ChatCompletionRequest(
+            model="m",
+            messages=[{"role": "user", "content": "hi"}],
+            response_format={"type": "text"},
+        )
+        converted = request.to_sampling_params([], {})
+
+        effective = merge_preferred_sampling_params(
+            converted,
+            {
+                "json_schema": '{"type":"object"}',
+                "structural_tag": '{"structures":[]}',
+            },
+            request.get_explicit_sampling_keys(),
+        )
+
+        self.assertNotIn("json_schema", effective)
+        self.assertNotIn("structural_tag", effective)
+        SamplingParams(**effective).verify(vocab_size=100)
+
+    def test_explicit_constraint_clears_preferred_cross_kind_constraints(self):
+        cases = [
+            ("regex", "a+", {"json_schema": "{}", "structural_tag": "{}"}),
+            ("ebnf", "root ::= 'a'", {"regex": "b+", "json_schema": "{}"}),
+            (
+                "response_format",
+                {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "answer",
+                        "schema": {"type": "object"},
+                    },
+                },
+                {"regex": "b+", "ebnf": "root ::= 'b'", "structural_tag": "{}"},
+            ),
+        ]
+        for field, value, preferred in cases:
+            with self.subTest(field=field):
+                request = ChatCompletionRequest(
+                    model="m",
+                    messages=[{"role": "user", "content": "hi"}],
+                    **{field: value},
+                )
+                converted = request.to_sampling_params([], {})
+                effective = merge_preferred_sampling_params(
+                    converted, preferred, request.get_explicit_sampling_keys()
+                )
+
+                SamplingParams(**effective).verify(vocab_size=100)
+
     def test_all_client_sampling_fields_are_tracked(self):
         request = ChatCompletionRequest(
             model="m",
