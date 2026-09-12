@@ -215,41 +215,40 @@ mod payload_size_tests {
 
         let app = ctx.create_app().await;
 
-        // Create a payload slightly under the limit (accounting for JSON overhead)
-        let text_size = limit_bytes - 100; // Leave room for JSON structure
-        let text = "x".repeat(text_size);
         let payload = json!({
-            "text": text,
+            "text": "boundary",
             "stream": false
         });
+        let mut body = serde_json::to_string(&payload).unwrap();
+        body.push_str(&" ".repeat(limit_bytes - body.len()));
+        assert_eq!(body.len(), limit_bytes);
 
         let req = Request::builder()
             .method("POST")
             .uri("/generate")
             .header(CONTENT_TYPE, "application/json")
-            .body(Body::from(serde_json::to_string(&payload).unwrap()))
+            .body(Body::from(body))
             .unwrap();
 
         let resp = app.oneshot(req).await.unwrap();
-        // Payload at/near limit should be accepted
-        assert!(
-            resp.status() == StatusCode::OK || resp.status() == StatusCode::PAYLOAD_TOO_LARGE,
-            "Payload at limit boundary, got status {}",
-            resp.status()
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "payload exactly at the configured limit should be accepted"
         );
 
         ctx.shutdown().await;
     }
 
-    /// Test default payload size limit (256MB)
+    /// Test that a configured limit overrides Axum's built-in 2MB extractor limit.
     #[tokio::test]
-    async fn test_default_payload_limit() {
+    async fn test_configured_limit_overrides_axum_default() {
         let config = RouterConfig::builder()
             .regular_mode(vec![])
             .round_robin_policy()
             .host("127.0.0.1")
             .port(4204)
-            .max_payload_size(256 * 1024 * 1024) // Default 256MB
+            .max_payload_size(4 * 1024 * 1024)
             .request_timeout_secs(600)
             .worker_startup_timeout_secs(5)
             .worker_startup_check_interval_secs(1)
@@ -271,8 +270,9 @@ mod payload_size_tests {
 
         let app = ctx.create_app().await;
 
-        // Create a 1MB payload (well within 256MB)
-        let large_text = "x".repeat(1024 * 1024);
+        // This exceeds Axum's default 2MB body limit but remains below the
+        // configured 4MB gateway limit.
+        let large_text = "x".repeat(3 * 1024 * 1024);
         let payload = json!({
             "text": large_text,
             "stream": false
@@ -289,7 +289,7 @@ mod payload_size_tests {
         assert_eq!(
             resp.status(),
             StatusCode::OK,
-            "1MB payload should be accepted with 256MB limit"
+            "3MB payload should be accepted with a configured 4MB limit"
         );
 
         ctx.shutdown().await;

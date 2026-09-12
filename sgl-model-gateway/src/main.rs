@@ -292,7 +292,12 @@ struct CliArgs {
     shutdown_grace_period_secs: u64,
 
     /// Maximum payload size in bytes
-    #[arg(long, default_value_t = 536870912, help_heading = "Request Handling")]
+    #[arg(
+        long,
+        env = "SGLANG_MAX_PAYLOAD_SIZE",
+        default_value_t = 536870912,
+        help_heading = "Request Handling"
+    )]
     max_payload_size: usize,
 
     /// CORS allowed origins
@@ -1277,4 +1282,45 @@ Provide --worker-urls or PD flags as usual.",
         shutdown_otel();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+
+    const MAX_PAYLOAD_SIZE_ENV: &str = "SGLANG_MAX_PAYLOAD_SIZE";
+
+    #[test]
+    #[serial]
+    fn max_payload_size_can_be_set_from_environment() {
+        std::env::set_var(MAX_PAYLOAD_SIZE_ENV, "12582912");
+
+        let cli = Cli::try_parse_from(["sglang-router"]).unwrap();
+
+        assert_eq!(cli.router_args.max_payload_size, 12 * 1024 * 1024);
+        std::env::remove_var(MAX_PAYLOAD_SIZE_ENV);
+    }
+
+    #[test]
+    #[serial]
+    fn max_payload_size_cli_overrides_environment() {
+        std::env::set_var(MAX_PAYLOAD_SIZE_ENV, "12582912");
+
+        let cli = Cli::try_parse_from(["sglang-router", "--max-payload-size", "16777216"]).unwrap();
+
+        assert_eq!(cli.router_args.max_payload_size, 16 * 1024 * 1024);
+        std::env::remove_var(MAX_PAYLOAD_SIZE_ENV);
+    }
+
+    #[test]
+    #[serial]
+    fn invalid_max_payload_size_environment_is_rejected() {
+        std::env::set_var(MAX_PAYLOAD_SIZE_ENV, "not-a-size");
+
+        let error = Cli::try_parse_from(["sglang-router"]).unwrap_err();
+
+        assert!(error.to_string().contains("invalid digit found in string"));
+        std::env::remove_var(MAX_PAYLOAD_SIZE_ENV);
+    }
 }

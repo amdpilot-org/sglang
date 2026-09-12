@@ -353,8 +353,13 @@ class RouterArgs:
         routing_group.add_argument(
             f"--{prefix}max-payload-size",
             type=int,
-            default=RouterArgs.max_payload_size,
-            help="Maximum payload size in bytes",
+            default=int(
+                os.getenv("SGLANG_MAX_PAYLOAD_SIZE", RouterArgs.max_payload_size)
+            ),
+            help=(
+                "Maximum payload size in bytes "
+                "(environment: SGLANG_MAX_PAYLOAD_SIZE)"
+            ),
         )
         routing_group.add_argument(
             f"--{prefix}dp-aware",

@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/6622",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Completed the payload-size configuration contract already partially present in the model gateway: SGLANG_MAX_PAYLOAD_SIZE now configures both the native Rust CLI and Python launcher, while an explicit CLI value takes precedence. Strengthened gateway tests cover rejection above the configured limit, acceptance exactly at the limit, and acceptance of a 3 MiB JSON request above Axum's historical 2 MiB default. The test mock worker's unrelated Axum default was disabled so transport tests measure the gateway boundary.",
+  "tests": [
+    {
+      "command": "RUSTUP_HOME=/tmp/amdpilot-repo-j-32d9fecb7c19/rustup CARGO_HOME=/tmp/amdpilot-repo-j-32d9fecb7c19/cargo CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-32d9fecb7c19/gateway-target cargo test --bin sgl-model-gateway max_payload_size -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Native Rust CLI reads SGLANG_MAX_PAYLOAD_SIZE, rejects invalid values, and gives an explicit --max-payload-size argument precedence; 3 tests passed."
+    },
+    {
+      "command": "RUSTUP_HOME=/tmp/amdpilot-repo-j-32d9fecb7c19/rustup CARGO_HOME=/tmp/amdpilot-repo-j-32d9fecb7c19/cargo CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-32d9fecb7c19/gateway-target cargo test --test routing_tests payload_size_tests -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Rebuilt native gateway transport behavior with mock upstream: small and within-limit requests accepted, over-limit request rejected, exact-limit request accepted, and a 3 MiB JSON request accepted under a 4 MiB configured limit; 5 tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/sgl-model-gateway/bindings/python/src /tmp/amdpilot-repo-j-32d9fecb7c19/venv/bin/python - <isolated payload environment assertions>",
+      "exit_code": 0,
+      "what_was_measured": "Python argparse path reads a 12 MiB SGLANG_MAX_PAYLOAD_SIZE value, lets a 16 MiB CLI value override it, and rejects a non-integer environment value."
+    },
+    {
+      "command": "cargo fmt --all -- --check (Rust 1.90 private toolchain, from sgl-model-gateway)",
+      "exit_code": 0,
+      "what_was_measured": "Rust formatting of the modified workspace."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the contribution."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "This feature changes HTTP payload configuration and Axum request-body enforcement only; it has no GPU numerical behavior. No model or GPU execution was used as evidence.",
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "No multimodal model semantic-accuracy run was performed because the change is model-independent HTTP transport configuration; the supplied tiny Llama fixture cannot qualify image architecture behavior.",
+    "The prepared Python environment did not contain the sglang_router_rs extension, so the repository's full Python router test module could not be collected. The affected argparse code was tested directly with the pinned interpreter, and the native Rust gateway was rebuilt and tested independently.",
+    "No GPU path was exercised because payload admission occurs before and independently of GPU execution."
+  ]
+}
