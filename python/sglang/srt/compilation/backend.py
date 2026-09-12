@@ -24,7 +24,7 @@ from sglang.srt.compilation.cuda_piecewise_backend import CUDAPiecewiseBackend
 from sglang.srt.compilation.npu_piecewise_backend import NPUPiecewiseBackend
 from sglang.srt.compilation.pass_manager import PostGradPassManager
 from sglang.srt.compilation.xpu_piecewise_backend import XPUPiecewiseBackend
-from sglang.srt.environ import envs
+from sglang.srt.environ import get_jit_cache_subdir
 from sglang.srt.platforms import current_platform
 from sglang.srt.utils.common import is_npu, is_xpu
 
@@ -400,12 +400,11 @@ class SGLangBackend:
         self.inductor_config["post_grad_custom_post_pass"] = self.post_grad_pass_manager
 
     def __call__(self, graph: fx.GraphModule, example_inputs) -> Callable:
-        base_cache_dir = envs.SGLANG_CACHE_DIR.get()
+        base_cache_dir = get_jit_cache_subdir("torch_compile")
 
         cache_hash = self.compiler_manager.compute_hash()
         cache_dir = os.path.join(
             base_cache_dir,
-            "torch_compile_cache",
             cache_hash,
         )
 

@@ -29,12 +29,31 @@ _NON_UTF8_PREFIX = "base64:"
 
 
 def _default_cache_subdir(name: str) -> str:
-    """A directory under SGLANG_CACHE_DIR, for env defaults that track it.
+    """A directory under SGLANG_CACHE_DIR, for non-JIT cache defaults.
 
     Pass as a callable default: SGLANG_CACHE_DIR is declared further down the
     Envs body, and resolving late also lets tests override it.
     """
     return os.path.join(os.path.expanduser(envs.SGLANG_CACHE_DIR.get()), name)
+
+
+def _default_jit_cache_root() -> str:
+    """Resolve the unified JIT root while preserving SGLANG_CACHE_DIR users."""
+    if legacy_root := os.getenv("SGLANG_CACHE_DIR"):
+        return os.path.expanduser(legacy_root)
+    xdg_cache_home = os.getenv("XDG_CACHE_HOME")
+    if xdg_cache_home:
+        return os.path.join(os.path.expanduser(xdg_cache_home), "sglang")
+    return os.path.expanduser("~/.cache/sglang")
+
+
+def _default_jit_cache_subdir(name: str) -> str:
+    return os.path.join(os.path.expanduser(envs.SGLANG_JIT_CACHE_ROOT.get()), name)
+
+
+def get_jit_cache_subdir(name: str) -> str:
+    """Return a named directory in the configured unified JIT cache root."""
+    return _default_jit_cache_subdir(name)
 
 
 def _default_tree_cache_sanity_check() -> bool:
@@ -1134,8 +1153,8 @@ class Envs:
     SGLANG_JIT_DEEPGEMM_FAST_WARMUP = EnvBool(False)
     SGLANG_JIT_DEEPGEMM_COMPILE_WORKERS = EnvInt(4)
     SGLANG_IN_DEEPGEMM_PRECOMPILE_STAGE = EnvBool(False)
-    # Resolved lazily so it tracks SGLANG_CACHE_DIR, which is defined below.
-    SGLANG_DG_CACHE_DIR = EnvStr(lambda: _default_cache_subdir("deep_gemm"))
+    # Per-cache overrides take precedence over the unified JIT cache root.
+    SGLANG_DG_CACHE_DIR = EnvStr(lambda: _default_jit_cache_subdir("deep_gemm"))
     SGLANG_DG_USE_NVRTC = EnvBool(False)
     SGLANG_USE_DEEPGEMM_BMM = EnvBool(False)
     SGLANG_DEEPGEMM_SANITY_CHECK = EnvBool(False)
@@ -1146,6 +1165,14 @@ class Envs:
     # Cache directories
     # ===================================================================
     SGLANG_CACHE_DIR = EnvStr(os.path.expanduser("~/.cache/sglang"))
+    # Root for compiled artifacts controlled by SGLang. An explicitly set
+    # SGLANG_CACHE_DIR remains a backward-compatible fallback; otherwise use
+    # the XDG cache location when available.
+    SGLANG_JIT_CACHE_ROOT = EnvStr(_default_jit_cache_root)
+    SGLANG_TRITON_CACHE_DIR = EnvStr(lambda: _default_jit_cache_subdir("triton"))
+    SGLANG_TORCHINDUCTOR_CACHE_DIR = EnvStr(
+        lambda: _default_jit_cache_subdir("inductor")
+    )
     # Persistent CuTe DSL AOT objects. Resolved lazily so it tracks
     # SGLANG_CACHE_DIR; set to an empty string to keep compilation
     # process-local. Must be trusted: cached objects are loaded into the process.
@@ -1895,10 +1922,12 @@ def _handle_deprecated_envs():
 
 
 def third_party_cache_defaults() -> Dict[str, str]:
-    base = os.path.expanduser(envs.SGLANG_CACHE_DIR.get())
+    base = os.path.expanduser(envs.SGLANG_JIT_CACHE_ROOT.get())
     return {
-        "TRITON_CACHE_DIR": os.path.join(base, "triton"),
-        "TORCHINDUCTOR_CACHE_DIR": os.path.join(base, "inductor"),
+        "TRITON_CACHE_DIR": os.path.expanduser(envs.SGLANG_TRITON_CACHE_DIR.get()),
+        "TORCHINDUCTOR_CACHE_DIR": os.path.expanduser(
+            envs.SGLANG_TORCHINDUCTOR_CACHE_DIR.get()
+        ),
         "CUDA_CACHE_PATH": os.path.join(base, "nv"),
         # FlashInfer appends ".cache/flashinfer" to this base itself, so this
         # is the base dir rather than the final cache dir.
@@ -1906,8 +1935,17 @@ def third_party_cache_defaults() -> Dict[str, str]:
     }
 
 
+def deep_gemm_cache_dir() -> str:
+    """Resolve DeepGEMM's cache, including its native compatibility variable."""
+    if envs.SGLANG_DG_CACHE_DIR.is_set():
+        return os.path.expanduser(envs.SGLANG_DG_CACHE_DIR.get())
+    if native_cache := os.getenv("DG_JIT_CACHE_DIR"):
+        return os.path.expanduser(native_cache)
+    return os.path.expanduser(envs.SGLANG_DG_CACHE_DIR.get())
+
+
 def redirect_third_party_caches():
-    """Point third-party JIT caches at SGLANG_CACHE_DIR, so a run's compiled
+    """Point third-party JIT caches at SGLANG_JIT_CACHE_ROOT, so compiled
     kernels can be cleaned, warmed or volume-mounted as one directory.
 
     Must be called early. The redirect silently does nothing if either of
@@ -1917,8 +1955,16 @@ def redirect_third_party_caches():
     - Inductor made its first ``cache_dir()`` call. That call setdefaults
       TORCHINDUCTOR_CACHE_DIR itself.
     """
+    overrides = {
+        "TRITON_CACHE_DIR": envs.SGLANG_TRITON_CACHE_DIR,
+        "TORCHINDUCTOR_CACHE_DIR": envs.SGLANG_TORCHINDUCTOR_CACHE_DIR,
+    }
     for key, value in third_party_cache_defaults().items():
-        os.environ.setdefault(key, value)
+        override = overrides.get(key)
+        if override is not None and override.is_set():
+            os.environ[key] = value
+        else:
+            os.environ.setdefault(key, value)
 
 
 _handle_deprecated_envs()
