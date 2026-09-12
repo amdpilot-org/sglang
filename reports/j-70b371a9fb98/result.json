@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38651",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "dcd46ee1a2e600bfd3cca89ff2e37f55a569d124",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is a functional partial fix for caller-ID preservation and Kimi K3 image artifact reuse, but it does not implement the original cross-modality/native/Chat/Responses contract. Video and audio IDs are accepted yet unused by processors, native video-only IDs fail image-based alignment, and previous_response_id multimodal no-I/O reuse remains unverified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-70b371a9fb98/venv/bin/python base reproduction script",
+      "exit_code": 0,
+      "what_was_measured": "At the recorded base, Chat video and Responses input-image cache_id fields were discarded and parse_cache_id was absent."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-70b371a9fb98/venv/bin/python -m compileall -q python/sglang/srt",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python sources compile from the checkout."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-70b371a9fb98/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_protocol.py test/registered/unit/parser/test_jinja_template_utils.py test/registered/unit/managers/test_mm_hashes.py test/registered/unit/multimodal/test_media_artifact_processor.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regressions and nearby focused tests: 91 passed and 27 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-70b371a9fb98/venv/bin/python /job/review-evidence-j-70b371a9fb98/adversarial.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent contract checks: schema retention passes, native video-only cache IDs raise an alignment error, and only Kimi K3 consumes cache_ids."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 dcd46ee1a2e600bfd3cca89ff2e37f55a569d124",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X gfx950 GPU was visible, but no compatible multimodal weights were provided. The tiny Llama fixture cannot qualify multimodal cache semantics, so no unrelated GPU smoke is claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A native video-only GenerateReqInput with video_data and one mm_cache_ids entry raises 'mm_cache_ids has 1 entries for 0 images'.",
+    "Chat video_url.cache_id is retained in the request object, but no video processor passes cache_ids to prepare_media_artifacts, so a repeated video cannot obtain the promised no-I/O cache hit.",
+    "Chat audio_url.cache_id is retained in the request object, but no audio processor passes cache_ids to prepare_media_artifacts, so a repeated audio item cannot obtain the promised no-I/O cache hit.",
+    "Responses previous_response_id reuse has no real multimodal serving proof that historical media avoids reading, decoding, preprocessing, and feature hashing.",
+    "Operational caller-ID caching is limited to the Kimi K3 image artifact path rather than images generally across supported processors."
+  ],
+  "remaining_limitations": [
+    "No compatible multimodal model weights were available for an HTTP or GPU end-to-end test.",
+    "The deterministic tiny Llama fixture validates transport and engine execution only and was not used as evidence for multimodal semantics.",
+    "No native source changed, so no native rebuild was applicable.",
+    "The observed architecture was AMD Instinct MI350X gfx950 with ROCm 7.2 and Torch 2.11.0+rocm7.2."
+  ]
+}
