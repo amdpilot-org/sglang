@@ -285,6 +285,52 @@ class TestInklingDetector(CustomTestCase):
             content += detector.parse_streaming_increment(char).normal_text
         self.assertEqual(content, source)
 
+    def test_tool_header_without_opener_is_not_leaked_as_content(self):
+        """A first-block tool header must be reframed instead of surfaced."""
+        for marker, payload in (
+            (
+                "<|content_invoke_tool_json|>",
+                '{"name":"weather","args":{"city":"SF"}}',
+            ),
+            ("<|content_invoke_tool_text|>", "search the web"),
+        ):
+            source = f"weather{marker}{payload}<|end_message|>"
+            framed = f"<|message_model|>{source}"
+
+            self.assertEqual(
+                InklingDetector().detect_and_parse(source).normal_text, framed
+            )
+
+            for chunk_size in (1, 7):
+                detector = InklingDetector()
+                content = ""
+                for start in range(0, len(source), chunk_size):
+                    content += detector.parse_streaming_increment(
+                        source[start : start + chunk_size]
+                    ).normal_text
+                content += detector.finish().normal_text
+                self.assertEqual(
+                    content,
+                    framed,
+                    msg=f"marker={marker!r}, chunk_size={chunk_size}",
+                )
+
+    def test_unframed_text_is_preserved_when_stream_finishes(self):
+        source = "ordinary unframed answer"
+        self.assertEqual(InklingDetector().detect_and_parse(source).normal_text, source)
+
+        detector = InklingDetector()
+        self.assertEqual(detector.parse_streaming_increment(source).normal_text, "")
+        self.assertEqual(detector.finish().normal_text, source)
+
+    def test_continue_final_message_streams_unframed_text_immediately(self):
+        detector = InklingDetector(continue_final_message=True)
+        self.assertEqual(
+            detector.parse_streaming_increment(" resumed answer").normal_text,
+            " resumed answer",
+        )
+        self.assertEqual(detector.finish().normal_text, "")
+
     def test_raw_text_tool_framing_is_preserved_for_the_tool_parser(self):
         """The headerless <|content_invoke_tool_text|> block must survive into
         content so the tool-call detector can surface it, rather than being
