@@ -920,7 +920,7 @@ def apply_dflash_simulated_acceptance(
     simulate_acc_len: float,
     simulate_acc_method: str,
     simulate_acc_token_mode: str,
-    fixed_token_id: int = 100,
+    fixed_token_id: Optional[int] = None,
 ) -> None:
     """Forces the DFlash acceptance length (SGLANG_SIMULATE_ACC_LEN benchmark knob)."""
     block_size = candidates.shape[1]
@@ -935,6 +935,10 @@ def apply_dflash_simulated_acceptance(
     commit_lens.fill_(forced_commit_len)
 
     if simulate_acc_token_mode != "real-draft-token":
+        if fixed_token_id is None:
+            raise ValueError(
+                "fixed_token_id is required for fixed simulated acceptance."
+            )
         bonus.fill_(fixed_token_id)
         out_tokens.fill_(fixed_token_id)
         return

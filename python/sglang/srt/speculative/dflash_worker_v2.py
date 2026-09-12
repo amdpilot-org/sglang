@@ -81,6 +81,7 @@ from sglang.srt.speculative.spec_utils import (
     GrammarTree,
     assign_req_to_token_pool_func,
     build_grammar_vocab_mask,
+    get_simulated_accept_token_id,
 )
 from sglang.srt.utils import is_cuda, is_hip, is_npu, is_xpu
 
@@ -2445,6 +2446,7 @@ class DFlashWorkerV2(BaseSpecWorker):
                 simulate_acc_len=SIMULATE_ACC_LEN,
                 simulate_acc_method=SIMULATE_ACC_METHOD,
                 simulate_acc_token_mode=SIMULATE_ACC_TOKEN_MODE,
+                fixed_token_id=get_simulated_accept_token_id(self.target_worker),
             )
             # The Triton path may have written new_seq_lens from the real
             # accept_len; recompute it from the forced commit_lens.

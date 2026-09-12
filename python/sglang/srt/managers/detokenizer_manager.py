@@ -16,6 +16,7 @@
 import dataclasses
 import logging
 import os
+import re
 import signal
 from collections import OrderedDict, defaultdict
 from typing import Dict, List, Optional, Tuple, Union
@@ -70,6 +71,64 @@ logger = logging.getLogger(__name__)
 # Use power of 2 values for better memory allocation.
 DETOKENIZER_MAX_STATES = int(os.environ.get("SGLANG_DETOKENIZER_MAX_STATES", 1 << 16))
 
+# Keep retries for genuinely incomplete characters small in token space. A
+# token bound, unlike an event bound, remains effective when one speculative
+# decode event contains many accepted tokens.
+MAX_STALLED_DECODE_TOKENS = 64
+BYTE_FALLBACK_TOKEN_RE = re.compile(r"^<0x([0-9A-Fa-f]{2})>$")
+
+
+def _incomplete_utf8_byte_token_count(tokenizer, token_ids: List[int]) -> int:
+    """Return the trailing byte-fallback tokens forming an incomplete codepoint."""
+    if not token_ids or not hasattr(tokenizer, "convert_ids_to_tokens"):
+        return 0
+
+    trailing_bytes = []
+    for token_id in reversed(token_ids[-4:]):
+        token = tokenizer.convert_ids_to_tokens(token_id)
+        match = (
+            BYTE_FALLBACK_TOKEN_RE.fullmatch(token) if isinstance(token, str) else None
+        )
+        if match is None:
+            break
+        trailing_bytes.append(int(match.group(1), 16))
+    trailing_bytes.reverse()
+    if not trailing_bytes:
+        return 0
+
+    continuation_count = 0
+    for byte in reversed(trailing_bytes):
+        if 0x80 <= byte <= 0xBF:
+            continuation_count += 1
+        else:
+            break
+    lead_index = len(trailing_bytes) - continuation_count - 1
+    if lead_index < 0:
+        return 0
+    lead = trailing_bytes[lead_index]
+    expected = (
+        2
+        if 0xC2 <= lead <= 0xDF
+        else 3
+        if 0xE0 <= lead <= 0xEF
+        else 4
+        if 0xF0 <= lead <= 0xF4
+        else 0
+    )
+    available = len(trailing_bytes) - lead_index
+    if not expected or available >= expected:
+        return 0
+    if available >= 2:
+        second = trailing_bytes[lead_index + 1]
+        if (
+            (lead == 0xE0 and second < 0xA0)
+            or (lead == 0xED and second > 0x9F)
+            or (lead == 0xF0 and second < 0x90)
+            or (lead == 0xF4 and second > 0x8F)
+        ):
+            return 0
+    return available
+
 
 @dataclasses.dataclass
 class DecodeStatus:
@@ -81,6 +140,7 @@ class DecodeStatus:
     read_offset: int
     # Offset that's sent to tokenizer for incremental update.
     sent_offset: int = 0
+    stalled_decode_start: Optional[int] = None
     decoded_text_len: int = dataclasses.field(init=False)
     decoded_text_chunks: List[str] = dataclasses.field(default_factory=list)
 
@@ -383,20 +443,51 @@ class DetokenizerManager(MultiHttpWorkerDetokenizerMixin):
                     f"The current value is {DETOKENIZER_MAX_STATES}. "
                     "For more details, see: https://github.com/sgl-project/sglang/issues/2812"
                 )
-            new_text = read_texts[i][len(surr_texts[i]) :]
+            surr_text = surr_texts[i]
+            if _incomplete_utf8_byte_token_count(self.tokenizer, surr_ids[i]):
+                # The replacement character produced for an incomplete byte
+                # prefix is provisional and may disappear once continuation
+                # bytes arrive, so it is not part of the stable surround text.
+                surr_text = surr_text.removesuffix("�")
+            new_text = read_texts[i][len(surr_text) :]
             if recv_obj.finished_reasons[i] is None:
                 # Streaming. Invariant: sent_offset >= decoded_text_len. The
                 # gap (`pending`) is "printable but uncommitted" text emitted
                 # in a prior "�" recovery step; we skip it from this step's
                 # emission so we don't double-send.
                 pending = s.sent_offset - s.decoded_text_len
-                if new_text and not new_text.endswith("�"):
-                    # Clean text: commit to decoded_text and advance offsets.
-                    s.append_decoded_text(new_text)
-                    s.surr_offset = s.read_offset
+                incomplete_tokens = _incomplete_utf8_byte_token_count(
+                    self.tokenizer, read_ids[i]
+                )
+                clean = bool(new_text) and incomplete_tokens == 0
+                if s.stalled_decode_start is None:
+                    s.stalled_decode_start = s.read_offset
+                stalled_tokens = len(s.decode_ids) - s.stalled_decode_start
+                force_commit = stalled_tokens >= MAX_STALLED_DECODE_TOKENS
+                if clean or force_commit:
+                    # Commit clean text or recover from an oversized stalled tail.
+                    committed_text = new_text
+                    if force_commit and incomplete_tokens:
+                        commit_end = len(s.decode_ids) - incomplete_tokens
+                        committed_text = self._grouped_batch_decode(
+                            [s.decode_ids[s.surr_offset : commit_end]],
+                            [recv_obj.skip_special_tokens[i]],
+                            [recv_obj.spaces_between_special_tokens[i]],
+                        )[0][len(surr_text) :]
+                    s.append_decoded_text(committed_text)
+                    # A forced recovery commits the stable prefix while keeping
+                    # only the (at most three-token) incomplete UTF-8 suffix.
+                    s.surr_offset = (
+                        len(s.decode_ids) - incomplete_tokens
+                        if force_commit
+                        else s.read_offset
+                    )
                     s.read_offset = len(s.decode_ids)
+                    s.stalled_decode_start = None
                     s.sent_offset = s.decoded_text_len
-                    output_strs.append(new_text[pending:] if pending else new_text)
+                    output_strs.append(
+                        committed_text[pending:] if pending else committed_text
+                    )
                 else:
                     # Incomplete UTF-8: emit the printable prefix only; do not
                     # commit (token offsets stay so the next iteration retries
