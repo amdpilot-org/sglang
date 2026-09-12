@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32378",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "The reported commands use the finite compile_deep_gemm precompiler rather than the persistent launch_server entrypoint. Its post-warmup shutdown is intentional, while the supplied resource_tracker warnings do not expose the preceding cause. Upstream PR 32444's process-wide resource tracking disablement was rejected as overbroad. No issue-specific product correction was justified on the available topology.",
+  "tests": [
+    {
+      "command": "python -m sglang.compile_deep_gemm --model-path <qualified-tiny-llama> --tokenizer-path <qualified-tiny-llama> --host 127.0.0.1 --port 39321 --attention-backend triton --dtype float16 --context-length 128 --max-total-tokens 256 --max-running-requests 4 --mem-fraction-static 0.01 --timeout 180",
+      "exit_code": 143,
+      "what_was_measured": "The actual source entrypoint loaded the model, allocated KV cache, executed its compile-deep-gemm warmup on gfx950, and reached application startup. A local port bind collision then prevented a clean finite exit; the owned run was terminated and is retained only as negative boundary evidence."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/disaggregation/test_mooncake_transfer_batching.py",
+      "exit_code": 0,
+      "what_was_measured": "Five Mooncake transfer batching tests and three subtests passed, covering short-transfer legacy behavior, custom-memory-pool behavior, sliced indices, failure stopping, and device-page indices."
+    },
+    {
+      "command": "python reports/j-0c219da3d74e/gpu_boundary.py",
+      "exit_code": 0,
+      "what_was_measured": "One-GPU FP16 matrix multiplication on gfx950 agreed with an independent CPU FP32 reference at rtol=0.01, atol=0.02 (maximum absolute error 0.02323150634765625)."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The actual compile_deep_gemm child log records model loading, GPU KV-cache allocation, Triton compilation warnings for gfx950, and a completed prefill warmup. The independent numerical boundary identifies AMD Instinct MI350X / gfx950 and passes against CPU FP32."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No GLM-5.2-W4AFP8 weights were available; the tiny random Llama cannot validate that architecture, quantization, speculative decoding, or semantic accuracy.",
+    "Only one gfx950 GPU was assigned; TP8, EP8, attention CP8, and the reported one-prefill/one-decode distributed workload were not reproduced.",
+    "No second host or matching four-HCA RDMA fabric was available, so Mooncake RDMA and the combined Mooncake HiCache plus PD-transfer path remain unverified.",
+    "The issue contains only resource_tracker shutdown warnings and omits the preceding root exception/traceback.",
+    "The tiny compile_deep_gemm boundary encountered a local port bind collision after successful GPU warmup and was terminated; it is not claimed as a clean reproduction or fix verification.",
+    "No native source was changed, so no native rebuild was applicable."
+  ]
+}
