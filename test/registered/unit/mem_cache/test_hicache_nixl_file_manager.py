@@ -12,6 +12,8 @@ register_cpu_ci(est_time=2, suite="base-a-test-cpu")
 
 
 class TestNixlFileManagerClear(unittest.TestCase):
+    KEY = "a" * 64
+
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.base_dirs = [
@@ -32,13 +34,13 @@ class TestNixlFileManagerClear(unittest.TestCase):
 
     def test_clear_only_removes_the_calling_instance_files(self):
         owned = [
-            self._write("012345_model-a_0_1"),
-            self._write("abcdef_model-a_0_1_mamba_temporal"),
+            self._write(f"{self.KEY}_model-a_0_1"),
+            self._write(f"{self.KEY}_model-a_0_1_mamba_temporal"),
         ]
         preserved = [
-            self._write("123456_model-b_0_1"),
-            self._write("234567_model-a_0_10"),
-            self._write("345678_model-a-extended_0_1"),
+            self._write(f"{self.KEY}_model-b_0_1"),
+            self._write(f"{self.KEY}_model-a_0_10"),
+            self._write(f"{self.KEY}_model-a-extended_0_1"),
             self._write("unrelated.txt"),
         ]
 
@@ -47,8 +49,33 @@ class TestNixlFileManagerClear(unittest.TestCase):
         self.assertTrue(all(not os.path.exists(path) for path in owned))
         self.assertTrue(all(os.path.exists(path) for path in preserved))
 
+    def test_clear_does_not_match_tail_of_longer_model_name(self):
+        cases = [
+            ("_model_0_1", "_tenant_model_0_1"),
+            ("_model", "_tenant_model"),
+        ]
+
+        for suffix, longer_model_suffix in cases:
+            with self.subTest(suffix=suffix):
+                owned = self._write(f"{self.KEY}{suffix}")
+                foreign = self._write(f"{self.KEY}{longer_model_suffix}")
+
+                self.manager.clear(suffix=suffix)
+
+                self.assertFalse(os.path.exists(owned))
+                self.assertTrue(os.path.exists(foreign))
+
+    def test_clear_requires_a_sha256_cache_key_prefix(self):
+        cache_file = self._write(f"{self.KEY}_model-a_0_1")
+        non_cache_file = self._write("notes_model-a_0_1")
+
+        self.manager.clear(suffix="_model-a_0_1")
+
+        self.assertFalse(os.path.exists(cache_file))
+        self.assertTrue(os.path.exists(non_cache_file))
+
     def test_clear_rejects_empty_or_degenerate_scope(self):
-        path = self._write("012345_model-b_0_1")
+        path = self._write(f"{self.KEY}_model-b_0_1")
 
         for suffix in (None, "", "_"):
             with (
@@ -61,7 +88,7 @@ class TestNixlFileManagerClear(unittest.TestCase):
             self.assertTrue(os.path.exists(path))
 
     def test_clear_handles_missing_base_directory(self):
-        self._write("012345_model-a_0_1")
+        self._write(f"{self.KEY}_model-a_0_1")
         shutil.rmtree(self.base_dirs[0])
 
         self.manager.clear(suffix="_model-a_0_1")
