@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/26794",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The production correction is already present in the prepared main checkout: NPU unquantized MoE post-processing preserves canonical w13/w2 parameter layouts and transposes only at execution, so subsequent separate gate_proj/up_proj/down_proj disk loads remain valid. Added focused regression coverage for post-process followed by reload, the minimum intermediate-size boundary, and independent replacement of both w13 halves.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-41e2ae4a818a/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_npu_unquant_moe_reload.py",
+      "exit_code": 0,
+      "what_was_measured": "Three CPU tests exercised the NPU post-processing branch with format casting mocked, then loaded separate gate, up, and down tensors through the actual FusedMoE loader. Cases covered intermediate sizes 1 and 3 and verified that both fused halves overwrite prior values independently."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-41e2ae4a818a/venv/bin/python -c '<gfx950 FusedMoE._load_w13 numerical check>'",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X (gfx950), loaded separate 1408x64 BF16 gate and up tensors into a 2816x64 fused destination and independently compared both halves; gate checksum 4060041216.0 and up checksum 4060057088.0."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-41e2ae4a818a/venv/bin/python -c '<pre-fix transposed NPU layout followed by FusedMoE._load_w13>'",
+      "exit_code": 1,
+      "what_was_measured": "Recreated the obsolete NPU post-processing layout and confirmed the actual reload loader fails with a tensor shape mismatch, establishing that the new regression would fail before the existing production correction."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-41e2ae4a818a/raw/gfx950_loader_check.txt records the one-GPU BF16 loader check on AMD Instinct MI350X."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Ascend NPU was available, so the original CANN/torch_npu execution path and scheduler subprocess behavior were not run.",
+    "The reported DeepSeekV3.2 model weights were unavailable; no full-model or HTTP update_weights_from_disk reproduction is claimed.",
+    "The gfx950 check validates FusedMoE tensor loading only and does not qualify NPU kernel execution, model semantics, or distributed behavior."
+  ]
+}
