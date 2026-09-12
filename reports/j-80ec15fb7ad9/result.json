@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39096",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/636",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/529",
+  "candidate_commit": "fc25fb0ed902605ed7aaf5592a72e42979219965",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a substantive partial fix: it reproduces and corrects the reported eager-default loss for the seven sampler keys tested with empty and populated generation configuration, and preserves explicit scalar client values. It does not fully implement the required explicit-client > preferred-server > generation-config/default contract. Explicit client constraints derived from tool_choice/tools are not represented in sampling_params_explicit_keys and are overwritten by a preferred constraint. An explicit response_format=text also cannot clear preferred json_schema/structural_tag values; preferences may leave mutually exclusive constraints in the merged request, which the real SamplingParams verifier rejects. Request changes to make precedence operate on all explicit/derived chat sampling semantics and add regressions for removal and mutually exclusive constraint keys.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-80ec15fb7ad9/venv/bin/python /job/review-evidence-j-80ec15fb7ad9/repro_preferred_sampling.py (base commit)",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced the original defect on the prepared base. With no client sampler fields, preferred temperature/top_p/top_k/min_p/presence_penalty/frequency_penalty/repetition_penalty were all replaced by protocol defaults or model generation config; top_k became -1 with an empty config. Raw output: /job/review-evidence-j-80ec15fb7ad9/base-reproduction.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-80ec15fb7ad9/venv/bin/python -m pytest -q test/registered/unit/managers/test_chat_preferred_sampling_params.py test/registered/unit/entrypoints/openai/test_protocol.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and adjacent protocol suite: 48 tests and 25 subtests passed. This confirms the submitted scalar-field behavior but does not exercise derived/removal constraint precedence. Raw output: /job/review-evidence-j-80ec15fb7ad9/candidate-tests.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-80ec15fb7ad9/venv/bin/python /job/review-evidence-j-80ec15fb7ad9/candidate_adversarial.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Independent cases confirmed all seven reported scalar sampler preferences win when unset and explicit scalar defaults win when supplied. They also showed response_format=text retains preferred json_schema and structural_tag, and an explicit required-tool regex is replaced by the preferred regex. Raw output: /job/review-evidence-j-80ec15fb7ad9/candidate-adversarial.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-80ec15fb7ad9/venv/bin/python - <<'PY' ... assert effective['regex'] == 'CLIENT_TOOL_REGEX' (candidate commit)",
+      "exit_code": 1,
+      "what_was_measured": "Failing adversarial regression: the request explicitly required tool calling and to_sampling_params produced CLIENT_TOOL_REGEX, but candidate merge metadata contained no explicit key and the result became SERVER_PREFERRED_REGEX. Raw output: /job/review-evidence-j-80ec15fb7ad9/candidate-counterexample-failing.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-80ec15fb7ad9/venv/bin/python constraint verification snippet (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "The real SamplingParams verifier accepted preferred regex and json_schema individually, but rejected the candidate's explicit-text merged json_schema+structural_tag result with 'Only one ... can be set.' Raw output: /job/review-evidence-j-80ec15fb7ad9/constraint-validation.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-80ec15fb7ad9/venv/bin/python ROCm CPU-reference comparison",
+      "exit_code": 0,
+      "what_was_measured": "One assigned AMD Instinct MI350X ran float64 polynomial arithmetic through torch 2.11.0+rocm7.2 and exactly matched the independent CPU result [2.0, -1.75, -1.0, 7.0, 28.25]. This is architecture/environment evidence only, not evidence for the CPU request-path fix. Raw output: /job/review-evidence-j-80ec15fb7ad9/gpu-evidence.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "torch.cuda reported exactly one AMD Instinct MI350X, capability (9, 5), with HIP 7.2.26015; a CPU-referenced numerical tensor check matched exactly.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With explicit tools plus tool_choice=required, a derived regex constraint produced by ChatCompletionRequest.to_sampling_params is not marked explicit, so --preferred-sampling-params regex overwrites the client-required tool constraint.",
+    "With explicit response_format={type:text}, get_explicit_sampling_keys names json_schema and structural_tag but neither key exists in sampling_params; preferred constraints therefore remain instead of being cleared.",
+    "With explicit response_format=text and preferred json_schema plus structural_tag, the merged result contains mutually exclusive constraint keys and SamplingParams.verify rejects the request. Related cross-kind cases (explicit json_schema versus preferred regex/ebnf/structural_tag) remain uncovered by the candidate tests."
+  ],
+  "remaining_limitations": "This is a CPU request-conversion and tokenizer-manager merge review. No model weights were prepared, so no model-backed server startup or generated-token comparison was run; such a smoke would not establish this precedence contract. The host exposed one AMD Instinct MI350X (gfx950-equivalent capability 9.5), not CUDA hardware. No native/C++ files changed in the candidate, repository-environment.json declares native=null, and no native rebuild was applicable. Imports were confirmed from /job/repo/python/sglang using the prescribed interpreter. Raw evidence is retained under /job/review-evidence-j-80ec15fb7ad9 outside the checkout."
+}
