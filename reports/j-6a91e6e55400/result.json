@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/1190",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3163",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/3159",
+  "candidate_commit": "ef1d2fba188d3c59748218908e7986f05c905305",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The recorded base has no native Jamba implementation and resolves JambaForCausalLM through the generic Transformers fallback. The exact candidate adds a native implementation. Its five focused tests passed, independent GPU recurrence cases passed, and an independently generated tiny hybrid Jamba with attention, Mamba-1, and two active MoE experts served successfully through four HTTP paths. SGLang greedy output exactly matched an independent Transformers GPU reference. This verifies a substantive functional implementation, but not the complete original Jamba 1.5 deployment contract because official checkpoints are gated and too large for the assigned single GPU, and tensor parallelism and pretrained semantics were not exercised.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6a91e6e55400/venv/bin/python (base model-registry probe)",
+      "exit_code": 0,
+      "what_was_measured": "At the recorded base, JambaForCausalLM resolved to sglang.srt.models.transformers.TransformersForCausalLM rather than a native Jamba implementation."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6a91e6e55400/venv/bin/python -m pytest -q test/registered/layers/mamba/test_mamba1_selective_scan.py test/registered/models/test_jamba_config.py",
+      "exit_code": 0,
+      "what_was_measured": "Five candidate regression tests passed, including FP32/BF16 GPU selective-scan comparisons, invalid input rejection, Jamba layer/cache layout, and native registry resolution."
+    },
+    {
+      "command": "Independent inline GPU selective-scan recurrence matrix on candidate commit",
+      "exit_code": 0,
+      "what_was_measured": "FP32 and BF16, sequence lengths 0/1/9, batches 1/2/3, nontrivial initial states, and the path without optional D/z or softplus all matched an independently written recurrence."
+    },
+    {
+      "command": "Transformers JambaForCausalLM generation on independently generated four-layer/two-expert fixture",
+      "exit_code": 0,
+      "what_was_measured": "Independent GPU reference completion IDs [0, 4, 21, 0, 4, 21, 0, 4]."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_CACHE_DIR=/tmp/amdpilot-repo-j-6a91e6e55400/cache /tmp/amdpilot-repo-j-6a91e6e55400/venv/bin/python run_server_probe.py --fixture /tmp/amdpilot-repo-j-6a91e6e55400/tiny-review-jamba --output /job/review-evidence-j-6a91e6e55400/server",
+      "exit_code": 0,
+      "what_was_measured": "Native Jamba weight loading, Mamba cache allocation, GPU prefill/decode, generate/completions/batch/stream HTTP paths, owned-process cleanup, and exact greedy agreement with Transformers."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI355X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2 and HIP 7.2.26015. Candidate tests, independent recurrence checks, Transformers reference generation, and SGLang serving all executed on GPU.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No official AI21 Jamba 1.5 Mini (approximately 52B) or Large (approximately 399B) checkpoint was loadable: repository access returned HTTP 401 and either checkpoint exceeds this single-GPU qualification scope.",
+    "Pretrained Jamba 1.5 semantic accuracy and official-checkpoint weight compatibility remain unverified.",
+    "Tensor-parallel and multi-GPU cache/weight sharding remain unverified; the independent run used one gfx950 GPU.",
+    "Long-context performance remains unverified; candidate prefill uses a correctness-first Python/PyTorch token recurrence rather than a fused selective-scan kernel.",
+    "Quantization, LoRA, speculative decoding, pipeline parallelism, radix-prefix reuse, and NPU execution remain unverified or unsupported."
+  ],
+  "remaining_limitations": [
+    "The independent random tiny fixture qualifies architecture execution, MoE routing/weight loading, cache transitions, transport, and numerical agreement, but cannot qualify pretrained semantics or deployment-scale memory/performance.",
+    "No C++/HIP/native source changed in the candidate, so no native rebuild was applicable. Imports were verified from /job/repo/python and the candidate model module.",
+    "The host reports NUMA balancing enabled; it was not changed and did not block the tests.",
+    "The unrelated optional Inkling model import reports missing cutlass during registry initialization; it did not affect Jamba."
+  ]
+}
