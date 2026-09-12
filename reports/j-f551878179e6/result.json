@@ -1,0 +1,27 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32666",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "unsupported_architecture",
+  "summary": "The reported Frozen-KV MTP failure is specific to CUDA/SM100, TRT-LLM MHA, ModelOpt FP4, and Gemma-4 weights. The assigned accelerator is an AMD MI350X (gfx950), so neither the corrupt-output reproduction nor the depth-4 CUDA-graph illegal access can be executed faithfully. The current source was inspected and the only issue-linked candidate, upstream PR #32691, was rejected as unjustified: its proposed removal of batch_size * draft_token_num^2 contradicts the current pre-extension meaning of paged_kernel_lens_sum. No source correction was made without issue-specific execution evidence.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-f551878179e6/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_verify_mask.py",
+      "exit_code": 0,
+      "what_was_measured": "CPU-side independent boundary coverage for verify-mask element counts across batch sizes and draft widths in the prepared implementation. This does not execute Frozen-KV MTP or TRT-LLM MHA."
+    },
+    {
+      "command": "rocm-smi --showproductname --showuniqueid --showmeminfo vram --csv",
+      "exit_code": 0,
+      "what_was_measured": "Hardware inventory identified the sole assigned accelerator as AMD Instinct MI350X, GFX version gfx950, rather than NVIDIA B200/SM100."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The nvidia/Gemma-4-31B-IT-NVFP4 target weights and google/gemma-4-31B-it-assistant draft weights were unavailable.",
+    "The assigned AMD gfx950 cannot reproduce an NVIDIA SM100 CUDA graph or trtllm_mha failure.",
+    "Hardware evidence is retained in reports/j-f551878179e6/hardware.txt; no issue-relevant GPU execution was performed.",
+    "No full-model, semantic-accuracy, concurrency-corruption, or depth-4 graph-capture claim was made.",
+    "Upstream PR #32691 remains open and was not adopted because its mask-size derivation conflicts with the inspected implementation; it also does not address the eager-mode corruption reported in the issue."
+  ]
+}
