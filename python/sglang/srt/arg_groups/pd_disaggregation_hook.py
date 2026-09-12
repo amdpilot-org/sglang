@@ -23,6 +23,18 @@ def handle_pd_disaggregation(server_args: ServerArgs) -> None:
     """Validate and normalize PD-disaggregation server args."""
     cfg = resolving_view(server_args)
 
+    if (
+        cfg.disaggregation_mode != "null"
+        and (cfg.speculative_algorithm or "").upper() == "DFLASH"
+    ):
+        raise ValueError(
+            "DFLASH speculative decoding is not supported with PD "
+            "disaggregation: the prefill-to-decode transfer does not carry "
+            "DFLASH draft KV or auxiliary hidden states. Use "
+            "--disaggregation-mode null, or choose a speculative algorithm "
+            "with PD support."
+        )
+
     # "mooncake_tcp" is mooncake with the TCP transport forced: set MC_FORCE_TCP
     # so mooncake installs TcpTransport instead of RDMA, rewrite the backend to
     # mooncake, and skip RDMA HCA selection. Must run before backend-name checks.
