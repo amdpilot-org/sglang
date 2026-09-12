@@ -2863,18 +2863,18 @@ class MMReceiverGrpc(MMReceiverBase):
 
         effective_urls = encode_urls if encode_urls is not None else self.encode_urls
 
-        # gRPC currently only supports image; flatten new dict formats to simple lists
-        if mm_data and isinstance(mm_data[0], dict):
+        # gRPC currently only supports image; flatten typed items to simple lists.
+        if mm_data and isinstance(mm_data[0], MooncakeMMUrlItem):
             non_image = [
-                item.get("modality")
+                item.modality
                 for item in mm_data
-                if item.get("modality") != Modality.IMAGE
+                if item.modality != Modality.IMAGE
             ]
             if non_image:
                 raise NotImplementedError(
                     f"gRPC encode only supports IMAGE modality, got: {non_image}"
                 )
-            img_data = [item.get("url") for item in mm_data]
+            img_data = [item.url for item in mm_data]
         else:
             img_data = mm_data
         if isinstance(num_items_assigned, dict):
