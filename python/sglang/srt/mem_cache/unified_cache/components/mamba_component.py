@@ -549,7 +549,12 @@ class MambaComponent(TreeComponent):
 
         if is_finished:
             if cache_len is None:
-                cache_len = 0
+                # A short final extend may not produce a new checkpoint after
+                # earlier chunked inserts already committed this prefix.  Rewalk
+                # that protected path at finish so the non-chunked insert can
+                # perform the write-through touch deferred by chunked=True.
+                # The path is already tree-owned, so this cannot cache new KV.
+                cache_len = req.kv.cache_protected_len
             if self.cache.enable_mamba_extra_buffer:
                 keep_idx = self.cache.req_to_token_pool.get_mamba_ping_pong_keep_idx(
                     req
