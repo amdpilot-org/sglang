@@ -61,6 +61,7 @@ class _MockTemplateManager:
             None  # Set to None to avoid template processing
         )
         self.jinja_template_may_reorder_tool_results = False
+        self.force_reasoning = False
 
 
 class ServingCompletionTestCase(unittest.TestCase):
@@ -88,6 +89,55 @@ class ServingCompletionTestCase(unittest.TestCase):
         self.template_manager = _MockTemplateManager()
         self.sc = OpenAIServingCompletion(tm, self.template_manager)
         self.fastapi_request = Mock(spec=Request)
+
+    def test_include_reasoning_false_filters_non_stream_and_is_request_local(self):
+        self.sc.reasoning_parser = "deepseek-r1"
+        ret = [_spec_result(0)]
+        ret[0]["text"] = "<think>private</think>visible"
+
+        hidden = CompletionRequest(model="x", prompt="hi", include_reasoning=False)
+        shown = CompletionRequest(model="x", prompt="hi", include_reasoning=True)
+
+        self.assertEqual(
+            self.sc._build_completion_response(hidden, ret, 1).choices[0].text,
+            "visible",
+        )
+        self.assertEqual(
+            self.sc._build_completion_response(shown, ret, 1).choices[0].text,
+            "<think>private</think>visible",
+        )
+
+    def test_include_reasoning_false_filters_stream(self):
+        self.sc.reasoning_parser = "deepseek-r1"
+
+        async def generate(*args, **kwargs):
+            yield {
+                **_spec_result(0),
+                "text": "<think>private</think>visible",
+            }
+
+        self.sc.tokenizer_manager.generate_request = generate
+        request = CompletionRequest(
+            model="x", prompt="hi", stream=True, include_reasoning=False
+        )
+        adapted, _ = self.sc._convert_to_internal_request(request)
+
+        async def collect():
+            return [
+                chunk
+                async for chunk in self.sc._generate_completion_stream(
+                    adapted, request, self.fastapi_request
+                )
+            ]
+
+        chunks = get_or_create_event_loop().run_until_complete(collect())
+        payloads = [
+            json.loads(chunk[6:]) for chunk in chunks if chunk.startswith("data: {")
+        ]
+        self.assertEqual(
+            "".join(choice["text"] for p in payloads for choice in p["choices"]),
+            "visible",
+        )
 
     # ---------- prompt-handling ----------
     def test_single_token_ids_prompt(self):

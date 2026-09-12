@@ -88,6 +88,35 @@ class InputMessageConstructionTestCase(CustomTestCase):
             ],
         )
 
+
+class IncludeReasoningTestCase(CustomTestCase):
+    def test_non_stream_suppresses_only_reasoning_and_is_request_local(self):
+        serving = make_serving()
+        serving.reasoning_parser = "deepseek-r1"
+        hidden = ResponsesRequest(
+            model="x", input="hi", include_reasoning=False, store=False
+        )
+        shown = ResponsesRequest(
+            model="x", input="hi", include_reasoning=True, store=False
+        )
+
+        with patch(
+            "sglang.srt.entrypoints.openai.serving_responses.ReasoningParser"
+        ) as parser_cls:
+            parser_cls.return_value.parse_non_stream.return_value = (
+                "private",
+                "visible",
+            )
+            hidden_items = serving._make_response_output_items(
+                hidden, "raw", Mock(), require_reasoning=True
+            )
+            shown_items = serving._make_response_output_items(
+                shown, "raw", Mock(), require_reasoning=True
+            )
+
+        self.assertEqual([item.type for item in hidden_items], ["message"])
+        self.assertEqual([item.type for item in shown_items], ["reasoning", "message"])
+
     def test_input_parts_normalized_for_chat_templates(self):
         serving = make_serving()
         request = ResponsesRequest(
@@ -709,6 +738,37 @@ class OutputItemsTestCase(CustomTestCase):
         ]
         self.assertEqual(len(message_items), 1)
         self.assertEqual(message_items[0].content[0].text, "trailing text")
+
+    def test_include_reasoning_false_preserves_tool_call(self):
+        serving = self.serving
+        serving.reasoning_parser = "deepseek-r1"
+        request = self._function_tool_request().model_copy(
+            update={"include_reasoning": False}
+        )
+        fake_call = ToolCallItem(
+            tool_index=0, name="get_weather", parameters='{"city": "Beijing"}'
+        )
+
+        with (
+            patch(
+                "sglang.srt.entrypoints.openai.serving_responses.ReasoningParser"
+            ) as reasoning_cls,
+            patch(
+                "sglang.srt.entrypoints.openai.serving_responses.FunctionCallParser"
+            ) as tool_cls,
+        ):
+            reasoning_cls.return_value.parse_non_stream.return_value = (
+                "private",
+                "tool payload",
+            )
+            tool_cls.return_value.has_tool_call.return_value = True
+            tool_cls.return_value.parse_non_stream.return_value = ("", [fake_call])
+            items = serving._make_response_output_items(
+                request, "raw", tokenizer=Mock(), require_reasoning=True
+            )
+
+        self.assertEqual([item.type for item in items], ["function_call"])
+        self.assertEqual(items[0].name, "get_weather")
 
     def test_prose_emitted_before_tool_call_item(self):
         serving = self.serving
