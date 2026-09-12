@@ -279,7 +279,7 @@ def _warmup_marker_payload(
             "deep_gemm_jit_env": {
                 key: value
                 for key, value in sorted(os.environ.items())
-                if key.startswith("DG_JIT_")
+                if key.startswith("DG_JIT_") and key != "DG_JIT_CACHE_DIR"
             },
             "standard_layout": envs.SGLANG_DEEPGEMM_STANDARD_LAYOUT.get(),
             "pdl": envs.SGLANG_DEEPGEMM_PDL.get(),

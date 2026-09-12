@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -166,6 +167,32 @@ def test_successful_warmup_marks_then_restored_cache_skips(
     compile_utils._INITIALIZATION_DICT.clear()  # simulate a restored-cache process
     compile_utils._maybe_compile_deep_gemm_one_type_all(*args)
     assert len(calls) == 1
+
+
+def test_relocated_restored_cache_skips_warmup(
+    compile_marker_state, monkeypatch, tmp_path
+):
+    calls = []
+    monkeypatch.setattr(
+        compile_utils,
+        "_compile_deep_gemm_one_type_all",
+        lambda **kwargs: calls.append(kwargs) or True,
+    )
+    args = (compile_utils.DeepGemmKernelType.GEMM_NT_F8F8BF16, 16, 32, 1)
+    baked_cache = tmp_path / "baked-image-cache"
+    restored_cache = tmp_path / "runtime-restored-cache"
+    monkeypatch.setenv("DG_JIT_CACHE_DIR", str(baked_cache))
+
+    compile_utils._maybe_compile_deep_gemm_one_type_all(*args)
+    assert len(calls) == 1
+    shutil.copytree(baked_cache, restored_cache)
+
+    compile_utils._INITIALIZATION_DICT.clear()
+    monkeypatch.setenv("DG_JIT_CACHE_DIR", str(restored_cache))
+    compile_utils._maybe_compile_deep_gemm_one_type_all(*args)
+
+    assert len(calls) == 1
+    assert len(list(restored_cache.rglob("*.json"))) == 1
 
 
 def test_opt_out_preserves_repeated_warmup(compile_marker_state, monkeypatch):
