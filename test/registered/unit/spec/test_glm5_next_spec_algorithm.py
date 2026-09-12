@@ -1,4 +1,6 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from sglang.srt.arg_groups.speculative_hook import _validate_native_mtp_algorithm
 from sglang.test.ci.ci_register import register_cpu_ci
@@ -40,6 +42,49 @@ class TestGlm5NextSpecAlgorithm(CustomTestCase):
             speculative_algorithm="EAGLE3",
             model_path="zai-org/GLM-5.3-Flash",
             speculative_draft_model_path="org/trained-glm5-eagle3-draft",
+        )
+
+    def test_rejects_equivalent_local_checkpoint_paths(self):
+        with TemporaryDirectory() as temp_dir:
+            checkpoint = Path(temp_dir) / "glm5"
+            checkpoint.mkdir()
+            alias = Path(temp_dir) / "glm5-alias"
+            alias.symlink_to(checkpoint, target_is_directory=True)
+
+            equivalent_paths = [
+                f"{checkpoint}/",
+                f"{temp_dir}/./glm5",
+                str(alias),
+            ]
+            for draft_path in equivalent_paths:
+                with self.subTest(draft_path=draft_path):
+                    with self.assertRaisesRegex(ValueError, "not EAGLE3"):
+                        _validate_native_mtp_algorithm(
+                            model_arch="Glm5NextForConditionalGeneration",
+                            speculative_algorithm="EAGLE3",
+                            model_path=str(checkpoint),
+                            speculative_draft_model_path=draft_path,
+                        )
+
+    def test_rejects_same_hub_checkpoint_at_equivalent_default_revision(self):
+        with self.assertRaisesRegex(ValueError, "not EAGLE3"):
+            _validate_native_mtp_algorithm(
+                model_arch="Glm5NextForConditionalGeneration",
+                speculative_algorithm="EAGLE3",
+                model_path="zai-org/GLM-5.3-Flash",
+                model_revision=None,
+                speculative_draft_model_path="zai-org/GLM-5.3-Flash",
+                speculative_draft_model_revision="main",
+            )
+
+    def test_accepts_same_hub_repo_at_distinct_revision(self):
+        _validate_native_mtp_algorithm(
+            model_arch="Glm5NextForConditionalGeneration",
+            speculative_algorithm="EAGLE3",
+            model_path="zai-org/GLM-5.3-Flash",
+            model_revision="target-revision",
+            speculative_draft_model_path="zai-org/GLM-5.3-Flash",
+            speculative_draft_model_revision="eagle3-draft-revision",
         )
 
     def test_accepts_eagle3_for_other_target_architecture(self):
