@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35912",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes the prior valid-global-option checker bypass and updates the remaining documented command, but it is only partial documentation mitigation. Its guard incorrectly accepts an unsafe install when --prerelease=allow appears in a shell comment or belongs to another command on the same line, and uv 0.11.16 itself still silently resolves a manually entered plain install to sglang==0.5.9.",
+  "tests": [
+    {
+      "command": "printf 'sglang\\n' | uv 0.11.16 pip compile - --no-cache --python-platform x86_64-manylinux_2_34 --python-version 3.12 (prepared base)",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced the original resolver failure: sglang==0.5.9 and torch==2.9.1 were selected."
+    },
+    {
+      "command": "node docs/scripts/check_cookbook_configs.mjs (exact candidate, clean tree)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's embedded regression cases and current documentation pass."
+    },
+    {
+      "command": "node docs/scripts/check_cookbook_configs.mjs (exact candidate plus temporary `uv --no-cache pip install sglang` fixture)",
+      "exit_code": 1,
+      "what_was_measured": "Confirmed the candidate fixes the concrete global-option counterexample from the prior review."
+    },
+    {
+      "command": "node docs/scripts/check_cookbook_configs.mjs (exact candidate plus comment and multiple-command adversarial fixtures)",
+      "exit_code": 0,
+      "what_was_measured": "The checker incorrectly accepted both unsafe sglang installs because --prerelease=allow appeared elsewhere on each logical line."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a48a625e20e7/venv/bin/python -c 'prepend /job/repo/python; import sglang and sglang.srt.layers.layernorm' (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed imports used candidate checkout source paths, including /job/repo/python/sglang/srt/layers/layernorm.py."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Package resolution and the static documentation checker do not execute GPU code. The reported Qwen3.8-27B-FP8 TP=2 symptom needs unavailable weights and two GPUs; one assigned gfx950 GPU cannot qualify it."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "`uv pip install sglang # add --prerelease=allow to avoid old releases` passes the candidate checker although the option is only in a comment.",
+    "`uv pip install --prerelease=allow requests; uv pip install sglang` passes the candidate checker although the sglang command has no prerelease option.",
+    "A user manually running plain `uv pip install sglang` with uv 0.11.16 still silently resolves to sglang==0.5.9; repository documentation cannot change the installed resolver."
+  ],
+  "remaining_limitations": [
+    "The Qwen3.8-27B-FP8 TP=2 wrong-output consequence was not reproduced because the model weights and required two-GPU topology were unavailable.",
+    "No native source or build input changed, repository-environment.json supplied no native library, and no native rebuild was applicable.",
+    "No GPU claim is made from the assigned single gfx950 GPU."
+  ]
+}

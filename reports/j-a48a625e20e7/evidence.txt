@@ -1,0 +1,58 @@
+Independent review evidence, captured 2026-09-12 UTC
+
+Reviewed candidate
+  PR: https://github.com/amdpilot-org/sglang/pull/3321
+  exact commit: 34cf2b9fb078e1378d04887b5e6aae7308cbc52c
+  upstream issue: https://github.com/sgl-project/sglang/issues/35912
+  prepared base: 358c163250ad3b1f62939b01ce1314a0a31a0365
+
+Original failure on prepared base
+  printf 'sglang\n' | uv 0.11.16 pip compile - --no-cache \
+    --python-platform x86_64-manylinux_2_34 --python-version 3.12
+  exit 0; selected sglang==0.5.9 and torch==2.9.1.
+
+Candidate source and native scope
+  The candidate changes one documentation sentence, a Node documentation
+  checker, and reports. It changes no Python, C++, GPU, packaging metadata, or
+  native build input. No native library was supplied by repository-environment.json,
+  so no native rebuild was applicable.
+  With /job/repo/python prepended to sys.path, imports resolved to:
+    /job/repo/python/sglang/__init__.py
+    /job/repo/python/sglang/srt/layers/layernorm.py
+
+Candidate clean regression
+  node docs/scripts/check_cookbook_configs.mjs
+  exit 0: cookbook config check: OK
+
+Candidate reviewed-counterexample regression
+  Added a temporary Markdown fixture containing:
+    uv --no-cache pip install sglang
+  node docs/scripts/check_cookbook_configs.mjs
+  exit 1, identifying the unsafe command. The fixture was removed.
+
+Independent adversarial counterexamples
+  Added a temporary Markdown fixture containing these valid shell commands:
+    uv pip install sglang # add --prerelease=allow to avoid old releases
+    uv pip install --prerelease=allow requests; uv pip install sglang
+  node docs/scripts/check_cookbook_configs.mjs
+  exit 0: cookbook config check: OK (incorrect).
+
+  The checker searches the entire logical line for --prerelease=allow instead
+  of associating the option with the detected uv command. A comment can satisfy
+  the test, and a flag on a different command can satisfy it. Both leave the
+  sglang install unmitigated. The temporary fixture was removed.
+
+Classification
+  The candidate is partial documentation mitigation and test-only hardening.
+  It corrects the specific global-option bypass from the prior review but its
+  recurrence guard has independent command-boundary bypasses. It does not alter
+  uv 0.11.16, so a manually entered plain command still resolves to 0.5.9.
+
+Architecture and environment limitations
+  No GPU execution was relevant to deterministic package resolution or the
+  static Node checker. The original Qwen3.8-27B-FP8 TP=2 semantic symptom was
+  not reproduced: the required model weights and two-GPU topology were not
+  available, and the assigned single gfx950 GPU cannot qualify that workload.
+
+Raw outputs retained outside the checkout
+  /tmp/amdpilot-repo-j-a48a625e20e7/evidence/
