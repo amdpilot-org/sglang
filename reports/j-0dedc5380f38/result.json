@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36855",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the chunked-prefill progress reset in the actual scheduler/cache implementation: with skip_radix_cache_insert, three scheduling rounds started at token offsets [0, 0, 0]. The fix separates radix publication from unfinished-request bookkeeping, preserving request-owned KV progress while leaving the protected tree boundary unchanged for final cleanup. The regression now advances [0, 8, 16], does not call radix insertion, and covers ChunkCache independently.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-0dedc5380f38/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_skip_radix_cache_insert.py (base behavior, before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Three failures: chunk scheduling restarted at [0, 0, 0], RadixCache prefix_indices stayed length 2 instead of 6, and ChunkCache prefix_indices stayed length 2 instead of 6. Raw output: reports/j-0dedc5380f38/regression-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0dedc5380f38/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_skip_radix_cache_insert.py",
+      "exit_code": 0,
+      "what_was_measured": "Three regression and boundary tests passed after the fix, including scheduler progress, no radix publication, request-owned final cleanup, and ChunkCache progress. Raw output: reports/j-0dedc5380f38/regression-final.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0dedc5380f38/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_radix_cache_unit.py test/registered/unit/managers/test_scheduler_chunked_req_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "42 related tests and 61 subtests passed. Raw output: reports/j-0dedc5380f38/related-tests.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0dedc5380f38/venv/bin/python GPU tensor reference check",
+      "exit_code": 0,
+      "what_was_measured": "A float32 matrix product executed on the assigned AMD Instinct MI350X/gfx950 and exactly matched the independent CPU result. Raw output: reports/j-0dedc5380f38/gpu-torch-check.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "ROCm reported one idle assigned AMD Instinct MI350X with gfx950; a Torch ROCm matrix multiplication ran on it and exactly matched CPU (sum 12976.0). This is environment evidence only, not a full HTTP/model reproduction. See gpu-inventory.txt and gpu-torch-check.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported Qwen/Qwen3-0.6B weights were not present, so the original full-model HTTP crash was not rerun.",
+    "The deterministic tiny-Llama fixture was inspected but not used to claim model-architecture or semantic validation.",
+    "The C++ radix backend change was syntax-checked through Python compilation but its optional native extension was not rebuilt; this task changes only Python bookkeeping and no native source."
+  ]
+}
