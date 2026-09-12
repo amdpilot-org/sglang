@@ -671,6 +671,30 @@ class TestWrapperEntryClassGates(_FusionGateCase):
             get_name=lambda: "quark", exclude_layers=["mtp.mlp.experts"]
         )
         self.assertIsNone(_mtp_quant_config(quark_mtp))
+        compressed_mtp = SimpleNamespace(
+            get_name=lambda: "compressed_tensors",
+            ignore=[
+                "mtp.fc",
+                "mtp.layers.0.self_attn.q_proj",
+                "mtp.layers.0.mlp.gate_proj",
+            ],
+        )
+        self.assertIsNone(_mtp_quant_config(compressed_mtp))
+        for ignore in (
+            [],
+            ["model.layers.0.self_attn.q_proj"],
+            [None, 1, {"layer": "mtp.fc"}],
+        ):
+            compressed_target_only = SimpleNamespace(
+                get_name=lambda: "compressed_tensors", ignore=ignore
+            )
+            self.assertIs(
+                _mtp_quant_config(compressed_target_only), compressed_target_only
+            )
+        compressed_without_ignore = _quant("compressed_tensors")
+        self.assertIs(
+            _mtp_quant_config(compressed_without_ignore), compressed_without_ignore
+        )
         kept = _quant("fp8")
         self.assertIs(_mtp_quant_config(kept), kept)
 

@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35797",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Qwen3.5 MTP now disables compressed-tensors quantization when the checkpoint ignore list contains mtp.* entries, preventing fused qkv_proj and gate_up_proj parameters from being allocated in packed form for plain BF16 MTP weights. The regression failed before the source change and passes after it, with independent target-only, empty, missing, and non-string ignore-list boundaries.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-1cee264fc652/venv/bin/python -m pytest -q test/registered/unit/models/test_shared_experts_fusion_gates.py -k qwen3_5_mtp --junitxml=/tmp/amdpilot-repo-j-1cee264fc652/qwen3_5_mtp-before.xml",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: _mtp_quant_config returned the reported compressed_tensors config unchanged despite mtp.* ignore entries. Raw JUnit: reports/j-1cee264fc652/qwen3_5_mtp-before.xml"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1cee264fc652/venv/bin/python -m pytest -q test/registered/unit/models/test_shared_experts_fusion_gates.py -k qwen3_5_mtp --junitxml=/tmp/amdpilot-repo-j-1cee264fc652/qwen3_5_mtp-after.xml",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression and boundary cases for reported mtp.* entries, unrelated target entries, empty/missing ignore lists, and non-string entries. Raw JUnit: reports/j-1cee264fc652/qwen3_5_mtp-after.xml"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1cee264fc652/venv/bin/python -m pytest -q test/registered/unit/models/test_shared_experts_fusion_gates.py --junitxml=/tmp/amdpilot-repo-j-1cee264fc652/shared_experts_fusion_gates.xml",
+      "exit_code": 1,
+      "what_was_measured": "Broader fusion-gate suite: 33 passed and one unrelated existing test named test_expert_parallelism_blocks_fusion_off_rocm failed because the prepared host is ROCm. Raw JUnit: reports/j-1cee264fc652/shared_experts_fusion_gates.xml"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1cee264fc652/venv/bin/python -m compileall -q python/sglang/srt/models/qwen3_5_mtp.py test/registered/unit/models/test_shared_experts_fusion_gates.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed production and regression-test Python files compile successfully."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1cee264fc652/venv/bin/python -m ruff check python/sglang/srt/models/qwen3_5_mtp.py test/registered/unit/models/test_shared_experts_fusion_gates.py",
+      "exit_code": 1,
+      "what_was_measured": "Environment limitation: the prepared interpreter does not contain the ruff module, so lint could not run."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "rocm-smi identified the assigned GPU as AMD Instinct MI355X, gfx950, but no Qwen3.5 compressed-tensors checkpoint weights were available. The corrected behavior is a constructor/configuration decision and was validated deterministically without claiming model acceptance or numerical GPU execution."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported 27B compressed-tensors Qwen3.5 checkpoint and its weights were unavailable, so full server startup, skipped-weight log counts, speculative accept length, throughput, and semantic accuracy were not reproduced.",
+    "Only one gfx950 GPU was assigned; the report used two RTX 3090 GPUs with TP=2, so no multi-GPU or NVIDIA-specific qualification was attempted.",
+    "The broader fusion-gate file has one unrelated ROCm/platform expectation failure; the focused changed behavior passes.",
+    "Ruff is absent from the prepared Python environment."
+  ]
+}
