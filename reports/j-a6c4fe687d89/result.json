@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/5979",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Added sglang:kv_cache_usage_perc as an unrounded KV-only Prometheus gauge computed as max(full-attention usage, SWA usage), explicitly excluding Mamba state-pool pressure; documented it and added adversarial pool-semantics plus live serving coverage.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a6c4fe687d89/venv/bin/python -c 'from sglang.srt.observability.metrics_collector import SchedulerStats; assert hasattr(SchedulerStats(), \"kv_cache_usage_perc\"), \"SchedulerStats does not expose KV-cache-only usage\"'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction on the recorded base: SchedulerStats had no KV-cache-only usage field. Raw output: reports/j-a6c4fe687d89/evidence/failing-before.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a6c4fe687d89/venv/bin/python -m pytest -q test/registered/unit/managers/scheduler_components/test_pool_stats_kv_usage.py",
+      "exit_code": 0,
+      "what_was_measured": "Five CPU regression/adversarial tests for plain attention, full- and SWA-dominant hybrid attention, Mamba exclusion, combined SWA+SSM, and preservation of unrounded usage. Raw output: reports/j-a6c4fe687d89/evidence/unit-tests.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a6c4fe687d89/venv/bin/python reports/j-a6c4fe687d89/run_metrics_probe.py /tmp/amdpilot-repo-j-a6c4fe687d89/tiny-random-llama reports/j-a6c4fe687d89/evidence/server",
+      "exit_code": 0,
+      "what_was_measured": "A real source-checkout SGLang server on the assigned GPU performed prefill/decode and exposed the new metric during an active generation. kv_cache_usage_perc was 0.01171875 and independently matched full_token_usage for the plain-attention fixture; the legacy rounded token_usage was 0.01. Requests, response, scrape, logs, and cleanup metadata are retained under reports/j-a6c4fe687d89/evidence/server/."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-a6c4fe687d89/pre-commit-cache /opt/venv/bin/pre-commit run --files docs/docs/references/production_metrics.mdx python/sglang/srt/managers/scheduler_components/pool_stats_observer.py python/sglang/srt/observability/metrics_collector.py test/registered/observability/test_metrics.py test/registered/unit/managers/scheduler_components/test_pool_stats_kv_usage.py reports/j-a6c4fe687d89/run_metrics_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, secret, CI-registration, and related pre-commit checks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X gfx950 with Torch 2.11.0+rocm7.2/HIP 7.2.26015 executed a real tiny-Llama prefill and decode workload. The live scrape and server execution log are reports/j-a6c4fe687d89/evidence/server/metrics.txt and server.log; run-metadata.json records the exact command and measured values."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The deterministic tiny random Llama validates serving transport, engine execution, and plain-attention metric wiring only; it does not establish model semantic accuracy.",
+    "No qualified hybrid SWA or hybrid Mamba model weights were available, so those pool semantics were validated with direct CPU PoolStats regression tests rather than end-to-end GPU model runs.",
+    "No C++ or FlyDSL source changed; native rebuild and compiler/ISA evidence were not applicable.",
+    "The probe's owned server process group required SIGKILL after the 30-second SIGTERM grace period; its descendants were reaped, and no GPU reset or node-wide state change was performed."
+  ]
+}
