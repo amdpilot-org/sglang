@@ -1,5 +1,6 @@
 """Unit tests for DeepSeekV4Detector DSML streaming — no server, no model loading."""
 
+import json
 from unittest.mock import patch
 
 from sglang.srt.entrypoints.openai.protocol import Function, Tool
@@ -121,6 +122,110 @@ class TestDeepSeekV4Streaming(CustomTestCase):
         # No half-formed call: the failure can land between a tool's name and its
         # arguments, so an argument-less named call must not reach the client.
         self.assertEqual(first.calls, [])
+
+    def test_repairs_schema_disambiguated_argument_envelopes(self):
+        """V4 sometimes adds OpenAI transport keys inside the DSML payload."""
+        cases = [
+            {"arguments": {"city": "SF"}},
+            {"arguments": json.dumps({"city": "SF"})},
+            {"args": {"city": "SF"}},
+            {"arguments": {"arguments": {"city": "SF"}}},
+            {
+                "arguments": {
+                    "arguments": {
+                        "arguments": {"arguments": {"city": "SF"}}
+                    }
+                }
+            },
+        ]
+        for payload in cases:
+            with self.subTest(payload=payload):
+                text = _wrapped(_invoke("get_weather", json.dumps(payload)))
+                result = DeepSeekV4Detector().detect_and_parse(text, self.tools)
+                self.assertEqual(json.loads(result.calls[0].parameters), {"city": "SF"})
+
+    def test_streaming_repairs_envelope_before_emitting_arguments(self):
+        text = _wrapped(
+            _invoke("get_weather", json.dumps({"arguments": {"city": "SF"}}))
+        )
+        _, calls = self._feed([text[i : i + 3] for i in range(0, len(text), 3)])
+
+        self.assertEqual("".join(c.parameters for c in calls), '{"city": "SF"}')
+
+    def test_preserves_declared_arguments_parameter(self):
+        tools = [
+            Tool(
+                type="function",
+                function=Function(
+                    name="forward",
+                    parameters={
+                        "type": "object",
+                        "properties": {"arguments": {"type": "object"}},
+                    },
+                ),
+            )
+        ]
+        payload = {"arguments": {"city": "SF"}}
+        result = DeepSeekV4Detector().detect_and_parse(
+            _wrapped(_invoke("forward", json.dumps(payload))), tools
+        )
+
+        self.assertEqual(json.loads(result.calls[0].parameters), payload)
+
+    def test_preserves_unknown_or_corrupted_inner_payload(self):
+        for payload in (
+            {"arguments": {"unknown": "value"}},
+            {"arguments": 'not {"valid": json'},
+        ):
+            with self.subTest(payload=payload):
+                result = DeepSeekV4Detector().detect_and_parse(
+                    _wrapped(_invoke("get_weather", json.dumps(payload))), self.tools
+                )
+                self.assertEqual(json.loads(result.calls[0].parameters), payload)
+
+    def test_preserves_irrecoverable_or_schema_ambiguous_payloads(self):
+        """Normalization must not guess at damaged content or free-form schemas."""
+        cases = [
+            (
+                self.tools,
+                {"arguments": {"command": "printf okprintf ok"}},
+                {"arguments": {"command": "printf okprintf ok"}},
+            ),
+            (
+                self.tools,
+                {
+                    "arguments": {
+                        "arguments": {
+                            "arguments": {
+                                "arguments": '{"city":"SF"'
+                            }
+                        }
+                    }
+                },
+                {"arguments": '{"city":"SF"'},
+            ),
+            (
+                [
+                    Tool(
+                        type="function",
+                        function=Function(
+                            name="get_weather",
+                            parameters={
+                                "type": "object",
+                                "additionalProperties": True,
+                            },
+                        ),
+                    )
+                ],
+                {"arguments": {"city": "SF"}},
+                {"arguments": {"city": "SF"}},
+            ),
+        ]
+        for tools, payload, expected in cases:
+            with self.subTest(payload=payload):
+                text = _wrapped(_invoke("get_weather", json.dumps(payload)))
+                result = DeepSeekV4Detector().detect_and_parse(text, tools)
+                self.assertEqual(json.loads(result.calls[0].parameters), expected)
 
 
 if __name__ == "__main__":
