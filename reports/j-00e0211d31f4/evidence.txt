@@ -1,0 +1,67 @@
+Correction generation 1 evidence, captured 2026-09-12 UTC
+
+Prepared base
+  commit: 358c163250ad3b1f62939b01ce1314a0a31a0365
+  candidate: https://github.com/amdpilot-org/sglang/pull/1326
+  candidate commit: 0f6ace775da584a0bfe330ff908470574b14fb7c
+  independent review: https://github.com/amdpilot-org/sglang/pull/3240
+
+Exact candidate reproduction
+  node docs/scripts/check_cookbook_configs.mjs
+  exit 0: cookbook config check: OK
+
+  Added three temporary fixtures to the exact candidate checkout:
+    docs/cookbook/review-multiline.mdx:
+      uv pip install \
+        sglang
+    docs/cookbook/review-case.mdx:
+      uv pip install SGLang
+    docs/docs/get-started/review-scope.mdx:
+      uv pip install sglang
+  node docs/scripts/check_cookbook_configs.mjs
+  exit 0: cookbook config check: OK (unexpected; all three bypassed the guard)
+
+Candidate behavior retained
+  Restored the edited Qwen3.8-Flash-Next sentence to plain
+  `uv pip install sglang` in the exact candidate checkout.
+  node docs/scripts/check_cookbook_configs.mjs
+  exit 1: Qwen3.8-Flash-Next.mdx:34 missing --prerelease=allow
+
+Corrected checker adversarial regression
+  Added the same three temporary fixtures to the corrected checkout.
+  node docs/scripts/check_cookbook_configs.mjs
+  exit 1 with three failures:
+    cookbook/review-case.mdx:2
+    cookbook/review-multiline.mdx:2
+    docs/get-started/review-scope.mdx:2
+  Removed all temporary fixtures.
+
+Corrected tree
+  node docs/scripts/check_cookbook_configs.mjs
+  exit 0: cookbook config check: OK
+  git diff --check
+  exit 0
+
+Independent resolver reproduction
+  uv versions were installed in the private runtime directory
+  /tmp/amdpilot-repo-j-00e0211d31f4/uv-repro.
+
+  printf 'sglang\n' | uv-0.11.16 pip compile - \
+    --python-platform x86_64-manylinux_2_34 --python-version 3.12
+  exit 0: sglang==0.5.9, torch==2.9.1
+
+  printf 'sglang<0.5.18\n' | uv-0.12.0 pip compile - \
+    --python-platform x86_64-manylinux_2_34 --python-version 3.12
+  exit 0: sglang==0.5.17, flash-attn-4==4.0.0b19
+
+  printf 'sglang<0.5.18\n' | uv-0.11.16 pip compile - \
+    --prerelease=allow --python-platform x86_64-manylinux_2_34 \
+    --python-version 3.12
+  exit 0: sglang==0.5.17, flash-attn-4==4.0.0b19
+
+Scope limitation
+  The repository can correct its recommendations and guard them against
+  recurrence, but it cannot change an already installed uv 0.11.16 resolver.
+  A user who manually runs plain `uv pip install sglang` remains vulnerable.
+  No package metadata or resolver source change was made without evidence that
+  it would be a safe, compatible mitigation.
