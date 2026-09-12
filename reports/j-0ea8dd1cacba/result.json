@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38470",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes the primary unrecorded-event race and implements the opt-in loader-thread handoff, but its abort path is not failure-safe: a secondary exception while releasing layer events escapes the daemon before an ack is published or enqueue completion is marked, leaving later work able to hang.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-0ea8dd1cacba/venv/bin/python /tmp/j-0ea8dd1cacba-evidence/gpu_recorded_gate.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "On AMD Instinct MI350X/ROCm 7.2, waiting on the base's unrecorded LayerLoadingEvent allowed the consumer copy to observe 0/4096 producer values."
+    },
+    {
+      "command": "PYTHONPATH=python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-0ea8dd1cacba/venv/bin/python /tmp/j-0ea8dd1cacba-evidence/gpu_recorded_gate.py (candidate ce81df8)",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate's CPU recorded gate produced 4096/4096 expected values with real GPU stream/event/copy ordering."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-0ea8dd1cacba/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_async_load_enqueue.py test/registered/unit/mem_cache/test_hicache_staged_write_back_dispatch.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression suite: 19 passed, 1 skipped."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-0ea8dd1cacba/venv/bin/python /tmp/j-0ea8dd1cacba-evidence/adversarial_async.py -v",
+      "exit_code": 0,
+      "what_was_measured": "Independent normal failure release/ack and FIFO shutdown drain: 2 tests passed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-0ea8dd1cacba/venv/bin/python /tmp/j-0ea8dd1cacba-evidence/adversarial_abort_failure.py",
+      "exit_code": 1,
+      "what_was_measured": "A secondary event-record failure in the abort path escaped the loader loop; mark_enqueue_done was called 0 times and 0 acknowledgements were published."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X, gfx950, ROCm/HIP 7.2.26015; base 0/4096 versus candidate 4096/4096 expected values in the recorded-event ordering regression.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "If producer_event.complete(), timing-event construction, event recording, or ack publication raises while handling a loader failure, the second exception escapes the daemon before mark_enqueue_done; no ack is published and slot rotation can block indefinitely."
+  ],
+  "remaining_limitations": "No H100/CUDA device, TP=8 deployment, model weights, or cudaMemcpyBatchAsync direct-backend serving workload was available. H100 throughput and latency claims remain upstream measurements. The local GPU result validates ROCm event/copy ordering, not CUDA-specific performance or end-to-end serving throughput."
+}
