@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33693",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source already detects DeepSeek-V4-Flash-0731 routed experts as packed FP4 and routes an H20/SM90 non-A2A launch to flashinfer_mxfp4. The legacy FP8 route reproduces the reported Hidden size mismatch because checkpoint hidden_size=4096 but packed I8 expert weights have physical K=2048.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4d0012c4c996/venv/bin/python reports/j-4d0012c4c996/reproduce_hidden_size_route.py",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, the actual production fused_experts_impl shape gate rejected the 0731 packed shape on the legacy FP8 route, accepted it on the FP4 route, accepted a true-FP8 boundary, and rejected malformed FP4. Kernel preparation was intercepted after the shape checks."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4d0012c4c996/venv/bin/python reports/j-4d0012c4c996/test_checkpoint_detection.py -v",
+      "exit_code": 0,
+      "what_was_measured": "Six deterministic cases covered packed I8 detection, true FP8, missing metadata, remote path, H20/SM90 MXFP4 selection, and the true-FP8 H20 boundary."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4d0012c4c996/venv/bin/python -c 'from sglang.srt.configs.deepseek_v4 import try_detect_fp4_experts; assert try_detect_fp4_experts(\"/tmp/amdpilot-repo-j-4d0012c4c996/dsv4-header-fixture\") is True'",
+      "exit_code": 0,
+      "what_was_measured": "Current source classified the range-fetched real DeepSeek-V4-Flash-0731 safetensors shard header as packed FP4."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4d0012c4c996/venv/bin/python test/registered/unit/test_model_overrides.py -k test_deepseek_v4_overrides_at_callable_level -v",
+      "exit_code": 1,
+      "what_was_measured": "Existing test is host-platform-sensitive on gfx950: its SM100 mock leaves is_hip=true, so the NVIDIA-only branch is skipped. A complete NVIDIA mock passes in the report-specific regression."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "One assigned AMD Instinct MI350X gfx950 ran production fused_experts_impl shape checks; see reproduce_hidden_size_route.log. No CUDA/H20 kernel execution is claimed.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported NVIDIA H20/SM90 hardware was unavailable; the assigned GPU was gfx950.",
+    "The 166,878,536,440-byte DeepSeek-V4-Flash-0731 weights were not downloaded, so full model loading and HTTP serving were not reproduced.",
+    "FlashInfer MXFP4 CUDA execution, semantic accuracy, and distributed TP/EP behavior remain unverified.",
+    "The issue omitted launch flags and TP/EP configuration, and the cited image suffix e4c4faf8 was not a fetchable public commit."
+  ]
+}
