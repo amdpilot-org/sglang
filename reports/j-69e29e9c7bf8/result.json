@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31766",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved the candidate's fd-aware bounded LRU and socket lifecycle fixes, but replaced its active-sender cache overflow with condition-variable backpressure. Also added a bounded retry for real libzmq asynchronous fd retirement. Under RLIMIT_NOFILE=128, the exact candidate failed after 38 locked endpoints; the corrected real-PyZMQ regression holds the cache at its derived bound and completes after a sender releases.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-69e29e9c7bf8/venv/bin/python /job/evidence-j-69e29e9c7bf8/probe_socket_cache.py --limit 128 --count 1000 --hold-locks (candidate 52a17bf276b24ea1f62f93c2c43f4ffca182c217)",
+      "exit_code": 1,
+      "what_was_measured": "The exact candidate derived cache_size=21, completed and locked 38 distinct endpoints, overflowed the cache to 38, and real PyZMQ raised ZMQError: Too many open files during socket/monitor creation."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-69e29e9c7bf8/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_common_kv_manager_socket_cache.py (candidate 52a17bf276b24ea1f62f93c2c43f4ffca182c217)",
+      "exit_code": 1,
+      "what_was_measured": "Seven candidate tests passed and its real low-RLIMIT sequential test failed at get_monitor_socket with Too many open files on the prepared host, independently exposing transient libzmq fd retirement during rapid churn."
+    },
+    {
+      "command": "env -u SGLANG_DISAGGREGATION_ZMQ_SOCKET_CACHE_SIZE PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-69e29e9c7bf8/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_common_kv_manager_socket_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "Nine corrected tests passed, including real-PyZMQ sequential churn and active-endpoint backpressure under soft RLIMIT_NOFILE=128."
+    },
+    {
+      "command": "env -u SGLANG_DISAGGREGATION_ZMQ_SOCKET_CACHE_SIZE PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-69e29e9c7bf8/venv/bin/python -m pytest -q test/registered/unit/disaggregation test/registered/unit/test_environ.py",
+      "exit_code": 0,
+      "what_was_measured": "380 tests and 47 subtests passed across the broader disaggregation and environment suites."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/environ.py python/sglang/srt/disaggregation/common/conn.py test/registered/unit/disaggregation/test_common_kv_manager_socket_cache.py reports/j-69e29e9c7bf8/investigation.md reports/j-69e29e9c7bf8/result.json",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, syntax, spelling, registry, and repository policy hooks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reproduced defect and correction are in host-side CommonKVManager/PyZMQ descriptor management; no GPU kernel participates. The unavailable 16x H800 distributed workload was not represented by a smaller fixture."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reporter's 16x NVIDIA H800 full-model, multi-node workload and weights were unavailable; validation covers the actual host-side manager and real PyZMQ path only.",
+    "No GPU execution was needed for this descriptor lifecycle, and no native source changed.",
+    "An explicitly oversized SGLANG_DISAGGREGATION_ZMQ_SOCKET_CACHE_SIZE remains capable of exceeding the descriptor budget because explicit configuration intentionally overrides the derived default."
+  ]
+}

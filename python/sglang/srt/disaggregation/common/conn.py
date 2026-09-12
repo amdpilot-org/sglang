@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import dataclasses
+import errno
 import logging
 import threading
 import time
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
@@ -217,10 +218,14 @@ class CommonKVManager(BaseKVManager):
         logger.debug(f"kv manager bind to {self.local_ip}:{self.rank_port}")
 
         self.request_status: Dict[int, KVPoll] = {}
-        self._socket_cache: Dict[str, zmq.Socket] = {}
+        self._socket_cache: OrderedDict[str, zmq.Socket] = OrderedDict()
         self._monitor_cache: Dict[str, zmq.Socket] = {}
         self._socket_send_locks: Dict[str, threading.Lock] = {}
         self._socket_lock = threading.Lock()
+        self._socket_available = threading.Condition(self._socket_lock)
+        self._socket_cache_size = max(
+            1, envs.SGLANG_DISAGGREGATION_ZMQ_SOCKET_CACHE_SIZE.get()
+        )
         self.failure_records: Dict[int, str] = {}
         self.failure_lock = threading.Lock()
 
@@ -893,39 +898,96 @@ class CommonKVManager(BaseKVManager):
                     except zmq.ZMQError:
                         disconnected = True
                 if not disconnected:
+                    self._socket_cache.move_to_end(endpoint)
                     return sock
-                sock.close(linger=0)
-                if monitor is not None:
-                    monitor.close()
-                self._socket_cache.pop(endpoint, None)
-                self._monitor_cache.pop(endpoint, None)
+                self._close_cached_socket(endpoint)
 
-            sock = self._zmq_ctx.socket(zmq.PUSH)
-            if is_ipv6:
-                sock.setsockopt(zmq.IPV6, 1)
-            sock.setsockopt(zmq.RECONNECT_IVL, -1)
-            sock.setsockopt(zmq.SNDTIMEO, 30000)
-            sock.setsockopt(zmq.LINGER, 0)
-            sock.setsockopt(zmq.TCP_KEEPALIVE, 1)
-            sock.setsockopt(zmq.TCP_KEEPALIVE_IDLE, 30)
-            sock.setsockopt(zmq.TCP_KEEPALIVE_INTVL, 5)
-            sock.setsockopt(zmq.TCP_KEEPALIVE_CNT, 3)
-            sock.connect(endpoint)
+            # Do not close a socket while another transfer thread is sending on
+            # it, and do not exceed the descriptor-safe cache bound. Waiting on
+            # the condition releases _socket_lock so current senders and cached
+            # endpoint lookups can finish and make an entry evictable.
+            while len(self._socket_cache) >= self._socket_cache_size:
+                if not self._evict_idle_socket():
+                    self._socket_available.wait(timeout=0.1)
+
+            fd_retry_deadline = time.monotonic() + 1.0
+            while True:
+                sock = None
+                try:
+                    sock = self._zmq_ctx.socket(zmq.PUSH)
+                    if is_ipv6:
+                        sock.setsockopt(zmq.IPV6, 1)
+                    sock.setsockopt(zmq.RECONNECT_IVL, -1)
+                    sock.setsockopt(zmq.SNDTIMEO, 30000)
+                    sock.setsockopt(zmq.LINGER, 0)
+                    sock.setsockopt(zmq.TCP_KEEPALIVE, 1)
+                    sock.setsockopt(zmq.TCP_KEEPALIVE_IDLE, 30)
+                    sock.setsockopt(zmq.TCP_KEEPALIVE_INTVL, 5)
+                    sock.setsockopt(zmq.TCP_KEEPALIVE_CNT, 3)
+                    sock.connect(endpoint)
+                    monitor = sock.get_monitor_socket(zmq.EVENT_DISCONNECTED)
+                    break
+                except Exception as exc:
+                    if sock is not None:
+                        try:
+                            sock.disable_monitor()
+                        except zmq.ZMQError:
+                            pass
+                        sock.close(linger=0)
+                    if not isinstance(exc, zmq.ZMQError) or exc.errno != errno.EMFILE:
+                        raise
+                    if time.monotonic() >= fd_retry_deadline:
+                        raise
+                    # libzmq releases the fds of close(linger=0) sockets on its
+                    # I/O thread. Briefly throttle rapid endpoint churn until
+                    # that asynchronous cleanup catches up.
+                    time.sleep(0.01)
             self._socket_cache[endpoint] = sock
-            self._monitor_cache[endpoint] = sock.get_monitor_socket(
-                zmq.EVENT_DISCONNECTED
-            )
+            self._monitor_cache[endpoint] = monitor
             self._socket_send_locks.setdefault(endpoint, threading.Lock())
             return sock
+
+    def _close_cached_socket(self, endpoint: str):
+        sock = self._socket_cache.pop(endpoint, None)
+        monitor = self._monitor_cache.pop(endpoint, None)
+        if sock is not None:
+            try:
+                sock.disable_monitor()
+            except zmq.ZMQError:
+                pass
+        if monitor is not None:
+            monitor.close(linger=0)
+        if sock is not None:
+            sock.close(linger=0)
+
+    def _evict_idle_socket(self) -> bool:
+        for endpoint in list(self._socket_cache):
+            send_lock = self._socket_send_locks.get(endpoint)
+            if send_lock is not None and not send_lock.acquire(blocking=False):
+                continue
+            try:
+                self._close_cached_socket(endpoint)
+                return True
+            finally:
+                if send_lock is not None:
+                    send_lock.release()
+        return False
 
     def _send_multipart_locked(
         self, endpoint: str, parts: List[bytes], is_ipv6: bool = False
     ):
         # Cached sockets are shared across sender threads and zmq sockets are
         # not thread-safe; serialize sends per endpoint.
-        sock = self._connect(endpoint, is_ipv6=is_ipv6)
-        with self._socket_send_locks[endpoint]:
+        with self._socket_lock:
+            send_lock = self._socket_send_locks.setdefault(endpoint, threading.Lock())
+        send_lock.acquire()
+        try:
+            sock = self._connect(endpoint, is_ipv6=is_ipv6)
             sock.send_multipart(parts)
+        finally:
+            send_lock.release()
+            with self._socket_available:
+                self._socket_available.notify_all()
 
     def get_mha_kv_ptrs_with_pp(
         self, src_kv_ptrs: List[int], dst_kv_ptrs: List[int]
