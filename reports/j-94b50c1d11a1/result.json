@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34740",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes vocabulary-dependent simulated token ID 100 and enforces a strict token-space bound even for oversized decode events. It does not fully resolve the original byte-completeness contract: forced recovery can finalize an incomplete UTF-8 prefix and permanently corrupt a character completed by the next event.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-94b50c1d11a1/venv/bin/python /job/review-evidence-j-94b50c1d11a1/repro_detok.py (recorded base source)",
+      "exit_code": 0,
+      "what_was_measured": "Original failure reproduced: 1,024- and 131,072-token invalid-byte streams retained equally large live decode windows with no emitted or committed text. Raw output: /job/review-evidence-j-94b50c1d11a1/base-repro.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-94b50c1d11a1/venv/bin/python -m pytest -q test/registered/unit/managers/test_detokenizer_incremental_window.py test/registered/unit/managers/test_trim_matched_stop.py test/registered/unit/spec/test_simulated_acceptance_token.py (candidate 084b94f67bf37874a070e7e36199857bde662f25)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and neighboring stop-trimming suite passed: 15 passed. Raw output: /job/review-evidence-j-94b50c1d11a1/candidate-regression.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-94b50c1d11a1/venv/bin/python /job/review-evidence-j-94b50c1d11a1/repro_detok.py (candidate 084b94f67bf37874a070e7e36199857bde662f25)",
+      "exit_code": 0,
+      "what_was_measured": "Oversized invalid streams ended with a zero-token live window, but a 64-token stalled event ending in byte E4 followed by B8 AD produced replacement characters instead of 中. boundary_text_equal=false. Raw output: /job/review-evidence-j-94b50c1d11a1/candidate-adversarial.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-94b50c1d11a1/venv/bin/python /job/review-evidence-j-94b50c1d11a1/gpu_candidate.py (candidate 084b94f67bf37874a070e7e36199857bde662f25)",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, source imported from the checkout, fixture safe token ID 64 was resolved, and the synchronized ROCm tensor path produced [64, 64, 64, 64]. Raw output: /job/review-evidence-j-94b50c1d11a1/candidate-gpu.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI350X, reported by rocminfo as gfx950 and by Torch capability (9, 5), executed the focused candidate tensor path with Torch 2.11.0+rocm7.2. No model-serving or distributed workload was run.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "At the 64-token recovery threshold, an event ending in the incomplete UTF-8 prefix E4 is force-committed as U+FFFD; a following event containing B8 AD can no longer complete U+4E2D, so candidate output differs from decoding the complete token sequence.",
+    "Complete U+FFFD output is still classified by the character heuristic as stalled and may be delayed until the 64-token threshold rather than being recognized immediately as complete text."
+  ],
+  "remaining_limitations": [
+    "DeepSeek-V4-Pro weights and its exact tokenizer were unavailable, so its semantics were not directly verified.",
+    "The reported eight-GPU TP/DP/EAGLE serving workload, throughput, TTFT, and distributed routing were not reproduced.",
+    "The single-gfx950 deterministic fixture qualifies focused Python and tensor behavior only; it does not qualify a different model architecture.",
+    "No native source changed and repository-environment.json declares native=null, so no native rebuild was applicable."
+  ]
+}
