@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38899",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "DSpark compact verification now lets a forced SPS profiling budget bypass the uninitialized-table verify-all cache, while preserving that cache for startup and normal no-table serving. Speculative mRoPE construction now maps packed ragged tokens to request-specific deltas through the QO indptr and leaves CUDA Graph tail padding at zero.",
+  "tests": [
+    {
+      "command": "JOB_WORKDIR=/job/artifacts PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d0964f71c779/venv/bin/python -m pytest -q test/registered/spec/dspark/test_dspark_scheduler.py::TestForcedBudgetLayout::test_forced_budget_bypasses_uninitialized_table_verify_all_cache test/registered/spec/dspark/test_ragged_verify.py::TestRaggedTargetVerifyGeometry::test_spec_mrope_positions_follow_packed_rows_and_zero_graph_padding",
+      "exit_code": 1,
+      "what_was_measured": "Pre-fix regression: the forced budget never reached _schedule_verify_lens, and packed mRoPE positions assigned incorrect per-request deltas and nonzero graph padding. Both tests failed before the production changes."
+    },
+    {
+      "command": "JOB_WORKDIR=/job/artifacts PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d0964f71c779/venv/bin/python -m pytest -q test/registered/spec/dspark/test_dspark_scheduler.py test/registered/spec/dspark/test_ragged_verify.py",
+      "exit_code": 0,
+      "what_was_measured": "Post-fix focused DSpark scheduler and ragged verification suite: 37 tests and 18 subtests passed."
+    },
+    {
+      "command": "JOB_WORKDIR=/job/artifacts PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d0964f71c779/venv/bin/python <reports/j-d0964f71c779/gpu_mrope_check.py>",
+      "exit_code": 0,
+      "what_was_measured": "Actual ForwardBatch.compute_spec_mrope_positions execution on AMD Instinct MI355X for batch_size=48, graph_tokens=640, real_tokens=575 and padding_tokens=65. Compared with an independently constructed CPU row-by-row reference; output shape was (3, 640) and max absolute error was 0."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d0964f71c779/venv/bin/python -m pre_commit run --files python/sglang/srt/speculative/dspark_components/dspark_planner.py python/sglang/srt/model_executor/forward_batch_info.py test/registered/spec/dspark/test_dspark_scheduler.py test/registered/spec/dspark/test_ragged_verify.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository formatting, lint, spelling, and registered-test validation hooks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "PyTorch 2.11.0+rocm7.2 reported one AMD Instinct MI355X. The 48-request, 640-token mRoPE check executed tensors and searchsorted on cuda:0, synchronized successfully, and matched the independent CPU reference exactly."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": "The full two-GPU Qwen DSpark profiling server from the NVIDIA H20 report was not run: this prepared environment exposes one AMD MI355X and does not provide the reported model checkpoints. The planner profiling contract and the reported 48-request/640-token positional shape were exercised directly through their production methods. No native C++ or FlyDSL files were changed, so no native rebuild was applicable. Source paths: python/sglang/srt/speculative/dspark_components/dspark_planner.py and python/sglang/srt/model_executor/forward_batch_info.py. Native paths: none. Raw validation output is retained in reports/j-d0964f71c779/validation.txt."
+}

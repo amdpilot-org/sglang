@@ -1,7 +1,9 @@
+import types
 import unittest
 
 import torch
 
+from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.speculative.ragged_verify import (
     RaggedVerifyLayout,
     build_ragged_target_verify_geometry,
@@ -20,6 +22,36 @@ _GRID = [8, 16, 24, 32, 64]
 
 
 class TestRaggedTargetVerifyGeometry(CustomTestCase):
+    def test_spec_mrope_positions_follow_packed_rows_and_zero_graph_padding(self):
+        layout = RaggedVerifyLayout(
+            verify_lens=torch.tensor([3, 1], dtype=torch.int32),
+            graph_num_tokens=8,
+            extend_start_loc=torch.tensor([0, 3], dtype=torch.int32),
+            qo_indptr_device=torch.tensor([0, 3, 4], dtype=torch.int32),
+        )
+        forward_batch = ForwardBatch.__new__(ForwardBatch)
+        forward_batch.seq_lens = torch.tensor([10, 20], dtype=torch.int32)
+        batch = types.SimpleNamespace(
+            multimodal_inputs=[
+                types.SimpleNamespace(mrope_position_delta=torch.tensor([[100]])),
+                types.SimpleNamespace(mrope_position_delta=torch.tensor([[200]])),
+            ],
+            spec_info=types.SimpleNamespace(
+                positions=torch.tensor([10, 11, 12, 20, -1, -1, -1, -1]),
+                ragged_verify_layout=layout,
+            ),
+        )
+
+        forward_batch.compute_spec_mrope_positions(
+            types.SimpleNamespace(device=torch.device("cpu")), batch
+        )
+
+        expected = torch.tensor([110, 111, 112, 220, 0, 0, 0, 0])
+        self.assertEqual(tuple(forward_batch.mrope_positions.shape), (3, 8))
+        torch.testing.assert_close(forward_batch.mrope_positions[0], expected)
+        torch.testing.assert_close(forward_batch.mrope_positions[1], expected)
+        torch.testing.assert_close(forward_batch.mrope_positions[2], expected)
+
     def test_mixed_verify_lens_geometry(self):
         layout = RaggedVerifyLayout.from_verify_lens(
             verify_lens_cpu=[8, 1, 3], device=_DEVICE, grid=_GRID
