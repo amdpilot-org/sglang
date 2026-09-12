@@ -81,6 +81,12 @@ struct PDRequestContext<'a> {
 #[derive(Clone, Copy)]
 struct BreakerOutcomesRecorded;
 
+/// Marker for failures that happened before a PD attempt selected and sent to
+/// either upstream. PD dispatch is not idempotent, so a response without this
+/// marker must not cause the same request ID to be replayed.
+#[derive(Clone, Copy)]
+struct RetryableBeforePDDispatch;
+
 impl PDRouter {
     fn worker_endpoint_url(worker: &dyn Worker, endpoint: &str) -> String {
         api_path(worker.base_url(), endpoint)
@@ -190,15 +196,35 @@ impl PDRouter {
 
     fn handle_server_selection_error(error: String) -> Response {
         error!("Failed to select PD pair error={}", error);
-        error::service_unavailable(
+        let mut response = error::service_unavailable(
             "server_selection_failed",
             format!("No available servers: {}", error),
-        )
+        );
+        response.extensions_mut().insert(RetryableBeforePDDispatch);
+        response
     }
 
     fn handle_serialization_error(error: impl std::fmt::Display) -> Response {
         error!("Failed to serialize request error={}", error);
         error::internal_error("serialization_failed", "Failed to serialize request")
+    }
+
+    fn should_retry_pd_response(response: &Response) -> bool {
+        if !is_retryable_status(response.status()) {
+            return false;
+        }
+
+        let safe_before_dispatch = response
+            .extensions()
+            .get::<RetryableBeforePDDispatch>()
+            .is_some();
+        if !safe_before_dispatch {
+            warn!(
+                status = %response.status(),
+                "Not retrying PD request after possible upstream dispatch because PD attempts are not idempotent"
+            );
+        }
+        safe_before_dispatch
     }
 
     fn get_generate_batch_size(req: &GenerateRequest) -> Option<usize> {
@@ -480,7 +506,7 @@ impl PDRouter {
                     }
                 }
             },
-            |res, _attempt| is_retryable_status(res.status()),
+            |res, _attempt| Self::should_retry_pd_response(res),
             |delay, attempt| {
                 // Layer 3 worker metrics (PD mode uses both prefill and decode workers)
                 Metrics::record_worker_retry(metrics_labels::WORKER_PREFILL, endpoint);
@@ -1788,6 +1814,26 @@ mod tests {
             PDRouter::build_chat_request_text(&body).is_none(),
             "empty conversation text should produce None, not Some(\"\")"
         );
+    }
+
+    #[test]
+    fn test_pd_retry_is_allowed_only_before_dispatch() {
+        let selection_error =
+            PDRouter::handle_server_selection_error("No prefill workers available".to_string());
+        assert_eq!(selection_error.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(PDRouter::should_retry_pd_response(&selection_error));
+
+        let dispatched_failure = error::bad_gateway(
+            "decode_server_error",
+            "decode transport failed after dispatch".to_string(),
+        );
+        assert!(!PDRouter::should_retry_pd_response(&dispatched_failure));
+
+        let mut client_error = error::bad_request("invalid_request", "invalid request");
+        client_error
+            .extensions_mut()
+            .insert(RetryableBeforePDDispatch);
+        assert!(!PDRouter::should_retry_pd_response(&client_error));
     }
 
     #[tokio::test]
