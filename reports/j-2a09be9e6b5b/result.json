@@ -1,0 +1,32 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35150",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Verified and corrected one issue-specific GDN numerical mismatch: width-one TARGET_VERIFY retained sigmoid(beta) in FP32 while packed decode materialized it in the BF16 activation dtype before the recurrent update. On gfx950 before the change, all 128 output elements differed with max absolute error 0.000244140625. After the verify-only GDN dtype alignment, packed decode and TARGET_VERIFY output and FP32 intermediate state are bitwise equal at four beta boundary/central values. This is a partial correction only; the reported Qwen3.8 cumulative model-level divergence was not reproduced because the required target/draft weights and NVIDIA NVFP4 environment were unavailable, and upstream evidence reports remaining divergence after this alignment.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-2a09be9e6b5b/triton-cache HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-2a09be9e6b5b/venv/bin/python -m pytest -q -s test/registered/kernels/ops/attention/test_fused_verify_triton_gdn.py::test_target_verify_matches_packed_decode_beta_semantics",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before gfx950 comparison of packed GDN decode against width-one TARGET_VERIFY: 128/128 BF16 output elements mismatched; max absolute difference 0.000244140625. Raw log: /tmp/amdpilot-repo-j-2a09be9e6b5b/logs/failing-before-beta-parity.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-2a09be9e6b5b/triton-cache HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-2a09be9e6b5b/venv/bin/python -m pytest -q -s test/registered/kernels/ops/attention/test_fused_verify_triton_gdn.py",
+      "exit_code": 0,
+      "what_was_measured": "17 gfx950 tests passed after the correction. Exact output and FP32 state parity was checked for b=-20, -0.5, 0, and 20; existing multi-step, direct state-update, and scratch-pitch cases also passed. Raw log: /tmp/amdpilot-repo-j-2a09be9e6b5b/logs/passing-after-gdn-suite.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-2a09be9e6b5b/triton-cache HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-2a09be9e6b5b/venv/bin/python -m pytest -q -s test/registered/attention/test_gdn_noncontiguous_stride.py test/registered/attention/test_kda_kernels.py",
+      "exit_code": 0,
+      "what_was_measured": "23 gfx950 tests and 3 subtests passed, independently covering non-contiguous GDN layouts and the KDA branch that intentionally retains its prior FP32 beta expression. Raw log: /tmp/amdpilot-repo-j-2a09be9e6b5b/logs/boundary-gdn-kda.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "All numerical tests ran with HIP_VISIBLE_DEVICES=0 on the assigned AMD Instinct MI350X, gfx950, unique ID 0x6e4208b780600d88. ROCm 7.2 / PyTorch 2.11.0+rocm7.2 came from the prepared environment.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The RadixArk/Qwen3.8-27B-NVFP4 target and RadixArk/Qwen3.8-27B-DSpark draft weights were not available, so the 96-token serving reproduction and accumulated recurrent-state drift were not executed.",
+    "The assigned gfx950 ROCm GPU cannot reproduce the report's CUDA 13, sm_120, Triton GDN, or NVIDIA NVFP4 environment.",
+    "This correction addresses the independently isolated beta source-dtype mismatch only. Upstream issue evidence says it delays or reduces divergence but does not eliminate the model-level bug.",
+    "No full model, serving-path, distributed, or semantic-accuracy claim is made. The deterministic tiny Llama fixture is not a GDN/Qwen3.8 architecture fixture and therefore would not qualify this issue."
+  ]
+}
