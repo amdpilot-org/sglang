@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38099",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced both reported NIXL staging worker defects on the prepared main checkout: an asynchronous transfer read a shared staging buffer after the next destination overwrote it, and a deferred destination caused completed destinations to be replayed while submitted handles remained live. The fix waits for each staged transfer before reusing its worker-local source buffer, drains all submitted handles before a deferred chunk is dequeued again, and records completed destination session identities on the queued chunk so retries process only unfinished destinations.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c2f5542ddd89/venv/bin/python -m pytest test/registered/unit/disaggregation/test_nixl_backend_basic.py -q -k staging_fanout",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before run on base behavior: all three regressions failed, showing A read B's staged source, A was replayed after B deferred, and unfinished mixed-memory handles survived into the next dequeue. Raw output: reports/j-c2f5542ddd89/raw/failing-before.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c2f5542ddd89/venv/bin/python -m pytest test/registered/unit/disaggregation/test_nixl_backend_basic.py -q -k staging_fanout",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after run: the three worker-level regressions passed, covering source-buffer lifetime, retry deduplication, and draining mixed VRAM/DRAM/state/aux handles before retry. Raw output: reports/j-c2f5542ddd89/raw/passing-after-focused.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c2f5542ddd89/venv/bin/python -m pytest test/registered/unit/disaggregation/test_nixl_backend_basic.py test/registered/unit/disaggregation/test_nixl_deferred_kv_release.py test/registered/unit/disaggregation/test_nixl_sender_failure_cleanup.py test/registered/unit/disaggregation/test_disaggregation_wire.py -q",
+      "exit_code": 0,
+      "what_was_measured": "103 related NIXL/disaggregation tests passed, with 14 subtests passed. Raw output: reports/j-c2f5542ddd89/raw/passing-after-suite.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validation passed. Ruff and Black were not installed in the prepared interpreter, so those separate module invocations could not run."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned single gfx950 GPU was detected as AMD Instinct MI350X with ROCm 7.2 and NIXL importable (reports/j-c2f5542ddd89/raw/environment.txt), but the reported fanout requires distinct prefill/decode endpoints and heterogeneous TP. The regression therefore exercised the actual worker and retry logic with asynchronous transfer/GPU operations simulated; no real GPU transfer was claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No multi-process or multi-node NIXL transfer was run; the assigned environment exposes only one GPU.",
+    "No model weights were loaded, so the production text corruption symptom and semantic model accuracy were not reproduced.",
+    "The tests deterministically validate worker scheduling, shared-source lifetime, completion polling, and destination retry state, but simulate NIXL completion and GPU gathers.",
+    "Ruff and Black are absent from the prepared Python environment; git diff --check and the focused Python test suites were used instead.",
+    "No native source changed and no native rebuild was applicable."
+  ],
+  "source_paths": [
+    "python/sglang/srt/disaggregation/common/utils.py",
+    "python/sglang/srt/disaggregation/nixl/conn.py",
+    "test/registered/unit/disaggregation/test_nixl_backend_basic.py"
+  ],
+  "native_paths": []
+}
