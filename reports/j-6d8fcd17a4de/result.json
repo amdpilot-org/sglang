@@ -1,0 +1,63 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19092",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "Exact candidate d8a3b79 restores controlled single-rank scheduler overlap and removes the whole-call native loader lock, but it does not safely parallelize real native Transformers/Diffusers construction. An independent adversarial probe through _load_native_with_context reproduced a process-global torch default-dtype race: requested float16/float64 contexts observed float64/float32 and left the process default at float16 instead of float32. The candidate regression replaces load_native with a sleep, so it cannot detect this real native-library behavior. The original issue is only partially addressed and its real-model performance, wake/refit, pinned checkpoint memory, distributed, and peak-memory requirements remain unresolved or unverified.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6d8fcd17a4de/venv/bin/python /job/review-evidence-j-6d8fcd17a4de/scheduler_overlap_probe.py (base 358c163)",
+      "exit_code": 1,
+      "what_was_measured": "Original sequential behavior reproduced: max_active=1, elapsed_seconds=0.4020 for two 0.20-second component loads."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6d8fcd17a4de/venv/bin/python /job/review-evidence-j-6d8fcd17a4de/scheduler_overlap_probe.py (candidate d8a3b79)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate scheduler overlap: max_active=2, elapsed_seconds=0.2021."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6d8fcd17a4de/venv/bin/python /job/review-evidence-j-6d8fcd17a4de/native_overlap_probe.py (candidate d8a3b79)",
+      "exit_code": 0,
+      "what_was_measured": "Controlled mocked native calls overlapped: max_active_native_loads=2, elapsed_seconds=0.2008."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6d8fcd17a4de/venv/bin/python /job/review-evidence-j-6d8fcd17a4de/native_dtype_race_probe.py (candidate d8a3b79)",
+      "exit_code": 1,
+      "what_was_measured": "Adversarial native construction race using Transformers' actual local_torch_dtype context: component a requested float16 but observed float64, component b requested float64 but observed float32, and global default ended float16 rather than original float32."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6d8fcd17a4de/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_parallel_component_loading.py python/sglang/multimodal_gen/test/unit/test_plain_component_loader.py python/sglang/multimodal_gen/test/unit/test_component_loader_identity.py python/sglang/multimodal_gen/test/unit/test_component_loading_order.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and nearby loader suite: 32 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6d8fcd17a4de/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_utility_ownership.py python/sglang/multimodal_gen/test/unit/test_component_quantization_admission.py python/sglang/multimodal_gen/test/unit/test_disagg_roles.py",
+      "exit_code": 0,
+      "what_was_measured": "Extended compatibility: 68 passed and 9 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6d8fcd17a4de/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_parallel_component_loading.py::test_parallel_loaded_gpu_modules_match_numpy_reference",
+      "exit_code": 0,
+      "what_was_measured": "Synthetic GPU scheduler numerical test passed against NumPy; this does not validate a real Qwen-Image/native model load."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X, torch 2.11.0+rocm7.2/HIP 7.2. Synthetic candidate GPU test passed against NumPy. No Qwen-Image weights were available."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Parallel native Transformers/Diffusers construction is not thread-safe: third-party contexts mutate process-global torch default dtype and module-registration hooks outside SGLang's narrower model_construction_lock.",
+    "The reported Qwen-Image 63.20-second module-load bottleneck and launch-time reduction remain unmeasured with real weights.",
+    "Sleep/wake restoration and post-training refit paths are unchanged and untested.",
+    "Production checkpoint mappings remain pageable; pinned checkpoint loading is not implemented or validated.",
+    "Multi-rank component loading remains sequential by design.",
+    "Peak host memory and storage pressure are neither automatically bounded nor measured with representative checkpoints."
+  ],
+  "remaining_limitations": [
+    "No Qwen-Image or representative Transformers/Diffusers model weights were available.",
+    "The available GPU qualified only the synthetic numerical scheduler test, not model architecture semantics or launch performance.",
+    "No native C/C++/CUDA/HIP source changed between base and candidate, so no native rebuild was applicable. Imports resolved to /job/repo/python for SGLang and the pinned /opt/venv packages for torch, transformers, and diffusers."
+  ]
+}
