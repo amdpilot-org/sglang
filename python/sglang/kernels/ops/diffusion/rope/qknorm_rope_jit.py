@@ -7,7 +7,9 @@ import torch
 
 from sglang.kernels.jit.utils import (
     cache_once,
+    get_jit_cuda_arch,
     is_arch_support_pdl,
+    is_hip_runtime,
     load_jit,
     make_cpp_args,
 )
@@ -21,6 +23,29 @@ logger = logging.getLogger(__name__)
 
 _SUPPORTED_DTYPES = (torch.float16, torch.bfloat16)
 _SUPPORTED_CACHE_DTYPES = (*_SUPPORTED_DTYPES, torch.float32)
+_LOGGED_PRE_AMPERE_SKIP = False
+
+
+def _is_diffusion_cuda_jit_supported() -> bool:
+    """Avoid known-bad CUDA JIT probes on pre-Ampere devices.
+
+    HIP capability numbers are not CUDA SM versions, so ROCm keeps its existing
+    behavior.
+    """
+    global _LOGGED_PRE_AMPERE_SKIP
+    if is_hip_runtime():
+        return True
+    arch = get_jit_cuda_arch()
+    if arch.major >= 8:
+        return True
+    if not _LOGGED_PRE_AMPERE_SKIP:
+        logger.info(
+            "Skipping diffusion CUDA JIT kernels on unsupported sm_%s%s",
+            arch.major,
+            arch.minor,
+        )
+        _LOGGED_PRE_AMPERE_SKIP = True
+    return False
 
 
 @cache_once
@@ -69,6 +94,8 @@ def _can_use_fused_qknorm_rope(
     pack_kv: bool,
     cache_has_full_width: bool,
 ) -> bool:
+    if not _is_diffusion_cuda_jit_supported():
+        return False
     if dtype not in _SUPPORTED_DTYPES or cache_dtype not in _SUPPORTED_CACHE_DTYPES:
         logger.warning(
             "Unsupported dtype pair (%s, %s) for JIT fused QKNorm+RoPE",
