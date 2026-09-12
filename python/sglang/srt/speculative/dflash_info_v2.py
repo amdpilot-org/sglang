@@ -153,6 +153,13 @@ class DFlashDraftInputV2(SpecInput):
             page_size=page_size,
         )
 
+        max_alloc_len = max(nxt_kv_lens)
+        row_width = int(batch.req_to_token_pool.req_to_token.shape[1])
+        assert max_alloc_len <= row_width, (
+            f"DFLASH decode over-allocation ({max_alloc_len}) exceeds req_to_token "
+            f"row width ({row_width}); page_size={page_size}, reserve={reserve}."
+        )
+
         max_top_k = 1
         uniform_top_k_value = None
         uniform_top_k = True
