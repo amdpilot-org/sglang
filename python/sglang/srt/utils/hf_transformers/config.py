@@ -216,6 +216,21 @@ class MistralModelConfigParser(ModelConfigParserBase):
         )
 
 
+def _recursive_config_update(config, overrides: dict) -> None:
+    for key, value in overrides.items():
+        current = (
+            config.get(key)
+            if isinstance(config, dict)
+            else getattr(config, key, None)
+        )
+        if isinstance(value, dict) and isinstance(current, (dict, PretrainedConfig)):
+            _recursive_config_update(current, value)
+        elif isinstance(config, dict):
+            config[key] = value
+        else:
+            setattr(config, key, value)
+
+
 @lru_cache_frozenset(maxsize=32)
 def get_config(
     model: str,
@@ -238,7 +253,7 @@ def get_config(
         if not gguf_has_sidecar_config and has_native_gguf_support(model):
             config = build_gguf_config(model)
             if model_override_args:
-                config.update(model_override_args)
+                _recursive_config_update(config, model_override_args)
             return config
         if not gguf_has_sidecar_config:
             kwargs["gguf_file"] = model
@@ -264,15 +279,11 @@ def get_config(
     )
 
     if model_override_args:
-        # A plain update() setattrs a dict-valued override straight onto the
-        # config, so '{"text_config": {...}}' on a VLM would replace the whole
-        # sub-config with a dict and break attribute access downstream.
-        for key, value in model_override_args.items():
-            current = getattr(config, key, None)
-            if isinstance(value, dict) and isinstance(current, PretrainedConfig):
-                current.update(value)
-            else:
-                setattr(config, key, value)
+        # Preserve unmentioned fields at every existing config/dict level.
+        # A plain update() would replace a VLM's text_config with a dict, while
+        # PretrainedConfig.update() still replaces nested dictionaries such as
+        # rope_parameters wholesale.
+        _recursive_config_update(config, model_override_args)
 
     if is_gguf and not gguf_has_sidecar_config:
         if config.model_type not in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES:

@@ -113,11 +113,20 @@ class TestHFTransformersLoading(unittest.TestCase):
     def test_nested_config_override_preserves_text_config(self):
         self.write_multimodal_config()
 
+        rope_parameters = {
+            "mrope_interleaved": True,
+            "mrope_section": [11, 11, 10],
+            "rope_type": "yarn",
+            "rope_theta": 10000000,
+            "partial_rotary_factor": 0.25,
+            "factor": 4.0,
+            "original_max_position_embeddings": 262144,
+        }
         config = get_config(
             self.model_path,
             trust_remote_code=False,
             local_files_only=True,
-            model_override_args={"text_config": {"max_position_embeddings": 1024}},
+            model_override_args={"text_config": {"rope_parameters": rope_parameters}},
         )
         text = get_hf_text_config(config)
 
@@ -126,8 +135,44 @@ class TestHFTransformersLoading(unittest.TestCase):
         self.assertEqual(text.model_type, "llama")
         self.assertEqual(text.hidden_size, 32)
         self.assertEqual(text.eos_token_id, 2)
-        self.assertEqual(get_context_length(text), 1024)
+        self.assertEqual(get_context_length(text), 512)
+        self.assertEqual(text.rope_parameters["rope_type"], "yarn")
+        self.assertEqual(text.rope_parameters["factor"], 4.0)
+        self.assertEqual(
+            text.rope_parameters["original_max_position_embeddings"], 262144
+        )
         self.assertEqual(config.vision_config.patch_size, 14)
+
+    def test_nested_dict_override_preserves_unmentioned_siblings(self):
+        self.write_multimodal_config()
+
+        config = get_config(
+            self.model_path,
+            trust_remote_code=False,
+            local_files_only=True,
+            model_override_args={
+                "text_config": {"rope_parameters": {"rope_theta": 20000.0}}
+            },
+        )
+
+        self.assertEqual(config.text_config.rope_parameters["rope_type"], "default")
+        self.assertEqual(config.text_config.rope_parameters["rope_theta"], 20000.0)
+
+    def test_scalar_and_new_dict_config_overrides_are_replaced(self):
+        self.write_multimodal_config()
+
+        config = get_config(
+            self.model_path,
+            trust_remote_code=False,
+            local_files_only=True,
+            model_override_args={
+                "image_token_index": 7,
+                "custom_metadata": {"source": "override"},
+            },
+        )
+
+        self.assertEqual(config.image_token_index, 7)
+        self.assertEqual(config.custom_metadata, {"source": "override"})
 
     def test_tokenizer_loading_preserves_batch_special_tokens_and_chat(self):
         self.write_config(self.text_config())
