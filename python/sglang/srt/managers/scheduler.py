@@ -3985,16 +3985,20 @@ class Scheduler(
         except KVCacheOOMError as error:
             logger.warning(
                 "Prefill allocation missed after admission for %d request(s); "
-                "returning them to the waiting queue. %s",
+                "restoring scheduler ownership. %s",
                 len(can_run_list),
                 error,
             )
+            retained_chunked_req = None
             if self.chunked_req is not None:
                 self.chunked_req.inflight_middle_chunks -= 1
                 if self.chunked_req is adder.new_chunked_req:
                     self.chunked_req = None
+                else:
+                    retained_chunked_req = self.chunked_req
             for req in can_run_list:
-                self._add_request_to_queue(req)
+                if req is not retained_chunked_req:
+                    self._add_request_to_queue(req)
             running_batch.batch_is_full = True
             return None, running_batch
 

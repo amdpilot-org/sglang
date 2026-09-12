@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34676",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1686",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1576",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/1651",
+  "candidate_commit": "b6ca9a3b9c47a1faaced6e588e46faec4693717f",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the review's duplicate scheduler ownership at the exact candidate commit, then preserved the candidate's typed allocation recovery and slot cleanup while preventing a retained active chunked request from also entering waiting_queue. Ordinary admitted requests and newly created chunked requests remain requeued after a late allocation miss.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0796a3a0b351/venv/bin/python -m pytest -vv test/registered/unit/managers/test_prefill_alloc_oom_requeue.py::TestSchedulerPrefillOOM::test_existing_chunked_req_is_not_duplicated_in_waiting_queue",
+      "exit_code": 1,
+      "what_was_measured": "At exact candidate commit b6ca9a3b9c47a1faaced6e588e46faec4693717f, a pre-existing active chunk remained Scheduler.chunked_req and was also appended to waiting_queue after KVCacheOOMError. Raw output: reports/j-0796a3a0b351/raw/candidate_counterexample_before.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0796a3a0b351/venv/bin/python -m pytest -vv test/registered/unit/managers/test_prefill_alloc_oom_requeue.py::TestSchedulerPrefillOOM::test_existing_chunked_req_is_not_duplicated_in_waiting_queue",
+      "exit_code": 0,
+      "what_was_measured": "After correction, the same active chunk retained sole ownership in Scheduler.chunked_req, its inflight counter returned to zero, and waiting_queue did not contain it. Raw output: reports/j-0796a3a0b351/raw/candidate_counterexample_after.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0796a3a0b351/venv/bin/python -m pytest -q test/registered/unit/managers/test_prefill_alloc_oom_requeue.py test/registered/unit/managers/test_prefill_adder.py",
+      "exit_code": 0,
+      "what_was_measured": "37 tests and 12 subtests passed, covering the candidate's typed allocator miss and request-slot cleanup, hybrid-Mamba admission accounting, ordinary requeue, retained active-chunk ownership, mixed active/ordinary recovery, and newly-created chunk recovery. Raw output: reports/j-0796a3a0b351/raw/focused_suite_after.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Device inventory only: one AMD Instinct MI350X, gfx950, Torch 2.11.0+rocm7.2 and ROCm 7.2.26015. Tests are deterministic CPU scheduler/allocation control-flow tests; no GPU numerical result is claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The exact Kimi-K3 TP8/DCP4 sustained-traffic reproduction was not run because only one AMD gfx950 GPU is available rather than eight NVIDIA B300 GPUs and Kimi-K3 weights were unavailable.",
+    "The deterministic tiny Llama fixture cannot exercise hybrid Mamba allocation and was not treated as evidence for this issue.",
+    "No model-semantic, distributed-workload, or GPU numerical behavior was validated; the evidence qualifies scheduler and allocator control flow only.",
+    "No native rebuild was performed because the consolidated change modifies Python only."
+  ]
+}
