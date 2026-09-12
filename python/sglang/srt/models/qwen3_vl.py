@@ -1586,6 +1586,22 @@ class Qwen3VLForConditionalGeneration(nn.Module):
     def should_apply_lora(self, module_name: str) -> bool:
         return bool(self._lora_pattern.match(module_name))
 
+    def get_hidden_dim(self, module_name: str, layer_idx: int):
+        if module_name in ("linear_fc1", "linear_fc2"):
+            vision_config = self.config.vision_config
+            merger_hidden_size = vision_config.hidden_size * (
+                vision_config.spatial_merge_size**2
+            )
+            if module_name == "linear_fc1":
+                return merger_hidden_size, merger_hidden_size
+            return merger_hidden_size, vision_config.out_hidden_size
+
+        from sglang.srt.lora.utils import get_default_hidden_dim
+
+        return get_default_hidden_dim(
+            module_name, self.config.get_text_config(), layer_idx
+        )
+
     @torch.no_grad()
     def forward(
         self,
