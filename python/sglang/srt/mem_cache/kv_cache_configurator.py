@@ -2264,7 +2264,9 @@ class KVCacheConfigurator:
 
         return token_capacity
 
-    def resolve_max_num_reqs(self, token_capacity: int) -> int:
+    def resolve_max_num_reqs(
+        self, token_capacity: int, *, log_warnings: bool = True
+    ) -> int:
         """Compute max concurrent requests (per dp worker) from the finalized
         token capacity."""
         # Estimate pool size (used as upper bound when user specifies max_running_requests)
@@ -2285,16 +2287,17 @@ class KVCacheConfigurator:
             mamba_cap = get_schedule().max_mamba_cache_size // ratio
             if mamba_cap < max_num_reqs:
                 capped_by_mamba = True
-                logger.warning(
-                    "max_running_requests is capped to %d by the mamba state "
-                    "cache (max_mamba_cache_size=%d, %d state slots per "
-                    "request). To raise it: increase --mamba-full-memory-ratio "
-                    "or --max-mamba-cache-size, or halve the state size with "
-                    "--mamba-ssm-dtype bfloat16.",
-                    mamba_cap,
-                    get_schedule().max_mamba_cache_size,
-                    ratio,
-                )
+                if log_warnings:
+                    logger.warning(
+                        "max_running_requests is capped to %d by the mamba state "
+                        "cache (max_mamba_cache_size=%d, %d state slots per "
+                        "request). To raise it: increase --mamba-full-memory-ratio "
+                        "or --max-mamba-cache-size, or halve the state size with "
+                        "--mamba-ssm-dtype bfloat16.",
+                        mamba_cap,
+                        get_schedule().max_mamba_cache_size,
+                        ratio,
+                    )
             max_num_reqs = min(max_num_reqs, mamba_cap)
 
             if max_num_reqs <= 0:
@@ -2310,6 +2313,7 @@ class KVCacheConfigurator:
             requested_per_worker is not None
             and max_num_reqs < requested_per_worker
             and not capped_by_mamba
+            and log_warnings
         ):
             logger.warning(
                 "max_running_requests was reduced from the requested %d to %d "
@@ -2328,6 +2332,8 @@ class KVCacheConfigurator:
         )
 
         available_bytes = self._profile_available_bytes(pre_model_load_memory)
+        if self._needs_aiter_workspace_reservation():
+            available_bytes = self._solve_aiter_kv_budget(available_bytes)
         config = self.config_from_budget(available_bytes)
         config.max_running_requests = self.resolve_max_num_reqs(
             config.max_total_num_tokens
@@ -2336,6 +2342,58 @@ class KVCacheConfigurator:
         config = configurator.finalize_with_max_running_requests(config)
         config.mem_fraction_static = get_schedule().mem_fraction_static
         return config
+
+    def _needs_aiter_workspace_reservation(self) -> bool:
+        """Whether AITER will allocate its request-scaled legacy workspace."""
+        return (
+            "aiter" in attention_backends()
+            and not self.is_hybrid_swa
+            and not self.use_mla_backend
+            and not envs.SGLANG_USE_AITER_UNIFIED_ATTN.get()
+        )
+
+    def _solve_aiter_kv_budget(self, available_bytes: int) -> int:
+        """Jointly fit the KV pools and AITER workspace in ``available_bytes``.
+
+        Pool sizing includes alignment, user caps, and architecture-specific fixed
+        costs, so solve against the real configurator rather than approximating it
+        as ``tokens * cell_size``. Charging the candidate budget itself is
+        conservative for non-unified pools and exact for unified allocation.
+        """
+        from sglang.srt.layers.attention.aiter_backend import (
+            get_aiter_workspace_size_bytes,
+        )
+
+        workspace_kwargs = dict(
+            num_heads=(
+                self.model_config.num_attention_heads
+                // get_parallel().attn_tp_size
+            ),
+            max_context_len=self.model_config.context_len,
+            head_dim=self.model_config.head_dim,
+        )
+
+        low, high = 0, available_bytes
+        while low < high:
+            candidate = (low + high + 1) // 2
+            config = self.config_from_budget(candidate)
+            max_num_reqs = self.resolve_max_num_reqs(
+                config.max_total_num_tokens, log_warnings=False
+            )
+            workspace_bytes = get_aiter_workspace_size_bytes(
+                max_num_reqs=max_num_reqs, **workspace_kwargs
+            )
+            if candidate + workspace_bytes <= available_bytes:
+                low = candidate
+            else:
+                high = candidate - 1
+
+        logger.info(
+            "Reserved %.2f GiB of the profiled KV budget for the AITER "
+            "attention workspace.",
+            (available_bytes - low) / (1 << 30),
+        )
+        return low
 
     def config_from_budget(
         self, budget_bytes: int, *, cap_tokens: Optional[int] = None

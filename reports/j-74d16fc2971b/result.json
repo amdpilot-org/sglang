@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/18262",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared main branch still sized KV pools from the entire profiled byte budget and allocated the request-scaled legacy AITER workspace afterward. The issue-shaped deterministic reproduction overcommitted the budget by 69,793,139,393 bytes. The correction shares the backend's exact workspace formula and binary-searches the real pool configurator/request resolver so KV pools plus workspace fit the profiled budget, including explicit request limits and aligned or architecture-specific pool sizing.",
+  "tests": [
+    {
+      "command": "SGLANG_REPRO_BEFORE=1 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-74d16fc2971b/venv/bin/python reports/j-74d16fc2971b/reproduce_before.py",
+      "exit_code": 1,
+      "what_was_measured": "Before the correction, the checked-out _resolve_memory_pool_config assigned all 219721119039 profiled bytes to 2235118 KV tokens, then derived 4096 requests and a 69793218560-byte AITER workspace, exceeding the budget by 69793139393 bytes. Raw output: reports/j-74d16fc2971b/reproduce_before.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-74d16fc2971b/venv/bin/python reports/j-74d16fc2971b/reproduce_before.py",
+      "exit_code": 0,
+      "what_was_measured": "After the correction, the same resolver fixture selected 1669878 KV tokens and 3261 requests; KV plus the 55565352960-byte workspace used 219721039872 bytes, leaving 79167 bytes of conservative headroom. Raw output: reports/j-74d16fc2971b/reproduce_after.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-74d16fc2971b/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_aiter_workspace_budget.py test/registered/unit/model_executor/test_pool_configurator.py",
+      "exit_code": 0,
+      "what_was_measured": "45 tests and 9 subtests passed, covering the issue-shaped budget, exact backend formula, request floor and ceiling, an explicit request limit, and existing pool configurator behavior. Raw output: reports/j-74d16fc2971b/unit_and_pool_after.log."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-74d16fc2971b/venv/bin/python reports/j-74d16fc2971b/gpu_workspace_check.py",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI350X gfx950 GPU, allocated exactly 65495040 uint8 workspace bytes computed by the shared production helper and verified writes at the first and last byte. Raw output: reports/j-74d16fc2971b/gpu_workspace_check.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-74d16fc2971b/venv/bin/python -m compileall -q python/sglang/srt/layers/attention/aiter_backend.py python/sglang/srt/mem_cache/kv_cache_configurator.py test/registered/unit/mem_cache/test_aiter_workspace_budget.py reports/j-74d16fc2971b",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python sources and retained evidence scripts compiled successfully."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-74d16fc2971b/gpu_workspace_check.log records an exact 65495040-byte allocation and boundary writes on AMD Instinct MI350X, gcn_arch_name gfx950:sramecc+:xnack-."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported Qwen3-30B-A3B weights were not available, so no full serving-path or model startup reproduction was claimed.",
+    "The assigned GPU is one 252 GiB MI350X gfx950, not the report's 288 GiB MI355X; the retained reproduction validates the current resolver's byte arithmetic and the GPU check validates actual allocation sizing only.",
+    "No multi-GPU or distributed workload was exercised.",
+    "The prepared environment does not include ruff or black, so those optional formatter commands could not run; git diff --check and compileall passed."
+  ]
+}
