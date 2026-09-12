@@ -9,6 +9,7 @@ import torch
 
 from sglang.srt.environ import envs
 from sglang.srt.layers.attention.dsa.utils import (
+    MQA_LOGITS_MAX_BUDGET_BYTES,
     mqa_logits_budget_bytes,
     mqa_logits_row_bytes,
     mqa_logits_rows_per_chunk,
@@ -138,9 +139,35 @@ class TestMqaLogitsBudgetArithmetic(CustomTestCase):
             mem_get_info.assert_not_called()
             live = mqa_logits_budget_bytes(device_index=0, allow_sync=True)
             mem_get_info.assert_called_once_with(0)
-        # static: 80 GiB x (1 - 0.9) x 0.2; live is further capped by 6 GiB free x 0.2.
-        self.assertEqual(static, int(int(total * 0.1) * 0.2))
-        self.assertEqual(live, int((6 << 30) * 0.2))
+        # The graph-safe path cannot inspect live free memory, so its final
+        # safeguard is the deterministic 512 MiB ceiling. Eager execution is
+        # still allowed to tighten that ceiling from live free memory.
+        self.assertEqual(static, MQA_LOGITS_MAX_BUDGET_BYTES)
+        self.assertEqual(live, MQA_LOGITS_MAX_BUDGET_BYTES)
+
+    def test_graph_budget_chunks_issue_allocation_despite_large_static_headroom(self):
+        total = 80 << 30
+        props = SimpleNamespace(total_memory=total)
+        device_module = SimpleNamespace(
+            get_device_properties=MagicMock(return_value=props)
+        )
+        schedule = SimpleNamespace(mem_fraction_static=0.9)
+        with (
+            envs.SGLANG_DSA_MQA_LOGITS_FREE_MEM_FRACTION.override(0.2),
+            patch(f"{_DSA_UTILS}.get_device_module", return_value=device_module),
+            patch(f"{_DSA_UTILS}.get_schedule", return_value=schedule),
+        ):
+            budget = mqa_logits_budget_bytes(device_index=0, allow_sync=False)
+
+        row_bytes = mqa_logits_row_bytes(_ISSUE_C4_COLS)
+        rows = mqa_logits_rows_per_chunk(
+            num_rows=4096, row_bytes=row_bytes, budget_bytes=budget
+        )
+        issue_allocation = 4096 * row_bytes
+        self.assertEqual(issue_allocation, 1526726656)
+        self.assertEqual(budget, 512 << 20)
+        self.assertEqual(rows, budget // row_bytes)
+        self.assertLess(rows * row_bytes, int(1.17 * (1 << 30)))
 
 
 class TestPagedIndexerMetadataChunking(CustomTestCase):

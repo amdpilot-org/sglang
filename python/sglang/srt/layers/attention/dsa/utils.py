@@ -268,6 +268,10 @@ MQA_LOGITS_BYTES_PER_ELEM = 4
 # callers skip the mem_get_info host sync entirely.
 MQA_LOGITS_STATIC_SKIP_ELEMS = 8_000_000
 MQA_LOGITS_TOTAL_MEM_FRACTION = 0.3
+# A graph-safe budget cannot observe unexpectedly low live free memory. Keep a
+# deterministic ceiling as the final guard so graph capture never plans a
+# multi-GiB temporary merely because configured static headroom is large.
+MQA_LOGITS_MAX_BUDGET_BYTES = 512 << 20
 # aiter's fp8_mqa_logits only compiles below 2 GiB of logits (buffer_store).
 MQA_LOGITS_MAX_BYTES_ROCM = 2**31 - 1
 # DeepGEMM pads the logits row stride to 1024 bytes, i.e. 256 fp32 columns.
@@ -292,7 +296,9 @@ def mqa_logits_row_bytes(num_cols: int) -> int:
 def mqa_logits_static_budget_bytes(*, device_index: int) -> int:
     """Budget from configuration alone (no device query); safe during graph capture."""
     total_mem = get_device_module().get_device_properties(device_index).total_memory
-    total_mem_budget = int(total_mem * MQA_LOGITS_TOTAL_MEM_FRACTION)
+    total_mem_budget = min(
+        int(total_mem * MQA_LOGITS_TOTAL_MEM_FRACTION), MQA_LOGITS_MAX_BUDGET_BYTES
+    )
     mem_fraction_static = get_schedule().mem_fraction_static
     if mem_fraction_static is None:
         budget = total_mem_budget

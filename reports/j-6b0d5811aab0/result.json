@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35201",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved PR 1608's valid eager and graph row-chunking fixes and corrected the independently reproduced graph counterexample by capping the graph-safe MQA-logits allocation budget at 512 MiB. At the issue dimensions the exact candidate used a 1.6 GiB budget and left the 1.421875 GiB allocation whole; the consolidated correction plans 1440-row chunks of about 500 MiB.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-6b0d5811aab0/venv/bin/python /job/repo/reports/j-6b0d5811aab0/graph_budget_regression.py /tmp/j-6b0d5811-before/python/sglang/srt/layers/attention/dsa/utils.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before at exact candidate c0d54de: graph_budget=1717986918, issue_allocation=1526726656, rows_per_chunk=None."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6b0d5811aab0/venv/bin/python reports/j-6b0d5811aab0/graph_budget_regression.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after: graph_budget=536870912, issue_allocation=1526726656, rows_per_chunk=1440; each chunk is below the issue-reported 1.17 GiB live free memory."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6b0d5811aab0/venv/bin/python -m pytest -q test/registered/unit/layers/test_dsv4_indexer_chunk.py test/registered/unit/layers/test_dsv4_nonpaged_indexer.py",
+      "exit_code": 0,
+      "what_was_measured": "21 focused tests and 29 subtests passed, covering budget arithmetic, graph/eager modes, paged/nonpaged planning, and chunk equivalence."
+    },
+    {
+      "command": "inline torch GPU top-k equivalence check on cuda device",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X, unchunked output matched row chunks 1, 3, 7, 16, and 40 for selected top-k page sets."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Actual AMD Instinct MI350X/gfx950 ROCm 7.2 execution validated row-wise top-k equivalence; it was not a DeepSeek-V4 model or CUDA DeepGEMM run."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 weights were unavailable.",
+    "The environment has one AMD Instinct MI350X under ROCm 7.2, not the reported four H100 CUDA 12.9 topology.",
+    "The full 800K-token TP4 HTTP serving reproduction and CUDA DeepGEMM execution remain unverified.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
