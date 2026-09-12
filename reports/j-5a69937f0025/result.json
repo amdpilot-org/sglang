@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35484",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1574",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1542",
+  "candidate_commit": "3df72284c7a4fbfb906582ac86a2628dedc33788",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the reviewed DP-attention direct-linker counterexample and adds the requested one-client-per-directory documentation, but it does not fulfill its broader every-client isolation claim. The registered direct linker uses only attn_dp_rank, tp_rank, and pp_rank: pure-DP replicas all have attn_dp_rank 0, and attention-CP rank is omitted. Independent fixtures therefore still produce identical Mooncake LOCAL_DISK directories for those distinct clients.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5a69937f0025/venv/bin/python /job/review-evidence-j-5a69937f0025/independent_contract.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "On base 358c163250ad3b1f62939b01ce1314a0a31a0365, two clients with identical attention-local TP/PP identity both passed the same configured SSD directory, reproducing the collision precondition. The README also had no one-client-per-directory statement."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5a69937f0025/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py (candidate 3df72284c7a4fbfb906582ac86a2628dedc33788)",
+      "exit_code": 0,
+      "what_was_measured": "All four candidate regressions passed, including propagation of attention DP rank and DP/TP/PP path namespacing."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5a69937f0025/venv/bin/python /job/review-evidence-j-5a69937f0025/independent_contract.py (candidate 3df72284c7a4fbfb906582ac86a2628dedc33788)",
+      "exit_code": 0,
+      "what_was_measured": "The imported registered direct-linker helper generated distinct rank_0_0_0 and rank_1_0_0 directories for two DP-attention workers; independent TP and PP boundary cases also remained distinct and directories were created."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5a69937f0025/venv/bin/python /job/review-evidence-j-5a69937f0025/remaining_counterexamples.py (candidate 3df72284c7a4fbfb906582ac86a2628dedc33788)",
+      "exit_code": 1,
+      "what_was_measured": "Two pure-DP replicas both selected rank_0_0_0 because attn_dp_rank is 0 for every pure-DP worker; two attention-CP workers also both selected rank_0_0_0 because attn_cp_rank is not represented."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5a69937f0025/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mooncake_group_semantics.py test/registered/unit/mem_cache/test_mooncake_standalone_dummy_mamba.py test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Fifteen adjacent Mooncake unit tests passed."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "One AMD Instinct MI355X (gfx950), torch 2.11.0+rocm7.2, and HIP 7.2 were visible. No GPU execution is claimed because the reviewed defect is deterministic Python rank propagation and filesystem path selection; GPU execution would not establish directory uniqueness.",
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "The candidate diff contains no C, C++, CUDA, HIP, header, or other native source changes. Python imports resolved to /job/repo/python/sglang/srt/mem_cache/hicache_storage.py and /job/repo/python/sglang/srt/mem_cache/storage/mooncake_store/mooncake_direct_linker.py, so a native rebuild was not applicable.",
+  "remaining_counterexamples": [
+    "Registered MooncakeDirectLinker under pure data parallelism: distinct replicas have attn_dp_rank == 0 and identical local tp_rank/pp_rank, so they still select the same rank_0_0_0 directory when sharing the configured base path.",
+    "Registered MooncakeDirectLinker under attention context parallelism: distinct attn_cp_rank workers are not distinguished by the rank_<dp>_<tp>_<pp> layout and can select the same final directory."
+  ],
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash weights and the reported TP8 distributed deployment were unavailable; no full-model or multi-node run is claimed.",
+    "No live Mooncake master with simultaneous LOCAL_DISK clients was run. The tests directly validate SGLang's setup path collision precondition, not downstream bucket corruption or restart recovery.",
+    "The Mooncake-side recovery/ownership change referenced by the issue is outside this repository and was not qualified.",
+    "The available gfx950 GPU was not needed for this Python configuration/path defect and was not used as substitute evidence."
+  ]
+}
