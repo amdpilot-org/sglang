@@ -1,0 +1,30 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36105",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the config-only sglang serve failure in the prepared checkout. Backend selection inspected raw argv before ServerArgs merged --config, so it rejected a YAML-provided model-path. The fix reuses ConfigArgumentMerger during best-effort backend detection while preserving explicit CLI precedence.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bffb99b35b3b/venv/bin/python -c 'from sglang.cli.serve import serve; serve(None, [\"--config\", \"/tmp/amdpilot-repo-j-bffb99b35b3b/issue-36105.yaml\"])' (before fix)",
+      "exit_code": 1,
+      "what_was_measured": "The actual prepared serve implementation rejected the config before parsing it with 'Error: --model-path is required'; raw traceback is in raw/baseline-serve-config.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bffb99b35b3b/venv/bin/python -m pytest -q test/registered/unit/cli/test_serve_backends.py",
+      "exit_code": 0,
+      "what_was_measured": "17 CLI/backend unit tests passed, including config-only dispatch and independent explicit-precedence, model-alias, malformed-config, and missing-config cases."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bffb99b35b3b/venv/bin/python reports/j-bffb99b35b3b/reproduce_post_fix.py",
+      "exit_code": 0,
+      "what_was_measured": "The actual serve backend selection and ServerArgs parser completed, and the launch boundary received model_path=/tmp/issue-36105-nonexistent-model from YAML. Raw output is in raw/fixed-serve-config.log."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No full model was launched and no inference request was made; the post-fix command intentionally used a nonexistent local model to prove that execution advanced past the reported premature CLI rejection.",
+    "No GPU execution was performed because the changed and tested path runs before engine or device initialization.",
+    "The two related upstream candidate fixes (https://github.com/sgl-project/sglang/pull/36107 and https://github.com/sgl-project/sglang/pull/36168) were open and unmerged when inspected."
+  ]
+}

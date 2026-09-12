@@ -96,20 +96,40 @@ def get_is_diffusion_model(model_path: str) -> bool:
         return False
 
 
-def try_get_model_path(extra_argv) -> str | None:
-    """Return a model path from command-line arguments when one is present."""
-
-    model_path = None
-    for i, arg in enumerate(extra_argv):
+def _scan_argv_for_model_path(argv) -> str | None:
+    for i, arg in enumerate(argv):
         if arg in ("--model-path", "--model"):
-            if i + 1 < len(extra_argv):
-                model_path = extra_argv[i + 1]
-                break
+            if i + 1 < len(argv):
+                return argv[i + 1]
         elif arg.startswith("--model-path=") or arg.startswith("--model="):
-            model_path = arg.split("=", 1)[1]
-            break
+            return arg.split("=", 1)[1]
 
-    return model_path
+    return None
+
+
+def try_get_model_path(extra_argv) -> str | None:
+    """Return the model path available to serve backend detection.
+
+    ``serve`` selects a backend before ``prepare_server_args`` performs its
+    normal config merge. Resolve the same config here so a model path supplied
+    only through ``--config`` participates in backend selection.
+    """
+
+    model_path = _scan_argv_for_model_path(extra_argv)
+    if model_path is not None or "--config" not in extra_argv:
+        return model_path
+
+    from sglang.srt.utils.server_args_config_parser import ConfigArgumentMerger
+
+    try:
+        merged_argv = ConfigArgumentMerger().merge_config_with_args(list(extra_argv))
+    except Exception as exc:
+        # Backend detection is best-effort; keep the existing missing-model
+        # handling for malformed, missing, or unreadable config files.
+        logger.debug("Failed to resolve model path from config: %s", exc)
+        return None
+
+    return _scan_argv_for_model_path(merged_argv)
 
 
 def get_model_path(extra_argv):
