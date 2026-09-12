@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35252",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that the fused MoE tuner divided the runtime w2 config dimension by two a second time for int4_w4a16, producing E=256,N=128 while the runtime requests E=256,N=256. Removed the int4-only division from both the output filename and benchmark-mode lookup, and made both paths share the same dimension helper.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python:benchmark/kernels/fused_moe_triton /tmp/amdpilot-repo-j-56aa56ee0460/venv/bin/python < deterministic tuner/runtime filename comparison",
+      "exit_code": 0,
+      "what_was_measured": "On the unmodified implementation, int4_w4a16 produced N=128 versus runtime N=256 for the reported shape and N=7168 versus runtime N=14336 for an independent larger shape; the non-int4 control matched. Raw output: reports/j-56aa56ee0460/raw/pre_fix_key_reproduction.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-56aa56ee0460/venv/bin/python -m pytest -q test/registered/unit/layers/moe/test_fused_moe_tuning_config.py (recorded-base worktree)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: both int4 filename cases failed, while all four unaffected dtype boundary cases passed. Raw output: reports/j-56aa56ee0460/raw/base_regression_pytest.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-56aa56ee0460/venv/bin/python -m pytest -q test/registered/unit/layers/moe/test_fused_moe_tuning_config.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression: 6 tests passed, covering the reported int4 shape, an independent larger shape, and unquantized/fp8/int8 filename boundaries. Raw output: reports/j-56aa56ee0460/raw/post_fix_pytest.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-56aa56ee0460/venv/bin/python -m py_compile benchmark/kernels/fused_moe_triton/common_utils.py benchmark/kernels/fused_moe_triton/tuning_fused_moe_triton.py test/registered/unit/layers/moe/test_fused_moe_tuning_config.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed production and regression-test modules compile successfully. Raw output: reports/j-56aa56ee0460/raw/py_compile.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The assigned GPU was identified as one AMD Instinct MI355X (gfx950), and its device name was used by the real config filename implementation during reproduction. No GPU kernel was executed because the defect is deterministic host-side key construction. Inventory: reports/j-56aa56ee0460/raw/gpu_inventory.txt",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported cyankiwi/Qwen3.5-35B-A3B-AWQ-4bit weights were not available locally, so a full model tune followed by server launch was not performed.",
+    "No claim is made about model semantics, performance, or distributed execution; validation is limited to the actual tuner and runtime config-key implementations.",
+    "No native components were changed, so a native rebuild was not applicable."
+  ]
+}

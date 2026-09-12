@@ -313,9 +313,7 @@ def get_config_filename(
 
     # NOTE(woosuk): The current naming convention uses w2.shape[2], which
     # is the intermediate size after silu_and_mul.
-    N = shard_intermediate_size // 2
-    if use_int4_w4a16:
-        N = N // 2
+    N = get_config_n(shard_intermediate_size)
 
     filename = get_config_file_name(
         num_experts,
@@ -326,6 +324,11 @@ def get_config_filename(
     )
 
     return filename
+
+
+def get_config_n(shard_intermediate_size: int) -> int:
+    """Return the runtime config dimension derived from ``w2.shape[2]``."""
+    return shard_intermediate_size // 2
 
 
 def get_default_batch_sizes() -> List[int]:
