@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34737",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that node-failure cleanup leaves staging watermark subscribers registered and that same-endpoint registration retains the old request-scoped receiver/session. Added generation-tagged subscriber refresh and conditional cleanup so a concurrent re-registration survives stale failure cleanup, while failed subscribers are removed and healthy subscribers remain.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-0fa908ac9325/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_nixl_backend_basic.py::TestNixlNodeFailure::test_handle_node_failure_removes_watermark_subscriber test/registered/unit/disaggregation/test_nixl_backend_basic.py::TestStagingWatermarkSubscriberLifecycle",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction on the prepared base: all four lifecycle checks failed, demonstrating retained failed subscribers, stale receiver/session reuse, and absence of race-safe selective cleanup. Raw output: reports/j-0fa908ac9325/raw/failing-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0fa908ac9325/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_nixl_backend_basic.py::TestNixlNodeFailure::test_handle_node_failure_removes_watermark_subscriber test/registered/unit/disaggregation/test_nixl_backend_basic.py::TestStagingWatermarkSubscriberLifecycle test/registered/unit/disaggregation/test_disaggregation_wire.py::TestStagingWatermark::test_new_watermark_subscriber_receives_current_allocator_state",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after focused regression and boundary cases: 5 passed, covering failure removal, endpoint refresh, stale-generation preservation, healthy-peer selectivity, and initial watermark delivery. Raw output: reports/j-0fa908ac9325/raw/passing-after-focused.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0fa908ac9325/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_nixl_backend_basic.py test/registered/unit/disaggregation/test_disaggregation_wire.py",
+      "exit_code": 0,
+      "what_was_measured": "Complete affected unit files: 90 passed and 14 subtests passed. Raw output: reports/j-0fa908ac9325/raw/passing-after-full-unit.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0fa908ac9325/venv/bin/python -m pre_commit run --files python/sglang/srt/disaggregation/common/conn.py python/sglang/srt/disaggregation/common/staging_handler.py test/registered/unit/disaggregation/test_disaggregation_wire.py test/registered/unit/disaggregation/test_nixl_backend_basic.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, test-registry, and policy hooks for all changed source/test files passed. Raw output: reports/j-0fa908ac9325/raw/pre-commit.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and correction are CPU-side Python control-plane registry behavior and were deterministically exercised without GPU execution. The reported heterogeneous topology requires at least three GPUs (two prefill TP ranks plus one decode rank), while this task assigned one gfx950 GPU; no full serving-topology or model reproduction is claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported 2x prefill TP=2 plus 1x decode TP=1 NIXL serving topology was not run because only one GPU was assigned.",
+    "No model weights were needed or used; tests validate the staging subscriber lifecycle and concurrency boundary, not model semantics or distributed serving behavior.",
+    "The fix follows the generation-based design in the still-open upstream candidate PR https://github.com/sgl-project/sglang/pull/36049; upstream CI/review had not accepted it at investigation time."
+  ]
+}
