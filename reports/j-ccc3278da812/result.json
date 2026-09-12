@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31475",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2460",
+  "candidate_commit": "6c8bf4d4fddcbe5ce6fabf1b3248e9d9d5014e0d",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduced the original R + ep_size*S arithmetic. The exact candidate correctly scales replicated TP1 shared output only for skips that defer to a later cross-rank SUM, while retaining full S for A2A/FP4 absorbed skips with no later SUM. Focused, related, and independent adversarial tests passed.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ccc3278da812/venv/bin/python -c <base gfx950 arithmetic reproduction tied to inspected DeepseekV2MoE.forward_normal ordering>",
+      "exit_code": 0,
+      "what_was_measured": "At base commit 358c163, EP=8 produced the bug formula R + 8*S rather than R + S; maximum absolute error was 15.595807194709778."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ccc3278da812/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v2_shared_expert_tp1.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit 6c8bf4d, six focused tests passed, including deferred-SUM scaling and A2A no-later-SUM behavior."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ccc3278da812/venv/bin/python -m pytest -q test/registered/unit/test_runtime_context.py test/registered/unit/layers/test_layer_communicator_fusion_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "99 related tests and 140 subtests passed at the exact candidate commit."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ccc3278da812/venv/bin/python -c <independent candidate gfx950 boundary test>",
+      "exit_code": 0,
+      "what_was_measured": "Independent random-data checks had zero maximum absolute error for deferred SUM, absorbed A2A/FP4 skip, immediate all-reduce, nonreplicated, and single-rank boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ccc3278da812/venv/bin/python -m compileall -q python/sglang/srt/layers/moe python/sglang/srt/models/deepseek_v2.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source compiled successfully."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Base reproduction and independent candidate arithmetic ran on one AMD Instinct MI355X, gfx950:sramecc+:xnack-, with Torch 2.11.0+rocm7.2 and HIP 7.2.26015."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Only one gfx950 GPU was assigned, so no actual eight-rank RCCL reduce-scatterv or A2A transport was executed.",
+    "DeepSeek-V2-Lite-Chat and GLM-5.2 weights were unavailable, so full-model serving and semantic accuracy were not tested.",
+    "The candidate changes only Python source; no native rebuild was applicable."
+  ]
+}
+
