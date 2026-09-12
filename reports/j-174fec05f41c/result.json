@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35241",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/634",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/531",
+  "candidate_commit": "75e10e4bdbfdfa2f05a5b5258eda2bb48cb3db02",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a valid partial fix for DataParallelController accounting: generation health probes no longer advance user round-robin state, mutate TOTAL_REQUESTS/TOTAL_TOKENS speculative budgets, or refresh those budgets in health-only batches. It does not establish the original issue's broader contract or throughput fix. An idle health probe is still sent to one real scheduler, accepted into the normal request path, and can participate in the same per-rank PrefillDelayer negotiation that the issue identifies; the regression suite stops at a mocked worker send. The original TP8/DP8 NVIDIA B30Z long-prefill bifurcation could not be reproduced on the assigned single AMD MI355X.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-174fec05f41c/venv/bin/python -m pytest test/registered/unit/managers/test_data_parallel_controller.py -q (candidate test file on prepared base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before controller regression: 5 failed and 20 passed. Failures demonstrated shared round-robin advancement, request/token budget mutation, and health-only refresh on the base. Raw output is preserved outside the checkout at /job/review-evidence/base/candidate-regression-on-base.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-174fec05f41c/venv/bin/python -m pytest test/registered/unit/managers/test_data_parallel_controller.py -q (exact candidate 75e10e4)",
+      "exit_code": 0,
+      "what_was_measured": "25 controller unit tests passed, including probe/user interleavings and controller budget invariants. These tests mock the worker transport and do not execute scheduler admission or PrefillDelayer. Raw output: /job/review-evidence/candidate/pytest.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-174fec05f41c/venv/bin/python -c '<seeded ROCm matmul versus NumPy float64 reference>'",
+      "exit_code": 0,
+      "what_was_measured": "Real GPU execution on AMD Instinct MI355X gfx950 with torch 2.11.0+rocm7.2; max absolute error was 1.0059784056437593e-05. This validates the assigned GPU environment only, not the DP scheduler claim. Raw output: /job/review-evidence/candidate/gpu-numerical.txt."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 75e10e4bdbfdfa2f05a5b5258eda2bb48cb3db02",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the exact candidate diff."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "One AMD Instinct MI355X (gfx950:sramecc+:xnack-) was visible and executed the independent numerical check. The reported environment requires 8 NVIDIA B30Z GPUs with TP=8 and DP=8, so no original-workload GPU reproduction was possible.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "When the scheduler is fully idle, process_input_requests does not skip a health request. The candidate dispatches that request to exactly one DP scheduler, after which it follows ordinary admission and can make that rank locally prefillable while peer ranks are not, producing the mixed input to PrefillDelayer that the issue describes.",
+    "The candidate tests assert only that sock_send reached a mocked worker. They do not assert that health probes leave waiting_queue_len, observed/attempted prefill batch size, PrefillDelayer state/outcome counters, per-rank prefill progress, or subsequent user admission unchanged.",
+    "No TP8/DP8 long-prefill run demonstrates that the ~62-79k tok/s LOW regime, one-chunk rank divergence, mixed/delay persistence, or running-request collapse is eliminated."
+  ],
+  "remaining_limitations": [
+    "Architecture mismatch: one AMD Instinct MI355X (ROCm gfx950) instead of eight NVIDIA B30Z GPUs; TP8/DP8 and the original model/workload are unsupported here.",
+    "The issue's performance failure is timing-sensitive and cannot be inferred from mocked dispatch success or a single-GPU numerical smoke.",
+    "No native C++ or FlyDSL files changed in the candidate, so a native rebuild was not applicable. The imported candidate source was /job/repo/python/sglang/srt/managers/data_parallel_controller.py; aiter loaded /tmp/amdpilot-repo-j-174fec05f41c/cache/aiter/module_aiter_core.so, but it is unrelated to this Python-only diff."
+  ]
+}
