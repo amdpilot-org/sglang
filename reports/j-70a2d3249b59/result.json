@@ -1,0 +1,27 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34214",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared main checkout already contains the relevant fix from upstream PR https://github.com/sgl-project/sglang/pull/34458. An issue-shaped parser replay against that PR's base dropped the final content suffix when it shared a streaming delta with the DeepSeek V4 DSML tool call; the prepared implementation preserved the complete content and emitted the tool call. A split-marker boundary showed the same failing-before/passing-after result, while content-only and tool-only controls were unchanged.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-70a2d3249b59/venv/bin/python < issue-specific before/after replay script",
+      "exit_code": 0,
+      "what_was_measured": "Compared DeepSeekV4 streaming output from upstream PR #34458 base 7fb6e61b953e6598aa6b0bffad4c9db0435e734e with the prepared source. The old implementation emitted content only through '呈现毛主席'; current source emitted the complete '我来为您调用工具获取北京天气，同时为您呈现毛主席的《沁园春·雪》'. Both emitted get_current_weather and identical JSON arguments. Also covered a DSML marker split across deltas plus content-only and tool-only controls. Raw output: reports/j-70a2d3249b59/issue_replay.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-70a2d3249b59/venv/bin/python -m pytest -q test/registered/unit/function_call/test_deepseekv4_detector.py",
+      "exit_code": 0,
+      "what_was_measured": "All six existing DeepSeek V4 parser regressions passed, including preamble preservation in the same delta, bare invoke handling, marker non-leakage, malformed partial JSON recovery, multiple sections, and parse-error recovery. Raw output: reports/j-70a2d3249b59/deepseekv4_tests.txt"
+    },
+    {
+      "command": "rocm-smi --showproductname --showuniqueid; python torch device query",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the assigned single GPU is AMD Instinct MI350X / gfx950 and is visible through the prepared ROCm Torch environment. Raw output: reports/j-70a2d3249b59/gpu_query.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The defect and fix are deterministic CPU-side streaming parser behavior, so no GPU kernel execution was relevant. The assigned single gfx950 GPU was inventoried and retained unused; see reports/j-70a2d3249b59/gpu_query.txt.",
+  "native_rebuilt": false,
+  "remaining_limitations": "The reported DeepSeek-V4-Flash-0731 weights and original 4 x H200 CUDA topology were unavailable. Therefore this does not claim a full-model, speculative-decoding, CUDA, or multi-node reproduction. The qualified tiny Llama fixture cannot validate DeepSeek V4 output format or model semantics, so it was not substituted for the reported architecture. Validation covers the actual current parser implementation and an issue-shaped generated-text replay."
+}
