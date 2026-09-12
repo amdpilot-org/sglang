@@ -1,8 +1,11 @@
+import asyncio
 import unittest
 from array import array
+from unittest.mock import patch
 
 import torch
 
+from sglang.srt.utils import common
 from sglang.srt.utils.common import (
     flatten_arrays_to_int64_tensor,
     get_device_sm_nvidia_smi,
@@ -13,6 +16,95 @@ from sglang.test.test_utils import CustomTestCase
 
 register_cuda_ci(est_time=10, stage="base-b", runner_config="1-gpu-small")
 register_amd_ci(est_time=5, stage="stage-b", runner_config="1-gpu-small-amd")
+
+
+class _FakeMetricsProcess:
+    def __init__(self, communicate, returncode=0):
+        self.communicate = communicate
+        self.returncode = returncode
+        self.killed = False
+
+    def kill(self):
+        self.killed = True
+
+
+class TestPrometheusMetricsExporter(unittest.IsolatedAsyncioTestCase):
+    async def test_slow_scrape_does_not_block_loop_and_concurrent_scrape_fails_fast(
+        self,
+    ):
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def communicate():
+            started.set()
+            await release.wait()
+            return b"sglang_test_metric 1\n", b""
+
+        process = _FakeMetricsProcess(communicate)
+        exporter = common._PrometheusMetricsExporter("/tmp/prom", 8)
+        with patch.object(
+            asyncio, "create_subprocess_exec", return_value=process
+        ) as create_process:
+            first_scrape = asyncio.create_task(exporter.generate())
+            await asyncio.wait_for(started.wait(), timeout=1)
+
+            # This yield represents unrelated work such as a /health handler.
+            await asyncio.wait_for(asyncio.sleep(0), timeout=0.1)
+            self.assertEqual(
+                await exporter.generate(),
+                (503, b"Prometheus metrics collection already in progress\n"),
+            )
+            release.set()
+            self.assertEqual(
+                await first_scrape, (200, b"sglang_test_metric 1\n")
+            )
+            create_process.assert_called_once()
+
+    async def test_collection_timeout_kills_child(self):
+        async def communicate():
+            if process.killed:
+                return b"", b""
+            await asyncio.Event().wait()
+
+        process = _FakeMetricsProcess(communicate)
+        exporter = common._PrometheusMetricsExporter("/tmp/prom", 0.01)
+        with patch.object(asyncio, "create_subprocess_exec", return_value=process):
+            self.assertEqual(
+                await exporter.generate(),
+                (504, b"Prometheus metrics collection timed out\n"),
+            )
+        self.assertTrue(process.killed)
+
+    async def test_collection_failure_does_not_expose_child_stderr(self):
+        async def communicate():
+            return b"partial", b"private child failure"
+
+        process = _FakeMetricsProcess(communicate, returncode=1)
+        exporter = common._PrometheusMetricsExporter("/tmp/prom", 8)
+        with patch.object(asyncio, "create_subprocess_exec", return_value=process):
+            self.assertEqual(
+                await exporter.generate(),
+                (500, b"Prometheus metrics collection failed\n"),
+            )
+
+    async def test_cancelled_scrape_kills_child(self):
+        started = asyncio.Event()
+
+        async def communicate():
+            if process.killed:
+                return b"", b""
+            started.set()
+            await asyncio.Event().wait()
+
+        process = _FakeMetricsProcess(communicate)
+        exporter = common._PrometheusMetricsExporter("/tmp/prom", 8)
+        with patch.object(asyncio, "create_subprocess_exec", return_value=process):
+            scrape = asyncio.create_task(exporter.generate())
+            await asyncio.wait_for(started.wait(), timeout=1)
+            scrape.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await scrape
+        self.assertTrue(process.killed)
 
 
 @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
