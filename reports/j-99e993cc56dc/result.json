@@ -1,0 +1,56 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36528",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1246",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1213",
+  "candidate_commit": "9c8a73c0c3ad979a58fdf7b2be486435f5862e39",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The candidate adds an early EAGLE3 validation guard for ordinary targets without a draft path. The recorded base reproduced the exact Llama duplicate-load and hot_token_id AttributeError on gfx950; the exact candidate rejects both the Llama and Qwen issue commands during argument resolution with a clear ValueError. Explicit drafts, bundled drafts, lowercase normalization, EAGLE, and no-spec boundaries remained valid.",
+  "tests": [
+    {
+      "command": "focused Python contract probe on base using LlamaForCausalLM, EAGLE3, and no draft path",
+      "exit_code": 0,
+      "what_was_measured": "The base incorrectly completed argument handling and printed NO_ERROR draft=None."
+    },
+    {
+      "command": "python -m sglang.launch_server --model-path HuggingFaceH4/tiny-random-LlamaForCausalLM --load-format dummy --skip-tokenizer-init --mem-fraction-static 0.2 --max-total-tokens 512 --context-length 128 --cuda-graph-backend-decode disabled --cuda-graph-backend-prefill disabled --speculative-algorithm EAGLE3 --port 30000 (base)",
+      "exit_code": 137,
+      "what_was_measured": "On gfx950 the base loaded LlamaForCausalLM twice and reproduced AttributeError: LlamaForCausalLM has no attribute hot_token_id."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/spec/test_spec_registry.py test/registered/unit/spec/test_spec_cpu_overlap_constraint.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "36 focused speculative configuration tests passed."
+    },
+    {
+      "command": "same dummy-weight Llama launcher command (candidate)",
+      "exit_code": 1,
+      "what_was_measured": "Raised the intended ValueError during argument resolution before scheduler creation or weight loading."
+    },
+    {
+      "command": "python -m sglang.launch_server --model-path Qwen/Qwen2.5-0.5B-Instruct --skip-tokenizer-init --mem-fraction-static 0.35 --max-total-tokens 4096 --context-length 1024 --cuda-graph-backend-decode disabled --cuda-graph-backend-prefill disabled --speculative-algorithm EAGLE3 --port 30000 (candidate)",
+      "exit_code": 1,
+      "what_was_measured": "Resolved the public Qwen configuration and raised the intended early ValueError before scheduler creation or weight loading."
+    },
+    {
+      "command": "independent Python adversarial configuration matrix (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Verified uppercase/lowercase EAGLE3 rejection for ordinary targets, explicit draft acceptance, two bundled-draft architectures, unchanged EAGLE behavior, and no-spec behavior."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The failing-before Llama reproduction initialized the assigned AMD Instinct MI350X gfx950, loaded the target twice, allocated memory pools, and reached the reported hot_token_id AttributeError. Candidate success is an intentional pre-GPU validation exit; no numerical inference claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No compatible target/draft pair was run through speculative decoding, so numerical output and semantic accuracy were not evaluated.",
+    "Only one gfx950 GPU was assigned; multi-GPU and multi-node behavior were not tested.",
+    "The Qwen candidate check resolved the public configuration but intentionally did not load weights because the new validation exits first.",
+    "No native/C++ files changed and the prepared environment specified no native build target, so no native rebuild was applicable.",
+    "The candidate's committed raw pytest evidence contains trailing whitespace, causing whole-commit git diff --check findings limited to report log files."
+  ]
+}
