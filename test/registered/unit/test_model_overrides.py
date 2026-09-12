@@ -16,6 +16,7 @@ from typing import Optional
 from unittest.mock import patch
 
 from sglang.srt.arg_groups import model_override_base as base_module
+from sglang.srt.arg_groups import model_hook as model_hook_module
 from sglang.srt.arg_groups import overrides as overrides_module
 from sglang.srt.arg_groups.arg_utils import A, Arg, resolvable_fields
 from sglang.srt.arg_groups.model_overrides import minicpm as minicpm_module
@@ -1271,6 +1272,56 @@ class TestGoldenModelOverrides(_IsolatedPublish):
         sa = self._construct("GptOssForCausalLM", "llama")
         self.assertEqual(self._resolved(sa, "dtype"), "auto")
         self.assertEqual((self._publish(sa), self._leaf("dtype"))[1], "auto")
+
+    def test_aiter_allreduce_fusion_log_matches_resolved_flag(self):
+        cases = (
+            (
+                "DeepseekV3ForCausalLM",
+                "deepseek_v3",
+                {"index_head_dim": 128, "index_topk": 2048},
+            ),
+            (
+                "GlmMoeDsaForCausalLM",
+                "deepseek_v3",
+                {"index_head_dim": 128, "index_topk": 2048},
+            ),
+            ("GptOssForCausalLM", "llama", {}),
+        )
+        for architecture, model_type, config_extra in cases:
+            for enabled, dp_attention, nnodes, should_log in (
+                (False, False, 1, False),
+                (True, False, 1, True),
+                (True, True, 1, False),
+                (True, False, 2, False),
+            ):
+                with self.subTest(
+                    architecture=architecture,
+                    enabled=enabled,
+                    dp_attention=dp_attention,
+                    nnodes=nnodes,
+                ):
+                    with (
+                        override_platform(is_hip=True),
+                        patch.object(model_hook_module.logger, "info") as info,
+                    ):
+                        args = self._construct(
+                            architecture,
+                            model_type,
+                            config_extra=config_extra,
+                            enable_aiter_allreduce_fusion=enabled,
+                            enable_dp_attention=dp_attention,
+                            nnodes=nnodes,
+                        )
+
+                    self.assertEqual(
+                        self._resolved(args, "enable_aiter_allreduce_fusion"), enabled
+                    )
+                    fusion_logs = [
+                        call
+                        for call in info.call_args_list
+                        if "Enable Aiter AllReduce Fusion" in str(call)
+                    ]
+                    self.assertEqual(bool(fusion_logs), should_log)
 
     def test_gpt_oss_xpu_dtype_validation_reads_pristine(self):
         from sglang.srt.arg_groups.model_overrides.gpt_oss import _gpt_oss_overrides

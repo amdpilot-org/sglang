@@ -357,9 +357,12 @@ def handle_model_specific_adjustments(server_args: Any):
                 # above `set`s the variable unconditionally, so this has
                 # to follow it.
                 envs.SGLANG_OPT_USE_TOPK_V2.set(True)
-            if not resolved_view(server_args).enable_dp_attention and cfg.nnodes == 1:
-                # TODO (Hubert): Put this back later
-                # server_args.enable_aiter_allreduce_fusion = True
+            view = resolved_view(server_args)
+            if (
+                view.enable_aiter_allreduce_fusion
+                and not view.enable_dp_attention
+                and cfg.nnodes == 1
+            ):
                 logger.info("Enable Aiter AllReduce Fusion for DeepseekV3ForCausalLM")
 
             # The fp4-checkpoint draft spec-MoE resolution moved to the
@@ -447,13 +450,13 @@ def handle_model_specific_adjustments(server_args: Any):
 
         quant_method = get_quantization_config(hf_config)
         is_mxfp4_quant_format = quant_method == "mxfp4"
+        view = resolved_view(server_args)
         if (
-            not resolved_view(server_args).enable_dp_attention
+            view.enable_aiter_allreduce_fusion
+            and not view.enable_dp_attention
             and cfg.nnodes == 1
             and get_platform().is_hip
         ):
-            # TODO (Hubert): Put this back later
-            # server_args.enable_aiter_allreduce_fusion = True
             logger.info("Enable Aiter AllReduce Fusion for GptOssForCausalLM")
         quantization_config = getattr(hf_config, "quantization_config", None)
         is_mxfp4_quant_format = (
