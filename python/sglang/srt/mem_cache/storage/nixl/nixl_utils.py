@@ -11,6 +11,18 @@ from sglang.srt.mem_cache.storage.nixl.nixl_routing import (
 
 logger = logging.getLogger(__name__)
 
+
+def _name_matches_suffix(name: str, suffix: str) -> bool:
+    """Return whether a file name contains an instance suffix boundary."""
+    start = 0
+    while (index := name.find(suffix, start)) != -1:
+        remainder = name[index + len(suffix) :]
+        if not remainder or remainder.startswith("_"):
+            return True
+        start = index + 1
+    return False
+
+
 _SGLANG_NIXL_CONFIG_KEYS = {
     "use_direct_io",
     "l3_cleaner_enabled",
@@ -233,16 +245,26 @@ class NixlFileManager:
                 f"Initialized file manager with base directories: {self.base_dirs}. Direct I/O: {use_direct_io}"
             )
 
-    def clear(self) -> None:
-        """Clear all files below every configured base directory."""
+    def clear(self, suffix: Optional[str] = None) -> None:
+        """Clear only files belonging to the supplied instance suffix."""
         if not self.base_dirs:
             logger.warning("Base directories are empty, skipping clear operation")
+            return
+
+        if not suffix or suffix == "_":
+            logger.error(
+                "Refusing to clear NIXL files without a usable instance suffix "
+                "(suffix=%r)",
+                suffix,
+            )
             return
 
         for base in self.base_dirs:
             try:
                 for root, _dirs, files in os.walk(base):
                     for file in files:
+                        if not _name_matches_suffix(file, suffix):
+                            continue
                         file_path = os.path.join(root, file)
                         try:
                             os.remove(file_path)
@@ -250,7 +272,11 @@ class NixlFileManager:
                             logger.warning(f"Failed to remove file {file_path}: {e}")
             except Exception as e:
                 logger.error(f"Failed to clear base directory {base}: {e}")
-        logger.debug(f"Cleared all files in base directories: {self.base_dirs}")
+        logger.debug(
+            "Cleared files with suffix %r in base directories: %s",
+            suffix,
+            self.base_dirs,
+        )
 
     def ensure_all_bucket_dirs(self) -> None:
         """Pre-create every possible bucket directory under each base dir.

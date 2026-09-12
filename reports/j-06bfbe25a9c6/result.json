@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32693",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that NixlFileManager.clear() deleted another model's cache file and an unrelated file on a shared base directory. Scoped HiCacheNixl clears to config_suffix, added boundary-aware filename filtering, and made missing or degenerate scopes refuse deletion. Upstream PR https://github.com/sgl-project/sglang/pull/32705 was inspected before implementation; it remains open and is not present in the prepared base.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-06bfbe25a9c6/venv/bin/python - <<'PY' ... NixlFileManager shared-directory reproduction ... PY",
+      "exit_code": 0,
+      "what_was_measured": "On the unmodified implementation, verified that clear() removed the calling model's file, a second model's file, and unrelated.txt. Raw output: reports/j-06bfbe25a9c6/raw/failing-before-reproduction.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-06bfbe25a9c6/venv/bin/python test/registered/unit/mem_cache/test_hicache_nixl_file_manager.py (before fix)",
+      "exit_code": 1,
+      "what_was_measured": "The preserved regression failed before the implementation accepted a scoped suffix. Raw output: reports/j-06bfbe25a9c6/raw/failing-before-unit.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-06bfbe25a9c6/venv/bin/python test/registered/unit/mem_cache/test_hicache_nixl_file_manager.py",
+      "exit_code": 0,
+      "what_was_measured": "Three CPU tests passed: owned files are deleted while other-model, overlapping-suffix, and unrelated files survive; unusable scopes preserve data; a concurrently missing base directory is tolerated. Raw output: reports/j-06bfbe25a9c6/raw/passing-after-unit-final.log"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/mem_cache/storage/nixl/hicache_nixl.py python/sglang/srt/mem_cache/storage/nixl/nixl_utils.py test/registered/unit/mem_cache/test_hicache_nixl_file_manager.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, CI registration, and policy hooks passed. Raw output: reports/j-06bfbe25a9c6/raw/pre-commit.log"
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No full HTTP server or real NIXL POSIX/GDS deployment was started; validation directly exercised the checked-out NixlFileManager implementation and its production bucket routing on temporary shared directories.",
+    "No multi-rank deletion race was reproduced. The correction prevents ranks from deleting other suffixes but same-instance ranks may still attempt the same scoped names depending on their configured suffix.",
+    "No GPU execution was performed because this admin clear path is CPU-only; this does not validate model inference, GPU transfer, or distributed serving behavior."
+  ]
+}
