@@ -1,0 +1,132 @@
+.F.                                                                      [100%]
+=================================== FAILURES ===================================
+_ TestEagleConfigurator.test_inkling_eight_layer_eagle_draft_pools_are_in_auto_budget _
+
+self = <test_pool_configurator.TestEagleConfigurator testMethod=test_inkling_eight_layer_eagle_draft_pools_are_in_auto_budget>
+
+    def test_inkling_eight_layer_eagle_draft_pools_are_in_auto_budget(self):
+        """Regression for #31588: price every built-in MTP draft layer."""
+        available = int(65.45 * (1 << 30))
+        page_size = 128
+        ratio = 0.1
+        draft_layers = 8
+        mr = _make_model_runner(
+            self,
+            num_kv_heads=8,
+            head_dim=128,
+            v_head_dim=128,
+            num_layers=32,
+            is_hybrid_swa=True,
+            full_attention_layer_ids=list(range(16)),
+            swa_attention_layer_ids=list(range(16, 32)),
+            swa_num_kv_heads=8,
+            swa_full_tokens_ratio=ratio,
+            page_size=page_size,
+        )
+        mr.spec_algorithm.is_eagle.return_value = True
+        mr.spec_algorithm.is_none.return_value = False
+        mr.spec_aux_config.eagle_draft_num_layers = draft_layers
+        mr.spec_aux_config.eagle_draft_swa_num_layers = 0
+    
+        with mock_cpu_env():
+            from sglang.srt.model_executor.pool_configurator import (
+                create_memory_pool_configurator,
+            )
+    
+            cfg = create_memory_pool_configurator(mr)
+            config = cfg.calculate_pool_sizes(available, page_size)
+    
+        full_tokens = config.full_max_total_num_tokens
+        swa_tokens = config.swa_max_total_num_tokens
+        full_pt = _full_per_token(mr)
+        swa_pt = _swa_per_token(mr)
+        target_bytes = full_tokens * full_pt * 16 + swa_tokens * swa_pt * 16
+        target_full_bytes_per_token = full_pt * 16
+        virtual_span = max(target_bytes // target_full_bytes_per_token - 1, 0)
+        draft_tokens = (
+            virtual_span + page_size - 1
+        ) // page_size * page_size + page_size
+        actual = target_bytes + draft_tokens * full_pt * draft_layers
+        self.assertEqual(cfg._draft_full_layers_num, draft_layers)
+        self.assertGreater(draft_tokens, full_tokens)
+>       self.assertLessEqual(actual, available)
+E       AssertionError: 72456601600 not less than or equal to 70276402380
+
+test/registered/unit/model_executor/test_pool_configurator.py:846: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f1bcab516c0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f24ac8179c0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestEagleConfigurator.test_inkling_eight_layer_eagle_draft_pools_are_in_auto_budget
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/model_executor/test_pool_configurator.py", line 846, in test_inkling_eight_layer_eagle_draft_pools_are_in_auto_budget
+    self.assertLessEqual(actual, available)
+  File "/usr/lib/python3.12/unittest/case.py", line 1263, in assertLessEqual
+    self.fail(self._formatMessage(msg, standardMsg))
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: 72456601600 not less than or equal to 70276402380
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/model_executor/test_pool_configurator.py::TestEagleConfigurator::test_inkling_eight_layer_eagle_draft_pools_are_in_auto_budget
+1 failed, 2 passed, 41 deselected, 17 warnings in 27.25s
