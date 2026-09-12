@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35332",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Exact candidate 7ba8f72eedf5db55b7b554cb2197cdbc454015ab is a verified partial fix. It adds a disabled-by-default framework step-reuse controller and corrects the independently reported tensor-ownership defect: in-place mutation by a scheduler or consumer no longer corrupts the canonical last real prediction or later reused values. It does not enable or validate a concrete stateful diffusion adapter and therefore does not fully resolve the original issue.",
+  "tests": [
+    {
+      "command": "At recorded base: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-24a51de4154f/venv/bin/python -c 'from sglang.multimodal_gen.runtime.pipelines_core.step_reuse import StepReuseController'",
+      "exit_code": 1,
+      "what_was_measured": "Original feature absence on prepared base: the controller module does not exist."
+    },
+    {
+      "command": "At exact candidate: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-24a51de4154f/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_step_reuse.py python/sglang/multimodal_gen/test/unit/test_cfg_gating.py",
+      "exit_code": 0,
+      "what_was_measured": "17 focused controller/integration tests passed from candidate source, including the in-place mutation regression."
+    },
+    {
+      "command": "At exact candidate: independent CPU/ROCm tensor-mutation reproducer",
+      "exit_code": 0,
+      "what_was_measured": "On CPU and AMD Instinct MI350X, mutating the first reuse to 6.5 left the canonical prediction and next reuse at 3.25, with independent storage."
+    },
+    {
+      "command": "At exact candidate: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-24a51de4154f/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_sampling_params.py python/sglang/multimodal_gen/test/unit/test_diffusion_bcg_padding.py",
+      "exit_code": 0,
+      "what_was_measured": "68 compatibility tests and 30 subtests passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Independent ownership regression passed on one AMD Instinct MI350X using Torch 2.11.0+rocm7.2 and HIP 7.2.26015. This is not model-quality or multi-rank evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No concrete model adapter is enabled, so request/modality/CFG scope switching, real observation semantics, thresholds, forced persistent writes, cache-off/on quality gates, full trajectories, and persistent session/KV equality are not validated on a stateful diffusion architecture.",
+    "Real multi-rank decision agreement and collective-control-flow safety remain unverified because only one GPU was assigned; the candidate has only a synthetic control/follower token test.",
+    "Model-specific _run_denoising_step implementations in Ideogram, LTX-2, JoyEcho, and progressive Ideogram bypass the shared controller hooks, so reuse would not apply to those paths without explicit integration."
+  ],
+  "remaining_limitations": [
+    "No qualified stateful diffusion model weights or adapter were available; the deterministic tiny Llama fixture cannot validate diffusion semantics, quality, or persistent world-model state.",
+    "Only one AMD Instinct MI350X was available, preventing real distributed validation.",
+    "No native rebuild was applicable because the candidate changes only Python and the prepared environment records native=null."
+  ]
+}
