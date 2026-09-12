@@ -433,6 +433,10 @@ class Qwen2Model(nn.Module):
                 }
             )
         else:
+            if self.end_layer in self.layers_to_capture:
+                aux_hidden_states.append(
+                    hidden_states + residual if residual is not None else hidden_states
+                )
             if hidden_states.shape[0] != 0:
                 if residual is None:
                     hidden_states = self.norm(hidden_states)
