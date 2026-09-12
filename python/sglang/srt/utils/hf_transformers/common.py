@@ -169,22 +169,28 @@ _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
 }
 
 
-# DeepSeek V3.2 / V4 reuse the V3 config schema. Subclass the upstream
-# transformers class with each model_type so AutoConfig.register passes its
-# consistency check (which requires class.model_type == registered key).
-# Default-value divergences (e.g. V4's topk_group) are handled in
-# model_config.py post-load.
+# DeepSeek V3.2 reuses the V3 config schema. Subclass the upstream class with
+# its model_type so AutoConfig.register passes its consistency check (which
+# requires class.model_type == registered key). DeepSeek V4 has a distinct
+# native schema in recent Transformers releases; prefer it when available and
+# retain the V3 alias only for older supported releases.
 try:
+    import transformers as _hf_transformers
     from transformers import DeepseekV3Config as _HFDeepseekV3Config
 
     class _DeepseekV32ConfigAlias(_HFDeepseekV3Config):
         model_type = "deepseek_v32"
 
-    class _DeepseekV4ConfigAlias(_HFDeepseekV3Config):
-        model_type = "deepseek_v4"
-
     _CONFIG_REGISTRY["deepseek_v32"] = _DeepseekV32ConfigAlias
-    _CONFIG_REGISTRY["deepseek_v4"] = _DeepseekV4ConfigAlias
+    _HFDeepseekV4Config = getattr(_hf_transformers, "DeepseekV4Config", None)
+    if _HFDeepseekV4Config is not None:
+        _CONFIG_REGISTRY["deepseek_v4"] = _HFDeepseekV4Config
+    else:
+
+        class _DeepseekV4ConfigAlias(_HFDeepseekV3Config):
+            model_type = "deepseek_v4"
+
+        _CONFIG_REGISTRY["deepseek_v4"] = _DeepseekV4ConfigAlias
 
     # For kimi_k25_eagle3
     class _KimiK2ConfigAlias(_HFDeepseekV3Config):
