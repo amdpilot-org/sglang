@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32449",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "summary": "Source inspection confirmed that the MLX auxiliary-state component bypassed MambaComponent initialization without supplying its inherited checkpoint-grid and path-cap fields. The request pool already had the mamba_allocator alias, but MLX still lacked CUDA's deferred CoW application. The candidate initializes the inherited fields and copies a matched auxiliary snapshot into the request slot synchronously. Apple MLX execution was unavailable in this Linux ROCm environment.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-4d61677d330e/venv/bin/python -m py_compile python/sglang/srt/hardware_backend/mlx/kv_cache/auxiliary_state.py test/registered/unit/hardware_backend/mlx/test_attention_patching.py",
+      "exit_code": 0,
+      "what_was_measured": "Modified production and regression-test modules compile successfully."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4d61677d330e/venv/bin/python -m pytest -q test/registered/unit/hardware_backend/mlx/test_attention_patching.py",
+      "exit_code": 0,
+      "what_was_measured": "Test collection succeeded; all 41 tests were skipped because the prepared Linux environment has no mlx package. Raw output: reports/j-4d61677d330e/raw/mlx_unit.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is specific to Apple's MLX backend. The assigned gfx950 ROCm GPU cannot execute MLX and would not validate the reported path."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Apple Silicon or mlx Python package was available, so the new MLX regressions and an end-to-end hybrid-SSM serving request could not be executed.",
+    "No model weights were used; semantic model accuracy and serving behavior remain unverified.",
+    "The candidate is supported by direct source-contract evidence and compilation, not runtime MLX validation."
+  ]
+}
