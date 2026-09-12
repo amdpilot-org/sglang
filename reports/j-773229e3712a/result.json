@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32693",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a partial fix: it scopes NIXL clears, refuses unusable suffixes, preserves unrelated files, and fixes the previously reported tail-overlap collision. It still violates per-instance isolation for prefix-overlapping MLA suffixes because any underscore remainder is treated as a component.",
+  "tests": [
+    {
+      "command": "At base 358c163250ad3b1f62939b01ce1314a0a31a0365: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-773229e3712a/venv/bin/python - <<'PY' <original shared-directory production NixlFileManager reproduction>",
+      "exit_code": 0,
+      "what_was_measured": "NixlFileManager.clear() deleted its own cache file, another model deployment's cache file, and unrelated.txt, reproducing the original failure."
+    },
+    {
+      "command": "At exact candidate 328bee322dc98cd4aed9f0cfa04f02bc4fcf5b77: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-773229e3712a/venv/bin/python test/registered/unit/mem_cache/test_hicache_nixl_file_manager.py",
+      "exit_code": 0,
+      "what_was_measured": "All five candidate regressions passed, including the earlier MHA and MLA tail-overlap cases, component files, SHA-256 anchoring, unusable scopes, unrelated files, multiple base directories, and a missing directory."
+    },
+    {
+      "command": "At exact candidate 328bee322dc98cd4aed9f0cfa04f02bc4fcf5b77: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-773229e3712a/venv/bin/python - <<'PY' <independent MLA prefix-overlap production NixlFileManager regression>",
+      "exit_code": 1,
+      "what_was_measured": "Clearing suffix _model correctly deleted the owned base and component files and preserved _tenant_model and unrelated.txt, but incorrectly deleted foreign MLA _model_variant and foreign non-MLA _model_0_1 files."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 328bee322dc98cd4aed9f0cfa04f02bc4fcf5b77",
+      "exit_code": 0,
+      "what_was_measured": "The candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is CPU-only filename ownership matching and filesystem deletion; no GPU execution was relevant or performed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "For MLA suffix _model, a different MLA deployment named model_variant produces _model_variant; candidate clear treats _variant as a component remainder and deletes it.",
+    "For MLA suffix _model, a non-MLA deployment of model with rank/size suffix _model_0_1 is also treated as a component remainder and deleted."
+  ],
+  "remaining_limitations": "Directly tested the production NixlFileManager with real bucket routing, but not a real NIXL plugin, HTTP endpoint, model inference, GPU transfer, multi-rank race, or distributed filesystem. The candidate changed Python only, so no native rebuild was applicable. The prepared interpreter resolved nixl_utils.py from /job/repo/python, and the image-prepared checkout exactly matched the recorded base before review."
+}
