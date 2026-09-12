@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37936",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/3359",
+  "candidate_commit": "2c2f2113585144c51d1f0d1a1aa816b7f552c1dd",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is correct test-only hardening: it makes the base's existing production call-site exclusion of width-dependent EAGLE select_index buffers intrinsic to EagleDraftExtendInputBuffers and adds a regression. It does not reproduce or fully verify the original V100 TP=4 concurrent serving failure.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-acd52e73b004/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_cuda_graph_buffer_registry.py test/registered/unit/spec/test_eagle_draft_extend_logits.py (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "46 tests passed; the base production caller already excluded select_index, while the candidate's EAGLE-specific direct-buffer regression was absent and a generic exclusion test occupied its place."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-acd52e73b004/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_cuda_graph_buffer_registry.py test/registered/unit/spec/test_eagle_draft_extend_logits.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "46 tests passed, including the candidate's direct-buffer width-specific non-alias regression."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-acd52e73b004/venv/bin/python < independent caller-exclusion union script (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Two buffers using caller exclusion input_ids retained distinct input_ids and distinct mandatory select_index storage, validating exclusion union semantics."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-acd52e73b004/venv/bin/python < safe gather script",
+      "exit_code": 0,
+      "what_was_measured": "AMD Instinct MI350X gfx950 returned exact gather output [11,13] for indices [1,3] over four rows. This is only a kernel-level numerical boundary check."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 2c2f2113585144c51d1f0d1a1aa816b7f552c1dd",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the exact candidate diff."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "A safe numerical gather ran on one AMD Instinct MI350X gfx950 under Torch 2.11.0+rocm7.2; it was not the reported serving workload.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The exact long decode plus concurrent forced empty-schema tool request may still trigger a stale gather index through scheduler/speculative state unrelated to cross-width buffer-pool aliasing.",
+    "The base production path already supplied exclude={select_index}; therefore the candidate's direct-buffer failing-before fixture does not demonstrate that the recorded production caller failed before this candidate.",
+    "CUDA/V100-specific EAGLE, tilelang_fa_v100, NCCL TP=4, or PCIe-only behavior may contain an independent failure not exercised on ROCm gfx950.",
+    "Structural-tag or grammar compilation failure interacting with request insertion was not exercised."
+  ],
+  "remaining_limitations": [
+    "Only one AMD gfx950 GPU was available, not 4 Tesla V100 GPUs.",
+    "The Qwen3.8 Flash-Next NVFP4 weights and V100-specific CUDA image/backends were unavailable.",
+    "The original HTTP concurrency trigger, CUDA device assertion, NCCL abort, and Xid 43 were not reproduced.",
+    "No native sources changed; native rebuild was not applicable."
+  ]
+}
