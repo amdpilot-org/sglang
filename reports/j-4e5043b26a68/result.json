@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34737",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1603",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1565",
+  "candidate_commit": "1065fe89c32aa4918bac5d64a38c54a1f931076b",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate reproduces the base failure and fixes the tested single connection-pool-group lifecycle, including receiver refresh and a same-key re-registration race. It does not fully clean up a receiver whose bootstrap_infos concatenate multiple connection_pool groups (as CommonKVReceiver._setup_bootstrap_infos does across target CP ranks): failure cleanup snapshots each group separately, so no token matches the concatenated subscriber key and later watermark broadcasts still target the stale receiver.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-4e5043b26a68/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_nixl_backend_basic.py::TestNixlNodeFailure::test_handle_node_failure_removes_watermark_subscriber test/registered/unit/disaggregation/test_nixl_backend_basic.py::TestStagingWatermarkSubscriberLifecycle (candidate tests temporarily placed over base production source)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before behavior at recorded base: stale subscriber survives node failure, same-endpoint registration does not refresh, and candidate lifecycle APIs are absent; 4 failed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4e5043b26a68/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_nixl_backend_basic.py::TestNixlNodeFailure::test_handle_node_failure_removes_watermark_subscriber test/registered/unit/disaggregation/test_nixl_backend_basic.py::TestStagingWatermarkSubscriberLifecycle",
+      "exit_code": 0,
+      "what_was_measured": "Candidate-authored focused regression at exact commit; 4 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4e5043b26a68/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_nixl_backend_basic.py test/registered/unit/disaggregation/test_disaggregation_wire.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate's relevant CPU unit and wire suites; 90 passed and 14 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4e5043b26a68/venv/bin/python /job/review-evidence-j-4e5043b26a68/adversarial_candidate.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial lifecycle case: two cached CP groups form one concatenated receiver subscriber. After failure, multi_cp_remaining=1 and stale_broadcast_calls=1; the single-group control has single_cp_remaining=0."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4e5043b26a68/venv/bin/python -c 'import inspect, sglang...; print(inspect.getsourcefile(...))'",
+      "exit_code": 0,
+      "what_was_measured": "Both changed classes imported from /job/repo/python/sglang/srt/disaggregation/common/{conn.py,staging_handler.py} at the exact candidate checkout, not from an installed wheel."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X (gfx950 family) was visible through Torch 2.11.0+rocm7.2, but the defect and candidate change are Python control-plane lifecycle logic and all review tests were CPU-only. No GPU kernel or model execution was claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "When one receiver.bootstrap_infos is the concatenation of two or more connection_pool groups (for example target_cp_ranks=[0,1]), snapshot_wm_subscribers receives each group separately. Neither per-group key equals the concatenated subscriber key, so _handle_node_failure removes no subscriber and _free_and_send_watermark continues sending to the failed node."
+  ],
+  "remaining_limitations": [
+    "The reported heterogeneous-TP deployment requires at least three GPUs (two prefill TP ranks plus one decode rank); only one AMD Instinct MI350X was assigned, so no full serving or distributed failure reproduction was possible.",
+    "No model weights were needed or used; deterministic tests cover the actual shared NIXL/Mooncake Python staging control-plane implementation, not model semantics.",
+    "No native source changed in the candidate, repository-environment.json specifies native=null, and therefore no native rebuild was applicable.",
+    "The prepared checkout started exactly at the recorded base. Before committing this review-only report, the designated branch was fast-forwarded to current mirror main a207786205bff0919eb2c8c9126c67f302ccff34."
+  ]
+}
