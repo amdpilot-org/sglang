@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37430",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Current source already contains upstream PR #34881 (merge commit 307a90f6d3c73ad4cbf3d90e817bc23617580475), which fixes issue-specific Kimi-K3 lost-tool-call paths. Its exact-parent regression fails before and passes on the prepared source; no additional code change was justified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-8da637375273/venv/bin/python -c '<remove prepared editable path; prepend /tmp/amdpilot-repo-j-8da637375273/prefix/python; pytest current Kimi-K3 reasoning regression -k tools_channel_before_think_close>'",
+      "exit_code": 1,
+      "what_was_measured": "Exact parent 8bb106cee94c1ccb5625cdb78ef0ee3e0cad3918: 2 failed and 3 passed. Non-streaming and single-chunk streaming lost the complete tools channel into reasoning_text; chunk sizes 1, 3, and 7 passed. Module path was printed as the temporary pre-fix worktree."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8da637375273/venv/bin/python -m pytest -q test/registered/function_call/test_kimik3_detector.py test/registered/unit/parser/test_kimik3_reasoning_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "75 passed: current Kimi-K3 native tool detector and reasoning parser, including the five failing-before/boundary cases plus multiple-call, marker-splitting, plain-text, and truncation boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8da637375273/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py -k 'required_tool_choice_skips_json_fallback_for_native_parser or truncated_native_tool_call_logs_and_drops or required_tool_choice_rejects_conflicting_output_constraint or auto_tool_choice_keeps_response_format_without_raising'",
+      "exit_code": 0,
+      "what_was_measured": "4 passed with 12 subtests: required Kimi-K3 native format avoids the JSON fallback, truncated native calls are reported, conflicting required/output constraints are rejected, and auto remains permitted."
+    },
+    {
+      "command": "rocm-smi --showproductname --showuniqueid --showmeminfo vram",
+      "exit_code": 0,
+      "what_was_measured": "Assigned hardware inventory: one AMD Instinct MI350X, gfx950, with 270566162432 bytes VRAM. This was inventory only, not model execution."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The correction is CPU serving/parser logic. Kimi-K3 and draft weights plus the reported 2P2D TP8/DCP8 topology were unavailable on the assigned single GPU. The sanctioned tiny-Llama fixture was inspected but not run because it cannot exercise or qualify this Kimi-K3 path."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Kimi-K3 or Kimi-K3-DSpark weights were available.",
+    "The reported 2-prefill/2-decode TP8/DCP8 topology requires more hardware than the assigned single gfx950 GPU.",
+    "The source report does not identify the exact SGLang commit used, so it is unknown whether that deployment included PR #34881.",
+    "No claim is made about Kimi-K3 semantic tool-selection accuracy, DSPARK behavior, PD disaggregation, multi-node transport, or elimination of every possible timeout cause.",
+    "PR #34881 explicitly notes that max_tokens and client stop strings can still terminate required-tool generation before a call completes."
+  ]
+}
