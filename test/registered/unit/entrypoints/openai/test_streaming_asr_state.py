@@ -42,6 +42,35 @@ class TestStreamingASRState(CustomTestCase):
         self.assertEqual(delta, ",")
         self.assertEqual(state.emitted_text, "hello world,")
 
+    def test_unicode_punctuation_suffixes_stay_attached_in_prompt(self):
+        for punctuation in ('"', "…", "—", "?!"):
+            with self.subTest(punctuation=punctuation):
+                state = self._state()
+                self.assertEqual(
+                    state.update("hello world one two three four five"),
+                    "hello world",
+                )
+
+                delta = state.update(
+                    f"hello world{punctuation} one two three four five"
+                )
+
+                self.assertEqual(delta, punctuation)
+                self.assertEqual(state.emitted_text, f"hello world{punctuation}")
+
+    def test_punctuation_rollback_does_not_repeat_text(self):
+        state = self._state()
+        self.assertEqual(
+            state.update('hello world" one two three four five'),
+            'hello world"',
+        )
+
+        self.assertEqual(
+            state.update("hello world one two three four five"),
+            "",
+        )
+        self.assertEqual(state.emitted_text, 'hello world"')
+
     def test_normal_word_append_keeps_separator(self):
         state = self._state()
         self.assertEqual(state.update("hello one two three four five"), "hello")
