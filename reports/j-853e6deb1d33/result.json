@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35498",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1443",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1402",
+  "candidate_commit": "f36cc319163a0d3c5be588d5e9165ac2fd91062e",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Accept as test-only hardening, not as a new runtime fix. The exact candidate changes only a registered regression test and report artifacts. The recorded base already contains the performance-preserving runtime solution: one independently serialized MultiprocessingSerializer payload per TP rank and rank-indexed deserialization. Independent spawned-process testing reproduced the legacy one-payload failure and verified three consecutive TP8-style per-rank loads plus TP1 with correct tensor contents.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-853e6deb1d33/venv/bin/python /job/review_issue_35498.py",
+      "exit_code": 0,
+      "what_was_measured": "On the recorded base, one shared ForkingPickler payload consumed by eight spawned processes produced exactly one success and seven EOFError failures. Three subsequent rounds using Engine._serialize_tensors_per_rank at tp_size=8 produced 24/24 successful rank-local deserializations with correct 65536-element count and sum 2147450880.0; TP1 also succeeded. Raw output: evidence/independent_reproduction_and_boundaries.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-853e6deb1d33/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_lora_tensor_serialization.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit f36cc319163a0d3c5be588d5e9165ac2fd91062e, all three candidate tests passed: concurrent per-rank CPU tensor payload consumption, TP1 preservation, and flattened_bucket raw/base64 normalization. Raw output: evidence/candidate_regression.txt"
+    },
+    {
+      "command": "git diff --name-only 358c163250ad3b1f62939b01ce1314a0a31a0365 f36cc319163a0d3c5be588d5e9165ac2fd91062e",
+      "exit_code": 0,
+      "what_was_measured": "The candidate changes one test and report artifacts only; it makes no Python runtime, C++, HIP, CUDA, or other native source change. Raw output: evidence/candidate_changed_files.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-853e6deb1d33/venv/bin/python -c '<inspect imported modules and torch architecture>'",
+      "exit_code": 0,
+      "what_was_measured": "SGLang engine, TP worker, and serializer imported from /job/repo/python; PyTorch imported from /opt/venv and reported 2.11.0+rocm7.2, HIP 7.2.26015, one AMD Instinct MI350X GPU. Raw output: evidence/import_paths_and_architecture.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The reproduced defect is CPU tensor ForkingPickler/resource_sharer FD ownership and requires no GPU operation. The assigned environment exposes one AMD Instinct MI350X (gfx950), not the reported eight NVIDIA H20 GPUs.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No end-to-end TP8 SGLang server was run because only one gfx950 GPU was assigned.",
+    "No Qwen3-0.6B or LoRA weights were available, so model loading, generation semantics, unload behavior, and server-health behavior were not independently qualified.",
+    "The independent passing test validates the exact serializer ownership contract with spawned processes, not HTTP transport, a full scheduler lifecycle, multi-node execution, or NVIDIA H20 behavior.",
+    "The prepared checkout exactly matched the recorded base commit; its shallow graft prevents identifying the earlier commit that introduced the already-present runtime fix from local history."
+  ]
+}
