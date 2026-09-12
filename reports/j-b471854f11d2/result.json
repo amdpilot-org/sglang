@@ -1,0 +1,30 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/29465",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Completed the six-part IPC migration: multimodal inputs and opaque registry migrations already present on main were verified; all request time-stat classes now use msgspec structs with trace snapshots, metric exclusion, enum preservation, and cross-process clock calibration; msgpack is the default; customized_info and Mooncake multimodal metadata use native typed payloads without field-level PickleWrapper wrappers.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-b471854f11d2/venv/bin/python -m pytest -q --junitxml=reports/j-b471854f11d2/pytest-ipc.xml test/registered/unit/managers/test_time_stats_msgpack.py test/registered/unit/managers/test_io_struct.py test/registered/unit/managers/test_io_struct_msgpack.py test/registered/unit/managers/test_customized_info_msgpack.py test/registered/unit/managers/test_msgpack_ipc_roundtrip.py test/registered/unit/managers/test_multi_tokenizer_mixin.py test/registered/unit/disaggregation/test_kimi_k3_encoder_mode.py test/registered/unit/observability/test_trace.py python/sglang/multimodal_gen/test/unit/test_disagg_trace.py",
+      "exit_code": 0,
+      "what_was_measured": "176 tests plus 35 subtests: typed producer-consumer MessagePack round trips, legacy pickle round trips, multimodal tensors/arrays/proxy state, Mooncake metadata, customized_info, time calibration, trace serialization, and metrics exclusion."
+    },
+    {
+      "command": "SGLANG_USE_PICKLE_IPC={0,1} loopback sock_send/sock_recv TokenizedGenerateReqInput with APIServerReqTimeStats",
+      "exit_code": 0,
+      "what_was_measured": "Actual transport selection in separate interpreter processes: msgpack mode produced a 265-byte frame and legacy pickle mode produced a 1866-byte frame; both reconstructed APIServerReqTimeStats. The unset environment reported default False."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-b471854f11d2/venv/bin/python -m compileall -q python/sglang/srt/managers python/sglang/srt/observability python/sglang/srt/disaggregation/encoder/receiver.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Python syntax/import compilation and whitespace validity."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "On the assigned AMD Instinct MI350X (gfx950), test_generate_mm_inputs_round_trip_preserves_cuda_tensor_device passed and verified decoded torch tensors remained on cuda:0. CUDA IPC proxy wire-state and fallback tensor tests also passed.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "A real NVIDIA CUDA inter-process handle lifetime test could not run on the assigned AMD ROCm GPU; SGLang intentionally rejects the cuda_ipc transport on non-NVIDIA platforms. Opaque CUDA IPC proxy state and GPU tensor device preservation were exercised, but a live cross-process CUDA handle remains platform-blocked.",
+    "The full upstream CI matrix was not available locally; focused IPC, tracing, disaggregation, and producer-consumer tests passed."
+  ]
+}

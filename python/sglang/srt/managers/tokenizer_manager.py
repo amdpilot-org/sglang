@@ -91,7 +91,6 @@ from sglang.srt.managers.io_struct import (
     async_sock_send,
     build_flat_input_top_logprobs_arrays,
     sock_send,
-    unwrap_from_pickle,
 )
 from sglang.srt.managers.load_snapshot import create_load_snapshot_reader
 from sglang.srt.managers.mm_utils import wrap_shm_features
@@ -1445,6 +1444,7 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                 token_type_ids=token_type_ids,
                 need_wait_for_mm_inputs=obj.need_wait_for_mm_inputs,
                 num_items_assigned=obj.num_items_assigned,
+                mm_data_mooncake=obj.mm_data_mooncake,
                 multi_item_delimiter_indices=obj.multi_item_delimiter_indices,
                 encoder_urls=obj.encoder_urls,
             )
@@ -1601,6 +1601,7 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
             tokenized_obj.time_stats.set_api_server_dispatch_time()
             tokenized_obj = wrap_shm_features(tokenized_obj)
             time_stats = tokenized_obj.time_stats
+            tokenized_obj.time_stats = time_stats.to_ipc() if time_stats else None
             tokenized_obj.wrap_pickle_fields()
             self._dispatch_to_scheduler(tokenized_obj)
             self._mark_state_dispatched(tokenized_obj.rid)
@@ -1643,6 +1644,11 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
             set_time_batch(tokenized_objs, "set_api_server_dispatch_time")
             time_stats = [tokenized_obj.time_stats for tokenized_obj in tokenized_objs]
             for tokenized_obj in tokenized_objs:
+                tokenized_obj.time_stats = (
+                    tokenized_obj.time_stats.to_ipc()
+                    if tokenized_obj.time_stats
+                    else None
+                )
                 tokenized_obj.wrap_pickle_fields()
 
             if isinstance(tokenized_objs[0], TokenizedGenerateReqInput):
@@ -2257,9 +2263,8 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
             BatchTokenIDOutput,
         ],
     ):
-        recv_obj.time_stats = unwrap_from_pickle(recv_obj.time_stats)
         if isinstance(recv_obj, (BatchStrOutput, BatchTokenIDOutput)):
-            customized_info = unwrap_from_pickle(recv_obj.customized_info)
+            customized_info = recv_obj.customized_info
         else:
             customized_info = None
         pending_notify: dict[str, ReqState] = {}

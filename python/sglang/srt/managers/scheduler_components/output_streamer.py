@@ -261,7 +261,7 @@ class SchedulerOutputStreamer:
 
                 # Collect detailed cache breakdown if available
                 cached_tokens_details.append(self.get_cached_tokens_details(req))
-                time_stats.append(req.time_stats)
+                time_stats.append(req.time_stats.to_ipc())
                 retraction_counts.append(req.retraction_count)
 
                 phs = req.pooled_hidden_state
@@ -296,7 +296,7 @@ class SchedulerOutputStreamer:
             BatchEmbeddingOutput(
                 rids=rids,
                 http_worker_ipcs=http_worker_ipcs,
-                time_stats=wrap_as_pickle(time_stats),
+                time_stats=time_stats,
                 finished_reasons=finished_reasons,
                 embeddings=embeddings,
                 prompt_tokens=prompt_tokens,
@@ -525,7 +525,7 @@ class _GenerationStreamAccumulator:
         else:
             self.weight_versions.append(None)
 
-        self.time_stats.append(req.time_stats)
+        self.time_stats.append(req.time_stats.to_ipc())
 
         if not self.spec_algorithm.is_none():
             self.spec_verify_ct.append(req.spec_verify_ct)
@@ -693,6 +693,7 @@ class _GenerationStreamAccumulator:
         if not (self.rids or is_idle_batch):
             return None
         dp_ranks = [dp_rank] * len(self.rids) if self.rids else None
+        customized_info = self.customized_info or None
         return BatchTokenIDOutput(
             rids=self.rids,
             http_worker_ipcs=self.http_worker_ipcs,
@@ -702,7 +703,7 @@ class _GenerationStreamAccumulator:
             spec_num_cap_tokens=self.spec_num_cap_tokens,
             spec_correct_drafts_histogram=self.spec_correct_drafts_histogram,
             spec_cap_lens_histogram=self.spec_cap_lens_histogram,
-            time_stats=wrap_as_pickle(self.time_stats),
+            time_stats=self.time_stats,
             finished_reasons=self.finished_reasons,
             decoded_texts=self.decoded_texts,
             decode_ids=self.decode_ids_list,
@@ -754,9 +755,7 @@ class _GenerationStreamAccumulator:
             output_hidden_states=self.output_hidden_states,
             routed_experts=self.routed_experts,
             indexer_topk=self.indexer_topk,
-            customized_info=(
-                wrap_as_pickle(self.customized_info) if self.customized_info else None
-            ),
+            customized_info=customized_info,
             placeholder_tokens_idx=None,
             placeholder_tokens_val=None,
             retraction_counts=self.retraction_counts,

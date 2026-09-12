@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
+    Any,
     Callable,
     List,
     Optional,
@@ -80,6 +81,25 @@ if TYPE_CHECKING:
     from sglang.srt.sampling.sampling_observer import HostAuxiliaryOutput
 
 logger = logging.getLogger(__name__)
+_CUSTOMIZED_INFO_SCALAR_TYPES = (type(None), bool, int, float, str)
+_USE_PICKLE_IPC = envs.SGLANG_USE_PICKLE_IPC.get()
+
+
+def _is_customized_info_value(value: Any) -> bool:
+    value_type = type(value)
+    if value_type in _CUSTOMIZED_INFO_SCALAR_TYPES:
+        return True
+    if value_type is list:
+        for item in value:
+            if not _is_customized_info_value(item):
+                return False
+        return True
+    if value_type is dict:
+        for key, item in value.items():
+            if type(key) is not str or not _is_customized_info_value(item):
+                return False
+        return True
+    return False
 
 
 def _get_speculative_output_stride(result: GenerationBatchResult) -> int:
@@ -195,18 +215,34 @@ class SchedulerBatchResultProcessor:
         logits_output: LogitsProcessorOutput,
     ):
         if logits_output is not None and logits_output.customized_info is not None:
-            if req.customized_info is None:
-                req.customized_info = {}
+            if not _USE_PICKLE_IPC:
+                for key in logits_output.customized_info:
+                    if type(key) is not str:
+                        raise TypeError(
+                            f"customized_info[{key!r}] uses a "
+                            f"{type(key).__name__} key; keys must be str for "
+                            "msgpack IPC"
+                        )
+            pending_customized_info = []
             for k, v in logits_output.customized_info.items():
-                if k not in req.customized_info:
-                    req.customized_info[k] = []
+                elem = v[i]
+                if not _USE_PICKLE_IPC and not _is_customized_info_value(elem):
+                    raise TypeError(
+                        f"customized_info[{k!r}][{i}] must contain only JSON "
+                        "scalars, lists, and string-keyed maps for msgpack IPC"
+                    )
                 # Copy the element so it doesn't retain the entire batch
                 # tensor/array via a view reference.
-                elem = v[i]
                 if isinstance(elem, torch.Tensor):
                     elem = elem.clone()
                 elif hasattr(elem, "copy") and callable(elem.copy):
                     elem = elem.copy()
+                pending_customized_info.append((k, elem))
+            if req.customized_info is None:
+                req.customized_info = {}
+            for k, elem in pending_customized_info:
+                if k not in req.customized_info:
+                    req.customized_info[k] = []
                 req.customized_info[k].append(elem)
 
     @staticmethod

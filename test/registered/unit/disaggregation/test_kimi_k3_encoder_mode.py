@@ -32,6 +32,7 @@ from sglang.srt.disaggregation.encoder.receiver import (
     _select_mm_processor_prompt,
 )
 from sglang.srt.disaggregation.encoder.server import BadRequestError, MMEncoder
+from sglang.srt.managers.io_struct import MooncakeMMUrlItem
 from sglang.srt.managers.schedule_batch import Modality, MultimodalDataItem
 from sglang.srt.managers.tokenizer_manager import (
     _reject_missing_dispatched_encoder_embedding,
@@ -561,14 +562,16 @@ def test_epd_receiver_keeps_content_hash_aligned_with_image():
     )
 
     assert receiver._extract_url_data(request) == [
-        {
-            "url": "image",
-            "modality": Modality.IMAGE,
-            "detail": "high",
-            "max_dynamic_patch": 12,
-            "preprocess_kwargs": {"crop": False},
-            "content_hash": digest,
-        }
+        MooncakeMMUrlItem(
+            url="image",
+            modality=Modality.IMAGE,
+            preprocess_kwargs={
+                "detail": "high",
+                "max_dynamic_patch": 12,
+                "preprocess_kwargs": {"crop": False},
+            },
+            content_hash=digest,
+        )
     ]
 
     assert _encoder_media_item(receiver._extract_url_data(request)[0]) == {
@@ -587,7 +590,9 @@ def test_epd_tokenizer_receiver_timeout_cancels_tasks_and_closes_socket():
         receiver.context = object()
         receiver.host = "127.0.0.1"
         receiver.recv_timeout = 0.01
-        receiver._extract_url_data = Mock(return_value=[{"modality": Modality.IMAGE}])
+        receiver._extract_url_data = Mock(
+            return_value=[MooncakeMMUrlItem(url="image", modality=Modality.IMAGE)]
+        )
         encode_cancelled = asyncio.Event()
         recv_cancelled = asyncio.Event()
 

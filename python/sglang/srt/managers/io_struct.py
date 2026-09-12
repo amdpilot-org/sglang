@@ -61,6 +61,11 @@ from sglang.srt.managers.schedule_batch import (
     get_return_hidden_states_mode,
 )
 from sglang.srt.multimodal.mm_utils import has_valid_data
+from sglang.srt.observability.req_time_stats import (
+    APIServerReqTimeStats,
+    DPControllerReqTimeStats,
+    SchedulerReqTimeStats,
+)
 from sglang.srt.sampling.sampling_params import SamplingParams
 from sglang.srt.utils import ImageData, VideoData
 from sglang.srt.utils.field_validators import validate_optional_list_i64_1d_2d
@@ -70,6 +75,8 @@ from sglang.srt.utils.msgspec_utils import (
     msgspec_struct_pydantic_core_schema,
 )
 from sglang.srt.utils.weight_versions import WeightVersionSpans
+
+RequestTimeStats = Union[APIServerReqTimeStats, DPControllerReqTimeStats]
 
 # Handle serialization of Image for pydantic
 if TYPE_CHECKING:
@@ -118,10 +125,9 @@ class BeamSearchOutput(BaseBatchReq, kw_only=True):
 class PickleWrapper(msgspec.Struct, tag=True, array_like=True):
     """Wraps an arbitrary Python object as pickle-serialized bytes for msgpack IPC.
 
-    In msgpack mode, fields that carry opaque or non-msgspec-typed payloads
-    (e.g. multimodal inputs, time stats, customized info) are stored as
-    PickleWrapper so the outer struct can still be msgpack-encoded.  In pickle
-    mode (_USE_PICKLE_IPC=True), wrap_as_pickle / unwrap_from_pickle are no-ops
+    In msgpack mode, explicitly opaque top-level payloads may be stored as a
+    PickleWrapper so the outer frame can still be msgpack-encoded. In pickle mode
+    (_USE_PICKLE_IPC=True), wrap_as_pickle / unwrap_from_pickle are no-ops
     and this class is not used on the wire.
     """
 
@@ -168,6 +174,15 @@ MultimodalDataInputFormat = Union[
     List[MultimodalDataInputItem],
     MultimodalDataInputItem,
 ]
+
+
+class MooncakeMMUrlItem(msgspec.Struct, array_like=True):
+    """Multimodal input captured for Mooncake encoder dispatch."""
+
+    url: object
+    modality: Modality
+    preprocess_kwargs: Dict[str, object] = msgspec.field(default_factory=dict)
+    content_hash: Optional[str] = None
 
 
 @dataclass
@@ -331,6 +346,7 @@ class GenerateReqInput:
     # For EPD-disaggregated inference
     need_wait_for_mm_inputs: Optional[bool] = None
     num_items_assigned: Optional[Dict[Modality, List[int]]] = None
+    mm_data_mooncake: Optional[List[MooncakeMMUrlItem]] = None
     # Snapshot of encoder URLs at the time tokenizer-side computed
     # ``num_items_assigned``.
     encoder_urls: Optional[List[str]] = None
@@ -1053,6 +1069,7 @@ class TokenizedGenerateReqInput(BaseReq, kw_only=True):
 
     need_wait_for_mm_inputs: Optional[bool] = None
     num_items_assigned: Optional[Dict[Modality, List[int]]] = None
+    mm_data_mooncake: Optional[List[MooncakeMMUrlItem]] = None
     # Encoder URL snapshot frozen at tokenizer-side dispatch time so that
     # encoder_idx assignments stay consistent in the scheduler subprocess.
     # Internal IPC only.
@@ -1062,17 +1079,16 @@ class TokenizedGenerateReqInput(BaseReq, kw_only=True):
     multi_item_delimiter_indices: Optional[List[int]] = None
 
     # For observability
-    # Pickled Optional[Union[APIServerReqTimeStats, DPControllerReqTimeStats]]
-    time_stats: Optional[PickleWrapper] = None
+    time_stats: Optional[RequestTimeStats] = None
 
     # Cache namespace used to isolate otherwise-identical prefixes.
     cache_salt: Optional[str] = None
 
     def wrap_pickle_fields(self):
-        self.time_stats = wrap_as_pickle(self.time_stats)
+        """Compatibility hook; all fields are now msgpack-native."""
 
     def unwrap_pickle_fields(self):
-        self.time_stats = unwrap_from_pickle(self.time_stats)
+        """Compatibility hook; all fields are now msgpack-native."""
 
 
 class BatchTokenizedGenerateReqInput(BaseBatchReq, kw_only=True):
@@ -1351,14 +1367,13 @@ class TokenizedEmbeddingReqInput(BaseReq, kw_only=True):
     multi_item_delimiter_indices: Optional[List[int]] = None
 
     # For observability
-    # Pickled Optional[Union[APIServerReqTimeStats, DPControllerReqTimeStats]]
-    time_stats: Optional[PickleWrapper] = None
+    time_stats: Optional[RequestTimeStats] = None
 
     def wrap_pickle_fields(self):
-        self.time_stats = wrap_as_pickle(self.time_stats)
+        """Compatibility hook; all fields are now msgpack-native."""
 
     def unwrap_pickle_fields(self):
-        self.time_stats = unwrap_from_pickle(self.time_stats)
+        """Compatibility hook; all fields are now msgpack-native."""
 
 
 class BatchTokenizedEmbeddingReqInput(BaseBatchReq, kw_only=True):
@@ -1385,6 +1400,7 @@ TokenIdsLogprobIndices = Optional[List[Optional[List[Optional[List[int]]]]]]
 HiddenStateChunk = List[Optional[Union[float, List[float]]]]
 OutputHiddenStates = Optional[List[Optional[List[HiddenStateChunk]]]]
 CachedTokensDetails = Dict[str, Union[int, str]]
+CustomizedInfo = Optional[Dict[str, List[List[Any]]]]
 # Serialized form of BaseFinishReason.to_json() — all values are primitives.
 FinishReasonDict = Dict[str, Optional[Union[str, int, List[int]]]]
 
@@ -1492,16 +1508,14 @@ class BatchTokenIDOutput(BaseBatchReq, kw_only=True):
     # The trainer step id. Used to know which step's weights are used for sampling.
     token_steps: Optional[List[List[int]]] = None
 
-    # Customized info
-    customized_info: Optional[PickleWrapper] = None
+    customized_info: CustomizedInfo = None
     # Detailed breakdown of cached tokens by source (device/host/storage)
     cached_tokens_details: Optional[List[Optional[CachedTokensDetails]]] = None
     # DP rank of the scheduler that processed each request
     dp_ranks: Optional[List[Optional[int]]] = None
 
     # For observability
-    # Pickled Optional[List[SchedulerReqTimeStats]]
-    time_stats: Optional[PickleWrapper] = None
+    time_stats: Optional[List[SchedulerReqTimeStats]] = None
 
     # Multimodal prompt token counts (image/audio/video). None when not applicable.
     image_tokens: Optional[List[int]] = None
@@ -1589,16 +1603,14 @@ class BatchStrOutput(BaseBatchReq, kw_only=True):
     # The trainer step id. Used to know which step's weights are used for sampling.
     token_steps: Optional[List[List[int]]] = None
 
-    # Customized info
-    customized_info: Optional[PickleWrapper] = None
+    customized_info: CustomizedInfo = None
     # Detailed breakdown of cached tokens by source (device/host/storage)
     cached_tokens_details: Optional[List[Optional[CachedTokensDetails]]] = None
     # DP rank of the scheduler that processed each request
     dp_ranks: Optional[List[Optional[int]]] = None
 
     # For observability
-    # Pickled Optional[List[SchedulerReqTimeStats]]
-    time_stats: Optional[PickleWrapper] = None
+    time_stats: Optional[List[SchedulerReqTimeStats]] = None
 
     # Multimodal prompt token counts (image/audio/video). None when not applicable.
     image_tokens: Optional[List[int]] = None
@@ -1640,8 +1652,7 @@ class BatchEmbeddingOutput(BaseBatchReq, kw_only=True):
     cached_tokens_details: Optional[List[Optional[CachedTokensDetails]]] = None
 
     # For observability
-    # Pickled Optional[List[SchedulerReqTimeStats]]
-    time_stats: Optional[PickleWrapper] = None
+    time_stats: Optional[List[SchedulerReqTimeStats]] = None
 
     # Optional pooled hidden states (pre-head transformer output).
     # Two IPC formats, disambiguated by len vs len(rids):
