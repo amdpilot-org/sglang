@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38478",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Implemented default-off NO_TOKEN admission lookahead with receipt-balanced head-prefix pinning, bounded same-head aging, a post-pin capacity reserve, and an unconditional priority-scheduling disable. Later candidates still enter through PrefillAdder.add_one_req, retaining its SWA, Mamba, chunked-prefill, DP-attention, LoRA, request-slot, and prefill-budget gates.",
+  "tests": [
+    {
+      "command": "base-source regression probe recorded in reports/j-935da159ca6f/base_reproduction.txt",
+      "exit_code": 1,
+      "what_was_measured": "Expected failing-before result: the recorded base has no lookahead policy and the head NO_TOKEN path stops before later waiting requests."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-935da159ca6f/venv/bin/python -m pytest -q test/registered/unit/managers/test_prefill_lookahead.py",
+      "exit_code": 0,
+      "what_was_measured": "Ten CPU policy/contract tests plus three subtests: aging, rematch/head-change/removal/admission lock balance, exact reserve boundary, the documented 114752-pin/1792-free/4096-reserve OOM sequence, cache delta sign variants, non-tree rejection, and real RadixCache evictable/protected accounting."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-935da159ca6f/venv/bin/python -m pytest -q test/registered/unit/managers/test_prefill_adder.py test/registered/unit/managers/test_scheduler_decision_batch_params.py test/registered/unit/managers/test_prefill_lookahead.py",
+      "exit_code": 0,
+      "what_was_measured": "Forty scheduler/admission tests plus fifteen subtests, covering the unchanged PrefillAdder gates alongside the new policy."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/environ.py python/sglang/srt/managers/scheduler.py python/sglang/srt/managers/prefill_lookahead.py test/registered/unit/managers/test_prefill_lookahead.py reports/j-935da159ca6f/result.json reports/j-935da159ca6f/base_reproduction.txt",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, spelling, and registered-test metadata checks for all changed files."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported prefill-only H100 TP=8 hierarchical-cache deployment was not available, so the reported throughput, TTFT, idle-round, cache-hit, and production lock-count percentages were not reproduced or claimed.",
+    "GPU execution is false: the implementation is scheduler/cache control flow and was validated with CPU contract tests, including the real simulated RadixCache; no model-weight or GPU serving run was used as evidence.",
+    "A CPU or single-GPU contract test cannot qualify distributed TP=8 performance or race behavior; deployment-level A/B validation remains required.",
+    "No metric counter was added in this first implementation; configuration uses three environment variables and is documented in the pull request."
+  ]
+}

@@ -1,0 +1,24 @@
+Command:
+/tmp/amdpilot-repo-j-935da159ca6f/venv/bin/python - <<'PY'
+import subprocess
+base='358c163250ad3b1f62939b01ce1314a0a31a0365'
+src=subprocess.check_output(['git','show',f'{base}:python/sglang/srt/managers/scheduler.py'], text=True)
+module=subprocess.run(['git','cat-file','-e',f'{base}:python/sglang/srt/managers/prefill_lookahead.py'])
+has_unconditional = 'if res == AddReqResult.NO_TOKEN:' in src and '                break\n\n        if mamba_allocator' in src
+print(f'base={base}')
+print(f'prefill_lookahead_module_exists={module.returncode == 0}')
+print(f'NO_TOKEN_path_stops_before_next_waiting_request={has_unconditional}')
+if module.returncode != 0 and has_unconditional:
+    print('REPRODUCED: a blocked head prevents consideration of later requests')
+    raise SystemExit(1)
+raise SystemExit(0)
+PY
+
+Exit code: 1 (expected failing-before regression)
+
+Output:
+fatal: path 'python/sglang/srt/managers/prefill_lookahead.py' exists on disk, but not in '358c163250ad3b1f62939b01ce1314a0a31a0365'
+base=358c163250ad3b1f62939b01ce1314a0a31a0365
+prefill_lookahead_module_exists=False
+NO_TOKEN_path_stops_before_next_waiting_request=True
+REPRODUCED: a blocked head prevents consideration of later requests
