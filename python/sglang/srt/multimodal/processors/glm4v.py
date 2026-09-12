@@ -434,6 +434,19 @@ def _passthrough_video_metadata(video, video_config):
     return _glm_video_metadata(num_frames, fps, num_frames / fps, range(num_frames))
 
 
+def _collapse_glm5_next_image_tokens(
+    input_ids: list[int], image_token_id: int
+) -> list[int]:
+    """Collapse each processor-expanded GLM-5.3 image span to one token."""
+    return [
+        token_id
+        for index, token_id in enumerate(input_ids)
+        if token_id != image_token_id
+        or index == 0
+        or input_ids[index - 1] != image_token_id
+    ]
+
+
 class Glm4vImageProcessor(SGLangBaseProcessor):
     smart_rgb_conversion = True
     video_preprocessing_device = "cpu"
@@ -543,6 +556,12 @@ class Glm4vImageProcessor(SGLangBaseProcessor):
         *args,
         **kwargs,
     ):
+        # GLM-5.3's processor expands one image placeholder into a consecutive
+        # token span while retaining the original image. Media loading expects
+        # one placeholder per item and expands it again during preprocessing.
+        if self.hf_config.model_type == "glm5_next" and isinstance(input_text, list):
+            input_text = _collapse_glm5_next_image_tokens(input_text, self.IM_TOKEN_ID)
+
         # Bare base64 video must use SGLang's decoder because HF treats it as a path-like string.
         video_urls, video_configs = split_glm_video_items(request_obj.video_data)
         video_processor = getattr(self._processor, "video_processor", None)
