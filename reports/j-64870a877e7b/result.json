@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/1715",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3156",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3146",
+  "candidate_commit": "8f1eaa1011c775914123ce8ee3021e2eb2b82982",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate adds a coherent eager-only shared-prefix cascade decode path and its mocked page-table/dispatch tests pass. It does not fully resolve the original feature request: CUDA-graph decode and several attention configurations explicitly fall back to non-cascade decode, and the actual FlashInfer kernel and serving path could not be imported or executed on the prepared AMD ROCm node. The only GPU numerical test proves the generic split-softmax merge identity, not the candidate wrapper integration. Therefore the implementation is a plausible partial fix with test-only hardening, while the central native-kernel correctness/performance claim remains unverified.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-64870a877e7b/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-64870a877e7b/candidate-test.py (base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction on recorded base: candidate regression reports missing cascade helpers/path (4 failed, 2 passed; seven profitability subtests fail under one test)."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-64870a877e7b/venv/bin/python -m pytest -q test/registered/unit/test_flashinfer_cascade_attention.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 6 tests and 7 subtests passed, covering helper thresholds, mocked page-table construction, mocked scale propagation/merge dispatch, and a hand-written float64 split-softmax identity on GPU. It did not execute FlashInfer."
+    },
+    {
+      "command": "Independent external updater adversary with one zero-length suffix and three uneven suffixes",
+      "exit_code": 0,
+      "what_was_measured": "The candidate produced unique indptr [0,0,1,2,3] and indices [9,8,7], preserving the zero-length request and suffix ordering in the mocked translator path."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-64870a877e7b/venv/bin/python -m py_compile python/sglang/srt/layers/attention/flashinfer_backend.py test/registered/unit/test_flashinfer_cascade_attention.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source and test syntax compiled."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 8f1eaa1011c775914123ce8ee3021e2eb2b82982",
+      "exit_code": 2,
+      "what_was_measured": "Contrary to the candidate report's exit-0 claim, exact-commit evidence logs contain five trailing-whitespace errors."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "One AMD Instinct MI355X was used through Torch 2.11.0+rocm7.2. The candidate's independent float64 algebra test ran on that GPU. No FlashInfer GPU code ran because flashinfer is absent and FlashInfer targets NVIDIA CUDA.",
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "No native source is changed by the candidate. repository-environment.json specifies native=null and wheel=null, so no native rebuild was applicable. The changed backend imported from /job/repo/python/sglang/srt/layers/attention/flashinfer_backend.py; flashinfer import raised ModuleNotFoundError.",
+  "remaining_counterexamples": [
+    "CUDA-graph decode always uses the existing ordinary decode wrappers; shared-prefix cascade is not integrated for the default graph replay path.",
+    "Sliding-window attention, encoder-decoder cross attention, speculative decode, and dequant-workspace KV cache configurations explicitly do not use cascade.",
+    "No actual BatchPrefillWithPagedKVCacheWrapper forward_return_lse or merge_state kernel invocation was tested, so wrapper planning, cache layout, numerical correctness, and kernel compatibility remain unverified.",
+    "No NVIDIA serving benchmark or end-to-end shared-prefix request workload was run, so the feature's intended latency/throughput benefit is unverified.",
+    "The candidate's exact commit fails git diff --check despite reporting that check as passing."
+  ],
+  "remaining_limitations": [
+    "Prepared hardware is AMD Instinct MI355X with ROCm 7.2, not an NVIDIA CUDA architecture supported by FlashInfer.",
+    "The pinned interpreter has no flashinfer module, preventing source/native import and execution of the candidate's real dependency.",
+    "The qualified tiny Llama fixture cannot exercise FlashInfer on this node and therefore would only be an unrelated transport/engine smoke; it was not used as proof.",
+    "No model weights or distributed workload were exercised."
+  ]
+}
