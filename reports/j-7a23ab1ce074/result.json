@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31766",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a substantive partial fix: configured LRU eviction bounds real PUSH/monitor descriptor growth and its cleanup tests pass, but the fixed default cache size of 1024 can exceed the process FD budget. With RLIMIT_NOFILE=128, the unchanged candidate still raises the original ZMQError after 32 endpoints; manually configuring the cache to 8 survives 1,000 endpoints.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-7a23ab1ce074/venv/bin/python /job/review-evidence-j-7a23ab1ce074/fd_probe.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Actual CommonKVManager._connect with real PyZMQ retained 200 socket and 200 monitor entries; /proc/self/fd grew from 9 to 613, peak 614."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7a23ab1ce074/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_common_kv_manager_socket_cache.py (candidate 368fafdf463b9f208433d3254d7f3e1b42180a74)",
+      "exit_code": 0,
+      "what_was_measured": "All five candidate regressions passed against source imported from /job/repo/python, covering bounded/LRU caching, paired closure, reuse, busy-socket handling, and monitor-creation cleanup."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7a23ab1ce074/venv/bin/python /job/review-evidence-j-7a23ab1ce074/fd_probe.py (candidate, cache limit 8)",
+      "exit_code": 0,
+      "what_was_measured": "Actual CommonKVManager._connect with real PyZMQ ended after 200 endpoints with 8 socket and 8 monitor entries; /proc/self/fd grew from 9 to 45, peak 48."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7a23ab1ce074/venv/bin/python /job/review-evidence-j-7a23ab1ce074/low_rlimit_probe.py (candidate default cache 1024, subprocess RLIMIT_NOFILE=128)",
+      "exit_code": 0,
+      "what_was_measured": "The probe caught zmq.error.ZMQError: Too many open files after 32 successfully created endpoints, before the 1024-entry eviction threshold."
+    },
+    {
+      "command": "PROBE_CACHE_LIMIT=8 /tmp/amdpilot-repo-j-7a23ab1ce074/venv/bin/python /job/review-evidence-j-7a23ab1ce074/low_rlimit_probe.py (candidate, subprocess RLIMIT_NOFILE=128)",
+      "exit_code": 0,
+      "what_was_measured": "The same real path completed 1,000 unique endpoints without error, ending with 8 cached entries and 38 descriptors, proving the LRU mechanism works when sized to the process budget."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7a23ab1ce074/venv/bin/python -m pytest -q test/registered/unit/disaggregation test/registered/unit/test_environ.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "376 tests passed with 47 subtests; no focused-suite compatibility regression was observed."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With the candidate default SGLANG_DISAGGREGATION_ZMQ_SOCKET_CACHE_SIZE=1024 and a per-process soft RLIMIT_NOFILE of 128, real CommonKVManager._connect raises ZMQError: Too many open files after 32 endpoints, before eviction can occur.",
+    "The fix requires operators with lower descriptor budgets to discover and manually tune the new cache-size environment variable; the default is not derived from RLIMIT_NOFILE or current descriptor headroom."
+  ],
+  "remaining_limitations": [
+    "The reporter's 16x NVIDIA H800 full-model and multi-node serving workload was unavailable; only the actual host-side CommonKVManager/PyZMQ path was reproduced.",
+    "The assigned device was one AMD Instinct MI350X (gfx950) with Torch 2.11.0+rocm7.2. No GPU execution was relevant to the descriptor lifecycle and none was claimed.",
+    "No native source changed and repository-environment.json reports native as null, so no native rebuild was applicable.",
+    "On the reporter's stated soft limit of 1,048,576, the candidate's default 1024-entry bound is expected to prevent this cache alone from exhausting descriptors, but the unavailable distributed workload was not reproduced."
+  ]
+}
