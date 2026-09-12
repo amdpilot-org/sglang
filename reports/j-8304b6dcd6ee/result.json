@@ -1,0 +1,31 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38408",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared base already contains the issue-specific fix from merged upstream PR #38830: expert_pack_mxfp4 now uses SGLang load_jit instead of torch.utils.cpp_extension.load, replacing legacy FileBaton existence-based ownership with kernel-released fcntl.flock. Added deterministic regression coverage for an orphaned lock file and a lock-holder process that dies. The original H200 intermittent CI event could not be exercised on the assigned AMD gfx950 GPU.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-8304b6dcd6ee/venv/bin/python -m pytest -q test/registered/kernels/test_jit_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "44 CPU-only JIT cache tests passed, including live-owner exclusion, orphan-file tolerance, and release after holder-process termination."
+    },
+    {
+      "command": "timeout 2 /tmp/amdpilot-repo-j-8304b6dcd6ee/venv/bin/python - <legacy FileBaton reproduction>",
+      "exit_code": 124,
+      "what_was_measured": "The prepared PyTorch 2.11.0+rocm7.2 FileBaton remained blocked on a pre-existing ownerless lock file until the external timeout, reproducing the reported lock failure mechanism deterministically."
+    },
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=<private cold cache> HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-8304b6dcd6ee/venv/bin/python -m pytest -q -s test/registered/expert_pack/test_expert_pack_mxfp4.py",
+      "exit_code": 1,
+      "what_was_measured": "The actual cold MXFP4 JIT path targeted gfx950 but all four tests stopped at compilation because the NVIDIA-specific source includes cuda_bf16.h, which is unavailable in the prepared ROCm toolchain; no MXFP4 GPU kernel executed."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "One assigned AMD Instinct MI355X (gfx950) was visible and the test reached hipcc with --offload-arch=gfx950:sramecc+:xnack-, but compilation failed at cuda_bf16.h before any MXFP4 kernel or numerical comparison ran. See reports/j-8304b6dcd6ee/raw/mxfp4_gfx950_cold.txt.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No H200/NVIDIA GPU was available, so the original intermittent H200 CI hang was not reproduced statistically or end-to-end on its reported architecture.",
+    "The assigned gfx950 ROCm environment cannot compile this NVIDIA-specific MXFP4 source because cuda_bf16.h is unavailable; therefore GPU numerical correctness was not claimed.",
+    "The evidence verifies the reported stale-file mechanism and the current advisory-lock recovery property, but cannot exclude unrelated compiler or kernel stalls as alternate causes of historical 30-minute jobs."
+  ]
+}
