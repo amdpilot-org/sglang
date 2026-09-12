@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36675",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Separated parser-owned reasoning output from parser-less chat-template reasoning so Qwen3-Coder structural tags allow the reasoning prefix exactly when the template enables it.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-2878c157affa/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py::ServingChatTestCase::test_xgrammar_tag_uses_parserless_template_reasoning_state",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: both parser-less enabled states incorrectly passed thinking_mode=False to the structural-tag builder; the two disabled boundary states passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2878c157affa/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py::ServingChatTestCase::test_xgrammar_tag_uses_parserless_template_reasoning_state test/registered/unit/entrypoints/openai/test_serving_chat.py::ServingChatTestCase::test_xgrammar_tag_omits_reasoning_when_parser_owns_it",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression across four parser-less toggle cases plus the independent parser-owned boundary: 2 tests and 4 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2878c157affa/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py",
+      "exit_code": 0,
+      "what_was_measured": "Complete serving-chat unit coverage: 136 tests and 72 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2878c157affa/venv/bin/python - <<'PY' # instantiate FunctionCallParser(..., 'qwen3_coder') and serialize required constraints for thinking_mode False/True",
+      "exit_code": 0,
+      "what_was_measured": "Actual installed XGrammar structural-tag serialization: reasoning=false starts at the tool call (296 bytes); reasoning=true includes any_text through </think> before the tool call (488 bytes)."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-2878c157affa/venv/bin/python < GPU sanity script",
+      "exit_code": 0,
+      "what_was_measured": "One AMD Instinct MI350X; Torch ROCm result matched an independent CPU reference with maximum absolute error 9.5367431640625e-07."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2878c157affa/venv/bin/python -m ruff check python/sglang/srt/entrypoints/openai/serving_chat.py test/registered/unit/entrypoints/openai/test_serving_chat.py",
+      "exit_code": 1,
+      "what_was_measured": "Formatting/lint runner was unavailable in the prepared interpreter: No module named ruff. git diff --check passed independently."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Qwen3.5 model weights were unavailable and the registered Qwen3.5 test requires eight GPUs; no full-model HTTP, semantic-accuracy, or distributed reproduction was performed.",
+    "The qualified tiny Llama fixture cannot validate Qwen3.5 chat-template or parser behavior and was intentionally not used as substitute architecture evidence.",
+    "Ruff was not installed in the prepared interpreter; focused and full-file unit tests plus git diff --check passed.",
+    "This is Python serving control flow; no native library rebuild was applicable."
+  ]
+}
