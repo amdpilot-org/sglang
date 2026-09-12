@@ -1,0 +1,56 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36338",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/2856",
+  "candidate_commit": "6fbcae3f6367d95c85a3f71d3105224145dee8f4",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes PR 2799's three named MI355X regressions and passes isolated GPU numerical/remapping tests, but independent boundary cases still select a slower compact path and the hard pre-dedup gate discards a highly overlapping, memory-beneficial union. Target NVIDIA BF16 FlashMLA output and end-to-end performance remain unverified.",
+  "tests": [
+    {
+      "command": "At base 358c163: PYTHONPATH=/job/repo/python .../venv/bin/python -c 'from sglang.kernels.ops.attention.dsa.dequant_k_cache import dequantize_k_cache_paged_selective'",
+      "exit_code": 1,
+      "what_was_measured": "The recorded base uses unconditional full-prefix dequantization and has no selective helper; the import fails from the checkout source path."
+    },
+    {
+      "command": "At candidate 6fbcae3: PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=.../candidate-triton-fresh .../venv/bin/python -m pytest -q test/registered/kernel/ops/attention/test_selective_dsa_kv_dequant.py -s",
+      "exit_code": 0,
+      "what_was_measured": "Four GPU tests passed against checked-out source: independent FP8 numerical reference, physical alias dedup/remap, fallback behavior, pre-dedup gate, and invalid sentinels."
+    },
+    {
+      "command": "At candidate 6fbcae3: PYTHONPATH=/job/repo/python .../venv/bin/python reports/j-2eee0f89730e/evidence/adversarial_scaling.py",
+      "exit_code": 0,
+      "what_was_measured": "The inherited 64/256/1024-query cases all took early full fallback with a 150994944-byte peak and measured 0.890x/0.872x/0.875x of the separately warmed full baseline."
+    },
+    {
+      "command": "At candidate 6fbcae3: PYTHONPATH=/job/repo/python .../venv/bin/python reports/j-f631daba9e47/benchmark_selective_dequant.py",
+      "exit_code": 0,
+      "what_was_measured": "The beneficial 262144-row case remained selective: 4029 compact rows, 4641408 BF16 bytes versus 301989888, and 2.541x speedup."
+    },
+    {
+      "command": "At candidate 6fbcae3: PYTHONPATH=/job/repo/python .../venv/bin/python /tmp/amdpilot-repo-j-75a9018acd88/review-evidence/independent_boundaries.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent MI355X medians around the gate: random 1/4/8/16/24/32-query compact cases were 1.011x/1.020x/1.060x/1.210x/1.327x/1.347x full latency. A 33-query highly overlapping input fell back to 150994944 bytes although forcing dedup produced 2048 rows at 4930048-byte peak and 0.993x latency."
+    },
+    {
+      "command": "At candidate 6fbcae3: PYTHONPATH=/job/repo/python .../venv/bin/python -m pytest -q test/registered/attention/unittests/dsa/test_dsa.py -k sparse_fp8_prefill_cases -s",
+      "exit_code": 1,
+      "what_was_measured": "One subtest passed and four skipped; flashmla_sparse and flashmla_kv stopped before attention because page size 64 is unsupported by the available legacy HIP DSA path, which requires page size 1."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Exact-candidate unit, numerical, memory, and timing checks executed checked-out Python/Triton source on one AMD Instinct MI355X (gfx950) with Torch 2.11.0+rocm7.2 and a fresh private Triton cache.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "At 131072 prefix rows and top-k 2048, random 1 through 32 query-row inputs select compact staging but were 1.011x to 1.347x slower than warmed full dequantization on the assigned MI355X.",
+    "At 131072 prefix rows, 33 query rows, and top-k 2048 with complete cross-query overlap, the entry-count gate falls back to the 150994944-byte full buffer; forcing the union yields 2048 compact rows at 4930048-byte peak with essentially equal latency.",
+    "BF16 flashmla_sparse attention output correctness and end-to-end sparse-prefill performance remain unverified on the required NVIDIA Hopper/Blackwell architecture."
+  ],
+  "remaining_limitations": [
+    "The assigned AMD Instinct MI355X is not NVIDIA Hopper/Blackwell and cannot execute the target FlashMLA sparse attention kernel.",
+    "The ROCm integration fixture stops before attention because page size 64 is incompatible with the available legacy HIP DSA path's page-size-1 requirement.",
+    "The candidate's fixed thresholds are validated only with isolated staging microbenchmarks on MI355X, not end-to-end or on the target architecture.",
+    "No native source changed, so a native rebuild was not applicable; only the changed checkout-source Python/Triton path was freshly compiled and executed."
+  ]
+}
