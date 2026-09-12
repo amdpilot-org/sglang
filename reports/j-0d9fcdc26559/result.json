@@ -1,0 +1,63 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38863",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/643",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/527",
+  "candidate_commit": "bbfa5b79fe00527779c40a141cb9ccc387a96ab5",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review reproduced the original accumulated quadratic host-CPU rollback-history work on the prepared base and verified that the exact candidate replaces full-history slice/rebind with guarded in-place deletion. On the actual installed xgrammar matcher, the candidate preserved rollback boundaries and list identity, fixed rollback(0) history desynchronization, and changed 8x-size accumulated timing growth from 21.33x to 7.88x (approximately linear in the number of operations).",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0d9fcdc26559/venv/bin/python /job/review-evidence-j-0d9fcdc26559/independent_xgrammar_review.py",
+      "revision": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "Actual XGrammarGrammar plus installed xgrammar.GrammarMatcher, using repeated speculative accept/rollback(1) followed by one committed accept so history accumulates. Median seconds for N=2000/4000/8000/16000 were 0.003653/0.009004/0.025060/0.077904; doubling ratios 2.465/2.783/3.109 and 8x-size ratio 21.328 reproduced superlinear accumulated work. Boundary assertions also reproduced rollback(0) debug-history desynchronization and list rebinding."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0d9fcdc26559/venv/bin/python -m pytest -q test/registered/unit/constrained/test_xgrammar_rollback.py",
+      "revision": "bbfa5b79fe00527779c40a141cb9ccc387a96ab5",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression on the real matcher: rollback(0), partial/full history truncation, content, and in-place list identity; 2 tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0d9fcdc26559/venv/bin/python /job/review-evidence-j-0d9fcdc26559/independent_xgrammar_review.py",
+      "revision": "bbfa5b79fe00527779c40a141cb9ccc387a96ab5",
+      "exit_code": 0,
+      "what_was_measured": "Unchanged independent actual-backend workload. All empty/zero/partial/full boundaries and identity checks passed. Median seconds were 0.002444/0.004853/0.009613/0.019249; doubling ratios 1.986/1.981/2.002 and 8x-size ratio 7.877, consistent with linear total work."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0d9fcdc26559/venv/bin/python reports/j-4d59c080bff5/benchmark_xgrammar_rollback.py",
+      "revision": "bbfa5b79fe00527779c40a141cb9ccc387a96ab5",
+      "exit_code": 0,
+      "what_was_measured": "Candidate-provided actual-backend controlled CPU benchmark; medians 0.002386/0.004748/0.009490/0.019009 seconds with doubling ratios 1.990/1.999/2.003."
+    },
+    {
+      "command": "Independent matcher failure-atomicity and MAX_ROLLBACK_TOKENS boundary probe (raw command/output retained in /job/review-evidence-j-0d9fcdc26559/candidate-adversarial.txt)",
+      "revision": "bbfa5b79fe00527779c40a141cb9ccc387a96ab5",
+      "exit_code": 0,
+      "what_was_measured": "rollback(200) emptied a 200-token history; rollback beyond saved history raised RuntimeError before changing list contents or identity."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..bbfa5b79fe00527779c40a141cb9ccc387a96ab5",
+      "revision": "bbfa5b79fe00527779c40a141cb9ccc387a96ab5",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU kernels or model generation were run. The assigned device was visible as one AMD Instinct MI355X, gfx950:sramecc+:xnack-, with torch 2.11.0+rocm7.2 and HIP 7.2.26015. The reviewed contract concerns Python host-CPU list-copy complexity, so timings are explicitly CPU timings, not GPU performance claims."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_reason": "The candidate changes only Python, tests, and report artifacts; no C++, FlyDSL, compiler, ISA, or other native source changed. The actual native xgrammar package loaded from /opt/venv/lib/python3.12/site-packages/xgrammar, while the reviewed backend loaded from /job/repo/python/sglang/srt/constrained/xgrammar_backend.py.",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No live speculative-decoding server or model generation was run; verification isolates the exact actual-backend accept/rollback/commit pattern responsible for the reported host work.",
+    "No GPU performance conclusion is made.",
+    "The installed xgrammar emits a deprecation warning that max_rollback_tokens is now always unlimited, although the SGLang constant is 200; this does not affect the verified Python history-copy fix.",
+    "Negative rollback counts are accepted unusually by the installed matcher, but are outside SGLang's rollback caller contract and the candidate preserves the base implementation's effective Python-list behavior for that invalid input."
+  ],
+  "raw_evidence_directory": "/job/review-evidence-j-0d9fcdc26559"
+}
