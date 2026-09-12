@@ -1,0 +1,94 @@
+FF.                                                                      [100%]
+=================================== FAILURES ===================================
+___ test_queued_abort_reopens_streaming_session_and_preserves_committed_turn ___
+
+_ = <MagicMock name='get_serving' id='140024721651712'>
+
+    @patch(
+        "sglang.srt.managers.scheduler.get_serving",
+        return_value=SimpleNamespace(weight_version="v0"),
+    )
+    def test_queued_abort_reopens_streaming_session_and_preserves_committed_turn(_):
+        committed = object()
+        session = SimpleNamespace(
+            streaming=True, _inflight=True, req_nodes={"committed": committed}
+        )
+        session.abort_req = MagicMock(side_effect=lambda: setattr(session, "_inflight", False))
+        aborted = _request("queued", session)
+        unrelated = _request("other", None)
+        scheduler = _scheduler([aborted, unrelated])
+    
+        scheduler.abort_request(AbortReq(rid="queued"))
+    
+        assert scheduler.waiting_queue == [unrelated]
+>       session.abort_req.assert_called_once_with()
+
+../review-evidence/j-944eb2d479c0/candidate-regression.py:65: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock id='140024706847600'>, args = (), kwargs = {}
+msg = "Expected 'mock' to be called once. Called 0 times."
+
+    def assert_called_once_with(self, /, *args, **kwargs):
+        """assert that the mock was called exactly once and that that call was
+        with the specified arguments."""
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to be called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'mock' to be called once. Called 0 times.
+
+/usr/lib/python3.12/unittest/mock.py:955: AssertionError
+____________ test_queued_mamba_abort_is_marked_before_cache_release ____________
+
+release_kv_cache = <MagicMock name='release_kv_cache' id='140024707268144'>
+_ = <MagicMock name='get_serving' id='140024707265312'>
+
+    @patch(
+        "sglang.srt.managers.scheduler.get_serving",
+        return_value=SimpleNamespace(weight_version="v0"),
+    )
+    @patch("sglang.srt.managers.scheduler.release_kv_cache")
+    def test_queued_mamba_abort_is_marked_before_cache_release(release_kv_cache, _):
+        session = SimpleNamespace(streaming=True, _inflight=True, abort_req=MagicMock())
+        aborted = _request("queued-mamba", session, holds_mamba=True)
+        scheduler = _scheduler([aborted])
+    
+        scheduler.abort_request(
+            AbortReq(
+                rid="queued-mamba",
+                abort_message="Request waiting timeout reached.",
+                finished_reason={
+                    "type": "abort",
+                    "status_code": 503,
+                    "message": "Request waiting timeout reached.",
+                },
+            )
+        )
+    
+        release_kv_cache.assert_called_once_with(
+            aborted, scheduler.tree_cache, is_insert=False
+        )
+>       assert isinstance(aborted.finished_reason, FINISH_ABORT)
+E       AssertionError: assert False
+E        +  where False = isinstance(None, FINISH_ABORT)
+E        +    where None = namespace(rid='queued-mamba', session=namespace(streaming=True, _inflight=True, abort_req=<MagicMock id='1400247072639...ion_events=[], finished_reason=None, beam_group=None, time_stats=namespace(trace_ctx=<MagicMock id='140024707273920'>)).finished_reason
+
+../review-evidence/j-944eb2d479c0/candidate-regression.py:95: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../review-evidence/j-944eb2d479c0/candidate-regression.py::test_queued_abort_reopens_streaming_session_and_preserves_committed_turn
+FAILED ../review-evidence/j-944eb2d479c0/candidate-regression.py::test_queued_mamba_abort_is_marked_before_cache_release
+2 failed, 1 passed, 16 warnings in 27.24s
