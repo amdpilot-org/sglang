@@ -35,6 +35,7 @@ from sglang.srt.bwap.bwap_manager import (
     compute_decode_scores,
     compute_prompt_scores,
     compute_row_modes,
+    retained_neuron_count,
 )
 from sglang.srt.layers.activation import SiluAndMul
 from sglang.srt.model_executor.forward_batch_info import ForwardMode
@@ -87,11 +88,14 @@ def _make_manager(model=None, **overrides):
     return BWAPManager(base_model=model if model is not None else TinyModel(), **kwargs)
 
 
-def _extend(manager, *, req_ids, prompt_len=5):
+def _extend(manager, *, req_ids, prompt_len=5, extend_lens=None):
+    if extend_lens is None:
+        extend_lens = [prompt_len] * len(req_ids)
     manager.prepare_bwap_batch(
         forward_mode=ForwardMode.EXTEND,
         req_pool_indices=torch.tensor(req_ids),
         seq_lens=torch.tensor([prompt_len] * len(req_ids)),
+        extend_seq_lens=torch.tensor(extend_lens),
     )
 
 
@@ -124,6 +128,27 @@ class TestBWAPScores(CustomTestCase):
             ]
         ) / (2**0.5)
         torch.testing.assert_close(compute_prompt_scores(z), expected)
+
+    def test_prompt_scores_apply_eq2_per_request_then_eq3(self):
+        model = TinyModel()
+        manager = _make_manager(model)
+        key = "mlp.act_fn"
+        request_1 = torch.tensor([[0.8, 0.0, 0.6]]).repeat(4, 1)
+        request_2 = torch.tensor([[0.0, 1.0, 0.0]])
+
+        _extend(manager, req_ids=[10, 11], prompt_len=4, extend_lens=[4, 1])
+        manager._process_activation(key, torch.cat((request_1, request_2)))
+
+        expected = torch.stack(
+            (compute_prompt_scores(request_1), compute_prompt_scores(request_2))
+        ).amax(dim=0)
+        torch.testing.assert_close(manager.mem_scores[key], expected)
+        self.assertEqual(int(manager.mem_scores[key].argmax()), 1)
+
+    def test_retained_count_is_stable_at_decimal_integer_boundary(self):
+        self.assertEqual(retained_neuron_count(5, 0.8), 1)
+        mask = build_topk_mask(torch.arange(5, dtype=torch.float32), 0.8)
+        self.assertEqual(int(mask.sum()), 1)
 
 
 class TestBWAPServerArgs(CustomTestCase):

@@ -997,6 +997,7 @@ class ForwardBatch(ForwardBatchDeepSeekMHAMixin):
                 forward_mode=ret.forward_mode,
                 req_pool_indices=ret.req_pool_indices,
                 seq_lens=ret.seq_lens,
+                extend_seq_lens=ret.extend_seq_lens,
             )
 
         if (

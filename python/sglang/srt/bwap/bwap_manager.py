@@ -66,6 +66,7 @@ Correctness notes:
 import enum
 import logging
 import math
+from decimal import ROUND_FLOOR, Decimal
 from typing import Callable, Dict, List, Optional, Tuple
 
 import torch
@@ -101,9 +102,9 @@ def compute_prompt_scores(z: torch.Tensor) -> torch.Tensor:
     """Importance score over a prompt (extend) forward, Eq. 2 pooled.
 
     Row-L2-normalize each token's activation vector, then take the column-L2
-    over tokens divided by ``sqrt(T_valid)``. The extend batch is pooled across
-    requests (Phase-1 simplification); padding/EOS tokens are absent because
-    extend forwards only carry real tokens.
+    over tokens divided by ``sqrt(T_valid)``. Callers split packed extend rows
+    per request before applying Equation 3 across the resulting scores;
+    padding/EOS tokens are absent because extend forwards only carry real tokens.
     """
     z_norm = _row_l2_normalize(z.float())
     return z_norm.norm(dim=0) / math.sqrt(max(z.shape[0], 1))
@@ -114,10 +115,24 @@ def compute_decode_scores(z: torch.Tensor) -> torch.Tensor:
     return compute_prompt_scores(z)
 
 
+def retained_neuron_count(dim: int, sparsity: float) -> int:
+    """Evaluate ``floor((1 - sparsity) * dim)`` in decimal arithmetic.
+
+    CLI sparsities are decimal inputs.  Evaluating the formula through binary
+    floating point can cross an integer boundary (for example, ``0.8`` and
+    ``dim=5`` produce ``0.9999999999999998``) and incorrectly remove one extra
+    neuron.
+    """
+    retained = ((Decimal(1) - Decimal(str(sparsity))) * dim).to_integral_value(
+        rounding=ROUND_FLOOR
+    )
+    return min(dim, max(0, int(retained)))
+
+
 def build_topk_mask(scores: torch.Tensor, sparsity: float) -> torch.Tensor:
     """Binary keep-mask of the top ``floor((1 - sparsity) * D)`` neurons."""
     dim = scores.shape[0]
-    k = min(dim, math.floor((1.0 - sparsity) * dim))
+    k = retained_neuron_count(dim, sparsity)
     mask = torch.zeros_like(scores)
     mask.scatter_(0, torch.topk(scores, k).indices, 1.0)
     return mask
@@ -221,6 +236,7 @@ class BWAPManager:
         self._has_collect = False
         self._all_prune = False  # every active row is pruning -> fast path eligible
         self._current_req_ids: List[int] = []
+        self._current_extend_lens: List[int] = []
 
         # Phase-2a fused-forward state (keyed by act_fn name).
         self._fast_ok: Dict[str, bool] = {}  # layer eligible for the gather path
@@ -293,6 +309,7 @@ class BWAPManager:
         forward_mode: ForwardMode,
         req_pool_indices: torch.Tensor,
         seq_lens: torch.Tensor,
+        extend_seq_lens: Optional[torch.Tensor] = None,
     ) -> None:
         """Set the per-row phase for the hooks from this forward's batch.
 
@@ -303,6 +320,12 @@ class BWAPManager:
         if forward_mode.is_extend():
             self._phase = _Phase.PROMPT
             self._current_req_ids = req_pool_indices.tolist()
+            if extend_seq_lens is None:
+                # Kept for direct callers and older integrations. A multi-request
+                # serving batch always supplies the exact packed row lengths.
+                self._current_extend_lens = seq_lens.tolist()
+            else:
+                self._current_extend_lens = extend_seq_lens.tolist()
             for idx, seq_len in zip(self._current_req_ids, seq_lens.tolist()):
                 self.prompt_lens[idx] = seq_len
                 self._discard_partial_phase(idx)
@@ -313,6 +336,7 @@ class BWAPManager:
         elif forward_mode.is_decode():
             self._phase = _Phase.DECODE
             self._current_req_ids = req_pool_indices.tolist()
+            self._current_extend_lens = []
             steps = self._decode_steps(req_pool_indices, seq_lens)
             self._prune_rows, self._collect_rows = compute_row_modes(
                 steps, t_init=self.t_init, t_prune=self.t_prune, t_trans=self.t_trans
@@ -348,6 +372,7 @@ class BWAPManager:
             self._phase = _Phase.IDLE
             self._all_prune = False
             self._current_req_ids = []
+            self._current_extend_lens = []
 
     def _decode_steps(
         self, req_pool_indices: torch.Tensor, seq_lens: torch.Tensor
@@ -401,7 +426,21 @@ class BWAPManager:
         (partially) masked ``Z`` flows into ``down_proj``.
         """
         if self._phase is _Phase.PROMPT:
-            self._update_mem(name, compute_prompt_scores(z))
+            if sum(self._current_extend_lens) != z.shape[0]:
+                logger.warning(
+                    "BWAP: prompt activation rows (%d) do not match packed "
+                    "extend lengths (%d); leaving this layer's memory unchanged.",
+                    z.shape[0],
+                    sum(self._current_extend_lens),
+                )
+                return None
+            offset = 0
+            for length in self._current_extend_lens:
+                if length > 0:
+                    self._update_mem(
+                        name, compute_prompt_scores(z[offset : offset + length])
+                    )
+                offset += length
             return None
         if self._phase is _Phase.DECODE:
             if self._prune_rows is None or z.shape[0] != self._prune_rows.shape[0]:
@@ -562,7 +601,7 @@ class BWAPManager:
             weight = mlp.down_proj.weight
             d_ff = weight.shape[1]
             hidden = weight.shape[0]
-            k = math.floor((1.0 - self.sparsity) * d_ff)
+            k = retained_neuron_count(d_ff, self.sparsity)
             # Initial capture mask: data-free magnitude proxy (top-k down_proj column
             # L2 norm). Overwritten by the adaptive mask via post_fill once decoding
             # starts; here it only pins the k-wide topology the graph captures.
