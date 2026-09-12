@@ -7,6 +7,7 @@ Base class for composed pipelines.
 This module defines the base class for pipelines that are composed of multiple stages.
 """
 
+import concurrent.futures
 import os
 from abc import ABC, abstractmethod
 from typing import Any, Callable, ClassVar, Iterator, Literal, cast
@@ -588,7 +589,7 @@ class ComposedPipelineBase(ABC):
             )
 
         # reorder loading order to avoid OOM
-        component_load_specs: ComponentLoadSpec = order_component_load_specs(
+        component_load_specs: list[ComponentLoadSpec] = order_component_load_specs(
             component_load_specs
         )
         logger.info(
@@ -596,9 +597,7 @@ class ComposedPipelineBase(ABC):
             [spec.module_name for spec in component_load_specs],
         )
 
-        for spec in tqdm(
-            iterable=component_load_specs, desc="Loading required modules"
-        ):
+        def load_component(spec: ComponentLoadSpec) -> tuple[Any, float]:
             module_name: str = spec.module_name
             load_module_name: str = spec.load_module_name
             transformers_or_diffusers: str = spec.transformers_or_diffusers
@@ -616,7 +615,7 @@ class ComposedPipelineBase(ABC):
                     attn_backend.name.lower(),
                     matched_backend_key,
                 )
-            module, memory_usage = PipelineComponentLoader.load_component(
+            return PipelineComponentLoader.load_component(
                 component_name=module_name,
                 component_type=load_module_name,
                 loader_cls=self.component_loaders.get(module_name),
@@ -628,11 +627,53 @@ class ComposedPipelineBase(ABC):
                 component_attn_name=matched_backend_key or module_name,
             )
 
-            self.memory_usages[module_name] = memory_usage
+        is_multi_rank = (
+            torch.distributed.is_initialized()
+            and torch.distributed.get_world_size() > 1
+        )
+        parallel_loading_requested = getattr(server_args, "parallel_loading", True)
+        use_parallel_loading = (
+            parallel_loading_requested
+            and len(component_load_specs) > 1
+            and not is_multi_rank
+        )
+        if parallel_loading_requested and is_multi_rank:
+            logger.info(
+                "Loading pipeline components sequentially because distributed "
+                "component initialization can contain rank collectives"
+            )
 
-            if module_name in loaded_components:
-                logger.warning("Overwriting module %s", module_name)
-            loaded_components[module_name] = module
+        if use_parallel_loading:
+            logger.info(
+                "Loading %d pipeline components in parallel: %s",
+                len(component_load_specs),
+                [spec.module_name for spec in component_load_specs],
+            )
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=len(component_load_specs),
+                thread_name_prefix="sglang-component-loader",
+            ) as executor:
+                results = list(
+                    tqdm(
+                        executor.map(load_component, component_load_specs),
+                        total=len(component_load_specs),
+                        desc="Loading required modules",
+                    )
+                )
+        else:
+            results = [
+                load_component(spec)
+                for spec in tqdm(
+                    iterable=component_load_specs, desc="Loading required modules"
+                )
+            ]
+
+        # Preserve model_index/load-priority ordering regardless of completion order.
+        for spec, (module, memory_usage) in zip(component_load_specs, results):
+            self.memory_usages[spec.module_name] = memory_usage
+            if spec.module_name in loaded_components:
+                logger.warning("Overwriting module %s", spec.module_name)
+            loaded_components[spec.module_name] = module
 
         # Check if all required modules were loaded
         for module_name in required_modules:
