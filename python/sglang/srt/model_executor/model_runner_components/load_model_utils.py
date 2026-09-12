@@ -119,6 +119,7 @@ def load_kv_cache_scales(*, model, kv_cache_dtype: str) -> None:
         if get_model().quantization_param_path is not None:
             if callable(getattr(model, "load_kv_cache_scales", None)):
                 model.load_kv_cache_scales(get_model().quantization_param_path)
+                _sync_external_kv_cache_scales(model)
                 logger.info(
                     "Loaded KV cache scaling factors from %s",
                     get_model().quantization_param_path,
@@ -130,10 +131,61 @@ def load_kv_cache_scales(*, model, kv_cache_dtype: str) -> None:
                     model.__class__,
                 )
         else:
-            logger.warning(
-                "Using FP8 KV cache but no scaling factors "
-                "provided. Defaulting to scaling factors of 1.0."
-            )
+            loaded, missing = _checkpoint_kv_cache_scale_counts(model)
+            if loaded and not missing:
+                logger.info(
+                    "Using FP8 KV cache with per-layer scaling factors "
+                    "loaded from the model checkpoint."
+                )
+            elif loaded:
+                logger.warning(
+                    "Using FP8 KV cache but %d of %d attention layers have no "
+                    "checkpoint scaling factors. Those layers are defaulting "
+                    "to scaling factors of 1.0.",
+                    missing,
+                    loaded + missing,
+                )
+            else:
+                logger.warning(
+                    "Using FP8 KV cache but no scaling factors "
+                    "provided. Defaulting to scaling factors of 1.0."
+                )
+
+
+def _checkpoint_kv_cache_scale_counts(model) -> tuple[int, int]:
+    """Count attention layers with loaded and missing checkpoint KV scales.
+
+    ``BaseKVCacheMethod.process_weights_after_loading`` records provenance
+    before converting its invalid checkpoint sentinel to the runtime fallback.
+    This also preserves a legitimate calibrated scale of exactly 1.0.
+    """
+    from sglang.srt.layers.radix_attention import RadixAttention
+
+    loaded = missing = 0
+    for module in model.modules():
+        if not isinstance(module, RadixAttention):
+            continue
+        calibration_loaded = getattr(module, "kv_scale_calibration_loaded", None)
+        if calibration_loaded is True:
+            loaded += 1
+        elif calibration_loaded is False:
+            missing += 1
+    return loaded, missing
+
+
+def _sync_external_kv_cache_scales(model) -> None:
+    """Publish legacy JSON scales through the fields attention backends read."""
+    from sglang.kernels.ops.quantization.fp8_kernel import is_fp8_fnuz
+    from sglang.srt.layers.radix_attention import RadixAttention
+
+    scale_adjustment = 2.0 if is_fp8_fnuz() else 1.0
+    for module in model.modules():
+        if not isinstance(module, RadixAttention):
+            continue
+        if module.k_scale is None or module.v_scale is None:
+            continue
+        module.k_scale_float = float(module.k_scale) * scale_adjustment
+        module.v_scale_float = float(module.v_scale) * scale_adjustment
 
 
 def resolve_sliding_window_size(model, model_config: ModelConfig) -> int | None:
