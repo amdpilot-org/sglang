@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35295",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1822",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1773",
+  "candidate_commit": "82c3e4430316be3a3928e3bd2a7bb445a14f4e87",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base independently reproduces the original mid-word delta and detached-punctuation prompt defects. Exact candidate commit 82c3e443 fixes both, passes its focused regression suite, and passes independent update, finalize, Unicode punctuation, normal append, complete-word revision, and process_asr_chunk(is_last=True) cases using the repository source tree.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8bc9681407c7/venv/bin/python /job/review-evidence-j-8bc9681407c7/base_reproduction.py (at 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Loaded /job/repo/python/sglang/srt/entrypoints/openai/streaming_asr.py and reproduced 'erpillar' plus emitted_text='the cat erpillar', and comma delta plus emitted_text='hello world ,'."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8bc9681407c7/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_streaming_asr_state.py test/registered/unit/entrypoints/openai/test_serving_transcription.py test/registered/unit/entrypoints/openai/test_audio_chunking.py (at 82c3e4430316be3a3928e3bd2a7bb445a14f4e87)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and adjacent serving/audio unit coverage: 37 passed, 19 warnings, 11 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8bc9681407c7/venv/bin/python /job/review-evidence-j-8bc9681407c7/adversarial.py (at 82c3e4430316be3a3928e3bd2a7bb445a14f4e87)",
+      "exit_code": 0,
+      "what_was_measured": "Independent original word revision; update/finalize punctuation for comma, quote, ellipsis, em dash, ?!, fullwidth parenthesis, Arabic semicolon, ideographic full stop, guillemet and multi-CJK punctuation; normal append; final complete-word revision; and production helper final chunk."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..82c3e4430316be3a3928e3bd2a7bb445a14f4e87",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and candidate changes are deterministic Python transcript-state logic; no GPU execution is required or claimed."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "PR 1773 changes Python, tests, and reports only; no native source or build definition changed, and repository-environment.json reports native=null.",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No Qwen3-ASR weights or live HTTP SSE/realtime server were exercised; the shared process_asr_chunk production helper was tested with a deterministic fake tokenizer manager, validating state/control flow rather than model semantic accuracy or network transport.",
+    "No GPU/model-architecture claim is made. The prepared environment reports ROCm 7.2 and Torch 2.11.0+rocm7.2, but this CPU-deterministic issue did not require GPU execution.",
+    "The pre-existing documented whitespace-free CJK rollback limitation remains outside the original growth/punctuation contract.",
+    "On punctuation rollback, emitted_text remains monotonic by design; the candidate's regression explicitly expects this and it is not a counterexample to the original append-growth issue."
+  ]
+}
