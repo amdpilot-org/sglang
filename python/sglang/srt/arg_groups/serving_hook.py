@@ -450,6 +450,18 @@ def handle_environment_variables(server_args: Any):
             envs.SGLANG_OPT_FP8_WO_A_GEMM.set(False)
 
 
+def handle_api_key_env(server_args: Any):
+    """Resolve non-empty auth keys from the environment when CLI omitted them."""
+    cfg = resolving_view(server_args)
+    resolved = {}
+    if cfg.api_key is None and (api_key := envs.SGLANG_API_KEY.get()):
+        resolved["api_key"] = api_key
+    if cfg.admin_api_key is None and (admin_api_key := envs.SGLANG_ADMIN_API_KEY.get()):
+        resolved["admin_api_key"] = admin_api_key
+    if resolved:
+        declare_resolution(server_args, "_handle_api_key_env", **resolved)
+
+
 def handle_other_validations(server_args: Any):
     cfg = resolving_view(server_args)
     if cfg.default_chat_template_kwargs is not None and not isinstance(

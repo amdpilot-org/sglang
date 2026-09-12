@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36346",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Added independent non-empty SGLANG_API_KEY and SGLANG_ADMIN_API_KEY fallbacks when the matching CLI option is omitted. Explicit CLI values retain precedence, unset or empty environment values preserve the existing None behavior, secret environment fields are excluded from subprocess snapshots, and diagnostic projections redact both credentials while operational authentication receives the resolved values.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-f37b4a385726/venv/bin/python -m pytest -q test/registered/unit/server_args/test_server_args.py -k 'api_keys_fall_back_to_environment or api_key_cli_precedence_is_independent or empty_api_key_environment_values_are_absent or unset_api_key_environment_preserves_defaults' (before implementation)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: both environment fallback cases failed while unset and empty negative cases retained None. Raw output: evidence/failing-before.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f37b4a385726/venv/bin/python -m pytest -q test/registered/unit/server_args/test_server_args.py -k 'api_key or grpc_port_rejects_api_key' test/registered/unit/utils/test_auth.py test/registered/unit/utils/test_http_server_auth.py",
+      "exit_code": 0,
+      "what_was_measured": "14 focused parser, ServerArgs resolution, empty/unset, independent precedence, auth decision, HTTP middleware, redaction, and gRPC incompatibility tests passed. Raw output: evidence/unit-tests.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f37b4a385726/venv/bin/python reports/j-f37b4a385726/verify_http_env_auth.py --fixture /job/cache/j-1fc9870820b9/tiny-random-llama --output /tmp/amdpilot-repo-j-f37b4a385726/http-auth-final",
+      "exit_code": 0,
+      "what_was_measured": "A real source-checkout server on the assigned MI355X accepted the environment user key for /v1/models (200 vs 401 without it), rejected that key for an admin endpoint (401), accepted the environment admin key through auth to request validation (400), omitted both canaries from /proc/<pid>/cmdline and the raw server log, and returned <redacted> for both keys from /server_info. Evidence: evidence/http-auth.json and evidence/server.log."
+    },
+    {
+      "command": "pre-commit run ruff --files <changed Python files> && pre-commit run ruff-format --files <changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources and tests passed lint and formatting hooks."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f37b4a385726/venv/bin/python -m pytest -q test/registered/unit/server_args/test_server_args.py test/registered/unit/utils/test_auth.py test/registered/unit/utils/test_http_server_auth.py",
+      "exit_code": 1,
+      "what_was_measured": "261 passed and 2 unrelated pre-existing context-parallel tests failed because this prepared HIP environment intentionally rejects prefill CP before those tests' expected validation path. The API-key and auth tests passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The deterministic tiny Llama fixture was loaded by the source checkout on the single visible AMD Instinct MI355X. The server became healthy and served authenticated HTTP control/model metadata requests; this validates startup and auth transport, not semantic model output."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The tiny random Llama smoke validates server startup, credential propagation, HTTP authentication, argv/log exposure, and diagnostic redaction only; it does not qualify semantic accuracy, another architecture, or distributed serving.",
+    "The server required SIGKILL after the runner's 30-second graceful shutdown timeout; the subreaper cleanup path retained no credential exposure evidence and no node-wide state was changed.",
+    "Two unrelated full-file context-parallel tests fail on the prepared HIP platform because prefill CP is rejected earlier than their CUDA-oriented expectations; 261 tests passed, including all changed behavior."
+  ]
+}

@@ -58,6 +58,8 @@ import msgspec.structs
 
 A = Annotated
 
+REDACTED = "<redacted>"
+
 
 class Arg(msgspec.Struct, frozen=True):
     """CLI argument metadata attached to a field via ``Annotated``."""
@@ -90,6 +92,9 @@ class Arg(msgspec.Struct, frozen=True):
     # that depends on the machine, on another field, or on anything impure is a
     # decision, and decisions stay in a hook where their order is visible.
     fallback: Any = None
+    # Credential fields retain their real value for operational reads but are
+    # replaced by REDACTED in diagnostic projections and startup logs.
+    secret: bool = False
 
 
 class Derived(msgspec.Struct, frozen=True):
@@ -201,6 +206,20 @@ def resolvable_fields(cls) -> frozenset:
     for field in record_fields(cls):
         _, arg = _unwrap_annotated(hints.get(field.name, field.type))
         if arg is not None and arg.resolvable:
+            names.add(field.name)
+    return frozenset(names)
+
+
+@functools.cache
+def secret_fields(cls) -> frozenset:
+    """Names of credential fields excluded from diagnostic projections."""
+    if not is_record(cls):
+        return frozenset()
+    hints = get_type_hints(cls, include_extras=True)
+    names = set()
+    for field in record_fields(cls):
+        _, arg = _unwrap_annotated(hints.get(field.name, field.type))
+        if arg is not None and arg.secret:
             names.add(field.name)
     return frozenset(names)
 

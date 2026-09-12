@@ -74,7 +74,7 @@ from sglang.srt.entrypoints.sidecar import (
     build_sidecar_endpoint,
     start_sidecar,
 )
-from sglang.srt.environ import envs
+from sglang.srt.environ import envs, exportable_env_vars
 from sglang.srt.layers.cp.base import is_cp_enabled, is_interleave
 from sglang.srt.layers.moe.utils import (
     FlashinferA2ADispatchType,
@@ -92,6 +92,7 @@ from sglang.srt.runtime_context import (
     get_serving,
     override_platform,
 )
+from sglang.srt.utils.auth import AuthLevel, decide_request_auth
 from sglang.srt.server_args import PortArgs, ServerArgs, prepare_server_args
 from sglang.srt.utils.server_args_config_parser import ConfigArgumentMerger
 from sglang.test.ci.ci_register import register_cpu_ci
@@ -111,6 +112,152 @@ _mock_device.start()
 
 
 class TestPrepareServerArgs(CustomTestCase):
+    def test_api_keys_fall_back_to_environment(self):
+        with patch.dict(
+            os.environ,
+            {
+                "SGLANG_API_KEY": "canary-env-user-7d2c",
+                "SGLANG_ADMIN_API_KEY": "canary-env-admin-91af",
+            },
+            clear=False,
+        ):
+            args = server_args_module.prepare_server_args(["--model-path", "dummy"])
+            args.resolve_once()
+
+        self.assertEqual(resolution_result(args, "api_key"), "canary-env-user-7d2c")
+        self.assertEqual(
+            resolution_result(args, "admin_api_key"), "canary-env-admin-91af"
+        )
+        self.assertEqual(args.launch_command, "--model-path dummy")
+        self.assertEqual(args.resolved_dict()["api_key"], "<redacted>")
+        self.assertEqual(args.resolved_dict()["admin_api_key"], "<redacted>")
+        self.assertNotIn("SGLANG_API_KEY", exportable_env_vars())
+        self.assertNotIn("SGLANG_ADMIN_API_KEY", exportable_env_vars())
+
+    def test_api_key_cli_precedence_is_independent(self):
+        with patch.dict(
+            os.environ,
+            {
+                "SGLANG_API_KEY": "canary-env-user-7d2c",
+                "SGLANG_ADMIN_API_KEY": "canary-env-admin-91af",
+            },
+            clear=False,
+        ):
+            args = server_args_module.prepare_server_args(
+                [
+                    "--model-path",
+                    "dummy",
+                    "--api-key",
+                    "canary-cli-user-44be",
+                ]
+            )
+            args.resolve_once()
+
+        self.assertEqual(resolution_result(args, "api_key"), "canary-cli-user-44be")
+        self.assertEqual(
+            resolution_result(args, "admin_api_key"), "canary-env-admin-91af"
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "SGLANG_API_KEY": "canary-env-user-7d2c",
+                "SGLANG_ADMIN_API_KEY": "canary-env-admin-91af",
+            },
+            clear=False,
+        ):
+            args = server_args_module.prepare_server_args(
+                [
+                    "--model-path",
+                    "dummy",
+                    "--admin-api-key",
+                    "canary-cli-admin-a540",
+                ]
+            )
+            args.resolve_once()
+
+        self.assertEqual(resolution_result(args, "api_key"), "canary-env-user-7d2c")
+        self.assertEqual(
+            resolution_result(args, "admin_api_key"), "canary-cli-admin-a540"
+        )
+
+    def test_empty_api_key_environment_values_are_absent(self):
+        with patch.dict(
+            os.environ,
+            {"SGLANG_API_KEY": "", "SGLANG_ADMIN_API_KEY": ""},
+            clear=False,
+        ):
+            args = server_args_module.prepare_server_args(["--model-path", "dummy"])
+            args.resolve_once()
+
+        self.assertIsNone(resolution_result(args, "api_key"))
+        self.assertIsNone(resolution_result(args, "admin_api_key"))
+
+    def test_unset_api_key_environment_preserves_defaults(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SGLANG_API_KEY", None)
+            os.environ.pop("SGLANG_ADMIN_API_KEY", None)
+            args = server_args_module.prepare_server_args(["--model-path", "dummy"])
+            args.resolve_once()
+
+        self.assertIsNone(resolution_result(args, "api_key"))
+        self.assertIsNone(resolution_result(args, "admin_api_key"))
+
+    def test_environment_api_keys_drive_authentication(self):
+        with patch.dict(
+            os.environ,
+            {
+                "SGLANG_API_KEY": "canary-env-user-7d2c",
+                "SGLANG_ADMIN_API_KEY": "canary-env-admin-91af",
+            },
+            clear=False,
+        ):
+            args = server_args_module.prepare_server_args(["--model-path", "dummy"])
+            args.resolve_once()
+
+        api_key = resolution_result(args, "api_key")
+        admin_api_key = resolution_result(args, "admin_api_key")
+        self.assertTrue(
+            decide_request_auth(
+                method="POST",
+                path="/v1/chat/completions",
+                authorization_header=f"Bearer {api_key}",
+                api_key=api_key,
+                admin_api_key=admin_api_key,
+                auth_level=AuthLevel.NORMAL,
+            ).allowed
+        )
+        self.assertFalse(
+            decide_request_auth(
+                method="POST",
+                path="/v1/chat/completions",
+                authorization_header="Bearer canary-wrong-user-3a80",
+                api_key=api_key,
+                admin_api_key=admin_api_key,
+                auth_level=AuthLevel.NORMAL,
+            ).allowed
+        )
+        self.assertTrue(
+            decide_request_auth(
+                method="POST",
+                path="/clear_hicache_storage_backend",
+                authorization_header=f"Bearer {admin_api_key}",
+                api_key=api_key,
+                admin_api_key=admin_api_key,
+                auth_level=AuthLevel.ADMIN_FORCE,
+            ).allowed
+        )
+        self.assertFalse(
+            decide_request_auth(
+                method="POST",
+                path="/clear_hicache_storage_backend",
+                authorization_header=f"Bearer {api_key}",
+                api_key=api_key,
+                admin_api_key=admin_api_key,
+                auth_level=AuthLevel.ADMIN_FORCE,
+            ).allowed
+        )
+
     def test_ple_embedding_offload_rejects_generic_weight_offload(self):
         for generic_offload in (
             {"cpu_offload_gb": 1},

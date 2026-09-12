@@ -319,8 +319,16 @@ class ServerArgs:
         `model_config` memo are not fields and do not appear.
         """
 
+        from sglang.srt.arg_groups.arg_utils import REDACTED, secret_fields
+
+        secrets = secret_fields(type(self))
         return {
-            field.name: _plain(resolution_result(self, field.name))
+            field.name: (
+                REDACTED
+                if field.name in secrets
+                and resolution_result(self, field.name) is not None
+                else _plain(resolution_result(self, field.name))
+            )
             for field in record_fields(type(self))
         }
 

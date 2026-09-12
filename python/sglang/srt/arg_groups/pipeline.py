@@ -65,6 +65,7 @@ def run_resolution_pipeline(server_args: Any) -> None:
     handle_mega_moe(server_args)
     from sglang.srt.arg_groups.serving_hook import (
         handle_asr_validation,
+        handle_api_key_env,
         handle_crash_dump_env,
         handle_debug_utils,
         handle_deprecated_args,
@@ -83,6 +84,7 @@ def run_resolution_pipeline(server_args: Any) -> None:
 
     handle_return_hidden_states_mode(server_args)
     handle_media_url_security(server_args)
+    handle_api_key_env(server_args)
     from sglang.srt.arg_groups.hicache_hook import (
         handle_hicache,
         handle_hicache_ratio_default,
