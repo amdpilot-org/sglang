@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35148",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the Qwen3.8 prefilled-thinking failure in the Rust gateway parser: generated text beginning with reasoning and containing only </think> was returned entirely as normal content. Upgraded reasoning-parser to 1.3.0 and initialized non-streaming and per-choice streaming parser state from llm-tokenizer's detected thinking toggle, request override, and think-in-prefill metadata.",
+  "tests": [
+    {
+      "command": "cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib qwen3_prefill_reasoning_is_parsed_non_streaming -- --nocapture (before fix)",
+      "exit_code": 101,
+      "what_was_measured": "Issue-shaped regression failed because reasoning_text was empty instead of 'Compute 17 * 23. '. Raw log: /tmp/amdpilot-repo-j-77c1a95a6944/failing-before.log"
+    },
+    {
+      "command": "cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib qwen3_prefill_reasoning -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Both non-streaming and incremental streaming Qwen3 prefilled-reasoning regressions passed. Raw log: /tmp/amdpilot-repo-j-77c1a95a6944/passing-after-prefill.log"
+    },
+    {
+      "command": "cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib",
+      "exit_code": 0,
+      "what_was_measured": "Full gateway library suite: 396 passed, 0 failed. Raw log: /tmp/amdpilot-repo-j-77c1a95a6944/cargo-test-lib.log"
+    },
+    {
+      "command": "cargo fmt --manifest-path sgl-model-gateway/Cargo.toml --all -- --check",
+      "exit_code": 0,
+      "what_was_measured": "Rust formatting check passed; stable rustfmt only emitted warnings that two configured import-grouping options require nightly. Raw log: /tmp/amdpilot-repo-j-77c1a95a6944/cargo-fmt.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU execution was used. The reproduced defect and correction are confined to deterministic Rust gateway response parsing after model generation."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Qwen/Qwen3.8-27B-FP8 weights and the reporter's NVIDIA L40S environment were unavailable, so no full-model HTTP or gRPC deployment was claimed.",
+    "The assigned gfx950 GPU was not relevant to this CPU-side parser defect; model architecture behavior beyond the supplied Qwen3.8 output shape remains unverified.",
+    "Two upstream candidate fixes were reviewed (https://github.com/sgl-project/sglang/pull/35249 and https://github.com/sgl-project/sglang/pull/35346); both remained open at investigation time."
+  ]
+}
