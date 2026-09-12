@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34384",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1668",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1634",
+  "candidate_commit": "0a0b787c4dbc878065c48926d18c5b43eafcf19a",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate adds two helper-level geometry tests but no production change. The prepared base already contains plausible replay padding/staging behavior, and independent gfx950 tests found no source-level counterexample. The candidate tests do not exercise graph admission, runner staging, replay metadata refresh, or DSV4 consumption, so they do not establish that the original H20 TP4 illegal-access path is fixed.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-16bdb6231e8c/venv/bin/python -m pytest -q test/registered/spec/dspark/test_ragged_verify.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Pre-candidate helper coverage; 10 tests passed, showing the base already had generic padding support."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-16bdb6231e8c/venv/bin/python -m pytest -q test/registered/spec/dspark/test_ragged_verify.py (candidate 0a0b787c4dbc878065c48926d18c5b43eafcf19a)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate helper-level regression suite; 12 tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-16bdb6231e8c/venv/bin/python -m pytest -q test/registered/spec/dspark/test_dspark_scheduler.py::TestBudgetTierSelection (base and candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Token-tier and request-slot admission boundaries; 2 tests passed on each revision."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-16bdb6231e8c/venv/bin/python /job/review-evidence-j-16bdb6231e8c/adversarial_geometry.py",
+      "exit_code": 0,
+      "what_was_measured": "Real gfx950 tensor execution through DecodeCudaGraphRunner._stage_ragged_verify_layout for the reported 32x6 case, mixed widths, lower-token tier filling, stable buffer pointers, the native 192-request boundary, and rejection of shrinking 192 rows to 191 slots."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "One AMD Instinct MI355X gfx950 executed the runner staging and ragged tensor kernels under ROCm 7.2; this was not CUDA/H20 graph replay.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The candidate tests still pass without exercising DecodeCudaGraphRunner._stage_ragged_verify_layout or DSV4 replay metadata, so removal or breakage of that integration is not detected by the proposed regression.",
+    "The exact four-H20 TP4 DeepSeek-V4-Flash CUDA Graph replay remains unexecuted and could still expose CUDA/Hopper- or distributed-only failures.",
+    "The candidate does not independently cover a lower-token layout rounded to the same 192-token tier, where synthetic padding slots receive tokens rather than remaining zero-length."
+  ],
+  "remaining_limitations": [
+    "Only one AMD gfx950 GPU was assigned; the issue reports four NVIDIA H20 GPUs.",
+    "The DeepSeek-V4-Flash DSpark model weights were unavailable.",
+    "No full serving, CUDA Graph, TP4, or model-semantic reproduction was possible.",
+    "No native source changed in the candidate, so rebuilding native code was not applicable."
+  ]
+}
