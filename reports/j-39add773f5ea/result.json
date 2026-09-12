@@ -1,0 +1,63 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38695",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2663",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2662",
+  "candidate_commit": "86a6658c7c3de43a5de96b8726423da0994df53b",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a partial fix. It reproduces and fixes the three explicit fp32-router-output downcasts, adds a shared RouterGate entry point, and passes its focused regression. It does not fulfill the original full-consolidation contract: the enabled ROCm/AITER backend stores the GEMM result as bf16 before converting it to fp32, five named model families retain model-local routing implementations, and the nominally neutral GEMM module only re-exports the implementation from the DSv4 attention namespace.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-39add773f5ea/venv/bin/python /job/review-evidence-j-39add773f5ea/check_downcasts.py (base)",
+      "exit_code": 0,
+      "what_was_measured": "Actual BailingMoE, BailingMoELinear, and LLaDA2 gate implementations on MI350X returned bf16 and differed from an independent fp32 reference by up to 0.0308475494, reproducing the original silent-downcast defect."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-39add773f5ea/venv/bin/python /job/review-evidence-j-39add773f5ea/check_downcasts.py (candidate 86a6658c)",
+      "exit_code": 0,
+      "what_was_measured": "The same actual gate implementations returned fp32 and exactly matched the independent fp32 reference, confirming that narrow correction."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-39add773f5ea/venv/bin/python -m pytest -q test/registered/unit/layers/test_router_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: three tests passed, covering CPU fp32 reference/output dtype, fp32 parameters and correction bias, and mocked deterministic bypass."
+    },
+    {
+      "command": "SGLANG_USE_AITER=1 /tmp/amdpilot-repo-j-39add773f5ea/venv/bin/python /job/review-evidence-j-39add773f5ea/check_router_candidate.py",
+      "exit_code": 0,
+      "what_was_measured": "Real MI350X AITER path at M=1,8,16,17,64. Every fp32-typed result was bit-identical to the fp32 reference rounded through bf16, with max absolute errors 0.0686-0.1217, proving the backend stores bf16 before upcasting."
+    },
+    {
+      "command": "SGLANG_USE_AITER=0 /tmp/amdpilot-repo-j-39add773f5ea/venv/bin/python /job/review-evidence-j-39add773f5ea/check_router_candidate.py",
+      "exit_code": 0,
+      "what_was_measured": "Real MI350X fallback path at M=1,8,16,17,64 returned fp32 results that were not bf16-rounded; max absolute error versus the independent fp32 matmul was at most 3.8147e-06."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..86a6658c7c3de43a5de96b8726423da0994df53b",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X, PyTorch 2.11.0+rocm7.2 / HIP 7.2.26015. Both AITER-enabled and fallback numerical paths were exercised."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With SGLANG_USE_AITER=1, linear_bf16_fp32 calls tgemm.mm(..., otype=x.dtype).float(); for bf16 input the measured output equals an independently computed fp32 result rounded to bf16 and back, violating the required fp32 output-store contract.",
+    "Hunyuan-v3 still explicitly upcasts hidden states to fp32 in its model-local ReplicatedLinear router path.",
+    "MiniMax-M3 still retains model-local routing and an fp32 activation-upcast fallback.",
+    "Sarvam-MoE still retains model-local F.linear/ReplicatedLinear router paths.",
+    "Step3.5 still retains model-local routing and an explicit fp32 matmul branch.",
+    "Nemotron-H still retains model-local torch.mm routing rather than the proposed shared RouterGate policy.",
+    "python/sglang/kernels/ops/gemm/bf16_fp32.py is a compatibility re-export; the implementation and policy remain physically under kernels/ops/attention/dsv4/gemm.py."
+  ],
+  "remaining_limitations": [
+    "CUDA-only tiny GEMM, DeepGEMM, and HPC-Ops could not be qualified on the assigned AMD GPU.",
+    "AMX, NPU, XPU, distributed execution, checkpoint loading, full-model semantic accuracy, and serving benchmarks were not run.",
+    "No native C++ files changed and repository-environment.json provides no native build target, so no native rebuild was applicable.",
+    "The prepared checkout exactly matched the recorded base commit; there was no base discrepancy."
+  ]
+}

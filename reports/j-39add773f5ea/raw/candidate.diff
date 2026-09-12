@@ -1,0 +1,642 @@
+diff --git a/python/sglang/kernels/ops/gemm/bf16_fp32.py b/python/sglang/kernels/ops/gemm/bf16_fp32.py
+new file mode 100644
+index 0000000..526c80d
+--- /dev/null
++++ b/python/sglang/kernels/ops/gemm/bf16_fp32.py
+@@ -0,0 +1,15 @@
++"""Neutral home for the shared bf16-input/fp32-output GEMM dispatcher."""
++
++# Compatibility implementation remains importable from its former DSv4 path.
++# Keeping one function object also preserves its process-wide HPC weight cache.
++from sglang.kernels.ops.attention.dsv4.gemm import (  # noqa: F401
++    hpc_bf16xfp32_gemm_enabled,
++    linear_bf16_fp32,
++    mark_hpc_bf16xfp32_gemm_enabled,
++)
++
++__all__ = [
++    "hpc_bf16xfp32_gemm_enabled",
++    "linear_bf16_fp32",
++    "mark_hpc_bf16xfp32_gemm_enabled",
++]
+diff --git a/python/sglang/srt/layers/moe/router_gate.py b/python/sglang/srt/layers/moe/router_gate.py
+new file mode 100644
+index 0000000..77bc0b3
+--- /dev/null
++++ b/python/sglang/srt/layers/moe/router_gate.py
+@@ -0,0 +1,101 @@
++"""Shared precision and dispatch policy for MoE router projections."""
++
++from typing import Optional
++
++import torch
++import torch.nn.functional as F
++from torch import nn
++
++from sglang.srt.environ import envs
++from sglang.srt.utils import is_cuda
++
++
++def tiny_router_gemm_max_tokens(
++    *, num_experts: int, hidden_size: int, weight_dtype: torch.dtype
++) -> int:
++    """Return the shared tiny-router cutoff, or -1 when unsupported."""
++    if not is_cuda() or weight_dtype != torch.bfloat16:
++        return -1
++    device = torch.cuda.current_device()
++    major, _ = torch.cuda.get_device_capability(device)
++    if major < 9:
++        return -1
++    from sglang.kernels.ops.gemm.tiny_gemm import can_use_tiny_gemm
++
++    return 16 if can_use_tiny_gemm(num_experts, hidden_size, max_m=16) else -1
++
++
++def router_linear_bf16_fp32(
++    hidden_states: torch.Tensor,
++    weight: torch.Tensor,
++    *,
++    tiny_max_tokens: int = -1,
++) -> torch.Tensor:
++    """bf16 router GEMM with an fp32 output and batch-invariant policy."""
++    deterministic = envs.SGLANG_ENABLE_DETERMINISTIC_INFERENCE.get()
++    if (
++        not deterministic
++        and 0 < hidden_states.shape[0] <= tiny_max_tokens
++        and hidden_states.is_cuda
++    ):
++        from sglang.kernels.ops.gemm.tiny_gemm import tiny_gemm_bf16
++
++        return tiny_gemm_bf16(
++            hidden_states, weight, out_dtype=torch.float32, max_m=tiny_max_tokens
++        )
++
++    if hidden_states.is_cuda:
++        from sglang.kernels.ops.gemm.bf16_fp32 import linear_bf16_fp32
++
++        return linear_bf16_fp32(hidden_states, weight)
++    return F.linear(hidden_states.float(), weight.float())
++
++
++class RouterGate(nn.Module):
++    """Checkpoint-compatible MoE gate which always returns fp32 logits.
++
++    ``fp32_compute`` preserves models whose checkpoints require fp32 inputs and
++    weights. Validated bf16 routers use the cheaper bf16 GEMM with fp32 output.
++    """
++
++    def __init__(
++        self,
++        hidden_size: int,
++        num_experts: int,
++        *,
++        fp32_compute: bool = True,
++        params_dtype: Optional[torch.dtype] = None,
++        has_correction_bias: bool = False,
++        correction_bias_shape: Optional[tuple[int, ...]] = None,
++    ):
++        super().__init__()
++        weight_dtype = (
++            torch.float32
++            if fp32_compute
++            else (params_dtype or torch.get_default_dtype())
++        )
++        self.fp32_compute = fp32_compute
++        self.weight = nn.Parameter(
++            torch.empty((num_experts, hidden_size), dtype=weight_dtype)
++        )
++        if has_correction_bias:
++            shape = correction_bias_shape or (num_experts,)
++            self.e_score_correction_bias = nn.Parameter(
++                torch.empty(shape, dtype=torch.float32)
++            )
++        else:
++            self.e_score_correction_bias = None
++        self.tiny_router_gemm_max_tokens = tiny_router_gemm_max_tokens(
++            num_experts=num_experts,
++            hidden_size=hidden_size,
++            weight_dtype=self.weight.dtype,
++        )
++
++    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
++        if self.fp32_compute or self.weight.dtype == torch.float32:
++            return F.linear(hidden_states.float(), self.weight.float())
++        return router_linear_bf16_fp32(
++            hidden_states.to(torch.bfloat16),
++            self.weight,
++            tiny_max_tokens=self.tiny_router_gemm_max_tokens,
++        )
+diff --git a/python/sglang/srt/model_executor/model_runner_components/weight_updater.py b/python/sglang/srt/model_executor/model_runner_components/weight_updater.py
+index e9dd1c7..2a62a96 100644
+--- a/python/sglang/srt/model_executor/model_runner_components/weight_updater.py
++++ b/python/sglang/srt/model_executor/model_runner_components/weight_updater.py
+@@ -41,7 +41,7 @@ def _unsupported_derived_weight_cache_error() -> Optional[str]:
+     old weights. The check is startup-determined and rank-uniform, so an
+     update never proceeds on some workers while rejected on others.
+     """
+-    from sglang.kernels.ops.attention.dsv4.gemm import hpc_bf16xfp32_gemm_enabled
++    from sglang.kernels.ops.gemm.bf16_fp32 import hpc_bf16xfp32_gemm_enabled
+ 
+     if hpc_bf16xfp32_gemm_enabled():
+         return (
+diff --git a/python/sglang/srt/models/bailing_moe.py b/python/sglang/srt/models/bailing_moe.py
+index 96a5641..a3af8b8 100644
+--- a/python/sglang/srt/models/bailing_moe.py
++++ b/python/sglang/srt/models/bailing_moe.py
+@@ -162,10 +162,7 @@ class BailingMoEGate(nn.Module):
+             self.expert_bias = None
+ 
+     def forward(self, hidden_states):
+-        logits = F.linear(hidden_states.to(self.weight.dtype), self.weight, None).to(
+-            hidden_states.dtype
+-        )
+-        return logits
++        return F.linear(hidden_states.to(self.weight.dtype), self.weight, None)
+ 
+ 
+ class BailingMoESparseMoeBlock(nn.Module):
+diff --git a/python/sglang/srt/models/bailing_moe_linear.py b/python/sglang/srt/models/bailing_moe_linear.py
+index 43d880b..4e5b4ba 100644
+--- a/python/sglang/srt/models/bailing_moe_linear.py
++++ b/python/sglang/srt/models/bailing_moe_linear.py
+@@ -225,10 +225,7 @@ class BailingMoEGate(nn.Module):
+             self.expert_bias = None
+ 
+     def forward(self, hidden_states):
+-        logits = F.linear(hidden_states.to(self.weight.dtype), self.weight, None).to(
+-            hidden_states.dtype
+-        )
+-        return logits
++        return F.linear(hidden_states.to(self.weight.dtype), self.weight, None)
+ 
+ 
+ class BailingMoE(nn.Module):
+diff --git a/python/sglang/srt/models/bailing_moe_v3.py b/python/sglang/srt/models/bailing_moe_v3.py
+index bac6a39..1d68c70 100644
+--- a/python/sglang/srt/models/bailing_moe_v3.py
++++ b/python/sglang/srt/models/bailing_moe_v3.py
+@@ -10,10 +10,6 @@ import torch.nn.functional as F
+ from torch import nn
+ from transformers import PretrainedConfig
+ 
+-from sglang.kernels.ops.moe.router import (
+-    ROUTER_GATE_MATVEC_MAX_M,
+-    router_gate_matvec,
+-)
+ from sglang.kernels.ops.quantization.fp8_kernel import (
+     is_fp8_fnuz,
+ )
+@@ -48,6 +44,10 @@ from sglang.srt.layers.moe import (
+ )
+ from sglang.srt.layers.moe.ep_moe.layer import get_moe_impl_class
+ from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
++from sglang.srt.layers.moe.router_gate import (
++    router_linear_bf16_fp32,
++    tiny_router_gemm_max_tokens,
++)
+ from sglang.srt.layers.moe.topk import TopK
+ from sglang.srt.layers.moe.utils import is_shared_experts_fusion_disabled
+ from sglang.srt.layers.quantization.base_config import QuantizationConfig
+@@ -394,20 +394,20 @@ class BailingMoEGate(nn.Module):
+             )
+         else:
+             self.expert_bias = None
++        self.tiny_router_gemm_max_tokens = tiny_router_gemm_max_tokens(
++            num_experts=config.num_experts,
++            hidden_size=config.hidden_size,
++            weight_dtype=self.weight.dtype,
++        )
+ 
+     def forward(self, hidden_states):
+-        if (
+-            hidden_states.is_cuda
+-            and 0 < hidden_states.shape[0] <= ROUTER_GATE_MATVEC_MAX_M
+-            and self.weight.dtype in (torch.float32, torch.bfloat16)
+-        ):
+-            # Decode-sized M: one fp32-accumulating triton matvec for either
+-            # gate dtype. Cold-cache (rotating weights) it beats the library
+-            # path up to M=8 — by ~2.6-3x at the bs=1 verify shape (M=4) —
+-            # and ties it at M=1; see router_gate_matvec for the numbers.
+-            return router_gate_matvec(hidden_states, self.weight)
+-        logits = F.linear(hidden_states.to(self.weight.dtype), self.weight, None)
+-        return logits
++        if self.weight.dtype == torch.bfloat16:
++            return router_linear_bf16_fp32(
++                hidden_states.to(torch.bfloat16),
++                self.weight,
++                tiny_max_tokens=self.tiny_router_gemm_max_tokens,
++            )
++        return F.linear(hidden_states.float(), self.weight.float(), None)
+ 
+ 
+ class BailingMoE(nn.Module):
+diff --git a/python/sglang/srt/models/deepseek_common/utils.py b/python/sglang/srt/models/deepseek_common/utils.py
+index ceefce6..5b92ed4 100644
+--- a/python/sglang/srt/models/deepseek_common/utils.py
++++ b/python/sglang/srt/models/deepseek_common/utils.py
+@@ -189,11 +189,10 @@ def tiny_router_gemm_max_tokens(
+     shape or the device rules it out. Doubles as the kernel's compile-time
+     max_m, so keep it as tight as the measurements allow.
+     """
+-    if not _is_cuda or _device_sm < 90 or weight_dtype != torch.bfloat16:
+-        return -1
++    from sglang.srt.layers.moe.router_gate import tiny_router_gemm_max_tokens as impl
+ 
+-    from sglang.kernels.ops.gemm.tiny_gemm import can_use_tiny_gemm
+-
+-    if not can_use_tiny_gemm(num_experts, hidden_size, max_m=16):
+-        return -1
+-    return 16
++    return impl(
++        num_experts=num_experts,
++        hidden_size=hidden_size,
++        weight_dtype=weight_dtype,
++    )
+diff --git a/python/sglang/srt/models/deepseek_v2.py b/python/sglang/srt/models/deepseek_v2.py
+index 41148eb..848a6a0 100644
+--- a/python/sglang/srt/models/deepseek_v2.py
++++ b/python/sglang/srt/models/deepseek_v2.py
+@@ -102,6 +102,7 @@ from sglang.srt.layers.moe.ep_moe.layer import get_moe_impl_class
+ from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
+ from sglang.srt.layers.moe.hash_topk import HashTopK
+ from sglang.srt.layers.moe.kt_ep_wrapper import KTEPWrapperMethod
++from sglang.srt.layers.moe.router_gate import router_linear_bf16_fp32
+ from sglang.srt.layers.moe.token_dispatcher.base import (
+     BaseDispatcher,
+     CombineInput,
+@@ -206,9 +207,6 @@ from sglang.srt.utils import (
+ )
+ from sglang.srt.utils.custom_op import register_custom_op
+ 
+-if _use_aiter:
+-    from sglang.srt.layers.rocm_linear_utils import aiter_dsv3_router_gemm
+-
+ if _use_aiter_gfx95:
+     from sglang.srt.layers.rocm_linear_utils import (
+         get_dsv3_gemm_output_zero_allocator_size,
+@@ -217,9 +215,7 @@ if _use_aiter_gfx95:
+ if _use_aiter:
+     pass
+ 
+-if _is_cuda:
+-    from sglang.kernels.ops.gemm.tiny_gemm import tiny_gemm_bf16
+-elif _is_npu:
++if _is_npu:
+     from sglang.srt.hardware_backend.npu.modules.deepseek_v2_attention_mla_npu import (
+         forward_dsa_core_npu,
+         forward_dsa_prepare_npu,
+@@ -517,27 +513,11 @@ class MoEGate(nn.Module):
+                 True,  # is_vnni
+             )
+ 
+-        if get_exec().deterministic.enable_deterministic_inference:
+-            return F.linear(hidden_states, self.weight, None)
+-
+-        if hidden_states.shape[0] <= self.tiny_router_gemm_max_tokens:
+-            logits = tiny_gemm_bf16(
+-                hidden_states,
+-                self.weight,
+-                out_dtype=torch.float32,
+-                max_m=self.tiny_router_gemm_max_tokens,
+-            )
+-        elif _use_aiter:
+-            logits = aiter_dsv3_router_gemm(hidden_states, self.weight)
+-        elif not _is_cuda:
+-            logits = F.linear(hidden_states, self.weight, None)
+-        else:
+-            # cuBLAS bf16 x bf16 -> fp32 GEMM (torch.mm's out_dtype kwarg is CUDA-only)
+-            from sglang.kernels.ops.attention.dsv4 import linear_bf16_fp32
+-
+-            logits = linear_bf16_fp32(hidden_states, self.weight)
+-
+-        return logits
++        return router_linear_bf16_fp32(
++            hidden_states,
++            self.weight,
++            tiny_max_tokens=self.tiny_router_gemm_max_tokens,
++        )
+ 
+ 
+ class DeepseekV2MoE(nn.Module):
+diff --git a/python/sglang/srt/models/ernie4.py b/python/sglang/srt/models/ernie4.py
+index 33cec5e..c98f368 100644
+--- a/python/sglang/srt/models/ernie4.py
++++ b/python/sglang/srt/models/ernie4.py
+@@ -17,7 +17,6 @@
+ from typing import Iterable, List, Optional, Tuple, Union
+ 
+ import torch
+-import torch.nn.functional as F
+ from torch import nn
+ from transformers.models.ernie4_5_moe.configuration_ernie4_5_moe import (
+     Ernie4_5_MoeConfig,
+@@ -31,6 +30,7 @@ from sglang.srt.layers.layernorm import RMSNorm
+ from sglang.srt.layers.logits_processor import LogitsProcessor
+ from sglang.srt.layers.moe.ep_moe.layer import get_moe_impl_class
+ from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
++from sglang.srt.layers.moe.router_gate import RouterGate
+ from sglang.srt.layers.moe.topk import TopK
+ from sglang.srt.layers.quantization.base_config import QuantizationConfig
+ from sglang.srt.layers.vocab_parallel_embedding import (
+@@ -49,24 +49,20 @@ _is_cpu = is_cpu()
+ _is_npu = is_npu()
+ 
+ 
+-class MoEGate(nn.Module):
++class MoEGate(RouterGate):
+     def __init__(
+         self,
+         config,
+         prefix: str = "",
+     ):
+-        super().__init__()
+-        self.weight = nn.Parameter(
+-            torch.empty((config.moe_num_experts, config.hidden_size))
+-        )
+-        self.e_score_correction_bias = nn.Parameter(
+-            torch.empty((1, config.moe_num_experts))
++        super().__init__(
++            config.hidden_size,
++            config.moe_num_experts,
++            fp32_compute=False,
++            has_correction_bias=True,
++            correction_bias_shape=(1, config.moe_num_experts),
+         )
+ 
+-    def forward(self, hidden_states):
+-        logits = F.linear(hidden_states, self.weight, None)
+-        return logits
+-
+ 
+ class Ernie4Moe(nn.Module):
+     def __init__(
+diff --git a/python/sglang/srt/models/glm4_moe.py b/python/sglang/srt/models/glm4_moe.py
+index fbda6fd..9460710 100644
+--- a/python/sglang/srt/models/glm4_moe.py
++++ b/python/sglang/srt/models/glm4_moe.py
+@@ -19,7 +19,6 @@ import re
+ from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+ 
+ import torch
+-import torch.nn.functional as F
+ from torch import nn
+ from transformers import PretrainedConfig
+ 
+@@ -64,6 +63,7 @@ from sglang.srt.layers.moe import (
+ from sglang.srt.layers.moe.ep_moe.layer import get_moe_impl_class
+ from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
+ from sglang.srt.layers.moe.kt_ep_wrapper import KTEPWrapperMethod
++from sglang.srt.layers.moe.router_gate import RouterGate
+ from sglang.srt.layers.moe.topk import TopK
+ from sglang.srt.layers.moe.utils import (
+     RoutingMethodType,
+@@ -360,26 +360,19 @@ class Glm4MoeAttention(nn.Module):
+         return self.forward_core(s)
+ 
+ 
+-class Glm4MoeGate(nn.Module):
++class Glm4MoeGate(RouterGate):
+     def __init__(
+         self,
+         config,
+         prefix: str = "",
+     ):
+-        super().__init__()
+-        self.weight = nn.Parameter(
+-            torch.empty(
+-                (config.n_routed_experts, config.hidden_size), dtype=torch.float32
+-            )
+-        )
+-        self.e_score_correction_bias = nn.Parameter(
+-            torch.empty((config.n_routed_experts), dtype=torch.float32)
++        super().__init__(
++            config.hidden_size,
++            config.n_routed_experts,
++            fp32_compute=False,
++            has_correction_bias=True,
+         )
+ 
+-    def forward(self, hidden_states):
+-        logits = F.linear(hidden_states.to(torch.float32), self.weight, None)
+-        return logits
+-
+ 
+ class Glm4MoeSparseMoeBlock(nn.Module):
+     def __init__(
+diff --git a/python/sglang/srt/models/kimi_linear.py b/python/sglang/srt/models/kimi_linear.py
+index 1b010b4..ec8ae4a 100644
+--- a/python/sglang/srt/models/kimi_linear.py
++++ b/python/sglang/srt/models/kimi_linear.py
+@@ -103,7 +103,9 @@ class KimiMoE(nn.Module):
+             prefix=f"{prefix}.gate",
+         )
+ 
+-        self.gate.e_score_correction_bias = nn.Parameter(torch.empty(num_experts))
++        self.gate.e_score_correction_bias = nn.Parameter(
++            torch.empty(num_experts, dtype=torch.float32)
++        )
+ 
+         self.experts = get_moe_impl_class(quant_config)(
+             num_experts=config.n_routed_experts,
+diff --git a/python/sglang/srt/models/laguna.py b/python/sglang/srt/models/laguna.py
+index 9aa8d45..2916faa 100644
+--- a/python/sglang/srt/models/laguna.py
++++ b/python/sglang/srt/models/laguna.py
+@@ -41,6 +41,7 @@ from sglang.srt.layers.logits_processor import LogitsProcessor
+ from sglang.srt.layers.moe import should_skip_post_experts_all_reduce
+ from sglang.srt.layers.moe.ep_moe.layer import get_moe_impl_class
+ from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
++from sglang.srt.layers.moe.router_gate import RouterGate
+ from sglang.srt.layers.moe.topk import TopK
+ from sglang.srt.layers.quantization.base_config import QuantizationConfig
+ from sglang.srt.layers.radix_attention import RadixAttention
+@@ -111,26 +112,23 @@ class LagunaMLP(nn.Module):
+         return x
+ 
+ 
+-class LagunaMoEGate(nn.Module):
++class LagunaMoEGate(RouterGate):
+     def __init__(
+         self,
+         config: LagunaConfig,
+         prefix: str = "",
+     ):
+-        super().__init__()
+-        self.weight = nn.Parameter(
+-            torch.empty(config.num_experts, config.hidden_size, dtype=torch.float32)
++        super().__init__(
++            config.hidden_size,
++            config.num_experts,
++            fp32_compute=False,
++            has_correction_bias=True,
+         )
+         # Released checkpoint stores this under `mlp.experts.e_score_correction_bias`
+         # (load_weights remaps it) but every value is 0.0; zero-init keeps us
+         # correct if a future checkpoint omits the tensor entirely.
+-        self.e_score_correction_bias = nn.Parameter(
+-            torch.zeros(config.num_experts, dtype=torch.float32),
+-            requires_grad=False,
+-        )
+-
+-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+-        return F.linear(hidden_states.to(torch.float32), self.weight, None)
++        self.e_score_correction_bias.requires_grad_(False)
++        self.e_score_correction_bias.data.zero_()
+ 
+ 
+ class LagunaMoE(nn.Module):
+diff --git a/python/sglang/srt/models/llada2.py b/python/sglang/srt/models/llada2.py
+index 1e4e804..df28c84 100644
+--- a/python/sglang/srt/models/llada2.py
++++ b/python/sglang/srt/models/llada2.py
+@@ -179,10 +179,7 @@ class LLaDA2MoeGate(nn.Module):
+             self.expert_bias = None
+ 
+     def forward(self, hidden_states):
+-        logits = F.linear(hidden_states.to(self.weight.dtype), self.weight, None).to(
+-            hidden_states.dtype
+-        )
+-        return logits
++        return F.linear(hidden_states.to(self.weight.dtype), self.weight, None)
+ 
+ 
+ class LLaDA2MoeSparseMoeBlock(nn.Module):
+diff --git a/python/sglang/srt/models/longcat_flash.py b/python/sglang/srt/models/longcat_flash.py
+index 7110941..6f00dfd 100644
+--- a/python/sglang/srt/models/longcat_flash.py
++++ b/python/sglang/srt/models/longcat_flash.py
+@@ -37,8 +37,10 @@ from typing import Iterable, List, Optional, Tuple
+ import torch
+ from torch import nn
+ 
+-from sglang.kernels.ops.attention.dsv4 import linear_bf16_fp32
+-from sglang.kernels.ops.attention.dsv4.gemm import mark_hpc_bf16xfp32_gemm_enabled
++from sglang.kernels.ops.gemm.bf16_fp32 import (
++    linear_bf16_fp32,
++    mark_hpc_bf16xfp32_gemm_enabled,
++)
+ from sglang.kernels.ops.moe.ep_moe_kernels import zero_experts_compute_triton
+ from sglang.kernels.ops.quantization.fp8_kernel import is_fp8_fnuz
+ from sglang.srt.configs import LongcatFlashConfig
+diff --git a/python/sglang/srt/models/mimo_v2.py b/python/sglang/srt/models/mimo_v2.py
+index eb02bca..fe20b69 100644
+--- a/python/sglang/srt/models/mimo_v2.py
++++ b/python/sglang/srt/models/mimo_v2.py
+@@ -18,7 +18,6 @@ import re
+ from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+ 
+ import torch
+-import torch.nn.functional as F
+ from torch import nn
+ 
+ from sglang.srt.batch_overlap.two_batch_overlap import model_forward_maybe_tbo
+@@ -49,10 +48,10 @@ from sglang.srt.layers.linear import (
+ from sglang.srt.layers.logits_processor import LogitsProcessor
+ from sglang.srt.layers.moe import (
+     get_moe_a2a_backend,
+-    get_moe_runner_backend,
+     should_skip_post_experts_all_reduce,
+ )
+ from sglang.srt.layers.moe.ep_moe.layer import DeepEPMoE, get_moe_impl_class
++from sglang.srt.layers.moe.router_gate import RouterGate
+ from sglang.srt.layers.moe.topk import TopK, TopKOutputFormat
+ from sglang.srt.layers.quantization.base_config import QuantizationConfig
+ from sglang.srt.layers.radix_attention import RadixAttention
+@@ -336,7 +335,7 @@ class MiMoV2MLP(nn.Module):
+         return x
+ 
+ 
+-class MoEGate(nn.Module):
++class MoEGate(RouterGate):
+     def __init__(
+         self,
+         config,
+@@ -344,30 +343,13 @@ class MoEGate(nn.Module):
+         prefix: str = "",
+         is_nextn: bool = False,
+     ):
+-        super().__init__()
+-        self.is_nextn = is_nextn
+-        self.dtype = torch.float32
+-        self.weight = nn.Parameter(
+-            torch.empty((config.n_routed_experts, config.hidden_size), dtype=self.dtype)
++        super().__init__(
++            config.hidden_size,
++            config.n_routed_experts,
++            fp32_compute=False,
++            has_correction_bias=config.topk_method == "noaux_tc",
+         )
+-        if config.topk_method == "noaux_tc":
+-            correction_bias_dtype = (
+-                torch.bfloat16
+-                if quant_config is not None
+-                and quant_config.get_name() == "modelopt_fp4"
+-                and get_moe_runner_backend().is_flashinfer_trtllm()
+-                else self.dtype
+-            )
+-            self.e_score_correction_bias = nn.Parameter(
+-                torch.empty((config.n_routed_experts), dtype=correction_bias_dtype)
+-            )
+-        else:
+-            self.e_score_correction_bias = None
+-
+-    def forward(self, hidden_states):
+-        logits = F.linear(hidden_states.to(self.dtype), self.weight, None)
+-
+-        return logits
++        self.is_nextn = is_nextn
+ 
+ 
+ class MiMoV2MoE(nn.Module):
+diff --git a/test/registered/unit/layers/test_router_gate.py b/test/registered/unit/layers/test_router_gate.py
+new file mode 100644
+index 0000000..0622b23
+--- /dev/null
++++ b/test/registered/unit/layers/test_router_gate.py
+@@ -0,0 +1,46 @@
++import unittest
++from unittest.mock import patch
++
++import torch
++
++from sglang.srt.layers.moe.router_gate import RouterGate, router_linear_bf16_fp32
++from sglang.test.ci.ci_register import register_cpu_ci
++
++register_cpu_ci(est_time=5, suite="base-a-test-cpu")
++
++
++class TestRouterGate(unittest.TestCase):
++    def test_fp32_reference_and_output_contract(self):
++        torch.manual_seed(7)
++        gate = RouterGate(17, 9, fp32_compute=False, params_dtype=torch.bfloat16)
++        x = torch.randn(8, 17, dtype=torch.bfloat16)
++        with torch.no_grad():
++            gate.weight.copy_(torch.randn_like(gate.weight))
++        actual = gate(x)
++        reference = x.float() @ gate.weight.float().t()
++        self.assertEqual(actual.dtype, torch.float32)
++        torch.testing.assert_close(actual, reference, rtol=0, atol=0)
++
++    def test_fp32_compute_contract(self):
++        gate = RouterGate(5, 3, fp32_compute=True, has_correction_bias=True)
++        self.assertEqual(gate.weight.dtype, torch.float32)
++        self.assertEqual(gate.e_score_correction_bias.dtype, torch.float32)
++        self.assertEqual(
++            gate(torch.randn(2, 5, dtype=torch.bfloat16)).dtype, torch.float32
++        )
++
++    def test_deterministic_policy_skips_tiny_dispatch(self):
++        x = torch.randn(1, 4, dtype=torch.bfloat16)
++        weight = torch.randn(3, 4, dtype=torch.bfloat16)
++        with patch(
++            "sglang.srt.layers.moe.router_gate.envs.SGLANG_ENABLE_DETERMINISTIC_INFERENCE.get",
++            return_value=True,
++        ):
++            actual = router_linear_bf16_fp32(x, weight, tiny_max_tokens=16)
++        torch.testing.assert_close(
++            actual, x.float() @ weight.float().t(), rtol=0, atol=0
++        )
++
++
++if __name__ == "__main__":
++    unittest.main()
