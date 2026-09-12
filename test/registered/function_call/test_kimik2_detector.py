@@ -266,6 +266,68 @@ class TestKimiK2DetectorStreaming(unittest.TestCase):
         self.assertEqual(tool_calls[1]["name"], "get_weather")
         self.assertEqual(json.loads(tool_calls[1]["parameters"]), {"city": "Paris"})
 
+    def test_streaming_split_end_marker_does_not_leak_into_arguments(self):
+        detector = KimiK2FuncDetector()
+        chunks = [
+            "<|tool_calls_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:0"
+            '<|tool_call_argument_begin|>{"path": "/tmp/a"}',
+            "<|tool_call_",
+            "end|><|tool_calls_section_end|>",
+        ]
+
+        tool_calls, _ = _collect_streaming_tool_calls(detector, chunks, self.tools)
+
+        self.assertEqual(tool_calls[0]["parameters"], '{"path": "/tmp/a"}')
+        self.assertEqual(json.loads(tool_calls[0]["parameters"]), {"path": "/tmp/a"})
+
+    def test_streaming_end_marker_prefix_divergence_is_preserved(self):
+        detector = KimiK2FuncDetector()
+        chunks = [
+            "<|tool_calls_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:0"
+            '<|tool_call_argument_begin|>{"path": "literal <|tool_call_',
+            'suffix"}<|tool_call_end|><|tool_calls_section_end|>',
+        ]
+
+        tool_calls, _ = _collect_streaming_tool_calls(detector, chunks, self.tools)
+
+        self.assertEqual(
+            json.loads(tool_calls[0]["parameters"]),
+            {"path": "literal <|tool_call_suffix"},
+        )
+
+    def test_streaming_long_nested_multiple_calls_with_tiny_argument_chunks(self):
+        detector = KimiK2FuncDetector()
+        long_path = "notes/```json\\n" + ("emoji-🚀-{{nested}}-" * 400) + "\\n```"
+        first_args = json.dumps(
+            {"path": long_path, "metadata": {"nested": {"enabled": True}}},
+            ensure_ascii=False,
+        )
+        second_args = json.dumps({"city": "Paris"})
+        chunks = [
+            "<|tool_calls_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:7"
+            "<|tool_call_argument_begin|>"
+        ]
+        chunks.extend(first_args)
+        chunks.extend(
+            [
+                "<|tool_call_",
+                "end|>",
+                "<|tool_call_begin|>functions.get_weather:8"
+                "<|tool_call_argument_begin|>",
+            ]
+        )
+        chunks.extend(second_args)
+        chunks.extend(["<|tool_call_en", "d|><|tool_calls_section_end|>"])
+
+        tool_calls, _ = _collect_streaming_tool_calls(detector, chunks, self.tools)
+
+        self.assertEqual(len(tool_calls), 2)
+        self.assertEqual(json.loads(tool_calls[0]["parameters"]), json.loads(first_args))
+        self.assertEqual(json.loads(tool_calls[1]["parameters"]), json.loads(second_args))
+
     def test_streaming_state_reset_after_completion(self):
         """Buffer and state reset after tool call completes."""
         detector = KimiK2FuncDetector()
