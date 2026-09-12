@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37845",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/963",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/932",
+  "candidate_commit": "ee68d72875bbb3d4f62df22ce75218bf6658454b",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base independently reproduces rejection of multipart text content for both system and assistant messages. At the exact candidate commit, repository-source imports concatenate all-text lists for both roles and continue to reject mixed text/non-text lists. The candidate regression suite and an independent adversarial matrix pass. The implementation is a full parser-level fix for the original contract, not test-only hardening.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-46a876b44e6e/venv/bin/python /job/review-evidence-j-46a876b44e6e/adversarial_review.py (base commit)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: system two-part and assistant three-part text lists raised the original single-text ValueErrors; mixed non-text cases remained rejected."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-46a876b44e6e/venv/bin/python /job/review-evidence-j-46a876b44e6e/adversarial_review.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after independent cases: multipart system and assistant text concatenation, empty text/list boundaries, and rejection of mixed image content."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-46a876b44e6e/venv/bin/python -m pytest -q test/registered/unit/parser/test_conversation.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and surrounding parser suite: 80 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-46a876b44e6e/venv/bin/python -c 'import inspect, ...' (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed conversation and protocol modules imported from /job/repo/python/sglang, not an installed sglang wheel."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "No GPU execution was needed or claimed because the defect and fix are deterministic request parsing before engine/model execution. The assigned host exposes one gfx950 AMD Instinct MI350X, but it was not used.",
+  "native_rebuilt": false,
+  "native_rebuild_reason": "Not applicable: the candidate changes only Python parser/test/report files; no C++, HIP, CUDA, FlyDSL, kernel, or native build input changed.",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No HTTP server or full-model request was run; parser-level reproduction directly exercises the function named by the issue and the failure occurs before GPU/model execution.",
+    "The review environment is ROCm 7.2 on gfx950 (AMD Instinct MI350X), unlike the reporter's CUDA RTX 4090 environment; the reviewed path is architecture-independent Python.",
+    "No model architecture, semantic accuracy, distributed, or multi-node behavior was evaluated or claimed."
+  ]
+}
