@@ -1,0 +1,56 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38981",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/632",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/525",
+  "candidate_commit": "97c33ff61442e589812954f6d71d59bcddae5c2c",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate coalesces touching row segments and fixes the reported shared-boundary-page assertion, including the reported page_size=64 boundary at 32704. It passes its focused CPU and ROCm GPU regressions and independent interleaved/gapped cases. However, cleanup is not idempotent: retrying the same free_kv_row_segments call adds the same pages to the allocator free list again. Because retry safety was an explicit review objective, this is a partial fix and changes are requested.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4e801a8d51a9/venv/bin/python -m pytest -q /job/review-evidence-j-4e801a8d51a9/test_original_contract.py (base version, initial five cases)",
+      "exit_code": 1,
+      "what_was_measured": "Actual free_kv_row_segments and paged allocator path on the prepared base: four touching/interleaved/retry-with-fresh-state cases reproduced _page_disjoint shared-page assertions; the overlapping-range rejection control passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4e801a8d51a9/venv/bin/python -m pytest -q /job/review-evidence-j-4e801a8d51a9/test_original_contract.py (candidate version, initial five cases)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate freed each expected page exactly once for touching ranges, interleaved touching chains separated by a gap, an empty segment between touching ranges, and repeated fresh request states; overlap remained rejected. Five tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4e801a8d51a9/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_paged_free_segment.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate paged allocator regression file, including its new touching-range regression. Fifteen tests passed."
+    },
+    {
+      "command": "timeout 60s env PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4e801a8d51a9/venv/bin/python -m pytest -vv -s test/registered/unit/mem_cache/test_swa_unittest.py::TestFreeKvRow::test_touching_abort_ranges_share_one_boundary_page",
+      "exit_code": 0,
+      "what_was_measured": "Candidate hybrid SWA allocator regression executed on AMD Instinct MI355X (gfx950, ROCm 7.2); full and SWA availability returned to baseline across two fresh allocations."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4e801a8d51a9/venv/bin/python -m pytest -q /job/review-evidence-j-4e801a8d51a9/test_original_contract.py (candidate version, expanded seven cases)",
+      "exit_code": 1,
+      "what_was_measured": "Six cases passed, including the reported page_size=64 boundary 32704. The same-cleanup retry case failed: two pages were inserted into free_pages twice, growing it from baseline+2 to baseline+4."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "PyTorch 2.11.0+rocm7.2 loaded from /opt/venv/lib/python3.12/site-packages/torch; torch.cuda reported AMD Instinct MI355X, capability (9, 5), and rocm-smi reported gfx950. The focused hybrid SWA regression passed on that device.",
+  "native_rebuilt": false,
+  "native_rebuild_reason": "Not applicable: the candidate changes Python and Python tests only; no native, C++, FlyDSL, compiler, or ISA source changed.",
+  "source_paths": {
+    "sglang": "/job/repo/python/sglang/__init__.py",
+    "reviewed_module": "/job/repo/python/sglang/srt/mem_cache/common.py",
+    "torch": "/opt/venv/lib/python3.12/site-packages/torch/__init__.py",
+    "aiter_native_module": "/tmp/amdpilot-repo-j-4e801a8d51a9/cache/aiter/module_aiter_core.so"
+  },
+  "remaining_counterexamples": [
+    "Calling free_kv_row_segments twice with the same touching ranges is not idempotent: the second call inserts the same physical pages into PagedTokenToKVPoolAllocator.free_pages again (baseline+2 becomes baseline+4)."
+  ],
+  "remaining_limitations": [
+    "The prepared host has one AMD Instinct MI355X (gfx950) with ROCm 7.2, not the reported 8x NVIDIA B300 (SM103) CUDA deployment, so the full Kimi-K3 multi-rank server reproduction and CUDA architecture were not available.",
+    "No Kimi-K3 or DSpark model weights and no eight-GPU topology were provided; validation therefore exercised the real Python allocator/free path and focused hybrid SWA GPU allocator test rather than the production server launch.",
+    "Raw logs and the independent adversarial test are retained outside the checkout at /job/review-evidence-j-4e801a8d51a9."
+  ]
+}
