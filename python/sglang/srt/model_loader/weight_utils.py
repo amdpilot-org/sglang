@@ -1241,7 +1241,10 @@ def fastsafetensors_weights_iterator(
     except Exception:
         rank = 0
 
-    device = torch.device(f"cuda:{rank}")
+    # The process-group rank is global across nodes, while CUDA device indices
+    # are local to a node. The model worker has already selected this process's
+    # local device before weight loading starts.
+    device = torch.device(f"cuda:{torch.cuda.current_device()}")
 
     weight_files_sub_lists = [
         hf_weights_files[i : i + pg.size()]
@@ -1258,11 +1261,26 @@ def fastsafetensors_weights_iterator(
         disable=False,
         bar_format=_BAR_FORMAT,
     ):
-        loader = SafeTensorsFileLoader(pg, device, nogds=not enable_gds)
         rank_file_map = {i: [f] for i, f in enumerate(f_list)}
-        loader.add_filenames(rank_file_map)
+        loader = None
         try:
-            fb = loader.copy_files_to_device()
+            try:
+                loader = SafeTensorsFileLoader(pg, device, nogds=not enable_gds)
+                loader.add_filenames(rank_file_map)
+                fb = loader.copy_files_to_device()
+            except Exception as error:
+                if not enable_gds or "gds" not in str(error).lower():
+                    raise
+                if loader is not None:
+                    loader.close()
+                    loader = None
+                logger.warning(
+                    "Fastsafetensors GDS loading is unavailable; retrying "
+                    "with the non-GDS fallback."
+                )
+                loader = SafeTensorsFileLoader(pg, device, nogds=True)
+                loader.add_filenames(rank_file_map)
+                fb = loader.copy_files_to_device()
             try:
                 keys = list(fb.key_to_rank_lidx.keys())
                 for k in keys:
@@ -1271,7 +1289,8 @@ def fastsafetensors_weights_iterator(
             finally:
                 pass
         finally:
-            loader.close()
+            if loader is not None:
+                loader.close()
         if drop_cache_after_load:
             for loaded_file in rank_file_map.get(rank, []):
                 _drop_file_cache_after_load(loaded_file)

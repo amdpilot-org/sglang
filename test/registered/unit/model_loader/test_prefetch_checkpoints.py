@@ -360,6 +360,112 @@ class TestPrefetchCheckpoints(CustomTestCase):
         torch.testing.assert_close(loaded[0][1], torch.tensor([1.0]))
         self.assertEqual(events, ["close", "drop:model.safetensors"])
 
+    @patch("torch.distributed.is_initialized", return_value=True)
+    def test_fastsafetensors_uses_local_device_not_global_rank(self, _):
+        devices = []
+
+        class FakeGroup:
+            def rank(self):
+                return 11
+
+            def size(self):
+                return 12
+
+        class FakeLoader:
+            def __init__(self, group, device, nogds):
+                devices.append(device)
+
+            def add_filenames(self, rank_file_map):
+                pass
+
+            def copy_files_to_device(self):
+                return type("FakeBuffer", (), {"key_to_rank_lidx": {}})()
+
+            def close(self):
+                pass
+
+        with (
+            patch(
+                "sglang.srt.model_loader.weight_utils.torch.distributed.group",
+                type("FakeDistributedGroup", (), {"WORLD": FakeGroup()})(),
+            ),
+            patch("torch.cuda.current_device", return_value=0),
+            patch(
+                "sglang.srt.model_loader.weight_utils.SafeTensorsFileLoader",
+                FakeLoader,
+            ),
+        ):
+            list(fastsafetensors_weights_iterator(["model.safetensors"]))
+
+        self.assertEqual(devices, [torch.device("cuda:0")])
+
+    @patch("torch.distributed.is_initialized", return_value=False)
+    def test_fastsafetensors_retries_without_gds_when_unavailable(self, _):
+        attempts = []
+
+        class FakeGroup:
+            def rank(self):
+                return 0
+
+            def size(self):
+                return 1
+
+        class FakeLoader:
+            def __init__(self, group, device, nogds):
+                attempts.append(nogds)
+                if not nogds:
+                    raise RuntimeError("is_gds_supported(0) failed")
+
+            def add_filenames(self, rank_file_map):
+                pass
+
+            def copy_files_to_device(self):
+                return type("FakeBuffer", (), {"key_to_rank_lidx": {}})()
+
+            def close(self):
+                pass
+
+        with (
+            patch("sglang.srt.model_loader.weight_utils.SingleGroup", FakeGroup),
+            patch(
+                "sglang.srt.model_loader.weight_utils.SafeTensorsFileLoader",
+                FakeLoader,
+            ),
+            patch("torch.cuda.current_device", return_value=0),
+        ):
+            list(fastsafetensors_weights_iterator(["model.safetensors"]))
+
+        self.assertEqual(attempts, [False, True])
+
+    @patch("torch.distributed.is_initialized", return_value=False)
+    def test_fastsafetensors_does_not_mask_non_gds_errors(self, _):
+        attempts = []
+
+        class FakeGroup:
+            def rank(self):
+                return 0
+
+            def size(self):
+                return 1
+
+        class FakeLoader:
+            def __init__(self, group, device, nogds):
+                attempts.append(nogds)
+                raise RuntimeError("checkpoint metadata is corrupt")
+
+        with (
+            patch("sglang.srt.model_loader.weight_utils.SingleGroup", FakeGroup),
+            patch(
+                "sglang.srt.model_loader.weight_utils.SafeTensorsFileLoader",
+                FakeLoader,
+            ),
+            patch("torch.cuda.current_device", return_value=0),
+            self.assertRaisesRegex(RuntimeError, "metadata is corrupt"),
+        ):
+            list(fastsafetensors_weights_iterator(["model.safetensors"]))
+
+        self.assertEqual(attempts, [False])
+
 
 class TestPrefetchDispatch(CustomTestCase):
     """Verify _get_weights_iterator dispatches to the right safetensors
