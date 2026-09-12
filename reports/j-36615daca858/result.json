@@ -1,0 +1,53 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38574",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/952",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/920",
+  "candidate_commit": "597898a956a8a2fba24d32ecf0ef6c32b9666a6b",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is a partial diagnostic and documentation improvement, not a full fix for the original issue. It names the failing MTP module, reports the matched Linear target and quantization details, documents a valid regex ignore, and protects genuinely packed MTP layers from a speculative prefix-only dense fallback. However, dense BF16 MTP construction with a broad Linear W4A8 target and no ignore still raises before checkpoint tensors are inspected, so the reported NEXTN startup failure remains.",
+  "tests": [
+    {
+      "command": "At recorded base 358c163250ad3b1f62939b01ce1314a0a31a0365: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-36615daca858/venv/bin/python /tmp/amdpilot-repo-j-36615daca858/review-evidence/check_mtp_scheme.py",
+      "exit_code": 0,
+      "what_was_measured": "Actual ReplicatedLinear construction reproduced the generic NotImplementedError for no ignore and for plain mtp.* / model.mtp.* entries; valid re: ignores selected UnquantizedLinearMethod. Imported source was /job/repo/python/sglang/srt/layers/quantization/compressed_tensors/compressed_tensors.py. Raw output: /tmp/amdpilot-repo-j-36615daca858/review-evidence/base-scheme.json and base-scheme.stderr."
+    },
+    {
+      "command": "At exact candidate 597898a956a8a2fba24d32ecf0ef6c32b9666a6b: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-36615daca858/venv/bin/python /tmp/amdpilot-repo-j-36615daca858/review-evidence/check_mtp_scheme.py",
+      "exit_code": 0,
+      "what_was_measured": "The independent construction matrix showed that no-ignore dense MTP still raises. The candidate improves the error with layer, matched target, format, W4/A8 args, and ignore guidance. Plain glob-looking ignores still raise; the documented regex selects dense storage for both prefix forms."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-36615daca858/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_nextn.py test/registered/unit/layers/quantization/test_compressed_tensors_mixed_precision.py test/registered/unit/layers/quantization/test_compressed_tensors_lm_head.py test/registered/unit/layers/quantization/test_compressed_tensors_kv_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate, 23 focused tests and 4 subtests passed. The NEXTN regression intentionally asserts that dense no-ignore construction raises, so this is hardening of the diagnostic/safety boundary rather than proof of original-issue resolution. Raw output: /tmp/amdpilot-repo-j-36615daca858/review-evidence/candidate-focused-tests.txt."
+    },
+    {
+      "command": "At exact candidate: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-36615daca858/venv/bin/python /tmp/amdpilot-repo-j-36615daca858/review-evidence/gpu_dense_ignore.py",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI355X, an explicit re:mtp\\..* ignore selected UnquantizedLinearMethod and BF16 GPU output had maximum absolute error 0.0152130126953125 versus an independent CPU FP32 matmul over BF16-rounded inputs and weights. This validates only the explicit-ignore dense path. Raw output: /tmp/amdpilot-repo-j-36615daca858/review-evidence/gpu-dense-ignore.txt."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI355X (gfx950), Torch 2.11.0+rocm7.2, HIP 7.2.26015; repository source import confirmed at /job/repo/python/sglang/srt/layers/quantization/compressed_tensors/compressed_tensors.py.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Dense mtp.layers.0.self_attn.qkv_proj.weight with broad Linear W4A8 targeting and no MTP ignore still raises NotImplementedError during ReplicatedLinear construction, before checkpoint tensor names can distinguish dense from packed storage.",
+    "The candidate requires users or checkpoint producers to add a valid re: ignore; it does not implement the original request to make a dense MTP module without such metadata start successfully.",
+    "Actual packed MTP checkpoint loading remains unverified. The candidate test only proves that construction does not silently select UnquantizedLinearMethod for the shared pre-load prefix/configuration case."
+  ],
+  "remaining_limitations": [
+    "No Qwen3-Next checkpoint weights were available, so full NEXTN server startup and real dense/packed checkpoint tensor loading were not exercised.",
+    "The original environment was 2x H100 NVL with TP2/EP2. Review execution used one AMD Instinct MI355X (gfx950), so NVIDIA-specific, multi-GPU, tensor-parallel, and expert-parallel behavior remains unverified.",
+    "No native source changed in the candidate, and repository-environment.json provides no separate native build target; no native rebuild was applicable.",
+    "The deterministic tiny Llama serving fixture cannot qualify Qwen3-Next/MTP architecture or compressed-tensors checkpoint loading, so it was not used as substitute evidence."
+  ],
+  "source_paths": [
+    "/job/repo/python/sglang/srt/layers/quantization/compressed_tensors/compressed_tensors.py",
+    "/job/repo/test/registered/unit/layers/quantization/test_compressed_tensors_nextn.py",
+    "/job/repo/docs/docs/advanced_features/quantization.mdx"
+  ],
+  "native_paths": []
+}
