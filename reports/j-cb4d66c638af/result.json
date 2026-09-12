@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39054",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the is_musa import-induced TorchDynamo gb0069 failure with the real SGLang probe under both cold and warm lru_cache states. The candidate resolves the complete MUSA detection fact at module import, retains the cached public API, and passes cold/warm fullgraph traces. A real ROCm Inductor kernel using is_musa ran numerically correctly on one MI350X and produced gfx950 AMDGCN/HSACO artifacts.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python TORCHINDUCTOR_CACHE_DIR=/tmp/amdpilot-repo-j-cb4d66c638af/torchinductor XDG_CACHE_HOME=/tmp/amdpilot-repo-j-cb4d66c638af/cache /tmp/amdpilot-repo-j-cb4d66c638af/venv/bin/python < cold/warm fullgraph reproduction",
+      "exit_code": 0,
+      "what_was_measured": "Before the change, both cold and pre-warmed calls to the actual sglang.srt.utils.common.is_musa failed fullgraph compilation with Unsupported: Import failure, module_name: torchada, gb0069. The script handled the expected exceptions and therefore exited zero. See reproduction-before.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TORCHINDUCTOR_CACHE_DIR=/tmp/amdpilot-repo-j-cb4d66c638af/torchinductor XDG_CACHE_HOME=/tmp/amdpilot-repo-j-cb4d66c638af/cache /tmp/amdpilot-repo-j-cb4d66c638af/venv/bin/python -m pytest -q test/registered/unit/utils/test_common.py -k MusaDetection",
+      "exit_code": 0,
+      "what_was_measured": "The preserved regression passed for cold and warm is_musa cache states with torch.compile(backend=eager, fullgraph=True): 1 test and 2 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TORCHINDUCTOR_CACHE_DIR=/tmp/amdpilot-repo-j-cb4d66c638af/torchinductor XDG_CACHE_HOME=/tmp/amdpilot-repo-j-cb4d66c638af/cache /tmp/amdpilot-repo-j-cb4d66c638af/venv/bin/python -m pytest -q test/registered/unit/utils/test_common.py test/registered/cp/test_cp_strategy_unit.py test/registered/unit/server_args/test_platform_prefill_cp_deprecation.py",
+      "exit_code": 0,
+      "what_was_measured": "Related common utility, context-parallel strategy, and platform prefill-CP tests: 37 tests and 57 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TORCHINDUCTOR_CACHE_DIR=/tmp/amdpilot-repo-j-cb4d66c638af/torchinductor-gpu XDG_CACHE_HOME=/tmp/amdpilot-repo-j-cb4d66c638af/cache /tmp/amdpilot-repo-j-cb4d66c638af/venv/bin/python < ROCm fullgraph Inductor numerical control",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, a fullgraph Inductor kernel calling is_musa matched an independent NumPy float32 reference (max absolute error 2.384185791015625e-07; allclose rtol=2e-5, atol=2e-6). Triton emitted triton_poi_fused_add_mul_pow_sin_0.hsaco and AMDGCN assembly targeted at amdgcn-amd-amdhsa--gfx950. See rocm-control.txt."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X, torch.version.hip 7.2.26015, gcnArchName gfx950:sramecc+:xnack-. The generated ELF was elf64-amdgpu with EF_AMDGPU_MACH_AMDGCN_GFX950 and amdhsa.target amdgcn-amd-amdhsa--gfx950."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original 8-GPU NVIDIA B200 MiniMax-M3 tc_piecewise prefill CUDA-graph deployment was not available and was not run; this one-GPU ROCm control does not qualify that deployment.",
+    "No MUSA hardware or torchada installation was available. The implementation preserves the previous detection predicate: torchada must import and torch.version.musa must be non-null.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable.",
+    "Compiler caches and generated GPU artifacts remain under /tmp/amdpilot-repo-j-cb4d66c638af, outside the repository checkout."
+  ]
+}
