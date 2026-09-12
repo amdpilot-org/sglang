@@ -1,0 +1,53 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34943",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1569",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1529",
+  "candidate_commit": "3e5ecbb8089e8540d803745cff5b19ea17453c7e",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the speculative stage predicate and makes single-rank trace export return asynchronously, but its background thread uses the scheduler's shared CPU process group for a barrier. A two-rank adversarial run with concurrent scheduler traffic hung, leaving the original TP8 serving-safety contract unresolved. Its new regression also hard-codes a prior job's private temporary directory and fails in a clean environment.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-793cff37cf4d/venv/bin/python -m pytest -q /job/review-evidence/candidate-test.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before comparison on the exact recorded base: TARGET_VERIFY was classified as prefill, DRAFT_EXTEND_V2 was unsupported, and synchronous export blocked for the fixture timeout. Result: 4 failed, 2 passed, 2 subtest failures. Raw log: /job/review-evidence/base/candidate-regression.log"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-793cff37cf4d/venv/bin/python -m pytest -q test/registered/unit/managers/test_profiler_manager_stage_stop.py (candidate, prior-job temp directory present)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression at exact commit: 4 passed and 2 speculative-mode subtests passed, covering stage mapping and mocked nonblocking export. Raw log: /job/review-evidence/candidate/regression.log"
+    },
+    {
+      "command": "timeout 25s env PYTHONPATH=python /tmp/amdpilot-repo-j-793cff37cf4d/venv/bin/python /job/review-evidence/adversarial_collective.py",
+      "exit_code": 124,
+      "what_was_measured": "Independent two-rank Gloo counterexample invoking the candidate's _export_torch_trace while scheduler/main threads issue all_reduce on the same process group. Staggered export completion caused collective-order mismatch and a hang until timeout. Raw log: /job/review-evidence/candidate/adversarial-collective.log"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-793cff37cf4d/venv/bin/python -m pytest -q test/registered/unit/managers/test_profiler_manager_stage_stop.py::TestProfilerManagerStageStop::test_trace_export_does_not_block_stop (candidate, hard-coded parent absent)",
+      "exit_code": 1,
+      "what_was_measured": "Portability boundary: the committed test fails with FileNotFoundError because it requires /tmp/amdpilot-repo-j-12936fe13f1a. Raw log: /job/review-evidence/candidate/portability-failure.log"
+    },
+    {
+      "command": "env PYTHONPATH=python /tmp/amdpilot-repo-j-793cff37cf4d/venv/bin/python /job/review-evidence/gpu_profile.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent one-GPU ROCm execution through SchedulerProfilerManager produced a 43,006-byte gzip trace. A 256x256 GPU matmul had max absolute error 2.6702880859375e-05 versus CPU. The standalone fixture lacked an initialized distributed group, which the background thread logged after writing the trace. Raw log: /job/review-evidence/candidate/gpu-profile.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X/gfx950 executed a profiled matrix multiplication; the trace and numerical result are retained at the paths listed above. This is not the reported model or distributed workload."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "At world size greater than one, background export calls barrier on dp_tp_cpu_group concurrently with normal scheduler collectives on that same group. Staggered ranks can enter different collectives in different orders and hang; the independent two-rank test timed out.",
+    "The new unit test depends on the candidate author's campaign-private /tmp directory and fails in a clean CI environment.",
+    "SGLANG_PROFILE_V2 still exports synchronously; only its speculative-stage classification is changed."
+  ],
+  "remaining_limitations": [
+    "No B200 hardware, eight-GPU allocation, GLM-5.2 weights, or reported TP8/MTP benchmark was available, so the original 25-second duration and TTFT delta were not reproduced end to end.",
+    "Only one gfx950 GPU was available; multi-rank GPU trace export and merge were not run.",
+    "The deterministic tiny Llama serving fixture was not used because it cannot validate the reported GLM/EAGLE/MTP semantics or the multi-rank collective race, and the issue-specific manager regressions plus independent distributed counterexample directly exercised the changed contract."
+  ]
+}
