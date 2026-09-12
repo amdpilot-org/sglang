@@ -1,0 +1,28 @@
+Base commit: 358c163250ad3b1f62939b01ce1314a0a31a0365
+
+Failing-before command:
+  /tmp/amdpilot-repo-j-f5c1bba2a455/venv/bin/python - <<'PY'
+  # Inspected python/sglang/srt/layers/attention/dsv4/indexer.py and asserted
+  # that the DSV4 MQA-logits row-budget helper was present.
+  PY
+
+Observed on the prepared base:
+  issue_shape=4096x92992 aligned_cols=93184 logits_bytes=1526726656 GiB=1.421875
+  paged_single_full_call=True
+  budget_helper_present=False
+  nonpaged_chunk_field_present=False
+  AssertionError: REGRESSION: DSV4 has no MQA-logits budget/chunk helper
+
+The byte count independently reproduces the reported 1.421875 GiB transient:
+4096 query rows * align(92992, 256) columns * 4 bytes/fp32.
+Source inspection confirmed that both paged and nonpaged DSV4 paths dispatched
+the full query rectangle without a memory budget at the recorded base.
+
+Current related work inspected:
+  https://github.com/sgl-project/sglang/pull/39095
+  candidate commit 23774d125a33d3043c5fee050c965051af324261
+
+The candidate was adopted, then tightened so a low budget never forces a
+128-row minimum that knowingly exceeds the measured budget. One row is now the
+minimum possible useful launch. Tests cover below-one-row, exact-fit, and
+one-row-over-boundary behavior.
