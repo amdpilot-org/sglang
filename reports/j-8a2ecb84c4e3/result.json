@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33493",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 1887's valid acc_additive_penalties correction and fixed the independently reproduced DFLASH/DSPARK decode lifecycle gap by cumulating output tokens in DFlashDraftInputV2.prepare_for_decode. A real min_new_tokens penalizer now lifts EOS/stop suppression at the configured minimum.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-8a2ecb84c4e3/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_verify_logits_adjustments.py test/registered/unit/spec/test_dflash_min_new_tokens.py (candidate behavior before lifecycle fix)",
+      "exit_code": 1,
+      "what_was_measured": "PR 1887's five direct adjustment tests passed, while the real penalizer lifecycle test failed because the EOS adjustment remained -inf after two DFLASH decode preparations."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8a2ecb84c4e3/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_verify_logits_adjustments.py test/registered/unit/spec/test_dflash_min_new_tokens.py",
+      "exit_code": 0,
+      "what_was_measured": "Six focused tests passed, covering additive penalty broadcasting, logit-bias composition, DSPARK fast-path gating, real penalty creation, per-step advancement, refresh, exact min-token release, and removal."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8a2ecb84c4e3/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_logits.py test/registered/unit/spec/test_decode_bookkeeping_ownership.py",
+      "exit_code": 0,
+      "what_was_measured": "Twelve existing DFLASH logits and scheduler bookkeeping ownership tests passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-8a2ecb84c4e3/venv/bin/python reports/j-8a2ecb84c4e3/gfx950_adjustment_check.py",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, fp32 additive penalties plus logit bias broadcast across two rows and four verify positions into fp16 with zero finite error versus an explicit CPU reference and preserved -inf masks."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-8a2ecb84c4e3/raw/gfx950_adjustment.log records AMD Instinct MI350X, gfx950:sramecc+:xnack-, max_finite_abs_error=0.0, and negative_infinity_preserved=True."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The exact DeepSeek-V4-Flash-0731 TP4 HTTP serving reproduction remains unverified because only one gfx950 GPU and no qualified model weights were available.",
+    "The GPU check validates the affected tensor adjustment only; it does not qualify DeepSeek-V4 architecture behavior, semantic accuracy, or a distributed TP4 workload.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
