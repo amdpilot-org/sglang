@@ -15,9 +15,9 @@ def test_copy_to_gpu_no_ce(size):
     assert torch.all(tensor_cpu.cuda() == tensor_gpu)
 
 
-@pytest.mark.parametrize("size", [0])
-def test_copy_to_gpu_no_ce_rejects_out_of_range_input(size):
-    """Rejects sizes outside the bounded kernel-argument representation."""
+def test_copy_to_gpu_no_ce_rejects_empty_input():
+    """Rejects an empty vector, which cannot produce a kernel launch."""
+    size = 0
     tensor_cpu = torch.empty(size, dtype=torch.int32, device="cpu")
     tensor_gpu = torch.empty_like(tensor_cpu, device="cuda")
 

@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32507",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 2113's N=16 specialization, input validation, and bounded no-copy-engine fallback, then corrected the counterexample found by PR 2218 by chunking arbitrary positive vectors into bounded 512-element by-value launches. The exact candidate rejected N=513 and N=1024; the corrected rebuilt library copied N=513, N=1024, and independent N=1025 exactly.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTORCH_ROCM_ARCH=gfx950 TORCH_EXTENSIONS_DIR=/tmp/amdpilot-repo-j-2fcac2c377ae/torch-extensions-candidate MAX_JOBS=8 /tmp/amdpilot-repo-j-2fcac2c377ae/venv/bin/python /job/native_probe_j_2fcac2c377ae.py --source /job/repo/python/sglang/kernels/aot/csrc/elementwise/copy.cu --name correction_candidate_exact --expect-cap",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 3ac707e, rebuilt the checked-out native source for gfx950. Exact copies passed through N=512, while N=513, N=1024, and N=1025 were rejected with the 512-element cap. See evidence/candidate-native-probe.log."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTORCH_ROCM_ARCH=gfx950 TORCH_EXTENSIONS_DIR=/tmp/amdpilot-repo-j-2fcac2c377ae/torch-extensions-corrected MAX_JOBS=8 /tmp/amdpilot-repo-j-2fcac2c377ae/venv/bin/python /job/native_probe_j_2fcac2c377ae.py --source /job/repo/python/sglang/kernels/aot/csrc/elementwise/copy.cu --name correction_after",
+      "exit_code": 0,
+      "what_was_measured": "Rebuilt the corrected native source for gfx950 and compared GPU output exactly with CPU int32 references. All tested N=1..1025 boundary cases passed, specifically N=512, N=513, N=1024, and N=1025. See evidence/corrected-native-probe.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2fcac2c377ae/venv/bin/python -m py_compile python/sglang/kernels/aot/tests/test_copy.py",
+      "exit_code": 0,
+      "what_was_measured": "Regression test source compiles successfully."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..HEAD",
+      "exit_code": 0,
+      "what_was_measured": "The consolidated patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "Freshly rebuilt native extensions ran on the assigned AMD Instinct MI350X gfx950:sramecc+:xnack- GPU. Results were compared against independently constructed CPU int32 vectors with rtol=0 and atol=0.",
+  "native_rebuilt": true,
+  "native_rebuild_evidence": "Both exact candidate and corrected copy.cu sources were HIP-translated with zero unsupported CUDA calls and compiled separately with /opt/rocm-7.2.4/bin/hipcc --offload-arch=gfx950, then loaded directly instead of using the installed wheel.",
+  "remaining_limitations": [
+    "The original GLM-5.2 weights and two-node TP16/EP16 DeepEP environment were unavailable, so full serving was not reproduced.",
+    "Only one AMD Instinct MI350X gfx950 GPU with ROCm 7.2 was assigned; NVIDIA H800/CUDA compilation and execution remain unverified.",
+    "The prepared ROCm sgl_kernel package does not register copy_to_gpu_no_ce, so focused extensions were rebuilt from checked-out source.",
+    "Model semantic accuracy and distributed routing remain outside what this native transfer fixture establishes."
+  ]
+}
