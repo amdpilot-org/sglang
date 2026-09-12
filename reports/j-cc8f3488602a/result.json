@@ -1,0 +1,31 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37711",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced and fixed both Python Ollama endpoint defects: chat tokenizer output is normalized to flat input IDs, and the implicit 2048-token completion default is bounded by remaining context.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-cc8f3488602a/venv/bin/python -m pytest test/registered/unit/entrypoints/ollama/test_serving.py -q (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: chat input normalization and remaining-context default failed; large-context and explicit-option cases passed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-cc8f3488602a/venv/bin/python -m pytest test/registered/unit/entrypoints/ollama/test_serving.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Five passing handler regressions covering mapping-like chat-template output, small and large context limits, reserved tokens, explicit num_predict, and absent context metadata."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-cc8f3488602a/venv/bin/python /tmp/amdpilot-repo-j-cc8f3488602a/run_server_probe.py --fixture /tmp/amdpilot-repo-j-cc8f3488602a/tiny-random-llama --output /tmp/amdpilot-repo-j-cc8f3488602a/ollama-http",
+      "exit_code": 0,
+      "what_was_measured": "A real single-gfx950 SGLang server returned HTTP 200 for Ollama chat with num_predict=4 and Ollama generate without num_predict in a 128-token context; engine reported 4 and 125 completion tokens respectively."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Single-GPU gfx950 execution is recorded in /tmp/amdpilot-repo-j-cc8f3488602a/ollama-http/server.log and the two HTTP response JSON files.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The HTTP fixture is a deterministic synthetic Llama and validates transport and engine execution only.",
+    "Qwen/Qwen3-0.6B weights were unavailable, so Qwen-specific and semantic behavior were not validated.",
+    "No distributed or multi-node workload was tested."
+  ]
+}

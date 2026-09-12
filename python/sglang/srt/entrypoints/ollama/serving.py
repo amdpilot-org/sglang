@@ -7,7 +7,7 @@ internal format and return Ollama-compatible responses.
 
 import time
 from datetime import datetime, timezone
-from typing import AsyncIterator, Union
+from typing import AsyncIterator, Optional, Union
 
 import orjson
 from fastapi import Request
@@ -27,6 +27,8 @@ from sglang.srt.entrypoints.ollama.protocol import (
 )
 from sglang.srt.managers.io_struct import GenerateReqInput
 
+_DEFAULT_MAX_NEW_TOKENS = 2048
+
 
 class OllamaServing:
     """Handler for Ollama-compatible API endpoints."""
@@ -38,7 +40,9 @@ class OllamaServing:
         """Get current timestamp in Ollama format."""
         return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
-    def _convert_options_to_sampling_params(self, options: dict = None) -> dict:
+    def _convert_options_to_sampling_params(
+        self, options: dict = None, prompt_length: Optional[int] = None
+    ) -> dict:
         """Convert Ollama options to SGLang sampling params."""
         sampling_params = {}
 
@@ -61,9 +65,21 @@ class OllamaServing:
         # Set a reasonable default for max_new_tokens if not specified
         # Ollama users typically expect longer responses than SGLang's default (128)
         if "max_new_tokens" not in sampling_params:
-            sampling_params["max_new_tokens"] = 2048
+            sampling_params["max_new_tokens"] = self._get_default_max_new_tokens(
+                prompt_length
+            )
 
         return sampling_params
+
+    def _get_default_max_new_tokens(self, prompt_length: Optional[int]) -> int:
+        """Return the Ollama default, bounded by the available model context."""
+        context_len = getattr(self.tokenizer_manager, "context_len", None)
+        if prompt_length is None or context_len is None:
+            return _DEFAULT_MAX_NEW_TOKENS
+
+        reserved_tokens = getattr(self.tokenizer_manager, "num_reserved_tokens", 0)
+        remaining_tokens = context_len - prompt_length - reserved_tokens
+        return max(0, min(_DEFAULT_MAX_NEW_TOKENS, remaining_tokens))
 
     async def handle_chat(
         self, request: OllamaChatRequest, raw_request: Request
@@ -81,10 +97,13 @@ class OllamaServing:
             messages,
             tokenize=True,
             add_generation_prompt=True,
+            return_dict=False,
         )
 
         # Convert options to sampling params
-        sampling_params = self._convert_options_to_sampling_params(request.options)
+        sampling_params = self._convert_options_to_sampling_params(
+            request.options, prompt_length=len(prompt_ids)
+        )
 
         # Create SGLang request with input_ids
         gen_request = GenerateReqInput(
@@ -202,7 +221,10 @@ class OllamaServing:
             return empty_response
 
         # Convert options to sampling params
-        sampling_params = self._convert_options_to_sampling_params(request.options)
+        prompt_length = len(self.tokenizer_manager.tokenizer.encode(prompt))
+        sampling_params = self._convert_options_to_sampling_params(
+            request.options, prompt_length=prompt_length
+        )
 
         # Create SGLang request
         gen_request = GenerateReqInput(
