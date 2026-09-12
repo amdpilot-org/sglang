@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30760",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Moved HiCache storage prefetch progress checks out of the rank-locally bounded admission loop and ahead of local batch-full/capacity exits, so every TP rank checks the complete broadcast waiting queue in the same order before using a local result map.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-eec6a6a299f2/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_hicache_prefetch_progress.py (base scheduler behavior)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: 4 failures because the queue-wide snapshot did not exist."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-eec6a6a299f2/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_hicache_prefetch_progress.py",
+      "exit_code": 0,
+      "what_was_measured": "Five passing cases covering divergent local admission limits, unfinished prefetch, disabled storage, empty queue, and batch-full early return."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-eec6a6a299f2/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_decision_batch_params.py test/registered/unit/mem_cache/test_hiradix_pp_sync_drain.py test/registered/unit/managers/test_scheduler_hicache_prefetch_progress.py",
+      "exit_code": 0,
+      "what_was_measured": "Ten focused scheduler and HiCache tests passed."
+    },
+    {
+      "command": "git diff --check && /tmp/amdpilot-repo-j-eec6a6a299f2/venv/bin/python -m py_compile python/sglang/srt/managers/scheduler.py test/registered/unit/managers/test_scheduler_hicache_prefetch_progress.py",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace and Python syntax validation."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Hardware discovery found one AMD Instinct MI355X gfx950. TP=4 collective behavior cannot be executed on the assigned single GPU, so no GPU workload was presented as issue reproduction."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original four-GPU NVIDIA TP=4 GLM-5.2-FP8 deployment, Mooncake/RDMA backend, model weights, and production traffic are unavailable.",
+    "The regression deterministically validates collective call-count ordering in the actual scheduler but does not reproduce the full production server deadlock.",
+    "The prepared environment lacks the ruff Python module; focused tests, git diff --check, and py_compile passed."
+  ]
+}
