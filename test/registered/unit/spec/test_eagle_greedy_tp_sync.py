@@ -48,7 +48,9 @@ def _fake_verify_tree_greedy(**kwargs):
     return predicts, accept_index, accept_token_num
 
 
-def _sample(logits, tp_group, *, dp_attention=False, attn_tp_group=None):
+def _sample(
+    logits, tp_group, *, is_hip=True, dp_attention=False, attn_tp_group=None
+):
     device = logits.device
     verify_input = SimpleNamespace(
         draft_token_num=2,
@@ -72,7 +74,7 @@ def _sample(logits, tp_group, *, dp_attention=False, attn_tp_group=None):
     )
 
     with (
-        patch.object(eagle_utils, "_is_hip", True),
+        patch.object(eagle_utils, "_is_hip", is_hip),
         patch.object(
             eagle_utils,
             "verify_tree_greedy_func",
@@ -113,6 +115,30 @@ def test_rocm_greedy_verify_broadcasts_rank_zero_decision():
 
     assert torch.argmax(rank_zero_logits, dim=-1).tolist() == [1, 2]
     assert torch.argmax(rank_one_logits, dim=-1).tolist() == [1, 1]
+    assert len(group.calls) == 6
+    for rank_zero_tensor, rank_one_tensor in zip(rank_zero, rank_one):
+        torch.testing.assert_close(rank_one_tensor, rank_zero_tensor)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a GPU")
+def test_non_rocm_greedy_verify_broadcasts_rank_zero_decision():
+    group = _ReplayBroadcastGroup(world_size=2)
+    rank_zero_logits = torch.tensor(
+        [[0.0, 1.0, 0.0], [0.0, 1.0, 1.0001]], device="cuda"
+    )
+    rank_one_logits = torch.tensor(
+        [[0.0, 1.0, 0.0], [0.0, 1.0001, 1.0]], device="cuda"
+    )
+
+    group.rank = 0
+    rank_zero = _sample(rank_zero_logits, group, is_hip=False)
+    group.rank = 1
+    rank_one = _sample(rank_one_logits, group, is_hip=False)
+
+    assert torch.argmax(rank_zero_logits, dim=-1).tolist() == [1, 2]
+    assert torch.argmax(rank_one_logits, dim=-1).tolist() == [1, 1]
+    assert rank_zero[1].tolist() == [3]
+    assert rank_one[1].tolist() == [3]
     assert len(group.calls) == 6
     for rank_zero_tensor, rank_one_tensor in zip(rank_zero, rank_one):
         torch.testing.assert_close(rank_one_tensor, rank_zero_tensor)

@@ -1,0 +1,27 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31071",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the review's non-HIP greedy TP divergence against candidate behavior and made finalized greedy accept-decision broadcasts backend-independent while preserving the candidate's valid ROCm, TP=1, and DP-attention coverage.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python:/job/repo/python/sglang-kernel/python /tmp/amdpilot-repo-j-9ac69303abaa/venv/bin/python -m pytest -q test/registered/unit/spec/test_eagle_greedy_tp_sync.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate cad9443 regression on the assigned GPU: three candidate tests passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python:/job/repo/python/sglang-kernel/python /tmp/amdpilot-repo-j-9ac69303abaa/venv/bin/python -m pytest -q test/registered/unit/spec/test_eagle_greedy_tp_sync.py::test_non_rocm_greedy_verify_broadcasts_rank_zero_decision",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before candidate behavior: non-HIP logical TP ranks retained different accepted-token counts, 3 versus 2."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python:/job/repo/python/sglang-kernel/python /tmp/amdpilot-repo-j-9ac69303abaa/venv/bin/python -m pytest -q test/registered/unit/spec/test_eagle_greedy_tp_sync.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after behavior: four GPU-backed tests covered HIP and non-HIP logical TP=2 synchronization, TP=1, and DP-attention routing."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Real torch tensors and argmax ran on AMD Instinct MI350X gfx950 with Torch 2.11.0+rocm7.2; collective behavior was replayed across logical ranks.",
+  "native_rebuilt": false,
+  "remaining_limitations": "Only one GPU was assigned, so no real two-rank process group, ROCm collective/deadlock, AITER all-reduce fusion, multi-node workload, full serving path, or model semantic accuracy was verified. No model weights were used. No native source changed."
+}
