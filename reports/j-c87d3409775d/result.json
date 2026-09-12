@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37111",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "summary": "Current main contains the newer QSA speculative CUDA-graph layout implementation from merged PR #37500 and the paged sparse-decode memory-safety fix from merged PR #38851, but the original GB10/SM121 TP2 semantic-corruption report cannot be revalidated on the assigned single AMD gfx950 GPU without the Qwen3.8-Flash-Next-NVFP4 weights. Investigation did reproduce a current-head QSA+NEXTN draft-extend blocker: _speculative_max_row_length read draft_token_num, which EagleDraftExtendInput does not define. The narrow correction uses the canonical num_tokens_per_req field shared by verify and draft-extend, with a failing-before artifact and boundary regressions. This correction removes the blocker but is not claimed to resolve or reproduce the original silent corruption.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-c87d3409775d/venv/bin/python < focused reproduction script>",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction using a real EagleDraftExtendInput(num_tokens_per_req=4); current base raised AttributeError because draft_token_num is absent. Raw output: reports/j-c87d3409775d/evidence/failing-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c87d3409775d/venv/bin/python -m pytest -q test/registered/kernel/qsa/test_qsa.py -k 'speculative_row_bound or cuda_graph_pads_dynamic_draft_extend_rows or cuda_graph_target_verify_ignores_capture_bucket_requests'",
+      "exit_code": 0,
+      "what_was_measured": "Five focused CPU regressions passed: real draft-extend input, canonical-width precedence, no-speculation boundary, ragged draft-extend graph padding, and target-verify capture-bucket padding."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c87d3409775d/venv/bin/python -m pytest -q test/registered/kernel/qsa/test_qsa.py",
+      "exit_code": 0,
+      "what_was_measured": "Full focused QSA suite: 41 passed and 1 SM121-only test skipped on the assigned AMD GPU."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c87d3409775d/venv/bin/python -m pytest -vv test/registered/kernel/qsa/test_qsa.py::test_qsa_triton_block_expansion_matches_torch_reference test/registered/kernel/qsa/test_qsa.py::test_qsa_graph_metadata_kernels_match_legacy_host_path test/registered/kernel/qsa/test_qsa.py::test_qsa_graph_layout_covers_speculative_rows_and_padded_tail",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X (gfx950), Triton block expansion matched the independent Torch reference, GPU graph metadata matched the legacy host path for decode/target-verify/draft-extend boundaries, and speculative padded-tail layouts matched an independent host oracle; 3 passed."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/layers/attention/qwen_sparse_attn_backend.py test/registered/kernel/qsa/test_qsa.py reports/j-c87d3409775d/result.json reports/j-c87d3409775d/findings.md",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, spelling, secret, and registered-test validation hooks all passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X, ROCm 7.2, torch 2.11.0+rocm7.2. Raw output: reports/j-c87d3409775d/evidence/gfx950-graph-numerics.txt"
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No GB10/SM121 NVIDIA GPU was available; the SM121-only sparse attention kernel test was skipped.",
+    "Only one gfx950 GPU was assigned, so TP2 over RoCEv2 and multi-node behavior were not tested.",
+    "Qwen3.8-Flash-Next-NVFP4 weights were not available, so the HTTP semantic gates, 1024-token non-looping generation, approximately 25K marker retrieval, and eager-versus-decode-graph output comparison were not run.",
+    "The tiny Llama transport fixture cannot qualify Qwen4-Exp/QSA/NEXTN architecture semantics and therefore was not substituted for the reported model.",
+    "The correction addresses the independently reproduced draft-extend metadata crash only; it does not establish that the original silent semantic corruption is fixed."
+  ]
+}
