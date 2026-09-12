@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31915",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Exact candidate 378ebac401a21abfa048a3880426bdb995ccabc4 is a valid narrow fix for the original issue's Llama32 streaming JSON-string corruption item. The recorded base corrupts or drops calls containing the reported single-quote patterns; the candidate preserves them across complete and adversarially split increments and retains Python-dict compatibility. It is a partial fix because the original issue enumerates multiple independent detector defects that this commit does not change.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f76314a2e3df/venv/bin/python /job/review-evidence-j-f76314a2e3df/llama32_review_cases.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction against the real Llama32Detector. Both reported quote patterns and related JSON-string cases were corrupted; the Python single-quoted-dict compatibility control passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f76314a2e3df/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py -k 'TestLlama32Detector' (candidate 378ebac)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 10 Llama32 tests passed, including both reported corruption patterns, a cross-chunk case, and preservation of Python single-quoted-dict conversion."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f76314a2e3df/venv/bin/python /job/review-evidence-j-f76314a2e3df/llama32_review_cases.py (candidate 378ebac)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial round-trip cases passed for complete input and boundaries before/inside/after vulnerable patterns, escaped double quotes, backslashes, Unicode, multiple patterns, and the existing Python-dict compatibility behavior."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f76314a2e3df/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py (candidate 378ebac)",
+      "exit_code": 0,
+      "what_was_measured": "Complete shared function-call parser module: 246 tests passed with 4 subtests; only the existing unknown asyncio_mode configuration warning was emitted."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "An AMD Instinct MI350X was visible, but the reviewed defect is deterministic CPU string parsing after detokenization. No model weights, HTTP serving, semantic accuracy, distributed execution, or GPU result is claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "base_format_detector name-send branch can lose arguments or parallel calls",
+    "Step3 parameter matching can cross an invoke boundary and graft/drop calls",
+    "KimiK2 can fail to retain a lone trailing '<' token prefix",
+    "KimiK2 can stream a split end-token prefix into arguments",
+    "DeepSeekV3 greedy streaming matching can assign the second call's name to the first",
+    "DeepSeekV3/V31 can discard already-valid calls when a later call is malformed",
+    "Base/Mistral normal-text cleanup can delete ordinary ']' characters",
+    "Llama32 non-streaming separator accounting can drop the first trailing-text character",
+    "Pythonic detector bracket matching can mis-slice brackets inside string literals"
+  ],
+  "remaining_limitations": [
+    "This review validates one Llama32 parser defect, not the full multi-detector original issue.",
+    "No full model, HTTP serving path, model semantics, multi-node workload, or GPU kernel was exercised; none is required to reproduce this decoded-text parser bug.",
+    "No native code changed, so a native rebuild was neither applicable nor performed.",
+    "The candidate's Python-literal fallback remains intentionally narrow and was not qualified for every possible Python literal or escaped single-quoted string form."
+  ]
+}
