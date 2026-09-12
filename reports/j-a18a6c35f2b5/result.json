@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35054",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced TeaCache's stale-branch reset behavior, then made request-start reset use the current CFG branch and CFG-parallel topology. Wan skip boundaries now double only for serial CFG, where both branches execute locally. Added regression coverage for serial double reset, serial next-request reset, CFG-parallel negative-rank isolation, noninitial timesteps, and boundary scaling.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a18a6c35f2b5/venv/bin/python < issue state-machine reproduction",
+      "exit_code": 0,
+      "what_was_measured": "Before the fix, the serial negative timestep-0 call changed cnt from 1 to 0, and a subsequent CFG-parallel negative request retained cnt=50 plus cached tensors and accumulator=7.0. Raw output: reports/j-a18a6c35f2b5/raw/reproduction_before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a18a6c35f2b5/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_teacache_cfg_lifecycle.py python/sglang/multimodal_gen/test/unit/test_sampling_params.py",
+      "exit_code": 0,
+      "what_was_measured": "46 tests and 23 subtests passed, covering TeaCache lifecycle and independent sampling-parameter boundaries. Raw output: reports/j-a18a6c35f2b5/raw/pytest_focused.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a18a6c35f2b5/venv/bin/python < gfx950 TeaCache state check",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, GPU-resident negative cached tensors were cleared and cnt/accumulator reset at CFG-parallel request start. Raw output: reports/j-a18a6c35f2b5/raw/gpu_state_check.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a18a6c35f2b5/venv/bin/python -m compileall -q python/sglang/multimodal_gen/runtime/cache/teacache.py python/sglang/multimodal_gen/configs/sample/teacache.py python/sglang/multimodal_gen/runtime/models/dits/wanvideo.py",
+      "exit_code": 0,
+      "what_was_measured": "Modified production modules compile successfully."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Single assigned AMD Instinct MI350X (gfx950:sramecc+:xnack-) executed the cache-state reset check with GPU-resident tensors; see reports/j-a18a6c35f2b5/raw/gpu_state_check.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Wan model weights were available, so no full diffusion generation or semantic/image-quality validation was performed.",
+    "Only one assigned GPU was available; CFG-parallel rank behavior was tested deterministically through the actual TeaCache implementation, not a live multi-rank workload.",
+    "Ruff is not installed in the prepared interpreter or shell environment; git diff --check and Python compilation passed."
+  ]
+}
