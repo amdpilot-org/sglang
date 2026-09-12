@@ -150,16 +150,9 @@ def is_graph_dsa_split_op_surface(forward_batch: "ForwardBatch") -> bool:
 
 
 def can_dsa_prefill_cp_interleave(forward_batch: "ForwardBatch"):
-    if not forward_batch.forward_mode.is_context_parallel_extend():
-        return False
-    cp_size = get_parallel().attn_cp_size
-    seq_len = sum(forward_batch.extend_seq_lens_cpu)
-    return (
-        is_dsa_prefill_cp_interleave()
-        and seq_len > 0
-        and seq_len >= cp_size
-        and cp_size > 1
-    )
+    from sglang.srt.layers.cp.utils import is_cp_active
+
+    return is_dsa_prefill_cp_interleave() and is_cp_active(forward_batch)
 
 
 def cal_padded_tokens(forward_batch: "ForwardBatch"):
