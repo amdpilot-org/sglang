@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38904",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the MiniMax H3 BF16 GGUF patch embedding failure through the production GGUF reader/iterator and native encoder loader with checkpoint shape (3456, 2, 16, 16) and Conv3D parameter shape (1152, 3, 2, 16, 16). Restored only the documented floating-point patch-embedding fold, interpreting the leading checkpoint axis as contiguous [out_channels, in_channels]. Native, folded, malformed, noncontiguous, and packed-storage cases are covered, and GPU Conv3D output was compared with an independent flattened dot-product reference.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-f92aa550367b/venv/bin/python -m pytest -vv python/sglang/multimodal_gen/test/unit/test_qwen3vl_vision.py -k folded_bf16",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction through a generated BF16 GGUF and the real GGUF iterator/native load_weights path; observed checkpoint=(3456, 2, 16, 16), parameter=(1152, 3, 2, 16, 16)."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 ROCR_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-f92aa550367b/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_qwen3vl_vision.py python/sglang/multimodal_gen/test/unit/test_gguf_diffusion.py --junitxml=/job/pytest-final.xml",
+      "exit_code": 0,
+      "what_was_measured": "53 focused tests passed, including exact real-GGUF tensor recovery, native/folded/malformed/noncontiguous/packed cases, and the assigned-GPU numerical comparison. Raw JUnit output: /job/pytest-final.xml."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-f92aa550367b/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_gguf_diffusion.py python/sglang/multimodal_gen/test/unit/test_text_encoder_loader.py --junitxml=/job/pytest-loader.xml",
+      "exit_code": 1,
+      "what_was_measured": "89 passed, 3 skipped, and 4 unrelated existing text-encoder restoration cases failed because the test process had no initialized distributed world group. Raw JUnit output: /job/pytest-loader.xml."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One visible AMD Instinct MI350X ran the exact-shape loaded Conv3D. Its output matched a separately computed flattened weight/input dot product (rtol=0.02, atol=0.25)."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The full public MiniMax H3 checkpoint was not downloaded and full video/audio generation was not run; generation and output quality remain unverified.",
+    "Validation used ROCm on an AMD Instinct MI350X rather than the source reporter's CUDA SM12.x system.",
+    "No native C++ or FlyDSL code changed, so no native rebuild was applicable.",
+    "Four broader text_encoder_loader tests are environment-sensitive in this checkout and failed before reaching their intended assertions because distributed world state was not initialized; focused affected-path suites passed."
+  ],
+  "source_paths": [
+    "python/sglang/multimodal_gen/runtime/models/encoders/minimax_h3_qwen3vl.py",
+    "python/sglang/multimodal_gen/test/unit/test_qwen3vl_vision.py"
+  ],
+  "native_paths": []
+}

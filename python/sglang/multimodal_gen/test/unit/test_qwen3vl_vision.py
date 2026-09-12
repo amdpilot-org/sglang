@@ -1,11 +1,18 @@
+import struct
 from types import SimpleNamespace
 
+import pytest
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 from sglang.multimodal_gen.configs.models.encoders.qwen3vl import Qwen3VLArchConfig
 from sglang.multimodal_gen.runtime.layers.quantization.configs.quanto_int8_config import (
     QuantoInt8Config,
+)
+from sglang.multimodal_gen.runtime.loader.gguf_weights import (
+    gguf_weights_iterator,
+    read_gguf_tensor_meta,
 )
 from sglang.multimodal_gen.runtime.models.encoders.minimax_h3_qwen3vl import (
     MiniMaxH3Qwen3VLEncoder,
@@ -24,6 +31,119 @@ from sglang.srt.models.qwen3_vl import (
     Qwen3VLVisionPatchEmbed,
 )
 from sglang.srt.runtime_context import get_parallel
+
+
+def _write_bf16_gguf(path, name, value):
+    """Write one unquantized tensor using GGUF's fastest-axis-first shape."""
+    encoded_name = name.encode()
+    architecture = b"test"
+    header = b"GGUF" + struct.pack("<IQQ", 3, 1, 1)
+    header += struct.pack("<Q", len(b"general.architecture"))
+    header += b"general.architecture" + struct.pack("<I", 8)
+    header += struct.pack("<Q", len(architecture)) + architecture
+    header += struct.pack("<Q", len(encoded_name)) + encoded_name
+    header += struct.pack("<I", value.ndim)
+    header += b"".join(struct.pack("<Q", dim) for dim in reversed(value.shape))
+    header += struct.pack("<IQ", 30, 0)  # GGML_TYPE_BF16, data offset zero.
+    header += b"\0" * ((-len(header)) % 32)
+    payload = value.contiguous().view(torch.uint16).numpy().tobytes()
+    path.write_bytes(header + payload)
+
+
+class _PatchWeightOnly(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.model = nn.Module()
+        self.model.visual = nn.Module()
+        self.model.visual.patch_embed = nn.Module()
+        self.model.visual.patch_embed.proj = nn.Conv3d(
+            3, 1152, (2, 16, 16), bias=False, dtype=torch.bfloat16
+        )
+
+    should_materialize_checkpoint_weight = staticmethod(lambda _name: True)
+
+
+def _load_patch_weight(model, weights):
+    return MiniMaxH3Qwen3VLEncoder.load_weights(model, weights)
+
+
+def _native_patch_weight():
+    values = torch.arange(1152 * 3 * 2 * 16 * 16, dtype=torch.int64)
+    return ((values.remainder(251) - 125).float() / 64).to(torch.bfloat16).reshape(
+        1152, 3, 2, 16, 16
+    )
+
+
+def test_minimax_h3_loads_folded_bf16_patch_embed_from_real_gguf(tmp_path):
+    name = "model.visual.patch_embed.proj.weight"
+    native = _native_patch_weight()
+    folded = native.reshape(3456, 2, 16, 16)
+    checkpoint = tmp_path / "folded.gguf"
+    _write_bf16_gguf(checkpoint, name, folded)
+
+    metadata = read_gguf_tensor_meta(str(checkpoint))
+    assert metadata[name].logical_shape == (3456, 2, 16, 16)
+    model = _PatchWeightOnly()
+    loaded = dict(gguf_weights_iterator(str(checkpoint), metadata))[name]
+    _load_patch_weight(model, [(name, loaded)])
+
+    actual = model.model.visual.patch_embed.proj.weight
+    torch.testing.assert_close(actual, native, rtol=0, atol=0)
+    sample = torch.linspace(-1, 1, 3 * 2 * 16 * 16).reshape(1, 3, 2, 16, 16)
+    expected = F.conv3d(sample, native.float())
+    observed = F.conv3d(sample, actual.float())
+    torch.testing.assert_close(observed, expected, rtol=0, atol=0)
+
+
+def test_minimax_h3_patch_embed_load_shapes_and_storage_rules():
+    name = "model.visual.patch_embed.proj.weight"
+    native = _native_patch_weight()
+
+    for checkpoint_weight in (native, native.transpose(-1, -2)):
+        model = _PatchWeightOnly()
+        _load_patch_weight(model, [(name, checkpoint_weight)])
+        torch.testing.assert_close(
+            model.model.visual.patch_embed.proj.weight,
+            checkpoint_weight,
+            rtol=0,
+            atol=0,
+        )
+
+    folded_noncontiguous = native.reshape(3456, 2, 16, 16).transpose(-1, -2)
+    model = _PatchWeightOnly()
+    _load_patch_weight(model, [(name, folded_noncontiguous)])
+    torch.testing.assert_close(
+        model.model.visual.patch_embed.proj.weight,
+        native.transpose(-1, -2).reshape(1152, 3, 2, 16, 16),
+        rtol=0,
+        atol=0,
+    )
+
+    malformed = native.reshape(2304, 3, 16, 16)
+    for bad in (malformed, native.reshape(3456, 2, 16, 16).view(torch.uint16)):
+        model = _PatchWeightOnly()
+        with pytest.raises(RuntimeError, match="Failed to load"):
+            _load_patch_weight(model, [(name, bad)])
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires one GPU")
+def test_minimax_h3_folded_patch_embed_gpu_matches_flattened_reference():
+    name = "model.visual.patch_embed.proj.weight"
+    native = _native_patch_weight()
+    model = _PatchWeightOnly()
+    _load_patch_weight(model, [(name, native.reshape(3456, 2, 16, 16))])
+    model = model.to("cuda")
+
+    sample = torch.linspace(-1, 1, 3 * 2 * 16 * 16, device="cuda").reshape(
+        1, 3, 2, 16, 16
+    )
+    observed = model.model.visual.patch_embed.proj(sample.to(torch.bfloat16))
+    # A flattened dot product is independent of the Conv3D implementation and
+    # directly tests which checkpoint axes became output and input channels.
+    expected = torch.matmul(
+        native.float().flatten(1).to("cuda"), sample.float().flatten()
+    ).reshape(1, 1152, 1, 1, 1)
+    torch.testing.assert_close(observed.float(), expected, rtol=2e-2, atol=0.25)
 
 
 def test_native_vision_layout_matches_qwen3_merge_order():
