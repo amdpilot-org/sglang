@@ -31,6 +31,29 @@ def _template_sources(chat_template: Any) -> list[str]:
     return []
 
 
+def _is_tool_reference_type_check(node: jinja2.nodes.Compare) -> bool:
+    """Return whether a comparison dispatches on a tool_reference part type."""
+    expressions = [node.expr, *(operand.expr for operand in node.ops)]
+    has_reference = any(
+        isinstance(expression, jinja2.nodes.Const)
+        and expression.value == "tool_reference"
+        for expression in expressions
+    )
+    has_type_access = any(
+        (
+            isinstance(expression, jinja2.nodes.Getattr)
+            and expression.attr == "type"
+        )
+        or (
+            isinstance(expression, jinja2.nodes.Getitem)
+            and isinstance(expression.arg, jinja2.nodes.Const)
+            and expression.arg.value == "type"
+        )
+        for expression in expressions
+    )
+    return has_reference and has_type_access
+
+
 def template_supports_deferred_tool_loading(chat_template: Any) -> bool:
     """Return whether a template implements native deferred-tool expansion.
 
@@ -44,14 +67,12 @@ def template_supports_deferred_tool_loading(chat_template: Any) -> bool:
             template_ast = compiled.environment.parse(source)
         except (jinja2.TemplateError, TypeError, ValueError):
             continue
-        constants = {
-            node.value
-            for node in template_ast.find_all(jinja2.nodes.Const)
-            if isinstance(node.value, str)
-        }
         attributes = {node.attr for node in template_ast.find_all(jinja2.nodes.Getattr)}
-        identifiers = constants | attributes
-        if {"tool_reference", "defer_loading"} <= identifiers:
+        handles_reference_parts = any(
+            _is_tool_reference_type_check(node)
+            for node in template_ast.find_all(jinja2.nodes.Compare)
+        )
+        if handles_reference_parts and "defer_loading" in attributes:
             return True
     return False
 

@@ -44,6 +44,17 @@ NATIVE_TEMPLATE = """
 {%- endfor -%}
 """
 
+NATIVE_BRACKET_TEMPLATE = """
+{%- for tool in tools if not tool.function.defer_loading -%}
+{{ tool.function.name }}
+{%- endfor -%}
+{%- for message in messages if message.role == "tool" -%}
+{%- if message.content is not string and message.content[0]["type"] == "tool_reference" -%}
+{{ message.content[0]["name"] }}
+{%- endif -%}
+{%- endfor -%}
+"""
+
 QWEN_LIKE_TEMPLATE = """
 {%- macro render_content(content) -%}
     {%- if content is string -%}
@@ -60,6 +71,26 @@ QWEN_LIKE_TEMPLATE = """
 {%- endmacro -%}
 {%- for tool in tools -%}{{ tool.function.name }} {% endfor -%}
 {%- for message in messages -%}{{ render_content(message.content) }}{% endfor -%}
+"""
+
+UNRELATED_REFERENCE_TEMPLATE = """
+{%- set diagnostic_label = "tool_reference" -%}
+{%- for tool in tools if not tool.function.defer_loading -%}
+{{ tool.function.name }}
+{%- endfor -%}
+{%- for message in messages -%}
+    {%- if message.content is string -%}
+        {{- message.content -}}
+    {%- else -%}
+        {%- for item in message.content -%}
+            {%- if item.type == "text" -%}
+                {{- item.text -}}
+            {%- else -%}
+                {{- raise_exception("Unexpected item type in content.") -}}
+            {%- endif -%}
+        {%- endfor -%}
+    {%- endif -%}
+{%- endfor -%}
 """
 
 
@@ -136,6 +167,11 @@ class TestTemplateCapabilityDetection(unittest.TestCase):
     def test_detects_native_deferred_tool_expansion(self):
         self.assertTrue(template_supports_deferred_tool_loading(NATIVE_TEMPLATE))
 
+    def test_detects_bracketed_reference_type_check(self):
+        self.assertTrue(
+            template_supports_deferred_tool_loading(NATIVE_BRACKET_TEMPLATE)
+        )
+
     def test_ignores_jinja_comment(self):
         self.assertFalse(
             template_supports_deferred_tool_loading(
@@ -156,6 +192,11 @@ class TestTemplateCapabilityDetection(unittest.TestCase):
             template_supports_deferred_tool_loading(
                 {"default": "{{ message.content }}", "tool_use": NATIVE_TEMPLATE}
             )
+        )
+
+    def test_unrelated_reference_string_is_not_native_expansion(self):
+        self.assertFalse(
+            template_supports_deferred_tool_loading(UNRELATED_REFERENCE_TEMPLATE)
         )
 
 
@@ -190,6 +231,20 @@ class TestGenericTemplateDeferredTools(unittest.TestCase):
 
         self.assertIn("ToolSearch Bash", prompt)
         self.assertNotIn("Read", prompt)
+        self.assertIn("[tool reference: Bash]", prompt)
+
+    def test_unrelated_reference_string_uses_generic_path(self):
+        payload = _convert(UNRELATED_REFERENCE_TEMPLATE, references=["Bash"])
+        environment = Environment()
+        environment.globals["raise_exception"] = _raise_exception
+
+        prompt = environment.from_string(UNRELATED_REFERENCE_TEMPLATE).render(
+            messages=payload["messages"],
+            tools=payload["tools"],
+        )
+
+        self.assertIn("ToolSearch", prompt)
+        self.assertIn("Bash", prompt)
         self.assertIn("[tool reference: Bash]", prompt)
 
     def test_unknown_reference_does_not_unlock_a_tool(self):

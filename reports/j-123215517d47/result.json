@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35692",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved the candidate's generic-template fallback and deferred-tool routing while correcting its demonstrated capability-detection false positive. Native support now requires a Jinja comparison of a content item's type with tool_reference, not merely unrelated AST token presence.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-123215517d47/venv/bin/python -m pytest -q test/registered/unit/entrypoints/anthropic/test_tool_reference.py -k 'unrelated_reference_string'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before against the unchanged candidate logic: capability detection returned true and actual conversion plus strict Jinja rendering raised ValueError: Unexpected item type in content."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-123215517d47/venv/bin/python -m pytest -q test/registered/unit/entrypoints/anthropic/test_tool_reference.py -k 'unrelated_reference_string'",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after counterexample: both capability classification and actual conversion plus strict rendering passed (2 tests)."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-123215517d47/venv/bin/python -m pytest -q test/registered/unit/entrypoints/anthropic/test_tool_reference.py test/registered/unit/entrypoints/anthropic/test_serving.py",
+      "exit_code": 0,
+      "what_was_measured": "Final combined regression run passed 77 tests and 5 subtests, covering generic fallback, deferred discovery gating, native GLM-style behavior, and independent boundary cases."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-123215517d47/venv/bin/python -m ruff check python/sglang/srt/entrypoints/anthropic/tool_reference.py test/registered/unit/entrypoints/anthropic/test_tool_reference.py",
+      "exit_code": 1,
+      "what_was_measured": "Lint did not start because the prepared interpreter has no ruff module."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "The complete patch contains no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and correction are confined to CPU-side Anthropic request conversion and Jinja AST/rendering behavior; no GPU kernel or model execution is involved."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No model weights or full HTTP server were used; transport, model generation, semantic accuracy, and distributed execution were not evaluated.",
+    "No native rebuild was performed because no native source changed.",
+    "The prepared interpreter lacks ruff, so focused lint could not start; unit regressions and git diff --check passed."
+  ]
+}
