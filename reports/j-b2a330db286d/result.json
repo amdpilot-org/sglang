@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38210",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1878",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1836",
+  "candidate_commit": "91a601b36576761643cbf825833165f168af3ca7",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The base reproducibly destroys enabled sync and async trace contexts at an uninitialized pickle relay. The exact candidate preserves the opaque wire state across such relays and reconstructs an enabled context at the initialized destination. Production source confirms the multi-tokenizer and multi-detokenizer routers exercise this transparent pickle receive/send boundary. Candidate regressions and independent three-hop, final-reconstruction, and disabled-context cases passed.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b2a330db286d/venv/bin/python - <<'PY' ... sync and async two-hop pickle reproduction ... PY (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Both enabled trace contexts became disabled after an uninitialized relay and remained disabled at an initialized destination, reproducing the original failure. Imports resolved to the source checkout. Evidence: /tmp/amdpilot-repo-j-b2a330db286d/evidence/base/two_hop_reproduction.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b2a330db286d/venv/bin/python -m pytest -q test/registered/unit/observability/test_trace.py test/registered/unit/managers/test_multi_tokenizer_mixin.py (candidate 91a601b36576761643cbf825833165f168af3ca7)",
+      "exit_code": 0,
+      "what_was_measured": "58 focused tests passed, including the candidate's sync/async relay regressions and router tests. Evidence: /tmp/amdpilot-repo-j-b2a330db286d/evidence/candidate/focused_pytest.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b2a330db286d/venv/bin/python - <<'PY' ... independent three-hop sync/async relay, initialized destination, and disabled-context cases ... PY (candidate 91a601b36576761643cbf825833165f168af3ca7)",
+      "exit_code": 0,
+      "what_was_measured": "Three consecutive uninitialized relays preserved the original wire state; initialized sync and async destinations reconstructed enabled contexts with valid root/last-span data; disabled contexts remained disabled. Evidence: /tmp/amdpilot-repo-j-b2a330db286d/evidence/candidate/adversarial_relay_cases_corrected.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No model-serving or GPU numerical workload was needed for the serialization fix review. rocm-smi identified the assigned device as AMD Instinct MI355X, gfx950; evidence: /tmp/amdpilot-repo-j-b2a330db286d/evidence/candidate/gpu_architecture.txt"
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": "No live end-to-end OTLP collector capture was performed in this independent review. The exact production pickle relay contract was reproduced and verified deterministically, but this review does not qualify non-pickle IPC, semantic model accuracy, a different model architecture, or distributed/multi-node execution. No native source changed, so rebuilding native code was not applicable."
+}
