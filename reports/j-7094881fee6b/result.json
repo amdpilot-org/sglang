@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38516",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "PR 2826 at exact commit 45edfe6adc673223d69098db3524f1052de7ef15 adds pre-Ampere CUDA gates to all three reported JIT families, including the standalone QKNorm path omitted by its parent candidate. Independent simulated-sm_75 checks fail on the recorded base and pass on the candidate without invoking loaders; ROCm remains enabled and executes correctly on the assigned GPU.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7094881fee6b/venv/bin/python /tmp/j-7094881fee6b-evidence/adversarial_gate_check.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Expected failing-before: simulated sm_75 returned standalone=True, fused_rope=True, eligible_residual=True and recorded all three loader/eligibility events."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7094881fee6b/venv/bin/python /tmp/j-7094881fee6b-evidence/adversarial_gate_check.py (candidate 45edfe6adc673223d69098db3524f1052de7ef15)",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after with the identical independent check: all three results were false and no loader was called."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7094881fee6b/venv/bin/python -m pytest -q test/registered/kernels/ops/diffusion/test_jit_arch_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 17 passed, covering pre-Ampere rejection, sm_80/sm_90/sm_121 acceptance, ROCm exemption, and loader suppression."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-7094881fee6b/review-jit-cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7094881fee6b/venv/bin/python /tmp/j-7094881fee6b-evidence/gpu_residual_check.py",
+      "exit_code": 0,
+      "what_was_measured": "AMD Instinct MI355X ROCm exemption and real residual-gate HIP JIT execution; fp32 output matched a CPU-fp64 reference with max_abs=0.0."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "One AMD Instinct MI355X (gfx950 family), Torch 2.11.0+rocm7.2; residual-gate HIP JIT executed and matched the independent reference exactly.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No NVIDIA sm_75 GPU or pip CUDA 13 plus host-glibc environment was available, so the exact rsqrt/rsqrtf diagnostic and compiler latency were not directly reproduced.",
+    "FLUX.2-klein-4B weights were unavailable, so full denoise first-step latency and model semantics were not measured.",
+    "No native source changed; native rebuild was therefore not applicable. The reviewed Python modules imported from the checkout and the prepared sgl_kernel package imported from the environment."
+  ]
+}
