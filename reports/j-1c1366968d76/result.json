@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37097",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1107",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1072",
+  "candidate_commit": "a1e572dcdd67ca7ee7bee45e448590b125d06fbb",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base passes the stale HF processor attention_mask to GLM MRoPE after exact client input_ids can replace the processor IDs. The candidate's one-line call-site change passes None, causing the existing helper to construct an all-ones mask from the final IDs. The candidate regression fails on the recorded base and passes at the exact candidate commit. An independent test of the real helper reproduced the IndexError with a shorter stale mask, verified the None path completes, and verified that None is numerically identical to a correct all-ones mask for the canonical unpadded case.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1c1366968d76/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-1c1366968d76/review-evidence/test_glm4v_stale_attention_mask.py (base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "Candidate regression on recorded base: mismatched case raised the reported boolean-mask IndexError; canonical case proved the base still forwarded the processor mask. 2 failed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1c1366968d76/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_glm4v_stale_attention_mask.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression at exact commit a1e572dcdd67ca7ee7bee45e448590b125d06fbb. 2 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1c1366968d76/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_glm4v_mixed_offsets.py test/registered/unit/multimodal/test_glm4v_stale_attention_mask.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Regression plus nearby GLM image/video offset coverage. 5 passed."
+    },
+    {
+      "command": "Independent Python invocation of sglang.srt.layers.rotary_embedding.mrope_rope_index.get_rope_index_glm4v",
+      "exit_code": 0,
+      "what_was_measured": "Real helper with final IDs length 4 and stale mask length 3 raised IndexError; attention_mask=None returned positions of shape (3,1,4), and positions/delta exactly equaled the correct all-ones-mask result."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The failure and fix are CPU-side preprocessing. One AMD Instinct MI350X gfx950 GPU was visible through torch 2.11.0+rocm7.2, but no GPU execution was needed or claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No GLM-5.3 model weights or original 8K/36K multi-turn RL workload were available, so no full model/server reproduction was run.",
+    "The review qualifies the current per-request, unpadded Glm4vImageProcessor call-site contract. It does not establish behavior for a hypothetical future padded processor batch.",
+    "No native source changed; repository-environment.json specifies no native rebuild target."
+  ]
+}
