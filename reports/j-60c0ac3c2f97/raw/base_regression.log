@@ -1,0 +1,190 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_ TestGemma4AttentionMask.test_image_mask_uses_compact_spans_on_sliding_attention _
+
+self = <test_gemma4_attention_mask.TestGemma4AttentionMask testMethod=test_image_mask_uses_compact_spans_on_sliding_attention>
+
+    def test_image_mask_uses_compact_spans_on_sliding_attention(self):
+        backend = _FakeTritonBackend()
+        forward_batch = SimpleNamespace(
+            forward_mode=ForwardMode.EXTEND,
+            batch_size=1,
+            extend_seq_lens_cpu=[8],
+            extend_prefix_lens_cpu=[0],
+            extend_seq_lens=torch.tensor([8]),
+            extend_prefix_lens=torch.tensor([0]),
+            mm_inputs=[SimpleNamespace(mm_items=[_FakeImage(((1, 3), (5, 6)))])],
+        )
+    
+        self._prepare(backend, forward_batch, 8)
+    
+        metadata = backend.forward_metadata
+>       torch.testing.assert_close(
+            metadata.image_span_indptr, torch.tensor([0, 2], dtype=torch.int64)
+        )
+E       AssertionError: None mismatch: None is not tensor([0, 2])
+
+../review-evidence-j-60c0ac3c2f97/base/test_gemma4_attention_mask.py:69: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x780c43986d40>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x78152dbed760>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestGemma4AttentionMask.test_image_mask_uses_compact_spans_on_sliding_attention
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/review-evidence-j-60c0ac3c2f97/base/test_gemma4_attention_mask.py", line 69, in test_image_mask_uses_compact_spans_on_sliding_attention
+    torch.testing.assert_close(
+  File "/opt/venv/lib/python3.12/site-packages/torch/testing/_comparison.py", line 1600, in assert_close
+    raise error_metas[0].to_error(msg)
+AssertionError: None mismatch: None is not tensor([0, 2])
+___ TestGemma4AttentionMask.test_mixed_batch_indptr_and_split_image_fallback ___
+
+self = <test_gemma4_attention_mask.TestGemma4AttentionMask testMethod=test_mixed_batch_indptr_and_split_image_fallback>
+
+    def test_mixed_batch_indptr_and_split_image_fallback(self):
+        backend = _FakeTritonBackend()
+        forward_batch = SimpleNamespace(
+            forward_mode=ForwardMode.EXTEND,
+            batch_size=3,
+            extend_seq_lens_cpu=[8, 4, 5],
+            extend_prefix_lens_cpu=[0, 4, 10],
+            extend_seq_lens=torch.tensor([8, 4, 5]),
+            extend_prefix_lens=torch.tensor([0, 4, 10]),
+            mm_inputs=[
+                None,
+                SimpleNamespace(mm_items=[_FakeImage(((4, 7),))]),
+                # Intersects this chunk but is not fully contained, so it must
+                # remain causal rather than exposing a partial image span.
+                SimpleNamespace(mm_items=[_FakeImage(((8, 12),))]),
+            ],
+        )
+    
+        self._prepare(backend, forward_batch, 17)
+    
+        metadata = backend.forward_metadata
+>       torch.testing.assert_close(
+            metadata.image_span_indptr, torch.tensor([0, 0, 1, 1])
+        )
+E       AssertionError: None mismatch: None is not tensor([0, 0, 1, 1])
+
+../review-evidence-j-60c0ac3c2f97/base/test_gemma4_attention_mask.py:111: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x780c43857ba0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x78152dbed760>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestGemma4AttentionMask.test_mixed_batch_indptr_and_split_image_fallback
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/review-evidence-j-60c0ac3c2f97/base/test_gemma4_attention_mask.py", line 111, in test_mixed_batch_indptr_and_split_image_fallback
+    torch.testing.assert_close(
+  File "/opt/venv/lib/python3.12/site-packages/torch/testing/_comparison.py", line 1600, in assert_close
+    raise error_metas[0].to_error(msg)
+AssertionError: None mismatch: None is not tensor([0, 0, 1, 1])
+------------------------------ Captured log call -------------------------------
+WARNING  sglang.srt.models.gemma4_mm:logging.py:340 1 images are split across chunk boundaries. Below are the first 5 images that are split across chunk boundaries: 
+WARNING  sglang.srt.models.gemma4_mm:logging.py:340 Image 2:8-12 is split across chunk boundaries.
+
+WARNING  sglang.srt.models.gemma4_mm:logging.py:340 Those images will receive causal attention. Disable chunked prefill (--chunked-prefill-size=-1) for full bidirectional attention.
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../review-evidence-j-60c0ac3c2f97/base/test_gemma4_attention_mask.py::TestGemma4AttentionMask::test_image_mask_uses_compact_spans_on_sliding_attention
+FAILED ../review-evidence-j-60c0ac3c2f97/base/test_gemma4_attention_mask.py::TestGemma4AttentionMask::test_mixed_batch_indptr_and_split_image_fallback
+2 failed, 16 warnings in 19.84s
