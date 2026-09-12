@@ -259,6 +259,25 @@ class TestNgramCorpusSqueeze(CustomTestCase):
         self.assertIn(2003, ids_list, "Recent sequence should still be matchable")
 
 
+class TestNgramCorpusCapacity(CustomTestCase):
+    def test_capacity_equal_to_max_depth_is_rejected(self):
+        with self.assertRaisesRegex(
+            RuntimeError, "capacity must be greater than max_trie_depth"
+        ):
+            _make_corpus(capacity=4, max_trie_depth=4)
+
+    def test_capacity_below_max_depth_is_rejected(self):
+        with self.assertRaisesRegex(
+            RuntimeError, "capacity must be greater than max_trie_depth"
+        ):
+            _make_corpus(capacity=3, max_trie_depth=4)
+
+    def test_capacity_one_above_max_depth_can_insert(self):
+        corpus = _make_corpus(capacity=5, max_trie_depth=4)
+        corpus.batch_put([[1, 2, 3, 4]])
+        corpus.synchronize()
+
+
 class TestNgramCorpusLeafPaths(CustomTestCase):
     """Verify the leaf_paths_from_mask utility."""
 
