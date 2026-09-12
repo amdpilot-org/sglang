@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/13809",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2975",
+  "candidate_commit": "e5c2189055820624395769913d2b1b94a7c09c56",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes duplicate grammar compilation and masking for ordinary tensor parallel constrained decoding without speculative decoding or context parallelism, and its focused tests plus an independent two-process broadcast check pass. It is only a partial implementation of the original unqualified TP contract because speculative TP and context-parallel TP deliberately retain the original per-rank compilation path.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-93b2b1e733a8/venv/bin/python -m pytest -q test/registered/unit/constrained/test_grammar_manager.py test/registered/unit/sampling/test_sampling_batch_info.py (base)",
+      "exit_code": 0,
+      "what_was_measured": "Prepared recorded base compatibility suite: 92 passed."
+    },
+    {
+      "command": "independent inline GrammarManager base reproduction",
+      "exit_code": 0,
+      "what_was_measured": "On base commit, a simulated non-entry TP rank submitted its own grammar backend lookup and received a Future, reproducing duplicate compilation submission."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-93b2b1e733a8/venv/bin/python -m pytest -q test/registered/unit/constrained/test_grammar_manager.py test/registered/unit/sampling/test_sampling_batch_info.py test/registered/unit/layers/test_sampler_grammar_tp_sync.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate focused suite: 97 passed, including entry-only placeholder behavior, broadcast selection, fallback all-reduce, and no collective for unconstrained batches."
+    },
+    {
+      "command": "independent inline two-process Gloo invocation of Sampler._sync_token_ids_across_tp",
+      "exit_code": 0,
+      "what_was_measured": "Divergent rank tokens 3 and 9 both became 3 after the candidate's group-root broadcast."
+    },
+    {
+      "command": "independent inline GrammarManager fallback adversarial case",
+      "exit_code": 0,
+      "what_was_measured": "A non-entry rank made one backend compile/cache lookup and received a Future when entry-only mode was disabled, reproducing the original overhead in the candidate's speculative/context-parallel fallback configurations."
+    },
+    {
+      "command": "independent inline ROCm masked-argmax reference",
+      "exit_code": 0,
+      "what_was_measured": "GPU masked argmax [2, 1] matched a separately constructed allowed-token reference [2, 1] on AMD Instinct MI355X; this does not qualify multi-GPU TP serving."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A numerical mask/reference check ran on the assigned AMD Instinct MI355X (gfx950), ROCm 7.2, Torch 2.11.0+rocm7.2. Only one GPU was available, so the candidate's TP serving path was not executed on GPU."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "TP constrained decoding with speculative decoding: the candidate sets tp_grammar_entry_only false, so every TP rank still compiles the grammar and applies the mask.",
+    "TP constrained decoding with active context parallelism: the candidate sets tp_grammar_entry_only false, so every applicable rank still compiles the grammar and applies the mask."
+  ],
+  "remaining_limitations": [
+    "Only one GPU was assigned; true TP=2/TP=4 serving and end-to-end CPU-overhead measurement were unavailable.",
+    "Speculative TP, context-parallel TP, and DP-attention distributed serving were not executable on the available architecture and remain direct unimplemented portions of the original contract.",
+    "The real two-rank collective validation used Gloo on CPU and does not substitute for a multi-GPU ROCm serving run.",
+    "No native sources changed, so native rebuild was not applicable. Candidate modules imported from /job/repo/python/sglang at the exact candidate checkout."
+  ]
+}
