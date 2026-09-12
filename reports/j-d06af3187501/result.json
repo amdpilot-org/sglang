@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31206",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "PR 2383 is valid test-only hardening at exact commit e08baaaa5812a00905d6734eebc50133cdc6ff80. It makes no production change. The recorded base already rejects a PD request before decode dispatch when the prefill breaker is open, and the candidate's three tests pass. Independent cases also pass for the exact chat-completions endpoint and for a failed half-open probe reopening the breaker. This does not reproduce or repair the historical v0.2.4 abort-driven failure, so it must not be characterized as a full original-issue fix.",
+  "tests": [
+    {
+      "command": "cargo test --test routing_tests pd_circuit_breaker -- --nocapture (exact candidate e08baaaa5812a00905d6734eebc50133cdc6ff80; Rust 1.90; private CARGO_TARGET_DIR)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: open healthy prefill returns 503, two successful half-open probes close the breaker, and open decode returns 503. 3 passed; raw output in exact-candidate-tests.txt."
+    },
+    {
+      "command": "cargo test --test routing_tests pd_circuit_breaker -- --nocapture with temporary review-only chat-endpoint and failed-half-open cases",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial coverage: /v1/chat/completions fails fast with 503 when prefill is open; a failing half-open prefill probe records a server error, returns the breaker to Open, and the next request returns 503. 5 total tests passed; raw output in adversarial-tests.txt."
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "exit_code": 0,
+      "what_was_measured": "Candidate formatting. Stable rustfmt warned that repository nightly-only import grouping options were ignored."
+    },
+    {
+      "command": "git diff --name-only 358c163250ad3b1f62939b01ce1314a0a31a0365 e08baaaa5812a00905d6734eebc50133cdc6ff80 -- 'sgl-model-gateway/src/**' 'python/**' 'sgl-kernel/**'",
+      "exit_code": 0,
+      "what_was_measured": "No production or native source differences; candidate is tests/reports only."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "rocminfo exposes the assigned gfx950 / AMD Instinct MI350X, but this candidate is a Rust HTTP router integration test with mock workers and has no GPU/model execution path. No GPU correctness claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The exact sgl-router v0.2.4 binary and its historical abort-driven transition into the fake-dead state were not available or reproduced; current prepared base behavior is already different.",
+    "No real prefill/decode engines, model weights, Mooncake/KV transport, or multi-node 1P1D deployment verified that decode receives no bootstrap allocation under the historical failure.",
+    "The candidate forces the breaker open rather than generating the original client-timeout/abort burst, so it does not validate the complete causal chain reported in the issue.",
+    "Half-open recovery was validated sequentially with HTTP mocks, not under concurrent probes or a distributed workload."
+  ],
+  "remaining_limitations": [
+    "This is test-only hardening of current-tree behavior, not a production fix for the original release.",
+    "The candidate uses /generate; the independent review covered /v1/chat/completions temporarily and retained its output, but that exact-endpoint test is not part of the candidate patch.",
+    "The assigned gfx950 was present but irrelevant and unused; there was no GPU numerical work to validate.",
+    "No native source changed, so no native rebuild was required. The gateway Rust test binary was freshly compiled from /job/repo/sgl-model-gateway using Rust 1.90 and a private target directory."
+  ]
+}
