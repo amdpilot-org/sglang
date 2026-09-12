@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35884",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that health_generate returned 503 after a stalled probe without sending a scheduler-side abort. The timeout path now aborts the still-tracked probe before removing local state, and the scheduler busy-path now distinguishes tokenized health probes from AbortReq messages carrying the same RID prefix.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ea9e63f332a4/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_health_check_abort.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: timeout returned 503 but the fake tokenizer manager recorded zero abort calls (expected one). Raw output: reports/j-ea9e63f332a4/evidence/failing_before_health_abort.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ea9e63f332a4/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_health_check_abort.py test/registered/unit/managers/test_health_check_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression and boundaries: one abort on timeout while state is tracked, no abort on success, generate and embedding probe recognition, ordinary RID rejection, and AbortReq exclusion. Result: 5 passed. Raw output: reports/j-ea9e63f332a4/evidence/passing_after_focused_tests.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ea9e63f332a4/venv/bin/python -m pre_commit run --files python/sglang/srt/entrypoints/http_server.py python/sglang/srt/managers/scheduler.py python/sglang/srt/managers/utils.py test/registered/unit/entrypoints/test_health_check_abort.py test/registered/unit/managers/test_health_check_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, test registration, and policy hooks for all changed implementation and test files."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU execution was used. The defect and correction are HTTP/tokenizer/scheduler control-flow and IPC message classification; the prepared gfx950 cannot reproduce the reported NVIDIA Qwen3.8/NEXTN paged-prefill crash."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported Qwen3.8-27B-FP8 NEXTN workload and NVIDIA RTX PRO 6000 Blackwell hardware/weights were unavailable, so the downstream paged-prefill shape-mismatch crash was not reproduced or claimed fixed.",
+    "Validation deterministically covers dispatch of the explicit scheduler abort and prevention of that AbortReq being filtered as a busy health probe; it does not claim a full-model or multi-node reproduction.",
+    "The separate GPU reset-required failure described by the reporter was not investigated."
+  ],
+  "source_paths": [
+    "python/sglang/srt/entrypoints/http_server.py",
+    "python/sglang/srt/managers/scheduler.py",
+    "python/sglang/srt/managers/utils.py"
+  ],
+  "native_paths": []
+}
