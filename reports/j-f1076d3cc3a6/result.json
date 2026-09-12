@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35826",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1338",
+  "candidate_commit": "cf963c0763d40b42918accb80f2c230984f52f2b",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the issue-specific control-flow defect: grammar-triggered and environment-forced synchronization call all_reduce for a singleton selected group. The exact candidate adds a world-size guard at that call site, skips singleton collectives, and preserves ReduceOp.MIN on multi-rank groups. This is a full source-level fix for the original contract, with the reporter's NVIDIA allocation signature remaining unavailable in the review environment.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-f1076d3cc3a6/venv/bin/python - <base mocked singleton reproduction>",
+      "exit_code": 0,
+      "what_was_measured": "At recorded base 358c163250ad3b1f62939b01ce1314a0a31a0365, grammar-triggered and forced-sync singleton cases each called all_reduce once; the inactive case did not. See raw/base-reproduction.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f1076d3cc3a6/venv/bin/python -m pytest -q test/registered/unit/test_sampler_token_sync.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate cf963c0763d40b42918accb80f2c230984f52f2b, all four candidate regression/boundary cases passed. See raw/candidate-pytest.log."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-f1076d3cc3a6/venv/bin/python - <independent adversarial checks>",
+      "exit_code": 0,
+      "what_was_measured": "The checked-out sampler source path was confirmed. A real singleton NCCL/RCCL process group on gfx950 skipped a trapped all_reduce and retained token [17]. Mocked sizes 0 and 1 skipped, size 2 called the exact group with ReduceOp.MIN, and empty grammars did not query or reduce. See raw/candidate-adversarial.log."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "raw/candidate-adversarial.log records AMD Instinct MI350X, capability (9, 5)/gfx950, ROCm 7.2, an actual NCCL-backend world-size-one process group, zero sampler all_reduce calls, and unchanged GPU token [17]."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Only one assigned AMD Instinct MI350X gfx950 GPU was available; the reported 8x NVIDIA B300 DP-attention serving topology was not reproduced.",
+    "CUDA 13.0 and NVIDIA NCCL 2.28.9 were unavailable, so the reported 512 MiB NET shared P2P allocation signature was not directly measured.",
+    "No full model-serving or multi-rank physical-GPU run was performed; the multi-rank contract was independently checked at the sampler call boundary.",
+    "No native rebuild was performed because the candidate changes only Python and report/test files; repository-environment.json identifies no native target for this review."
+  ]
+}
