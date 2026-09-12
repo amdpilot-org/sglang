@@ -1,0 +1,56 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37755",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/1128",
+  "candidate_commit": "9f5b71e3aae3ad3a53b8c36683fd4d760c8cb22e",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "PR 1128 is test-only hardening, not an original-issue fix. It changes no production or native code, and its exact six-test regression passes unchanged on the recorded base as well as at the candidate commit. The reported ModelSlim checkpoint, Ascend/CANN execution, two-node TP32/DP4 serving topology, and response accuracy remain unavailable and unverified.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK=0 /tmp/amdpilot-repo-j-bdc75e564e98/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-bdc75e564e98/candidate_test.py (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's exact six test functions passed 6/6 before applying the candidate, proving they are not a failing-before regression for the reported issue."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK=0 /tmp/amdpilot-repo-j-bdc75e564e98/venv/bin/python -m pytest -q test/registered/unit/models/test_mimo_v2_fused_qkv_weights.py (exact candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "The same six synthetic fused-QKV mapping, scale-ordering, and config cases passed 6/6 at exact commit 9f5b71e3aae3ad3a53b8c36683fd4d760c8cb22e."
+    },
+    {
+      "command": "git diff --quiet 358c163250ad3b1f62939b01ce1314a0a31a0365 9f5b71e3aae3ad3a53b8c36683fd4d760c8cb22e -- python sgl-kernel",
+      "exit_code": 0,
+      "what_was_measured": "There is no production Python or native-kernel delta in the candidate."
+    },
+    {
+      "command": "prepared Python GPU check of _deinterleave_qkv_shards against an independently constructed reference",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, synthetic shards mapped to [1,2,5,6,3,7,4,8], exactly matching the independent reference; this does not exercise ModelSlim, Ascend, loading, serving, or accuracy."
+    },
+    {
+      "command": "command -v npu-smi; test -d /usr/local/Ascend; test -e /home/weights/MiMo-V2.5-Pro-W8A8",
+      "exit_code": 1,
+      "what_was_measured": "Ascend tooling/CANN and the reported checkpoint are absent."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X (gfx950, ROCm 7.2) executed a synthetic tensor-order check. This architecture differs from the reported Ascend 910/CANN environment and provides no end-to-end issue verification."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The candidate's complete regression passes on the recorded base, so it cannot demonstrate a candidate fix.",
+    "The candidate has no production or native-code change relative to the recorded base.",
+    "No test loads the reported MiMo-V2.5-Pro-W8A8 ModelSlim checkpoint or verifies its actual tensor names, shapes, ordering, and scale metadata.",
+    "No test measures generated-token equivalence or semantic accuracy for MiMo-V2.5-Pro-W8A8.",
+    "No test executes the Ascend/CANN load and serving path or the reported two-node TP32/DP4 topology."
+  ],
+  "remaining_limitations": [
+    "The private/reported MiMo-V2.5-Pro-W8A8 checkpoint is unavailable.",
+    "No Ascend device, npu-smi, or /usr/local/Ascend CANN installation is present.",
+    "Only one gfx950 GPU is assigned, not the reported 64-device two-node topology.",
+    "The synthetic CPU/GPU checks establish only internal tensor-layout behavior already present on the base.",
+    "No native source changed; no native rebuild was applicable."
+  ]
+}
