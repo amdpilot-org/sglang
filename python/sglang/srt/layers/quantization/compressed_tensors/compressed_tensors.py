@@ -683,6 +683,8 @@ class CompressedTensorsConfig(QuantizationConfig):
         weight_quant: BaseModel,
         input_quant: BaseModel,
         format: Optional[str] = None,
+        layer_name: Optional[str] = None,
+        matched_target: Optional[str] = None,
     ) -> CompressedTensorsLinearScheme:
         # The format of the config_group this layer matched, when it declares
         # one. Falls back to the top-level format, which is "mixed-precision"
@@ -777,7 +779,26 @@ class CompressedTensorsConfig(QuantizationConfig):
                         input_symmetric=input_quant.symmetric,
                     )
 
-        raise NotImplementedError("No compressed-tensors compatible scheme was found.")
+        context = []
+        if layer_name is not None:
+            context.append(f"layer {layer_name!r}")
+        if matched_target is not None:
+            context.append(f"matched target {matched_target!r}")
+        context.extend(
+            (
+                f"format={quant_format!r}",
+                f"weights={weight_quant!r}",
+                f"input_activations={input_quant!r}",
+            )
+        )
+        raise NotImplementedError(
+            "No compressed-tensors compatible scheme was found for "
+            + ", ".join(context)
+            + ". If this layer is stored as dense weights in the checkpoint, "
+            "add its name or parent prefix to quantization_config.ignore. "
+            "Do not ignore it if the checkpoint contains quantized tensors "
+            "such as weight_packed or weight_scale."
+        )
 
     def get_moe_scheme(
         self, layer: torch.nn.Module, layer_name: Optional[str] = None
@@ -930,10 +951,18 @@ class CompressedTensorsConfig(QuantizationConfig):
 
         # Use the new get_scheme_dict method to extract QuantizationArgs
         scheme_dict = self.get_scheme_dict(layer, layer_name, matched_target)
+        quant_target = matched_target
         weight_quant = None
         input_quant = None
         scheme_format = None
         if scheme_dict:
+            if quant_target is None:
+                quant_target = find_matched_target(
+                    layer_name=layer_name,
+                    module=layer,
+                    targets=self.target_scheme_map.keys(),
+                    fused_mapping=self.packed_modules_mapping,
+                )
             weight_quant = scheme_dict.get("weights")
             input_quant = scheme_dict.get("input_activations")
             scheme_format = scheme_dict.get("format")
@@ -973,6 +1002,8 @@ class CompressedTensorsConfig(QuantizationConfig):
                 weight_quant=weight_quant,
                 input_quant=input_quant,
                 format=scheme_format,
+                layer_name=layer_name,
+                matched_target=quant_target,
             )
 
         # Raise error if device does not support the scheme
