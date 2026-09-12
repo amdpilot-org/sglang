@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34152",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the multimodal EAGLE3 draft-extend mRoPE cardinality defect on the prepared base: 10 requests with four extended tokens each produced 10 position columns for 40 query rows. The fallback now creates one consecutive, delta-shifted mRoPE position per extended token. Added a failing-before/passing-after regression with batched, ragged, single-token, and unaffected in-prompt boundary coverage. Upstream PR https://github.com/sgl-project/sglang/pull/34154 is open with the same core correction but is not present in this base.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-dde29a0d6b3d/venv/bin/python <issue CPU reproducer>",
+      "exit_code": 1,
+      "what_was_measured": "Untouched-base reproduction: mrope_positions had shape [3, 10] while the forward batch contained 40 tokens; retained in reports/j-dde29a0d6b3d/raw/repro_before.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-dde29a0d6b3d/venv/bin/python test/registered/unit/spec/test_mrope_draft_extend_positions.py -v (with old source restored temporarily)",
+      "exit_code": 1,
+      "what_was_measured": "Regression failed before the fix in the batched cardinality, ragged cardinality/value, and single-token position cases; the in-range prompt slice boundary passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-dde29a0d6b3d/venv/bin/python test/registered/unit/spec/test_mrope_draft_extend_positions.py -v",
+      "exit_code": 0,
+      "what_was_measured": "All four CPU regression and boundary tests passed after the fix."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-dde29a0d6b3d/venv/bin/python <GPU ragged-position check>",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI355X (gfx950), the generated [3, 7] GPU position tensor exactly matched an independently constructed CPU arithmetic reference for two requests with different deltas and extend lengths."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/model_executor/forward_batch_info.py test/registered/unit/spec/test_mrope_draft_extend_positions.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, and registered-test validation passed for the changed files."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-dde29a0d6b3d/raw/gpu_inventory.log and gpu_positions_after.log record one AMD Instinct MI355X, capability (9, 5), and exact GPU/CPU-reference equality."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": "The Qwen3-VL target and EAGLE3 draft checkpoint weights were not available locally, so the full HTTP serving crash and fused/native rotary execution were not reproduced end to end. The deterministic fixture is Llama-only and cannot qualify this Qwen3-VL architecture, so it was not substituted. This change is Python-only and requires no native rebuild."
+}
