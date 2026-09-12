@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32938",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes the configuration-level routing defect: the recorded base leaves the reported Hopper Kimi-K3 DSPARK fp8_e4m3 configuration on speculative prefill, while the candidate resolves it to FlashMLA decode. Its regression and independent routing boundaries pass. Full resolution of the original 32xH200 throughput regression is unverified because the assigned environment is one ROCm gfx950 GPU without the model weights or CUDA FlashMLA path.",
+  "tests": [
+    {
+      "command": "git switch --detach 358c163250ad3b1f62939b01ce1314a0a31a0365 && /tmp/amdpilot-repo-j-05f09f87d6ca/venv/bin/python <base routing probe>",
+      "exit_code": 0,
+      "what_was_measured": "Verified imports came from /job/repo and reproduced the configuration-level failure: the reported Hopper + DSPARK + flashmla + fp8_e4m3 inputs returned an empty override, leaving target verification on prefill. Raw output: /job/review-evidence/base/import-and-routing.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-05f09f87d6ca/venv/bin/python -m pytest -q test/registered/unit/test_model_overrides.py -k 'kimi_k3_hopper_dspark_flashmla_verify_uses_decode or m3_fp8_attn_gemm_resolution'",
+      "exit_code": 0,
+      "what_was_measured": "At candidate 9bf7abe67090b5c111a7915eb353a8b9cce11dbc, 2 tests passed and 93 were deselected, including the new reported-configuration regression and its BF16, FA3, and gfx950 boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-05f09f87d6ca/venv/bin/python <candidate routing and import probe>",
+      "exit_code": 0,
+      "what_was_measured": "The reported candidate configuration returned speculative_attention_mode=decode. Independent probes confirmed BF16, FA3, and gfx950 remain unchanged; q_len 1 and 64 also route to decode, and an explicit prefill mode is overridden. Source imports and installed sgl_kernel paths were recorded. Raw output: /job/review-evidence/candidate/import-routing-adversarial.txt and runtime-imports.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-05f09f87d6ca/venv/bin/python -m pytest -q test/registered/unit/test_model_overrides.py",
+      "exit_code": 1,
+      "what_was_measured": "91 passed and 4 failed. The four failures are pre-existing CUDA/SM100 expectation mismatches on the ROCm host; the candidate regression passed. Raw output: /job/review-evidence/candidate/full-model-overrides.txt."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 9bf7abe67090b5c111a7915eb353a8b9cce11dbc",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The available device is one AMD Instinct MI355X with gfx950 and ROCm 7.2. The affected implementation is CUDA FlashMLA on H200/SM90, so no relevant GPU kernel or throughput execution was possible."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No local result demonstrates that the candidate removes the 96 large FP8-to-BF16 conversion/copy kernels or restores b8 throughput on H200.",
+    "Synthetic FlashMLA fp8_e4m3 verification widths other than the reported q_len=8 are accepted by the routing predicate but were not exercised on CUDA FlashMLA.",
+    "An explicit speculative_attention_mode=prefill is overridden for the affected configuration; this matches existing model-override policy but lacks a dedicated candidate boundary test."
+  ],
+  "remaining_limitations": [
+    "No H200/SM90 CUDA GPU was available.",
+    "Kimi-K3 and Kimi-K3-DSpark weights were unavailable.",
+    "The reported 32-GPU, four-node TP32/EP32 topology could not be reproduced on one assigned GPU.",
+    "The issue author's corrected H200 benchmark is corroborating upstream evidence, not an independent measurement by this review.",
+    "No native source changed, so there was no native rebuild; the installed sgl_kernel FlashMLA package was inspected only for import/source-path evidence on ROCm."
+  ]
+}
