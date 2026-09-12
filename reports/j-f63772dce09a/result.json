@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31924",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared source already contains the relevant fused-checkpoint reload correction. Relative to the July failing base a25164bda355250015c0ba6d8821f0d4b37abe7d, the mapper now preserves merge_index, load_weights_into_model forwards it as shard_id, and Flux2Transformer2DModel declares diffusers to_q/to_k/to_v and add_q/add_k/add_v mappings for fused runtime parameters. An issue-specific integrated regression was added. The July code reproduces the bare AssertionError on the same mapped fused-shard contract; the current code passes on CPU and gfx950.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/tmp/sglang-j-f63772dce09a-before/python /tmp/amdpilot-repo-j-f63772dce09a/venv/bin/python -c '<historical fused-shard reload fixture>'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction using the actual July base implementation: merge_index was discarded, the two-argument loader received a [2,2] shard for a [6,2] fused parameter, and raised the reported bare AssertionError. Raw traceback: raw/failing_before_july_base.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f63772dce09a/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_flux2_weight_reload.py python/sglang/multimodal_gen/test/unit/test_cosmos3_rollout.py::TestWeightsUpdaterFusedParams python/sglang/multimodal_gen/test/unit/test_transformer_quant.py -k 'flux2_modelopt_fp8_qkv_checkpoint_tensors_are_merged or TestWeightsUpdaterFusedParams or flux2_weight_reload'",
+      "exit_code": 0,
+      "what_was_measured": "Five focused tests passed: integrated FLUX.2 diffusers shard routing, runtime-layout two-argument boundary behavior, generic merge-index forwarding, and FLUX.2 ModelOpt mapping/merge behavior. Raw output: raw/cpu_tests_pass.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f63772dce09a/venv/bin/python -c '<gfx950 FLUX.2 mapped-shard reload and independent expected tensor check>'",
+      "exit_code": 0,
+      "what_was_measured": "The actual current reload path on AMD Instinct MI355X gfx950 routed q/k/v shards into the correct rows of a GPU-resident fused parameter; torch.testing.assert_close passed against an independently constructed expected tensor. Raw output: raw/gfx950_reload.log."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the proposed report and regression changes."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Single assigned AMD Instinct MI355X, gfx950:sramecc+:xnack-, executed the current mapped fused-shard reload path and matched the independent expected GPU tensor; see raw/gfx950_reload.log."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The Qwen-Image and FLUX.2-klein-base-4B checkpoint weights were not available, so no full model boot or HTTP endpoint reproduction was claimed.",
+    "The regression validates the exact name-mapping, merge-index, weight-loader, and GPU copy contract with a minimal FLUX.2 fixture; it does not validate model semantic accuracy.",
+    "Layerwise-offloaded fused-parameter reload remains explicitly unsupported by the current implementation and was not tested here.",
+    "FSDP, tensor-parallel, multi-GPU, and multi-node reload paths were not exercised.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable."
+  ]
+}

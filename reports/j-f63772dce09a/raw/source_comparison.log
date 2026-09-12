@@ -1,0 +1,265 @@
+
+def _build_module_weight_name_mapper(module: torch.nn.Module):
+    """Build a chained regex mapper from mapping dicts exposed by the module."""
+    mapping_fns = []
+    for attr in ("lora_param_names_mapping", "param_names_mapping"):
+        mapping = getattr(module, attr, None)
+        if not mapping:
+            continue
+        mapping_fns.append(get_param_names_mapping(mapping))
+
+    if not mapping_fns:
+        return None
+
+    def map_name(name: str) -> str:
+        mapped_name = name
+        for mapping_fn in mapping_fns:
+            mapped_name = mapping_fn(mapped_name)[0]
+        return mapped_name
+
+    return map_name
+
+
+def _strip_param_weight_suffix(param_name: str) -> str:
+    if param_name.endswith(".weight"):
+        return param_name[: -len(".weight")]
+    if param_name.endswith(".bias"):
+        return param_name[: -len(".bias")]
+    return param_name
+
+
+def _resolve_lora_ipc_layer_dict_key(
+    layer_prefix: str,
+    layer_dict: dict,
+    module: torch.nn.Module,
+) -> tuple[Any | None, str]:
+    """Map training-side LoRA layer prefix to lora_layers key (Layer 2)."""
+    layer = layer_dict.get(layer_prefix)
+    if layer is not None:
+        return layer, layer_prefix
+
+    map_name = _build_module_weight_name_mapper(module)
+    if map_name is None:
+        return None, layer_prefix
+
+    mapped = _strip_param_weight_suffix(map_name(f"{layer_prefix}.weight"))
+    if mapped != layer_prefix:
+        layer = layer_dict.get(mapped)
+        if layer is not None:
+            return layer, mapped
+
+    return None, layer_prefix
+
+
+def _iter_module_weight_updates(
+    module: torch.nn.Module,
+    weights_iter,
+    model_params: dict,
+):
+    map_name = _build_module_weight_name_mapper(module)
+    module_name = type(module).__name__
+
+    for name, loaded_weight in weights_iter:
+        if name in model_params:
+            yield name, loaded_weight
+            continue
+
+        mapped_name = map_name(name) if map_name is not None else name
+        if mapped_name in model_params:
+            yield mapped_name, loaded_weight
+            continue
+
+        logger.warning(
+            "Skipping weight update for %s: parameter %r not found after mapping to %r",
+            module_name,
+            name,
+            mapped_name,
+        )
+
+
+def load_weights_into_model(
+    weights_iter, model_params: dict, module_name: str | None = None
+) -> None:
+    """Copy weights from weights_iter into model_params in-place."""
+    for name, loaded_weight in weights_iter:
+        if name not in model_params:
+            logger.warning("Skipping weight update: parameter %r not found", name)
+            continue
+        param = model_params[name]
+        weight_loader = getattr(param, "weight_loader", None)
+        if callable(weight_loader):
+            weight_loader(param, loaded_weight.to(param.dtype))
+        else:
+            dtensor_param = param if isinstance(param, DTensor) else None
+            if dtensor_param is None and isinstance(
+                getattr(param, "data", None), DTensor
+            ):
+                dtensor_param = param.data
+
+            if dtensor_param is not None:
+                distributed_weight = distribute_tensor(
+                    loaded_weight.to(param.dtype),
+
+CURRENT
+            for manager in offload_managers:
+                offloaded_names.update(manager.update_cpu_weights(weight_dict))
+            remaining = (
+                (n, w) for n, w in weight_dict.items() if n not in offloaded_names
+            )
+            load_weights_into_model(remaining, model_params)
+        else:
+            load_weights_into_model(weights_iter, model_params)
+
+
+def _build_module_weight_name_mapper(module: torch.nn.Module):
+    """Build a chained regex mapper from mapping dicts exposed by the module."""
+    mapping_fns = []
+    for attr in ("lora_param_names_mapping", "param_names_mapping"):
+        mapping = getattr(module, attr, None)
+        if not mapping:
+            continue
+        mapping_fns.append(get_param_names_mapping(mapping))
+
+    if not mapping_fns:
+        return None
+
+    def map_name(name: str) -> tuple[str, Any]:
+        mapped_name = name
+        merge_index = None
+        for mapping_fn in mapping_fns:
+            mapped_name, index, _ = mapping_fn(mapped_name)
+            if index is not None:
+                merge_index = index
+        return mapped_name, merge_index
+
+    return map_name
+
+
+def _strip_param_weight_suffix(param_name: str) -> str:
+    if param_name.endswith(".weight"):
+        return param_name[: -len(".weight")]
+    if param_name.endswith(".bias"):
+        return param_name[: -len(".bias")]
+    return param_name
+
+
+def _resolve_lora_ipc_layer_dict_key(
+    layer_prefix: str,
+    layer_dict: dict,
+    module: torch.nn.Module,
+) -> tuple[Any | None, str, int | None]:
+    """Map training-side LoRA layer prefix to lora_layers key (Layer 2)."""
+    layer = layer_dict.get(layer_prefix)
+    if layer is not None:
+        return layer, layer_prefix, None
+
+    map_name = _build_module_weight_name_mapper(module)
+    if map_name is None:
+        return None, layer_prefix, None
+
+    mapped_name, merge_index = map_name(f"{layer_prefix}.weight")
+    mapped = _strip_param_weight_suffix(mapped_name)
+    if mapped != layer_prefix:
+        layer = layer_dict.get(mapped)
+        if layer is not None:
+            return layer, mapped, merge_index
+
+    return None, layer_prefix, None
+
+
+def _iter_module_weight_updates(
+    module: torch.nn.Module,
+    weights_iter,
+    model_params: dict,
+):
+    """Yield (mapped_name, weight, shard_id); shard_id is the merge index for
+    weights that map into a fused parameter (e.g. q/k/v -> to_qkv), else None.
+    """
+    map_name = _build_module_weight_name_mapper(module)
+    module_name = type(module).__name__
+
+    for name, loaded_weight in weights_iter:
+        if name in model_params:
+            yield name, loaded_weight, None
+            continue
+
+        mapped_name, merge_index = (
+            map_name(name) if map_name is not None else (name, None)
+        )
+        if mapped_name in model_params:
+            yield mapped_name, loaded_weight, merge_index
+            continue
+
+        logger.warning(
+            "Skipping weight update for %s: parameter %r not found after mapping to %r",
+            module_name,
+            name,
+            mapped_name,
+        )
+
+
+def load_weights_into_model(
+    weights_iter, model_params: dict, module_name: str | None = None
+) -> None:
+    """Copy weights into model_params in-place; entries are (name, weight) or
+    (name, weight, shard_id), shard_id routing fused parts via weight_loader."""
+    for entry in weights_iter:
+        name, loaded_weight, *rest = entry
+        shard_id = rest[0] if rest else None
+        if name not in model_params:
+            logger.warning("Skipping weight update: parameter %r not found", name)
+            continue
+        param = model_params[name]
+        weight_loader = getattr(param, "weight_loader", None)
+        if callable(weight_loader):
+            if shard_id is not None:
+                weight_loader(param, loaded_weight.to(param.dtype), shard_id)
+            else:
+                weight_loader(param, loaded_weight.to(param.dtype))
+        else:
+            dtensor_param = param if isinstance(param, DTensor) else None
+            if dtensor_param is None and isinstance(
+                getattr(param, "data", None), DTensor
+            ):
+                dtensor_param = param.data
+
+FLUX2_MAPPING
+    param_names_mapping = {
+        # ModelOpt FP8 exports separate Diffusers projections. Merge Q/K/V and
+        # their static scales into the runtime MergedColumnParallelLinear.
+        r"^(transformer_blocks\.\d+\.attn)\.to_q\.(weight|bias|weight_scale|input_scale)$": (
+            r"\1.to_qkv.\2",
+            0,
+            3,
+        ),
+        r"^(transformer_blocks\.\d+\.attn)\.to_k\.(weight|bias|weight_scale|input_scale)$": (
+            r"\1.to_qkv.\2",
+            1,
+            3,
+        ),
+        r"^(transformer_blocks\.\d+\.attn)\.to_v\.(weight|bias|weight_scale|input_scale)$": (
+            r"\1.to_qkv.\2",
+            2,
+            3,
+        ),
+        r"^(transformer_blocks\.\d+\.attn)\.add_q_proj\.(weight|bias|weight_scale|input_scale)$": (
+            r"\1.to_added_qkv.\2",
+            0,
+            3,
+        ),
+        r"^(transformer_blocks\.\d+\.attn)\.add_k_proj\.(weight|bias|weight_scale|input_scale)$": (
+            r"\1.to_added_qkv.\2",
+            1,
+            3,
+        ),
+        r"^(transformer_blocks\.\d+\.attn)\.add_v_proj\.(weight|bias|weight_scale|input_scale)$": (
+            r"\1.to_added_qkv.\2",
+            2,
+            3,
+        ),
+        **FluxConfig().arch_config.param_names_mapping,
+    }
+    packed_modules_mapping = {
+        "to_qkv": ["to_q", "to_k", "to_v"],
+        "to_added_qkv": ["add_q_proj", "add_k_proj", "add_v_proj"],
+    }
