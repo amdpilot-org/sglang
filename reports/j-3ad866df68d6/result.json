@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38156",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced both remaining PR 1070 counterexamples at PR 982 commit 956321de134fde54ee75b71aad60be1546163183. Replaced equal per-rank cached accounting at the six allocation guards with a host-local lock held across a live memory check and allocation, covering unequal in-job requests and cooperating separately launched jobs.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=$PWD/python /tmp/amdpilot-repo-j-3ad866df68d6/venv/bin/python reports/j-3ad866df68d6/repro_candidate_boundaries.py at exact candidate 956321de134fde54ee75b71aad60be1546163183",
+      "exit_code": 2,
+      "what_was_measured": "The candidate rejected an aggregate-fitting 30 GiB rank at a 22.5 GiB equal share, and two isolated 60 GiB job contexts both accepted against 90 GiB usable."
+    },
+    {
+      "command": "PYTHONPATH=$PWD/python /tmp/amdpilot-repo-j-3ad866df68d6/venv/bin/python reports/j-3ad866df68d6/repro_candidate_boundaries.py",
+      "exit_code": 0,
+      "what_was_measured": "Real spawned processes using the actual OS lock admitted all 30+20+20+20 GiB requests and admitted only one of two separate 60 GiB jobs against 90 GiB usable."
+    },
+    {
+      "command": "PYTHONPATH=$PWD/python /tmp/amdpilot-repo-j-3ad866df68d6/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mem_pool_host.py test/registered/unit/mem_cache/test_hicache_host_register.py test/registered/unit/mem_cache/test_minimax_sparse_pool_host_unit.py",
+      "exit_code": 0,
+      "what_was_measured": "42 focused and adjacent host-pool tests passed, 1 skipped, with 15 subtests passed."
+    },
+    {
+      "command": "pre-commit run --files <changed files>",
+      "exit_code": 0,
+      "what_was_measured": "All configured formatting, lint, registry, and repository policy hooks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI355X gfx950 was visible, but the correction concerns CPU host-memory accounting and OS advisory locking; no GPU computation was used or claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The exact 8xH200 GLM-5.2-W4AFP8 serving workload and model weights were unavailable.",
+    "No full-model, H200, multi-node, or real heterogeneous pipeline serving run was performed.",
+    "Cross-job coordination requires cooperating SGLang processes to share the host temporary directory; containers with isolated /tmp mounts and non-cooperating allocators remain outside the lock domain.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}

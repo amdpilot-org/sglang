@@ -402,6 +402,55 @@ class TestHostMemoryBudget(CustomTestCase):
             self.assertEqual(base.host_memory_budget_bytes(21 * gib), 20 * gib)
             self.assertEqual(base.host_memory_budget_bytes(20 * gib), 20 * gib)
 
+    def test_allocation_lock_uses_live_host_budget_without_equal_split(self):
+        gib = 1024**3
+        fake_mem = unittest.mock.Mock(
+            available=base.HICACHE_HOST_MEMORY_RESERVE_BYTES + 90 * gib
+        )
+        fake_file = unittest.mock.MagicMock()
+        fake_file.fileno.return_value = 123
+        with (
+            unittest.mock.patch.object(
+                base.psutil, "virtual_memory", return_value=fake_mem
+            ),
+            unittest.mock.patch.object(base, "open", return_value=fake_file),
+            unittest.mock.patch.object(base.fcntl, "flock") as flock,
+        ):
+            with base.host_memory_allocation_lock() as budget:
+                self.assertEqual(budget, 90 * gib)
+
+        self.assertEqual(
+            flock.call_args_list,
+            [
+                unittest.mock.call(123, base.fcntl.LOCK_EX),
+                unittest.mock.call(123, base.fcntl.LOCK_UN),
+            ],
+        )
+
+    def test_allocation_lock_rechecks_after_previous_allocation(self):
+        gib = 1024**3
+        readings = iter(
+            [
+                base.HICACHE_HOST_MEMORY_RESERVE_BYTES + 90 * gib,
+                base.HICACHE_HOST_MEMORY_RESERVE_BYTES + 60 * gib,
+            ]
+        )
+        fake_file = unittest.mock.MagicMock()
+        fake_file.fileno.return_value = 123
+        with (
+            unittest.mock.patch.object(
+                base.psutil,
+                "virtual_memory",
+                side_effect=lambda: unittest.mock.Mock(available=next(readings)),
+            ),
+            unittest.mock.patch.object(base, "open", return_value=fake_file),
+            unittest.mock.patch.object(base.fcntl, "flock"),
+        ):
+            with base.host_memory_allocation_lock() as first:
+                self.assertEqual(first, 90 * gib)
+            with base.host_memory_allocation_lock() as second:
+                self.assertEqual(second, 60 * gib)
+
 
 class TestHostPoolGroup(CustomTestCase):
     @staticmethod

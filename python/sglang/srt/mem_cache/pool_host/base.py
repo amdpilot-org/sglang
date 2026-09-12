@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import abc
+import fcntl
 import logging
+import os
+import tempfile
 import threading
 from functools import wraps
 from typing import Optional
@@ -71,6 +74,58 @@ def host_memory_sync_group() -> Optional[torch.distributed.ProcessGroup]:
 _initial_host_memory_available_bytes: Optional[int] = None
 _reserved_host_memory_bytes = 0
 _host_memory_budget_lock = threading.Lock()
+_HOST_MEMORY_ALLOCATION_LOCK_PATH = os.path.join(
+    tempfile.gettempdir(), "sglang-hicache-host-memory.lock"
+)
+
+
+class HostMemoryAllocationLock:
+    """Serialize a host-memory check with the allocation it protects."""
+
+    def __init__(self):
+        self._file = None
+
+    def acquire(self) -> int:
+        _host_memory_budget_lock.acquire()
+        try:
+            self._file = open(_HOST_MEMORY_ALLOCATION_LOCK_PATH, "a+")
+            fcntl.flock(self._file.fileno(), fcntl.LOCK_EX)
+            return max(
+                psutil.virtual_memory().available - HICACHE_HOST_MEMORY_RESERVE_BYTES,
+                0,
+            )
+        except BaseException:
+            _host_memory_budget_lock.release()
+            raise
+
+    def release(self):
+        if self._file is None:
+            return
+        try:
+            fcntl.flock(self._file.fileno(), fcntl.LOCK_UN)
+            self._file.close()
+            self._file = None
+        finally:
+            _host_memory_budget_lock.release()
+
+    def __enter__(self) -> int:
+        return self.acquire()
+
+    def __exit__(self, exc_type, exc, traceback):
+        self.release()
+
+    def __del__(self):
+        self.release()
+
+
+def host_memory_allocation_lock() -> HostMemoryAllocationLock:
+    """Coordinate HiCache allocations across ranks and separate local jobs.
+
+    The lock must cover both the live-memory check and the allocation. Merely
+    locking the check leaves a race where another process can pass against the
+    same snapshot before either process has made its allocation visible.
+    """
+    return HostMemoryAllocationLock()
 
 
 def host_memory_budget_bytes(requested_bytes: int = 0) -> int:
@@ -219,17 +274,15 @@ class HostKVCache(abc.ABC):
                 device_pool.size,
             )
 
-        # Verify there is enough available host memory.
         requested_bytes = self.size * self.size_per_token
-        available_bytes = host_memory_budget_bytes(requested_bytes)
-        if requested_bytes > available_bytes:
-            raise ValueError(
-                f"Not enough host memory available. Requesting "
-                f"{requested_bytes / 1e9:.2f} GB but only have "
-                f"{available_bytes / 1e9:.2f} GB free. Please reduce the "
-                f"size of the hierarchical cache."
-            )
-        else:
+        with host_memory_allocation_lock() as available_bytes:
+            if requested_bytes > available_bytes:
+                raise ValueError(
+                    f"Not enough host memory available. Requesting "
+                    f"{requested_bytes / 1e9:.2f} GB but only have "
+                    f"{available_bytes / 1e9:.2f} GB free. Please reduce the "
+                    f"size of the hierarchical cache."
+                )
             draft_layer_num = self.layer_num - self.target_layer_num
             if draft_layer_num > 0:
                 logger.info(
@@ -251,7 +304,7 @@ class HostKVCache(abc.ABC):
                     requested_bytes / 1e9,
                 )
 
-        self.kv_buffer = self.init_kv_buffer()
+            self.kv_buffer = self.init_kv_buffer()
         self.fd = getattr(self.allocator, "fd", None)
 
         # A lock for synchronized operations on memory allocation and state transitions.
