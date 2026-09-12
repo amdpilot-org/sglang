@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35257",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1518",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1483",
+  "candidate_commit": "d501752c27de267fbc85dce32832d2a59cdba8bd",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The base reproduces silent exactness loss whenever a threshold coarse bin contains more than 2048 distinct fp32 candidates. The candidate's progressive exact-key refinement fixes the register and streaming implementations on the assigned gfx950 GPU, including the 2049 boundary and independent signed-subnormal cases, and its new regression passes against a freshly rebuilt JIT library. It does not change the CUDA-only cluster implementation, which still truncates at kMaxNumTie. The original B200 batch-1 N=262144 reproduction dispatches to that cluster implementation, so the candidate is a verified partial architecture-specific fix rather than a full fix for the original issue.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-25b6a2c6b1b5/jit-base /tmp/amdpilot-repo-j-25b6a2c6b1b5/venv/bin/python /tmp/amdpilot-repo-j-25b6a2c6b1b5/review_harness.py",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before on base: register, streaming, and N=262144 ROCm cases returned 2048 valid unique indices but had 2048/2048 selected-value mismatches; 2049 candidates already failed with 1791 mismatches. The 2048 boundary and a 5000-way exact tie had zero mismatches. See evidence/base_harness.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-25b6a2c6b1b5/jit-candidate /tmp/amdpilot-repo-j-25b6a2c6b1b5/venv/bin/python /tmp/amdpilot-repo-j-25b6a2c6b1b5/review_harness.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, all independent cases had 2048 valid unique outputs and zero value-multiset mismatches, including register/streaming overflow, 2048 and 2049 boundaries, exact ties, and values spanning signed fp16-subnormal space. See evidence/candidate_harness.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-25b6a2c6b1b5/jit-candidate /tmp/amdpilot-repo-j-25b6a2c6b1b5/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_topk_v2.py -k single_coarse_bin_is_exact",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 10 passed, 278 deselected on gfx950. See evidence/candidate_regression.txt."
+    },
+    {
+      "command": "git diff 358c163250ad3b1f62939b01ce1314a0a31a0365..d501752c27de267fbc85dce32832d2a59cdba8bd --check",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "All numerical and pytest runs used the single assigned AMD Instinct MI350X (gfx950:sramecc+:xnack-) with torch 2.11.0+rocm7.2 and HIP 7.2.26015."
+  },
+  "native_rebuilt": true,
+  "native_rebuild_evidence": "A private empty SGLANG_JIT_CACHE_DIR forced compilation of sgl_kernel_jit_dpsk_v4_topk_v2.so from /job/repo/python/sglang/kernels/jit/csrc/deepseek_v4/topk_v2.cuh and /job/repo/python/sglang/kernels/jit/include/sgl_kernel/deepseek_v4/topk_impl.cuh. The resulting gfx950 library and build timestamps are recorded in evidence/candidate_native_files.txt; Python source paths are in evidence/import_paths.txt.",
+  "remaining_counterexamples": [
+    "CUDA TopKCluster still executes min(equal_count, kMaxNumTie) after retaining an arrival-order-limited candidate subset. Any CUDA-dispatched cluster row with more than 2048 fp32-distinct values in its threshold coarse bin can still return the wrong top-k value multiset.",
+    "The original issue's batch=1, N=262144 B200 fixture selects the unchanged CUDA cluster path, so it remains a direct source-level counterexample and was not executable on this AMD-only host."
+  ],
+  "remaining_limitations": [
+    "No CUDA/B200 device was available, so the unchanged cluster-path failure could not be executed here.",
+    "No GLM-5.2 weights, reported 1M-token score dumps, TP8, or multi-node environment were available; no full-model or workload-level claim is made.",
+    "The candidate's entire 288-test file was not rerun in this independent review; the issue-specific 10-case regression and eight independent deterministic cases were run."
+  ]
+}
