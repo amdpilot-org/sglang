@@ -1,0 +1,573 @@
+diff --git a/experimental/sgl-router/monitoring/README.md b/experimental/sgl-router/monitoring/README.md
+index d792ff8..c4e0079 100644
+--- a/experimental/sgl-router/monitoring/README.md
++++ b/experimental/sgl-router/monitoring/README.md
+@@ -31,7 +31,7 @@ The dashboard graphs every family the router emits:
+ | `sgl_router_worker_cb_state` | Gauge | Per-worker circuit breaker state (0=closed, 1=open, 2=half_open) |
+ | `sgl_router_worker_inflight_requests` | Gauge | In-flight requests per worker |
+ | `sgl_router_stale_requests_total` | Counter | Stale-request cancellations |
+-| `sgl_router_decode_affinity_total` | Counter | PD decode-affinity outcomes |
++| `sgl_router_decode_affinity_total` | Counter | Legacy PD decode-affinity outcomes (`same_host_picked`, `fallback_no_same_host`, `fallback_breaker`, `fallback_load_imbalance`) |
+ | `sgl_router_sticky_total` | Counter | Sticky-session selection outcomes |
+ 
+ The legacy `sgl_router_overlap_blocks` metric was removed with the
+diff --git a/experimental/sgl-router/monitoring/grafana-dashboard.json b/experimental/sgl-router/monitoring/grafana-dashboard.json
+index 5fd86f8..341bdea 100644
+--- a/experimental/sgl-router/monitoring/grafana-dashboard.json
++++ b/experimental/sgl-router/monitoring/grafana-dashboard.json
+@@ -1714,7 +1714,7 @@
+     {
+       "type": "timeseries",
+       "title": "Decode-affinity outcomes",
+-      "description": "same_host_picked / fallback_breaker / fallback_load_imbalance.",
++      "description": "Legacy host-affinity outcomes: same_host_picked / fallback_no_same_host / fallback_breaker / fallback_load_imbalance.",
+       "datasource": {
+         "type": "prometheus",
+         "uid": "${datasource}"
+diff --git a/experimental/sgl-router/src/policies/decode.rs b/experimental/sgl-router/src/policies/decode.rs
+index cbfe5dc..5213907 100644
+--- a/experimental/sgl-router/src/policies/decode.rs
++++ b/experimental/sgl-router/src/policies/decode.rs
+@@ -9,7 +9,6 @@ use crate::policies::admission::{
+     RoutingStage,
+ };
+ use crate::policies::engine_load::EngineLoadSnapshot;
+-use crate::policies::registry::select_decode_with_affinity;
+ use crate::policies::{ProposalKind, SelectionProposal};
+ use rand::Rng;
+ use std::sync::Arc;
+@@ -18,6 +17,7 @@ use std::sync::Arc;
+ pub struct DecodeSelectionContext<'a> {
+     load_snapshot: Option<&'a EngineLoadSnapshot>,
+     prefill_url: Option<&'a str>,
++    affinity_pool: Option<&'a [Arc<crate::workers::Worker>]>,
+ }
+ 
+ impl<'a> DecodeSelectionContext<'a> {
+@@ -25,6 +25,7 @@ impl<'a> DecodeSelectionContext<'a> {
+         Self {
+             load_snapshot: None,
+             prefill_url: None,
++            affinity_pool: None,
+         }
+     }
+ 
+@@ -47,6 +48,12 @@ impl<'a> DecodeSelectionContext<'a> {
+     pub fn prefill_url(&self) -> Option<&str> {
+         self.prefill_url
+     }
++
++    /// Full registered decode pool used only to classify why affinity fell back.
++    pub fn with_affinity_pool(mut self, affinity_pool: &'a [Arc<crate::workers::Worker>]) -> Self {
++        self.affinity_pool = Some(affinity_pool);
++        self
++    }
+ }
+ 
+ pub trait DecodePolicy: Send + Sync + std::fmt::Debug {
+@@ -151,7 +158,15 @@ impl DecodePolicy for LegacyHostAffinityDecodePolicy {
+         ctx: &DecodeSelectionContext<'_>,
+     ) -> Option<SelectionProposal> {
+         let prefill_url = ctx.prefill_url()?;
+-        select_decode_with_affinity(prefill_url, &domain.workers).map(SelectionProposal::primary)
++        crate::policies::registry::select_decode_with_affinity_observed(
++            prefill_url,
++            &domain.workers,
++            ctx.affinity_pool.unwrap_or(&domain.workers),
++        )
++        .map(|selection| {
++            SelectionProposal::primary(selection.worker)
++                .with_decode_affinity_outcome(selection.outcome)
++        })
+     }
+ }
+ 
+diff --git a/experimental/sgl-router/src/policies/mod.rs b/experimental/sgl-router/src/policies/mod.rs
+index 6460526..2289e69 100644
+--- a/experimental/sgl-router/src/policies/mod.rs
++++ b/experimental/sgl-router/src/policies/mod.rs
+@@ -23,6 +23,7 @@ use crate::discovery::ModelId;
+ use crate::policies::buckets::{BucketRequest, BucketSelector};
+ use crate::policies::engine_load::EngineLoadSnapshot;
+ use crate::policies::scoring::{EligibilityFilter, ScoringPolicy};
++use crate::server::metrics::DecodeAffinityOutcome;
+ use crate::server::metrics::MetricsRegistry;
+ use crate::tokenizer::{adapter, TokenizerRegistry};
+ use crate::workers::Worker;
+@@ -323,6 +324,8 @@ pub struct SelectionProposal {
+     pub guard_hints: GuardHints,
+     /// Workers available for fallback after eligibility filtering.
+     pub eligible_workers: Option<Vec<Arc<Worker>>>,
++    /// Decode-affinity branch taken by the legacy host-affinity policy.
++    pub decode_affinity_outcome: Option<DecodeAffinityOutcome>,
+ }
+ 
+ /// Cache-Aware prefill candidate where `E = L - H`.
+@@ -381,6 +384,7 @@ impl SelectionProposal {
+             kind: ProposalKind::Generic,
+             guard_hints: GuardHints::default(),
+             eligible_workers: None,
++            decode_affinity_outcome: None,
+         }
+     }
+ 
+@@ -392,6 +396,7 @@ impl SelectionProposal {
+             kind: ProposalKind::PowerOfTwo,
+             guard_hints: GuardHints::default(),
+             eligible_workers: None,
++            decode_affinity_outcome: None,
+         }
+     }
+ 
+@@ -409,6 +414,11 @@ impl SelectionProposal {
+         self.eligible_workers = Some(workers);
+         self
+     }
++
++    pub fn with_decode_affinity_outcome(mut self, outcome: DecodeAffinityOutcome) -> Self {
++        self.decode_affinity_outcome = Some(outcome);
++        self
++    }
+ }
+ 
+ /// Source of a primary/backup proposal.
+diff --git a/experimental/sgl-router/src/policies/registry.rs b/experimental/sgl-router/src/policies/registry.rs
+index 44c4bb5..3057c49 100644
+--- a/experimental/sgl-router/src/policies/registry.rs
++++ b/experimental/sgl-router/src/policies/registry.rs
+@@ -34,6 +34,7 @@
+ //!    — only the resolver has the cohort context to tell which is which.
+ 
+ use crate::discovery::{ModelId, WorkerMode};
++use crate::server::metrics::DecodeAffinityOutcome;
+ use crate::workers::{Worker, WorkerRegistry};
+ use std::sync::Arc;
+ 
+@@ -81,6 +82,21 @@ pub enum PdResolveError {
+     NoDecodeWorkersAvailable,
+ }
+ 
++/// A selected decode worker and the affinity branch that selected it.
++#[derive(Debug, Clone)]
++pub struct DecodeAffinitySelection {
++    pub worker: Arc<Worker>,
++    pub outcome: DecodeAffinityOutcome,
++}
++
++impl std::ops::Deref for DecodeAffinitySelection {
++    type Target = Worker;
++
++    fn deref(&self) -> &Self::Target {
++        &self.worker
++    }
++}
++
+ /// Thin façade over [`WorkerRegistry`] that returns the per-pool
+ /// candidate sets for a model. Cheap to construct; the registry is
+ /// shared.
+@@ -195,7 +211,7 @@ impl PdPoolResolver {
+         &self,
+         model: &ModelId,
+         prefill_url: &str,
+-    ) -> Result<Arc<Worker>, PdResolveError> {
++    ) -> Result<DecodeAffinitySelection, PdResolveError> {
+         let candidates = self.decode_candidates(model)?;
+         select_decode_with_affinity(prefill_url, &candidates)
+             .ok_or(PdResolveError::NoDecodeWorkersAvailable)
+@@ -235,7 +251,18 @@ impl PdPoolResolver {
+ pub fn select_decode_with_affinity(
+     prefill_url: &str,
+     candidates: &[Arc<Worker>],
+-) -> Option<Arc<Worker>> {
++) -> Option<DecodeAffinitySelection> {
++    select_decode_with_affinity_observed(prefill_url, candidates, candidates)
++}
++
++/// Select from `candidates`, while classifying affinity fallbacks against the
++/// full registered decode pool. This keeps breaker-open peers observable
++/// without making them eligible for dispatch.
++pub fn select_decode_with_affinity_observed(
++    prefill_url: &str,
++    candidates: &[Arc<Worker>],
++    affinity_pool: &[Arc<Worker>],
++) -> Option<DecodeAffinitySelection> {
+     if candidates.is_empty() {
+         return None;
+     }
+@@ -263,6 +290,16 @@ pub fn select_decode_with_affinity(
+         ((median as f64) * AFFINITY_LOAD_TOLERANCE).ceil() as usize
+     };
+ 
++    let same_host_candidates: Vec<&Arc<Worker>> = prefill_host
++        .as_deref()
++        .map(|host| {
++            affinity_pool
++                .iter()
++                .filter(|w| host_of(&w.url).as_deref() == Some(host))
++                .collect()
++        })
++        .unwrap_or_default();
++
+     // Rule 1: same-host AND healthy AND not overloaded.
+     if let Some(host) = prefill_host.as_deref() {
+         let affinity_peer = healthy.iter().find(|w| {
+@@ -270,19 +307,40 @@ pub fn select_decode_with_affinity(
+                 && (load_tolerance == 0 || w.active_load() <= load_tolerance)
+         });
+         if let Some(w) = affinity_peer {
+-            return Some(Arc::clone(w));
++            return Some(DecodeAffinitySelection {
++                worker: Arc::clone(w),
++                outcome: DecodeAffinityOutcome::SameHostPicked,
++            });
+         }
+     }
+ 
++    let fallback_outcome = if prefill_host.is_none() || same_host_candidates.is_empty() {
++        DecodeAffinityOutcome::FallbackNoSameHost
++    } else if same_host_candidates.iter().any(|w| w.breaker.would_allow()) {
++        DecodeAffinityOutcome::FallbackLoadImbalance
++    } else {
++        DecodeAffinityOutcome::FallbackBreaker
++    };
++
+     // Rule 2: min-load among healthy.
+     if let Some(w) = healthy.iter().min_by_key(|w| w.active_load()) {
+-        return Some(Arc::clone(w));
++        return Some(DecodeAffinitySelection {
++            worker: Arc::clone(w),
++            outcome: fallback_outcome,
++        });
+     }
+ 
+     // Rule 3: last-resort min-load over all candidates (every
+     // breaker is open). The caller's dispatch will likely fail and
+     // surface `BreakerOpen`, but the selection function stays total.
+-    candidates.iter().min_by_key(|w| w.active_load()).cloned()
++    candidates
++        .iter()
++        .min_by_key(|w| w.active_load())
++        .cloned()
++        .map(|worker| DecodeAffinitySelection {
++            worker,
++            outcome: fallback_outcome,
++        })
+ }
+ 
+ /// Parse the host portion of a worker URL. Returns `None` when the URL
+@@ -523,6 +581,7 @@ mod tests {
+             chosen.url, "http://host_a:30001",
+             "same-host decode peer must win over remote peer",
+         );
++        assert_eq!(chosen.outcome, DecodeAffinityOutcome::SameHostPicked);
+     }
+ 
+     /// Affinity peer's breaker is open → fall back to the remote
+@@ -558,6 +617,7 @@ mod tests {
+             chosen.url, "http://host_b:30001",
+             "breaker-open affinity peer must fall back to the remote healthy peer",
+         );
++        assert_eq!(chosen.outcome, DecodeAffinityOutcome::FallbackNoSameHost);
+     }
+ 
+     /// Affinity peer is overloaded (load > 2× median) → fall back to
+@@ -611,6 +671,7 @@ mod tests {
+             "overloaded affinity peer must fall back to a remote min-load peer, got: {}",
+             chosen.url,
+         );
++        assert_eq!(chosen.outcome, DecodeAffinityOutcome::FallbackLoadImbalance);
+         // Drop guards explicitly so the test cleanup doesn't depend on
+         // RAII order against the resolver / registry.
+         drop(guards);
+@@ -646,6 +707,7 @@ mod tests {
+             chosen.url, "http://host_c:30001",
+             "no same-host peer → min-load fallback over remote candidates",
+         );
++        assert_eq!(chosen.outcome, DecodeAffinityOutcome::FallbackNoSameHost);
+     }
+ 
+     /// Empty decode pool → `NoDecodeWorkersAvailable`. The chat
+@@ -686,6 +748,7 @@ mod tests {
+             "unexpected decode worker chosen: {}",
+             chosen.url,
+         );
++        assert_eq!(chosen.outcome, DecodeAffinityOutcome::FallbackNoSameHost);
+     }
+ 
+     /// All decode peers' breakers are open → `decode_with_affinity`
+@@ -737,5 +800,6 @@ mod tests {
+             "last-resort path must return some candidate, got: {}",
+             any.url,
+         );
++        assert_eq!(any.outcome, DecodeAffinityOutcome::FallbackBreaker);
+     }
+ }
+diff --git a/experimental/sgl-router/src/server/metrics.rs b/experimental/sgl-router/src/server/metrics.rs
+index ea0d536..ffc83c0 100644
+--- a/experimental/sgl-router/src/server/metrics.rs
++++ b/experimental/sgl-router/src/server/metrics.rs
+@@ -124,10 +124,11 @@ impl WorkerModeLabel {
+ }
+ 
+ /// Decode-affinity outcome — see `select_decode_with_affinity` for the
+-/// three reasons the affinity may not be honored.
+-#[derive(Debug, Clone, Copy)]
++/// reasons the affinity may not be honored.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+ pub enum DecodeAffinityOutcome {
+     SameHostPicked,
++    FallbackNoSameHost,
+     FallbackBreaker,
+     FallbackLoadImbalance,
+ }
+@@ -136,6 +137,7 @@ impl DecodeAffinityOutcome {
+     fn as_str(self) -> &'static str {
+         match self {
+             Self::SameHostPicked => "same_host_picked",
++            Self::FallbackNoSameHost => "fallback_no_same_host",
+             Self::FallbackBreaker => "fallback_breaker",
+             Self::FallbackLoadImbalance => "fallback_load_imbalance",
+         }
+@@ -1281,14 +1283,18 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn decode_affinity_counter_emits_three_outcomes() {
++    fn decode_affinity_counter_emits_all_outcomes() {
+         let reg = MetricsRegistry::new();
+         reg.record_decode_affinity(DecodeAffinityOutcome::SameHostPicked);
+         reg.record_decode_affinity(DecodeAffinityOutcome::SameHostPicked);
++        reg.record_decode_affinity(DecodeAffinityOutcome::FallbackNoSameHost);
+         reg.record_decode_affinity(DecodeAffinityOutcome::FallbackBreaker);
+         reg.record_decode_affinity(DecodeAffinityOutcome::FallbackLoadImbalance);
+         let out = reg.render();
+         assert!(out.contains(r#"sgl_router_decode_affinity_total{outcome="same_host_picked"} 2"#));
++        assert!(
++            out.contains(r#"sgl_router_decode_affinity_total{outcome="fallback_no_same_host"} 1"#)
++        );
+         assert!(out.contains(r#"sgl_router_decode_affinity_total{outcome="fallback_breaker"} 1"#));
+         assert!(out
+             .contains(r#"sgl_router_decode_affinity_total{outcome="fallback_load_imbalance"} 1"#,));
+diff --git a/experimental/sgl-router/src/server/routes/chat.rs b/experimental/sgl-router/src/server/routes/chat.rs
+index ec311d0..71cfd63 100644
+--- a/experimental/sgl-router/src/server/routes/chat.rs
++++ b/experimental/sgl-router/src/server/routes/chat.rs
+@@ -623,6 +623,12 @@ pub async fn chat_completions(
+                 model: model_str.clone(),
+             },
+         })?;
++        let registered_decode_workers = ctx
++            .registry
++            .workers_for(&model_id)
++            .into_iter()
++            .filter(|candidate| candidate.mode() == WorkerMode::Decode)
++            .collect::<Vec<_>>();
+         let request_kv_tokens =
+             projected_decode_kv_tokens(request_input_tokens, requested_max_output_tokens);
+         let expected_peak_sequence_tokens = requested_max_output_tokens.map(|_| request_kv_tokens);
+@@ -641,7 +647,8 @@ pub async fn chat_completions(
+                 let snapshot = load_snapshot.as_ref()?;
+                 let decode_ctx = DecodeSelectionContext::new()
+                     .with_load_snapshot(snapshot)
+-                    .with_prefill_url(&worker.url);
++                    .with_prefill_url(&worker.url)
++                    .with_affinity_pool(&registered_decode_workers);
+                 let decode_proposal = decode_policy.propose(decode_domain, &decode_ctx)?;
+                 let decode_decision = if allow_capacity_fallback {
+                     resolve_decode_with_capacity_fallback(
+@@ -653,6 +660,11 @@ pub async fn chat_completions(
+                 } else {
+                     resolve_decode(decode_domain, &decode_proposal, request_kv_tokens, snapshot)
+                 }?;
++                if decode_decision.selected.id == decode_proposal.primary.id {
++                    if let Some(outcome) = decode_proposal.decode_affinity_outcome {
++                        ctx.metrics.record_decode_affinity(outcome);
++                    }
++                }
+                 tracing::debug!(
+                     model = %model_str,
+                     policy = ?ctx.config.model.decode_policy,
+diff --git a/experimental/sgl-router/tests/proxy/pd_bootstrap_injection.rs b/experimental/sgl-router/tests/proxy/pd_bootstrap_injection.rs
+index c81e790..c3f1bfb 100644
+--- a/experimental/sgl-router/tests/proxy/pd_bootstrap_injection.rs
++++ b/experimental/sgl-router/tests/proxy/pd_bootstrap_injection.rs
+@@ -21,8 +21,8 @@ use axum::http::{Request, StatusCode};
+ use bytes::Bytes;
+ use serde_json::{json, Value};
+ use sgl_router::config::{
+-    ActiveLoadConfig, Config, DiscoveryBackend, ModelConfig, ObservabilityConfig, PolicyKind,
+-    ProxyConfig, ServerConfig, StaticUrlsDiscoveryConfig,
++    ActiveLoadConfig, Config, DecodePolicyKind, DiscoveryBackend, ModelConfig, ObservabilityConfig,
++    PolicyKind, ProxyConfig, ServerConfig, StaticUrlsDiscoveryConfig,
+ };
+ use sgl_router::discovery::{ModelId, WorkerId, WorkerMode, WorkerSpec};
+ use sgl_router::policies::factory::build_registry_with_defaults;
+@@ -64,7 +64,15 @@ fn config() -> Config {
+ }
+ 
+ fn build_ctx(specs: Vec<WorkerSpec>) -> Arc<AppContext> {
+-    let cfg = config();
++    build_ctx_with_decode_policy(specs, DecodePolicyKind::default())
++}
++
++fn build_ctx_with_decode_policy(
++    specs: Vec<WorkerSpec>,
++    decode_policy: DecodePolicyKind,
++) -> Arc<AppContext> {
++    let mut cfg = config();
++    cfg.model.decode_policy = decode_policy;
+     let tokenizers = Arc::new(TokenizerRegistry::load_from_config(&cfg).unwrap());
+     let registry = Arc::new(WorkerRegistry::default());
+     for s in specs {
+@@ -75,6 +83,151 @@ fn build_ctx(specs: Vec<WorkerSpec>) -> Arc<AppContext> {
+     Arc::new(AppContext::new(cfg, tokenizers, proxy, registry, policies))
+ }
+ 
++#[tokio::test]
++async fn legacy_decode_affinity_records_successful_same_host_selection() {
++    let prefill = crate::common::mock_worker::MockWorker::start(vec![]).await;
++    let decode = crate::common::mock_worker::MockWorker::start(vec![]).await;
++    let ctx = build_ctx_with_decode_policy(
++        vec![
++            WorkerSpec {
++                id: WorkerId("p1".into()),
++                url: prefill.url.clone(),
++                mode: WorkerMode::Prefill,
++                model_ids: vec![ModelId("tiny".into())],
++                bootstrap_port: Some(8997),
++            },
++            WorkerSpec {
++                id: WorkerId("d1".into()),
++                url: decode.url.clone(),
++                mode: WorkerMode::Decode,
++                model_ids: vec![ModelId("tiny".into())],
++                bootstrap_port: None,
++            },
++        ],
++        DecodePolicyKind::LegacyHostAffinity,
++    );
++
++    let response = build_router(Arc::clone(&ctx))
++        .oneshot(chat_request())
++        .await
++        .unwrap();
++    assert_eq!(response.status(), StatusCode::OK);
++    assert!(
++        ctx.metrics
++            .render()
++            .contains(r#"sgl_router_decode_affinity_total{outcome="same_host_picked"} 1"#),
++        "metrics:\n{}",
++        ctx.metrics.render()
++    );
++}
++
++#[tokio::test]
++async fn legacy_decode_affinity_records_breaker_fallback() {
++    let prefill = crate::common::mock_worker::MockWorker::start(vec![]).await;
++    let affinity_decode = crate::common::mock_worker::MockWorker::start(vec![]).await;
++    let fallback_decode = crate::common::mock_worker::MockWorker::start(vec![]).await;
++    let prefill_url = prefill.url.replacen("127.0.0.1", "localhost", 1);
++    let affinity_decode_url = affinity_decode.url.replacen("127.0.0.1", "localhost", 1);
++    let ctx = build_ctx_with_decode_policy(
++        vec![
++            WorkerSpec {
++                id: WorkerId("p1".into()),
++                url: prefill_url,
++                mode: WorkerMode::Prefill,
++                model_ids: vec![ModelId("tiny".into())],
++                bootstrap_port: Some(8997),
++            },
++            WorkerSpec {
++                id: WorkerId("d-affinity".into()),
++                url: affinity_decode_url,
++                mode: WorkerMode::Decode,
++                model_ids: vec![ModelId("tiny".into())],
++                bootstrap_port: None,
++            },
++            WorkerSpec {
++                id: WorkerId("d-fallback".into()),
++                url: fallback_decode.url.clone(),
++                mode: WorkerMode::Decode,
++                model_ids: vec![ModelId("tiny".into())],
++                bootstrap_port: None,
++            },
++        ],
++        DecodePolicyKind::LegacyHostAffinity,
++    );
++    let affinity_worker = ctx
++        .registry
++        .workers_for(&ModelId("tiny".into()))
++        .into_iter()
++        .find(|worker| worker.id.0 == "d-affinity")
++        .unwrap();
++    while affinity_worker.breaker.allow() {
++        affinity_worker.breaker.record_failure();
++    }
++
++    let response = build_router(Arc::clone(&ctx))
++        .oneshot(chat_request())
++        .await
++        .unwrap();
++    assert_eq!(response.status(), StatusCode::OK);
++    assert!(
++        ctx.metrics
++            .render()
++            .contains(r#"sgl_router_decode_affinity_total{outcome="fallback_breaker"} 1"#),
++        "metrics:\n{}",
++        ctx.metrics.render()
++    );
++}
++
++#[tokio::test]
++async fn legacy_decode_affinity_is_not_recorded_for_plain_mode() {
++    let plain = crate::common::mock_worker::MockWorker::start(vec![]).await;
++    let ctx = build_ctx_with_decode_policy(
++        vec![WorkerSpec {
++            id: WorkerId("w1".into()),
++            url: plain.url.clone(),
++            mode: WorkerMode::Plain,
++            model_ids: vec![ModelId("tiny".into())],
++            bootstrap_port: None,
++        }],
++        DecodePolicyKind::LegacyHostAffinity,
++    );
++
++    let response = build_router(Arc::clone(&ctx))
++        .oneshot(chat_request())
++        .await
++        .unwrap();
++    assert_eq!(response.status(), StatusCode::OK);
++    assert!(!ctx
++        .metrics
++        .render()
++        .contains("sgl_router_decode_affinity_total{"));
++}
++
++#[tokio::test]
++async fn legacy_decode_affinity_is_not_recorded_without_decode_workers() {
++    let prefill = crate::common::mock_worker::MockWorker::start(vec![]).await;
++    let ctx = build_ctx_with_decode_policy(
++        vec![WorkerSpec {
++            id: WorkerId("p1".into()),
++            url: prefill.url.clone(),
++            mode: WorkerMode::Prefill,
++            model_ids: vec![ModelId("tiny".into())],
++            bootstrap_port: Some(8997),
++        }],
++        DecodePolicyKind::LegacyHostAffinity,
++    );
++
++    let response = build_router(Arc::clone(&ctx))
++        .oneshot(chat_request())
++        .await
++        .unwrap();
++    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
++    assert!(!ctx
++        .metrics
++        .render()
++        .contains("sgl_router_decode_affinity_total{"));
++}
++
+ fn chat_request() -> Request<Body> {
+     Request::builder()
+         .method("POST")
