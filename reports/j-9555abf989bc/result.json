@@ -1,0 +1,56 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34113",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2131",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2096",
+  "candidate_commit": "82684a5c845f51c6a20cac3cfb4fee22afef066a",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes a real pre-normalization GenerateReqInput cleanup AttributeError in create_abort_task, but that function is not the public /abort_request path described by the issue. The endpoint remains unchanged and returns HTTP 200 after local dispatch without downstream completion acknowledgement. Identical real-GPU probes aborted cleanly on base and candidate, so the original endpoint failure was not reproduced and the candidate is only a partial fix.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-9555abf989bc/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-9555abf989bc/review-evidence/test_candidate.py -k TestCreateAbortTask (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Candidate regression failed before the change: three cases raised AttributeError for missing is_single; one normalized batch case passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9555abf989bc/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py -k TestCreateAbortTask (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "All four candidate cleanup cases passed, confirming the narrow create_abort_task correction."
+    },
+    {
+      "command": "qualified PR649 subreaper runner and HTTP abort probe against recorded base",
+      "exit_code": 0,
+      "what_was_measured": "HTTP 200 was returned and the active stream ended with finish_reason.type=abort after four tokens; no missing-is_single exception was logged."
+    },
+    {
+      "command": "qualified PR649 subreaper runner and HTTP abort probe against exact candidate",
+      "exit_code": 0,
+      "what_was_measured": "HTTP 200 was returned and the active stream ended with finish_reason.type=abort after four tokens; no missing-is_single exception was logged."
+    },
+    {
+      "command": "git diff 358c163250ad3b1f62939b01ce1314a0a31a0365..82684a5c845f51c6a20cac3cfb4fee22afef066a -- python/sglang/srt/entrypoints/http_server.py python/sglang/srt/managers/tokenizer_manager.py",
+      "exit_code": 0,
+      "what_was_measured": "Only create_abort_task changed; the public /abort_request handler did not change and still directly dispatches then returns 200."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Base and candidate performed real generation on one AMD Instinct MI350X/gfx950 with Torch 2.11.0+rocm7.2. The deterministic fixture weight SHA-256 was 6632fab7c351a0bd85518d80a89ec673f68139587f5ad3fa8d5ab38fad87e75f."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The public /abort_request endpoint is unchanged and does not invoke the modified create_abort_task path.",
+    "HTTP 200 still acknowledges only successful local dispatch; there is no scheduler completion acknowledgement or later cancellation-failure propagation.",
+    "The original endpoint failure was not reproduced: matched live GPU probes aborted cleanly on both recorded base and exact candidate."
+  ],
+  "remaining_limitations": [
+    "The original meta-llama/Llama-3.2-1B-Instruct weights were unavailable.",
+    "The report used RTX 4090/CUDA; review execution used one AMD MI350X/gfx950 with ROCm 7.2.",
+    "The tiny random Llama fixture validates transport and engine execution only, not semantic accuracy, the original model configuration, NVIDIA behavior, or distributed behavior.",
+    "Because the original failure did not reproduce and the endpoint has no completion protocol, no speculative endpoint change was evaluated.",
+    "Both owned server process groups exceeded the graceful shutdown window and were killed and reaped.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
