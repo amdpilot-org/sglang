@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32507",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "3ac707e08537890da1a90372c58f2718e5b8789a",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a partial functional fix. Its rebuilt native kernel fixes the reported N=16 failure and handles arbitrary tested sizes through 512, but it adds an N<=512 cap without a matching production invariant. The unchanged OffloaderV2/DeepEP caller still unconditionally invokes this operator, so a 513-element local-expert vector remains a concrete counterexample to the issue's arbitrary-valid-count contract.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTORCH_ROCM_ARCH=gfx950 TORCH_EXTENSIONS_DIR=/tmp/amdpilot-repo-j-67ccc9efcb77/torch-extensions-base MAX_JOBS=8 /tmp/amdpilot-repo-j-67ccc9efcb77/venv/bin/python /job/review-evidence-j-67ccc9efcb77/native_probe.py --source /job/repo/python/sglang/kernels/aot/csrc/elementwise/copy.cu --name review_copy_base --expect-base",
+      "exit_code": 0,
+      "what_was_measured": "At exact base 358c163, rebuilt and loaded the checked-out native source. Exact copies passed for N=32,64,72; N=16 and independent N=17 both raised unexpected N. See base-native-probe.log."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTORCH_ROCM_ARCH=gfx950 TORCH_EXTENSIONS_DIR=/tmp/amdpilot-repo-j-67ccc9efcb77/torch-extensions-candidate MAX_JOBS=8 /tmp/amdpilot-repo-j-67ccc9efcb77/venv/bin/python /job/review-evidence-j-67ccc9efcb77/native_probe.py --source /job/repo/python/sglang/kernels/aot/csrc/elementwise/copy.cu --name review_copy_candidate",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 3ac707e, separately rebuilt and loaded the changed native source. Exact copies passed for N=1,15,16,17,31,32,33,64,72,127,255,256,511,512. N=513 and 1024 were rejected by the new cap; invalid dtype, rank, contiguity, and output size were rejected. See candidate-native-probe.log."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "Both freshly built native extensions executed on the assigned AMD Instinct MI355X, gfx950:sramecc+:xnack-, and GPU results were compared exactly against independently constructed CPU int32 vectors with rtol=0 and atol=0.",
+  "native_rebuilt": true,
+  "native_rebuild_evidence": "Each revision was HIP-translated with zero unsupported CUDA calls and compiled separately by /opt/rocm-7.2.4/bin/hipcc with --offload-arch=gfx950; the resulting extension was loaded directly rather than using the installed wheel.",
+  "remaining_counterexamples": [
+    "A positive 513-element int32 local-expert count vector reaches the unchanged unconditional OffloaderV2/DeepEP call and is rejected with: copy_to_gpu_no_ce supports at most 512 elements, but got 513.",
+    "Any larger otherwise valid local-expert vector, such as N=1024, is rejected for the same reason; no caller-side fallback or source invariant limits this path to 512."
+  ],
+  "remaining_limitations": [
+    "The original GLM-5.2 weights and two-node TP16/EP16 DeepEP environment were unavailable, so full serving was not reproduced.",
+    "Only one AMD Instinct MI355X gfx950 GPU with ROCm 7.2 was assigned; NVIDIA H800/CUDA compilation and execution remain unverified.",
+    "The prepared ROCm sgl_kernel package does not register copy_to_gpu_no_ce, so the review rebuilt the checked-out native source as focused Torch extensions.",
+    "The candidate's exact N=16 native behavior is verified, but model semantic accuracy and distributed routing were outside what this fixture can establish."
+  ]
+}
