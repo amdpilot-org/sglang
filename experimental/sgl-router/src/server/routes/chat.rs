@@ -623,6 +623,12 @@ pub async fn chat_completions(
                 model: model_str.clone(),
             },
         })?;
+        let registered_decode_workers = ctx
+            .registry
+            .workers_for(&model_id)
+            .into_iter()
+            .filter(|candidate| candidate.mode() == WorkerMode::Decode)
+            .collect::<Vec<_>>();
         let request_kv_tokens =
             projected_decode_kv_tokens(request_input_tokens, requested_max_output_tokens);
         let expected_peak_sequence_tokens = requested_max_output_tokens.map(|_| request_kv_tokens);
@@ -641,7 +647,8 @@ pub async fn chat_completions(
                 let snapshot = load_snapshot.as_ref()?;
                 let decode_ctx = DecodeSelectionContext::new()
                     .with_load_snapshot(snapshot)
-                    .with_prefill_url(&worker.url);
+                    .with_prefill_url(&worker.url)
+                    .with_affinity_pool(&registered_decode_workers);
                 let decode_proposal = decode_policy.propose(decode_domain, &decode_ctx)?;
                 let decode_decision = if allow_capacity_fallback {
                     resolve_decode_with_capacity_fallback(
@@ -653,6 +660,11 @@ pub async fn chat_completions(
                 } else {
                     resolve_decode(decode_domain, &decode_proposal, request_kv_tokens, snapshot)
                 }?;
+                if decode_decision.selected.id == decode_proposal.primary.id {
+                    if let Some(outcome) = decode_proposal.decode_affinity_outcome {
+                        ctx.metrics.record_decode_affinity(outcome);
+                    }
+                }
                 tracing::debug!(
                     model = %model_str,
                     policy = ?ctx.config.model.decode_policy,

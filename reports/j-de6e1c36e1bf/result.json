@@ -1,0 +1,53 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32752",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that the real legacy host-affinity PD chat route completed successfully without emitting sgl_router_decode_affinity_total. The fix carries the selected affinity branch through the current decode policy/admission pipeline and records it only when that proposal is the final decode worker. It also preserves breaker-fallback observability by classifying against the registered decode pool while selecting only from eligible workers. Upstream PR https://github.com/sgl-project/sglang/pull/32753 contains an earlier fix for the pre-policy-pipeline route, but remains open and does not apply directly to this base.",
+  "tests": [
+    {
+      "command": "cargo test --test proxy legacy_decode_affinity_ -- --nocapture (before implementation)",
+      "exit_code": 101,
+      "what_was_measured": "Real Axum /v1/chat/completions path with mock prefill/decode workers: successful PD routing produced no decode-affinity sample; plain mode and an empty decode pool correctly produced none. Raw output: /job/reports/j-de6e1c36e1bf/raw/failing-before.log"
+    },
+    {
+      "command": "cargo test --test proxy legacy_decode_affinity_ -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Four HTTP-route regressions: same-host selection increments once, breaker fallback increments once, plain mode does not increment, and NoDecodeWorkersAvailable does not increment. Raw output: /job/reports/j-de6e1c36e1bf/raw/proxy-tests-final.log"
+    },
+    {
+      "command": "cargo test --lib policies::registry -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Fifteen resolver/selection tests, including independent same-host, missing-host, malformed URL, load imbalance, breaker, empty-pool, and all-breakers-open boundaries. Raw output: /job/reports/j-de6e1c36e1bf/raw/registry-tests-final.log"
+    },
+    {
+      "command": "cargo test --lib server::metrics -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Twenty-two metric registry tests, including rendering all four decode-affinity outcome labels. Raw output: /job/reports/j-de6e1c36e1bf/raw/metrics-tests-final.log"
+    },
+    {
+      "command": "cargo fmt -- --check",
+      "exit_code": 0,
+      "what_was_measured": "Rust formatting for the router workspace. Raw output: /job/reports/j-de6e1c36e1bf/raw/cargo-fmt-check.log"
+    },
+    {
+      "command": "cargo check --all-targets",
+      "exit_code": 0,
+      "what_was_measured": "Compilation of all router targets with the repository-pinned Rust 1.90 toolchain. Raw output: /job/reports/j-de6e1c36e1bf/raw/cargo-check-all-targets-final.log"
+    },
+    {
+      "command": "cargo clippy --all-targets -- -D warnings",
+      "exit_code": 101,
+      "what_was_measured": "Blocked by a pre-existing clippy::nonminimal_bool warning in src/policies/buckets.rs:167, outside the changed paths. Raw output: /job/reports/j-de6e1c36e1bf/raw/cargo-clippy-all-targets.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and regression are entirely in experimental/sgl-router CPU-side HTTP routing and Prometheus accounting. No model kernels, weights, or GPU output are involved."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Validation used the repository's deterministic in-process HTTP mock workers, not a live model deployment; it qualifies router transport, selection, and metric accounting only.",
+    "No GPU was used because GPU execution is not on this observability code path.",
+    "The full clippy -D warnings gate remains blocked by the unrelated existing warning in experimental/sgl-router/src/policies/buckets.rs:167."
+  ]
+}

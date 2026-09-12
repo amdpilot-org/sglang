@@ -9,7 +9,6 @@ use crate::policies::admission::{
     RoutingStage,
 };
 use crate::policies::engine_load::EngineLoadSnapshot;
-use crate::policies::registry::select_decode_with_affinity;
 use crate::policies::{ProposalKind, SelectionProposal};
 use rand::Rng;
 use std::sync::Arc;
@@ -18,6 +17,7 @@ use std::sync::Arc;
 pub struct DecodeSelectionContext<'a> {
     load_snapshot: Option<&'a EngineLoadSnapshot>,
     prefill_url: Option<&'a str>,
+    affinity_pool: Option<&'a [Arc<crate::workers::Worker>]>,
 }
 
 impl<'a> DecodeSelectionContext<'a> {
@@ -25,6 +25,7 @@ impl<'a> DecodeSelectionContext<'a> {
         Self {
             load_snapshot: None,
             prefill_url: None,
+            affinity_pool: None,
         }
     }
 
@@ -46,6 +47,12 @@ impl<'a> DecodeSelectionContext<'a> {
 
     pub fn prefill_url(&self) -> Option<&str> {
         self.prefill_url
+    }
+
+    /// Full registered decode pool used only to classify why affinity fell back.
+    pub fn with_affinity_pool(mut self, affinity_pool: &'a [Arc<crate::workers::Worker>]) -> Self {
+        self.affinity_pool = Some(affinity_pool);
+        self
     }
 }
 
@@ -151,7 +158,15 @@ impl DecodePolicy for LegacyHostAffinityDecodePolicy {
         ctx: &DecodeSelectionContext<'_>,
     ) -> Option<SelectionProposal> {
         let prefill_url = ctx.prefill_url()?;
-        select_decode_with_affinity(prefill_url, &domain.workers).map(SelectionProposal::primary)
+        crate::policies::registry::select_decode_with_affinity_observed(
+            prefill_url,
+            &domain.workers,
+            ctx.affinity_pool.unwrap_or(&domain.workers),
+        )
+        .map(|selection| {
+            SelectionProposal::primary(selection.worker)
+                .with_decode_affinity_outcome(selection.outcome)
+        })
     }
 }
 

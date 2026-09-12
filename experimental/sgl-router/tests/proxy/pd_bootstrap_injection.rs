@@ -21,8 +21,8 @@ use axum::http::{Request, StatusCode};
 use bytes::Bytes;
 use serde_json::{json, Value};
 use sgl_router::config::{
-    ActiveLoadConfig, Config, DiscoveryBackend, ModelConfig, ObservabilityConfig, PolicyKind,
-    ProxyConfig, ServerConfig, StaticUrlsDiscoveryConfig,
+    ActiveLoadConfig, Config, DecodePolicyKind, DiscoveryBackend, ModelConfig, ObservabilityConfig,
+    PolicyKind, ProxyConfig, ServerConfig, StaticUrlsDiscoveryConfig,
 };
 use sgl_router::discovery::{ModelId, WorkerId, WorkerMode, WorkerSpec};
 use sgl_router::policies::factory::build_registry_with_defaults;
@@ -64,7 +64,15 @@ fn config() -> Config {
 }
 
 fn build_ctx(specs: Vec<WorkerSpec>) -> Arc<AppContext> {
-    let cfg = config();
+    build_ctx_with_decode_policy(specs, DecodePolicyKind::default())
+}
+
+fn build_ctx_with_decode_policy(
+    specs: Vec<WorkerSpec>,
+    decode_policy: DecodePolicyKind,
+) -> Arc<AppContext> {
+    let mut cfg = config();
+    cfg.model.decode_policy = decode_policy;
     let tokenizers = Arc::new(TokenizerRegistry::load_from_config(&cfg).unwrap());
     let registry = Arc::new(WorkerRegistry::default());
     for s in specs {
@@ -73,6 +81,151 @@ fn build_ctx(specs: Vec<WorkerSpec>) -> Arc<AppContext> {
     let policies = Arc::new(build_registry_with_defaults(&cfg).unwrap());
     let proxy = Arc::new(Proxy::new(Duration::from_secs(5)).unwrap());
     Arc::new(AppContext::new(cfg, tokenizers, proxy, registry, policies))
+}
+
+#[tokio::test]
+async fn legacy_decode_affinity_records_successful_same_host_selection() {
+    let prefill = crate::common::mock_worker::MockWorker::start(vec![]).await;
+    let decode = crate::common::mock_worker::MockWorker::start(vec![]).await;
+    let ctx = build_ctx_with_decode_policy(
+        vec![
+            WorkerSpec {
+                id: WorkerId("p1".into()),
+                url: prefill.url.clone(),
+                mode: WorkerMode::Prefill,
+                model_ids: vec![ModelId("tiny".into())],
+                bootstrap_port: Some(8997),
+            },
+            WorkerSpec {
+                id: WorkerId("d1".into()),
+                url: decode.url.clone(),
+                mode: WorkerMode::Decode,
+                model_ids: vec![ModelId("tiny".into())],
+                bootstrap_port: None,
+            },
+        ],
+        DecodePolicyKind::LegacyHostAffinity,
+    );
+
+    let response = build_router(Arc::clone(&ctx))
+        .oneshot(chat_request())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        ctx.metrics
+            .render()
+            .contains(r#"sgl_router_decode_affinity_total{outcome="same_host_picked"} 1"#),
+        "metrics:\n{}",
+        ctx.metrics.render()
+    );
+}
+
+#[tokio::test]
+async fn legacy_decode_affinity_records_breaker_fallback() {
+    let prefill = crate::common::mock_worker::MockWorker::start(vec![]).await;
+    let affinity_decode = crate::common::mock_worker::MockWorker::start(vec![]).await;
+    let fallback_decode = crate::common::mock_worker::MockWorker::start(vec![]).await;
+    let prefill_url = prefill.url.replacen("127.0.0.1", "localhost", 1);
+    let affinity_decode_url = affinity_decode.url.replacen("127.0.0.1", "localhost", 1);
+    let ctx = build_ctx_with_decode_policy(
+        vec![
+            WorkerSpec {
+                id: WorkerId("p1".into()),
+                url: prefill_url,
+                mode: WorkerMode::Prefill,
+                model_ids: vec![ModelId("tiny".into())],
+                bootstrap_port: Some(8997),
+            },
+            WorkerSpec {
+                id: WorkerId("d-affinity".into()),
+                url: affinity_decode_url,
+                mode: WorkerMode::Decode,
+                model_ids: vec![ModelId("tiny".into())],
+                bootstrap_port: None,
+            },
+            WorkerSpec {
+                id: WorkerId("d-fallback".into()),
+                url: fallback_decode.url.clone(),
+                mode: WorkerMode::Decode,
+                model_ids: vec![ModelId("tiny".into())],
+                bootstrap_port: None,
+            },
+        ],
+        DecodePolicyKind::LegacyHostAffinity,
+    );
+    let affinity_worker = ctx
+        .registry
+        .workers_for(&ModelId("tiny".into()))
+        .into_iter()
+        .find(|worker| worker.id.0 == "d-affinity")
+        .unwrap();
+    while affinity_worker.breaker.allow() {
+        affinity_worker.breaker.record_failure();
+    }
+
+    let response = build_router(Arc::clone(&ctx))
+        .oneshot(chat_request())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        ctx.metrics
+            .render()
+            .contains(r#"sgl_router_decode_affinity_total{outcome="fallback_breaker"} 1"#),
+        "metrics:\n{}",
+        ctx.metrics.render()
+    );
+}
+
+#[tokio::test]
+async fn legacy_decode_affinity_is_not_recorded_for_plain_mode() {
+    let plain = crate::common::mock_worker::MockWorker::start(vec![]).await;
+    let ctx = build_ctx_with_decode_policy(
+        vec![WorkerSpec {
+            id: WorkerId("w1".into()),
+            url: plain.url.clone(),
+            mode: WorkerMode::Plain,
+            model_ids: vec![ModelId("tiny".into())],
+            bootstrap_port: None,
+        }],
+        DecodePolicyKind::LegacyHostAffinity,
+    );
+
+    let response = build_router(Arc::clone(&ctx))
+        .oneshot(chat_request())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(!ctx
+        .metrics
+        .render()
+        .contains("sgl_router_decode_affinity_total{"));
+}
+
+#[tokio::test]
+async fn legacy_decode_affinity_is_not_recorded_without_decode_workers() {
+    let prefill = crate::common::mock_worker::MockWorker::start(vec![]).await;
+    let ctx = build_ctx_with_decode_policy(
+        vec![WorkerSpec {
+            id: WorkerId("p1".into()),
+            url: prefill.url.clone(),
+            mode: WorkerMode::Prefill,
+            model_ids: vec![ModelId("tiny".into())],
+            bootstrap_port: Some(8997),
+        }],
+        DecodePolicyKind::LegacyHostAffinity,
+    );
+
+    let response = build_router(Arc::clone(&ctx))
+        .oneshot(chat_request())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(!ctx
+        .metrics
+        .render()
+        .contains("sgl_router_decode_affinity_total{"));
 }
 
 fn chat_request() -> Request<Body> {
