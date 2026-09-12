@@ -1,6 +1,8 @@
 # Adapted from https://github.com/thinking-machines-lab/batch_invariant_ops/blob/main/test_batch_invariance.py
 import math
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import torch
 
@@ -119,6 +121,102 @@ class TestBatchInvariantOps(CustomTestCase):
                                 iters=5, M=M, K=K, N=N, dtype=dtype
                             )
                             self._assert_batch_invariant_results(difflist, dtype, name)
+
+    def test_mm_dtype_fp32_preserves_accumulator_precision(self):
+        torch.manual_seed(34758)
+        a = torch.randn((5, 257), dtype=torch.bfloat16)
+        b = torch.randn((257, 64), dtype=torch.bfloat16)
+
+        with set_batch_invariant_mode(True):
+            actual = torch.mm(a, b, out_dtype=torch.float32)
+
+        reference = (a.cpu().double() @ b.cpu().double()).float().to(actual.device)
+        widened_bf16 = actual.bfloat16().float()
+        self.assertEqual(actual.dtype, torch.float32)
+        self.assertGreater(torch.count_nonzero(actual != widened_bf16).item(), 0)
+        self.assertLess(
+            torch.max(torch.abs(actual - reference)).item(),
+            torch.max(torch.abs(widened_bf16 - reference)).item(),
+        )
+
+    def test_mm_dtype_fp32_is_repeatable_and_sub_batch_invariant(self):
+        torch.manual_seed(34758)
+        a = torch.randn((17, 257), dtype=torch.bfloat16)
+        b = torch.randn((257, 64), dtype=torch.bfloat16)
+
+        with set_batch_invariant_mode(True):
+            full = torch.mm(a, b, out_dtype=torch.float32)
+            repeated = torch.mm(a, b, out_dtype=torch.float32)
+            sub_batch = torch.mm(a[:5], b, out_dtype=torch.float32)
+
+        self.assertTrue(torch.equal(full, repeated))
+        self.assertTrue(torch.equal(full[:5], sub_batch))
+
+    def test_mm_dtype_fp32_preserves_near_tied_expert_order(self):
+        hidden_states = torch.zeros((1, 257), dtype=torch.bfloat16)
+        weights = torch.zeros((257, 64), dtype=torch.bfloat16)
+        hidden_states[0, :2] = 1
+        weights[0, :2] = 100
+        weights[1, 1] = 0.0625
+
+        with set_batch_invariant_mode(True):
+            scores = torch.mm(hidden_states, weights, out_dtype=torch.float32)
+
+        self.assertEqual(scores[0, 0].item(), 100.0)
+        self.assertEqual(scores[0, 1].item(), 100.0625)
+        self.assertEqual(scores.bfloat16()[0, 0].item(), 100.0)
+        self.assertEqual(scores.bfloat16()[0, 1].item(), 100.0)
+        self.assertEqual(torch.argmax(scores).item(), 1)
+        self.assertEqual(torch.argmax(scores.bfloat16()).item(), 0)
+
+    def test_fp32_output_bypasses_bf16_only_deepgemm(self):
+        a = torch.empty((1, 16), dtype=torch.bfloat16)
+        b = torch.empty((16, 16), dtype=torch.bfloat16)
+        expected = torch.empty((1, 16), dtype=torch.float32)
+
+        with (
+            patch.object(batch_invariant_ops, "_ENABLE_MM_DEEPGEMM", True),
+            patch.object(batch_invariant_ops, "ENABLE_JIT_DEEPGEMM", True),
+            patch.object(
+                batch_invariant_ops,
+                "_matmul_persistent_triton",
+                return_value=expected,
+            ) as triton_matmul,
+            patch.object(
+                batch_invariant_ops, "_matmul_persistent_deepgemm"
+            ) as deepgemm_matmul,
+        ):
+            actual = batch_invariant_ops.matmul_persistent(
+                a, b, out_dtype=torch.float32
+            )
+
+        self.assertIs(actual, expected)
+        triton_matmul.assert_called_once_with(
+            a=a, b=b, bias=None, out_dtype=torch.float32
+        )
+        deepgemm_matmul.assert_not_called()
+
+    def test_deepseek_deterministic_gate_requests_fp32(self):
+        from sglang.srt.models.deepseek_v2 import MoEGate
+
+        gate = MoEGate.__new__(MoEGate)
+        torch.nn.Module.__init__(gate)
+        gate.weight = torch.nn.Parameter(torch.randn((64, 257), dtype=torch.bfloat16))
+        hidden_states = torch.randn((5, 257), dtype=torch.bfloat16)
+        execution = SimpleNamespace(
+            deterministic=SimpleNamespace(enable_deterministic_inference=True)
+        )
+
+        with (
+            patch("sglang.srt.models.deepseek_v2.get_exec", return_value=execution),
+            set_batch_invariant_mode(True),
+        ):
+            logits = gate(hidden_states)
+
+        self.assertEqual(logits.dtype, torch.float32)
+        self.assertGreater(
+            torch.count_nonzero(logits != logits.bfloat16().float()).item(), 0
+        )
 
     def test_medium_matrices(self):
         """Test batch invariance with medium matrix sizes"""
