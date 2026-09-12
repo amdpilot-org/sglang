@@ -1,0 +1,58 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34111",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "3c44c979ec2e341317e2bd1900cfe5a3548afc17",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate makes tokenizer-side cancellation the streaming visibility boundary. Base leaked a queued token ID after cancellation; candidate emitted only an empty abort control event and preserved the overlap peer.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-c5b65889793b/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py -k StreamAbortBoundary (candidate tests with production file reverted to recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: two tests failed; queued invalid text was yielded immediately and incremental abort output exposed accumulated text."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c5b65889793b/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py -k StreamAbortBoundary",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate passed all three cancellation-boundary regression tests."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c5b65889793b/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py",
+      "exit_code": 0,
+      "what_was_measured": "Complete tokenizer-manager unit file: 29 tests and 3 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c5b65889793b/venv/bin/python /job/review-evidence-j-c5b65889793b/adversarial_abort_boundary.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent boundary cases passed: repeated intermediate wakeups stayed blocked, terminal abort metadata survived while content was cleared, a normal completion winning the race remained visible, and non-stream output was unchanged."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-c5b65889793b/venv/bin/python reports/j-a3f881b2090a/run_tiny_abort_probe.py --fixture /tmp/amdpilot-repo-j-c5b65889793b/tiny-random-llama --output /job/review-evidence-j-c5b65889793b/gpu-base (production file reverted to base)",
+      "exit_code": 0,
+      "what_was_measured": "Real gfx950 serving path reproduced a post-cancel grammar abort event with output_ids [0]; overlap peer completed normally."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-c5b65889793b/venv/bin/python reports/j-a3f881b2090a/run_tiny_abort_probe.py --fixture /tmp/amdpilot-repo-j-c5b65889793b/tiny-random-llama --output /job/review-evidence-j-c5b65889793b/gpu-candidate",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate emitted only an empty-text, empty-output_ids abort event after cancellation; overlap peer completed normally."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c5b65889793b/venv/bin/python -m compileall -q python/sglang/srt/managers/tokenizer_manager.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python production source compiled successfully."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI355X with gfx950 ran independent base and candidate source-checkout servers on ROCm 7.2. Raw events, logs, process metadata, and rocm-smi output are under /job/review-evidence-j-c5b65889793b/."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The reported meta-llama/Llama-3.2-1B-Instruct weights were unavailable.",
+    "The reported CUDA 12.9 dual RTX 4090 environment was unavailable; testing used one assigned gfx950 GPU on ROCm 7.2.",
+    "The qualified tiny fixture lacks JSON punctuation, so it validates the cancellation race and leaked token ID but cannot reproduce the original visible invalid grammar string or qualify model semantic accuracy.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
