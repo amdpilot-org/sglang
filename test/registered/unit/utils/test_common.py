@@ -74,6 +74,22 @@ class TestPrometheusMetricsExporter(unittest.IsolatedAsyncioTestCase):
                             "Accept-Encoding": "identity",
                         },
                     )
+                    duplicate_accept = await client.get(
+                        "/metrics",
+                        headers=[
+                            ("Accept", "application/json"),
+                            ("Accept", "application/openmetrics-text"),
+                            ("Accept-Encoding", "identity"),
+                        ],
+                    )
+                    duplicate_accept_encoding = await client.get(
+                        "/metrics",
+                        headers=[
+                            ("Accept", "text/plain"),
+                            ("Accept-Encoding", "identity;q=0"),
+                            ("Accept-Encoding", "gzip"),
+                        ],
+                    )
 
         self.assertNotIn("beta_total", filtered.text)
         self.assertEqual(compressed.headers["content-encoding"], "gzip")
@@ -82,6 +98,14 @@ class TestPrometheusMetricsExporter(unittest.IsolatedAsyncioTestCase):
             openmetrics.headers["content-type"].startswith(
                 "application/openmetrics-text"
             )
+        )
+        self.assertTrue(
+            duplicate_accept.headers["content-type"].startswith(
+                "application/openmetrics-text"
+            )
+        )
+        self.assertEqual(
+            duplicate_accept_encoding.headers["content-encoding"], "gzip"
         )
 
     async def test_slow_scrape_does_not_block_loop_and_concurrent_scrape_fails_fast(

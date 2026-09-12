@@ -2735,8 +2735,8 @@ def add_prometheus_middleware(app):
     async def metrics_endpoint(request):
         status_code, headers, content = await exporter.generate(
             query_string=request.url.query,
-            accept=request.headers.get("accept", ""),
-            accept_encoding=request.headers.get("accept-encoding", ""),
+            accept=",".join(request.headers.getlist("accept")),
+            accept_encoding=",".join(request.headers.getlist("accept-encoding")),
         )
         return Response(
             content=content,
