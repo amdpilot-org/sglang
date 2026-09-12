@@ -96,6 +96,10 @@ from sglang.multimodal_gen.runtime.utils.perf_logger import (
 )
 from sglang.multimodal_gen.runtime.utils.process import kill_itself_when_parent_died
 from sglang.multimodal_gen.runtime.utils.profiler import maybe_record_function
+from sglang.multimodal_gen.runtime.utils.startup_profiler import (
+    log_startup_summary,
+    startup_phase,
+)
 from sglang.multimodal_gen.runtime.utils.trace_wrapper import (
     DiffStage,
     init_diffusion_tracing,
@@ -346,8 +350,13 @@ class GPUWorker(GPUWorkerPostTrainingMixin):
 
     def init_device_and_model(self) -> None:
         """Initialize the device and load the model."""
-        if not current_platform.is_mps():
-            current_platform.set_device(current_platform.get_device(self.local_rank))
+        with startup_phase("init_device_and_model"):
+            self._init_device_and_model()
+
+    def _init_device_and_model(self) -> None:
+        with startup_phase("set_device"):
+            if not current_platform.is_mps():
+                current_platform.set_device(current_platform.get_device(self.local_rank))
         self._cap_device_memory_for_tests()
         # num_gpus is the total world size across every node; the co-located,
         # CPU-contending worker count on THIS host is num_gpus // nnodes.
@@ -369,16 +378,17 @@ class GPUWorker(GPUWorkerPostTrainingMixin):
         os.environ["WORLD_SIZE"] = str(self.server_args.num_gpus)
         self._configure_persistent_torch_compile_cache()
         # initialize the distributed environment
-        maybe_init_distributed_environment_and_model_parallel(
-            tp_size=self.server_args.tp_size,
-            cfg_degree=self.server_args.cfg_parallel_degree or 1,
-            ulysses_degree=self.server_args.ulysses_degree,
-            ring_degree=self.server_args.ring_degree,
-            sp_size=self.server_args.sp_degree,
-            dp_size=self.server_args.dp_size,
-            distributed_init_method=rendezvous_addr.to_tcp(),
-            dist_timeout=self.server_args.dist_timeout,
-        )
+        with startup_phase("init_distributed_environment"):
+            maybe_init_distributed_environment_and_model_parallel(
+                tp_size=self.server_args.tp_size,
+                cfg_degree=self.server_args.cfg_parallel_degree or 1,
+                ulysses_degree=self.server_args.ulysses_degree,
+                ring_degree=self.server_args.ring_degree,
+                sp_size=self.server_args.sp_degree,
+                dp_size=self.server_args.dp_size,
+                distributed_init_method=rendezvous_addr.to_tcp(),
+                dist_timeout=self.server_args.dist_timeout,
+            )
 
         from sglang.srt.runtime_context import get_context, publish
         from sglang.srt.server_args import ServerArgs as SrtServerArgs
@@ -410,7 +420,8 @@ class GPUWorker(GPUWorkerPostTrainingMixin):
         else:
             setproctitle(f"sgl_diffusion::scheduler_{self.local_rank}")
 
-        self.pipeline = build_pipeline(self.server_args)
+        with startup_phase("build_pipeline"):
+            self.pipeline = build_pipeline(self.server_args)
 
         # apply layerwise offload after lora is applied while building LoRAPipeline
         # otherwise empty offloaded weights could fail lora converting
@@ -1586,14 +1597,16 @@ def run_scheduler_process(
     from sglang.multimodal_gen.runtime.managers.scheduler import Scheduler
 
     try:
-        scheduler = Scheduler(
-            server_args,
-            gpu_id=rank,
-            port_args=port_args,
-            task_pipes_to_slaves=task_pipes_to_slaves,
-            result_pipes_from_slaves=result_pipes_from_slaves,
-            local_rank=local_rank,
-        )
+        with startup_phase("init_scheduler"):
+            scheduler = Scheduler(
+                server_args,
+                gpu_id=rank,
+                port_args=port_args,
+                task_pipes_to_slaves=task_pipes_to_slaves,
+                result_pipes_from_slaves=result_pipes_from_slaves,
+                local_rank=local_rank,
+            )
+        log_startup_summary()
         logger.info(f"Worker {rank}: Scheduler loop started.")
         pipe_writer.send(
             {
