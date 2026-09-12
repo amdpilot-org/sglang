@@ -425,6 +425,48 @@ def is_weak_contiguous(inp: torch.Tensor):
     )
 
 
+_get_raw_stream = getattr(torch._C, "_cuda_getCurrentRawStream", None)
+
+
+class SingleStreamGuard:
+    """Keep one communicator's eager all-reduces totally ordered.
+
+    Custom all-reduce rendezvous state is owned by the communicator and assumes
+    that only one kernel uses it at a time. A single stream supplies that order.
+    When eager calls move between streams, record the previous stream and make
+    the new stream wait for it before launching another collective.
+
+    CUDA graph capture is deliberately ignored: capture records work instead of
+    executing it, and concurrent graph replay does not call this host guard.
+    Callers must not replay graphs sharing a communicator concurrently.
+    """
+
+    def __init__(self, device: torch.device) -> None:
+        self.device_index = 0 if device.index is None else device.index
+        self._raw_stream = _get_raw_stream or (
+            lambda index: torch.cuda.current_stream(index).cuda_stream
+        )
+        self._last_stream: Optional[torch.cuda.Stream] = None
+        self._last_raw_stream: Optional[int] = None
+        self._event: Optional[torch.cuda.Event] = None
+
+    def maybe_serialize(self) -> None:
+        """Order this launch after the prior launch when its stream changes."""
+        if self._raw_stream(self.device_index) == self._last_raw_stream:
+            return
+        if torch.cuda.is_current_stream_capturing():
+            return
+
+        stream = torch.cuda.current_stream(self.device_index)
+        if self._last_stream is not None:
+            if self._event is None:
+                self._event = torch.cuda.Event(enable_timing=False)
+            self._event.record(self._last_stream)
+            stream.wait_event(self._event)
+        self._last_stream = stream
+        self._last_raw_stream = stream.cuda_stream
+
+
 def can_p2p(rank: int, world_size: int) -> bool:
     # SGLANG_SKIP_P2P_CHECK can be set to False in sglang
     SGLANG_SKIP_P2P_CHECK = os.getenv("SGLANG_SKIP_P2P_CHECK", "0") == "1"

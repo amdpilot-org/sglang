@@ -56,6 +56,7 @@ from .configs.custom_all_reduce_v2 import (
     get_supported_world_sizes,
 )
 from .custom_all_reduce_utils import (
+    SingleStreamGuard,
     can_use_custom_all_reduce_with_nvlink,
     is_one_nvlink_clique,
     is_weak_contiguous,
@@ -134,6 +135,7 @@ class CustomAllReduceV2:
         priority and override all of the size parameters above.
         """
         self.disabled = True
+        self.stream_guard = SingleStreamGuard(device)
         if not can_use_custom_all_reduce_v2(group=group, device=device):
             return
 
@@ -365,6 +367,7 @@ class CustomAllReduceV2:
     # ------------------------------------------------------------------
 
     def custom_all_reduce(self, input: torch.Tensor) -> torch.Tensor:
+        self.stream_guard.maybe_serialize()
         nbytes = input.numel() * input.element_size()
         if self.override_algo is not None:
             # TODO: enhance this override pattern
