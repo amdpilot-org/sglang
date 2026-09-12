@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32693",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2071",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2036",
+  "candidate_commit": "aed3cae082a1786ded12e8d4e7d1f35c93e52807",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a partial fix. It prevents broad deletion of unrelated files and many distinct suffixes, but its substring matcher still deletes another valid deployment when the clearing suffix is the tail of that deployment's longer model name. Clearing suffix _model_0_1 deleted a tenant_model deployment key ending in _tenant_model_0_1.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-00ef89c49e60/venv/bin/python /job/review-evidence-j-00ef89c49e60/repro_clear.py (base commit)",
+      "exit_code": 0,
+      "what_was_measured": "Direct production NixlFileManager bucket-routed reproduction showed that unscoped clear removed the caller's files, other deployment files, boundary-case files, and unrelated.txt. The command succeeds after printing existence=false for every fixture; this is the reproduced defect, not a passing correctness assertion."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-00ef89c49e60/venv/bin/python test/registered/unit/mem_cache/test_hicache_nixl_file_manager.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "All three candidate regression tests passed on the exact candidate source."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-00ef89c49e60/venv/bin/python /job/review-evidence-j-00ef89c49e60/adversarial_test.py (candidate commit)",
+      "exit_code": 1,
+      "what_was_measured": "Independent shared-mount isolation assertion failed because clearing _model_0_1 deleted another deployment's key ending in _tenant_model_0_1."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The clear path is a CPU filesystem operation. One AMD Instinct MI350X was visible through Torch/ROCm, but no GPU operation was relevant or claimed.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With clearing suffix _model_0_1, a different deployment whose model name is tenant_model produces filenames ending in _tenant_model_0_1; the candidate matcher finds _model_0_1 at end-of-name and deletes that other deployment's file.",
+    "The same tail-overlap class applies to MLA suffixes, where a shorter model name can be the underscore-delimited tail of a longer model name."
+  ],
+  "remaining_limitations": [
+    "No full HTTP server or real NIXL POSIX/GDS plugin deployment was started; validation directly exercised the checked-out production file manager and bucket routing.",
+    "No model inference, GPU transfer, multi-rank race, or distributed serving workload was run.",
+    "The available device was one AMD Instinct MI350X; this review makes no multi-GPU or multi-node claim.",
+    "No native rebuild was performed because the candidate contains no native/C++ changes."
+  ]
+}
