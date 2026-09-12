@@ -7,8 +7,8 @@ must prove the put/wait round-trip.
 
 Run::
 
-    pytest test/registered/distributed/test_pynccl_rma.py -q
-    python test/registered/distributed/test_pynccl_rma.py --num-gpu 2
+    pytest test/registered/e2e/distributed/test_pynccl_rma.py -q
+    python test/registered/e2e/distributed/test_pynccl_rma.py --num-gpu 2
 """
 
 from __future__ import annotations
@@ -105,6 +105,86 @@ def test_nccl_config_t_field_count_is_21_with_trailing_graph_stream_ordering():
     fields = [n for n, _ in W.ncclConfig_t._fields_]
     assert len(fields) == 21
     assert fields[-1] == "graphStreamOrdering"
+
+
+def test_nccl_config_create_preserves_legacy_initializer_contract():
+    """The RMA layout extension must not shadow the initializer used by the
+    established configured-init and symmetric-memory paths."""
+    cfg = W.ncclConfig_t.create()
+    assert cfg.size == ctypes.sizeof(W.ncclConfig_t)
+    assert cfg.magic == NCCL_API_MAGIC
+    assert cfg.version == W.NCCL_CONFIG_VERSION
+    for name, ctype in W.ncclConfig_t._fields_[3:]:
+        expected = None if ctype is ctypes.c_char_p else NCCL_CONFIG_UNDEF_INT
+        assert getattr(cfg, name) == expected, f"{name} not initialized"
+
+
+def test_nccl_comm_init_rank_config_default_uses_initializer():
+    """Exercise NCCLLibrary's pre-existing default-config call site."""
+    seen = {}
+
+    def _init(comm, world_size, unique_id, rank, config):
+        seen["config"] = ctypes.cast(config, ctypes.POINTER(W.ncclConfig_t)).contents
+        return 0
+
+    lib = object.__new__(W.NCCLLibrary)
+    lib._funcs = {"ncclCommInitRankConfig": _init}
+    lib.ncclCommInitRankConfig(1, W.ncclUniqueId(), 0)
+    assert seen["config"].magic == NCCL_API_MAGIC
+    assert seen["config"].graphStreamOrdering == NCCL_CONFIG_UNDEF_INT
+
+
+def test_symmetric_memory_config_call_site_uses_initializer(monkeypatch):
+    """Exercise communicator construction's symmetric-memory call site."""
+    seen = {}
+
+    class _Nccl:
+        def __init__(self, path):
+            pass
+
+        def ncclGetRawVersion(self):
+            return 23007
+
+        def ncclGetVersion(self):
+            return "2.30.7"
+
+        def ncclGetUniqueId(self):
+            return W.ncclUniqueId()
+
+        def ncclCommInitRankConfig(self, world_size, unique_id, rank, config):
+            seen["config"] = config
+            return W.ncclComm_t()
+
+    class _Group:
+        rank = 0
+        world_size = 2
+
+        def broadcast_obj(self, value, src):
+            return value
+
+    class _Context:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def synchronize(self):
+            pass
+
+    monkeypatch.setattr(pynccl_mod, "StatelessProcessGroup", _Group)
+    monkeypatch.setattr(pynccl_mod, "NCCLLibrary", _Nccl)
+    monkeypatch.setattr(pynccl_mod.torch.cuda, "device", lambda device: _Context())
+    monkeypatch.setattr(pynccl_mod.torch.cuda, "Stream", _Context)
+    monkeypatch.setattr(pynccl_mod.torch.cuda, "stream", lambda stream: _Context())
+    monkeypatch.setattr(pynccl_mod.torch, "zeros", lambda *args, **kwargs: object())
+    monkeypatch.setattr(PyNcclCommunicator, "all_reduce", lambda self, data: None)
+
+    PyNcclCommunicator(
+        _Group(), torch.device("cuda:0"), is_symmetric_memory_enabled=True
+    )
+    assert seen["config"].magic == NCCL_API_MAGIC
+    assert seen["config"].graphUsageMode == 1
 
 
 def test_wait_signal_desc_layout_matches_nccl():
