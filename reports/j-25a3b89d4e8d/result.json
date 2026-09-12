@@ -1,0 +1,53 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37379",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Added validated external FP8 KV-scale loading to the real Qwen3.5 dense/MoE causal classes and delegation from both conditional-generation wrappers. The loader maps nested text model types to their public calibration model types, retains schema and TP-rank validation, skips SSM and pipeline-placeholder layers, and initializes tensor and Python-float scale representations consumed by Triton.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-25a3b89d4e8d/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen3_5_kv_cache_scales.py",
+      "exit_code": 0,
+      "what_was_measured": "Dense and MoE causal classes, both conditional wrappers, rank-dependent selection, hybrid layer filtering, all four scale representations, external model-type validation, missing/malformed calibration, and the Triton descale consumer; 5 tests and 6 subtests passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-25a3b89d4e8d/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen3_5_kv_cache_scales.py test/registered/unit/models/test_qwen3_5_pipeline_parallel.py",
+      "exit_code": 0,
+      "what_was_measured": "Focused regression plus existing Qwen3.5 pipeline-parallel coverage; 10 tests and 6 subtests passed. Raw output: reports/j-25a3b89d4e8d/unit-tests.log."
+    },
+    {
+      "command": "failing-before run of test/registered/unit/models/test_qwen3_5_kv_cache_scales.py after temporarily reversing the source patch",
+      "exit_code": 2,
+      "what_was_measured": "The recorded base lacks the Qwen3.5 loader/downstream helper and fails test collection. Raw output: reports/j-25a3b89d4e8d/failing-before.log."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 pinned Python FP8 quantize/dequantize comparison on ROCm",
+      "exit_code": 0,
+      "what_was_measured": "MI355X gfx950 FP8 E4M3 quantize/dequantize output exactly matched an independently computed CPU reference for scale 0.5. Raw output: reports/j-25a3b89d4e8d/amd-fp8-numerical.log."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-25a3b89d4e8d/pre-commit /opt/venv/bin/pre-commit run --files <changed files>",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, ruff, isort, schema, security, and registered-test checks all passed."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI355X (gfx950), Torch 2.11.0+rocm7.2 / HIP 7.2.26015, produced an exact FP8 numerical match; see reports/j-25a3b89d4e8d/amd-fp8-numerical.log.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The exact reported Qwen3.5-122B-A10B deployment on eight NVIDIA L20 GPUs with TP=8 was unavailable and remains unverified.",
+    "No model weights were available, so full server startup and semantic model output were not claimed.",
+    "AMD validation covered supported gfx950 FP8 execution and the model-loading/downstream-consumer unit path, not a distributed Qwen3.5 workload.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable."
+  ],
+  "source_paths": [
+    "/job/repo/python/sglang/srt/models/qwen3_5.py",
+    "/job/repo/python/sglang/srt/layers/attention/triton_backend.py",
+    "/job/repo/test/registered/unit/models/test_qwen3_5_kv_cache_scales.py"
+  ],
+  "native_paths": []
+}
