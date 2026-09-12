@@ -63,11 +63,13 @@ class TestMmHashesContract(CustomTestCase):
                 ["sha256:" + "11" * 32],
                 ["sha256:" + "22" * 32, "sha256:" + "33" * 32],
             ],
+            mm_cache_ids=[["first"], ["second", "third"]],
         )
         req.normalize_batch_and_arguments()
         self.assertEqual(req[0].mm_hashes, ["01"])
         self.assertEqual(req[1].mm_hashes, ["02", "03"])
         self.assertEqual(len(req[1].mm_content_hashes), 2)
+        self.assertEqual(req[1].mm_cache_ids, ["second", "third"])
 
     def test_set_pad_value_honors_preset_hash(self):
         """set_pad_value() must use a pre-set hash without recomputing."""

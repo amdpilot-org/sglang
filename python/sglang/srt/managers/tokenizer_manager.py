@@ -1140,7 +1140,7 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
     @staticmethod
     def _normalize_mm_content_hashes(obj: GenerateReqInput) -> None:
         """Merge Native/OpenAI content identities and validate their alignment."""
-        from sglang.srt.multimodal.cache import parse_content_hash
+        from sglang.srt.multimodal.cache import parse_cache_id, parse_content_hash
         from sglang.srt.utils import ImageData
 
         images = obj.image_data or []
@@ -1149,24 +1149,57 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
             image.content_hash if isinstance(image, ImageData) else None
             for image in images
         ]
-        if explicit is None and not any(inline):
+        if explicit is not None or any(inline):
+            if explicit is None:
+                explicit = inline
+            if len(explicit) != len(images):
+                raise ValueError(
+                    f"mm_content_hashes has {len(explicit)} entries for "
+                    f"{len(images)} images"
+                )
+
+            normalized = []
+            for index, (provided, embedded) in enumerate(zip(explicit, inline)):
+                provided = parse_content_hash(provided)
+                embedded = parse_content_hash(embedded)
+                if (
+                    provided is not None
+                    and embedded is not None
+                    and provided != embedded
+                ):
+                    raise ValueError(
+                        f"Conflicting content hashes for image_data[{index}]"
+                    )
+                normalized.append(provided or embedded)
+            obj.mm_content_hashes = normalized
+
+        explicit_cache_ids = obj.mm_cache_ids
+        inline_cache_ids = [
+            image.cache_id if isinstance(image, ImageData) else None for image in images
+        ]
+        if explicit_cache_ids is None and not any(inline_cache_ids):
             return
-        if explicit is None:
-            explicit = inline
-        if len(explicit) != len(images):
+        if explicit_cache_ids is None:
+            explicit_cache_ids = inline_cache_ids
+        if len(explicit_cache_ids) != len(images):
             raise ValueError(
-                f"mm_content_hashes has {len(explicit)} entries for "
+                f"mm_cache_ids has {len(explicit_cache_ids)} entries for "
                 f"{len(images)} images"
             )
-
-        normalized = []
-        for index, (provided, embedded) in enumerate(zip(explicit, inline)):
-            provided = parse_content_hash(provided)
-            embedded = parse_content_hash(embedded)
-            if provided is not None and embedded is not None and provided != embedded:
-                raise ValueError(f"Conflicting content hashes for image_data[{index}]")
-            normalized.append(provided or embedded)
-        obj.mm_content_hashes = normalized
+        normalized_cache_ids = []
+        for index, (provided, embedded) in enumerate(
+            zip(explicit_cache_ids, inline_cache_ids)
+        ):
+            provided = parse_cache_id(provided)
+            embedded = parse_cache_id(embedded)
+            if (
+                provided is not None
+                and embedded is not None
+                and provided != embedded
+            ):
+                raise ValueError(f"Conflicting cache IDs for image_data[{index}]")
+            normalized_cache_ids.append(provided or embedded)
+        obj.mm_cache_ids = normalized_cache_ids
 
     def _validate_one_request(
         self, obj: Union[GenerateReqInput, EmbeddingReqInput], input_ids: List[int]

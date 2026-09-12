@@ -1793,6 +1793,7 @@ class ImageData:
     max_dynamic_patch: Optional[int] = None
     preprocess_kwargs: Optional[Dict] = None
     content_hash: Optional[str] = None
+    cache_id: Optional[str] = None
 
 
 GLM_MEDIA_CONFIG_KEYS = (
@@ -1807,6 +1808,22 @@ GLM_MEDIA_CONFIG_KEYS = (
 class VideoData:
     url: str
     preprocess_kwargs: Optional[Dict] = None
+    cache_id: Optional[str] = None
+
+
+class AudioData(str):
+    """String-compatible audio source carrying an optional caller cache ID."""
+
+    cache_id: Optional[str]
+
+    def __new__(cls, url: str, cache_id: Optional[str] = None):
+        value = super().__new__(cls, url)
+        value.cache_id = cache_id
+        return value
+
+    @property
+    def url(self) -> str:
+        return str(self)
 
 
 image_extension_names = (".png", ".jpg", ".jpeg", ".webp", ".gif")

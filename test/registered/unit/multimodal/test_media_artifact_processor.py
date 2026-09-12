@@ -231,6 +231,55 @@ class TestMediaArtifactProcessor(unittest.TestCase):
         self.assertEqual(artifacts, [artifact])
         self.assertEqual(processor.batches, [])
 
+    def test_trusted_cache_id_hit_skips_source_read_and_preprocess(self):
+        processor = _Processor()
+        processor.trust_mm_content_hashes = True
+        try:
+            first = asyncio.run(
+                processor.prepare_media_artifacts(
+                    [b"original-media"], cache_ids=["opaque-video-id"]
+                )
+            )
+            second = asyncio.run(
+                processor.prepare_media_artifacts(
+                    ["source-that-must-not-be-read"], cache_ids=["opaque-video-id"]
+                )
+            )
+        finally:
+            processor.close()
+
+        self.assertIs(first[0], second[0])
+        self.assertEqual(len(processor.batches), 1)
+
+    def test_untrusted_cache_id_keeps_strict_content_behavior(self):
+        processor = _Processor()
+        try:
+            first = asyncio.run(
+                processor.prepare_media_artifacts([b"one"], cache_ids=["same"])
+            )
+            second = asyncio.run(
+                processor.prepare_media_artifacts([b"two"], cache_ids=["same"])
+            )
+        finally:
+            processor.close()
+
+        self.assertNotEqual(first[0].content_digest, second[0].content_digest)
+        self.assertEqual(len(processor.batches), 2)
+
+    def test_content_hash_and_cache_id_are_mutually_exclusive(self):
+        processor = _Processor()
+        try:
+            with self.assertRaisesRegex(ValueError, "both content_hash and cache_id"):
+                asyncio.run(
+                    processor.prepare_media_artifacts(
+                        [b"one"],
+                        content_hashes=[snapshot_media(b"one").content_digest],
+                        cache_ids=["same"],
+                    )
+                )
+        finally:
+            processor.close()
+
     def test_cached_artifact_must_match_content_identity(self):
         processor = _Processor()
         digest = snapshot_media(b"fresh").content_digest
