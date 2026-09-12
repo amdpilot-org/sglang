@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37369",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1050",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1015",
+  "candidate_commit": "72ffcd201344d84479531607c897b31319e90714",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproducibly corrupts either cached GLM-5 fused-MLA shard when a marked RunAI tensor view shares a reused staging buffer. The exact candidate makes retained marked tensors owned clones in the actual Glm5NextForConditionalGeneration.load_weights path. Its regression, independent reverse-order and marker-boundary cases, existing RunAI loader tests, and a gfx950 numerical check pass from repository sources.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-586fa85e40fd/venv/bin/python /job/glm5_runai_review_probe.py (base commit)",
+      "exit_code": 1,
+      "what_was_measured": "Actual GLM-5 load_weights fused-q/kv cache behavior with marked views into one overwritten CPU staging buffer. q-then-kv produced [3,4,3,4] and kv-then-q produced [1,2,1,2], reproducing corruption; the unmarked alias boundary behaved as expected."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-586fa85e40fd/venv/bin/python -m pytest -q test/registered/unit/models/test_glm5_next_weight_loading.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression through Glm5NextForConditionalGeneration.load_weights: both shard orders and ordinary unmarked tensors; 3 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-586fa85e40fd/venv/bin/python /job/glm5_runai_review_probe.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial staging-buffer reuse in both shard orders plus an unmarked-tensor boundary; all exact values matched."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-586fa85e40fd/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_runai_model_streamer_loader.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Existing RunAI marker, synchronous consumption, cloning, and loader boundary coverage after helper/constant refactor; 11 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-586fa85e40fd/venv/bin/python /job/glm5_runai_gpu_probe.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate-produced fused [[1,2],[3,4]] weight on the assigned gfx950 GPU; multiplication by [[2],[-1]] exactly matched independent reference [[0],[2]]."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI355X, gcnArchName gfx950:sramecc+:xnack-, executed the exact numerical fused-weight check; see evidence/candidate-gpu-probe.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No GLM-5.3-Flash model or draft-model weights were available, so full-model semantic generation was not run.",
+    "Distributed RunAI Model Streamer, Kubernetes, TP=8, streamer concurrency=8, and DFLASH serving were not available; the issue's deterministic staging-buffer ownership contract was exercised directly instead.",
+    "Only one assigned gfx950 GPU was available, so no multi-GPU or multi-node claim is made.",
+    "No native sources changed in the candidate, repository-environment.json declares native null, and no native rebuild was applicable."
+  ]
+}

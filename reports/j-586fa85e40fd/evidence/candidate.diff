@@ -1,0 +1,236 @@
+diff --git a/python/sglang/srt/model_loader/runai_utils.py b/python/sglang/srt/model_loader/runai_utils.py
+new file mode 100644
+index 0000000..326973e
+--- /dev/null
++++ b/python/sglang/srt/model_loader/runai_utils.py
+@@ -0,0 +1,23 @@
++# Copyright 2026 SGLang Team
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++import torch
++
++RUNAI_STREAMER_TENSOR_ATTR = "_sglang_runai_streamer_tensor"
++
++
++def _clone_if_runai_streamed_tensor(tensor: torch.Tensor) -> torch.Tensor:
++    """Own tensors retained beyond the current RunAI streamer iteration."""
++    if getattr(tensor, RUNAI_STREAMER_TENSOR_ATTR, False):
++        return tensor.clone().detach()
++    return tensor
+diff --git a/python/sglang/srt/model_loader/utils.py b/python/sglang/srt/model_loader/utils.py
+index c82e5d6..5af0eb3 100644
+--- a/python/sglang/srt/model_loader/utils.py
++++ b/python/sglang/srt/model_loader/utils.py
+@@ -16,6 +16,7 @@ from transformers.dynamic_module_utils import get_class_from_dynamic_module
+ 
+ from sglang.srt.configs.model_config import ModelConfig, ModelImpl
+ from sglang.srt.layers import deep_gemm_wrapper
++from sglang.srt.model_loader.runai_utils import RUNAI_STREAMER_TENSOR_ATTR
+ from sglang.srt.utils import get_device_sm
+ 
+ logger = logging.getLogger(__name__)
+@@ -301,7 +302,7 @@ def should_async_load(weight: torch.Tensor) -> bool:
+     RunAI-streamed tensors are zero-copy views into a reused CPU buffer. They
+     must be consumed synchronously before the streamer fills its next batch.
+     """
+-    if getattr(weight, "_sglang_runai_streamer_tensor", False):
++    if getattr(weight, RUNAI_STREAMER_TENSOR_ATTR, False):
+         return False
+ 
+     device = getattr(weight, "device", None)
+diff --git a/python/sglang/srt/model_loader/weight_utils.py b/python/sglang/srt/model_loader/weight_utils.py
+index 55b5d6b..57a92fd 100644
+--- a/python/sglang/srt/model_loader/weight_utils.py
++++ b/python/sglang/srt/model_loader/weight_utils.py
+@@ -60,6 +60,7 @@ from sglang.srt.model_loader.ci_weight_validation import (
+     ci_download_with_validation_and_retry,
+     ci_validate_and_cleanup_local_snapshot,
+ )
++from sglang.srt.model_loader.runai_utils import RUNAI_STREAMER_TENSOR_ATTR
+ from sglang.srt.runtime_context import get_parallel
+ from sglang.srt.utils import (
+     BAR_FORMAT,
+@@ -79,9 +80,6 @@ except ImportError:
+ 
+ logger = logging.getLogger(__name__)
+ 
+-RUNAI_STREAMER_TENSOR_ATTR = "_sglang_runai_streamer_tensor"
+-
+-
+ # Matches routed-expert weight keys in both HF-style layouts
+ # (``...mlp.experts.<N>.{gate,up,down}_proj.weight``) and DeepSeek V4
+ # layouts (``...ffn.experts.<N>.w{1,2,3}.weight``). ``shared_experts`` is
+diff --git a/python/sglang/srt/models/deepseek_common/deepseek_weight_loader.py b/python/sglang/srt/models/deepseek_common/deepseek_weight_loader.py
+index c526df7..511eaf2 100644
+--- a/python/sglang/srt/models/deepseek_common/deepseek_weight_loader.py
++++ b/python/sglang/srt/models/deepseek_common/deepseek_weight_loader.py
+@@ -40,15 +40,13 @@ from sglang.srt.layers.quantization.int8_utils import (
+     block_dequant as int8_block_dequant,
+ )
+ from sglang.srt.layers.utils import get_layer_id
++from sglang.srt.model_loader.runai_utils import _clone_if_runai_streamed_tensor
+ from sglang.srt.model_loader.utils import (
+     maybe_executor_submit,
+     should_async_load,
+     should_deepgemm_weight_requant_ue8m0,
+ )
+-from sglang.srt.model_loader.weight_utils import (
+-    RUNAI_STREAMER_TENSOR_ATTR,
+-    default_weight_loader,
+-)
++from sglang.srt.model_loader.weight_utils import default_weight_loader
+ from sglang.srt.models.deepseek_common.utils import (
+     _is_cuda,
+     _is_fp8_fnuz,
+@@ -72,12 +70,6 @@ logger = logging.getLogger(__name__)
+ NVFP4_CKPT_FP8_ATTN_QUANT_MODULES = ["q_b_proj"]
+ 
+ 
+-def _clone_if_runai_streamed_tensor(tensor: torch.Tensor) -> torch.Tensor:
+-    if getattr(tensor, RUNAI_STREAMER_TENSOR_ATTR, False):
+-        return tensor.clone().detach()
+-    return tensor
+-
+-
+ def _get_indexer_weight_block_size(
+     quant_config: Optional[QuantizationConfig],
+ ) -> List[int]:
+diff --git a/python/sglang/srt/models/glm5_next.py b/python/sglang/srt/models/glm5_next.py
+index c6ec665..f659e74 100644
+--- a/python/sglang/srt/models/glm5_next.py
++++ b/python/sglang/srt/models/glm5_next.py
+@@ -71,6 +71,7 @@ from sglang.srt.model_executor.forward_batch_info import (
+     ForwardBatch,
+     PPProxyTensors,
+ )
++from sglang.srt.model_loader.runai_utils import _clone_if_runai_streamed_tensor
+ from sglang.srt.model_loader.weight_utils import (
+     default_weight_loader,
+     sharded_weight_loader,
+@@ -1534,7 +1535,9 @@ class Glm5NextForConditionalGeneration(nn.Module):
+                     if fuse_qkv_a_proj and (
+                         "q_a_proj" in name or "kv_a_proj_with_mqa" in name
+                     ):
+-                        cached_a_proj[name] = loaded_weight
++                        cached_a_proj[name] = _clone_if_runai_streamed_tensor(
++                            loaded_weight
++                        )
+                         q_a_proj_name = (
+                             name
+                             if "q_a_proj" in name
+diff --git a/test/registered/unit/models/test_glm5_next_weight_loading.py b/test/registered/unit/models/test_glm5_next_weight_loading.py
+new file mode 100644
+index 0000000..a93c853
+--- /dev/null
++++ b/test/registered/unit/models/test_glm5_next_weight_loading.py
+@@ -0,0 +1,100 @@
++import unittest
++from types import SimpleNamespace
++from unittest.mock import patch
++
++import torch
++
++from sglang.srt.model_loader.runai_utils import RUNAI_STREAMER_TENSOR_ATTR
++from sglang.srt.models.glm5_next import Glm5NextForConditionalGeneration
++from sglang.test.ci.ci_register import register_cpu_ci
++
++register_cpu_ci(est_time=3, suite="base-a-test-cpu")
++
++
++class _FakeParam:
++    def __init__(self):
++        self.loaded = None
++
++    def weight_loader(self, _param, loaded_weight):
++        self.loaded = loaded_weight
++
++
++class TestGlm5NextWeightLoading(unittest.TestCase):
++    def _load_fused(self, weights):
++        fused_param = _FakeParam()
++        model = SimpleNamespace(
++            config=SimpleNamespace(n_routed_experts=0, num_hidden_layers=1),
++            num_fused_shared_experts=0,
++            quant_config=None,
++            fuse_qkv_a_proj=True,
++            named_parameters=lambda: iter(
++                [
++                    (
++                        "model.layers.0.self_attn.fused_qkv_a_proj_with_mqa.weight",
++                        fused_param,
++                    )
++                ]
++            ),
++        )
++        with patch(
++            "sglang.srt.models.glm5_next.DeepseekV2WeightLoaderMixin.post_load_weights"
++        ) as post_load:
++            Glm5NextForConditionalGeneration.load_weights(model, weights)
++            post_load.assert_called_once()
++        return fused_param.loaded
++
++    def test_runai_streamed_fused_qkv_a_proj_owns_reused_buffer(self):
++        staging_buffer = torch.tensor([1, 2], dtype=torch.float32)
++
++        def streamed_weights():
++            q_view = staging_buffer[:]
++            setattr(q_view, RUNAI_STREAMER_TENSOR_ATTR, True)
++            yield "model.layers.0.self_attn.q_a_proj.weight", q_view
++
++            staging_buffer.copy_(torch.tensor([3, 4], dtype=torch.float32))
++            kv_view = staging_buffer[:]
++            setattr(kv_view, RUNAI_STREAMER_TENSOR_ATTR, True)
++            yield "model.layers.0.self_attn.kv_a_proj_with_mqa.weight", kv_view
++
++        fused = self._load_fused(streamed_weights())
++
++        self.assertEqual(fused.tolist(), [1, 2, 3, 4])
++
++    def test_runai_streamed_fused_qkv_a_proj_owns_reused_buffer_kv_first(self):
++        staging_buffer = torch.tensor([3, 4], dtype=torch.float32)
++
++        def streamed_weights():
++            kv_view = staging_buffer[:]
++            setattr(kv_view, RUNAI_STREAMER_TENSOR_ATTR, True)
++            yield "model.layers.0.self_attn.kv_a_proj_with_mqa.weight", kv_view
++
++            staging_buffer.copy_(torch.tensor([1, 2], dtype=torch.float32))
++            q_view = staging_buffer[:]
++            setattr(q_view, RUNAI_STREAMER_TENSOR_ATTR, True)
++            yield "model.layers.0.self_attn.q_a_proj.weight", q_view
++
++        fused = self._load_fused(streamed_weights())
++
++        self.assertEqual(fused.tolist(), [1, 2, 3, 4])
++
++    def test_unmarked_fused_qkv_a_proj_preserves_values(self):
++        weights = iter(
++            [
++                (
++                    "model.layers.0.self_attn.q_a_proj.weight",
++                    torch.tensor([1, 2], dtype=torch.float32),
++                ),
++                (
++                    "model.layers.0.self_attn.kv_a_proj_with_mqa.weight",
++                    torch.tensor([3, 4], dtype=torch.float32),
++                ),
++            ]
++        )
++
++        fused = self._load_fused(weights)
++
++        self.assertEqual(fused.tolist(), [1, 2, 3, 4])
++
++
++if __name__ == "__main__":
++    unittest.main()
