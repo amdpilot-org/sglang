@@ -1,0 +1,74 @@
+author:	jlee5814
+association:	contributor
+edited:	false
+status:	none
+--
+Root cause via `pdb` at `fc378f8`: `MTLCaptureError Code=1` from `_capture_error`. The mocks on `mx.metal` never intercept; the MPS manager starts capture outside mlx, so a real capture runs and fails without `MTL_CAPTURE_ENABLED`. With it set, the test passes by real GPU capture, so it presumably passed originally in a shell with it exported.
+--
+author:	cxingwei
+association:	none
+edited:	false
+status:	none
+--
+This is fixed on current `main` (`6cee9285a`). The fix landed in #34166, which was not linked to this issue — which is probably why this and #30886 are both still open.
+
+Verified on Apple Silicon:
+
+```
+$ python -m pytest test/registered/unit/hardware_backend/mlx/test_metal_profiler.py -q
+10 passed, 17 warnings in 7.22s
+
+$ python test/run_suite.py --hw mlx --suite stage-a-unit-test-mlx
+Test Summary: 21/21 passed
+```
+
+with `MTL_CAPTURE_ENABLED` and `SGLANG_USE_MLX` both unset, i.e. the configuration that used to fail.
+
+## Where the fix came from
+
+@jlee5814's and @now-ing's diagnosis above was correct: the manager takes the MPS strategy (`torch.mps.profiler.metal_capture`), but both tests patched `mx.metal.start_capture`, the *MLX* strategy's entry point, so a real Metal capture ran and failed without `MTL_CAPTURE_ENABLED=1`.
+
+`2969ab3d4` ("[MLX] Window-bounded SWA KV storage and in-graph sampling", #34166, merged Aug 10) changed exactly that:
+
+```
+$ git log --oneline -S "torch.mps.profiler" -- test/registered/unit/hardware_backend/mlx/test_metal_profiler.py
+2969ab3d4 [MLX] Window-bounded SWA KV storage and in-graph sampling (#34166)
+0a28a929d [MLX] Add Metal profiling hooks to server profiler (#28122)
+```
+
+Its diff swaps `mx.metal.start_capture` → `torch.mps.profiler.metal_capture` in both tests, adds a `MagicMock` capture context with `__enter__`/`__exit__` assertions, and asserts the injected message in the failure test. #34166's description states the same root cause in the same terms, so this looks like an independent rediscovery rather than an adoption of #30886.
+
+`5af518335` (#34300, Aug 10) then hardened the class against an ambient `SGLANG_USE_MLX=1` by pinning `profiler.use_mlx` to `False` in `setUp` — a second, separate hazard on the same tests.
+
+## Before/after on this machine
+
+Running the pre-#34166 test body against current `main`'s source reproduces the reported failure, and current `main`'s body passes:
+
+| Test body | Result |
+| --- | --- |
+| `2969ab3d4^` (pre-#34166) | **`test_start_profile_success_with_mock_capture` FAILED**, 1 passed |
+| current `main` | 10 passed |
+
+So the regression window closes exactly at #34166.
+
+## Suggestion
+
+- This issue can be closed as fixed by #34166.
+- #30886 is superseded. Worth noting in fairness to @zxyasfas that its diagnosis and its proposed diff were both right, and are substantively what landed — including the `__enter__`/`__exit__` assertions — and @now-ing had verified it on real hardware. It just never got merged before #34166 rewrote the same lines.
+
+Related: #34166 also carried the EOS-truncation fix for `test_batched_decode_matches_solo` (`_truncate_at_eos` is in `test_mlx_reference_correctness.py` as of the same commit), which is the fix proposed in #32441 / #32442. That pair may be in the same already-fixed-but-unlinked state; I have not run the `stage-b-e2e-mlx` lane to confirm.
+
+Happy to be corrected if there's a configuration I've missed.
+
+## Environment
+
+```
+macOS 15.1 (24B2083), Apple M4, 16 GB unified memory, Metal 3, 10 GPU cores
+Python 3.12.7
+sglang: main @ 6cee9285a (editable)
+torch 2.13.0 / torchvision 0.28.0 / torchaudio 2.11.0
+mlx 0.32.2 / mlx-lm 0.31.3 / mlx-metal 0.32.2
+transformers 5.12.1
+```
+
+--
