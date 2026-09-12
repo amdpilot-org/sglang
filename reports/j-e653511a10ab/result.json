@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33528",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source already contains upstream PR #33365's issue-specific local-path routing fix. The reported revision fails to recognize /workspace/vlm_dataset/MiniMax-H3 and can select DiffusersTI2VPipelineConfig, while the prepared source resolves the same basename to MiniMaxH3PipelineConfig, which defines audio_vae_config. No additional source change is justified.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e653511a10ab/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_server_args.py::TestMiniMaxH3Routing::test_modelscope_id_resolves_to_the_huggingface_config",
+      "exit_code": 0,
+      "what_was_measured": "The repository's focused MiniMax-H3 routing regression passed (1 test)."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e653511a10ab/venv/bin/python < inline routing boundary assertions",
+      "exit_code": 0,
+      "what_was_measured": "The reported-revision substring matcher returned None for /workspace/vlm_dataset/MiniMax-H3; the prepared matcher returned MiniMaxH3Pipeline. Exact near-name boundaries MiniMax-H3.5 and MiniMax-H3-4B returned None, and the Hugging Face cache-layout path returned MiniMaxH3Pipeline."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e653511a10ab/venv/bin/python < inline get_model_info assertion for /tmp/amdpilot-repo-j-e653511a10ab/models/MiniMax-H3",
+      "exit_code": 0,
+      "what_was_measured": "Actual prepared registry resolution selected MiniMaxH3Pipeline and MiniMaxH3PipelineConfig for a real local directory with the reported basename."
+    },
+    {
+      "command": "/opt/rocm/bin/rocm-smi --showproductname --showuniqueid",
+      "exit_code": 0,
+      "what_was_measured": "The assigned device is one AMD Instinct MI355X with gfx950 ISA, which differs from the reported eight NVIDIA H800 system."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU workload was run: the demonstrated defect and fix are CPU-side path-to-pipeline/config routing. Inventory confirmed one gfx950 GPU, but MiniMax-H3 weights and the reported 8xH800 CUDA topology were unavailable."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "MiniMax-H3 weights were unavailable, so full component loading and generation were not executed.",
+    "The assigned host has one AMD gfx950 GPU rather than eight NVIDIA H800 GPUs; CUDA, tensor-parallel, Ulysses, and multi-node or multi-GPU behavior remain unverified.",
+    "Transport and generic tiny-Llama fixtures cannot qualify the MiniMax-H3 architecture and were therefore not used as substitute evidence.",
+    "This result verifies the exact routing/config mismatch visible in the issue traceback, not output semantics or model quality."
+  ]
+}
