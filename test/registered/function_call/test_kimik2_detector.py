@@ -1,5 +1,6 @@
 import json
 import unittest
+from unittest.mock import patch
 
 from sglang.srt.entrypoints.openai.protocol import Function, Tool
 from sglang.srt.function_call.kimik2_detector import (
@@ -111,6 +112,23 @@ class TestKimiK2DetectorBasic(unittest.TestCase):
         self.assertEqual(result.calls[1].name, "get_weather")
         self.assertEqual(result.calls[1].parameters, '{"city": "Tokyo"}')
 
+    def test_non_streaming_singular_thinking_section_markers(self):
+        text = (
+            "prefix<|tool_call_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:0"
+            '<|tool_call_argument_begin|>{"path": "/test.py"}'
+            "<|tool_call_end|>"
+            "<|tool_call_section_end|>"
+        )
+
+        self.assertTrue(self.detector.has_tool_call(text))
+        result = self.detector.detect_and_parse(text, self.tools)
+
+        self.assertEqual(result.normal_text, "prefix")
+        self.assertEqual(len(result.calls), 1)
+        self.assertEqual(result.calls[0].name, "ReadFile")
+        self.assertEqual(result.calls[0].parameters, '{"path": "/test.py"}')
+
     def test_non_streaming_tool_index_is_local(self):
         """tool_index is the per-response 0-based position, not the model's :N suffix.
 
@@ -210,12 +228,14 @@ class TestKimiK2DetectorStreaming(unittest.TestCase):
     """Streaming incremental parsing tests for KimiK2Detector."""
 
     def test_streaming_trailing_literal_left_angle_is_not_dropped(self):
-        """A final literal '<' must remain in normal_text instead of being buffered away."""
+        """A literal '<' is delayed only until the next byte disambiguates it."""
         detector = KimiK2FuncDetector()
 
         result = detector.parse_streaming_increment("normal text <", [])
+        followup = detector.parse_streaming_increment("not-a-marker", [])
 
-        self.assertEqual(result.normal_text, "normal text <")
+        self.assertEqual(result.normal_text, "normal text ")
+        self.assertEqual(followup.normal_text, "<not-a-marker")
         self.assertEqual(detector._buffer, "")
 
     def setUp(self):
@@ -265,6 +285,174 @@ class TestKimiK2DetectorStreaming(unittest.TestCase):
         self.assertEqual(tool_calls[0]["name"], "ReadFile")
         self.assertEqual(tool_calls[1]["name"], "get_weather")
         self.assertEqual(json.loads(tool_calls[1]["parameters"]), {"city": "Paris"})
+
+    def test_streaming_split_end_marker_does_not_leak_into_arguments(self):
+        detector = KimiK2FuncDetector()
+        chunks = [
+            "<|tool_calls_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:0"
+            '<|tool_call_argument_begin|>{"path": "/tmp/a"}',
+            "<|tool_call_",
+            "end|><|tool_calls_section_end|>",
+        ]
+
+        tool_calls, _ = _collect_streaming_tool_calls(detector, chunks, self.tools)
+
+        self.assertEqual(tool_calls[0]["parameters"], '{"path": "/tmp/a"}')
+        self.assertEqual(json.loads(tool_calls[0]["parameters"]), {"path": "/tmp/a"})
+
+    def test_streaming_end_marker_prefix_divergence_is_preserved(self):
+        detector = KimiK2FuncDetector()
+        chunks = [
+            "<|tool_calls_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:0"
+            '<|tool_call_argument_begin|>{"path": "literal <|tool_call_',
+            'suffix"}<|tool_call_end|><|tool_calls_section_end|>',
+        ]
+
+        tool_calls, _ = _collect_streaming_tool_calls(detector, chunks, self.tools)
+
+        self.assertEqual(
+            json.loads(tool_calls[0]["parameters"]),
+            {"path": "literal <|tool_call_suffix"},
+        )
+
+    def test_streaming_long_nested_multiple_calls_with_tiny_argument_chunks(self):
+        detector = KimiK2FuncDetector()
+        long_path = "notes/```json\\n" + ("emoji-🚀-{{nested}}-" * 400) + "\\n```"
+        first_args = json.dumps(
+            {"path": long_path, "metadata": {"nested": {"enabled": True}}},
+            ensure_ascii=False,
+        )
+        second_args = json.dumps({"city": "Paris"})
+        chunks = [
+            "<|tool_calls_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:7"
+            "<|tool_call_argument_begin|>"
+        ]
+        chunks.extend(first_args)
+        chunks.extend(
+            [
+                "<|tool_call_",
+                "end|>",
+                "<|tool_call_begin|>functions.get_weather:8"
+                "<|tool_call_argument_begin|>",
+            ]
+        )
+        chunks.extend(second_args)
+        chunks.extend(["<|tool_call_en", "d|><|tool_calls_section_end|>"])
+
+        tool_calls, _ = _collect_streaming_tool_calls(detector, chunks, self.tools)
+
+        self.assertEqual(len(tool_calls), 2)
+        self.assertEqual(json.loads(tool_calls[0]["parameters"]), json.loads(first_args))
+        self.assertEqual(json.loads(tool_calls[1]["parameters"]), json.loads(second_args))
+
+    def test_streaming_complete_wire_format_one_character_at_a_time(self):
+        detector = KimiK2FuncDetector()
+        wire = (
+            "prefix<|tool_calls_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:39"
+            '<|tool_call_argument_begin|>{"path": "/tmp/a"}'
+            "<|tool_call_end|><|tool_calls_section_end|>"
+        )
+
+        tool_calls, normal_text = _collect_streaming_tool_calls(
+            detector, list(wire), self.tools
+        )
+
+        self.assertEqual(normal_text, "prefix")
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(tool_calls[0]["name"], "ReadFile")
+        self.assertEqual(json.loads(tool_calls[0]["parameters"]), {"path": "/tmp/a"})
+
+    def test_streaming_singular_thinking_section_markers_are_stripped(self):
+        detector = KimiK2FuncDetector()
+        wire = (
+            "prefix<|tool_call_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:0"
+            '<|tool_call_argument_begin|>{"path": "/tmp/a"}'
+            "<|tool_call_end|><|tool_call_section_end|>"
+        )
+
+        tool_calls, normal_text = _collect_streaming_tool_calls(
+            detector, list(wire), self.tools
+        )
+
+        self.assertEqual(normal_text, "prefix")
+        self.assertEqual(len(tool_calls), 1)
+
+    def test_streaming_unclosed_section_is_bounded_and_released(self):
+        with patch.dict("os.environ", {"SGLANG_KIMI_PARSER_SECTION_MAX": "128"}):
+            detector = KimiK2FuncDetector()
+        wire = (
+            "<|tool_calls_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:0"
+            "<|tool_call_argument_begin|>" + "x" * 256
+        )
+
+        result = detector.parse_streaming_increment(wire, self.tools)
+
+        self.assertEqual(detector._buffer, "")
+        self.assertEqual(result.normal_text, "functions.ReadFile:0" + "x" * 256)
+        self.assertEqual(result.calls, [])
+
+    def test_streaming_completed_call_does_not_mask_later_overflow(self):
+        with patch.dict("os.environ", {"SGLANG_KIMI_PARSER_SECTION_MAX": "128"}):
+            detector = KimiK2FuncDetector()
+        wire = (
+            "<|tool_calls_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:0"
+            '<|tool_call_argument_begin|>{"path": "/tmp/a"}'
+            "<|tool_call_end|>"
+            "<|tool_call_begin|>functions.ReadFile:1"
+            "<|tool_call_argument_begin|>"
+            + "x" * 200
+        )
+
+        result = detector.parse_streaming_increment(wire, self.tools)
+
+        self.assertEqual(detector._buffer, "")
+        self.assertEqual(len(result.calls), 1)
+        self.assertEqual(result.calls[0].tool_index, 0)
+        self.assertEqual(
+            result.normal_text, "functions.ReadFile:1" + "x" * 200
+        )
+        finished = detector.finish(self.tools)
+        self.assertEqual(finished.normal_text, "")
+        self.assertEqual(detector._buffer, "")
+
+    def test_finish_releases_pending_text_and_resets(self):
+        detector = KimiK2FuncDetector()
+        first = detector.parse_streaming_increment("ordinary text <", self.tools)
+
+        self.assertEqual(first.normal_text, "ordinary text ")
+        self.assertEqual(detector._buffer, "<")
+
+        finished = detector.finish(self.tools)
+
+        self.assertEqual(finished.normal_text, "<")
+        self.assertEqual(detector._buffer, "")
+        self.assertEqual(detector.current_tool_id, -1)
+
+    def test_explicit_reset_isolates_reused_detector(self):
+        detector = KimiK2FuncDetector()
+        wire = (
+            "<|tool_calls_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:0"
+            '<|tool_call_argument_begin|>{"path": "/tmp/a"}'
+            "<|tool_call_end|><|tool_calls_section_end|>"
+        )
+        _collect_streaming_tool_calls(detector, [wire], self.tools)
+        self.assertEqual(detector.current_tool_id, 1)
+
+        detector.reset()
+
+        self.assertEqual(detector.current_tool_id, -1)
+        self.assertEqual(detector.prev_tool_call_arr, [])
+        self.assertEqual(detector.streamed_args_for_tool, [])
+        tool_calls, _ = _collect_streaming_tool_calls(detector, [wire], self.tools)
+        self.assertEqual(tool_calls[0]["name"], "ReadFile")
 
     def test_streaming_state_reset_after_completion(self):
         """Buffer and state reset after tool call completes."""

@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/23363",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 2519's valid fragmented end-marker fix and corrected the independently reproduced one-character marker fragmentation, singular K2-Thinking section markers, unbounded unclosed sections, and missing explicit reset path.",
+  "tests": [
+    {
+      "command": "inline deterministic parser harness against detached candidate a8cd992b18403cd79c7b1defed0d6862f91f813c using the prepared Python interpreter",
+      "exit_code": 1,
+      "what_was_measured": "Candidate produced zero calls for one-character wire fragmentation, leaked singular section markers, buffered 600067 characters for an unclosed section with no normal text, and exposed no reset method. Raw output: reports/j-e9fe954d7d7e/candidate-failing-before.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-e9fe954d7d7e/venv/bin/python -m pytest -q test/registered/function_call/test_kimik2_detector.py",
+      "exit_code": 0,
+      "what_was_measured": "Complete dedicated detector suite: 67 passed plus 7 subtests, including all four review counterexamples and the candidate's split-end regression."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-e9fe954d7d7e/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py -k KimiK2Detector",
+      "exit_code": 0,
+      "what_was_measured": "Legacy compatibility selection: 6 passed, 237 deselected."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The corrected behavior is deterministic CPU-only string parsing; no unrelated GPU smoke was used as evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Kimi-K2/K2.5 weights were available, so model semantic accuracy, actual token generation, HTTP client behavior, and distributed execution remain unverified.",
+    "The streaming parser API has no end-of-stream signal; a trailing literal '<' is held until a subsequent increment disambiguates it, then emitted unchanged if it is not a marker.",
+    "Callers that intentionally reuse a detector across requests must invoke the new reset() method because parse_streaming_increment has no request-boundary argument."
+  ]
+}

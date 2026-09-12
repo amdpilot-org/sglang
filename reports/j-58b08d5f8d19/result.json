@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/23363",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 2581 and corrected both independently reviewed counterexamples: per-call streaming overflow is enforced even after an earlier complete call, finish releases held text and resets state, and non-streaming detection accepts singular K2-Thinking section markers.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python SGLANG_KIMI_PARSER_SECTION_MAX=128 /tmp/amdpilot-repo-j-58b08d5f8d19/venv/bin/python <adversarial harness> (candidate 6791b29b61cb0054a6be3387528f08f31d1872f8)",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before reproduction: the mixed complete/unclosed increment emitted two call fragments and retained 269 characters through finish; singular non-streaming input returned no calls and leaked all marked text."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-58b08d5f8d19/venv/bin/python -m pytest -q test/registered/function_call/test_kimik2_detector.py",
+      "exit_code": 0,
+      "what_was_measured": "Focused detector suite including candidate regressions and new mixed-overflow, finish, and singular non-streaming cases: 70 passed and 7 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-58b08d5f8d19/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py -k KimiK2Detector",
+      "exit_code": 0,
+      "what_was_measured": "Existing parser integration coverage: 6 passed, 237 deselected."
+    },
+    {
+      "command": "PYTHONPATH=python SGLANG_KIMI_PARSER_SECTION_MAX=128 /tmp/amdpilot-repo-j-58b08d5f8d19/venv/bin/python <adversarial harness> (corrected branch)",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after reproduction: one complete call was emitted, the unclosed second call was released as 222 normal characters with an empty buffer, finish retained nothing, and singular non-streaming input parsed one call with prefix content preserved."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the consolidated patch."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The corrected code is deterministic Python string parsing. No Kimi-K2/K2.5 weights were available, so GPU/model execution would not validate these source-level counterexamples."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Kimi-K2 or Kimi-K2.5 weights were available; actual model token emission, semantic tool accuracy, HTTP/client behavior, and distributed execution remain unverified.",
+    "No native code changed and repository-environment.json declares native and wheel artifacts null, so no native rebuild applies.",
+    "The configured section limit continues to use Python character count, matching the preserved candidate implementation; multibyte byte-memory accounting was not part of either concrete review counterexample."
+  ]
+}
