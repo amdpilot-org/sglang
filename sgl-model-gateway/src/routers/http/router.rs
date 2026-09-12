@@ -70,7 +70,9 @@ async fn parse_chat_reasoning_payload(
         };
         if message
             .get("reasoning_content")
-            .is_some_and(|value| !value.is_null())
+            .is_some_and(|value| {
+                !value.is_null() && value.as_str().is_none_or(|reasoning| !reasoning.is_empty())
+            })
         {
             continue;
         }
@@ -1079,6 +1081,19 @@ mod tests {
             payload["choices"][0]["message"]["reasoning_content"],
             "worker"
         );
+        assert_eq!(payload["choices"][0]["message"]["content"], "answer");
+    }
+
+    #[tokio::test]
+    async fn test_http_chat_response_parses_empty_worker_reasoning() {
+        let factory = ReasoningParserFactory::new();
+        let mut payload = serde_json::json!({
+            "choices": [{"message": {"content": "work</think>answer", "reasoning_content": ""}}]
+        });
+
+        parse_chat_reasoning_payload(&factory, Some("qwen3"), "Qwen3.8-27B", &mut payload).await;
+
+        assert_eq!(payload["choices"][0]["message"]["reasoning_content"], "work");
         assert_eq!(payload["choices"][0]["message"]["content"], "answer");
     }
 }

@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35148",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 1691's valid gateway fixes and corrected its remaining non-streaming HTTP empty-string counterexample by treating empty reasoning_content as unpopulated. HTTP streaming remains explicitly unverified and passthrough.",
+  "tests": [
+    {
+      "command": "temporary/permanent regression at exact candidate semantics: cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib test_http_chat_response_parses_empty_worker_reasoning -- --nocapture",
+      "exit_code": 101,
+      "what_was_measured": "Before the guard correction, the native test failed with left reasoning_content String(\"\") versus expected \"work\", matching independent review PR 1786. Raw output: /job/evidence-j-bd579ab8dba4/failing-before-empty.log"
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-bd579ab8dba4/cargo-target /job/.cargo/bin/cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib http_chat_response -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "All three HTTP payload cases passed: null reasoning, empty reasoning, and preservation of non-empty worker reasoning. Raw output: /job/evidence-j-bd579ab8dba4/http-suite.log"
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-bd579ab8dba4/cargo-target /job/.cargo/bin/cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib test_http_chat_response_parses_empty_worker_reasoning -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "After correction, the native Rust regression splits work into reasoning_content and answer into content. Raw output: /job/evidence-j-bd579ab8dba4/passing-after-empty.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "HTTP streaming remains a byte-stream passthrough and was not fixed or verified; a safe correction requires SSE framing across arbitrary byte chunks and parser state per choice.",
+    "Qwen/Qwen3.8-27B-FP8 weights and the reporter's NVIDIA L40S/CUDA environment were unavailable; no full-model, semantic, or architecture-specific claim is made.",
+    "The deterministic regression covers CPU-side Rust payload parsing for the original non-streaming HTTP response shape."
+  ]
+}
