@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33360",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "PR 2138 is verified as test-only hardening: at exact commit 29db02e it rejects each concrete false-negative from the review of PR 1958, while preserving the intentionally partial TBO boundary. It makes no runtime change; the prepared base already contains the production gather correction. The original H800 DeepSeek-V4 Marlin semantic-accuracy workload remains unexecuted.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0cae57308b7f/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v4_dp_gather_semantics.py (at 29db02e)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression on clean exact-candidate source: 3 passed."
+    },
+    {
+      "command": "SGLANG_DSV4_GATHER_TEST_MODELS_DIR=/job/review-evidence-j-0cae57308b7f/adversarial-models PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0cae57308b7f/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v4_dp_gather_semantics.py (at parent 152efc1)",
+      "exit_code": 0,
+      "what_was_measured": "Independently reproduced the parent test's false negative: both wrong input_ids_global.clone() operands plus an extra synchronous dp_gather_partial were accepted; 3 passed."
+    },
+    {
+      "command": "SGLANG_DSV4_GATHER_TEST_MODELS_DIR=/job/review-evidence-j-0cae57308b7f/adversarial-models PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0cae57308b7f/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v4_dp_gather_semantics.py (at 29db02e)",
+      "exit_code": 1,
+      "what_was_measured": "Candidate rejected the combined three-corruption fixture: 2 failed, 1 passed."
+    },
+    {
+      "command": "for fixture in wrong-main wrong-nextn extra-partial historical; do SGLANG_DSV4_GATHER_TEST_MODELS_DIR=/job/review-evidence-j-0cae57308b7f/$fixture ... pytest -q test/registered/unit/models/test_deepseek_v4_dp_gather_semantics.py; done (at 29db02e)",
+      "exit_code": 1,
+      "what_was_measured": "Each adversarial fixture was independently rejected: wrong-main 1 failed/2 passed, wrong-nextn 1 failed/2 passed, extra-partial 1 failed/2 passed, historical 2 failed/1 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0cae57308b7f/venv/bin/python <inline torch GPU arithmetic and aliasing reference>",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X, summing replicated tensors scaled values by widths 2/4/8; selecting one replica preserved values; a view propagated zeroing and a clone isolated it."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A focused Torch GPU numerical mechanism check ran on the assigned AMD Instinct MI350X (gfx950 family). It was not distributed SGLang, NVIDIA Marlin, or full-model execution."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The original eight-H800 TP8/DP4 DeepSeek-V4-Flash-0731 Marlin serving workload and its generated-text semantic accuracy remain unexecuted and unverified."
+  ],
+  "remaining_limitations": [
+    "Only one AMD Instinct MI350X GPU was available, not eight NVIDIA H800 GPUs.",
+    "DeepSeek-V4-Flash-0731 weights, CUDA, and NVIDIA Marlin were unavailable.",
+    "The candidate changes only Python tests and reports; it is test-only hardening, not a production fix by itself.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
