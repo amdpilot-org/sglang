@@ -383,6 +383,35 @@ class TestCustomTopK(CustomTestCase):
                 topk_weights, expected_weights, atol=1e-4, rtol=1e-4
             )
 
+    def test_topk_sigmoid_with_correction_bias_small_expert_counts(self):
+        """Exercise expert counts smaller than the CPU SIMD vector width."""
+        for dtype, num_experts, renormalize in itertools.product(
+            [torch.float32, torch.bfloat16],
+            [1, 2, 4, 8],
+            [False, True],
+        ):
+            logits = torch.linspace(-1, 1, num_experts, dtype=dtype).unsqueeze(0)
+            bias = torch.linspace(1, -1, num_experts, dtype=torch.float32)
+
+            topk_weights, topk_ids = torch.ops.sgl_kernel.topk_sigmoid_cpu(
+                hidden_states=torch.zeros((1, 1), dtype=dtype),
+                gating_output=logits,
+                topk=num_experts,
+                renormalize=renormalize,
+                correction_bias=bias,
+            )
+
+            scores = torch.sigmoid(logits.float())
+            expected_ids = torch.topk(scores + bias.unsqueeze(0), num_experts).indices
+            expected_weights = scores.gather(1, expected_ids)
+            if renormalize:
+                expected_weights /= expected_weights.sum(dim=-1, keepdim=True)
+
+            self.assertTrue(torch.equal(topk_ids.to(torch.int64), expected_ids))
+            torch.testing.assert_close(
+                topk_weights, expected_weights, atol=1e-4, rtol=1e-4
+            )
+
     def test_topk_sigmoid_mixed_input_dtypes(self):
         torch.manual_seed(0)
         hidden_states = torch.randn((17, 16), dtype=torch.bfloat16)
