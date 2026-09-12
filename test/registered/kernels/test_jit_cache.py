@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import os
 import pathlib
+import subprocess
 import sys
+import time
 
 import msgspec
 import pytest
@@ -394,6 +396,75 @@ def test_build_lock_excludes_a_second_holder(tmp_path):
     first.join(5)
     second.join(5)
     assert contender_entered.is_set(), "never entered after the lock was released"
+
+
+def test_build_lock_ignores_an_orphaned_lock_file(tmp_path):
+    from sglang.kernels.jit.utils.compile import loader
+
+    lock_file = tmp_path / loader._LOCK_FILE
+    lock_file.write_text("left by a dead compiler")
+
+    with loader._build_lock(tmp_path):
+        assert lock_file.read_text() == "left by a dead compiler"
+
+
+def test_build_lock_is_released_when_the_holder_process_dies(tmp_path):
+    from sglang.kernels.jit.utils.compile import loader
+
+    ready = tmp_path / "holder-ready"
+    script = """
+import pathlib
+import signal
+import sys
+from sglang.kernels.jit.utils.compile import loader
+
+scope, ready = map(pathlib.Path, sys.argv[1:])
+with loader._build_lock(scope):
+    ready.touch()
+    signal.pause()
+"""
+    process = subprocess.Popen(
+        [sys.executable, "-c", script, str(tmp_path), str(ready)]
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.exists() and process.poll() is None:
+            assert time.monotonic() < deadline, "child never acquired the build lock"
+            time.sleep(0.01)
+        assert ready.exists(), (
+            f"child exited before acquiring lock: {process.returncode}"
+        )
+    finally:
+        process.terminate()
+        process.wait(timeout=5)
+
+    assert (tmp_path / loader._LOCK_FILE).exists()
+    with loader._build_lock(tmp_path):
+        pass
+
+
+def test_mxfp4_registered_test_retries_a_stalled_worker_attempt():
+    test_file = (
+        pathlib.Path(__file__).parents[1] / "expert_pack" / "test_expert_pack_mxfp4.py"
+    )
+    env = os.environ.copy()
+    env.update(
+        SGLANG_MXFP4_TEST_TIMEOUT_SECONDS="20",
+        SGLANG_MXFP4_TEST_STALL_ATTEMPT="1",
+        SGLANG_MXFP4_TEST_SUPERVISOR_SELF_TEST="1",
+    )
+    result = subprocess.run(
+        [sys.executable, str(test_file)],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout
+    assert "attempt 1/2 timed out" in result.stdout
+    assert result.stdout.count("with fresh cache") == 2
+    assert "MXFP4 supervisor self-test worker passed" in result.stdout
 
 
 # --------------------------------------------------------------------------
