@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36194",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced Pydantic bool_type rejection of strict=null in both ChatCompletionRequest and ResponsesRequest, then made only the two function-tool strict fields nullable while preserving the False default. Added regressions for both request shapes and independent omitted, true, and invalid structured-value boundaries. The same narrow change is present in still-open upstream PR https://github.com/sgl-project/sglang/pull/36199, but it was not present at the prepared base commit.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-1ede4d271665/venv/bin/python < inline protocol validation script",
+      "exit_code": 0,
+      "what_was_measured": "Before the change, both strict=null request shapes failed with bool_type at the reported field paths; omitted and boolean values were accepted. Raw output: reports/j-1ede4d271665/raw/baseline_protocol_validation.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1ede4d271665/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_protocol.py test/registered/unit/entrypoints/openai/test_responses_protocol.py",
+      "exit_code": 0,
+      "what_was_measured": "Both complete OpenAI protocol test modules passed: 69 tests and 25 subtests. Raw output: reports/j-1ede4d271665/raw/pytest_protocol_after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1ede4d271665/venv/bin/python -m pytest -q <7 focused regression and boundary node IDs>",
+      "exit_code": 0,
+      "what_was_measured": "Nullable strict acceptance for chat and responses, omitted False defaults, explicit True acceptance, and rejection of structured non-boolean values: 7 passed. Raw output: reports/j-1ede4d271665/raw/focused_regression_after.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the patch."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1ede4d271665/venv/bin/python -m black|isort|ruff ...",
+      "exit_code": 1,
+      "what_was_measured": "Each formatter/linter module was unavailable in the prepared interpreter; no packages were installed or replaced. Raw outputs: reports/j-1ede4d271665/raw/black_check.txt, isort_check.txt, and ruff_check.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No live HTTP server/model-weight run was performed; reproduction and verification exercise the exact request models that reject the payload before model execution, not a full serving process.",
+    "GPU execution was not used because the defect and fix are confined to CPU-side Pydantic request validation before model execution; no GPU result is claimed, and a GPU smoke would not validate this behavior.",
+    "No model architecture, semantic accuracy, distributed workload, or GPU inference behavior was tested or claimed.",
+    "black, isort, and ruff were not installed in the prepared interpreter; git diff --check and the repository's protocol tests passed."
+  ]
+}

@@ -1,6 +1,8 @@
 import json
 import unittest
 
+from pydantic import ValidationError
+
 from utils import make_serving  # noqa: F401 — bootstrap import
 
 from sglang.srt.entrypoints.openai.protocol import (
@@ -9,6 +11,7 @@ from sglang.srt.entrypoints.openai.protocol import (
     ResponsesResponse,
     UsageInfo,
 )
+from sglang.srt.entrypoints.openai.serving_responses import OpenAIServingResponses
 from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import CustomTestCase
 
@@ -70,6 +73,45 @@ class ResponsesRequestTestCase(CustomTestCase):
         self.assertEqual(request.tools[0].type, "function")
         self.assertEqual(request.tools[0].name, "lookup")
         self.assertTrue(request.tools[0].strict)
+
+    def test_function_tool_accepts_nullable_strict(self):
+        request = ResponsesRequest(
+            model="x",
+            input="call the tool",
+            tools=[
+                {
+                    "type": "function",
+                    "name": "lookup",
+                    "strict": None,
+                }
+            ],
+            store=False,
+        )
+
+        self.assertIs(request.tools[0].strict, False)
+        self.assertIs(request.model_dump()["tools"][0]["strict"], False)
+
+        chat_tools = OpenAIServingResponses._response_tools_to_chat_tools(request)
+        self.assertIs(chat_tools[0].function.strict, False)
+
+    def test_function_tool_omitted_strict_defaults_to_false(self):
+        request = ResponsesRequest(
+            model="x",
+            input="call the tool",
+            tools=[{"type": "function", "name": "lookup"}],
+            store=False,
+        )
+
+        self.assertIs(request.tools[0].strict, False)
+
+    def test_function_tool_rejects_non_boolean_strict(self):
+        with self.assertRaises(ValidationError):
+            ResponsesRequest(
+                model="x",
+                input="call the tool",
+                tools=[{"type": "function", "name": "lookup", "strict": {}}],
+                store=False,
+            )
 
     def test_function_tool_requires_name(self):
         with self.assertRaises(ValueError):

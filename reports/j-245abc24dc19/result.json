@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36194",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced all three independent-review counterexamples at candidate commit aff03080588f3a879a4e5a8871523a224b8997a8 from https://github.com/amdpilot-org/sglang/pull/1249, as reviewed by https://github.com/amdpilot-org/sglang/pull/1328. The candidate accepted explicit strict:null but retained None in ResponsesRequest, ChatCompletionRequest, model_dump output, and the Responses-to-Chat conversion. The consolidated correction preserves nullable input acceptance while normalizing null to the established false default during validation.",
+  "tests": [
+    {
+      "command": "git switch --detach aff03080588f3a879a4e5a8871523a224b8997a8 && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-245abc24dc19/venv/bin/python < inline three-counterexample reproduction",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate commit, both request models and their model_dump outputs retained strict=None, and constructing Function from ResponseTool retained None. Raw output: reports/j-245abc24dc19/raw/candidate_counterexamples.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-245abc24dc19/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_protocol.py test/registered/unit/entrypoints/openai/test_responses_protocol.py",
+      "exit_code": 0,
+      "what_was_measured": "69 focused protocol tests and 25 subtests passed, including explicit null normalization, omitted/true values, invalid non-boolean rejection, serialization, and the Responses-to-Chat conversion boundary. Raw output: reports/j-245abc24dc19/raw/focused_tests_after.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-245abc24dc19/venv/bin/python < inline post-fix three-counterexample reproduction",
+      "exit_code": 0,
+      "what_was_measured": "ResponsesRequest, ChatCompletionRequest, both model dumps, and the converted Function all contained strict=False for explicit JSON null. Raw output: reports/j-245abc24dc19/raw/counterexamples_after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-245abc24dc19/venv/bin/python -m ruff check python/sglang/srt/entrypoints/openai/protocol.py test/registered/unit/entrypoints/openai/test_protocol.py test/registered/unit/entrypoints/openai/test_responses_protocol.py",
+      "exit_code": 1,
+      "what_was_measured": "The prepared interpreter does not contain the ruff module; no lint result was claimed. Raw output: reports/j-245abc24dc19/raw/ruff_after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-245abc24dc19/venv/bin/python -m black --check python/sglang/srt/entrypoints/openai/protocol.py test/registered/unit/entrypoints/openai/test_protocol.py test/registered/unit/entrypoints/openai/test_responses_protocol.py",
+      "exit_code": 1,
+      "what_was_measured": "The prepared interpreter does not contain the black module; no formatter result was claimed. Raw output: reports/j-245abc24dc19/raw/black_after.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the correction."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No live HTTP server/model test was run because the focused schema and serving-conversion paths reproduce the complete defect without model weights; transport or model execution is not claimed.",
+    "GPU execution was not used because the defect and correction are deterministic Pydantic request-validation and internal conversion behavior; no model execution, model weights, or GPU architecture is involved.",
+    "Black and Ruff were unavailable in the prepared interpreter."
+  ]
+}
