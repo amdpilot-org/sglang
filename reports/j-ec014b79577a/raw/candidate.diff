@@ -1,0 +1,445 @@
+diff --git a/python/sglang/srt/managers/scheduler.py b/python/sglang/srt/managers/scheduler.py
+index f0914b1..7240b2c 100644
+--- a/python/sglang/srt/managers/scheduler.py
++++ b/python/sglang/srt/managers/scheduler.py
+@@ -2384,6 +2384,7 @@ class Scheduler(
+             send_metrics_from_scheduler=self.ipc_channels.send_metrics_from_scheduler,
+             max_running_requests=self.max_running_requests,
+             max_total_num_tokens=self.max_total_num_tokens,
++            page_size=self.page_size,
+             get_stats=lambda: self.metrics_reporter.stats,
+         )
+ 
+diff --git a/python/sglang/srt/managers/scheduler_components/kv_events_publisher.py b/python/sglang/srt/managers/scheduler_components/kv_events_publisher.py
+index b483a9a..276c11d 100644
+--- a/python/sglang/srt/managers/scheduler_components/kv_events_publisher.py
++++ b/python/sglang/srt/managers/scheduler_components/kv_events_publisher.py
+@@ -54,6 +54,7 @@ class SchedulerKvEventsPublisher:
+     send_metrics_from_scheduler: Optional[zmq.Socket]
+     max_running_requests: int
+     max_total_num_tokens: int
++    page_size: int
+     get_stats: Callable
+     enable_kv_cache_events: bool = False
+     kv_event_publisher: Any = None
+@@ -79,10 +80,11 @@ class SchedulerKvEventsPublisher:
+         kv_metrics = KvMetrics()
+         kv_metrics.request_active_slots = self.get_stats().num_running_reqs.total
+         kv_metrics.request_total_slots = self.max_running_requests
++        num_blocks = self.max_total_num_tokens // self.page_size
+         kv_metrics.kv_active_blocks = int(
+-            self.get_stats().token_usage * self.max_total_num_tokens
++            self.get_stats().token_usage * num_blocks
+         )
+-        kv_metrics.kv_total_blocks = self.max_total_num_tokens
++        kv_metrics.kv_total_blocks = num_blocks
+         kv_metrics.num_requests_waiting = self.get_stats().num_queue_reqs.total
+         kv_metrics.gpu_cache_usage_perc = self.get_stats().token_usage
+         kv_metrics.gpu_prefix_cache_hit_rate = self.get_stats().cache_hit_rate
+diff --git a/reports/j-0fdd5b6f6a37/investigation.md b/reports/j-0fdd5b6f6a37/investigation.md
+new file mode 100644
+index 0000000..0c47fa3
+--- /dev/null
++++ b/reports/j-0fdd5b6f6a37/investigation.md
+@@ -0,0 +1,21 @@
++# Investigation evidence
++
++- Upstream issue: https://github.com/sgl-project/sglang/issues/32475
++- Mirror issue: https://github.com/amdpilot-org/sglang/issues/2063
++- Recorded base: `358c163250ad3b1f62939b01ce1314a0a31a0365`
++- Prepared interpreter: `/tmp/amdpilot-repo-j-0fdd5b6f6a37/venv/bin/python`
++
++The base source still assigned token capacity directly to the two fields named
++`kv_*_blocks`. A direct call through the actual `emit_kv_metrics` implementation
++recorded `8192` total and `4096` active for 8192 tokens at 50% usage. Applying
++the scheduler's page size of 16 independently gives 512 total pages and 256
++active pages.
++
++Repository and upstream history searches found two open, unmerged proposed
++fixes: https://github.com/sgl-project/sglang/pull/32499 and
++https://github.com/sgl-project/sglang/pull/32558. Neither correction was present
++at the prepared base.
++
++The implemented fix uses the same floor-page convention already present in
++`Scheduler.emit_metrics_constants`: `max_total_num_tokens // page_size`.
++Raw failing-before and passing-after outputs are retained in `raw/`.
+diff --git a/reports/j-0fdd5b6f6a37/raw/direct-reproduction-before.log b/reports/j-0fdd5b6f6a37/raw/direct-reproduction-before.log
+new file mode 100644
+index 0000000..74f7250
+--- /dev/null
++++ b/reports/j-0fdd5b6f6a37/raw/direct-reproduction-before.log
+@@ -0,0 +1,3 @@
++[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
++[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-0fdd5b6f6a37/cache/aiter/module_aiter_core.so
++{'actual_total_blocks': 8192, 'actual_active_blocks': 4096, 'expected_total_blocks_at_page_size_16': 512, 'expected_active_blocks_at_page_size_16': 256}
+diff --git a/reports/j-0fdd5b6f6a37/raw/regression-after.log b/reports/j-0fdd5b6f6a37/raw/regression-after.log
+new file mode 100644
+index 0000000..cbf29f2
+--- /dev/null
++++ b/reports/j-0fdd5b6f6a37/raw/regression-after.log
+@@ -0,0 +1,18 @@
++.                                                                    [100%]
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++  
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++1 passed, 17 warnings, 4 subtests passed in 11.93s
+diff --git a/reports/j-0fdd5b6f6a37/raw/regression-before.log b/reports/j-0fdd5b6f6a37/raw/regression-before.log
+new file mode 100644
+index 0000000..e6822a7
+--- /dev/null
++++ b/reports/j-0fdd5b6f6a37/raw/regression-before.log
+@@ -0,0 +1,200 @@
++.                                                                    [100%]
++=================================== FAILURES ===================================
++_ TestSchedulerKvEventsPublisher.test_kv_block_metrics_use_page_units (label='paged_half_full') _
++
++self = <test_kv_events_publisher.TestSchedulerKvEventsPublisher testMethod=test_kv_block_metrics_use_page_units>
++mock_sock_send = <MagicMock name='sock_send' id='140436837811312'>
++
++    @patch(
++        "sglang.srt.managers.scheduler_components.kv_events_publisher.sock_send"
++    )
++    def test_kv_block_metrics_use_page_units(self, mock_sock_send):
++        cases = [
++            ("paged_half_full", 8192, 16, 0.5, 512, 256),
++            ("single_token_pages", 8192, 1, 0.5, 8192, 4096),
++            ("empty_cache", 8192, 16, 0.0, 512, 0),
++            ("partial_trailing_page", 8200, 16, 1.0, 512, 512),
++        ]
++    
++        for label, max_tokens, page_size, usage, total_blocks, active_blocks in cases:
++            with self.subTest(label=label):
++                mock_sock_send.reset_mock()
++                stats = SimpleNamespace(
++                    num_running_reqs=SimpleNamespace(total=2),
++                    num_queue_reqs=SimpleNamespace(total=3),
++                    token_usage=usage,
++                    cache_hit_rate=0.25,
++                )
++                socket = MagicMock()
++                socket.closed = False
++>               publisher = SchedulerKvEventsPublisher(
++                    kv_events_config=None,
++                    ps=SimpleNamespace(dp_rank=None),
++                    attn_tp_rank=0,
++                    attn_cp_rank=0,
++                    attn_dp_rank=0,
++                    dp_rank=None,
++                    tree_cache=MagicMock(),
++                    send_metrics_from_scheduler=socket,
++                    max_running_requests=8,
++                    max_total_num_tokens=max_tokens,
++                    page_size=page_size,
++                    get_stats=lambda: stats,
++                )
++E               TypeError: SchedulerKvEventsPublisher.__init__() got an unexpected keyword argument 'page_size'
++
++test/registered/unit/managers/scheduler_components/test_kv_events_publisher.py:37: TypeError
++_ TestSchedulerKvEventsPublisher.test_kv_block_metrics_use_page_units (label='single_token_pages') _
++
++self = <test_kv_events_publisher.TestSchedulerKvEventsPublisher testMethod=test_kv_block_metrics_use_page_units>
++mock_sock_send = <MagicMock name='sock_send' id='140436837811312'>
++
++    @patch(
++        "sglang.srt.managers.scheduler_components.kv_events_publisher.sock_send"
++    )
++    def test_kv_block_metrics_use_page_units(self, mock_sock_send):
++        cases = [
++            ("paged_half_full", 8192, 16, 0.5, 512, 256),
++            ("single_token_pages", 8192, 1, 0.5, 8192, 4096),
++            ("empty_cache", 8192, 16, 0.0, 512, 0),
++            ("partial_trailing_page", 8200, 16, 1.0, 512, 512),
++        ]
++    
++        for label, max_tokens, page_size, usage, total_blocks, active_blocks in cases:
++            with self.subTest(label=label):
++                mock_sock_send.reset_mock()
++                stats = SimpleNamespace(
++                    num_running_reqs=SimpleNamespace(total=2),
++                    num_queue_reqs=SimpleNamespace(total=3),
++                    token_usage=usage,
++                    cache_hit_rate=0.25,
++                )
++                socket = MagicMock()
++                socket.closed = False
++>               publisher = SchedulerKvEventsPublisher(
++                    kv_events_config=None,
++                    ps=SimpleNamespace(dp_rank=None),
++                    attn_tp_rank=0,
++                    attn_cp_rank=0,
++                    attn_dp_rank=0,
++                    dp_rank=None,
++                    tree_cache=MagicMock(),
++                    send_metrics_from_scheduler=socket,
++                    max_running_requests=8,
++                    max_total_num_tokens=max_tokens,
++                    page_size=page_size,
++                    get_stats=lambda: stats,
++                )
++E               TypeError: SchedulerKvEventsPublisher.__init__() got an unexpected keyword argument 'page_size'
++
++test/registered/unit/managers/scheduler_components/test_kv_events_publisher.py:37: TypeError
++_ TestSchedulerKvEventsPublisher.test_kv_block_metrics_use_page_units (label='empty_cache') _
++
++self = <test_kv_events_publisher.TestSchedulerKvEventsPublisher testMethod=test_kv_block_metrics_use_page_units>
++mock_sock_send = <MagicMock name='sock_send' id='140436837811312'>
++
++    @patch(
++        "sglang.srt.managers.scheduler_components.kv_events_publisher.sock_send"
++    )
++    def test_kv_block_metrics_use_page_units(self, mock_sock_send):
++        cases = [
++            ("paged_half_full", 8192, 16, 0.5, 512, 256),
++            ("single_token_pages", 8192, 1, 0.5, 8192, 4096),
++            ("empty_cache", 8192, 16, 0.0, 512, 0),
++            ("partial_trailing_page", 8200, 16, 1.0, 512, 512),
++        ]
++    
++        for label, max_tokens, page_size, usage, total_blocks, active_blocks in cases:
++            with self.subTest(label=label):
++                mock_sock_send.reset_mock()
++                stats = SimpleNamespace(
++                    num_running_reqs=SimpleNamespace(total=2),
++                    num_queue_reqs=SimpleNamespace(total=3),
++                    token_usage=usage,
++                    cache_hit_rate=0.25,
++                )
++                socket = MagicMock()
++                socket.closed = False
++>               publisher = SchedulerKvEventsPublisher(
++                    kv_events_config=None,
++                    ps=SimpleNamespace(dp_rank=None),
++                    attn_tp_rank=0,
++                    attn_cp_rank=0,
++                    attn_dp_rank=0,
++                    dp_rank=None,
++                    tree_cache=MagicMock(),
++                    send_metrics_from_scheduler=socket,
++                    max_running_requests=8,
++                    max_total_num_tokens=max_tokens,
++                    page_size=page_size,
++                    get_stats=lambda: stats,
++                )
++E               TypeError: SchedulerKvEventsPublisher.__init__() got an unexpected keyword argument 'page_size'
++
++test/registered/unit/managers/scheduler_components/test_kv_events_publisher.py:37: TypeError
++_ TestSchedulerKvEventsPublisher.test_kv_block_metrics_use_page_units (label='partial_trailing_page') _
++
++self = <test_kv_events_publisher.TestSchedulerKvEventsPublisher testMethod=test_kv_block_metrics_use_page_units>
++mock_sock_send = <MagicMock name='sock_send' id='140436837811312'>
++
++    @patch(
++        "sglang.srt.managers.scheduler_components.kv_events_publisher.sock_send"
++    )
++    def test_kv_block_metrics_use_page_units(self, mock_sock_send):
++        cases = [
++            ("paged_half_full", 8192, 16, 0.5, 512, 256),
++            ("single_token_pages", 8192, 1, 0.5, 8192, 4096),
++            ("empty_cache", 8192, 16, 0.0, 512, 0),
++            ("partial_trailing_page", 8200, 16, 1.0, 512, 512),
++        ]
++    
++        for label, max_tokens, page_size, usage, total_blocks, active_blocks in cases:
++            with self.subTest(label=label):
++                mock_sock_send.reset_mock()
++                stats = SimpleNamespace(
++                    num_running_reqs=SimpleNamespace(total=2),
++                    num_queue_reqs=SimpleNamespace(total=3),
++                    token_usage=usage,
++                    cache_hit_rate=0.25,
++                )
++                socket = MagicMock()
++                socket.closed = False
++>               publisher = SchedulerKvEventsPublisher(
++                    kv_events_config=None,
++                    ps=SimpleNamespace(dp_rank=None),
++                    attn_tp_rank=0,
++                    attn_cp_rank=0,
++                    attn_dp_rank=0,
++                    dp_rank=None,
++                    tree_cache=MagicMock(),
++                    send_metrics_from_scheduler=socket,
++                    max_running_requests=8,
++                    max_total_num_tokens=max_tokens,
++                    page_size=page_size,
++                    get_stats=lambda: stats,
++                )
++E               TypeError: SchedulerKvEventsPublisher.__init__() got an unexpected keyword argument 'page_size'
++
++test/registered/unit/managers/scheduler_components/test_kv_events_publisher.py:37: TypeError
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++  
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++=========================== short test summary info ============================
++SUBFAILED(label='paged_half_full') test/registered/unit/managers/scheduler_components/test_kv_events_publisher.py::TestSchedulerKvEventsPublisher::test_kv_block_metrics_use_page_units
++SUBFAILED(label='single_token_pages') test/registered/unit/managers/scheduler_components/test_kv_events_publisher.py::TestSchedulerKvEventsPublisher::test_kv_block_metrics_use_page_units
++SUBFAILED(label='empty_cache') test/registered/unit/managers/scheduler_components/test_kv_events_publisher.py::TestSchedulerKvEventsPublisher::test_kv_block_metrics_use_page_units
++SUBFAILED(label='partial_trailing_page') test/registered/unit/managers/scheduler_components/test_kv_events_publisher.py::TestSchedulerKvEventsPublisher::test_kv_block_metrics_use_page_units
++4 failed, 1 passed, 17 warnings in 26.39s
+diff --git a/reports/j-0fdd5b6f6a37/raw/related-tests.log b/reports/j-0fdd5b6f6a37/raw/related-tests.log
+new file mode 100644
+index 0000000..49ecacb
+--- /dev/null
++++ b/reports/j-0fdd5b6f6a37/raw/related-tests.log
+@@ -0,0 +1,18 @@
++................                                   [100%]
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++  
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++16 passed, 17 warnings, 22 subtests passed in 12.33s
+diff --git a/reports/j-0fdd5b6f6a37/result.json b/reports/j-0fdd5b6f6a37/result.json
+new file mode 100644
+index 0000000..af61614
+--- /dev/null
++++ b/reports/j-0fdd5b6f6a37/result.json
+@@ -0,0 +1,43 @@
++{
++  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32475",
++  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
++  "outcome": "fixed",
++  "summary": "Reproduced that SchedulerKvEventsPublisher emitted max_total_num_tokens directly as kv_total_blocks and scaled the same token capacity for kv_active_blocks. The scheduler now passes page_size to the publisher, which reports both fields using max_total_num_tokens // page_size. Added a regression for the reported page_size=16 example plus page_size=1, empty-cache, and partial-trailing-page boundaries.",
++  "tests": [
++    {
++      "command": "/tmp/amdpilot-repo-j-0fdd5b6f6a37/venv/bin/python (direct emit_kv_metrics reproduction; output in reports/j-0fdd5b6f6a37/raw/direct-reproduction-before.log)",
++      "exit_code": 0,
++      "what_was_measured": "On the base implementation, max_total_num_tokens=8192 and token_usage=0.5 emitted kv_total_blocks=8192 and kv_active_blocks=4096; the page_size=16 references are 512 and 256."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-0fdd5b6f6a37/venv/bin/python -m pytest -q test/registered/unit/managers/scheduler_components/test_kv_events_publisher.py (before production fix)",
++      "exit_code": 1,
++      "what_was_measured": "The added regression failed before the fix because SchedulerKvEventsPublisher had no page_size input; all four page-unit cases failed. Raw output is in reports/j-0fdd5b6f6a37/raw/regression-before.log."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-0fdd5b6f6a37/venv/bin/python -m pytest -q test/registered/unit/managers/scheduler_components/test_kv_events_publisher.py",
++      "exit_code": 0,
++      "what_was_measured": "One test and four subtests passed: page_size=16 at 50% usage, page_size=1 compatibility, zero active usage, and floor division for a partial trailing page. Raw output is in reports/j-0fdd5b6f6a37/raw/regression-after.log."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-0fdd5b6f6a37/venv/bin/python -m pytest -q test/registered/unit/managers/scheduler_components/test_output_sender.py test/registered/unit/disaggregation/test_kv_events.py",
++      "exit_code": 0,
++      "what_was_measured": "Adjacent scheduler-component and KV-event tests passed: 16 tests and 22 subtests. Raw output is in reports/j-0fdd5b6f6a37/raw/related-tests.log."
++    },
++    {
++      "command": "git diff --check",
++      "exit_code": 0,
++      "what_was_measured": "The complete change has no whitespace errors."
++    }
++  ],
++  "gpu_execution": {
++    "value": false,
++    "evidence": "The defect and correction are CPU-side scheduler metric accounting and mocked socket serialization; no model, tensor, kernel, or GPU execution path is involved. No unrelated GPU smoke was used as evidence."
++  },
++  "native_rebuilt": false,
++  "remaining_limitations": [
++    "No full serving/model run was performed because this unit conversion does not depend on weights or engine GPU execution.",
++    "The prepared interpreter does not include the ruff module; formatting was reviewed through the focused diff and git diff --check instead.",
++    "Two related upstream pull requests, https://github.com/sgl-project/sglang/pull/32499 and https://github.com/sgl-project/sglang/pull/32558, remain open; this task did not modify or notify upstream."
++  ]
++}
+diff --git a/test/registered/unit/managers/scheduler_components/test_kv_events_publisher.py b/test/registered/unit/managers/scheduler_components/test_kv_events_publisher.py
+new file mode 100644
+index 0000000..6ab87e6
+--- /dev/null
++++ b/test/registered/unit/managers/scheduler_components/test_kv_events_publisher.py
+@@ -0,0 +1,62 @@
++import unittest
++from types import SimpleNamespace
++from unittest.mock import MagicMock, patch
++
++from sglang.srt.managers.scheduler_components.kv_events_publisher import (
++    SchedulerKvEventsPublisher,
++)
++from sglang.test.ci.ci_register import register_cpu_ci
++from sglang.test.test_utils import CustomTestCase
++
++register_cpu_ci(est_time=5, suite="base-a-test-cpu")
++
++
++class TestSchedulerKvEventsPublisher(CustomTestCase):
++    @patch(
++        "sglang.srt.managers.scheduler_components.kv_events_publisher.sock_send"
++    )
++    def test_kv_block_metrics_use_page_units(self, mock_sock_send):
++        cases = [
++            ("paged_half_full", 8192, 16, 0.5, 512, 256),
++            ("single_token_pages", 8192, 1, 0.5, 8192, 4096),
++            ("empty_cache", 8192, 16, 0.0, 512, 0),
++            ("partial_trailing_page", 8200, 16, 1.0, 512, 512),
++        ]
++
++        for label, max_tokens, page_size, usage, total_blocks, active_blocks in cases:
++            with self.subTest(label=label):
++                mock_sock_send.reset_mock()
++                stats = SimpleNamespace(
++                    num_running_reqs=SimpleNamespace(total=2),
++                    num_queue_reqs=SimpleNamespace(total=3),
++                    token_usage=usage,
++                    cache_hit_rate=0.25,
++                )
++                socket = MagicMock()
++                socket.closed = False
++                publisher = SchedulerKvEventsPublisher(
++                    kv_events_config=None,
++                    ps=SimpleNamespace(dp_rank=None),
++                    attn_tp_rank=0,
++                    attn_cp_rank=0,
++                    attn_dp_rank=0,
++                    dp_rank=None,
++                    tree_cache=MagicMock(),
++                    send_metrics_from_scheduler=socket,
++                    max_running_requests=8,
++                    max_total_num_tokens=max_tokens,
++                    page_size=page_size,
++                    get_stats=lambda: stats,
++                )
++                publisher.enable_kv_cache_events = True
++
++                publisher.emit_kv_metrics()
++
++                metrics = mock_sock_send.call_args.args[1]
++                self.assertEqual(metrics.kv_total_blocks, total_blocks)
++                self.assertEqual(metrics.kv_active_blocks, active_blocks)
++                self.assertEqual(metrics.gpu_cache_usage_perc, usage)
++
++
++if __name__ == "__main__":
++    unittest.main()
