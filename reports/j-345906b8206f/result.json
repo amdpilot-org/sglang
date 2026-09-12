@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30314",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate 8b1804ecee27f2c877529f501f53d79a5c8ef1fc's default decode-prefix unlock, but rejected its reduced Mamba pool sizing. The candidate's own deterministic fixture reproduced an admission peak of N request-owned states plus N admission-locked prefix states plus a donated state: 2N capacity raises 'Can not alloc mamba cache' after eviction finds no victim, while 3N succeeds. Pool sizing now retains the original admission ratios (3 no-buffer, 4 lazy extra-buffer, 5 overlap extra-buffer) whether decode lock skipping is enabled or disabled.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-345906b8206f/venv/bin/python test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py (candidate before correction)",
+      "exit_code": 1,
+      "what_was_measured": "The new admission-ratio invariant failed on the exact candidate: default-on skip produced lazy ratio 3 instead of required 4 (and overlap ratio 4 instead of 5). Raw output: failing-before-candidate.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-345906b8206f/venv/bin/python test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py",
+      "exit_code": 0,
+      "what_was_measured": "10 tests passed, including locked-prefix 2N failure, locked-prefix 3N success, decode-evictable 2N recovery, default decode unlock, and admission-safe ratios under both switch settings."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-345906b8206f/venv/bin/python test/registered/unit/mem_cache/test_streaming_session_unit.py",
+      "exit_code": 0,
+      "what_was_measured": "9 tests passed for session state and component-lock release behavior."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-345906b8206f/venv/bin/python test/registered/unit/mem_cache/test_unified_radix_allocation_eviction.py",
+      "exit_code": 0,
+      "what_was_measured": "17 tests passed for allocation-aware eviction, capacity rechecks, donor exhaustion, and zero-free-slot recovery."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-345906b8206f/venv/bin/python test/registered/unit/managers/test_prefill_adder.py",
+      "exit_code": 0,
+      "what_was_measured": "28 scheduler admission tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-345906b8206f/venv/bin/python test/registered/unit/managers/test_scheduler_init_req_max_new_tokens.py",
+      "exit_code": 0,
+      "what_was_measured": "8 request-length and token-capacity boundary tests passed."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The corrected behavior is CPU-side cache sizing and admission policy; no model or GPU kernel is exercised by the deterministic regression."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The Qwen3.5-397B-A17B-FP8 weights and eight H100 80GB GPUs were unavailable; TP=8, EAGLE, 100K+ production traffic, CUDA behavior, and model semantics were not reproduced.",
+    "Direct hierarchical-cache I/O blocking and the reported 222-second TTFT were not reproduced.",
+    "The tiny Llama fixture cannot exercise Mamba state allocation, so it was not used as evidence for /health responsiveness under Mamba pressure.",
+    "No claim is made that decode-prefix locking explains the zero-running post-flush report by itself. The correction instead preserves enough admission-time capacity for the independently reproduced locked-prefix peak, while the candidate's decode unlock handles redundant decode-held locks.",
+    "HTTP /health and completion responsiveness under a real Mamba admission stall remains unverified without compatible model weights."
+  ]
+}
