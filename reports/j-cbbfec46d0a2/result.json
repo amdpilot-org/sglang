@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34205",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the missing LoRARegistry release in TokenizerManager._handle_abort_req, added the matching asynchronous release, and constrained the existing 500/503 consumer fallback to release only when it still owns the same ReqState. This prevents both the reported leak and a double release when the direct-abort output is later consumed.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-cbbfec46d0a2/venv/bin/python -m pytest test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py::TestRidToStateCleanupOnAbort::test_abort_releases_lora_reference -q --junitxml=reports/j-cbbfec46d0a2/evidence/failing-before.xml",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: direct abort released the acquired LoRA ID zero times. Raw JUnit output is retained at reports/j-cbbfec46d0a2/evidence/failing-before.xml."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-cbbfec46d0a2/venv/bin/python -m pytest test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py::TestRidToStateCleanupOnAbort::test_abort_releases_lora_reference test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py::TestRidToStateCleanupOnAbort::test_error_abort_releases_lora_reference_once test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py::TestRidToStateCleanupOnAbort::test_abort_without_lora_does_not_release_reference -q --junitxml=reports/j-cbbfec46d0a2/evidence/focused-after.xml",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after focused regression and boundaries: direct LoRA abort releases once, a 503 direct-abort/consumer sequence releases exactly once, and a non-LoRA abort performs no release."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-cbbfec46d0a2/venv/bin/python -m pytest test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py -q --junitxml=reports/j-cbbfec46d0a2/evidence/full-after-formatted.xml",
+      "exit_code": 0,
+      "what_was_measured": "Full rid_to_state cleanup regression file after formatting: 30 tests passed and 3 subtests passed, including the independent owned-state 500 fallback boundary."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-cbbfec46d0a2/pre-commit /opt/venv/bin/pre-commit run --files python/sglang/srt/managers/tokenizer_manager.py test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, spelling, and registered-test policy hooks passed on the changed source and test files."
+    },
+    {
+      "command": "git diff --check && /tmp/amdpilot-repo-j-cbbfec46d0a2/venv/bin/python -m py_compile python/sglang/srt/managers/tokenizer_manager.py test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace and Python bytecode compilation passed."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The defect and regression concern CPU-side asynchronous LoRA registry reference accounting with mocked request state; no model forward pass, kernel, or numerical GPU behavior is involved. No unrelated GPU smoke is claimed as evidence.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No live serving reproduction with model weights and a real LoRA adapter was run; validation is deterministic unit coverage of the actual TokenizerManager implementation and release coroutine calls.",
+    "No model architecture, semantic accuracy, distributed workload, or adapter eviction throughput claim is made.",
+    "The checkout is shallow at the campaign-recorded base; related upstream issue and PR state was inspected through GitHub before implementation."
+  ]
+}
