@@ -66,7 +66,10 @@ def launch_or_reuse_server(launch_server_func: Callable, server_args: ServerArgs
         )
         return None, base_url
 
-    proc = multiprocessing.Process(
+    # ServerArgs resolution can initialize the accelerator in this parent.
+    # Starting the HTTP server with fork would then inherit an unusable device
+    # context, so isolate the launched server with a fresh interpreter.
+    proc = multiprocessing.get_context("spawn").Process(
         target=_launch_server_target,
         args=(
             launch_server_func,
