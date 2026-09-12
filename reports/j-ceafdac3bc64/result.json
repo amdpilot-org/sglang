@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37342",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Reproduced the review's direct-loader counterexamples against candidate 74ec83a. Preserved its valid backend-selection fix and replaced the unconstrained hand-sized loader fixture with production DeepSeek-V4 FlashInfer CUTLASS MXFP4 weight creation plus independent model-shape boundaries. No production correction is justified without the checkpoint and SM90 execution.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ceafdac3bc64/venv/bin/python -m pytest test/registered/unit/layers/quantization/test_dsv4_mxfp4_loader.py -q",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate's four direct-loader TP-rank cases passed before correction."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ceafdac3bc64/venv/bin/python reports/j-ceafdac3bc64/evidence/adversarial_loader.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate fixture pattern accepted 2048/128, 1024/64, and 2048/127 when destinations were hand-sized to match."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ceafdac3bc64/venv/bin/python -m pytest test/registered/unit/layers/quantization/test_dsv4_mxfp4_loader.py test/registered/unit/test_model_overrides.py::TestGoldenModelOverrides::test_deepseek_v4_overrides_at_callable_level -q",
+      "exit_code": 0,
+      "what_was_measured": "Eight corrected tests passed: production-created DSv4 MXFP4 buffer shapes, reported TP=4 sharding, two counterexample boundaries, a distinct valid hidden-size relationship, and backend selection."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ceafdac3bc64/venv/bin/python -m pytest test/registered/unit/layers/quantization/test_mxfp4_sm90_cutlass.py -q",
+      "exit_code": 0,
+      "what_was_measured": "The real SM90 FlashInfer preprocessing/kernel suite was attempted and skipped at module scope on the AMD host."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-ceafdac3bc64/venv/bin/python <64x64 matmul script>",
+      "exit_code": 0,
+      "what_was_measured": "A real MI350X gfx950 float32 matmul matched its CPU reference (max absolute difference 7.62939453125e-06)."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ceafdac3bc64/venv/bin/python -m ruff format --check test/registered/unit/layers/quantization/test_dsv4_mxfp4_loader.py",
+      "exit_code": 1,
+      "what_was_measured": "Formatting tool availability; ruff is not installed in the prepared interpreter."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X gfx950 executed a 64x64 float32 matmul matching a CPU reference; this is not SM90-path evidence.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 checkpoint weights were unavailable.",
+    "The assigned GPU is AMD gfx950, not NVIDIA SM90; FlashInfer Hopper preprocessing and kernel execution remain unverified.",
+    "Four-way H800 TP, full checkpoint loading, DSPARK, HTTP serving, and semantic accuracy remain unverified.",
+    "The generic shard copier intentionally does not infer a model hidden size; correctness is established by production buffer construction, not by arbitrary hand-sized destinations.",
+    "ruff was unavailable in the prepared interpreter."
+  ]
+}
