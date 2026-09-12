@@ -1,0 +1,64 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33627",
+  "candidate_mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3490",
+  "review_mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3496",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3493",
+  "candidate_commit": "5334091df7b584723e28e1e114bff123d4c31d88",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "prepared_checkout_difference": "none; prepared HEAD exactly matched the recorded base commit",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "classification": "test-only hardening of a pre-existing opt-in implementation",
+  "summary": "The candidate adds relevant regression coverage and an honest evidence report but no production or native code. Its tests and numerical claims reproduce on the assigned MI350X. The same candidate test file passes against the recorded base source, proving the runtime behavior predates the candidate. Accept as test hardening, not as a new full original-issue fix.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-395896839e56/venv/bin/python -m pytest -q test/registered/rl/test_fp32_lm_head.py (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "The prepared base's existing six tests passed, confirming the opt-in dense FP32-output implementation predates the candidate."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-395896839e56/venv/bin/python /job/base_adversarial_check.py (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "Independent MI350X ranking case: default BF16 output/post-cast chose token 0 while explicit-FP32 reference and direct FP32 output chose token 1; also measured single-device four-shard arithmetic."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-395896839e56/venv/bin/python -m pytest -q test/registered/rl/test_fp32_lm_head.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "All nine candidate tests passed, including ranking precision, mocked standard TP gather dtype preservation, and mocked generic fallback for FP32 around the BF16-only multimem wrapper."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-395896839e56/venv/bin/python reports/j-e3931992c986/lm_head_fp32_gpu_check.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Reran candidate synthetic GEMM/ranking/shard script on AMD Instinct MI350X; direct FP32 output remained much closer to the explicit-FP32-input reference than BF16 output/post-cast."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-395896839e56/venv/bin/python -m pytest -q /job/review-evidence-j-395896839e56/candidate_test_fp32_lm_head.py (candidate tests, recorded base source)",
+      "exit_code": 0,
+      "what_was_measured": "All nine tests passed against base production source, demonstrating the candidate is test-only hardening rather than a production failing-before/passing-after fix."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 5334091df7b584723e28e1e114bff123d4c31d88",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace validity."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X, Torch 2.11.0+rocm7.2, HIP 7.2.26015; independent values are retained in reports/j-395896839e56/independent_gpu_result.json and raw output under /job/review-evidence-j-395896839e56/.",
+  "native_rebuilt": false,
+  "native_rebuild_reason": "No native or production source changed; repository-environment.json reports native=null, so a native rebuild was not applicable.",
+  "remaining_counterexamples": [
+    "The default-disabled path still emits BF16 logits before the later FP32 cast and loses the constructed top-1 distinction; this is expected under the preserved default but means the original accuracy improvement is not universal.",
+    "No live TP2/TP4 run proves end-to-end TP token invariance or FP32 collective behavior; single-device shard concatenation is not a distributed counterexample test.",
+    "No actual multimem-capable B300/CUDA execution proves fallback selection or performance in the source issue's architecture.",
+    "Quantized and architecture-specific LM-head kernels may not implement the same direct FP32-output contract and remain unqualified.",
+    "No representative distributed model benchmark resolves whether FP32 output should become the default."
+  ],
+  "remaining_limitations": [
+    "Only one AMD Instinct MI350X was assigned; no live TP, RCCL/NCCL, or multimem workload was possible.",
+    "No B300/CUDA execution, compiler rebuild, disassembly, or ISA evidence.",
+    "No GLM-5.2, DeepSeek V4, or other real-model accuracy/performance benchmark.",
+    "Candidate attention-TP and TP all-to-all claims are supported by source inspection of dtype-derived allocations, not candidate-added live collective tests.",
+    "The candidate's checked-in raw GPU artifact identifies MI355X; this review reran the script on MI350X and did not treat the checked-in architecture as evidence for this environment."
+  ]
+}
