@@ -1,0 +1,29 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38768",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced a randomly initialized Qwen3 sequence-classification bias when a checkpoint omitted score.bias. The classifier bias is now initialized to zero, retaining bias-free logits for standard checkpoints while the existing loader still preserves an explicit checkpoint bias.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-1d9ad3ee2f2e/venv/bin/python test/registered/unit/models/test_qwen3_classification_bias.py (before fix)",
+      "exit_code": 1,
+      "what_was_measured": "Regression reproduced on the recorded base: the missing-bias case differed from an independent bias-free linear reference in all 6 logits, with maximum absolute error 0.3341083526611328. Raw output: reports/j-1d9ad3ee2f2e/raw/failing_before.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-1d9ad3ee2f2e/venv/bin/python test/registered/unit/models/test_qwen3_classification_bias.py (after fix)",
+      "exit_code": 0,
+      "what_was_measured": "CPU regression passed exact comparisons for both a missing score.bias and an explicit nonzero score.bias. Raw output: reports/j-1d9ad3ee2f2e/raw/passing_after.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-1d9ad3ee2f2e/venv/bin/python - [inline ROCm head-loading and logit-parity script]",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI355X, both missing-bias and explicit-bias GPU logits exactly matched independent torch.nn.functional.linear references (rtol=0, atol=0; maximum absolute error 0.0). Raw output and method: reports/j-1d9ad3ee2f2e/raw/gpu_numerical.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "PyTorch 2.11.0+rocm7.2 with HIP 7.2.26015 executed the classification head on the sole visible AMD Instinct MI355X; exact parity was observed for bias-free and explicit-bias references."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": "Validation isolates the classification head and its real load_weights path by replacing the unrelated transformer backbone with nn.Identity. It does not run a full checkpoint-backed server or transformer forward. No native source changed, so no native rebuild was needed."
+}
