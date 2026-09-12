@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/9889",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate replaces the Phi-4 CPU interval-matrix/nonzero mapping with an equivalent bucketize mapping, correctly leaves the CPU-only Janus path unchanged, and documents that the stale Gemma call is absent. Candidate regression tests and 169,708 independent adversarial equivalence cases passed.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-050e844c7bfe/venv/bin/python /tmp/amdpilot-repo-j-050e844c7bfe/review_probe.py (base)",
+      "exit_code": 0,
+      "what_was_measured": "Recorded-base functional reference and queued-work GPU synchronization control: nonzero host call 447.85 ms versus bucketize 4.80 ms."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-050e844c7bfe/venv/bin/python -m pytest -q test/srt/models/test_phi4mm_utils.py (candidate 41b3110)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite; 19 cases passed with output, shape, dtype, and device comparisons."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-050e844c7bfe/venv/bin/python /tmp/amdpilot-repo-j-050e844c7bfe/review_probe.py (candidate 41b3110)",
+      "exit_code": 0,
+      "what_was_measured": "169,708 independent adversarial sorted-boundary/window cases with zero mismatches; queued-work nonzero 177.20 ms versus bucketize 4.06 ms."
+    },
+    {
+      "command": "PYTHONUNBUFFERED=1 PYTHONPATH=python /tmp/amdpilot-repo-j-050e844c7bfe/venv/bin/python reports/j-7fa5a5c77b19/profile_nonzero.py (candidate 41b3110)",
+      "exit_code": 137,
+      "what_was_measured": "The candidate profiler reproduced Janus CPU placement and printed 18/64 Phi timings, but the prepared runner terminated it before completion on two attempts; the candidate's full timing table was not independently reproduced."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 41b3110c732a8d9d6ed2f492b7c290b05c4a4ae6",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace validation."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Independent queued-work probes ran on the assigned AMD Instinct MI350X gfx950 with ROCm 7.2. GPU nonzero blocked on prior work while bucketize returned asynchronously. The actual reviewed production call sites were CPU-resident or absent.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The candidate's full profiling script was terminated in the prepared environment after the 18/64 cases, so its complete timing table was not independently reproduced.",
+    "The removed Gemma call was verified by current source absence; no obsolete model-weight path could be executed.",
+    "Janus placement used the real processor method with deterministic fake tokenizer/image processor dependencies rather than model weights.",
+    "The source change runs on CPU in the actual Phi helper, so GPU evidence validates the general nonzero synchronization premise rather than a production GPU synchronization at that call site.",
+    "No serving, distributed, or model semantic-accuracy claim is made."
+  ]
+}
