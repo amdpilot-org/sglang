@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33187",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 2167 at 40a488defc20fc508eb9f5d4e099ae869d2cbd9f and corrected two independently reproduced gaps: FP16 all-NaN rows are now finite before sampling, and speculative verification reduces full-NaN rows to a per-request mask handled by the existing request-scoped cleanup path.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-1fcdf225607b/venv/bin/python -c '<candidate FP16 1x163840 probe>'",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate implementation, AMD Instinct MI355X FP16 logits became all -inf and softmax remained non-finite. See raw/candidate-fp16-gpu.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1fcdf225607b/venv/bin/python -m pytest -q test/registered/unit/utils/test_abort_on_nan_logits.py",
+      "exit_code": 0,
+      "what_was_measured": "The unmodified candidate's six tests passed, demonstrating that its regression suite missed the FP16 and speculative-containment counterexamples. See raw/candidate-tests.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1fcdf225607b/venv/bin/python -m pytest -q test/registered/unit/utils/test_abort_on_nan_logits.py test/registered/unit/managers/test_batch_result_processor_hidden_states.py",
+      "exit_code": 0,
+      "what_was_measured": "18 tests and 2 subtests passed after correction, covering dtype-safe sanitization, speculative per-request mask reduction, request marking, and comprehensive cleanup. See raw/passing-focused.txt."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-1fcdf225607b/venv/bin/python -c '<FP16/BF16/FP32 1x163840 probe>'",
+      "exit_code": 0,
+      "what_was_measured": "After correction, all three dtypes had a detected full-row mask and finite logits and softmax probabilities. See raw/passing-gpu-dtypes.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1fcdf225607b/venv/bin/python -m pytest -q test/registered/sampling/test_sampling_mask.py",
+      "exit_code": 1,
+      "what_was_measured": "Broader serving tests were blocked because meta-llama/Llama-3.2-1B-Instruct is gated and returned HTTP 401. See raw/passing-sampling-mask.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1fcdf225607b/venv/bin/python -m compileall -q <changed Python files> && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources compiled and the patch had no whitespace errors."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI355X with torch 2.11.0+rocm7.2 under HIP_VISIBLE_DEVICES=0; actual 1x163840 GPU tensors were checked before and after the correction.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Kimi-K3 weights, Blackwell SM10x TP=8, multi-node deployment, or transient production NaN source was available.",
+    "No live hierarchical-cache storage backend regression was run; safety remains verified through cleanup hooks and release with is_insert=False rather than end-to-end host-cache publication.",
+    "The broad sampling-mask serving suite requires gated Meta Llama weights and failed with HTTP 401.",
+    "No native source changed, so native rebuilding was not applicable."
+  ]
+}

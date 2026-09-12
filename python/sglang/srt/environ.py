@@ -1241,6 +1241,10 @@ class Envs:
     # Sanitize NaN logits before sampling kernels and log a throttled warning
     # (see sanitize_nan_logits).
     SGLANG_SANITIZE_NAN_LOGITS = EnvBool(False)
+    # Abort an affected request with a retriable 503 when its entire logits row
+    # is NaN. This is separate from sanitization so existing deployments keep
+    # their current behavior unless they explicitly opt in.
+    SGLANG_ABORT_ON_NAN_LOGITS = EnvBool(False)
     SGLANG_ENABLE_LOGPROB_CHUNK = EnvBoolWithAlias(
         True, deprecated_name="SGLANG_ENABLE_LOGITS_PROCESSER_CHUNK"
     )

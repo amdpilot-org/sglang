@@ -1,0 +1,3493 @@
+.ss...EEEEEEEE....EEEEEEEEEss                                        [100%]
+==================================== ERRORS ====================================
+_ ERROR at setup of TestSamplingMask.test_chat_completions_returns_sampling_mask _
+
+cls = <class 'test_sampling_mask.TestSamplingMask'>
+
+    @classmethod
+    def setUpClass(cls):
+>       cls._launch_server()
+
+test/registered/sampling/test_sampling_mask.py:370: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/sampling/test_sampling_mask.py:298: in _launch_server
+    cls.process = popen_launch_server(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+model = 'meta-llama/Llama-3.2-1B-Instruct', base_url = 'http://127.0.0.1:21000'
+timeout = 600, api_key = None
+other_args = ['--mem-fraction-static', '0.7', '--enable-custom-logit-processor', '--sampling-mask-max-tokens', '64', '--device', ...]
+env = {'AITER_ASM_DIR': '/sgl-workspace/aiter/hsa/', 'AITER_GPU_ARCHS': 'gfx950', 'AITER_JIT_DIR': '/tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter', 'CODEX_CI': '1', ...}
+return_stdout_stderr = None, device = 'cuda', pd_separated = False
+num_replicas = None
+
+    def popen_launch_server(
+        model: str,
+        base_url: str,
+        timeout: float,
+        api_key: Optional[str] = None,
+        other_args: Optional[list[str]] = None,
+        env: Optional[dict] = None,
+        return_stdout_stderr: Optional[tuple] = None,
+        device: str = "auto",
+        pd_separated: bool = False,
+        num_replicas: Optional[int] = None,
+    ):
+        """Launch a server process with automatic device detection and offline/online retry.
+    
+        Args:
+            model: Model path or identifier
+            base_url: Base URL for the server
+            timeout: Timeout for server startup
+            api_key: Optional API key for authentication
+            other_args: Additional command line arguments
+            env: Environment dict for subprocess
+            return_stdout_stderr: Optional tuple for output capture
+            device: Device type ("auto", "cuda", "rocm" or "cpu")
+            pd_separated: Whether to use PD separated mode
+            num_replicas: Number of replicas for mixed PD mode
+    
+        Returns:
+            Started subprocess.Popen object
+        """
+        other_args = other_args or []
+    
+        # Auto-detect device if needed
+        if device == "auto":
+            device = auto_config_device()
+            other_args = list(other_args)
+            other_args += ["--device", str(device)]
+    
+        # CI-specific: Validate cache and enable offline mode if complete
+        if env is None:
+            env = os.environ.copy()
+        else:
+            merged = os.environ.copy()
+            merged.update(env)
+            env = merged
+    
+        # A dying predecessor can hold the derived port plan past
+        # kill_process_tree() while GPU teardown completes; give CI launches
+        # teardown-sized patience (see wait_port_available).
+        env.setdefault("SGLANG_WAIT_PORT_TIMEOUT", "120")
+    
+        # Store per-run marker path for potential invalidation
+        per_run_marker_path = None
+        try:
+            from sglang.utils import is_in_ci
+    
+            if is_in_ci():
+                per_run_marker_path = _try_enable_offline_mode_if_cache_complete(
+                    model, env, other_args
+                )
+        except Exception as e:
+            print(f"CI cache validation failed (non-fatal): {e}")
+    
+        # Build server command
+        _, host, port = base_url.split(":")
+        host = host[2:]
+    
+        use_mixed_pd_engine = not pd_separated and num_replicas is not None
+        if pd_separated or use_mixed_pd_engine:
+            command = [
+                "python3",
+                "-m",
+                "sglang.launch_pd_server",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+        else:
+            command = [
+                "sglang",
+                "serve",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+    
+        if pd_separated or use_mixed_pd_engine:
+            command.extend(["--lb-host", host, "--lb-port", port])
+        else:
+            command.extend(["--host", host, "--port", port])
+    
+        if use_mixed_pd_engine:
+            command.extend(["--mixed", "--num-replicas", str(num_replicas)])
+    
+        if api_key:
+            command += ["--api-key", api_key]
+    
+        print(f"command={shlex.join(command)}")
+    
+        # Track if offline mode was enabled for potential retry
+        offline_enabled = env.get("HF_HUB_OFFLINE") == "1"
+    
+        # First launch attempt
+        process = _launch_server_process(command, env, return_stdout_stderr, model)
+        success, error_msg = _wait_for_server_health(process, base_url, api_key, timeout)
+    
+        # If offline launch failed and offline was enabled, retry with online mode
+        if not success and offline_enabled:
+            print(
+                f"CI_OFFLINE: Offline launch failed ({error_msg}), retrying with online mode..."
+            )
+    
+            # Kill failed process
+            try:
+                if process.poll() is None:
+                    kill_process_tree(process.pid)
+                else:
+                    process.wait(timeout=5)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error cleaning up failed offline process: {e}")
+    
+            # Invalidate per-run marker to prevent subsequent tests from using offline
+            if per_run_marker_path and os.path.exists(per_run_marker_path):
+                try:
+                    os.remove(per_run_marker_path)
+                    print("CI_OFFLINE: Invalidated per-run marker due to offline failure")
+                except Exception as e:
+                    print(f"CI_OFFLINE: Failed to remove per-run marker: {e}")
+    
+            # Retry with online mode
+            env["HF_HUB_OFFLINE"] = "0"
+            process = _launch_server_process(command, env, return_stdout_stderr, model)
+            success, error_msg = _wait_for_server_health(
+                process, base_url, api_key, timeout
+            )
+    
+            if success:
+                print("CI_OFFLINE: Online retry succeeded")
+                return process
+    
+            # Online retry also failed
+            try:
+                kill_process_tree(process.pid)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error killing process after online retry failure: {e}")
+    
+            if "exited" in error_msg:
+                raise Exception(error_msg + ". Check server logs for errors.")
+            raise TimeoutError(error_msg)
+    
+        # First attempt succeeded or offline was not enabled
+        if success:
+            return process
+    
+        # First attempt failed and offline was not enabled
+        try:
+            kill_process_tree(process.pid)
+        except Exception as e:
+            print(f"CI_OFFLINE: Error killing process after first attempt failure: {e}")
+    
+        if "exited" in error_msg:
+>           raise Exception(error_msg + ". Check server logs for errors.")
+E           Exception: Server process exited with code 1. Check server logs for errors.
+
+python/sglang/test/test_utils.py:834: Exception
+---------------------------- Captured stdout setup -----------------------------
+command=sglang serve --model-path meta-llama/Llama-3.2-1B-Instruct --mem-fraction-static 0.7 --enable-custom-logit-processor --sampling-mask-max-tokens 64 --device cuda --host 127.0.0.1 --port 21000
+CI_OFFLINE: Launching server HF_HUB_OFFLINE=0 model=meta-llama/Llama-3.2-1B-Instruct
+---------------------------- Captured stderr setup -----------------------------
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter/module_aiter_core.so
+[2026-09-12 13:43:39] kill_process_tree called: parent_pid=4275, include_parent=False, pid=4275
+httpx.HTTPStatusError: Client error '401 Unauthorized' for url 'https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/resolve/main/config.json'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/venv/lib/python3.12/site-packages/transformers/utils/hub.py", line 437, in cached_files
+    hf_hub_download(
+  File "/opt/venv/lib/python3.12/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/huggingface_hub/file_download.py", line 1028, in hf_hub_download
+    return _hf_hub_download_to_cache_dir(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/huggingface_hub/file_download.py", line 1175, in _hf_hub_download_to_cache_dir
+    _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+  File "/opt/venv/lib/python3.12/site-packages/huggingface_hub/file_download.py", line 1915, in _raise_on_head_call_error
+    raise head_call_error
+huggingface_hub.errors.GatedRepoError: 401 Client Error. (Request ID: Root=1-6aa5570b-69c34b5d46ac37894c7121c9;50eae747-9a03-4425-ace3-6879f0091187)
+
+Cannot access gated repo for url https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/resolve/main/config.json.
+Access to model meta-llama/Llama-3.2-1B-Instruct is restricted. You must have access to it and be authenticated to access it. Please log in.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/venv/bin/sglang", line 6, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/job/repo/python/sglang/cli/main.py", line 40, in main
+    serve(args, extra_argv)
+  File "/job/repo/python/sglang/cli/serve.py", line 205, in serve
+    registered.backend.run(request)
+  File "/job/repo/python/sglang/cli/serve.py", line 99, in _run_llm
+    run_server(server_args)
+  File "/job/repo/python/sglang/launch_server.py", line 21, in run_server
+    server_args.resolve_once()
+  File "/job/repo/python/sglang/srt/server_args.py", line 281, in resolve_once
+    run_resolution_pipeline(self)
+  File "/job/repo/python/sglang/srt/arg_groups/pipeline.py", line 188, in run_resolution_pipeline
+    apply_inkling_prefill_cuda_graph_default(server_args)
+  File "/job/repo/python/sglang/srt/arg_groups/cuda_graph_hook.py", line 497, in apply_inkling_prefill_cuda_graph_default
+    arch = model_config_of(server_args).hf_config.architectures[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/arg_groups/model_override_base.py", line 249, in model_config_of
+    model_config = ModelConfig.from_server_args(server_args)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/configs/model_config.py", line 720, in from_server_args
+    return ModelConfig(
+           ^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/configs/model_config.py", line 429, in __init__
+    get_config(
+  File "/job/repo/python/sglang/srt/utils/common.py", line 4308, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/utils/hf_transformers/config.py", line 262, in get_config
+    config = parser.parse(
+             ^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/utils/hf_transformers/config.py", line 86, in parse
+    config = _try_load_longcat_config(model, revision, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/utils/hf_transformers/config.py", line 65, in _try_load_longcat_config
+    config_dict, _ = PretrainedConfig.get_config_dict(
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/transformers/configuration_utils.py", line 687, in get_config_dict
+    config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/transformers/configuration_utils.py", line 742, in _get_config_dict
+    resolved_config_file = cached_file(
+                           ^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/transformers/utils/hub.py", line 293, in cached_file
+    file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/transformers/utils/hub.py", line 503, in cached_files
+    raise OSError(
+OSError: You are trying to access a gated repo.
+Make sure to have access to it at https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct.
+401 Client Error. (Request ID: Root=1-6aa5570b-69c34b5d46ac37894c7121c9;50eae747-9a03-4425-ace3-6879f0091187)
+
+Cannot access gated repo for url https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/resolve/main/config.json.
+Access to model meta-llama/Llama-3.2-1B-Instruct is restricted. You must have access to it and be authenticated to access it. Please log in.
+____ ERROR at setup of TestSamplingMask.test_disallowed_tokens_with_replay _____
+
+cls = <class 'test_sampling_mask.TestSamplingMask'>
+
+    @classmethod
+    def setUpClass(cls):
+>       cls._launch_server()
+
+test/registered/sampling/test_sampling_mask.py:370: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/sampling/test_sampling_mask.py:298: in _launch_server
+    cls.process = popen_launch_server(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+model = 'meta-llama/Llama-3.2-1B-Instruct', base_url = 'http://127.0.0.1:21000'
+timeout = 600, api_key = None
+other_args = ['--mem-fraction-static', '0.7', '--enable-custom-logit-processor', '--sampling-mask-max-tokens', '64', '--device', ...]
+env = {'AITER_ASM_DIR': '/sgl-workspace/aiter/hsa/', 'AITER_GPU_ARCHS': 'gfx950', 'AITER_JIT_DIR': '/tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter', 'CODEX_CI': '1', ...}
+return_stdout_stderr = None, device = 'cuda', pd_separated = False
+num_replicas = None
+
+    def popen_launch_server(
+        model: str,
+        base_url: str,
+        timeout: float,
+        api_key: Optional[str] = None,
+        other_args: Optional[list[str]] = None,
+        env: Optional[dict] = None,
+        return_stdout_stderr: Optional[tuple] = None,
+        device: str = "auto",
+        pd_separated: bool = False,
+        num_replicas: Optional[int] = None,
+    ):
+        """Launch a server process with automatic device detection and offline/online retry.
+    
+        Args:
+            model: Model path or identifier
+            base_url: Base URL for the server
+            timeout: Timeout for server startup
+            api_key: Optional API key for authentication
+            other_args: Additional command line arguments
+            env: Environment dict for subprocess
+            return_stdout_stderr: Optional tuple for output capture
+            device: Device type ("auto", "cuda", "rocm" or "cpu")
+            pd_separated: Whether to use PD separated mode
+            num_replicas: Number of replicas for mixed PD mode
+    
+        Returns:
+            Started subprocess.Popen object
+        """
+        other_args = other_args or []
+    
+        # Auto-detect device if needed
+        if device == "auto":
+            device = auto_config_device()
+            other_args = list(other_args)
+            other_args += ["--device", str(device)]
+    
+        # CI-specific: Validate cache and enable offline mode if complete
+        if env is None:
+            env = os.environ.copy()
+        else:
+            merged = os.environ.copy()
+            merged.update(env)
+            env = merged
+    
+        # A dying predecessor can hold the derived port plan past
+        # kill_process_tree() while GPU teardown completes; give CI launches
+        # teardown-sized patience (see wait_port_available).
+        env.setdefault("SGLANG_WAIT_PORT_TIMEOUT", "120")
+    
+        # Store per-run marker path for potential invalidation
+        per_run_marker_path = None
+        try:
+            from sglang.utils import is_in_ci
+    
+            if is_in_ci():
+                per_run_marker_path = _try_enable_offline_mode_if_cache_complete(
+                    model, env, other_args
+                )
+        except Exception as e:
+            print(f"CI cache validation failed (non-fatal): {e}")
+    
+        # Build server command
+        _, host, port = base_url.split(":")
+        host = host[2:]
+    
+        use_mixed_pd_engine = not pd_separated and num_replicas is not None
+        if pd_separated or use_mixed_pd_engine:
+            command = [
+                "python3",
+                "-m",
+                "sglang.launch_pd_server",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+        else:
+            command = [
+                "sglang",
+                "serve",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+    
+        if pd_separated or use_mixed_pd_engine:
+            command.extend(["--lb-host", host, "--lb-port", port])
+        else:
+            command.extend(["--host", host, "--port", port])
+    
+        if use_mixed_pd_engine:
+            command.extend(["--mixed", "--num-replicas", str(num_replicas)])
+    
+        if api_key:
+            command += ["--api-key", api_key]
+    
+        print(f"command={shlex.join(command)}")
+    
+        # Track if offline mode was enabled for potential retry
+        offline_enabled = env.get("HF_HUB_OFFLINE") == "1"
+    
+        # First launch attempt
+        process = _launch_server_process(command, env, return_stdout_stderr, model)
+        success, error_msg = _wait_for_server_health(process, base_url, api_key, timeout)
+    
+        # If offline launch failed and offline was enabled, retry with online mode
+        if not success and offline_enabled:
+            print(
+                f"CI_OFFLINE: Offline launch failed ({error_msg}), retrying with online mode..."
+            )
+    
+            # Kill failed process
+            try:
+                if process.poll() is None:
+                    kill_process_tree(process.pid)
+                else:
+                    process.wait(timeout=5)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error cleaning up failed offline process: {e}")
+    
+            # Invalidate per-run marker to prevent subsequent tests from using offline
+            if per_run_marker_path and os.path.exists(per_run_marker_path):
+                try:
+                    os.remove(per_run_marker_path)
+                    print("CI_OFFLINE: Invalidated per-run marker due to offline failure")
+                except Exception as e:
+                    print(f"CI_OFFLINE: Failed to remove per-run marker: {e}")
+    
+            # Retry with online mode
+            env["HF_HUB_OFFLINE"] = "0"
+            process = _launch_server_process(command, env, return_stdout_stderr, model)
+            success, error_msg = _wait_for_server_health(
+                process, base_url, api_key, timeout
+            )
+    
+            if success:
+                print("CI_OFFLINE: Online retry succeeded")
+                return process
+    
+            # Online retry also failed
+            try:
+                kill_process_tree(process.pid)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error killing process after online retry failure: {e}")
+    
+            if "exited" in error_msg:
+                raise Exception(error_msg + ". Check server logs for errors.")
+            raise TimeoutError(error_msg)
+    
+        # First attempt succeeded or offline was not enabled
+        if success:
+            return process
+    
+        # First attempt failed and offline was not enabled
+        try:
+            kill_process_tree(process.pid)
+        except Exception as e:
+            print(f"CI_OFFLINE: Error killing process after first attempt failure: {e}")
+    
+        if "exited" in error_msg:
+>           raise Exception(error_msg + ". Check server logs for errors.")
+E           Exception: Server process exited with code 1. Check server logs for errors.
+
+python/sglang/test/test_utils.py:834: Exception
+_ ERROR at setup of TestSamplingMask.test_generate_rejects_unbounded_sampling_mask _
+
+cls = <class 'test_sampling_mask.TestSamplingMask'>
+
+    @classmethod
+    def setUpClass(cls):
+>       cls._launch_server()
+
+test/registered/sampling/test_sampling_mask.py:370: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/sampling/test_sampling_mask.py:298: in _launch_server
+    cls.process = popen_launch_server(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+model = 'meta-llama/Llama-3.2-1B-Instruct', base_url = 'http://127.0.0.1:21000'
+timeout = 600, api_key = None
+other_args = ['--mem-fraction-static', '0.7', '--enable-custom-logit-processor', '--sampling-mask-max-tokens', '64', '--device', ...]
+env = {'AITER_ASM_DIR': '/sgl-workspace/aiter/hsa/', 'AITER_GPU_ARCHS': 'gfx950', 'AITER_JIT_DIR': '/tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter', 'CODEX_CI': '1', ...}
+return_stdout_stderr = None, device = 'cuda', pd_separated = False
+num_replicas = None
+
+    def popen_launch_server(
+        model: str,
+        base_url: str,
+        timeout: float,
+        api_key: Optional[str] = None,
+        other_args: Optional[list[str]] = None,
+        env: Optional[dict] = None,
+        return_stdout_stderr: Optional[tuple] = None,
+        device: str = "auto",
+        pd_separated: bool = False,
+        num_replicas: Optional[int] = None,
+    ):
+        """Launch a server process with automatic device detection and offline/online retry.
+    
+        Args:
+            model: Model path or identifier
+            base_url: Base URL for the server
+            timeout: Timeout for server startup
+            api_key: Optional API key for authentication
+            other_args: Additional command line arguments
+            env: Environment dict for subprocess
+            return_stdout_stderr: Optional tuple for output capture
+            device: Device type ("auto", "cuda", "rocm" or "cpu")
+            pd_separated: Whether to use PD separated mode
+            num_replicas: Number of replicas for mixed PD mode
+    
+        Returns:
+            Started subprocess.Popen object
+        """
+        other_args = other_args or []
+    
+        # Auto-detect device if needed
+        if device == "auto":
+            device = auto_config_device()
+            other_args = list(other_args)
+            other_args += ["--device", str(device)]
+    
+        # CI-specific: Validate cache and enable offline mode if complete
+        if env is None:
+            env = os.environ.copy()
+        else:
+            merged = os.environ.copy()
+            merged.update(env)
+            env = merged
+    
+        # A dying predecessor can hold the derived port plan past
+        # kill_process_tree() while GPU teardown completes; give CI launches
+        # teardown-sized patience (see wait_port_available).
+        env.setdefault("SGLANG_WAIT_PORT_TIMEOUT", "120")
+    
+        # Store per-run marker path for potential invalidation
+        per_run_marker_path = None
+        try:
+            from sglang.utils import is_in_ci
+    
+            if is_in_ci():
+                per_run_marker_path = _try_enable_offline_mode_if_cache_complete(
+                    model, env, other_args
+                )
+        except Exception as e:
+            print(f"CI cache validation failed (non-fatal): {e}")
+    
+        # Build server command
+        _, host, port = base_url.split(":")
+        host = host[2:]
+    
+        use_mixed_pd_engine = not pd_separated and num_replicas is not None
+        if pd_separated or use_mixed_pd_engine:
+            command = [
+                "python3",
+                "-m",
+                "sglang.launch_pd_server",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+        else:
+            command = [
+                "sglang",
+                "serve",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+    
+        if pd_separated or use_mixed_pd_engine:
+            command.extend(["--lb-host", host, "--lb-port", port])
+        else:
+            command.extend(["--host", host, "--port", port])
+    
+        if use_mixed_pd_engine:
+            command.extend(["--mixed", "--num-replicas", str(num_replicas)])
+    
+        if api_key:
+            command += ["--api-key", api_key]
+    
+        print(f"command={shlex.join(command)}")
+    
+        # Track if offline mode was enabled for potential retry
+        offline_enabled = env.get("HF_HUB_OFFLINE") == "1"
+    
+        # First launch attempt
+        process = _launch_server_process(command, env, return_stdout_stderr, model)
+        success, error_msg = _wait_for_server_health(process, base_url, api_key, timeout)
+    
+        # If offline launch failed and offline was enabled, retry with online mode
+        if not success and offline_enabled:
+            print(
+                f"CI_OFFLINE: Offline launch failed ({error_msg}), retrying with online mode..."
+            )
+    
+            # Kill failed process
+            try:
+                if process.poll() is None:
+                    kill_process_tree(process.pid)
+                else:
+                    process.wait(timeout=5)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error cleaning up failed offline process: {e}")
+    
+            # Invalidate per-run marker to prevent subsequent tests from using offline
+            if per_run_marker_path and os.path.exists(per_run_marker_path):
+                try:
+                    os.remove(per_run_marker_path)
+                    print("CI_OFFLINE: Invalidated per-run marker due to offline failure")
+                except Exception as e:
+                    print(f"CI_OFFLINE: Failed to remove per-run marker: {e}")
+    
+            # Retry with online mode
+            env["HF_HUB_OFFLINE"] = "0"
+            process = _launch_server_process(command, env, return_stdout_stderr, model)
+            success, error_msg = _wait_for_server_health(
+                process, base_url, api_key, timeout
+            )
+    
+            if success:
+                print("CI_OFFLINE: Online retry succeeded")
+                return process
+    
+            # Online retry also failed
+            try:
+                kill_process_tree(process.pid)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error killing process after online retry failure: {e}")
+    
+            if "exited" in error_msg:
+                raise Exception(error_msg + ". Check server logs for errors.")
+            raise TimeoutError(error_msg)
+    
+        # First attempt succeeded or offline was not enabled
+        if success:
+            return process
+    
+        # First attempt failed and offline was not enabled
+        try:
+            kill_process_tree(process.pid)
+        except Exception as e:
+            print(f"CI_OFFLINE: Error killing process after first attempt failure: {e}")
+    
+        if "exited" in error_msg:
+>           raise Exception(error_msg + ". Check server logs for errors.")
+E           Exception: Server process exited with code 1. Check server logs for errors.
+
+python/sglang/test/test_utils.py:834: Exception
+_ ERROR at setup of TestSamplingMask.test_generate_returns_greedy_singleton_mask _
+
+cls = <class 'test_sampling_mask.TestSamplingMask'>
+
+    @classmethod
+    def setUpClass(cls):
+>       cls._launch_server()
+
+test/registered/sampling/test_sampling_mask.py:370: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/sampling/test_sampling_mask.py:298: in _launch_server
+    cls.process = popen_launch_server(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+model = 'meta-llama/Llama-3.2-1B-Instruct', base_url = 'http://127.0.0.1:21000'
+timeout = 600, api_key = None
+other_args = ['--mem-fraction-static', '0.7', '--enable-custom-logit-processor', '--sampling-mask-max-tokens', '64', '--device', ...]
+env = {'AITER_ASM_DIR': '/sgl-workspace/aiter/hsa/', 'AITER_GPU_ARCHS': 'gfx950', 'AITER_JIT_DIR': '/tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter', 'CODEX_CI': '1', ...}
+return_stdout_stderr = None, device = 'cuda', pd_separated = False
+num_replicas = None
+
+    def popen_launch_server(
+        model: str,
+        base_url: str,
+        timeout: float,
+        api_key: Optional[str] = None,
+        other_args: Optional[list[str]] = None,
+        env: Optional[dict] = None,
+        return_stdout_stderr: Optional[tuple] = None,
+        device: str = "auto",
+        pd_separated: bool = False,
+        num_replicas: Optional[int] = None,
+    ):
+        """Launch a server process with automatic device detection and offline/online retry.
+    
+        Args:
+            model: Model path or identifier
+            base_url: Base URL for the server
+            timeout: Timeout for server startup
+            api_key: Optional API key for authentication
+            other_args: Additional command line arguments
+            env: Environment dict for subprocess
+            return_stdout_stderr: Optional tuple for output capture
+            device: Device type ("auto", "cuda", "rocm" or "cpu")
+            pd_separated: Whether to use PD separated mode
+            num_replicas: Number of replicas for mixed PD mode
+    
+        Returns:
+            Started subprocess.Popen object
+        """
+        other_args = other_args or []
+    
+        # Auto-detect device if needed
+        if device == "auto":
+            device = auto_config_device()
+            other_args = list(other_args)
+            other_args += ["--device", str(device)]
+    
+        # CI-specific: Validate cache and enable offline mode if complete
+        if env is None:
+            env = os.environ.copy()
+        else:
+            merged = os.environ.copy()
+            merged.update(env)
+            env = merged
+    
+        # A dying predecessor can hold the derived port plan past
+        # kill_process_tree() while GPU teardown completes; give CI launches
+        # teardown-sized patience (see wait_port_available).
+        env.setdefault("SGLANG_WAIT_PORT_TIMEOUT", "120")
+    
+        # Store per-run marker path for potential invalidation
+        per_run_marker_path = None
+        try:
+            from sglang.utils import is_in_ci
+    
+            if is_in_ci():
+                per_run_marker_path = _try_enable_offline_mode_if_cache_complete(
+                    model, env, other_args
+                )
+        except Exception as e:
+            print(f"CI cache validation failed (non-fatal): {e}")
+    
+        # Build server command
+        _, host, port = base_url.split(":")
+        host = host[2:]
+    
+        use_mixed_pd_engine = not pd_separated and num_replicas is not None
+        if pd_separated or use_mixed_pd_engine:
+            command = [
+                "python3",
+                "-m",
+                "sglang.launch_pd_server",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+        else:
+            command = [
+                "sglang",
+                "serve",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+    
+        if pd_separated or use_mixed_pd_engine:
+            command.extend(["--lb-host", host, "--lb-port", port])
+        else:
+            command.extend(["--host", host, "--port", port])
+    
+        if use_mixed_pd_engine:
+            command.extend(["--mixed", "--num-replicas", str(num_replicas)])
+    
+        if api_key:
+            command += ["--api-key", api_key]
+    
+        print(f"command={shlex.join(command)}")
+    
+        # Track if offline mode was enabled for potential retry
+        offline_enabled = env.get("HF_HUB_OFFLINE") == "1"
+    
+        # First launch attempt
+        process = _launch_server_process(command, env, return_stdout_stderr, model)
+        success, error_msg = _wait_for_server_health(process, base_url, api_key, timeout)
+    
+        # If offline launch failed and offline was enabled, retry with online mode
+        if not success and offline_enabled:
+            print(
+                f"CI_OFFLINE: Offline launch failed ({error_msg}), retrying with online mode..."
+            )
+    
+            # Kill failed process
+            try:
+                if process.poll() is None:
+                    kill_process_tree(process.pid)
+                else:
+                    process.wait(timeout=5)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error cleaning up failed offline process: {e}")
+    
+            # Invalidate per-run marker to prevent subsequent tests from using offline
+            if per_run_marker_path and os.path.exists(per_run_marker_path):
+                try:
+                    os.remove(per_run_marker_path)
+                    print("CI_OFFLINE: Invalidated per-run marker due to offline failure")
+                except Exception as e:
+                    print(f"CI_OFFLINE: Failed to remove per-run marker: {e}")
+    
+            # Retry with online mode
+            env["HF_HUB_OFFLINE"] = "0"
+            process = _launch_server_process(command, env, return_stdout_stderr, model)
+            success, error_msg = _wait_for_server_health(
+                process, base_url, api_key, timeout
+            )
+    
+            if success:
+                print("CI_OFFLINE: Online retry succeeded")
+                return process
+    
+            # Online retry also failed
+            try:
+                kill_process_tree(process.pid)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error killing process after online retry failure: {e}")
+    
+            if "exited" in error_msg:
+                raise Exception(error_msg + ". Check server logs for errors.")
+            raise TimeoutError(error_msg)
+    
+        # First attempt succeeded or offline was not enabled
+        if success:
+            return process
+    
+        # First attempt failed and offline was not enabled
+        try:
+            kill_process_tree(process.pid)
+        except Exception as e:
+            print(f"CI_OFFLINE: Error killing process after first attempt failure: {e}")
+    
+        if "exited" in error_msg:
+>           raise Exception(error_msg + ". Check server logs for errors.")
+E           Exception: Server process exited with code 1. Check server logs for errors.
+
+python/sglang/test/test_utils.py:834: Exception
+____ ERROR at setup of TestSamplingMask.test_generate_returns_sampling_mask ____
+
+cls = <class 'test_sampling_mask.TestSamplingMask'>
+
+    @classmethod
+    def setUpClass(cls):
+>       cls._launch_server()
+
+test/registered/sampling/test_sampling_mask.py:370: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/sampling/test_sampling_mask.py:298: in _launch_server
+    cls.process = popen_launch_server(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+model = 'meta-llama/Llama-3.2-1B-Instruct', base_url = 'http://127.0.0.1:21000'
+timeout = 600, api_key = None
+other_args = ['--mem-fraction-static', '0.7', '--enable-custom-logit-processor', '--sampling-mask-max-tokens', '64', '--device', ...]
+env = {'AITER_ASM_DIR': '/sgl-workspace/aiter/hsa/', 'AITER_GPU_ARCHS': 'gfx950', 'AITER_JIT_DIR': '/tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter', 'CODEX_CI': '1', ...}
+return_stdout_stderr = None, device = 'cuda', pd_separated = False
+num_replicas = None
+
+    def popen_launch_server(
+        model: str,
+        base_url: str,
+        timeout: float,
+        api_key: Optional[str] = None,
+        other_args: Optional[list[str]] = None,
+        env: Optional[dict] = None,
+        return_stdout_stderr: Optional[tuple] = None,
+        device: str = "auto",
+        pd_separated: bool = False,
+        num_replicas: Optional[int] = None,
+    ):
+        """Launch a server process with automatic device detection and offline/online retry.
+    
+        Args:
+            model: Model path or identifier
+            base_url: Base URL for the server
+            timeout: Timeout for server startup
+            api_key: Optional API key for authentication
+            other_args: Additional command line arguments
+            env: Environment dict for subprocess
+            return_stdout_stderr: Optional tuple for output capture
+            device: Device type ("auto", "cuda", "rocm" or "cpu")
+            pd_separated: Whether to use PD separated mode
+            num_replicas: Number of replicas for mixed PD mode
+    
+        Returns:
+            Started subprocess.Popen object
+        """
+        other_args = other_args or []
+    
+        # Auto-detect device if needed
+        if device == "auto":
+            device = auto_config_device()
+            other_args = list(other_args)
+            other_args += ["--device", str(device)]
+    
+        # CI-specific: Validate cache and enable offline mode if complete
+        if env is None:
+            env = os.environ.copy()
+        else:
+            merged = os.environ.copy()
+            merged.update(env)
+            env = merged
+    
+        # A dying predecessor can hold the derived port plan past
+        # kill_process_tree() while GPU teardown completes; give CI launches
+        # teardown-sized patience (see wait_port_available).
+        env.setdefault("SGLANG_WAIT_PORT_TIMEOUT", "120")
+    
+        # Store per-run marker path for potential invalidation
+        per_run_marker_path = None
+        try:
+            from sglang.utils import is_in_ci
+    
+            if is_in_ci():
+                per_run_marker_path = _try_enable_offline_mode_if_cache_complete(
+                    model, env, other_args
+                )
+        except Exception as e:
+            print(f"CI cache validation failed (non-fatal): {e}")
+    
+        # Build server command
+        _, host, port = base_url.split(":")
+        host = host[2:]
+    
+        use_mixed_pd_engine = not pd_separated and num_replicas is not None
+        if pd_separated or use_mixed_pd_engine:
+            command = [
+                "python3",
+                "-m",
+                "sglang.launch_pd_server",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+        else:
+            command = [
+                "sglang",
+                "serve",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+    
+        if pd_separated or use_mixed_pd_engine:
+            command.extend(["--lb-host", host, "--lb-port", port])
+        else:
+            command.extend(["--host", host, "--port", port])
+    
+        if use_mixed_pd_engine:
+            command.extend(["--mixed", "--num-replicas", str(num_replicas)])
+    
+        if api_key:
+            command += ["--api-key", api_key]
+    
+        print(f"command={shlex.join(command)}")
+    
+        # Track if offline mode was enabled for potential retry
+        offline_enabled = env.get("HF_HUB_OFFLINE") == "1"
+    
+        # First launch attempt
+        process = _launch_server_process(command, env, return_stdout_stderr, model)
+        success, error_msg = _wait_for_server_health(process, base_url, api_key, timeout)
+    
+        # If offline launch failed and offline was enabled, retry with online mode
+        if not success and offline_enabled:
+            print(
+                f"CI_OFFLINE: Offline launch failed ({error_msg}), retrying with online mode..."
+            )
+    
+            # Kill failed process
+            try:
+                if process.poll() is None:
+                    kill_process_tree(process.pid)
+                else:
+                    process.wait(timeout=5)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error cleaning up failed offline process: {e}")
+    
+            # Invalidate per-run marker to prevent subsequent tests from using offline
+            if per_run_marker_path and os.path.exists(per_run_marker_path):
+                try:
+                    os.remove(per_run_marker_path)
+                    print("CI_OFFLINE: Invalidated per-run marker due to offline failure")
+                except Exception as e:
+                    print(f"CI_OFFLINE: Failed to remove per-run marker: {e}")
+    
+            # Retry with online mode
+            env["HF_HUB_OFFLINE"] = "0"
+            process = _launch_server_process(command, env, return_stdout_stderr, model)
+            success, error_msg = _wait_for_server_health(
+                process, base_url, api_key, timeout
+            )
+    
+            if success:
+                print("CI_OFFLINE: Online retry succeeded")
+                return process
+    
+            # Online retry also failed
+            try:
+                kill_process_tree(process.pid)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error killing process after online retry failure: {e}")
+    
+            if "exited" in error_msg:
+                raise Exception(error_msg + ". Check server logs for errors.")
+            raise TimeoutError(error_msg)
+    
+        # First attempt succeeded or offline was not enabled
+        if success:
+            return process
+    
+        # First attempt failed and offline was not enabled
+        try:
+            kill_process_tree(process.pid)
+        except Exception as e:
+            print(f"CI_OFFLINE: Error killing process after first attempt failure: {e}")
+    
+        if "exited" in error_msg:
+>           raise Exception(error_msg + ". Check server logs for errors.")
+E           Exception: Server process exited with code 1. Check server logs for errors.
+
+python/sglang/test/test_utils.py:834: Exception
+_ ERROR at setup of TestSamplingMask.test_generate_streams_aligned_sampling_masks _
+
+cls = <class 'test_sampling_mask.TestSamplingMask'>
+
+    @classmethod
+    def setUpClass(cls):
+>       cls._launch_server()
+
+test/registered/sampling/test_sampling_mask.py:370: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/sampling/test_sampling_mask.py:298: in _launch_server
+    cls.process = popen_launch_server(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+model = 'meta-llama/Llama-3.2-1B-Instruct', base_url = 'http://127.0.0.1:21000'
+timeout = 600, api_key = None
+other_args = ['--mem-fraction-static', '0.7', '--enable-custom-logit-processor', '--sampling-mask-max-tokens', '64', '--device', ...]
+env = {'AITER_ASM_DIR': '/sgl-workspace/aiter/hsa/', 'AITER_GPU_ARCHS': 'gfx950', 'AITER_JIT_DIR': '/tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter', 'CODEX_CI': '1', ...}
+return_stdout_stderr = None, device = 'cuda', pd_separated = False
+num_replicas = None
+
+    def popen_launch_server(
+        model: str,
+        base_url: str,
+        timeout: float,
+        api_key: Optional[str] = None,
+        other_args: Optional[list[str]] = None,
+        env: Optional[dict] = None,
+        return_stdout_stderr: Optional[tuple] = None,
+        device: str = "auto",
+        pd_separated: bool = False,
+        num_replicas: Optional[int] = None,
+    ):
+        """Launch a server process with automatic device detection and offline/online retry.
+    
+        Args:
+            model: Model path or identifier
+            base_url: Base URL for the server
+            timeout: Timeout for server startup
+            api_key: Optional API key for authentication
+            other_args: Additional command line arguments
+            env: Environment dict for subprocess
+            return_stdout_stderr: Optional tuple for output capture
+            device: Device type ("auto", "cuda", "rocm" or "cpu")
+            pd_separated: Whether to use PD separated mode
+            num_replicas: Number of replicas for mixed PD mode
+    
+        Returns:
+            Started subprocess.Popen object
+        """
+        other_args = other_args or []
+    
+        # Auto-detect device if needed
+        if device == "auto":
+            device = auto_config_device()
+            other_args = list(other_args)
+            other_args += ["--device", str(device)]
+    
+        # CI-specific: Validate cache and enable offline mode if complete
+        if env is None:
+            env = os.environ.copy()
+        else:
+            merged = os.environ.copy()
+            merged.update(env)
+            env = merged
+    
+        # A dying predecessor can hold the derived port plan past
+        # kill_process_tree() while GPU teardown completes; give CI launches
+        # teardown-sized patience (see wait_port_available).
+        env.setdefault("SGLANG_WAIT_PORT_TIMEOUT", "120")
+    
+        # Store per-run marker path for potential invalidation
+        per_run_marker_path = None
+        try:
+            from sglang.utils import is_in_ci
+    
+            if is_in_ci():
+                per_run_marker_path = _try_enable_offline_mode_if_cache_complete(
+                    model, env, other_args
+                )
+        except Exception as e:
+            print(f"CI cache validation failed (non-fatal): {e}")
+    
+        # Build server command
+        _, host, port = base_url.split(":")
+        host = host[2:]
+    
+        use_mixed_pd_engine = not pd_separated and num_replicas is not None
+        if pd_separated or use_mixed_pd_engine:
+            command = [
+                "python3",
+                "-m",
+                "sglang.launch_pd_server",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+        else:
+            command = [
+                "sglang",
+                "serve",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+    
+        if pd_separated or use_mixed_pd_engine:
+            command.extend(["--lb-host", host, "--lb-port", port])
+        else:
+            command.extend(["--host", host, "--port", port])
+    
+        if use_mixed_pd_engine:
+            command.extend(["--mixed", "--num-replicas", str(num_replicas)])
+    
+        if api_key:
+            command += ["--api-key", api_key]
+    
+        print(f"command={shlex.join(command)}")
+    
+        # Track if offline mode was enabled for potential retry
+        offline_enabled = env.get("HF_HUB_OFFLINE") == "1"
+    
+        # First launch attempt
+        process = _launch_server_process(command, env, return_stdout_stderr, model)
+        success, error_msg = _wait_for_server_health(process, base_url, api_key, timeout)
+    
+        # If offline launch failed and offline was enabled, retry with online mode
+        if not success and offline_enabled:
+            print(
+                f"CI_OFFLINE: Offline launch failed ({error_msg}), retrying with online mode..."
+            )
+    
+            # Kill failed process
+            try:
+                if process.poll() is None:
+                    kill_process_tree(process.pid)
+                else:
+                    process.wait(timeout=5)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error cleaning up failed offline process: {e}")
+    
+            # Invalidate per-run marker to prevent subsequent tests from using offline
+            if per_run_marker_path and os.path.exists(per_run_marker_path):
+                try:
+                    os.remove(per_run_marker_path)
+                    print("CI_OFFLINE: Invalidated per-run marker due to offline failure")
+                except Exception as e:
+                    print(f"CI_OFFLINE: Failed to remove per-run marker: {e}")
+    
+            # Retry with online mode
+            env["HF_HUB_OFFLINE"] = "0"
+            process = _launch_server_process(command, env, return_stdout_stderr, model)
+            success, error_msg = _wait_for_server_health(
+                process, base_url, api_key, timeout
+            )
+    
+            if success:
+                print("CI_OFFLINE: Online retry succeeded")
+                return process
+    
+            # Online retry also failed
+            try:
+                kill_process_tree(process.pid)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error killing process after online retry failure: {e}")
+    
+            if "exited" in error_msg:
+                raise Exception(error_msg + ". Check server logs for errors.")
+            raise TimeoutError(error_msg)
+    
+        # First attempt succeeded or offline was not enabled
+        if success:
+            return process
+    
+        # First attempt failed and offline was not enabled
+        try:
+            kill_process_tree(process.pid)
+        except Exception as e:
+            print(f"CI_OFFLINE: Error killing process after first attempt failure: {e}")
+    
+        if "exited" in error_msg:
+>           raise Exception(error_msg + ". Check server logs for errors.")
+E           Exception: Server process exited with code 1. Check server logs for errors.
+
+python/sglang/test/test_utils.py:834: Exception
+_ ERROR at setup of TestSamplingMask.test_rejected_processors_do_not_break_generation _
+
+cls = <class 'test_sampling_mask.TestSamplingMask'>
+
+    @classmethod
+    def setUpClass(cls):
+>       cls._launch_server()
+
+test/registered/sampling/test_sampling_mask.py:370: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/sampling/test_sampling_mask.py:298: in _launch_server
+    cls.process = popen_launch_server(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+model = 'meta-llama/Llama-3.2-1B-Instruct', base_url = 'http://127.0.0.1:21000'
+timeout = 600, api_key = None
+other_args = ['--mem-fraction-static', '0.7', '--enable-custom-logit-processor', '--sampling-mask-max-tokens', '64', '--device', ...]
+env = {'AITER_ASM_DIR': '/sgl-workspace/aiter/hsa/', 'AITER_GPU_ARCHS': 'gfx950', 'AITER_JIT_DIR': '/tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter', 'CODEX_CI': '1', ...}
+return_stdout_stderr = None, device = 'cuda', pd_separated = False
+num_replicas = None
+
+    def popen_launch_server(
+        model: str,
+        base_url: str,
+        timeout: float,
+        api_key: Optional[str] = None,
+        other_args: Optional[list[str]] = None,
+        env: Optional[dict] = None,
+        return_stdout_stderr: Optional[tuple] = None,
+        device: str = "auto",
+        pd_separated: bool = False,
+        num_replicas: Optional[int] = None,
+    ):
+        """Launch a server process with automatic device detection and offline/online retry.
+    
+        Args:
+            model: Model path or identifier
+            base_url: Base URL for the server
+            timeout: Timeout for server startup
+            api_key: Optional API key for authentication
+            other_args: Additional command line arguments
+            env: Environment dict for subprocess
+            return_stdout_stderr: Optional tuple for output capture
+            device: Device type ("auto", "cuda", "rocm" or "cpu")
+            pd_separated: Whether to use PD separated mode
+            num_replicas: Number of replicas for mixed PD mode
+    
+        Returns:
+            Started subprocess.Popen object
+        """
+        other_args = other_args or []
+    
+        # Auto-detect device if needed
+        if device == "auto":
+            device = auto_config_device()
+            other_args = list(other_args)
+            other_args += ["--device", str(device)]
+    
+        # CI-specific: Validate cache and enable offline mode if complete
+        if env is None:
+            env = os.environ.copy()
+        else:
+            merged = os.environ.copy()
+            merged.update(env)
+            env = merged
+    
+        # A dying predecessor can hold the derived port plan past
+        # kill_process_tree() while GPU teardown completes; give CI launches
+        # teardown-sized patience (see wait_port_available).
+        env.setdefault("SGLANG_WAIT_PORT_TIMEOUT", "120")
+    
+        # Store per-run marker path for potential invalidation
+        per_run_marker_path = None
+        try:
+            from sglang.utils import is_in_ci
+    
+            if is_in_ci():
+                per_run_marker_path = _try_enable_offline_mode_if_cache_complete(
+                    model, env, other_args
+                )
+        except Exception as e:
+            print(f"CI cache validation failed (non-fatal): {e}")
+    
+        # Build server command
+        _, host, port = base_url.split(":")
+        host = host[2:]
+    
+        use_mixed_pd_engine = not pd_separated and num_replicas is not None
+        if pd_separated or use_mixed_pd_engine:
+            command = [
+                "python3",
+                "-m",
+                "sglang.launch_pd_server",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+        else:
+            command = [
+                "sglang",
+                "serve",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+    
+        if pd_separated or use_mixed_pd_engine:
+            command.extend(["--lb-host", host, "--lb-port", port])
+        else:
+            command.extend(["--host", host, "--port", port])
+    
+        if use_mixed_pd_engine:
+            command.extend(["--mixed", "--num-replicas", str(num_replicas)])
+    
+        if api_key:
+            command += ["--api-key", api_key]
+    
+        print(f"command={shlex.join(command)}")
+    
+        # Track if offline mode was enabled for potential retry
+        offline_enabled = env.get("HF_HUB_OFFLINE") == "1"
+    
+        # First launch attempt
+        process = _launch_server_process(command, env, return_stdout_stderr, model)
+        success, error_msg = _wait_for_server_health(process, base_url, api_key, timeout)
+    
+        # If offline launch failed and offline was enabled, retry with online mode
+        if not success and offline_enabled:
+            print(
+                f"CI_OFFLINE: Offline launch failed ({error_msg}), retrying with online mode..."
+            )
+    
+            # Kill failed process
+            try:
+                if process.poll() is None:
+                    kill_process_tree(process.pid)
+                else:
+                    process.wait(timeout=5)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error cleaning up failed offline process: {e}")
+    
+            # Invalidate per-run marker to prevent subsequent tests from using offline
+            if per_run_marker_path and os.path.exists(per_run_marker_path):
+                try:
+                    os.remove(per_run_marker_path)
+                    print("CI_OFFLINE: Invalidated per-run marker due to offline failure")
+                except Exception as e:
+                    print(f"CI_OFFLINE: Failed to remove per-run marker: {e}")
+    
+            # Retry with online mode
+            env["HF_HUB_OFFLINE"] = "0"
+            process = _launch_server_process(command, env, return_stdout_stderr, model)
+            success, error_msg = _wait_for_server_health(
+                process, base_url, api_key, timeout
+            )
+    
+            if success:
+                print("CI_OFFLINE: Online retry succeeded")
+                return process
+    
+            # Online retry also failed
+            try:
+                kill_process_tree(process.pid)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error killing process after online retry failure: {e}")
+    
+            if "exited" in error_msg:
+                raise Exception(error_msg + ". Check server logs for errors.")
+            raise TimeoutError(error_msg)
+    
+        # First attempt succeeded or offline was not enabled
+        if success:
+            return process
+    
+        # First attempt failed and offline was not enabled
+        try:
+            kill_process_tree(process.pid)
+        except Exception as e:
+            print(f"CI_OFFLINE: Error killing process after first attempt failure: {e}")
+    
+        if "exited" in error_msg:
+>           raise Exception(error_msg + ". Check server logs for errors.")
+E           Exception: Server process exited with code 1. Check server logs for errors.
+
+python/sglang/test/test_utils.py:834: Exception
+_ ERROR at setup of TestSamplingMask.test_sampling_mask_matches_topk_logprobs __
+
+cls = <class 'test_sampling_mask.TestSamplingMask'>
+
+    @classmethod
+    def setUpClass(cls):
+>       cls._launch_server()
+
+test/registered/sampling/test_sampling_mask.py:370: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/sampling/test_sampling_mask.py:298: in _launch_server
+    cls.process = popen_launch_server(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+model = 'meta-llama/Llama-3.2-1B-Instruct', base_url = 'http://127.0.0.1:21000'
+timeout = 600, api_key = None
+other_args = ['--mem-fraction-static', '0.7', '--enable-custom-logit-processor', '--sampling-mask-max-tokens', '64', '--device', ...]
+env = {'AITER_ASM_DIR': '/sgl-workspace/aiter/hsa/', 'AITER_GPU_ARCHS': 'gfx950', 'AITER_JIT_DIR': '/tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter', 'CODEX_CI': '1', ...}
+return_stdout_stderr = None, device = 'cuda', pd_separated = False
+num_replicas = None
+
+    def popen_launch_server(
+        model: str,
+        base_url: str,
+        timeout: float,
+        api_key: Optional[str] = None,
+        other_args: Optional[list[str]] = None,
+        env: Optional[dict] = None,
+        return_stdout_stderr: Optional[tuple] = None,
+        device: str = "auto",
+        pd_separated: bool = False,
+        num_replicas: Optional[int] = None,
+    ):
+        """Launch a server process with automatic device detection and offline/online retry.
+    
+        Args:
+            model: Model path or identifier
+            base_url: Base URL for the server
+            timeout: Timeout for server startup
+            api_key: Optional API key for authentication
+            other_args: Additional command line arguments
+            env: Environment dict for subprocess
+            return_stdout_stderr: Optional tuple for output capture
+            device: Device type ("auto", "cuda", "rocm" or "cpu")
+            pd_separated: Whether to use PD separated mode
+            num_replicas: Number of replicas for mixed PD mode
+    
+        Returns:
+            Started subprocess.Popen object
+        """
+        other_args = other_args or []
+    
+        # Auto-detect device if needed
+        if device == "auto":
+            device = auto_config_device()
+            other_args = list(other_args)
+            other_args += ["--device", str(device)]
+    
+        # CI-specific: Validate cache and enable offline mode if complete
+        if env is None:
+            env = os.environ.copy()
+        else:
+            merged = os.environ.copy()
+            merged.update(env)
+            env = merged
+    
+        # A dying predecessor can hold the derived port plan past
+        # kill_process_tree() while GPU teardown completes; give CI launches
+        # teardown-sized patience (see wait_port_available).
+        env.setdefault("SGLANG_WAIT_PORT_TIMEOUT", "120")
+    
+        # Store per-run marker path for potential invalidation
+        per_run_marker_path = None
+        try:
+            from sglang.utils import is_in_ci
+    
+            if is_in_ci():
+                per_run_marker_path = _try_enable_offline_mode_if_cache_complete(
+                    model, env, other_args
+                )
+        except Exception as e:
+            print(f"CI cache validation failed (non-fatal): {e}")
+    
+        # Build server command
+        _, host, port = base_url.split(":")
+        host = host[2:]
+    
+        use_mixed_pd_engine = not pd_separated and num_replicas is not None
+        if pd_separated or use_mixed_pd_engine:
+            command = [
+                "python3",
+                "-m",
+                "sglang.launch_pd_server",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+        else:
+            command = [
+                "sglang",
+                "serve",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+    
+        if pd_separated or use_mixed_pd_engine:
+            command.extend(["--lb-host", host, "--lb-port", port])
+        else:
+            command.extend(["--host", host, "--port", port])
+    
+        if use_mixed_pd_engine:
+            command.extend(["--mixed", "--num-replicas", str(num_replicas)])
+    
+        if api_key:
+            command += ["--api-key", api_key]
+    
+        print(f"command={shlex.join(command)}")
+    
+        # Track if offline mode was enabled for potential retry
+        offline_enabled = env.get("HF_HUB_OFFLINE") == "1"
+    
+        # First launch attempt
+        process = _launch_server_process(command, env, return_stdout_stderr, model)
+        success, error_msg = _wait_for_server_health(process, base_url, api_key, timeout)
+    
+        # If offline launch failed and offline was enabled, retry with online mode
+        if not success and offline_enabled:
+            print(
+                f"CI_OFFLINE: Offline launch failed ({error_msg}), retrying with online mode..."
+            )
+    
+            # Kill failed process
+            try:
+                if process.poll() is None:
+                    kill_process_tree(process.pid)
+                else:
+                    process.wait(timeout=5)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error cleaning up failed offline process: {e}")
+    
+            # Invalidate per-run marker to prevent subsequent tests from using offline
+            if per_run_marker_path and os.path.exists(per_run_marker_path):
+                try:
+                    os.remove(per_run_marker_path)
+                    print("CI_OFFLINE: Invalidated per-run marker due to offline failure")
+                except Exception as e:
+                    print(f"CI_OFFLINE: Failed to remove per-run marker: {e}")
+    
+            # Retry with online mode
+            env["HF_HUB_OFFLINE"] = "0"
+            process = _launch_server_process(command, env, return_stdout_stderr, model)
+            success, error_msg = _wait_for_server_health(
+                process, base_url, api_key, timeout
+            )
+    
+            if success:
+                print("CI_OFFLINE: Online retry succeeded")
+                return process
+    
+            # Online retry also failed
+            try:
+                kill_process_tree(process.pid)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error killing process after online retry failure: {e}")
+    
+            if "exited" in error_msg:
+                raise Exception(error_msg + ". Check server logs for errors.")
+            raise TimeoutError(error_msg)
+    
+        # First attempt succeeded or offline was not enabled
+        if success:
+            return process
+    
+        # First attempt failed and offline was not enabled
+        try:
+            kill_process_tree(process.pid)
+        except Exception as e:
+            print(f"CI_OFFLINE: Error killing process after first attempt failure: {e}")
+    
+        if "exited" in error_msg:
+>           raise Exception(error_msg + ". Check server logs for errors.")
+E           Exception: Server process exited with code 1. Check server logs for errors.
+
+python/sglang/test/test_utils.py:834: Exception
+_ ERROR at setup of TestSamplingMaskDeterministic.test_return_sampling_mask_preserves_deterministic_sampling _
+
+cls = <class 'test_sampling_mask.TestSamplingMaskDeterministic'>
+
+    @classmethod
+    def setUpClass(cls):
+        # This test validates sampler/output determinism, not backend selection.
+        # Pin Triton so the same deterministic path runs on CUDA and ROCm CI.
+>       cls._launch_server(
+            ("--enable-deterministic-inference", "--attention-backend", "triton")
+        )
+
+test/registered/sampling/test_sampling_mask.py:623: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/sampling/test_sampling_mask.py:298: in _launch_server
+    cls.process = popen_launch_server(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+model = 'meta-llama/Llama-3.2-1B-Instruct', base_url = 'http://127.0.0.1:21000'
+timeout = 600, api_key = None
+other_args = ['--mem-fraction-static', '0.7', '--enable-custom-logit-processor', '--sampling-mask-max-tokens', '64', '--enable-deterministic-inference', ...]
+env = {'AITER_ASM_DIR': '/sgl-workspace/aiter/hsa/', 'AITER_GPU_ARCHS': 'gfx950', 'AITER_JIT_DIR': '/tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter', 'CODEX_CI': '1', ...}
+return_stdout_stderr = None, device = 'cuda', pd_separated = False
+num_replicas = None
+
+    def popen_launch_server(
+        model: str,
+        base_url: str,
+        timeout: float,
+        api_key: Optional[str] = None,
+        other_args: Optional[list[str]] = None,
+        env: Optional[dict] = None,
+        return_stdout_stderr: Optional[tuple] = None,
+        device: str = "auto",
+        pd_separated: bool = False,
+        num_replicas: Optional[int] = None,
+    ):
+        """Launch a server process with automatic device detection and offline/online retry.
+    
+        Args:
+            model: Model path or identifier
+            base_url: Base URL for the server
+            timeout: Timeout for server startup
+            api_key: Optional API key for authentication
+            other_args: Additional command line arguments
+            env: Environment dict for subprocess
+            return_stdout_stderr: Optional tuple for output capture
+            device: Device type ("auto", "cuda", "rocm" or "cpu")
+            pd_separated: Whether to use PD separated mode
+            num_replicas: Number of replicas for mixed PD mode
+    
+        Returns:
+            Started subprocess.Popen object
+        """
+        other_args = other_args or []
+    
+        # Auto-detect device if needed
+        if device == "auto":
+            device = auto_config_device()
+            other_args = list(other_args)
+            other_args += ["--device", str(device)]
+    
+        # CI-specific: Validate cache and enable offline mode if complete
+        if env is None:
+            env = os.environ.copy()
+        else:
+            merged = os.environ.copy()
+            merged.update(env)
+            env = merged
+    
+        # A dying predecessor can hold the derived port plan past
+        # kill_process_tree() while GPU teardown completes; give CI launches
+        # teardown-sized patience (see wait_port_available).
+        env.setdefault("SGLANG_WAIT_PORT_TIMEOUT", "120")
+    
+        # Store per-run marker path for potential invalidation
+        per_run_marker_path = None
+        try:
+            from sglang.utils import is_in_ci
+    
+            if is_in_ci():
+                per_run_marker_path = _try_enable_offline_mode_if_cache_complete(
+                    model, env, other_args
+                )
+        except Exception as e:
+            print(f"CI cache validation failed (non-fatal): {e}")
+    
+        # Build server command
+        _, host, port = base_url.split(":")
+        host = host[2:]
+    
+        use_mixed_pd_engine = not pd_separated and num_replicas is not None
+        if pd_separated or use_mixed_pd_engine:
+            command = [
+                "python3",
+                "-m",
+                "sglang.launch_pd_server",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+        else:
+            command = [
+                "sglang",
+                "serve",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+    
+        if pd_separated or use_mixed_pd_engine:
+            command.extend(["--lb-host", host, "--lb-port", port])
+        else:
+            command.extend(["--host", host, "--port", port])
+    
+        if use_mixed_pd_engine:
+            command.extend(["--mixed", "--num-replicas", str(num_replicas)])
+    
+        if api_key:
+            command += ["--api-key", api_key]
+    
+        print(f"command={shlex.join(command)}")
+    
+        # Track if offline mode was enabled for potential retry
+        offline_enabled = env.get("HF_HUB_OFFLINE") == "1"
+    
+        # First launch attempt
+        process = _launch_server_process(command, env, return_stdout_stderr, model)
+        success, error_msg = _wait_for_server_health(process, base_url, api_key, timeout)
+    
+        # If offline launch failed and offline was enabled, retry with online mode
+        if not success and offline_enabled:
+            print(
+                f"CI_OFFLINE: Offline launch failed ({error_msg}), retrying with online mode..."
+            )
+    
+            # Kill failed process
+            try:
+                if process.poll() is None:
+                    kill_process_tree(process.pid)
+                else:
+                    process.wait(timeout=5)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error cleaning up failed offline process: {e}")
+    
+            # Invalidate per-run marker to prevent subsequent tests from using offline
+            if per_run_marker_path and os.path.exists(per_run_marker_path):
+                try:
+                    os.remove(per_run_marker_path)
+                    print("CI_OFFLINE: Invalidated per-run marker due to offline failure")
+                except Exception as e:
+                    print(f"CI_OFFLINE: Failed to remove per-run marker: {e}")
+    
+            # Retry with online mode
+            env["HF_HUB_OFFLINE"] = "0"
+            process = _launch_server_process(command, env, return_stdout_stderr, model)
+            success, error_msg = _wait_for_server_health(
+                process, base_url, api_key, timeout
+            )
+    
+            if success:
+                print("CI_OFFLINE: Online retry succeeded")
+                return process
+    
+            # Online retry also failed
+            try:
+                kill_process_tree(process.pid)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error killing process after online retry failure: {e}")
+    
+            if "exited" in error_msg:
+                raise Exception(error_msg + ". Check server logs for errors.")
+            raise TimeoutError(error_msg)
+    
+        # First attempt succeeded or offline was not enabled
+        if success:
+            return process
+    
+        # First attempt failed and offline was not enabled
+        try:
+            kill_process_tree(process.pid)
+        except Exception as e:
+            print(f"CI_OFFLINE: Error killing process after first attempt failure: {e}")
+    
+        if "exited" in error_msg:
+>           raise Exception(error_msg + ". Check server logs for errors.")
+E           Exception: Server process exited with code 1. Check server logs for errors.
+
+python/sglang/test/test_utils.py:834: Exception
+---------------------------- Captured stdout setup -----------------------------
+command=sglang serve --model-path meta-llama/Llama-3.2-1B-Instruct --mem-fraction-static 0.7 --enable-custom-logit-processor --sampling-mask-max-tokens 64 --enable-deterministic-inference --attention-backend triton --device cuda --host 127.0.0.1 --port 21000
+CI_OFFLINE: Launching server HF_HUB_OFFLINE=0 model=meta-llama/Llama-3.2-1B-Instruct
+---------------------------- Captured stderr setup -----------------------------
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter/module_aiter_core.so
+[2026-09-12 13:43:59] kill_process_tree called: parent_pid=4535, include_parent=False, pid=4535
+httpx.HTTPStatusError: Client error '401 Unauthorized' for url 'https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/resolve/main/config.json'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/venv/lib/python3.12/site-packages/transformers/utils/hub.py", line 437, in cached_files
+    hf_hub_download(
+  File "/opt/venv/lib/python3.12/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/huggingface_hub/file_download.py", line 1028, in hf_hub_download
+    return _hf_hub_download_to_cache_dir(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/huggingface_hub/file_download.py", line 1175, in _hf_hub_download_to_cache_dir
+    _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+  File "/opt/venv/lib/python3.12/site-packages/huggingface_hub/file_download.py", line 1915, in _raise_on_head_call_error
+    raise head_call_error
+huggingface_hub.errors.GatedRepoError: 401 Client Error. (Request ID: Root=1-6aa5571f-0567b543533dc7b30c4dd240;6ae6f42d-ca23-47ae-b7dd-83259ce3d276)
+
+Cannot access gated repo for url https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/resolve/main/config.json.
+Access to model meta-llama/Llama-3.2-1B-Instruct is restricted. You must have access to it and be authenticated to access it. Please log in.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/venv/bin/sglang", line 6, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/job/repo/python/sglang/cli/main.py", line 40, in main
+    serve(args, extra_argv)
+  File "/job/repo/python/sglang/cli/serve.py", line 205, in serve
+    registered.backend.run(request)
+  File "/job/repo/python/sglang/cli/serve.py", line 99, in _run_llm
+    run_server(server_args)
+  File "/job/repo/python/sglang/launch_server.py", line 21, in run_server
+    server_args.resolve_once()
+  File "/job/repo/python/sglang/srt/server_args.py", line 281, in resolve_once
+    run_resolution_pipeline(self)
+  File "/job/repo/python/sglang/srt/arg_groups/pipeline.py", line 188, in run_resolution_pipeline
+    apply_inkling_prefill_cuda_graph_default(server_args)
+  File "/job/repo/python/sglang/srt/arg_groups/cuda_graph_hook.py", line 497, in apply_inkling_prefill_cuda_graph_default
+    arch = model_config_of(server_args).hf_config.architectures[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/arg_groups/model_override_base.py", line 249, in model_config_of
+    model_config = ModelConfig.from_server_args(server_args)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/configs/model_config.py", line 720, in from_server_args
+    return ModelConfig(
+           ^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/configs/model_config.py", line 429, in __init__
+    get_config(
+  File "/job/repo/python/sglang/srt/utils/common.py", line 4308, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/utils/hf_transformers/config.py", line 262, in get_config
+    config = parser.parse(
+             ^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/utils/hf_transformers/config.py", line 86, in parse
+    config = _try_load_longcat_config(model, revision, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/utils/hf_transformers/config.py", line 65, in _try_load_longcat_config
+    config_dict, _ = PretrainedConfig.get_config_dict(
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/transformers/configuration_utils.py", line 687, in get_config_dict
+    config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/transformers/configuration_utils.py", line 742, in _get_config_dict
+    resolved_config_file = cached_file(
+                           ^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/transformers/utils/hub.py", line 293, in cached_file
+    file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/transformers/utils/hub.py", line 503, in cached_files
+    raise OSError(
+OSError: You are trying to access a gated repo.
+Make sure to have access to it at https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct.
+401 Client Error. (Request ID: Root=1-6aa5571f-0567b543533dc7b30c4dd240;6ae6f42d-ca23-47ae-b7dd-83259ce3d276)
+
+Cannot access gated repo for url https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/resolve/main/config.json.
+Access to model meta-llama/Llama-3.2-1B-Instruct is restricted. You must have access to it and be authenticated to access it. Please log in.
+_ ERROR at setup of TestSamplingMaskPytorch.test_chat_completions_returns_sampling_mask _
+
+cls = <class 'test_sampling_mask.TestSamplingMaskPytorch'>
+
+    @classmethod
+    def setUpClass(cls):
+>       cls._launch_server(("--sampling-backend", "pytorch"))
+
+test/registered/sampling/test_sampling_mask.py:650: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/sampling/test_sampling_mask.py:298: in _launch_server
+    cls.process = popen_launch_server(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+model = 'meta-llama/Llama-3.2-1B-Instruct', base_url = 'http://127.0.0.1:21000'
+timeout = 600, api_key = None
+other_args = ['--mem-fraction-static', '0.7', '--enable-custom-logit-processor', '--sampling-mask-max-tokens', '64', '--sampling-backend', ...]
+env = {'AITER_ASM_DIR': '/sgl-workspace/aiter/hsa/', 'AITER_GPU_ARCHS': 'gfx950', 'AITER_JIT_DIR': '/tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter', 'CODEX_CI': '1', ...}
+return_stdout_stderr = None, device = 'cuda', pd_separated = False
+num_replicas = None
+
+    def popen_launch_server(
+        model: str,
+        base_url: str,
+        timeout: float,
+        api_key: Optional[str] = None,
+        other_args: Optional[list[str]] = None,
+        env: Optional[dict] = None,
+        return_stdout_stderr: Optional[tuple] = None,
+        device: str = "auto",
+        pd_separated: bool = False,
+        num_replicas: Optional[int] = None,
+    ):
+        """Launch a server process with automatic device detection and offline/online retry.
+    
+        Args:
+            model: Model path or identifier
+            base_url: Base URL for the server
+            timeout: Timeout for server startup
+            api_key: Optional API key for authentication
+            other_args: Additional command line arguments
+            env: Environment dict for subprocess
+            return_stdout_stderr: Optional tuple for output capture
+            device: Device type ("auto", "cuda", "rocm" or "cpu")
+            pd_separated: Whether to use PD separated mode
+            num_replicas: Number of replicas for mixed PD mode
+    
+        Returns:
+            Started subprocess.Popen object
+        """
+        other_args = other_args or []
+    
+        # Auto-detect device if needed
+        if device == "auto":
+            device = auto_config_device()
+            other_args = list(other_args)
+            other_args += ["--device", str(device)]
+    
+        # CI-specific: Validate cache and enable offline mode if complete
+        if env is None:
+            env = os.environ.copy()
+        else:
+            merged = os.environ.copy()
+            merged.update(env)
+            env = merged
+    
+        # A dying predecessor can hold the derived port plan past
+        # kill_process_tree() while GPU teardown completes; give CI launches
+        # teardown-sized patience (see wait_port_available).
+        env.setdefault("SGLANG_WAIT_PORT_TIMEOUT", "120")
+    
+        # Store per-run marker path for potential invalidation
+        per_run_marker_path = None
+        try:
+            from sglang.utils import is_in_ci
+    
+            if is_in_ci():
+                per_run_marker_path = _try_enable_offline_mode_if_cache_complete(
+                    model, env, other_args
+                )
+        except Exception as e:
+            print(f"CI cache validation failed (non-fatal): {e}")
+    
+        # Build server command
+        _, host, port = base_url.split(":")
+        host = host[2:]
+    
+        use_mixed_pd_engine = not pd_separated and num_replicas is not None
+        if pd_separated or use_mixed_pd_engine:
+            command = [
+                "python3",
+                "-m",
+                "sglang.launch_pd_server",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+        else:
+            command = [
+                "sglang",
+                "serve",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+    
+        if pd_separated or use_mixed_pd_engine:
+            command.extend(["--lb-host", host, "--lb-port", port])
+        else:
+            command.extend(["--host", host, "--port", port])
+    
+        if use_mixed_pd_engine:
+            command.extend(["--mixed", "--num-replicas", str(num_replicas)])
+    
+        if api_key:
+            command += ["--api-key", api_key]
+    
+        print(f"command={shlex.join(command)}")
+    
+        # Track if offline mode was enabled for potential retry
+        offline_enabled = env.get("HF_HUB_OFFLINE") == "1"
+    
+        # First launch attempt
+        process = _launch_server_process(command, env, return_stdout_stderr, model)
+        success, error_msg = _wait_for_server_health(process, base_url, api_key, timeout)
+    
+        # If offline launch failed and offline was enabled, retry with online mode
+        if not success and offline_enabled:
+            print(
+                f"CI_OFFLINE: Offline launch failed ({error_msg}), retrying with online mode..."
+            )
+    
+            # Kill failed process
+            try:
+                if process.poll() is None:
+                    kill_process_tree(process.pid)
+                else:
+                    process.wait(timeout=5)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error cleaning up failed offline process: {e}")
+    
+            # Invalidate per-run marker to prevent subsequent tests from using offline
+            if per_run_marker_path and os.path.exists(per_run_marker_path):
+                try:
+                    os.remove(per_run_marker_path)
+                    print("CI_OFFLINE: Invalidated per-run marker due to offline failure")
+                except Exception as e:
+                    print(f"CI_OFFLINE: Failed to remove per-run marker: {e}")
+    
+            # Retry with online mode
+            env["HF_HUB_OFFLINE"] = "0"
+            process = _launch_server_process(command, env, return_stdout_stderr, model)
+            success, error_msg = _wait_for_server_health(
+                process, base_url, api_key, timeout
+            )
+    
+            if success:
+                print("CI_OFFLINE: Online retry succeeded")
+                return process
+    
+            # Online retry also failed
+            try:
+                kill_process_tree(process.pid)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error killing process after online retry failure: {e}")
+    
+            if "exited" in error_msg:
+                raise Exception(error_msg + ". Check server logs for errors.")
+            raise TimeoutError(error_msg)
+    
+        # First attempt succeeded or offline was not enabled
+        if success:
+            return process
+    
+        # First attempt failed and offline was not enabled
+        try:
+            kill_process_tree(process.pid)
+        except Exception as e:
+            print(f"CI_OFFLINE: Error killing process after first attempt failure: {e}")
+    
+        if "exited" in error_msg:
+>           raise Exception(error_msg + ". Check server logs for errors.")
+E           Exception: Server process exited with code 1. Check server logs for errors.
+
+python/sglang/test/test_utils.py:834: Exception
+---------------------------- Captured stdout setup -----------------------------
+command=sglang serve --model-path meta-llama/Llama-3.2-1B-Instruct --mem-fraction-static 0.7 --enable-custom-logit-processor --sampling-mask-max-tokens 64 --sampling-backend pytorch --device cuda --host 127.0.0.1 --port 21000
+CI_OFFLINE: Launching server HF_HUB_OFFLINE=0 model=meta-llama/Llama-3.2-1B-Instruct
+---------------------------- Captured stderr setup -----------------------------
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter/module_aiter_core.so
+[2026-09-12 13:44:19] kill_process_tree called: parent_pid=4787, include_parent=False, pid=4787
+httpx.HTTPStatusError: Client error '401 Unauthorized' for url 'https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/resolve/main/config.json'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/venv/lib/python3.12/site-packages/transformers/utils/hub.py", line 437, in cached_files
+    hf_hub_download(
+  File "/opt/venv/lib/python3.12/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/huggingface_hub/file_download.py", line 1028, in hf_hub_download
+    return _hf_hub_download_to_cache_dir(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/huggingface_hub/file_download.py", line 1175, in _hf_hub_download_to_cache_dir
+    _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+  File "/opt/venv/lib/python3.12/site-packages/huggingface_hub/file_download.py", line 1915, in _raise_on_head_call_error
+    raise head_call_error
+huggingface_hub.errors.GatedRepoError: 401 Client Error. (Request ID: Root=1-6aa55733-2ee226db62f06bc641404e51;a18f26e5-8f0d-4b0c-8640-e8f2fcb6ecdd)
+
+Cannot access gated repo for url https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/resolve/main/config.json.
+Access to model meta-llama/Llama-3.2-1B-Instruct is restricted. You must have access to it and be authenticated to access it. Please log in.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/venv/bin/sglang", line 6, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/job/repo/python/sglang/cli/main.py", line 40, in main
+    serve(args, extra_argv)
+  File "/job/repo/python/sglang/cli/serve.py", line 205, in serve
+    registered.backend.run(request)
+  File "/job/repo/python/sglang/cli/serve.py", line 99, in _run_llm
+    run_server(server_args)
+  File "/job/repo/python/sglang/launch_server.py", line 21, in run_server
+    server_args.resolve_once()
+  File "/job/repo/python/sglang/srt/server_args.py", line 281, in resolve_once
+    run_resolution_pipeline(self)
+  File "/job/repo/python/sglang/srt/arg_groups/pipeline.py", line 188, in run_resolution_pipeline
+    apply_inkling_prefill_cuda_graph_default(server_args)
+  File "/job/repo/python/sglang/srt/arg_groups/cuda_graph_hook.py", line 497, in apply_inkling_prefill_cuda_graph_default
+    arch = model_config_of(server_args).hf_config.architectures[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/arg_groups/model_override_base.py", line 249, in model_config_of
+    model_config = ModelConfig.from_server_args(server_args)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/configs/model_config.py", line 720, in from_server_args
+    return ModelConfig(
+           ^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/configs/model_config.py", line 429, in __init__
+    get_config(
+  File "/job/repo/python/sglang/srt/utils/common.py", line 4308, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/utils/hf_transformers/config.py", line 262, in get_config
+    config = parser.parse(
+             ^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/utils/hf_transformers/config.py", line 86, in parse
+    config = _try_load_longcat_config(model, revision, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/utils/hf_transformers/config.py", line 65, in _try_load_longcat_config
+    config_dict, _ = PretrainedConfig.get_config_dict(
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/transformers/configuration_utils.py", line 687, in get_config_dict
+    config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/transformers/configuration_utils.py", line 742, in _get_config_dict
+    resolved_config_file = cached_file(
+                           ^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/transformers/utils/hub.py", line 293, in cached_file
+    file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/transformers/utils/hub.py", line 503, in cached_files
+    raise OSError(
+OSError: You are trying to access a gated repo.
+Make sure to have access to it at https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct.
+401 Client Error. (Request ID: Root=1-6aa55733-2ee226db62f06bc641404e51;a18f26e5-8f0d-4b0c-8640-e8f2fcb6ecdd)
+
+Cannot access gated repo for url https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/resolve/main/config.json.
+Access to model meta-llama/Llama-3.2-1B-Instruct is restricted. You must have access to it and be authenticated to access it. Please log in.
+_ ERROR at setup of TestSamplingMaskPytorch.test_disallowed_tokens_with_replay _
+
+cls = <class 'test_sampling_mask.TestSamplingMaskPytorch'>
+
+    @classmethod
+    def setUpClass(cls):
+>       cls._launch_server(("--sampling-backend", "pytorch"))
+
+test/registered/sampling/test_sampling_mask.py:650: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/sampling/test_sampling_mask.py:298: in _launch_server
+    cls.process = popen_launch_server(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+model = 'meta-llama/Llama-3.2-1B-Instruct', base_url = 'http://127.0.0.1:21000'
+timeout = 600, api_key = None
+other_args = ['--mem-fraction-static', '0.7', '--enable-custom-logit-processor', '--sampling-mask-max-tokens', '64', '--sampling-backend', ...]
+env = {'AITER_ASM_DIR': '/sgl-workspace/aiter/hsa/', 'AITER_GPU_ARCHS': 'gfx950', 'AITER_JIT_DIR': '/tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter', 'CODEX_CI': '1', ...}
+return_stdout_stderr = None, device = 'cuda', pd_separated = False
+num_replicas = None
+
+    def popen_launch_server(
+        model: str,
+        base_url: str,
+        timeout: float,
+        api_key: Optional[str] = None,
+        other_args: Optional[list[str]] = None,
+        env: Optional[dict] = None,
+        return_stdout_stderr: Optional[tuple] = None,
+        device: str = "auto",
+        pd_separated: bool = False,
+        num_replicas: Optional[int] = None,
+    ):
+        """Launch a server process with automatic device detection and offline/online retry.
+    
+        Args:
+            model: Model path or identifier
+            base_url: Base URL for the server
+            timeout: Timeout for server startup
+            api_key: Optional API key for authentication
+            other_args: Additional command line arguments
+            env: Environment dict for subprocess
+            return_stdout_stderr: Optional tuple for output capture
+            device: Device type ("auto", "cuda", "rocm" or "cpu")
+            pd_separated: Whether to use PD separated mode
+            num_replicas: Number of replicas for mixed PD mode
+    
+        Returns:
+            Started subprocess.Popen object
+        """
+        other_args = other_args or []
+    
+        # Auto-detect device if needed
+        if device == "auto":
+            device = auto_config_device()
+            other_args = list(other_args)
+            other_args += ["--device", str(device)]
+    
+        # CI-specific: Validate cache and enable offline mode if complete
+        if env is None:
+            env = os.environ.copy()
+        else:
+            merged = os.environ.copy()
+            merged.update(env)
+            env = merged
+    
+        # A dying predecessor can hold the derived port plan past
+        # kill_process_tree() while GPU teardown completes; give CI launches
+        # teardown-sized patience (see wait_port_available).
+        env.setdefault("SGLANG_WAIT_PORT_TIMEOUT", "120")
+    
+        # Store per-run marker path for potential invalidation
+        per_run_marker_path = None
+        try:
+            from sglang.utils import is_in_ci
+    
+            if is_in_ci():
+                per_run_marker_path = _try_enable_offline_mode_if_cache_complete(
+                    model, env, other_args
+                )
+        except Exception as e:
+            print(f"CI cache validation failed (non-fatal): {e}")
+    
+        # Build server command
+        _, host, port = base_url.split(":")
+        host = host[2:]
+    
+        use_mixed_pd_engine = not pd_separated and num_replicas is not None
+        if pd_separated or use_mixed_pd_engine:
+            command = [
+                "python3",
+                "-m",
+                "sglang.launch_pd_server",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+        else:
+            command = [
+                "sglang",
+                "serve",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+    
+        if pd_separated or use_mixed_pd_engine:
+            command.extend(["--lb-host", host, "--lb-port", port])
+        else:
+            command.extend(["--host", host, "--port", port])
+    
+        if use_mixed_pd_engine:
+            command.extend(["--mixed", "--num-replicas", str(num_replicas)])
+    
+        if api_key:
+            command += ["--api-key", api_key]
+    
+        print(f"command={shlex.join(command)}")
+    
+        # Track if offline mode was enabled for potential retry
+        offline_enabled = env.get("HF_HUB_OFFLINE") == "1"
+    
+        # First launch attempt
+        process = _launch_server_process(command, env, return_stdout_stderr, model)
+        success, error_msg = _wait_for_server_health(process, base_url, api_key, timeout)
+    
+        # If offline launch failed and offline was enabled, retry with online mode
+        if not success and offline_enabled:
+            print(
+                f"CI_OFFLINE: Offline launch failed ({error_msg}), retrying with online mode..."
+            )
+    
+            # Kill failed process
+            try:
+                if process.poll() is None:
+                    kill_process_tree(process.pid)
+                else:
+                    process.wait(timeout=5)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error cleaning up failed offline process: {e}")
+    
+            # Invalidate per-run marker to prevent subsequent tests from using offline
+            if per_run_marker_path and os.path.exists(per_run_marker_path):
+                try:
+                    os.remove(per_run_marker_path)
+                    print("CI_OFFLINE: Invalidated per-run marker due to offline failure")
+                except Exception as e:
+                    print(f"CI_OFFLINE: Failed to remove per-run marker: {e}")
+    
+            # Retry with online mode
+            env["HF_HUB_OFFLINE"] = "0"
+            process = _launch_server_process(command, env, return_stdout_stderr, model)
+            success, error_msg = _wait_for_server_health(
+                process, base_url, api_key, timeout
+            )
+    
+            if success:
+                print("CI_OFFLINE: Online retry succeeded")
+                return process
+    
+            # Online retry also failed
+            try:
+                kill_process_tree(process.pid)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error killing process after online retry failure: {e}")
+    
+            if "exited" in error_msg:
+                raise Exception(error_msg + ". Check server logs for errors.")
+            raise TimeoutError(error_msg)
+    
+        # First attempt succeeded or offline was not enabled
+        if success:
+            return process
+    
+        # First attempt failed and offline was not enabled
+        try:
+            kill_process_tree(process.pid)
+        except Exception as e:
+            print(f"CI_OFFLINE: Error killing process after first attempt failure: {e}")
+    
+        if "exited" in error_msg:
+>           raise Exception(error_msg + ". Check server logs for errors.")
+E           Exception: Server process exited with code 1. Check server logs for errors.
+
+python/sglang/test/test_utils.py:834: Exception
+_ ERROR at setup of TestSamplingMaskPytorch.test_generate_rejects_unbounded_sampling_mask _
+
+cls = <class 'test_sampling_mask.TestSamplingMaskPytorch'>
+
+    @classmethod
+    def setUpClass(cls):
+>       cls._launch_server(("--sampling-backend", "pytorch"))
+
+test/registered/sampling/test_sampling_mask.py:650: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/sampling/test_sampling_mask.py:298: in _launch_server
+    cls.process = popen_launch_server(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+model = 'meta-llama/Llama-3.2-1B-Instruct', base_url = 'http://127.0.0.1:21000'
+timeout = 600, api_key = None
+other_args = ['--mem-fraction-static', '0.7', '--enable-custom-logit-processor', '--sampling-mask-max-tokens', '64', '--sampling-backend', ...]
+env = {'AITER_ASM_DIR': '/sgl-workspace/aiter/hsa/', 'AITER_GPU_ARCHS': 'gfx950', 'AITER_JIT_DIR': '/tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter', 'CODEX_CI': '1', ...}
+return_stdout_stderr = None, device = 'cuda', pd_separated = False
+num_replicas = None
+
+    def popen_launch_server(
+        model: str,
+        base_url: str,
+        timeout: float,
+        api_key: Optional[str] = None,
+        other_args: Optional[list[str]] = None,
+        env: Optional[dict] = None,
+        return_stdout_stderr: Optional[tuple] = None,
+        device: str = "auto",
+        pd_separated: bool = False,
+        num_replicas: Optional[int] = None,
+    ):
+        """Launch a server process with automatic device detection and offline/online retry.
+    
+        Args:
+            model: Model path or identifier
+            base_url: Base URL for the server
+            timeout: Timeout for server startup
+            api_key: Optional API key for authentication
+            other_args: Additional command line arguments
+            env: Environment dict for subprocess
+            return_stdout_stderr: Optional tuple for output capture
+            device: Device type ("auto", "cuda", "rocm" or "cpu")
+            pd_separated: Whether to use PD separated mode
+            num_replicas: Number of replicas for mixed PD mode
+    
+        Returns:
+            Started subprocess.Popen object
+        """
+        other_args = other_args or []
+    
+        # Auto-detect device if needed
+        if device == "auto":
+            device = auto_config_device()
+            other_args = list(other_args)
+            other_args += ["--device", str(device)]
+    
+        # CI-specific: Validate cache and enable offline mode if complete
+        if env is None:
+            env = os.environ.copy()
+        else:
+            merged = os.environ.copy()
+            merged.update(env)
+            env = merged
+    
+        # A dying predecessor can hold the derived port plan past
+        # kill_process_tree() while GPU teardown completes; give CI launches
+        # teardown-sized patience (see wait_port_available).
+        env.setdefault("SGLANG_WAIT_PORT_TIMEOUT", "120")
+    
+        # Store per-run marker path for potential invalidation
+        per_run_marker_path = None
+        try:
+            from sglang.utils import is_in_ci
+    
+            if is_in_ci():
+                per_run_marker_path = _try_enable_offline_mode_if_cache_complete(
+                    model, env, other_args
+                )
+        except Exception as e:
+            print(f"CI cache validation failed (non-fatal): {e}")
+    
+        # Build server command
+        _, host, port = base_url.split(":")
+        host = host[2:]
+    
+        use_mixed_pd_engine = not pd_separated and num_replicas is not None
+        if pd_separated or use_mixed_pd_engine:
+            command = [
+                "python3",
+                "-m",
+                "sglang.launch_pd_server",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+        else:
+            command = [
+                "sglang",
+                "serve",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+    
+        if pd_separated or use_mixed_pd_engine:
+            command.extend(["--lb-host", host, "--lb-port", port])
+        else:
+            command.extend(["--host", host, "--port", port])
+    
+        if use_mixed_pd_engine:
+            command.extend(["--mixed", "--num-replicas", str(num_replicas)])
+    
+        if api_key:
+            command += ["--api-key", api_key]
+    
+        print(f"command={shlex.join(command)}")
+    
+        # Track if offline mode was enabled for potential retry
+        offline_enabled = env.get("HF_HUB_OFFLINE") == "1"
+    
+        # First launch attempt
+        process = _launch_server_process(command, env, return_stdout_stderr, model)
+        success, error_msg = _wait_for_server_health(process, base_url, api_key, timeout)
+    
+        # If offline launch failed and offline was enabled, retry with online mode
+        if not success and offline_enabled:
+            print(
+                f"CI_OFFLINE: Offline launch failed ({error_msg}), retrying with online mode..."
+            )
+    
+            # Kill failed process
+            try:
+                if process.poll() is None:
+                    kill_process_tree(process.pid)
+                else:
+                    process.wait(timeout=5)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error cleaning up failed offline process: {e}")
+    
+            # Invalidate per-run marker to prevent subsequent tests from using offline
+            if per_run_marker_path and os.path.exists(per_run_marker_path):
+                try:
+                    os.remove(per_run_marker_path)
+                    print("CI_OFFLINE: Invalidated per-run marker due to offline failure")
+                except Exception as e:
+                    print(f"CI_OFFLINE: Failed to remove per-run marker: {e}")
+    
+            # Retry with online mode
+            env["HF_HUB_OFFLINE"] = "0"
+            process = _launch_server_process(command, env, return_stdout_stderr, model)
+            success, error_msg = _wait_for_server_health(
+                process, base_url, api_key, timeout
+            )
+    
+            if success:
+                print("CI_OFFLINE: Online retry succeeded")
+                return process
+    
+            # Online retry also failed
+            try:
+                kill_process_tree(process.pid)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error killing process after online retry failure: {e}")
+    
+            if "exited" in error_msg:
+                raise Exception(error_msg + ". Check server logs for errors.")
+            raise TimeoutError(error_msg)
+    
+        # First attempt succeeded or offline was not enabled
+        if success:
+            return process
+    
+        # First attempt failed and offline was not enabled
+        try:
+            kill_process_tree(process.pid)
+        except Exception as e:
+            print(f"CI_OFFLINE: Error killing process after first attempt failure: {e}")
+    
+        if "exited" in error_msg:
+>           raise Exception(error_msg + ". Check server logs for errors.")
+E           Exception: Server process exited with code 1. Check server logs for errors.
+
+python/sglang/test/test_utils.py:834: Exception
+_ ERROR at setup of TestSamplingMaskPytorch.test_generate_returns_greedy_singleton_mask _
+
+cls = <class 'test_sampling_mask.TestSamplingMaskPytorch'>
+
+    @classmethod
+    def setUpClass(cls):
+>       cls._launch_server(("--sampling-backend", "pytorch"))
+
+test/registered/sampling/test_sampling_mask.py:650: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/sampling/test_sampling_mask.py:298: in _launch_server
+    cls.process = popen_launch_server(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+model = 'meta-llama/Llama-3.2-1B-Instruct', base_url = 'http://127.0.0.1:21000'
+timeout = 600, api_key = None
+other_args = ['--mem-fraction-static', '0.7', '--enable-custom-logit-processor', '--sampling-mask-max-tokens', '64', '--sampling-backend', ...]
+env = {'AITER_ASM_DIR': '/sgl-workspace/aiter/hsa/', 'AITER_GPU_ARCHS': 'gfx950', 'AITER_JIT_DIR': '/tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter', 'CODEX_CI': '1', ...}
+return_stdout_stderr = None, device = 'cuda', pd_separated = False
+num_replicas = None
+
+    def popen_launch_server(
+        model: str,
+        base_url: str,
+        timeout: float,
+        api_key: Optional[str] = None,
+        other_args: Optional[list[str]] = None,
+        env: Optional[dict] = None,
+        return_stdout_stderr: Optional[tuple] = None,
+        device: str = "auto",
+        pd_separated: bool = False,
+        num_replicas: Optional[int] = None,
+    ):
+        """Launch a server process with automatic device detection and offline/online retry.
+    
+        Args:
+            model: Model path or identifier
+            base_url: Base URL for the server
+            timeout: Timeout for server startup
+            api_key: Optional API key for authentication
+            other_args: Additional command line arguments
+            env: Environment dict for subprocess
+            return_stdout_stderr: Optional tuple for output capture
+            device: Device type ("auto", "cuda", "rocm" or "cpu")
+            pd_separated: Whether to use PD separated mode
+            num_replicas: Number of replicas for mixed PD mode
+    
+        Returns:
+            Started subprocess.Popen object
+        """
+        other_args = other_args or []
+    
+        # Auto-detect device if needed
+        if device == "auto":
+            device = auto_config_device()
+            other_args = list(other_args)
+            other_args += ["--device", str(device)]
+    
+        # CI-specific: Validate cache and enable offline mode if complete
+        if env is None:
+            env = os.environ.copy()
+        else:
+            merged = os.environ.copy()
+            merged.update(env)
+            env = merged
+    
+        # A dying predecessor can hold the derived port plan past
+        # kill_process_tree() while GPU teardown completes; give CI launches
+        # teardown-sized patience (see wait_port_available).
+        env.setdefault("SGLANG_WAIT_PORT_TIMEOUT", "120")
+    
+        # Store per-run marker path for potential invalidation
+        per_run_marker_path = None
+        try:
+            from sglang.utils import is_in_ci
+    
+            if is_in_ci():
+                per_run_marker_path = _try_enable_offline_mode_if_cache_complete(
+                    model, env, other_args
+                )
+        except Exception as e:
+            print(f"CI cache validation failed (non-fatal): {e}")
+    
+        # Build server command
+        _, host, port = base_url.split(":")
+        host = host[2:]
+    
+        use_mixed_pd_engine = not pd_separated and num_replicas is not None
+        if pd_separated or use_mixed_pd_engine:
+            command = [
+                "python3",
+                "-m",
+                "sglang.launch_pd_server",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+        else:
+            command = [
+                "sglang",
+                "serve",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+    
+        if pd_separated or use_mixed_pd_engine:
+            command.extend(["--lb-host", host, "--lb-port", port])
+        else:
+            command.extend(["--host", host, "--port", port])
+    
+        if use_mixed_pd_engine:
+            command.extend(["--mixed", "--num-replicas", str(num_replicas)])
+    
+        if api_key:
+            command += ["--api-key", api_key]
+    
+        print(f"command={shlex.join(command)}")
+    
+        # Track if offline mode was enabled for potential retry
+        offline_enabled = env.get("HF_HUB_OFFLINE") == "1"
+    
+        # First launch attempt
+        process = _launch_server_process(command, env, return_stdout_stderr, model)
+        success, error_msg = _wait_for_server_health(process, base_url, api_key, timeout)
+    
+        # If offline launch failed and offline was enabled, retry with online mode
+        if not success and offline_enabled:
+            print(
+                f"CI_OFFLINE: Offline launch failed ({error_msg}), retrying with online mode..."
+            )
+    
+            # Kill failed process
+            try:
+                if process.poll() is None:
+                    kill_process_tree(process.pid)
+                else:
+                    process.wait(timeout=5)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error cleaning up failed offline process: {e}")
+    
+            # Invalidate per-run marker to prevent subsequent tests from using offline
+            if per_run_marker_path and os.path.exists(per_run_marker_path):
+                try:
+                    os.remove(per_run_marker_path)
+                    print("CI_OFFLINE: Invalidated per-run marker due to offline failure")
+                except Exception as e:
+                    print(f"CI_OFFLINE: Failed to remove per-run marker: {e}")
+    
+            # Retry with online mode
+            env["HF_HUB_OFFLINE"] = "0"
+            process = _launch_server_process(command, env, return_stdout_stderr, model)
+            success, error_msg = _wait_for_server_health(
+                process, base_url, api_key, timeout
+            )
+    
+            if success:
+                print("CI_OFFLINE: Online retry succeeded")
+                return process
+    
+            # Online retry also failed
+            try:
+                kill_process_tree(process.pid)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error killing process after online retry failure: {e}")
+    
+            if "exited" in error_msg:
+                raise Exception(error_msg + ". Check server logs for errors.")
+            raise TimeoutError(error_msg)
+    
+        # First attempt succeeded or offline was not enabled
+        if success:
+            return process
+    
+        # First attempt failed and offline was not enabled
+        try:
+            kill_process_tree(process.pid)
+        except Exception as e:
+            print(f"CI_OFFLINE: Error killing process after first attempt failure: {e}")
+    
+        if "exited" in error_msg:
+>           raise Exception(error_msg + ". Check server logs for errors.")
+E           Exception: Server process exited with code 1. Check server logs for errors.
+
+python/sglang/test/test_utils.py:834: Exception
+_ ERROR at setup of TestSamplingMaskPytorch.test_generate_returns_sampling_mask _
+
+cls = <class 'test_sampling_mask.TestSamplingMaskPytorch'>
+
+    @classmethod
+    def setUpClass(cls):
+>       cls._launch_server(("--sampling-backend", "pytorch"))
+
+test/registered/sampling/test_sampling_mask.py:650: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/sampling/test_sampling_mask.py:298: in _launch_server
+    cls.process = popen_launch_server(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+model = 'meta-llama/Llama-3.2-1B-Instruct', base_url = 'http://127.0.0.1:21000'
+timeout = 600, api_key = None
+other_args = ['--mem-fraction-static', '0.7', '--enable-custom-logit-processor', '--sampling-mask-max-tokens', '64', '--sampling-backend', ...]
+env = {'AITER_ASM_DIR': '/sgl-workspace/aiter/hsa/', 'AITER_GPU_ARCHS': 'gfx950', 'AITER_JIT_DIR': '/tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter', 'CODEX_CI': '1', ...}
+return_stdout_stderr = None, device = 'cuda', pd_separated = False
+num_replicas = None
+
+    def popen_launch_server(
+        model: str,
+        base_url: str,
+        timeout: float,
+        api_key: Optional[str] = None,
+        other_args: Optional[list[str]] = None,
+        env: Optional[dict] = None,
+        return_stdout_stderr: Optional[tuple] = None,
+        device: str = "auto",
+        pd_separated: bool = False,
+        num_replicas: Optional[int] = None,
+    ):
+        """Launch a server process with automatic device detection and offline/online retry.
+    
+        Args:
+            model: Model path or identifier
+            base_url: Base URL for the server
+            timeout: Timeout for server startup
+            api_key: Optional API key for authentication
+            other_args: Additional command line arguments
+            env: Environment dict for subprocess
+            return_stdout_stderr: Optional tuple for output capture
+            device: Device type ("auto", "cuda", "rocm" or "cpu")
+            pd_separated: Whether to use PD separated mode
+            num_replicas: Number of replicas for mixed PD mode
+    
+        Returns:
+            Started subprocess.Popen object
+        """
+        other_args = other_args or []
+    
+        # Auto-detect device if needed
+        if device == "auto":
+            device = auto_config_device()
+            other_args = list(other_args)
+            other_args += ["--device", str(device)]
+    
+        # CI-specific: Validate cache and enable offline mode if complete
+        if env is None:
+            env = os.environ.copy()
+        else:
+            merged = os.environ.copy()
+            merged.update(env)
+            env = merged
+    
+        # A dying predecessor can hold the derived port plan past
+        # kill_process_tree() while GPU teardown completes; give CI launches
+        # teardown-sized patience (see wait_port_available).
+        env.setdefault("SGLANG_WAIT_PORT_TIMEOUT", "120")
+    
+        # Store per-run marker path for potential invalidation
+        per_run_marker_path = None
+        try:
+            from sglang.utils import is_in_ci
+    
+            if is_in_ci():
+                per_run_marker_path = _try_enable_offline_mode_if_cache_complete(
+                    model, env, other_args
+                )
+        except Exception as e:
+            print(f"CI cache validation failed (non-fatal): {e}")
+    
+        # Build server command
+        _, host, port = base_url.split(":")
+        host = host[2:]
+    
+        use_mixed_pd_engine = not pd_separated and num_replicas is not None
+        if pd_separated or use_mixed_pd_engine:
+            command = [
+                "python3",
+                "-m",
+                "sglang.launch_pd_server",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+        else:
+            command = [
+                "sglang",
+                "serve",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+    
+        if pd_separated or use_mixed_pd_engine:
+            command.extend(["--lb-host", host, "--lb-port", port])
+        else:
+            command.extend(["--host", host, "--port", port])
+    
+        if use_mixed_pd_engine:
+            command.extend(["--mixed", "--num-replicas", str(num_replicas)])
+    
+        if api_key:
+            command += ["--api-key", api_key]
+    
+        print(f"command={shlex.join(command)}")
+    
+        # Track if offline mode was enabled for potential retry
+        offline_enabled = env.get("HF_HUB_OFFLINE") == "1"
+    
+        # First launch attempt
+        process = _launch_server_process(command, env, return_stdout_stderr, model)
+        success, error_msg = _wait_for_server_health(process, base_url, api_key, timeout)
+    
+        # If offline launch failed and offline was enabled, retry with online mode
+        if not success and offline_enabled:
+            print(
+                f"CI_OFFLINE: Offline launch failed ({error_msg}), retrying with online mode..."
+            )
+    
+            # Kill failed process
+            try:
+                if process.poll() is None:
+                    kill_process_tree(process.pid)
+                else:
+                    process.wait(timeout=5)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error cleaning up failed offline process: {e}")
+    
+            # Invalidate per-run marker to prevent subsequent tests from using offline
+            if per_run_marker_path and os.path.exists(per_run_marker_path):
+                try:
+                    os.remove(per_run_marker_path)
+                    print("CI_OFFLINE: Invalidated per-run marker due to offline failure")
+                except Exception as e:
+                    print(f"CI_OFFLINE: Failed to remove per-run marker: {e}")
+    
+            # Retry with online mode
+            env["HF_HUB_OFFLINE"] = "0"
+            process = _launch_server_process(command, env, return_stdout_stderr, model)
+            success, error_msg = _wait_for_server_health(
+                process, base_url, api_key, timeout
+            )
+    
+            if success:
+                print("CI_OFFLINE: Online retry succeeded")
+                return process
+    
+            # Online retry also failed
+            try:
+                kill_process_tree(process.pid)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error killing process after online retry failure: {e}")
+    
+            if "exited" in error_msg:
+                raise Exception(error_msg + ". Check server logs for errors.")
+            raise TimeoutError(error_msg)
+    
+        # First attempt succeeded or offline was not enabled
+        if success:
+            return process
+    
+        # First attempt failed and offline was not enabled
+        try:
+            kill_process_tree(process.pid)
+        except Exception as e:
+            print(f"CI_OFFLINE: Error killing process after first attempt failure: {e}")
+    
+        if "exited" in error_msg:
+>           raise Exception(error_msg + ". Check server logs for errors.")
+E           Exception: Server process exited with code 1. Check server logs for errors.
+
+python/sglang/test/test_utils.py:834: Exception
+_ ERROR at setup of TestSamplingMaskPytorch.test_generate_streams_aligned_sampling_masks _
+
+cls = <class 'test_sampling_mask.TestSamplingMaskPytorch'>
+
+    @classmethod
+    def setUpClass(cls):
+>       cls._launch_server(("--sampling-backend", "pytorch"))
+
+test/registered/sampling/test_sampling_mask.py:650: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/sampling/test_sampling_mask.py:298: in _launch_server
+    cls.process = popen_launch_server(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+model = 'meta-llama/Llama-3.2-1B-Instruct', base_url = 'http://127.0.0.1:21000'
+timeout = 600, api_key = None
+other_args = ['--mem-fraction-static', '0.7', '--enable-custom-logit-processor', '--sampling-mask-max-tokens', '64', '--sampling-backend', ...]
+env = {'AITER_ASM_DIR': '/sgl-workspace/aiter/hsa/', 'AITER_GPU_ARCHS': 'gfx950', 'AITER_JIT_DIR': '/tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter', 'CODEX_CI': '1', ...}
+return_stdout_stderr = None, device = 'cuda', pd_separated = False
+num_replicas = None
+
+    def popen_launch_server(
+        model: str,
+        base_url: str,
+        timeout: float,
+        api_key: Optional[str] = None,
+        other_args: Optional[list[str]] = None,
+        env: Optional[dict] = None,
+        return_stdout_stderr: Optional[tuple] = None,
+        device: str = "auto",
+        pd_separated: bool = False,
+        num_replicas: Optional[int] = None,
+    ):
+        """Launch a server process with automatic device detection and offline/online retry.
+    
+        Args:
+            model: Model path or identifier
+            base_url: Base URL for the server
+            timeout: Timeout for server startup
+            api_key: Optional API key for authentication
+            other_args: Additional command line arguments
+            env: Environment dict for subprocess
+            return_stdout_stderr: Optional tuple for output capture
+            device: Device type ("auto", "cuda", "rocm" or "cpu")
+            pd_separated: Whether to use PD separated mode
+            num_replicas: Number of replicas for mixed PD mode
+    
+        Returns:
+            Started subprocess.Popen object
+        """
+        other_args = other_args or []
+    
+        # Auto-detect device if needed
+        if device == "auto":
+            device = auto_config_device()
+            other_args = list(other_args)
+            other_args += ["--device", str(device)]
+    
+        # CI-specific: Validate cache and enable offline mode if complete
+        if env is None:
+            env = os.environ.copy()
+        else:
+            merged = os.environ.copy()
+            merged.update(env)
+            env = merged
+    
+        # A dying predecessor can hold the derived port plan past
+        # kill_process_tree() while GPU teardown completes; give CI launches
+        # teardown-sized patience (see wait_port_available).
+        env.setdefault("SGLANG_WAIT_PORT_TIMEOUT", "120")
+    
+        # Store per-run marker path for potential invalidation
+        per_run_marker_path = None
+        try:
+            from sglang.utils import is_in_ci
+    
+            if is_in_ci():
+                per_run_marker_path = _try_enable_offline_mode_if_cache_complete(
+                    model, env, other_args
+                )
+        except Exception as e:
+            print(f"CI cache validation failed (non-fatal): {e}")
+    
+        # Build server command
+        _, host, port = base_url.split(":")
+        host = host[2:]
+    
+        use_mixed_pd_engine = not pd_separated and num_replicas is not None
+        if pd_separated or use_mixed_pd_engine:
+            command = [
+                "python3",
+                "-m",
+                "sglang.launch_pd_server",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+        else:
+            command = [
+                "sglang",
+                "serve",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+    
+        if pd_separated or use_mixed_pd_engine:
+            command.extend(["--lb-host", host, "--lb-port", port])
+        else:
+            command.extend(["--host", host, "--port", port])
+    
+        if use_mixed_pd_engine:
+            command.extend(["--mixed", "--num-replicas", str(num_replicas)])
+    
+        if api_key:
+            command += ["--api-key", api_key]
+    
+        print(f"command={shlex.join(command)}")
+    
+        # Track if offline mode was enabled for potential retry
+        offline_enabled = env.get("HF_HUB_OFFLINE") == "1"
+    
+        # First launch attempt
+        process = _launch_server_process(command, env, return_stdout_stderr, model)
+        success, error_msg = _wait_for_server_health(process, base_url, api_key, timeout)
+    
+        # If offline launch failed and offline was enabled, retry with online mode
+        if not success and offline_enabled:
+            print(
+                f"CI_OFFLINE: Offline launch failed ({error_msg}), retrying with online mode..."
+            )
+    
+            # Kill failed process
+            try:
+                if process.poll() is None:
+                    kill_process_tree(process.pid)
+                else:
+                    process.wait(timeout=5)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error cleaning up failed offline process: {e}")
+    
+            # Invalidate per-run marker to prevent subsequent tests from using offline
+            if per_run_marker_path and os.path.exists(per_run_marker_path):
+                try:
+                    os.remove(per_run_marker_path)
+                    print("CI_OFFLINE: Invalidated per-run marker due to offline failure")
+                except Exception as e:
+                    print(f"CI_OFFLINE: Failed to remove per-run marker: {e}")
+    
+            # Retry with online mode
+            env["HF_HUB_OFFLINE"] = "0"
+            process = _launch_server_process(command, env, return_stdout_stderr, model)
+            success, error_msg = _wait_for_server_health(
+                process, base_url, api_key, timeout
+            )
+    
+            if success:
+                print("CI_OFFLINE: Online retry succeeded")
+                return process
+    
+            # Online retry also failed
+            try:
+                kill_process_tree(process.pid)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error killing process after online retry failure: {e}")
+    
+            if "exited" in error_msg:
+                raise Exception(error_msg + ". Check server logs for errors.")
+            raise TimeoutError(error_msg)
+    
+        # First attempt succeeded or offline was not enabled
+        if success:
+            return process
+    
+        # First attempt failed and offline was not enabled
+        try:
+            kill_process_tree(process.pid)
+        except Exception as e:
+            print(f"CI_OFFLINE: Error killing process after first attempt failure: {e}")
+    
+        if "exited" in error_msg:
+>           raise Exception(error_msg + ". Check server logs for errors.")
+E           Exception: Server process exited with code 1. Check server logs for errors.
+
+python/sglang/test/test_utils.py:834: Exception
+_ ERROR at setup of TestSamplingMaskPytorch.test_rejected_processors_do_not_break_generation _
+
+cls = <class 'test_sampling_mask.TestSamplingMaskPytorch'>
+
+    @classmethod
+    def setUpClass(cls):
+>       cls._launch_server(("--sampling-backend", "pytorch"))
+
+test/registered/sampling/test_sampling_mask.py:650: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/sampling/test_sampling_mask.py:298: in _launch_server
+    cls.process = popen_launch_server(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+model = 'meta-llama/Llama-3.2-1B-Instruct', base_url = 'http://127.0.0.1:21000'
+timeout = 600, api_key = None
+other_args = ['--mem-fraction-static', '0.7', '--enable-custom-logit-processor', '--sampling-mask-max-tokens', '64', '--sampling-backend', ...]
+env = {'AITER_ASM_DIR': '/sgl-workspace/aiter/hsa/', 'AITER_GPU_ARCHS': 'gfx950', 'AITER_JIT_DIR': '/tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter', 'CODEX_CI': '1', ...}
+return_stdout_stderr = None, device = 'cuda', pd_separated = False
+num_replicas = None
+
+    def popen_launch_server(
+        model: str,
+        base_url: str,
+        timeout: float,
+        api_key: Optional[str] = None,
+        other_args: Optional[list[str]] = None,
+        env: Optional[dict] = None,
+        return_stdout_stderr: Optional[tuple] = None,
+        device: str = "auto",
+        pd_separated: bool = False,
+        num_replicas: Optional[int] = None,
+    ):
+        """Launch a server process with automatic device detection and offline/online retry.
+    
+        Args:
+            model: Model path or identifier
+            base_url: Base URL for the server
+            timeout: Timeout for server startup
+            api_key: Optional API key for authentication
+            other_args: Additional command line arguments
+            env: Environment dict for subprocess
+            return_stdout_stderr: Optional tuple for output capture
+            device: Device type ("auto", "cuda", "rocm" or "cpu")
+            pd_separated: Whether to use PD separated mode
+            num_replicas: Number of replicas for mixed PD mode
+    
+        Returns:
+            Started subprocess.Popen object
+        """
+        other_args = other_args or []
+    
+        # Auto-detect device if needed
+        if device == "auto":
+            device = auto_config_device()
+            other_args = list(other_args)
+            other_args += ["--device", str(device)]
+    
+        # CI-specific: Validate cache and enable offline mode if complete
+        if env is None:
+            env = os.environ.copy()
+        else:
+            merged = os.environ.copy()
+            merged.update(env)
+            env = merged
+    
+        # A dying predecessor can hold the derived port plan past
+        # kill_process_tree() while GPU teardown completes; give CI launches
+        # teardown-sized patience (see wait_port_available).
+        env.setdefault("SGLANG_WAIT_PORT_TIMEOUT", "120")
+    
+        # Store per-run marker path for potential invalidation
+        per_run_marker_path = None
+        try:
+            from sglang.utils import is_in_ci
+    
+            if is_in_ci():
+                per_run_marker_path = _try_enable_offline_mode_if_cache_complete(
+                    model, env, other_args
+                )
+        except Exception as e:
+            print(f"CI cache validation failed (non-fatal): {e}")
+    
+        # Build server command
+        _, host, port = base_url.split(":")
+        host = host[2:]
+    
+        use_mixed_pd_engine = not pd_separated and num_replicas is not None
+        if pd_separated or use_mixed_pd_engine:
+            command = [
+                "python3",
+                "-m",
+                "sglang.launch_pd_server",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+        else:
+            command = [
+                "sglang",
+                "serve",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+    
+        if pd_separated or use_mixed_pd_engine:
+            command.extend(["--lb-host", host, "--lb-port", port])
+        else:
+            command.extend(["--host", host, "--port", port])
+    
+        if use_mixed_pd_engine:
+            command.extend(["--mixed", "--num-replicas", str(num_replicas)])
+    
+        if api_key:
+            command += ["--api-key", api_key]
+    
+        print(f"command={shlex.join(command)}")
+    
+        # Track if offline mode was enabled for potential retry
+        offline_enabled = env.get("HF_HUB_OFFLINE") == "1"
+    
+        # First launch attempt
+        process = _launch_server_process(command, env, return_stdout_stderr, model)
+        success, error_msg = _wait_for_server_health(process, base_url, api_key, timeout)
+    
+        # If offline launch failed and offline was enabled, retry with online mode
+        if not success and offline_enabled:
+            print(
+                f"CI_OFFLINE: Offline launch failed ({error_msg}), retrying with online mode..."
+            )
+    
+            # Kill failed process
+            try:
+                if process.poll() is None:
+                    kill_process_tree(process.pid)
+                else:
+                    process.wait(timeout=5)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error cleaning up failed offline process: {e}")
+    
+            # Invalidate per-run marker to prevent subsequent tests from using offline
+            if per_run_marker_path and os.path.exists(per_run_marker_path):
+                try:
+                    os.remove(per_run_marker_path)
+                    print("CI_OFFLINE: Invalidated per-run marker due to offline failure")
+                except Exception as e:
+                    print(f"CI_OFFLINE: Failed to remove per-run marker: {e}")
+    
+            # Retry with online mode
+            env["HF_HUB_OFFLINE"] = "0"
+            process = _launch_server_process(command, env, return_stdout_stderr, model)
+            success, error_msg = _wait_for_server_health(
+                process, base_url, api_key, timeout
+            )
+    
+            if success:
+                print("CI_OFFLINE: Online retry succeeded")
+                return process
+    
+            # Online retry also failed
+            try:
+                kill_process_tree(process.pid)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error killing process after online retry failure: {e}")
+    
+            if "exited" in error_msg:
+                raise Exception(error_msg + ". Check server logs for errors.")
+            raise TimeoutError(error_msg)
+    
+        # First attempt succeeded or offline was not enabled
+        if success:
+            return process
+    
+        # First attempt failed and offline was not enabled
+        try:
+            kill_process_tree(process.pid)
+        except Exception as e:
+            print(f"CI_OFFLINE: Error killing process after first attempt failure: {e}")
+    
+        if "exited" in error_msg:
+>           raise Exception(error_msg + ". Check server logs for errors.")
+E           Exception: Server process exited with code 1. Check server logs for errors.
+
+python/sglang/test/test_utils.py:834: Exception
+_ ERROR at setup of TestSamplingMaskPytorch.test_sampling_mask_matches_topk_logprobs _
+
+cls = <class 'test_sampling_mask.TestSamplingMaskPytorch'>
+
+    @classmethod
+    def setUpClass(cls):
+>       cls._launch_server(("--sampling-backend", "pytorch"))
+
+test/registered/sampling/test_sampling_mask.py:650: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/sampling/test_sampling_mask.py:298: in _launch_server
+    cls.process = popen_launch_server(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+model = 'meta-llama/Llama-3.2-1B-Instruct', base_url = 'http://127.0.0.1:21000'
+timeout = 600, api_key = None
+other_args = ['--mem-fraction-static', '0.7', '--enable-custom-logit-processor', '--sampling-mask-max-tokens', '64', '--sampling-backend', ...]
+env = {'AITER_ASM_DIR': '/sgl-workspace/aiter/hsa/', 'AITER_GPU_ARCHS': 'gfx950', 'AITER_JIT_DIR': '/tmp/amdpilot-repo-j-1fcdf225607b/cache/aiter', 'CODEX_CI': '1', ...}
+return_stdout_stderr = None, device = 'cuda', pd_separated = False
+num_replicas = None
+
+    def popen_launch_server(
+        model: str,
+        base_url: str,
+        timeout: float,
+        api_key: Optional[str] = None,
+        other_args: Optional[list[str]] = None,
+        env: Optional[dict] = None,
+        return_stdout_stderr: Optional[tuple] = None,
+        device: str = "auto",
+        pd_separated: bool = False,
+        num_replicas: Optional[int] = None,
+    ):
+        """Launch a server process with automatic device detection and offline/online retry.
+    
+        Args:
+            model: Model path or identifier
+            base_url: Base URL for the server
+            timeout: Timeout for server startup
+            api_key: Optional API key for authentication
+            other_args: Additional command line arguments
+            env: Environment dict for subprocess
+            return_stdout_stderr: Optional tuple for output capture
+            device: Device type ("auto", "cuda", "rocm" or "cpu")
+            pd_separated: Whether to use PD separated mode
+            num_replicas: Number of replicas for mixed PD mode
+    
+        Returns:
+            Started subprocess.Popen object
+        """
+        other_args = other_args or []
+    
+        # Auto-detect device if needed
+        if device == "auto":
+            device = auto_config_device()
+            other_args = list(other_args)
+            other_args += ["--device", str(device)]
+    
+        # CI-specific: Validate cache and enable offline mode if complete
+        if env is None:
+            env = os.environ.copy()
+        else:
+            merged = os.environ.copy()
+            merged.update(env)
+            env = merged
+    
+        # A dying predecessor can hold the derived port plan past
+        # kill_process_tree() while GPU teardown completes; give CI launches
+        # teardown-sized patience (see wait_port_available).
+        env.setdefault("SGLANG_WAIT_PORT_TIMEOUT", "120")
+    
+        # Store per-run marker path for potential invalidation
+        per_run_marker_path = None
+        try:
+            from sglang.utils import is_in_ci
+    
+            if is_in_ci():
+                per_run_marker_path = _try_enable_offline_mode_if_cache_complete(
+                    model, env, other_args
+                )
+        except Exception as e:
+            print(f"CI cache validation failed (non-fatal): {e}")
+    
+        # Build server command
+        _, host, port = base_url.split(":")
+        host = host[2:]
+    
+        use_mixed_pd_engine = not pd_separated and num_replicas is not None
+        if pd_separated or use_mixed_pd_engine:
+            command = [
+                "python3",
+                "-m",
+                "sglang.launch_pd_server",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+        else:
+            command = [
+                "sglang",
+                "serve",
+                "--model-path",
+                model,
+                *[str(x) for x in other_args],
+            ]
+    
+        if pd_separated or use_mixed_pd_engine:
+            command.extend(["--lb-host", host, "--lb-port", port])
+        else:
+            command.extend(["--host", host, "--port", port])
+    
+        if use_mixed_pd_engine:
+            command.extend(["--mixed", "--num-replicas", str(num_replicas)])
+    
+        if api_key:
+            command += ["--api-key", api_key]
+    
+        print(f"command={shlex.join(command)}")
+    
+        # Track if offline mode was enabled for potential retry
+        offline_enabled = env.get("HF_HUB_OFFLINE") == "1"
+    
+        # First launch attempt
+        process = _launch_server_process(command, env, return_stdout_stderr, model)
+        success, error_msg = _wait_for_server_health(process, base_url, api_key, timeout)
+    
+        # If offline launch failed and offline was enabled, retry with online mode
+        if not success and offline_enabled:
+            print(
+                f"CI_OFFLINE: Offline launch failed ({error_msg}), retrying with online mode..."
+            )
+    
+            # Kill failed process
+            try:
+                if process.poll() is None:
+                    kill_process_tree(process.pid)
+                else:
+                    process.wait(timeout=5)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error cleaning up failed offline process: {e}")
+    
+            # Invalidate per-run marker to prevent subsequent tests from using offline
+            if per_run_marker_path and os.path.exists(per_run_marker_path):
+                try:
+                    os.remove(per_run_marker_path)
+                    print("CI_OFFLINE: Invalidated per-run marker due to offline failure")
+                except Exception as e:
+                    print(f"CI_OFFLINE: Failed to remove per-run marker: {e}")
+    
+            # Retry with online mode
+            env["HF_HUB_OFFLINE"] = "0"
+            process = _launch_server_process(command, env, return_stdout_stderr, model)
+            success, error_msg = _wait_for_server_health(
+                process, base_url, api_key, timeout
+            )
+    
+            if success:
+                print("CI_OFFLINE: Online retry succeeded")
+                return process
+    
+            # Online retry also failed
+            try:
+                kill_process_tree(process.pid)
+            except Exception as e:
+                print(f"CI_OFFLINE: Error killing process after online retry failure: {e}")
+    
+            if "exited" in error_msg:
+                raise Exception(error_msg + ". Check server logs for errors.")
+            raise TimeoutError(error_msg)
+    
+        # First attempt succeeded or offline was not enabled
+        if success:
+            return process
+    
+        # First attempt failed and offline was not enabled
+        try:
+            kill_process_tree(process.pid)
+        except Exception as e:
+            print(f"CI_OFFLINE: Error killing process after first attempt failure: {e}")
+    
+        if "exited" in error_msg:
+>           raise Exception(error_msg + ". Check server logs for errors.")
+E           Exception: Server process exited with code 1. Check server logs for errors.
+
+python/sglang/test/test_utils.py:834: Exception
+=================================== FAILURES ===================================
+_ TestSamplingMaskCapture.test_hard_exclusion_replay_in_mixed_batch (backend='pytorch') _
+
+self = <test_sampling_mask.TestSamplingMaskCapture testMethod=test_hard_exclusion_replay_in_mixed_batch>
+
+    def test_hard_exclusion_replay_in_mixed_batch(self):
+        backends = ["pytorch"] if is_hip() else ["pytorch", "flashinfer"]
+        for backend in backends:
+            with self.subTest(backend=backend):
+                logits = (
+                    torch.tensor([[0.3, 0.2, 0.5, 0.15, 0.1]], device="cuda")
+                    .log()
+                    .repeat(2, 1)
+                )
+                original = logits.clone()
+                info = SamplingBatchInfo(
+                    temperatures=torch.ones(2, 1, device="cuda"),
+                    top_ps=torch.full((2,), 0.9, device="cuda"),
+                    top_ks=torch.full((2,), 3, dtype=torch.int32, device="cuda"),
+                    min_ps=torch.zeros(2, device="cuda"),
+                    is_all_greedy=False,
+                    is_any_greedy=False,
+                    need_top_p_sampling=True,
+                    need_top_k_sampling=True,
+                    need_min_p_sampling=False,
+                    vocab_size=5,
+                    has_custom_logit_processor=True,
+                    custom_params=[{"token_ids": [2]}, None],
+                    custom_logit_processor={
+                        0: (
+                            DisallowedTokensLogitsProcessor(),
+                            torch.tensor([True, False], device="cuda"),
+                        )
+                    },
+                    return_sampling_masks=[True, True],
+                    sampling_mask_batch_indices=torch.tensor([0, 1], device="cuda"),
+                )
+>               logits = self.sampler._preprocess_logits(logits, info)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E               TypeError: Sampler._preprocess_logits() missing 1 required positional argument: 'logits_output'
+
+test/registered/sampling/test_sampling_mask.py:173: TypeError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SUBFAILED(backend='pytorch') test/registered/sampling/test_sampling_mask.py::TestSamplingMaskCapture::test_hard_exclusion_replay_in_mixed_batch
+ERROR test/registered/sampling/test_sampling_mask.py::TestSamplingMask::test_chat_completions_returns_sampling_mask
+ERROR test/registered/sampling/test_sampling_mask.py::TestSamplingMask::test_disallowed_tokens_with_replay
+ERROR test/registered/sampling/test_sampling_mask.py::TestSamplingMask::test_generate_rejects_unbounded_sampling_mask
+ERROR test/registered/sampling/test_sampling_mask.py::TestSamplingMask::test_generate_returns_greedy_singleton_mask
+ERROR test/registered/sampling/test_sampling_mask.py::TestSamplingMask::test_generate_returns_sampling_mask
+ERROR test/registered/sampling/test_sampling_mask.py::TestSamplingMask::test_generate_streams_aligned_sampling_masks
+ERROR test/registered/sampling/test_sampling_mask.py::TestSamplingMask::test_rejected_processors_do_not_break_generation
+ERROR test/registered/sampling/test_sampling_mask.py::TestSamplingMask::test_sampling_mask_matches_topk_logprobs
+ERROR test/registered/sampling/test_sampling_mask.py::TestSamplingMaskDeterministic::test_return_sampling_mask_preserves_deterministic_sampling
+ERROR test/registered/sampling/test_sampling_mask.py::TestSamplingMaskPytorch::test_chat_completions_returns_sampling_mask
+ERROR test/registered/sampling/test_sampling_mask.py::TestSamplingMaskPytorch::test_disallowed_tokens_with_replay
+ERROR test/registered/sampling/test_sampling_mask.py::TestSamplingMaskPytorch::test_generate_rejects_unbounded_sampling_mask
+ERROR test/registered/sampling/test_sampling_mask.py::TestSamplingMaskPytorch::test_generate_returns_greedy_singleton_mask
+ERROR test/registered/sampling/test_sampling_mask.py::TestSamplingMaskPytorch::test_generate_returns_sampling_mask
+ERROR test/registered/sampling/test_sampling_mask.py::TestSamplingMaskPytorch::test_generate_streams_aligned_sampling_masks
+ERROR test/registered/sampling/test_sampling_mask.py::TestSamplingMaskPytorch::test_rejected_processors_do_not_break_generation
+ERROR test/registered/sampling/test_sampling_mask.py::TestSamplingMaskPytorch::test_sampling_mask_matches_topk_logprobs
+1 failed, 8 passed, 4 skipped, 17 warnings, 17 errors, 3 subtests passed in 69.43s (0:01:09)

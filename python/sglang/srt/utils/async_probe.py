@@ -63,6 +63,18 @@ def maybe_warn_nan(tensor: Optional[torch.Tensor], msg: str = ""):
     _nan_warner.check(tensor, msg)
 
 
+def detect_full_nan_rows(logits: torch.Tensor) -> Optional[torch.Tensor]:
+    """Return a per-row all-NaN mask when request-scoped abort is enabled.
+
+    Detection must happen before :func:`sanitize_nan_logits`, which replaces a
+    fully-NaN row with a constant and makes it indistinguishable from a valid
+    (uniform) sampling distribution.
+    """
+    if not envs.SGLANG_ABORT_ON_NAN_LOGITS.get():
+        return None
+    return torch.isnan(logits).all(dim=-1)
+
+
 def sanitize_nan_logits(logits: torch.Tensor, msg: str = ""):
     """Detect NaN (assert in CI, throttled warning in prod), then sanitize in
     place: NaN logits (e.g. fp16 activation overflow) are undefined behavior
@@ -70,10 +82,25 @@ def sanitize_nan_logits(logits: torch.Tensor, msg: str = ""):
     rather than dtype min/max because callers divide logits by temperature,
     which would overflow dtype min/max to +-Inf and softmax back to NaN."""
     maybe_detect_nan(logits, msg)
-    if not envs.SGLANG_SANITIZE_NAN_LOGITS.get():
+    # Request-scoped abort is processed after sampling results reach the host.
+    # Keep every sampling backend safe until then, even when the independent
+    # sanitize flag is disabled.
+    if not (
+        envs.SGLANG_SANITIZE_NAN_LOGITS.get()
+        or envs.SGLANG_ABORT_ON_NAN_LOGITS.get()
+    ):
         return
     maybe_warn_nan(logits, msg)
-    torch.nan_to_num_(logits, nan=-1e30, posinf=1e30, neginf=-1e30)
+    full_nan_rows = torch.isnan(logits).all(dim=-1)
+    finite_limit = torch.finfo(logits.dtype).max
+    torch.nan_to_num_(
+        logits, nan=-finite_limit, posinf=finite_limit, neginf=-finite_limit
+    )
+    # A row containing no valid lane only needs to remain safe until its
+    # request-scoped abort is processed.  Use zero rather than a large negative
+    # sentinel: dividing a constant near dtype.min by temperature can overflow
+    # FP16 back to -inf, making softmax NaN again.
+    logits.masked_fill_(full_nan_rows.unsqueeze(-1), 0)
 
 
 def maybe_assert_async(cond: torch.Tensor, msg: str = ""):

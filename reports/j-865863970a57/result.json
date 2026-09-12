@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33187",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the sanitize-to-uniform failure on the assigned gfx950 GPU and added an opt-in SGLANG_ABORT_ON_NAN_LOGITS plain-sampling containment path. Fully-NaN rows are detected before sanitization, carried on the existing result D2H path, and aborted with HTTP 503 before a sampled token is committed. The request KV is released without radix-cache insertion; partial-row NaNs and the default-disabled behavior are unchanged.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-865863970a57/venv/bin/python < reports/j-865863970a57/raw/gpu-nan-reproduction-script.py",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950 with a 163840-wide logits tensor, sanitization changed the full-NaN row to one constant and softmax had max absolute error 0.0 from the uniform reference; the new mask was [true, false] and the partial-row control retained argmax token 42. Raw output is in reports/j-865863970a57/raw/gpu-nan-reproduction.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-865863970a57/venv/bin/python -m pytest -q test/registered/unit/utils/test_abort_on_nan_logits.py test/registered/unit/managers/test_batch_result_processor_hidden_states.py test/registered/unit/managers/test_batch_result_processor_mamba_boundary.py test/registered/unit/disaggregation/test_prefill_abort_result_cleanup.py",
+      "exit_code": 0,
+      "what_was_measured": "24 tests and 4 subtests passed, covering full-versus-partial detection, env-off behavior, selective 503 abort and cache-insert suppression, ignored finished/retracted/middle-chunk rows, mask boundaries, and neighboring prefill/decode/Mamba cleanup behavior."
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files <all changed source, documentation, and test files>",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, AST, secret, registry, and related pre-commit checks all passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-865863970a57/venv/bin/python -m compileall -q <changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python modules and the regression test compiled successfully."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the delivered patch."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "reports/j-865863970a57/raw/gpu-info.txt records the assigned AMD Instinct MI350X gfx950, and gpu-nan-reproduction.txt records torch 2.11.0+rocm7.2 execution with device_count=1.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported Kimi-K3 weights, Blackwell SM10x hardware, TP=8 topology, and production transient NaN source were unavailable; this does not claim reproduction of that model/kernel root cause.",
+    "The deterministic GPU fixture validates the reported logits/sampling failure mechanism and mask computation, not Kimi-K3 semantic accuracy or a full model request.",
+    "The new abort path is intentionally limited to plain sampling, matching the report where speculative decoding was disabled. Speculative verification needs algorithm-specific row-to-request mapping and remains unsupported by this flag.",
+    "No full HTTP server was launched because no qualified model weights were needed to establish the sampler/result-processing defect; existing FINISH_ABORT response machinery supplies the 503."
+  ]
+}

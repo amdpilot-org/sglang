@@ -703,6 +703,13 @@ def _can_use_sparse_uno_tree_target_sampling(
     )
 
 
+def _reduce_verify_nan_rows(
+    full_nan_rows: torch.Tensor, batch_size: int, draft_token_num: int
+) -> torch.Tensor:
+    """Collapse speculative verification rows to one containment bit per request."""
+    return full_nan_rows.reshape(batch_size, draft_token_num).any(dim=1)
+
+
 def eagle_sample(
     verify_input: EagleVerifyInput,
     batch: ScheduleBatch,
@@ -728,7 +735,11 @@ def eagle_sample(
         SIMULATE_ACC_TOKEN_MODE,
         generate_simulated_accept_index,
     )
-    from sglang.srt.utils.async_probe import maybe_detect_nan, sanitize_nan_logits
+    from sglang.srt.utils.async_probe import (
+        detect_full_nan_rows,
+        maybe_detect_nan,
+        sanitize_nan_logits,
+    )
 
     device = batch.device
     if batch.forward_mode.is_idle():
@@ -741,6 +752,11 @@ def eagle_sample(
     sampling_info = batch.sampling_info
     next_token_logits = logits_output.next_token_logits
 
+    full_nan_rows = detect_full_nan_rows(next_token_logits)
+    if full_nan_rows is not None:
+        logits_output.full_nan_rows = _reduce_verify_nan_rows(
+            full_nan_rows, bs, verify_input.draft_token_num
+        )
     sanitize_nan_logits(next_token_logits, "verify: target model logits")
 
     # Apply penalty
