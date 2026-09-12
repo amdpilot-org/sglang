@@ -1,0 +1,29 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36537",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared main checkout already contains the merged SM121 QSA correction associated with the reported token-ID-0 loop. Exact SM121 is excluded from the corrupting TRT-LLM sparse-decode route and dispatched to a contract-limited specialized kernel; no duplicate runtime change was made.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a168bdd9c5ea/venv/bin/python -m pytest -q test/registered/kernel/qsa/test_qsa.py -k 'is_sm120_matches_exact_capability or is_sm121_matches_exact_capability or qsa_trtllm_sparse_decode_arch_gate or qsa_sm121_resolves_kda_varlen_kernel or qsa_sm121_compaction_and_attention_match_sparse_reference' -rs",
+      "exit_code": 0,
+      "what_was_measured": "Architecture and resolver boundaries: exact SM120/SM121 detection, SM100/SM120 positive TRT-LLM routing, other-SM12x negative routing, and SM121 specialized-kernel selection. Result: 10 passed; the SM121 numerical comparison was skipped because the assigned GPU is gfx950."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a168bdd9c5ea/venv/bin/python -m pytest -q test/registered/kernel/qsa/test_qsa.py -k 'qsa_chunk_prefill_accepts_fp8_cached_prefix' -rs",
+      "exit_code": 0,
+      "what_was_measured": "Actual assigned-GPU execution of the QSA FP8 cached-prefix path against the same operation with BF16-converted K/V. Result: 1 passed on AMD Instinct MI355X gfx950. This is an independent ROCm boundary check, not validation of the NVIDIA-only SM121 kernel."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The QSA FP8 cached-prefix numerical pytest passed on device 0, reported by ROCm SMI and PyTorch as AMD Instinct MI355X, gfx950. The SM121-specific numerical test was skipped."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The assigned GPU is AMD gfx950, not NVIDIA SM120 or SM121, so the original architecture-specific corruption and corrected SM121 kernel could not execute locally.",
+    "Qwen3.8-Flash-Next and NVFP4 weights were not available; no full-model HTTP reproduction, model semantic validation, speculative-decoding validation, or long-context reproduction was performed.",
+    "The tiny Llama fixture was intentionally not used because it cannot qualify Qwen3.8 architecture, QSA, NVFP4, or NVIDIA dispatch behavior.",
+    "No multi-GPU or multi-node claim is made."
+  ]
+}
