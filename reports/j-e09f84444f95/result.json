@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38075",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Implemented grpc.health.v1.Health Check and Watch for the native Rust gRPC server. The aggregate service and sglang.runtime.v1.SglangService report SERVING when the existing RuntimeHandle health predicate is true, and NOT_SERVING when it is false or raises. The existing SglangService.HealthCheck RPC remains available. This completes only the standard-health portion of the umbrella feature request; multimodal transport and RL lifecycle semantics remain unimplemented.",
+  "tests": [
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-e09f84444f95/cargo-target cargo +1.92.0 test -p sglang-grpc",
+      "exit_code": 0,
+      "what_was_measured": "Compiled the Rust gRPC crate with the pinned Rust 1.92 toolchain and ran 14 unit tests, including the native-to-standard serving-status mapping."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-e09f84444f95/cargo-target cargo +1.92.0 clippy -p sglang-grpc --all-targets -- -D warnings",
+      "exit_code": 0,
+      "what_was_measured": "Checked all sglang-grpc Rust targets with warnings denied."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-e09f84444f95/native-target cargo +1.92.0 build --release --locked -p sglang-grpc",
+      "exit_code": 0,
+      "what_was_measured": "Produced a new optimized native extension at /tmp/amdpilot-repo-j-e09f84444f95/native-target/release/libsglang_grpc_core.so from the changed source and locked dependency graph."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e09f84444f95/venv/bin/python (load rebuilt extension, then pytest -q test/registered/unit/entrypoints/test_grpc_standard_health.py)",
+      "exit_code": 0,
+      "what_was_measured": "Live grpcio client interoperability against the rebuilt native server: aggregate and named Check return SERVING, unknown Check and Watch return NOT_FOUND, and Watch publishes a SERVING-to-NOT_SERVING transition. Result: 4 passed and 2 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e09f84444f95/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_grpc_bridge.py",
+      "exit_code": 0,
+      "what_was_measured": "Existing Python bridge compatibility tests. Result: 2 passed."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The implemented standard gRPC health control plane contains no GPU computation or numerical output. A GPU run would not validate this protocol behavior, so no GPU was allocated or modified.",
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "The broader issue's native gRPC multimodal image, audio, and video request support was not implemented or model-qualified.",
+    "Aggregated and encoder-disaggregated multimodal coverage was not added; no multimodal model weights were available or used.",
+    "RL-specific operations and a formal pause/drain, weight-update, and resume lifecycle API were not implemented.",
+    "No full model server was launched. The live test exercises the rebuilt native transport and dynamic engine-health state with a deterministic mock RuntimeHandle, not model inference or distributed execution.",
+    "tonic-health 0.12 returns NOT_FOUND for Watch on an unregistered service, matching its Check behavior; registered aggregate and native service names support streaming Watch transitions.",
+    "The prepared image did not initially contain Cargo. The repository-pinned Rust 1.92.0 toolchain was installed for this job; build targets and the rebuilt library were kept under /tmp/amdpilot-repo-j-e09f84444f95."
+  ]
+}
