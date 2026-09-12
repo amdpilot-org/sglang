@@ -1105,23 +1105,27 @@ class TestBaseFormatDetector(unittest.TestCase):
             tourist_calls[0].tool_index, 1, "Second tool should have tool_index=1"
         )
 
-    def test_buffer_reset_on_invalid_tool(self):
-        """Test that buffer and state are reset when an invalid tool name is encountered."""
+    def test_invalid_tool_is_buffered_until_complete(self):
+        """An invalid call is consumed without assigning it an output slot."""
         # Start fresh with an invalid tool name from the beginning
         result = self.detector.parse_streaming_increment(
             '<tool_call>{"name": "invalid_tool", ', self.tools
         )
 
-        # Should return empty result and reset state
+        # The partial call stays buffered so its exact boundary can be found.
         self.assertEqual(result.calls, [], "Should return no calls for invalid tool")
         self.assertEqual(
             self.detector.current_tool_id,
             -1,
             "current_tool_id should remain -1 for invalid tool",
         )
-        self.assertEqual(
-            self.detector._buffer, "", "Buffer should be cleared for invalid tool"
-        )
+        self.assertTrue(self.detector._skipping_unknown_tool)
+        self.assertEqual(self.detector._buffer, '<tool_call>{"name": "invalid_tool", ')
+
+        result = self.detector.parse_streaming_increment('"arguments": {}}', self.tools)
+        self.assertEqual(result.calls, [])
+        self.assertFalse(self.detector._skipping_unknown_tool)
+        self.assertEqual(self.detector._buffer, "")
 
     def test_chinese_characters_not_double_escaped(self):
         """Test that Chinese characters in tool call parameters are not double-escaped."""
