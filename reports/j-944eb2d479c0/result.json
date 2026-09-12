@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31765",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "Exact candidate 08a1faa06f054b939b1a672f3158b90632c713a2 is a substantive partial fix. It makes the original explicit queued-abort and SGLANG_REQ_WAITING_TIMEOUT removal path clear streaming Session._inflight and marks a queued Mamba request FINISH_ABORT before cache release. The recorded base fails those regressions and the candidate passes them. However, an independent pre-execution queue-limit rejection still sends an abort response while leaving the streaming session in flight, so the broader original contract that an aborted queued turn must not permanently poison its session is not fully resolved.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-944eb2d479c0/venv/bin/python -m pytest -q /job/review-evidence/j-944eb2d479c0/candidate-regression.py (on base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: 2 failed and 1 passed. Explicit queued abort never called Session.abort_req, and the hybrid-Mamba boundary reached cache release with finished_reason=None."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-944eb2d479c0/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_streaming_session_queue_abort.py test/registered/unit/managers/test_scheduler_timeouts.py test/registered/unit/mem_cache/test_session_token_share_unit.py (on exact candidate 08a1faa06f054b939b1a672f3158b90632c713a2)",
+      "exit_code": 0,
+      "what_was_measured": "15 tests passed, covering the candidate regression, timeout polling, non-streaming isolation, committed session bookkeeping, and Mamba abort-marker ordering at the scheduler/cache boundary."
+    },
+    {
+      "command": "Independent _abort_on_queued_limit streaming-session assertion in evidence/adversarial-queue-limit.txt (on exact candidate 08a1faa06f054b939b1a672f3158b90632c713a2)",
+      "exit_code": 1,
+      "what_was_measured": "A queue-full rejection returned an abort response for a never-run streaming request but left Session._inflight=True, reproducing the stuck-session lifecycle under an adjacent queued-abort path."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-944eb2d479c0/venv/bin/python reports/j-aa1f4d930390/reproduce_streaming_queue_abort.py --fixture /job/cache/j-1fc9870820b9/tiny-random-llama --output /job/review-evidence/j-944eb2d479c0/http-candidate-pass (on exact candidate)",
+      "exit_code": 130,
+      "what_was_measured": "Diagnostic only: the source-checkout server loaded and executed real prefill/decode on gfx950 and accepted open-session, generate, and queued-abort HTTP traffic, but the candidate harness hung after abort and emitted no requests.json/run-metadata.json. It was interrupted and is not counted as end-to-end proof."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "evidence/http-candidate-server.log records the exact-candidate source server using the local FP16 tiny Llama, ROCm Triton compilation for gfx950, real prefill/decode batches, and HTTP open-session/generate/abort traffic. The incomplete harness is diagnostic only."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With max_queued_requests already reached, _abort_on_queued_limit rejects a newly created streaming-session request before it runs, sends the abort result, but does not call Session.abort_req; the next turn remains vulnerable to 'Streaming session already has an active request.'",
+    "The priority-enabled branch of the same queue-limit function removes an existing waiting request through a separate path that likewise lacks streaming-session lifecycle cleanup and Mamba FINISH_ABORT marking; this was confirmed by source inspection but not separately executed."
+  ],
+  "remaining_limitations": [
+    "No Qwen/Qwen2.5-1.5B-Instruct weights were available; the tiny random Llama validates only transport and engine execution, not Qwen semantics or architecture behavior.",
+    "No hybrid-Mamba weights were available. Mamba behavior was checked at the scheduler/cache boundary with a mocked release callback, not end to end on a Mamba model.",
+    "The assigned device is one AMD Instinct MI350X-class gfx950 GPU with Torch 2.11.0+rocm7.2, not the reporter's NVIDIA RTX 5070/CUDA environment. No multi-GPU or multi-node claim is made.",
+    "The candidate changes Python only (python/sglang/srt/managers/scheduler.py plus tests/reports), so no native library rebuild was applicable. Import evidence confirms scheduler and session modules came from /job/repo/python while Torch came from the prepared environment.",
+    "The prepared checkout initially matched the recorded base commit exactly; no image-prepared revision difference was observed.",
+    "The candidate's HTTP reproducer did not terminate or retain structured request results in this review run, so it cannot qualify the explicit HTTP scenario despite real GPU traffic."
+  ]
+}
