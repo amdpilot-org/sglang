@@ -251,7 +251,18 @@ class TestCudaDeviceMixin(CustomTestCase):
 
     def test_cuda_srt_platform_capabilities(self):
         base = CudaSRTPlatform()
-        self.assertTrue(base.supports_fp8())
+        expected_fp8_support = {
+            (7, 5): False,
+            (8, 0): False,
+            (8, 9): True,
+            (9, 0): True,
+        }
+        for capability, expected in expected_fp8_support.items():
+            with (
+                self.subTest(capability=capability),
+                patch("torch.cuda.get_device_capability", return_value=capability),
+            ):
+                self.assertEqual(base.supports_fp8(), expected)
         self.assertTrue(base.support_cuda_graph())
         self.assertTrue(base.support_piecewise_cuda_graph())
 
