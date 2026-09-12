@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33504",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the flat non-streaming OpenAI error body in the prepared checkout and changed OpenAIServingBase.create_error_response to emit the standard {\"error\": {...}} envelope. Added a regression for the reported max_tokens/param case and independent coverage for a 422 response and streaming/non-streaming parity. Updated existing tests that intentionally inspect this shared response format.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-202ee938099e/venv/bin/python - <<'PY' ... call create_error_response for 400 and 422 and create_streaming_error_response ... PY (recorded in investigation.md)",
+      "exit_code": 0,
+      "what_was_measured": "Before the fix, the actual checked-out implementation returned top-level object/message/type/param/code for non-streaming 400 and 422 responses, while the streaming response had an error envelope."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-202ee938099e/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_base.py (run temporarily against the base implementation)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: all 3 tests failed because the non-streaming body lacked the error envelope."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-202ee938099e/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_base.py test/registered/unit/entrypoints/openai/test_serving_chat.py test/registered/unit/entrypoints/openai/test_serving_transcription.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after focused and caller coverage: 160 tests and 68 subtests passed, including reported-shape, non-default 422, streaming parity, chat validation, and transcription error paths."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-202ee938099e/venv/bin/python - <<'PY' ... feed create_error_response through httpx.MockTransport to openai.OpenAI chat.completions.create ... PY (recorded in investigation.md)",
+      "exit_code": 0,
+      "what_was_measured": "The installed official OpenAI SDK raised BadRequestError and preserved the max_tokens parameter and server error message from the corrected envelope."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the patch."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No live SGLang model server was launched and no model weights were loaded. The validation covers the actual shared serving serializer, real chat/transcription callers in unit tests, and official OpenAI SDK parsing through an in-process HTTP transport; it does not claim model architecture, semantic accuracy, or distributed serving coverage.",
+    "The defect and correction are deterministic Python HTTP response serialization. No GPU kernel, model execution, or numerical output is involved, so the assigned gfx950 was not used as unrelated evidence.",
+    "The prepared Python environment does not contain black or isort, so those formatter checks could not be run; git diff --check passed.",
+    "The matching upstream PR https://github.com/sgl-project/sglang/pull/33534 remains open and blocked at investigation time; this mirror change independently verifies the same narrow correction."
+  ]
+}
