@@ -1,0 +1,27 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36481",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Compact target-verify graph capture ignored the attention backend's existing ragged-graph capability flag. Hybrid Triton plus GDN correctly reports the capability as false, but startup still entered capture and could reach Triton extend_attention_fwd. Unsupported compact graph capture is now skipped, preserving the existing eager fallback selected by can_run_graph.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-3beed6345a9c/venv/bin/python -m pytest -q test/registered/spec/dspark/test_ragged_verify_backend_capability.py::TestRaggedVerifyGraphCapability::test_compact_capture_skips_unsupported_backend",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before control on the unguarded base: capture called warmup even though supports_ragged_verify_graph was false. Raw output: /tmp/amdpilot-repo-j-3beed6345a9c/failing-before.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-3beed6345a9c/venv/bin/python -m pytest -q test/registered/spec/dspark/test_ragged_verify_backend_capability.py",
+      "exit_code": 0,
+      "what_was_measured": "Six tests and three subtests passed: unsupported compact capture skips before warmup, supported compact and non-compact capture continue, Triton remains non-capable, hybrid capability is the conjunction of both children, and known capable backends remain enabled. Raw output: /tmp/amdpilot-repo-j-3beed6345a9c/passing-after.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The assigned device was identified as AMD Instinct MI350X, GFX Version gfx950, unique ID 0x5e94f9cc641f4027. The regression exercises graph-capture admission control and imports GPU backends but intentionally launches no GPU kernel; it is not a model-serving or CUDA reproduction.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported Qwen3.5/Qwen3.6 model and DSpark draft weights were unavailable.",
+    "The assigned gfx950 ROCm 7.2 device does not reproduce the reporter's B300 CUDA 13.2 environment.",
+    "No full model, HTTP serving, CUDA-graph capture, semantic-accuracy, or multi-node claim is made.",
+    "The fix deliberately falls back to eager target verification for unsupported compact attention backends; it does not add ragged CUDA-graph support to Triton attention."
+  ]
+}
