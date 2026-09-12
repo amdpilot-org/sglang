@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37342",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1059",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1027",
+  "candidate_commit": "91e812d9014eed3e8d68ce05b1a87c8bc477ed95",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes and expands a host-dependent backend-selection unit test, but it does not reproduce or exercise the original flashinfer_mxfp4 routed-expert loading failure. It changes no production/native code. Commit 60ff1e33 adds automatic backend selection; selection alone does not establish that the already-selected path can load the reported checkpoint without Hidden size mismatch.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-12ab335a6a1c/venv/bin/python -m pytest test/registered/unit/test_model_overrides.py::TestGoldenModelOverrides::test_deepseek_v4_overrides_at_callable_level -q (base)",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced only the test fixture's leakage of the physical HIP platform into a mocked SM100 case; this is not the original Hidden size mismatch. Evidence: evidence/base-regression.txt"
+    },
+    {
+      "command": "same focused pytest at candidate 91e812d9014eed3e8d68ce05b1a87c8bc477ed95",
+      "exit_code": 0,
+      "what_was_measured": "The host-independent routing test passed with SM90, SM100, and SM120 positive subtests. It did not load MXFP4 weights or invoke the reported failing path. Evidence: evidence/candidate-regression.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-12ab335a6a1c/venv/bin/python -m pytest test/registered/unit/layers/quantization/test_mxfp4_sm90_cutlass.py -q",
+      "exit_code": 5,
+      "what_was_measured": "One module-level skip because the assigned GPU is AMD gfx950 rather than NVIDIA SM90. Evidence: evidence/sm90-test.txt"
+    },
+    {
+      "command": "prepared Python import-path and 8x8 GPU matmul check",
+      "exit_code": 0,
+      "what_was_measured": "Imported sglang from /job/repo/python/sglang and Torch 2.11.0+rocm7.2; an MI350X GPU matmul matched its CPU reference with max_abs_error 0.0. This establishes GPU availability only. Evidence: evidence/environment.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "A numerical check ran on the assigned AMD Instinct MI350X gfx950. The issue-specific NVIDIA SM90 FlashInfer kernel did not run.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A detected MXFP4 DeepSeek-V4 checkpoint can select flashinfer_mxfp4 successfully yet still fail later while loading routed-expert tensors with Hidden size mismatch; the candidate never reaches that loader/runner contract.",
+    "The candidate supplies no failing-before/passing-after fixture with the reported packed weight shape [2048, 2048], scale shape [2048, 128], or TP=4 sharding.",
+    "No SM90 kernel execution demonstrates that loaded/permuted expert dimensions satisfy the FlashInfer Hopper contract."
+  ],
+  "remaining_limitations": "DeepSeek-V4-Flash-0731 weights and four H800/SM90 GPUs were unavailable. Full model loading, TP=4, DSPARK, HTTP serving, semantic accuracy, and actual FlashInfer SM90 execution remain unverified. The available single GPU is AMD MI350X gfx950. No native rebuild was applicable because the candidate changed only a Python test and report files."
+}
