@@ -104,7 +104,12 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):
     """Default in-tree CUDA SRT platform."""
 
     def supports_fp8(self) -> bool:
-        return True
+        """Whether the device has native FP8 GEMM support.
+
+        This capability is intentionally narrower than the ability to store or
+        convert FP8 tensors. NVIDIA FP8 tensor-core GEMM starts at SM 8.9.
+        """
+        return self.get_device_capability() >= DeviceCapability(8, 9)
 
     def support_cuda_graph(self) -> bool:
         return True

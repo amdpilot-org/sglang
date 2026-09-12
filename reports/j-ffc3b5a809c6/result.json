@@ -1,0 +1,63 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38513",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/691",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/639",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/678",
+  "candidate_commit": "2d784005479317580b5e07cff6c219a243ddc056",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the independent review against the exact candidate before modification. The candidate correctly reported native CUDA FP8 GEMM support only for controlled SM89/SM90 probes and provided a software fallback for channelwise scales, but scalar activation and weight scales still entered a separate unconditional torch._scaled_mm branch. A forced unsupported-kernel error propagated after one call. The consolidated correction preserves the candidate fixes, routes per-tensor FP8 linear on CUDA without CUTLASS support through explicit FP32 dequantization and torch.mm, retains ROCm's native torch._scaled_mm path, makes the inherited mocked-CUDA tests portable to ROCm, and documents that native NVIDIA FP8 GEMM requires SM89+ while FP8 storage does not.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ffc3b5a809c6/venv/bin/python -m pytest -q test/registered/unit/platforms/test_platform_interface.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "At candidate commit 2d784005479317580b5e07cff6c219a243ddc056, 60 tests and 25 subtests passed, including controlled CudaSRTPlatform.supports_fp8 probes for 7.5=false, 8.0=false, 8.9=true, and 9.0=true. Raw output: reports/j-ffc3b5a809c6/raw/candidate_platform_tests.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ffc3b5a809c6/venv/bin/python -m pytest -q test/registered/quant/test_fp8_utils.py::TestApplyFp8LinearScaleDispatch::test_channelwise_fallback_does_not_require_scaled_mm (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's channelwise software fallback regression passed while torch._scaled_mm was forbidden. Raw output: reports/j-ffc3b5a809c6/raw/candidate_channelwise_regression.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ffc3b5a809c6/venv/bin/python <exact-candidate scalar-scale adversarial script>",
+      "exit_code": 0,
+      "what_was_measured": "With cutlass_fp8_supported=false and scalar activation/weight scales, the exact candidate called torch._scaled_mm once and propagated the forced 'requires SM89+' error. The same script confirmed the controlled capability matrix. Imported sources were /job/repo/python/sglang/srt/layers/quantization/fp8_utils.py and /job/repo/python/sglang/srt/platforms/cuda.py. Raw output: reports/j-ffc3b5a809c6/raw/candidate_counterexamples.txt"
+    },
+    {
+      "command": "rg -n 'supports_fp8\\(' python; rg -n 'SM ?89|8\\.9|native FP8 GEMM' docs/docs/advanced_features/quantization.mdx (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate had only supports_fp8 method definitions under python and no SM89/native-FP8 warning in the quantization document. Raw output: reports/j-ffc3b5a809c6/raw/candidate_supports_fp8_audit.txt and candidate_docs_audit.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ffc3b5a809c6/venv/bin/python -m pytest -q test/registered/quant/test_fp8_utils.py::TestApplyFp8LinearScaleDispatch::test_channelwise_fallback_does_not_require_scaled_mm test/registered/quant/test_fp8_utils.py::TestApplyFp8LinearScaleDispatch::test_per_tensor_unsupported_cuda_falls_back_without_scaled_mm test/registered/unit/platforms/test_platform_interface.py",
+      "exit_code": 0,
+      "what_was_measured": "After correction, 62 tests and 25 subtests passed. The new regression forces unsupported CUDA behavior, forbids torch._scaled_mm, and checks the scalar-scale result against explicit dequantized GEMM. Raw output: reports/j-ffc3b5a809c6/raw/after_focused_tests.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ffc3b5a809c6/venv/bin/python -m pytest -q test/registered/quant/test_fp8_utils.py::TestApplyFp8LinearScaleDispatch",
+      "exit_code": 0,
+      "what_was_measured": "The complete FP8 linear scale-dispatch class passed on the prepared ROCm environment: 5 tests and 3 subtests. Raw output: reports/j-ffc3b5a809c6/raw/after_scale_dispatch_class_final.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ffc3b5a809c6/venv/bin/python <post-fix MI350X numerical validation script>",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X, the forced unsupported-CUDA scalar fallback made zero torch._scaled_mm calls and matched an independent NumPy FP32-dequantized GEMM reference with max absolute error 0.0. The preserved native ROCm torch._scaled_mm path returned finite output with max absolute error 0.001953125 versus NumPy. Raw output: reports/j-ffc3b5a809c6/raw/after_rocm_gpu_validation.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "The consolidated patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Executed on one assigned AMD Instinct MI350X with torch 2.11.0+rocm7.2 and reported capability (9, 5). Both the software fallback and the preserved native ROCm scaled-mm path were exercised against an independent NumPy reference."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No physical NVIDIA GPU was assigned. SM75/SM80/SM89/SM90 behavior is established by controlled probes and a forced unsupported-kernel dispatch regression, not physical NVIDIA qualification.",
+    "The software fallback is correctness-oriented and slower than native FP8 GEMM because it converts operands to FP32 before torch.mm.",
+    "CudaSRTPlatform.supports_fp8() still has no production caller in this checkout. This correction chooses the issue's permitted numerical software fallback rather than adding a broad early load refusal that would reject paths capable of using the fallback.",
+    "No C++, CUDA, HIP, FlyDSL, LLVM, or other native source changed; repository-environment.json records native as null, so no native rebuild was applicable."
+  ]
+}

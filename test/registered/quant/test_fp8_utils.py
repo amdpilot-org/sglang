@@ -163,7 +163,10 @@ class TestApplyFp8LinearScaleDispatch(CustomTestCase):
                         return_value=SimpleNamespace(**capabilities),
                     ),
                     patch.object(
-                        fp8_utils, "fp8_scaled_mm", side_effect=fake_fp8_scaled_mm
+                        fp8_utils,
+                        "fp8_scaled_mm",
+                        side_effect=fake_fp8_scaled_mm,
+                        create=True,
                     ),
                     patch.object(fp8_utils, "get_exec", return_value=exec_config),
                 ):
@@ -228,7 +231,12 @@ class TestApplyFp8LinearScaleDispatch(CustomTestCase):
                     is_sm120=False,
                 ),
             ),
-            patch.object(fp8_utils, "fp8_scaled_mm", side_effect=fake_fp8_scaled_mm),
+            patch.object(
+                fp8_utils,
+                "fp8_scaled_mm",
+                side_effect=fake_fp8_scaled_mm,
+                create=True,
+            ),
         ):
             fp8_utils.apply_fp8_linear(
                 input,
@@ -248,6 +256,86 @@ class TestApplyFp8LinearScaleDispatch(CustomTestCase):
 
         self.assertEqual(tuple(seen_scales[0].shape), (input.shape[0], 1))
         self.assertEqual(tuple(seen_scales[1].shape), (input.shape[0], 1))
+
+    def test_channelwise_fallback_does_not_require_scaled_mm(self):
+        import sglang.srt.layers.quantization.fp8_utils as fp8_utils
+
+        torch.manual_seed(7)
+        m, k, n = 5, 16, 7
+        qinput = torch.randn(m, k).to(torch.float8_e4m3fn)
+        weight = torch.randn(k, n).to(torch.float8_e4m3fn)
+        x_scale = torch.rand(m, 1, dtype=torch.float32) + 0.25
+        weight_scale = torch.rand(n, 1, dtype=torch.float32) + 0.25
+        bias = torch.randn(n, dtype=torch.float32)
+
+        reference = (
+            torch.mm(qinput.float(), weight.float())
+            * x_scale
+            * weight_scale.t()
+            + bias
+        ).to(torch.float16)
+
+        with patch.object(
+            torch,
+            "_scaled_mm",
+            side_effect=RuntimeError("native FP8 GEMM is unavailable"),
+        ):
+            output = fp8_utils._apply_fallback_scaled_mm(
+                qinput,
+                weight,
+                x_scale,
+                weight_scale,
+                (m, k),
+                (m, n),
+                bias,
+                torch.float16,
+            )
+
+        self.assertEqual(output.dtype, torch.float16)
+        torch.testing.assert_close(output, reference)
+
+    def test_per_tensor_unsupported_cuda_falls_back_without_scaled_mm(self):
+        import sglang.srt.layers.quantization.fp8_utils as fp8_utils
+
+        torch.manual_seed(11)
+        m, k, n = 5, 16, 7
+        input = torch.randn(m, k, dtype=torch.float16)
+        weight = torch.randn(k, n).to(torch.float8_e4m3fn)
+        input_scale = torch.tensor([0.25], dtype=torch.float32)
+        weight_scale = torch.tensor(0.5, dtype=torch.float32)
+        qinput = (
+            (input / input_scale)
+            .clamp(min=fp8_utils.fp8_min, max=fp8_utils.fp8_max)
+            .to(torch.float8_e4m3fn)
+        )
+        reference = (
+            torch.mm(qinput.float(), weight.float()) * input_scale * weight_scale
+        ).to(torch.float16)
+
+        with (
+            patch.object(fp8_utils, "_is_hip", False),
+            patch.object(
+                fp8_utils,
+                "static_quant_fp8",
+                return_value=(qinput, input_scale),
+            ),
+            patch.object(
+                torch,
+                "_scaled_mm",
+                side_effect=RuntimeError("native FP8 GEMM is unavailable"),
+            ),
+        ):
+            output = fp8_utils.apply_fp8_linear(
+                input,
+                weight,
+                weight_scale,
+                input_scale=input_scale,
+                cutlass_fp8_supported=False,
+                pad_output=False,
+            )
+
+        self.assertEqual(output.dtype, torch.float16)
+        torch.testing.assert_close(output, reference)
 
     def test_linear_methods_forward_fused_scalar_tuple(self):
         import sglang.srt.layers.quantization.compressed_tensors.schemes.compressed_tensors_w8a8_fp8 as compressed_fp8

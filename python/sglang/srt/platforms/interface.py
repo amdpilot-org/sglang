@@ -100,7 +100,10 @@ class SRTPlatform(DeviceMixin):
     # ------------------------------------------------------------------
 
     def supports_fp8(self) -> bool:
-        """Whether this platform supports FP8 quantization."""
+        """Whether this platform supports native FP8 GEMM.
+
+        This does not describe whether FP8 tensors can be stored or converted.
+        """
         return False
 
     def support_cuda_graph(self) -> bool:
