@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34112",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate independently passes issue-specific regressions that fail on the recorded base, fixing the current-tree cancelled final-prefill visible-token/result race and optimistic-decode admission. It is a partial, honestly bounded fix: the exact historical CUDA/model workload and external negative scheduler-output-id probe remain unavailable and unverified.",
+  "tests": [
+    {
+      "command": "On base 358c163250ad3b1f62939b01ce1314a0a31a0365, temporarily overlay the candidate versions of test_scheduler_chunked_req_gate.py and test_batch_result_processor_hidden_states.py, then run the three candidate regression selectors",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: pending-abort final-prefill request entered optimistic decode and committed sampled token/metadata; beam ordering case also failed. 3 failed, 17 warnings."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-af0e5216780c/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunked_req_gate.py test/registered/unit/managers/test_scheduler_chunked_abort_race.py test/registered/unit/managers/test_batch_result_processor_hidden_states.py test/registered/unit/managers/test_batch_result_processor_spec_grammar.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate focused scheduler/result regression suite: 23 passed, 17 warnings, 2 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-af0e5216780c/venv/bin/python -m py_compile python/sglang/srt/managers/scheduler.py python/sglang/srt/managers/scheduler_components/batch_result_processor.py test/registered/unit/managers/test_scheduler_chunked_req_gate.py test/registered/unit/managers/test_batch_result_processor_hidden_states.py && git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 e0bc6010ab7acc0bfd074aa069b003ee856528b6",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python files compile and its diff has no whitespace errors."
+    },
+    {
+      "command": "PYTHONPATH=python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-af0e5216780c/venv/bin/python -c '<deterministic torch ROCm tensor and import-path probe>'",
+      "exit_code": 0,
+      "what_was_measured": "The assigned AMD Instinct MI350X/gfx950 executed [1,2,3]^2 as [1,4,9], and imports resolved to /job/repo/python. This is environment evidence, not the original serving reproduction."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X (gfx950:sramecc+:xnack-) ran a Torch 2.11.0+rocm7.2/HIP 7.2.26015 tensor operation. No model-serving claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No candidate regression or available in-repository probe records the historical schedule_batch or schedule_batch_post_run output_ids, so absence of the reported persistent negative-ID ladder is not demonstrated end to end.",
+    "The exact meta-llama/Llama-3.2-1B-Instruct plus RTX 4090/CUDA cancellation workload could not be run in the assigned AMD gfx950/ROCm environment, so exact-workload absence of both the visible token and negative-ID ladder remains unverified."
+  ],
+  "remaining_limitations": [
+    "The reported model weights were unavailable.",
+    "The available architecture is AMD gfx950/ROCm, not NVIDIA RTX 4090/CUDA.",
+    "The external probe_runtime_structures instrumentation defining the historical recorded fields is absent from the repository.",
+    "No native source changed; a native rebuild was not applicable."
+  ]
+}
