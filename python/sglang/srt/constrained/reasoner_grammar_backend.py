@@ -246,6 +246,8 @@ class ReasonerGrammarObject(BaseGrammarObject):
         return False
 
     def rollback(self, k):
+        if k == 0:
+            return
         if self.grammar is not None:
             steps_after = sum(state[1] >= 0 for state in self._state_history[-k:])
             if steps_after > 0:

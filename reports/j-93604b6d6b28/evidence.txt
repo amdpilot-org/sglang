@@ -1,0 +1,56 @@
+Correction generation 2 evidence
+================================
+
+Prepared base: 358c163250ad3b1f62939b01ce1314a0a31a0365
+Candidate PR: https://github.com/amdpilot-org/sglang/pull/1872
+Candidate commit: b52daa1dd1564889b9eb2e59ef8c6bfcd7e32091
+Independent review PR: https://github.com/amdpilot-org/sglang/pull/1935
+
+Exact-candidate reproduction before editing
+-------------------------------------------
+
+The probe imported:
+  /job/repo/python/sglang/srt/constrained/reasoner_grammar_backend.py
+
+It accepted reasoning token 1, terminator 9, and generation tokens 20 and 21,
+then called rollback(0). Observed at b52daa1:
+
+  before= [20, 21] tokens_after_end= 2 history= 4
+  after= [] tokens_after_end= 2 history= 4 rollback_calls= [2]
+
+Thus the inner grammar rolled back every generation token while wrapper state
+did not move. This independently confirms that history[-0:] selected the whole
+history.
+
+Passing-after probe
+-------------------
+
+The same probe after the correction produced:
+
+  before= [20, 21] tokens_after_end= 2 history= 4
+  after= [20, 21] tokens_after_end= 2 history= 4 rollback_calls= []
+
+Focused regression suite
+------------------------
+
+Command:
+  PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-93604b6d6b28/venv/bin/python -m pytest -q test/registered/unit/constrained/test_reasoner_grammar_backend.py test/registered/unit/parser/test_reasoning_parser.py
+
+Result:
+  156 passed, 64 subtests passed
+
+Additional checks
+-----------------
+
+Command:
+  PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-93604b6d6b28/venv/bin/python -m compileall -q python/sglang/srt/constrained/reasoner_grammar_backend.py python/sglang/srt/environ.py python/sglang/srt/parser/reasoning_parser.py
+
+Result: exit 0
+
+Command: git diff --check
+Result: exit 0
+
+No GPU or native rebuild was used. The reproduced defect and correction are
+deterministic Python state-machine behavior. Muse Glimmer 30B NVFP4 weights
+were unavailable, so model-level semantic quality and production placeholder
+rates remain unverified; GPT-OSS remains unverified as well.

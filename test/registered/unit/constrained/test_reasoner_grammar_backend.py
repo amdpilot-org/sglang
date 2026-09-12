@@ -302,6 +302,24 @@ class TestReasonerGrammarBackend(unittest.TestCase):
         self.assertTrue(copied._is_generation())
         self.assertEqual(len(copied.grammar.accepted), answer_tokens)
 
+    def test_rollback_zero_is_no_op(self):
+        obj = ReasonerGrammarObject(
+            grammar=_RecordingGrammar(), think_end_ids=[self.EOM]
+        )
+        obj.maybe_init_reasoning(True)
+        for token in [1001, self.EOM, 2001, 2002]:
+            obj.accept_token(token)
+
+        state_before = obj._snapshot_state()
+        history_before = list(obj._state_history)
+        accepted_before = list(obj.grammar.accepted)
+
+        obj.rollback(0)
+
+        self.assertEqual(obj._snapshot_state(), state_before)
+        self.assertEqual(obj._state_history, history_before)
+        self.assertEqual(obj.grammar.accepted, accepted_before)
+
     def test_rollback_restores_history_before_second_reasoning_channel(self):
         obj = self._make_muse_object()
         first_reasoning = [1001, 1002]
