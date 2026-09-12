@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38871",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/782",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/749",
+  "candidate_commit": "0e62b84dd92e886fb4567887881439a2fa8c3458",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The prepared base reproduces the exact silent argument loss: VisionFlash4Attention omits window_size and sinks at the external FA4 boundary, and the resulting independent reference output differs. At exact candidate commit 0e62b84dd92e886fb4567887881439a2fa8c3458, the wrapper forwards window_size (defaulting to (-1, -1)), conditionally maps non-None s_aux to sinks, and retains ver=4. The candidate regression and independent adversarial boundary cases pass. This verifies the original source-level forwarding contract, but not CUDA FA4 kernel execution or MiMo multimodal output quality on Blackwell.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-041793711859/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-041793711859/review-evidence/test_vision_fa4_attention.py --junitxml=/tmp/amdpilot-repo-j-041793711859/review-evidence/base/regression.xml",
+      "revision": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 1,
+      "what_was_measured": "Candidate regression run unchanged against the prepared base. All five cases failed: four boundary cases lacked window_size and the end-to-end VisionAttention path disagreed with the independent local-window/sink reference."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-041793711859/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_vision_fa4_attention.py --junitxml=/tmp/amdpilot-repo-j-041793711859/review-evidence/candidate/regression.xml",
+      "revision": "0e62b84dd92e886fb4567887881439a2fa8c3458",
+      "exit_code": 0,
+      "what_was_measured": "Five CPU tests passed at the exact candidate: defaults, window-only, sink-only, combined forwarding, ver=4, and VisionAttention-to-backend behavior compared with an independent small-tensor local-window/sink reference."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-041793711859/venv/bin/python /tmp/amdpilot-repo-j-041793711859/review-evidence/adversarial_fa4_review.py",
+      "revision": "0e62b84dd92e886fb4567887881439a2fa8c3458",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial boundary checks for forward_metadata precedence, asymmetric (0, 2) window forwarding, identity-preserving zero-valued sinks, ver=4, full_attn suppression, and no-sink defaults."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The interpreter reports torch 2.11.0+rocm7.2, HIP 7.2, and AMD Instinct MI350X. Tests intentionally used CPU tensors and an instrumented external FA4 boundary. CUDA-only FlashAttention-4 and the NVIDIA Blackwell model path cannot run in this ROCm environment; mocks are not counted as GPU execution."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "CUDA-only FlashAttention-4 kernel execution was not physically tested because the assigned architecture is AMD MI350X with ROCm, not NVIDIA Blackwell/CUDA.",
+    "MiMo-V2.5 weights and an end-to-end multimodal Blackwell serving run were unavailable, so visual-feature/output quality is not independently qualified.",
+    "The candidate changes only Python and tests; repository-environment.json provides no native build target, so no native rebuild was applicable.",
+    "The numerical reference validates intended local-window and sink normalization semantics at the external boundary, not the implementation of the unavailable FA4 kernel itself."
+  ]
+}
