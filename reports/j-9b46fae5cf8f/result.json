@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35242",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1475",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1441",
+  "candidate_commit": "aa65bc925642375ebbd36253a8fb8082b16bba66",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the reported Draft 2020-12 rejection of required:null. The exact candidate removes that null sentinel through the real request normalization path, passes its regressions, and passes independent tool-index-17 and boundary cases without hiding other malformed non-null required values.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-9b46fae5cf8f/venv/bin/python (base inline reproducer using sglang.srt.function_call.utils.normalize_json_schema_types and Draft202012Validator.check_schema)",
+      "exit_code": 17,
+      "what_was_measured": "Prepared-base source import paths and exact failure: required:null remained and raised 'None is not of type array'."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9b46fae5cf8f/venv/bin/python -m pytest test/registered/unit/function_call/test_normalize_json_schema_types.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Candidate normalization regression suite: 27 tests and 3 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9b46fae5cf8f/venv/bin/python -m pytest test/registered/unit/entrypoints/openai/test_serving_chat.py::ServingChatTestCase::test_validate_request_accepts_null_required_tool_schema -q",
+      "exit_code": 0,
+      "what_was_measured": "Candidate-authored direct request-validation regression passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9b46fae5cf8f/venv/bin/python (independent request-path and adversarial inline cases)",
+      "exit_code": 0,
+      "what_was_measured": "An 18-tool request with required:null at index 17 was accepted; nested null was removed; valid arrays were preserved; malformed non-null required remained rejected; properties:null remained rejected."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 aa65bc925642375ebbd36253a8fb8082b16bba66",
+      "exit_code": 2,
+      "what_was_measured": "Two trailing-whitespace findings, both in candidate-retained raw pytest output files rather than source or tests."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One assigned AMD Instinct MI350X gfx950 was visible through rocminfo and Torch 2.11.0+rocm7.2, but the defect is CPU-side request schema validation and no inference or GPU numerical claim was needed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A tool schema containing properties:null still fails Draft 2020-12 validation with None is not of type 'object'; this is a neighboring malformed-schema case, not the original required:null error."
+  ],
+  "remaining_limitations": [
+    "Qwen3.8-27B-FP8 weights and the complete original request body were unavailable, so no full-model, semantic, distributed, or original-deployment reproduction was performed.",
+    "No end-to-end HTTP server was started; the actual OpenAIServingChat._validate_request path was exercised directly.",
+    "No native rebuild was applicable because the candidate changes only Python source and Python tests.",
+    "The candidate contains trailing whitespace in two raw log artifacts reported by git diff --check."
+  ]
+}
