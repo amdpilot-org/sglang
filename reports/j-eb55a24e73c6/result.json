@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/3365",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3239",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3234",
+  "candidate_commit": "aa27fd58ca4af299dd220819e2f99c56d5a88f51",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate adds root-only tensor-parallel logits gather for compatible eager generation and broadcasts sampled token IDs to every TP rank. It retains all-gather for paths that consume logits on every rank or cannot safely capture gather, including dLLM, speculative decoding, logprob/prefill-only work, decode CUDA graphs, attention/DP variants, and TP LM-head all-to-all. Independent tests reproduced the base's unconditional all-gather behavior and verified both prior review counterexamples are corrected. This is a source feature fix with regression hardening, not merely a test-only change.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-eb55a24e73c6/venv/bin/python -m pytest -q /job/review-evidence-j-eb55a24e73c6/independent_review.py (at base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: 3 failures. The base has no gather-selection policy or gather marker and unconditionally calls _logits_gatherer for ordinary TP logits. Raw output: /job/review-evidence-j-eb55a24e73c6/base-independent.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-eb55a24e73c6/venv/bin/python -m pytest -q /job/review-evidence-j-eb55a24e73c6/independent_review.py test/registered/unit/layers/test_tp_logits_gather.py test/registered/unit/model_executor/test_model_runner_decode_rows.py (at candidate aa27fd58ca4af299dd220819e2f99c56d5a88f51)",
+      "exit_code": 0,
+      "what_was_measured": "15 tests passed. Independently checked eager gather selection, every encoded all-rank exclusion, graph-capture exclusion, root sampling plus broadcast, non-root no-sampling behavior, grammar-mask release, stale auxiliary-output clearing, and adjacent decode-row behavior. Raw output: /job/review-evidence-j-eb55a24e73c6/candidate-focused.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-eb55a24e73c6/venv/bin/python -m torch.distributed.run --standalone --nnodes=1 --nproc-per-node=2 /job/review-evidence-j-eb55a24e73c6/gloo_collective_check.py",
+      "exit_code": 0,
+      "what_was_measured": "Actual two-process CPU/Gloo collective semantics: only rank 0 received concatenated vocabulary shards, rank 0 selected token 3, and both ranks received token 3 by broadcast. Raw output: /job/review-evidence-j-eb55a24e73c6/gloo-collective.log"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-eb55a24e73c6/venv/bin/python /job/review-evidence-j-eb55a24e73c6/gpu_numerical_check.py",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X, an independent FP32 full-vocabulary projection exactly matched two vocabulary shards concatenated in TP order: max_abs_error=0.0 and identical argmax tokens. Raw output: /job/review-evidence-j-eb55a24e73c6/gpu-numerical.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI350X was visible and used with Torch 2.11.0+rocm7.2 / HIP 7.2.26015 for the numerical reference. Imported SGLang source paths resolved to /job/repo; see /job/review-evidence-j-eb55a24e73c6/candidate-import-paths.log.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Only one GPU was assigned, so a real two-rank RCCL gather/broadcast model or serving run and a collective performance comparison could not be performed.",
+    "The CPU/Gloo collective test validates root-only gather and token-broadcast semantics but does not substitute for RCCL backend validation.",
+    "The one-GPU numerical test validates vocabulary shard ordering and token equivalence, not distributed transport.",
+    "CUDA graph, speculative decoding, return-logprob, prefill-only, DP-attention, attention-TP, TP-LM-head all-to-all, and dLLM paths intentionally retain all-gather; the original request is satisfied by adding gather under safe supported conditions, not by replacing every all-gather.",
+    "No C/C++/CUDA/HIP/native source changed in the candidate, and repository-environment.json provides no native artifact, so no native rebuild was applicable.",
+    "No model weights were used. The provided tiny Llama fixture cannot qualify a multi-GPU distributed workload or dLLM and was therefore not used as substitute proof."
+  ]
+}
