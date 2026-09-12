@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31000",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "f78d5c8d7cc80c05c8b452d0972d488a4c25040b",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "outcome": "candidate_verified",
+  "summary": "Accept as test-only hardening. The recorded base already contains the production fix; the candidate adds focused regression coverage without changing source. Exact candidate tests and independent shape/value probes confirm that active-EP scattered hidden and residual rows are aligned to full positions before LongCat self_attn[1].",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-759afcaba166/venv/bin/python -m pytest -q test/registered/unit/models/test_longcat_flash_scmoe.py",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate's five focused tests passed: active-EP gather, controlled legacy RoPE mismatch, no-backend and TP=1 boundaries, and gather/rank-slice values."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-759afcaba166/venv/bin/python < independent LongCat forward_mlp alignment harness",
+      "exit_code": 0,
+      "what_was_measured": "Using the checkout's real _scmoe_align_rows, TP=4 active EP gathered hidden and residual from 1 to 4 rows with exact expected values before attention; disabled EP made no collective call."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-759afcaba166/venv/bin/python < independent gfx950 reshape probe",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, reproduced the original invalid view from 256 scattered elements and validated the aligned (16, 4, 64) tensor with max_abs_error=0."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-759afcaba166/pre-commit /opt/venv/bin/pre-commit run --files test/registered/unit/models/test_longcat_flash_scmoe.py",
+      "exit_code": 0,
+      "what_was_measured": "Focused formatting, lint, spelling, AST, and registered-test checks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A deterministic tensor probe ran on the assigned AMD Instinct MI350X, architecture gfx950:sramecc+:xnack-, reproduced the reported legacy reshape failure, and validated aligned output numerically."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The recorded base already contains the source fix, so failing-before was demonstrated by disabling only the alignment helper rather than by claiming the recorded base fails.",
+    "Only one gfx950 GPU was assigned; the original 4x H200 TP16/EP16 PD-disaggregated DeepEP deployment was not available.",
+    "LongCat-2.0-FP8 weights were unavailable, so full serving behavior and semantic accuracy were not tested.",
+    "No live multi-rank DeepEP/UCCL collective was executed; the review validates the shape/dataflow contract with deterministic collective substitution.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
