@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37944",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2862",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2833",
+  "candidate_commit": "bbc17774786e3645c45283eb50e960344346200d",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "The recorded base independently reproduces the static short-prefill failure. At the exact candidate commit, repository-source imports were confirmed and the short batch becomes non-CP. The candidate's focused regression suite and an independent adversarial policy matrix pass, including the prior DSA interleave metadata mismatch. No additional source-level counterexample was found. However, the original contract is a CUDA multi-rank DSA/GLM-5.2-FP8 serving and latency claim; the prepared AMD ROCm node explicitly disables DSA prefill CP and the reported model weights are unavailable, so the real forward, numerical equivalence, and TTFT behavior remain unverified.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-22d4c640b560/venv/bin/python -c '<cp_size=4 interleave 8-token assertion>' (base commit)",
+      "exit_code": 1,
+      "what_was_measured": "Original failure reproduction: an 8-token prefill was CP-active on the recorded base."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-22d4c640b560/venv/bin/python -m pytest -q test/registered/cp/test_cp_strategy_unit.py test/registered/unit/server_args/test_server_args.py::TestContextParallelServerArgs::test_prefill_cp_min_tokens_cli test/registered/unit/server_args/test_server_args.py::TestContextParallelServerArgs::test_prefill_cp_min_tokens_must_be_non_negative test/registered/unit/server_args/test_server_args.py::TestContextParallelServerArgs::test_context_parallel_handler_initializes_cp_strategy",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and compatibility tests: 31 passed, 18 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-22d4c640b560/venv/bin/python /job/review-evidence-j-22d4c640b560/adversarial.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent zigzag/interleave threshold boundaries, runner padding, cached follow-ups, multi-request totals, non-extend mode, and DSA execution/metadata predicate agreement."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-22d4c640b560/venv/bin/python -c '<candidate short-batch assertion and source paths>'",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate was imported from /job/repo/python; the same 8-token batch was non-CP. Torch came from the pinned prepared environment."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 bbc17774786e3645c45283eb50e960344346200d -- python/sglang/srt test/registered/cp/test_cp_strategy_unit.py test/registered/unit/server_args/test_server_args.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed source and tests have no whitespace errors. The candidate's committed historical raw report artifacts separately contain whitespace warnings and are not runtime source."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned device is AMD Instinct MI355X with torch 2.11.0+rocm7.2 and HIP 7.2.26015. Imports initialize ROCm/AITER, but no qualifying prefill-CP GPU forward was run because SGLang's DSA prefill CP path returns disabled on HIP. Device detection is not counted as GPU execution."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No CUDA/NVIDIA device was available; the reported DSA prefill CP implementation is disabled on HIP.",
+    "GLM-5.2-FP8 model weights were unavailable.",
+    "No multi-rank DSA CP/non-CP forward or independent GPU numerical reference was executed.",
+    "No TTFT measurements verified that short requests recover non-CP latency or that long requests retain CP benefit.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
