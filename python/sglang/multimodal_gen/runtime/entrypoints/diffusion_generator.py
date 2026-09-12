@@ -572,18 +572,20 @@ class DiffGenerator:
             raise RuntimeError(
                 f"Failed to {operation}: scheduler request failed: {exc}"
             ) from exc
-        if response.error:
-            raise RuntimeError(f"Failed to {operation}: {response.error}")
-        if not isinstance(response.output, dict):
+        if response is None:
+            raise RuntimeError(f"Failed to {operation}: scheduler returned no response")
+        if error := getattr(response, "error", None):
+            raise RuntimeError(f"Failed to {operation}: {error}")
+        output = getattr(response, "output", None)
+        if not isinstance(output, dict):
             raise RuntimeError(
                 f"Failed to {operation}: scheduler returned no status payload"
             )
-        if not response.output.get("success", False):
+        if not output.get("success", False):
             raise RuntimeError(
-                f"Failed to {operation}: "
-                f"{response.output.get('message', 'unknown error')}"
+                f"Failed to {operation}: {output.get('message', 'unknown error')}"
             )
-        return response.output
+        return output
 
     def release_memory_occupation(self) -> dict[str, Any]:
         """Sleep the diffusion engine by moving active model weights to CPU."""

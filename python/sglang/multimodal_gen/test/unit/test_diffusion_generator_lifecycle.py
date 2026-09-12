@@ -81,6 +81,28 @@ def test_diffusion_generator_lifecycle_surfaces_failures(
 
 
 @pytest.mark.parametrize(
+    ("response", "message"),
+    [
+        (None, "scheduler returned no response"),
+        (SimpleNamespace(error=None), "scheduler returned no status payload"),
+    ],
+)
+def test_diffusion_generator_lifecycle_rejects_malformed_responses(
+    monkeypatch, response, message
+):
+    monkeypatch.setattr(
+        "sglang.multimodal_gen.runtime.entrypoints.diffusion_generator."
+        "sync_scheduler_client.forward",
+        lambda _req: response,
+    )
+
+    with pytest.raises(
+        RuntimeError, match=f"Failed to release memory occupation: {message}"
+    ):
+        _generator().release_memory_occupation()
+
+
+@pytest.mark.parametrize(
     "transport_error",
     [ConnectionError("scheduler transport down"), TimeoutError("scheduler timed out")],
 )
