@@ -10,7 +10,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from transformers import PretrainedConfig
+from transformers import PretrainedConfig, PreTrainedTokenizerBase
 from transformers.image_processing_utils import BaseImageProcessor
 
 import sglang.srt.utils.hf_transformers.processor as processor_utils
@@ -40,6 +40,72 @@ register_cpu_ci(est_time=7, suite="base-a-test-cpu")
 
 
 class TestGetProcessor(unittest.TestCase):
+    def test_loads_tokenizer_for_image_only_processor(self):
+        config = SimpleNamespace(model_type="internvl_chat", auto_map={})
+        image_only_processor = MagicMock(spec=BaseImageProcessor)
+        tokenizer = MagicMock(chat_template="template")
+        get_tokenizer = MagicMock(return_value=tokenizer)
+
+        with patch.multiple(
+            processor_utils,
+            AutoConfig=MagicMock(from_pretrained=MagicMock(return_value=config)),
+            AutoProcessor=MagicMock(
+                from_pretrained=MagicMock(return_value=image_only_processor)
+            ),
+            get_tokenizer=get_tokenizer,
+        ):
+            processor = processor_utils.get_processor(
+                "OpenGVLab/InternVL2_5-2B", trust_remote_code=True
+            )
+
+        get_tokenizer.assert_called_once_with(
+            "OpenGVLab/InternVL2_5-2B",
+            tokenizer_mode="auto",
+            trust_remote_code=True,
+            tokenizer_revision=None,
+            tokenizer_backend="huggingface",
+        )
+        self.assertIs(processor, image_only_processor)
+        self.assertIs(processor.tokenizer, tokenizer)
+
+    def test_preserves_processor_with_existing_tokenizer(self):
+        config = SimpleNamespace(model_type="test_vlm", auto_map={})
+        tokenizer = MagicMock(chat_template="template")
+        loaded_processor = MagicMock(tokenizer=tokenizer)
+        get_tokenizer = MagicMock()
+
+        with patch.multiple(
+            processor_utils,
+            AutoConfig=MagicMock(from_pretrained=MagicMock(return_value=config)),
+            AutoProcessor=MagicMock(
+                from_pretrained=MagicMock(return_value=loaded_processor)
+            ),
+            get_tokenizer=get_tokenizer,
+        ):
+            processor = processor_utils.get_processor("test-model")
+
+        get_tokenizer.assert_not_called()
+        self.assertIs(processor, loaded_processor)
+        self.assertIs(processor.tokenizer, tokenizer)
+
+    def test_preserves_processor_that_is_a_tokenizer(self):
+        config = SimpleNamespace(model_type="test_vlm", auto_map={})
+        tokenizer = MagicMock(spec=PreTrainedTokenizerBase)
+        tokenizer.chat_template = "template"
+        get_tokenizer = MagicMock()
+
+        with patch.multiple(
+            processor_utils,
+            AutoConfig=MagicMock(from_pretrained=MagicMock(return_value=config)),
+            AutoProcessor=MagicMock(from_pretrained=MagicMock(return_value=tokenizer)),
+            get_tokenizer=get_tokenizer,
+            attach_additional_stop_token_ids=MagicMock(),
+        ):
+            processor = processor_utils.get_processor("test-model")
+
+        get_tokenizer.assert_not_called()
+        self.assertIs(processor, tokenizer)
+
     def test_does_not_forward_backend_to_auto_processor(self):
         config = SimpleNamespace(model_type="test_vlm", auto_map={})
         loaded_processor = MagicMock()

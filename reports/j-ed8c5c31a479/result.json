@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32169",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the reported AttributeError with OpenGVLab/InternVL2_5-2B on the prepared base. AutoProcessor returned a bare CLIPImageProcessor without a tokenizer. The candidate now loads and attaches the separately shipped tokenizer only when the resolved processor is neither a tokenizer nor an object with a tokenizer attribute. Unit regression and boundary tests pass. The real-model retest advances beyond the reported AttributeError but full startup remains blocked in the prepared environment because SentencePiece 0.2.2 rejects the model's tokenizer.model NUL vocabulary piece.",
+  "tests": [
+    {
+      "command": "HF_HOME=/tmp/amdpilot-repo-j-ed8c5c31a479/hf-cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ed8c5c31a479/venv/bin/python < real-model processor reproduction script",
+      "exit_code": 0,
+      "what_was_measured": "Before the change, AutoProcessor resolved OpenGVLab/InternVL2_5-2B to transformers.models.clip.image_processing_clip.CLIPImageProcessor with has_tokenizer=False, and SGLang get_processor raised the reported AttributeError. Raw output: reports/j-ed8c5c31a479/raw/reproduction-before.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ed8c5c31a479/venv/bin/python -m pytest -q test/registered/unit/utils/test_hf_transformers.py",
+      "exit_code": 0,
+      "what_was_measured": "69 tests and 2 subtests passed, including the reported image-only processor regression and independent boundaries for combined processors and processors that are already tokenizers."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-ed8c5c31a479/pre-commit-cache /opt/venv/bin/pre-commit run --files python/sglang/srt/utils/hf_transformers/processor.py test/registered/unit/utils/test_hf_transformers.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository formatting, lint, syntax, and registration checks passed."
+    },
+    {
+      "command": "HF_HOME=/tmp/amdpilot-repo-j-ed8c5c31a479/hf-cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ed8c5c31a479/venv/bin/python < post-change real-model processor script",
+      "exit_code": 1,
+      "what_was_measured": "The candidate detected CLIPImageProcessor and attempted separate tokenizer loading, so the reported AttributeError did not recur. Loading then stopped in SentencePiece 0.2.2 with 'piece must not include null character'. The downloaded file matched Hugging Face's SHA-256 f868398fc4e05ee1e8aeba95ddf18ddcc45b8bce55d5093bead5bbf80429b48b and protobuf inspection found the NUL piece at vocabulary index 354."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reproduced defect and correction are CPU-only Hugging Face processor/tokenizer resolution. No model weights were available or downloaded, and GPU execution would not qualify the unresolved tokenizer dependency or model semantics."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Full InternVL2_5-2B server startup and inference were not verified because the prepared SentencePiece 0.2.2 runtime rejects the model's tokenizer.model literal NUL piece after the reported SGLang AttributeError is bypassed.",
+    "Model weights were not downloaded, so no InternVL architecture inference, semantic accuracy, or GPU execution is claimed.",
+    "The related upstream PR https://github.com/sgl-project/sglang/pull/32473 remains open and contains the same core fallback; this candidate was independently reproduced and tested against the prepared current main."
+  ]
+}
