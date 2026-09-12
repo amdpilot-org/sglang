@@ -8,6 +8,7 @@ from openai.types.responses import (
     ResponseReasoningItem,
 )
 from openai.types.responses.response_function_tool_call import ResponseFunctionToolCall
+from starlette.requests import Request
 from utils import make_serving
 
 from sglang.srt.entrypoints.context import SimpleContext
@@ -353,6 +354,77 @@ class ReasoningRequestForwardingTestCase(unittest.TestCase):
             [41, 42],
         )
         self.assertFalse(parser_cls.call_args.kwargs["force_reasoning"])
+
+
+class DPRankForwardingTestCase(unittest.TestCase):
+    def test_body_rank_reaches_generate_request(self):
+        self._assert_forwarded_rank(body_rank=3, header_rank=None, expected=3)
+
+    def test_header_rank_overrides_body_rank(self):
+        self._assert_forwarded_rank(body_rank=3, header_rank=7, expected=7)
+
+    def test_missing_rank_remains_unrouted(self):
+        self._assert_forwarded_rank(body_rank=None, header_rank=None, expected=None)
+
+    def _assert_forwarded_rank(self, *, body_rank, header_rank, expected):
+        serving = make_serving()
+        rendered = MessageProcessingResult(
+            prompt="prompt",
+            prompt_ids=[1, 2, 3],
+            image_data=None,
+            audio_data=None,
+            video_data=None,
+            modalities=[],
+            stop=[],
+            reasoning_end_token_ids=None,
+        )
+        captured = {}
+
+        async def fake_generate(
+            request_id,
+            request_prompt,
+            adapted_request,
+            sampling_params,
+            context,
+            **kwargs,
+        ):
+            captured["adapted_request"] = adapted_request
+            context.append_output(
+                {
+                    "text": "done",
+                    "meta_info": {
+                        "prompt_tokens": 3,
+                        "completion_tokens": 1,
+                        "cached_tokens": 0,
+                    },
+                }
+            )
+            yield context
+
+        serving._generate_with_builtin_tools = fake_generate
+        request = ResponsesRequest(
+            model="x",
+            input="answer",
+            request_id="resp_dp_rank",
+            store=False,
+            routed_dp_rank=body_rank,
+        )
+        headers = []
+        if header_rank is not None:
+            headers.append((b"x-data-parallel-rank", str(header_rank).encode()))
+        raw_request = Request({"type": "http", "headers": headers})
+
+        with patch.object(
+            serving, "_apply_conversation_template", return_value=rendered
+        ):
+            response = asyncio.run(serving.create_responses(request, raw_request))
+
+        self.assertEqual(
+            getattr(response, "status", None),
+            "completed",
+            getattr(response, "body", b"").decode(),
+        )
+        self.assertEqual(captured["adapted_request"].routed_dp_rank, expected)
 
 
 class SkipSpecialTokensForwardingTestCase(CustomTestCase):

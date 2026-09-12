@@ -1,0 +1,27 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34675",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that ResponsesRequest discarded both routed_dp_rank and deprecated data_parallel_rank, then added the rank fields, deprecated-field migration, header-over-body resolution, and forwarding to initial and built-in-tool continuation GenerateReqInput objects.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8efde798bc05/venv/bin/python - <<'PY' ... ResponsesRequest.model_validate payload inspection ... PY",
+      "exit_code": 0,
+      "what_was_measured": "Base-state reproduction showed routed_dp_rank=3 and data_parallel_rank=4 were both absent from the parsed ResponsesRequest model dump; raw output is reports/j-8efde798bc05/raw/failing-before-schema.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8efde798bc05/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_responses_protocol.py test/registered/unit/entrypoints/openai/test_serving_responses.py",
+      "exit_code": 0,
+      "what_was_measured": "61 tests and 2 subtests passed, including request schema preservation, deprecated rank migration and precedence, body-to-GenerateReqInput forwarding, X-Data-Parallel-Rank header precedence, and the no-rank boundary. Raw output is reports/j-8efde798bc05/raw/focused-tests-final.txt."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and correction are confined to Pydantic request parsing and CPU-side OpenAI serving adaptation; no GPU kernel, model execution, or numerical output is involved, so a GPU smoke would not validate the reported routing propagation bug."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No multi-rank DP server was launched and no model weights were used; validation covers the deterministic request parsing and serving adapter boundary through the GenerateReqInput handed toward the scheduler.",
+    "The test fixture does not claim full model inference, distributed scheduling, or multi-node validation."
+  ]
+}

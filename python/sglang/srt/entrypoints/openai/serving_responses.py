@@ -435,6 +435,14 @@ class OpenAIServingResponses(OpenAIServingChat):
                         else {}
                     )
 
+                    # The HTTP header takes precedence over the body, matching
+                    # the Completions and Chat Completions paths.
+                    effective_routed_dp_rank = (
+                        self.extract_routed_dp_rank_from_header(
+                            raw_request, request.routed_dp_rank
+                        )
+                    )
+
                     adapted_request = GenerateReqInput(
                         **prompt_kwargs,
                         **logprob_kwargs,
@@ -464,6 +472,7 @@ class OpenAIServingResponses(OpenAIServingChat):
                         session_id=request.session_id,
                         extra_key=request.extra_key,
                         cache_salt=request.cache_salt,
+                        routed_dp_rank=effective_routed_dp_rank,
                         # background+stream streams on this connection, so don't detach.
                         background=request.background and not request.stream,
                         require_reasoning=require_reasoning,
@@ -2584,6 +2593,7 @@ class OpenAIServingResponses(OpenAIServingChat):
                 session_id=adapted_request.session_id,
                 extra_key=adapted_request.extra_key,
                 cache_salt=adapted_request.cache_salt,
+                routed_dp_rank=adapted_request.routed_dp_rank,
                 return_logprob=adapted_request.return_logprob,
                 logprob_start_len=adapted_request.logprob_start_len,
                 top_logprobs_num=adapted_request.top_logprobs_num,

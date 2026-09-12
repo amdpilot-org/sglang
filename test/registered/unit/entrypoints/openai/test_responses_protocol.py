@@ -28,6 +28,29 @@ def _in_progress_response(request: ResponsesRequest) -> ResponsesResponse:
 
 
 class ResponsesRequestTestCase(CustomTestCase):
+    def test_dp_rank_fields_are_preserved(self):
+        request = ResponsesRequest(
+            model="x", input="hi", store=False, routed_dp_rank=3
+        )
+        self.assertEqual(request.routed_dp_rank, 3)
+
+    def test_deprecated_dp_rank_migrates_without_overriding_current_field(self):
+        with self.assertWarns(DeprecationWarning):
+            migrated = ResponsesRequest(
+                model="x", input="hi", store=False, data_parallel_rank=4
+            )
+        self.assertEqual(migrated.routed_dp_rank, 4)
+
+        with self.assertWarns(DeprecationWarning):
+            explicit = ResponsesRequest(
+                model="x",
+                input="hi",
+                store=False,
+                routed_dp_rank=5,
+                data_parallel_rank=4,
+            )
+        self.assertEqual(explicit.routed_dp_rank, 5)
+
     def test_function_tool_accepted(self):
         request = ResponsesRequest(
             model="x",
