@@ -12,6 +12,7 @@ import torch
 from sglang.srt.managers.io_struct import (
     EmbeddingReqInput,
     GenerateReqInput,
+    SetInternalStateReq,
     TokenizedEmbeddingReqInput,
     TokenizedGenerateReqInput,
     msgpack_decode,
@@ -40,6 +41,20 @@ from sglang.test.test_utils import (
 register_cuda_ci(est_time=10, stage="base-b", runner_config="1-gpu-large")
 register_amd_ci(est_time=8, suite="stage-b-test-1-gpu-small-amd")
 register_cpu_ci(est_time=6, suite="stage-b-test-cpu-intel")
+
+
+class TestSetInternalStateReqSerialization(unittest.TestCase):
+    def test_string_and_numeric_values_roundtrip(self):
+        req = SetInternalStateReq(
+            server_args={"schedule_policy": "lpm", "pp_max_micro_batch_size": 8}
+        )
+
+        decoded = msgspec.msgpack.decode(
+            msgspec.msgpack.encode(req), type=SetInternalStateReq
+        )
+
+        self.assertEqual(decoded.server_args["schedule_policy"], "lpm")
+        self.assertEqual(decoded.server_args["pp_max_micro_batch_size"], 8)
 
 
 class TestTokenizedReqInputMsgpack(unittest.TestCase):
