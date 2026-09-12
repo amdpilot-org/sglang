@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33493",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared base still queried the nonexistent acc_linear_penalties field in DFlash/DSPARK verification. The fix reads SamplingBatchInfo.acc_additive_penalties, applies it across the verify block, and prevents the DSPARK no-adjustment fast path when accumulated additive penalties are present.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-16e675513d6c/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_verify_logits_adjustments.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: additive penalties, including a -inf stop-token mask, were absent from one- and three-token verify blocks; composition with logit bias was incomplete; DSPARK incorrectly admitted the no-adjustment fast path. Four failed, one passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-16e675513d6c/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_verify_logits_adjustments.py",
+      "exit_code": 0,
+      "what_was_measured": "Five passing focused CPU cases covering one- and multi-token blocks, two batch rows, -inf masking, dtype conversion, logit-bias composition, and both sides of the DSPARK no-op predicate."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-16e675513d6c/venv/bin/python reports/j-16e675513d6c/raw/gfx950_numerical_check.py (inline script retained as output log)",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, the GPU adjustment for an 8x3 two-row/four-position block exactly matched an explicit CPU row-loop reference; maximum finite absolute error was 0 and all masked stop-token entries remained -inf."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-16e675513d6c/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_logits.py",
+      "exit_code": 0,
+      "what_was_measured": "Existing DFlash logits unit coverage passed."
+    },
+    {
+      "command": "git diff --check && /tmp/amdpilot-repo-j-16e675513d6c/venv/bin/python -m py_compile python/sglang/srt/speculative/dflash_utils.py python/sglang/srt/speculative/dspark_components/dspark_verify.py test/registered/unit/spec/test_dflash_verify_logits_adjustments.py",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace and Python syntax validation."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported DeepSeek-V4-Flash TP4 serving command was not run: the assigned environment has one gfx950 GPU and no qualified model weights. No full-model, semantic-accuracy, or distributed-workload claim is made.",
+    "The deterministic tiny Llama fixture cannot qualify the DeepSeek-V4 DSPARK architecture and therefore was not substituted for the reported reproduction.",
+    "Current DFlash decode preparation does not visibly call the ordinary/EAGLE penalty token-count accumulation hook. Whether this delays lifting min_new_tokens suppression requires a qualified model-level follow-up and was not included in this narrow stale-field correction."
+  ]
+}
