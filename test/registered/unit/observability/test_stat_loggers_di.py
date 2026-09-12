@@ -85,6 +85,11 @@ class _RecordingStorageMetricsCollector(StorageMetricsCollector):
     _histogram_cls = _RecordingMetric
 
 
+class _RecordingRadixCacheMetricsCollector(RadixCacheMetricsCollector):
+    _counter_cls = _RecordingMetric
+    _histogram_cls = _RecordingMetric
+
+
 class TestCollectorClassAttrs(unittest.TestCase):
     """All five collectors expose four DI hook class attrs, all defaulting to
     None so the existing prometheus_client backend is used unchanged."""
@@ -303,6 +308,49 @@ class TestHiCacheMetrics(unittest.TestCase):
         self.assertEqual(
             collector.prefetch_outcomes_total.increments,
             [({**labels, "outcome": "attempts"}, 1.0)],
+        )
+
+    def test_cross_tier_transfer_results_use_bounded_labels(self):
+        labels = {"model_name": "test"}
+        collector = _RecordingRadixCacheMetricsCollector(labels=labels)
+
+        collector.increment_transfer_request("l1_to_l2", "success")
+        collector.increment_transfer_request(
+            "l1_to_l2", "failure", "host_capacity"
+        )
+        collector.increment_transfer_request("l2_to_l1", "success")
+
+        self.assertEqual(
+            collector.hicache_transfer_requests.increments,
+            [
+                (
+                    {
+                        **labels,
+                        "direction": "l1_to_l2",
+                        "result": "success",
+                        "reason": "none",
+                    },
+                    1,
+                ),
+                (
+                    {
+                        **labels,
+                        "direction": "l1_to_l2",
+                        "result": "failure",
+                        "reason": "host_capacity",
+                    },
+                    1,
+                ),
+                (
+                    {
+                        **labels,
+                        "direction": "l2_to_l1",
+                        "result": "success",
+                        "reason": "none",
+                    },
+                    1,
+                ),
+            ],
         )
 
 
