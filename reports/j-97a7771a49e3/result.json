@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31023",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared base already contains the #32467 removal of the racing warp-scratch initialization. Added focused GPU regression coverage for the reported ragged shapes and independent reduction boundaries; no production source change was justified.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 .../python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py",
+      "exit_code": 0,
+      "what_was_measured": "Real GPU-input plan_prefill kernel output for the two reported ragged shapes, a uniform control, and partial-warp/full-block/zero-extend boundaries; 3 tests passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 .../python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py",
+      "exit_code": 0,
+      "what_was_measured": "Adjacent DSV4 CPU/GPU planner invariants; 5 tests and 82 subtests passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 .../python < direct repeated planner harness on fixed source",
+      "exit_code": 0,
+      "what_was_measured": "9,000 gfx950 kernel launches; zero out-of-bounds ragged plans, with exact maximum ragged IDs 383 for 384 rows and 359 for both 360-row reported ragged inputs."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 .../python < direct repeated planner harness with historical five-line initialization temporarily restored",
+      "exit_code": 0,
+      "what_was_measured": "Local failing-before attempt on gfx950; zero bad plans in 4,000 ragged launches, so the timing-sensitive historical NVIDIA failure was not reproduced on the assigned AMD GPU."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X gfx950:sramecc+:xnack-, PyTorch 2.11.0+rocm7.2 / ROCm 7.2.26015; raw logs under /tmp/amdpilot-repo-j-97a7771a49e3/evidence/.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Assigned hardware was one gfx950 GPU, not NVIDIA B300 TP8; TP8, CUDA Graph replay, NCCL, and cross-rank behavior remain unverified locally.",
+    "DeepSeek-V4-Pro-DSpark weights were unavailable, so no full-model or semantic accuracy reproduction was performed.",
+    "Temporarily restoring the historical racing initialization did not reproduce the timing-sensitive failure on gfx950; failing-before evidence remains platform-specific upstream evidence."
+  ]
+}
