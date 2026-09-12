@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34758",
+  "candidate_mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3487",
+  "review_mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3507",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3505",
+  "candidate_commit": "c7a959a488f29c77f38b5d0771860f1fc33bce07",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The base failure was reproduced and the exact candidate fixes the FP32 output contract on the assigned ROCm gfx950 GPU. The registered aten::mm.dtype path, actual deterministic MoEGate branch, near-tied routing, FP64-reference accuracy, repeated execution, sub-batch invariance, tile-boundary shapes, bias, and token-count boundaries all passed. CUDA and real DeepGEMM execution remain architecture-unverified.",
+  "tests": [
+    {
+      "command": "SGLANG_BATCH_INVARIANT_OPS_ENABLE_MM_DEEPGEMM=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-81cb23081693/venv/bin/python /job/review-evidence-j-81cb23081693/probe.py (base)",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced BF16-rounded values in a nominal FP32 aten::mm.dtype result: 0/4352 non-BF16 values, 0.966156 max error versus CPU FP64, and collapsed near-tied expert scores."
+    },
+    {
+      "command": "SGLANG_BATCH_INVARIANT_OPS_ENABLE_MM_DEEPGEMM=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-81cb23081693/venv/bin/python /job/review-evidence-j-81cb23081693/probe.py (candidate c7a959a)",
+      "exit_code": 0,
+      "what_was_measured": "Direct FP32 retention in 4351/4352 values, 0.000305176 max error versus CPU FP64, correct near-tied expert winner, and exact repeat/sub-batch invariance."
+    },
+    {
+      "command": "SGLANG_BATCH_INVARIANT_OPS_ENABLE_MM_DEEPGEMM=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-81cb23081693/venv/bin/python -m pytest -q test/registered/unit/batch_invariant_ops/test_batch_invariant_ops.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 11 passed and 54 subtests passed."
+    },
+    {
+      "command": "SGLANG_BATCH_INVARIANT_OPS_ENABLE_MM_DEEPGEMM=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-81cb23081693/venv/bin/python /job/review-evidence-j-81cb23081693/adversarial.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent tile-boundary shapes, FP32 bias, repeated outputs, and actual deterministic gate prefix invariance across 1/4/5/16/17 tokens."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "All numerical probes and regressions ran on AMD Instinct MI350X gfx950 with Torch 2.11.0+rocm7.2/HIP 7.2.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No failing counterexample was found on ROCm gfx950.",
+    "CUDA kernel execution is unverified because no NVIDIA GPU was assigned.",
+    "Actual DeepGEMM execution is unverified because DeepGEMM is unavailable on this AMD host; only the intentional FP32 bypass was source-reviewed and mock-tested."
+  ],
+  "remaining_limitations": [
+    "The review cannot honestly claim universal full resolution without executing the CUDA specialization on supported NVIDIA hardware.",
+    "No native rebuild was performed because the candidate contains no native C++ or FlyDSL changes.",
+    "The tiny Llama serving fixture is not relevant evidence for DeepSeek router numerical semantics and was not run."
+  ]
+}
