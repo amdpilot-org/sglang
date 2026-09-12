@@ -605,6 +605,14 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
         # Subprocess liveness watchdog — set by Engine or http_server after construction
         self._subprocess_watchdog = None
 
+    def _create_background_task(
+        self, awaitable: Awaitable[Any]
+    ) -> asyncio.Task[Any]:
+        task = asyncio.create_task(awaitable)
+        self.asyncio_tasks.add(task)
+        task.add_done_callback(self.asyncio_tasks.discard)
+        return task
+
     def init_request_logging_and_dumping(self):
         # TODO: Refactor and organize the log export code.
         # Request logging
@@ -1814,7 +1822,7 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                 )
 
                 if self.request_metrics_exporter_manager.exporter_enabled():
-                    asyncio.create_task(
+                    self._create_background_task(
                         self.request_metrics_exporter_manager.write_record(obj, out)
                     )
 
@@ -2525,7 +2533,9 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
 
                 # Mark ongoing LoRA request as finished.
                 if self.enable_lora and state.obj.lora_path:
-                    asyncio.create_task(self.lora_registry.release(state.obj.lora_id))
+                    self._create_background_task(
+                        self.lora_registry.release(state.obj.lora_id)
+                    )
 
             if out_dict is not None:
                 state.out_list.append(out_dict)
@@ -3080,7 +3090,7 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                     to_dump_with_server_args["resolved_config"] = None
                     pickle.dump(to_dump_with_server_args, f)
 
-        asyncio.create_task(asyncio.to_thread(background_task))
+        self._create_background_task(asyncio.to_thread(background_task))
 
     def dump_requests_before_crash(
         self, hostname: str = os.getenv("HOSTNAME", socket.gethostname())
