@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/29272",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved the candidate's process-local CUDA device selection and GDS fallback, and corrected its rank-local retry by reducing copy status across the process group before any FilesBufferOnDevice tensor operation.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-d7571f403652/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_prefetch_checkpoints.py::TestPrefetchCheckpoints::test_fastsafetensors_coordinates_gds_fallback_across_ranks (candidate behavior)",
+      "exit_code": 1,
+      "what_was_measured": "Two real Gloo ranks with rank 0 succeeding on GDS and rank 1 raising the reported GDS error; only rank 1 retried non-GDS, reproducing the review counterexample."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d7571f403652/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_prefetch_checkpoints.py::TestPrefetchCheckpoints::test_fastsafetensors_coordinates_gds_fallback_across_ranks",
+      "exit_code": 0,
+      "what_was_measured": "The same two-rank case made both ranks attempt GDS and then non-GDS after the correction."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d7571f403652/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_prefetch_checkpoints.py",
+      "exit_code": 0,
+      "what_was_measured": "25 focused model-loader tests passed, including local-device selection, coordinated fallback, non-GDS error propagation, cache dropping, and dispatch boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d7571f403652/venv/bin/python GPU arithmetic script",
+      "exit_code": 0,
+      "what_was_measured": "AMD Instinct MI355X gfx950 arithmetic result 312.0 matched the CPU reference 312.0."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "reports/j-d7571f403652/raw/gpu_smoke.log records an AMD Instinct MI355X with gfx950:sramecc+:xnack- and matching GPU/CPU result 312.0.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No real fastsafetensors installation was available, so loader behavior used a deterministic test double.",
+    "Only one GPU and one node were available; the original multi-node TP deployment was not run.",
+    "GLM-5.2 weights were unavailable; no full model load or architecture/semantic validation was performed.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}

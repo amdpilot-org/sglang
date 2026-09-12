@@ -1241,7 +1241,9 @@ def fastsafetensors_weights_iterator(
     except Exception:
         rank = 0
 
-    device = torch.device(f"cuda:{rank}")
+    # Process-group ranks are global across nodes, while device indices are
+    # local. The worker has selected this process's device before loading.
+    device = torch.device(f"cuda:{torch.cuda.current_device()}")
 
     weight_files_sub_lists = [
         hf_weights_files[i : i + pg.size()]
@@ -1252,17 +1254,64 @@ def fastsafetensors_weights_iterator(
         "{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
     )
 
+    def copy_files(rank_file_map, nogds):
+        loader = None
+        buffer = None
+        error = None
+        try:
+            loader = SafeTensorsFileLoader(pg, device, nogds=nogds)
+            loader.add_filenames(rank_file_map)
+            buffer = loader.copy_files_to_device()
+        except Exception as exc:
+            error = exc
+
+        if pg.size() > 1:
+            is_gds_error = (
+                not nogds and error is not None and "gds" in str(error).lower()
+            )
+            status = 1 if is_gds_error else 2 if error is not None else 0
+            flag_device = (
+                device if torch.distributed.get_backend(pg) == "nccl" else "cpu"
+            )
+            status_tensor = torch.tensor(status, dtype=torch.int32, device=flag_device)
+            torch.distributed.all_reduce(
+                status_tensor, op=torch.distributed.ReduceOp.MAX, group=pg
+            )
+            status = status_tensor.item()
+        elif error is not None:
+            status = 1 if not nogds and "gds" in str(error).lower() else 2
+        else:
+            status = 0
+
+        if status:
+            if loader is not None:
+                loader.close()
+                loader = None
+            if status == 2:
+                if error is not None:
+                    raise error
+                raise RuntimeError(
+                    "Fastsafetensors loading failed on another process-group rank."
+                )
+
+        return loader, buffer, status
+
     for f_list in tqdm(
         weight_files_sub_lists,
         desc="Loading safetensors using Fastsafetensor loader",
         disable=False,
         bar_format=_BAR_FORMAT,
     ):
-        loader = SafeTensorsFileLoader(pg, device, nogds=not enable_gds)
         rank_file_map = {i: [f] for i, f in enumerate(f_list)}
-        loader.add_filenames(rank_file_map)
+        loader = None
         try:
-            fb = loader.copy_files_to_device()
+            loader, fb, status = copy_files(rank_file_map, nogds=not enable_gds)
+            if status:
+                logger.warning(
+                    "Fastsafetensors GDS loading is unavailable; retrying "
+                    "with the non-GDS fallback."
+                )
+                loader, fb, _ = copy_files(rank_file_map, nogds=True)
             try:
                 keys = list(fb.key_to_rank_lidx.keys())
                 for k in keys:
@@ -1271,7 +1320,8 @@ def fastsafetensors_weights_iterator(
             finally:
                 pass
         finally:
-            loader.close()
+            if loader is not None:
+                loader.close()
         if drop_cache_after_load:
             for loaded_file in rank_file_map.get(rank, []):
                 _drop_file_cache_after_load(loaded_file)
