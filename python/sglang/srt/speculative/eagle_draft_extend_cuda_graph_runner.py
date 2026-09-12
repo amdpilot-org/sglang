@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Callable, Collection, Optional
 
 import torch
 
@@ -86,6 +86,12 @@ class EagleDraftExtendInputBuffers(ForwardInputBuffers):
     global_num_tokens_gpu: Optional[torch.Tensor]
     global_num_tokens_for_logprob_gpu: Optional[torch.Tensor]
     dsa_seed_topk_capture: Optional[torch.Tensor] = None
+
+    def share_buffers(self, *, exclude: Collection[str] = ()):
+        # Adaptive speculative decoding owns one runner per capture width, but
+        # select_index has shape [max_bs] for every width. Pooling it by shape
+        # aliases width-specific values and can make a narrow graph gather OOB.
+        super().share_buffers(exclude={*exclude, "select_index"})
 
 
 class EAGLEDraftExtendCudaGraphRunner(DecodeCudaGraphRunner):
@@ -282,11 +288,7 @@ class EAGLEDraftExtendCudaGraphRunner(DecodeCudaGraphRunner):
             global_num_tokens_for_logprob_gpu=global_num_tokens_for_logprob_gpu,
             dsa_seed_topk_capture=dsa_seed_topk_capture,
         )
-        # The values depend on captured_req_width, while adaptive speculative
-        # decoding owns multiple runners whose select_index buffers all have
-        # shape [max_bs]. Sharing by field name and shape would alias those
-        # width-specific indices and can make a narrower graph gather OOB.
-        self.buffers.share_buffers(exclude={"select_index"})
+        self.buffers.share_buffers()
 
         self.backend = resolve_decode_backend(self)
 
