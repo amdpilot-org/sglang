@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35484",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the SGLang-side collision precondition: MooncakeStore forwarded the same configured ssd_offload_path to every embedded client, while HiCacheController computed but did not retain the DP rank. The correction carries dp_rank in HiCacheStorageConfig and passes each configured client a created rank_<dp>_<tp>_<pp> subdirectory. A regression verifies DP-attention clients with identical local TP rank are isolated, with independent TP/PP and unset-path boundary cases.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-d39e095a1905/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py (before production change)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression showed HiCacheStorageConfig did not accept dp_rank, preventing distinct DP-attention client identities; raw output is reports/j-d39e095a1905/raw/regression-before.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d39e095a1905/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py",
+      "exit_code": 0,
+      "what_was_measured": "Three focused cases passed: DP ranks with tp_rank=0 received distinct rank_<dp>_0_0 directories, TP/PP ranks were independently distinct, and an unset SSD path was not forwarded; raw output is reports/j-d39e095a1905/raw/regression-after.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d39e095a1905/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mooncake_group_semantics.py test/registered/unit/mem_cache/test_mooncake_standalone_dummy_mamba.py test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py",
+      "exit_code": 0,
+      "what_was_measured": "Fourteen adjacent Mooncake and new path-isolation unit tests passed; raw output is reports/j-d39e095a1905/raw/mooncake-unit-suite.txt."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-d39e095a1905/pre-commit /opt/venv/bin/pre-commit run --files python/sglang/srt/managers/cache_controller.py python/sglang/srt/mem_cache/hicache_storage.py python/sglang/srt/mem_cache/storage/mooncake_store/mooncake_store.py test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, AST, test-registration, and other applicable pre-commit checks passed; raw output is reports/j-d39e095a1905/raw/pre-commit.txt."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The corrected behavior is CPU-side rank configuration, directory creation, and keyword forwarding; no GPU kernel or model execution is involved in the regression."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The DeepSeek-V4-Flash weights and reported TP8 multi-rank Mooncake bucket deployment were not available, so silent KV byte corruption under the full production workload was not reproduced.",
+    "Tests use the actual SGLang MooncakeStore implementation with a deterministic fake Mooncake client; they validate client path isolation, not Mooncake bucket I/O or restart re-adoption semantics.",
+    "No GPU claim is made, and this result does not qualify model architecture behavior, semantic accuracy, or distributed recovery."
+  ]
+}
