@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/26399",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is test-only hardening over a base that already contains the relevant EAGLE result-transfer redesign. Its tests pass on gfx950 and validate source shape, pinned CPU outputs, exact values, and an empty boundary, but they do not prove that D2H remains nonblocking: the runtime test would also pass with non_blocking=False. The AST guard is also bypassed by moving a synchronous conversion into a helper. The original TP8 H200/GLM-5.1 near-full-KV hang remains unverified.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a4ee62f24e7c/venv/bin/python -m pytest -q test/registered/spec/test_eagle_verify_result_d2h.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate suite passed 3 tests on gfx950: direct-call AST guard, pinned D2H output values for a nonempty result, and empty-result handling."
+    },
+    {
+      "command": "Run the exact candidate test file on recorded base 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "The candidate suite also passed unchanged on the required base (3 passed), proving it is not failing-before/passing-after relative to that base."
+    },
+    {
+      "command": "Independent AST helper-indirection counterexample",
+      "exit_code": 0,
+      "what_was_measured": "A run_eagle_verify function calling a helper that performs Tensor.tolist() produced an empty forbidden-call list and would pass the candidate guard."
+    },
+    {
+      "command": "Inspect candidate runtime assertions against a blocking pinned-copy substitution",
+      "exit_code": 0,
+      "what_was_measured": "CPU placement, pinning, and exact values after event synchronization do not distinguish non_blocking=True from non_blocking=False."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The exact candidate suite executed on HIP_VISIBLE_DEVICES=0 using AMD Instinct MI355X/gfx950 with torch 2.11.0+rocm7.2, including real device tensors, pinned host allocation, D2H copying, event synchronization, and exact comparisons."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Changing _async_d2h to use copy_(..., non_blocking=False) would retain all candidate runtime-test outcomes, so the claimed nonblocking property is not regression-tested.",
+    "A synchronous Tensor.tolist()/cpu()/numpy() conversion placed in a helper called by run_eagle_verify bypasses the lexical AST guard.",
+    "The original production hang could still depend on TP8 coordination, CUDA/H200 behavior, GLM-5.1 FP8 execution, or near-full KV/memory pressure, none of which the candidate fixture exercises."
+  ],
+  "remaining_limitations": [
+    "Only one AMD Instinct MI355X gfx950 GPU was available, not eight H200 GPUs.",
+    "GLM-5.1 FP8 weights were unavailable.",
+    "TP8, CUDA/H200 semantics, 80K-160K prompts, near-full KV pressure, and watchdog behavior were not reproduced.",
+    "No native files changed, so a native rebuild was not applicable."
+  ]
+}

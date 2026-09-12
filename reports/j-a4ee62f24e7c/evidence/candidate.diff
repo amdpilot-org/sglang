@@ -1,0 +1,137 @@
+diff --git a/reports/j-f2862992c228/findings.md b/reports/j-f2862992c228/findings.md
+new file mode 100644
+index 0000000..1fd0b34
+--- /dev/null
++++ b/reports/j-f2862992c228/findings.md
+@@ -0,0 +1,17 @@
++# EAGLE verify near-full KV investigation
++
++Upstream issue: https://github.com/sgl-project/sglang/issues/26399
++
++Mirror issue: https://github.com/amdpilot-org/sglang/issues/2490
++
++The prepared `main` revision already contains the relevant design correction, so this change adds regression coverage and records the hardware limitation instead of duplicating a runtime fix.
++
++In the reported v0.5.12 source, `EagleVerifyInput.verify` performs synchronous host conversions at lines 424-425 and 485-486 (`accept_index.tolist()`, `predict.tolist()`, and accepted-length `.tolist()` calls). The current implementation has moved verification to `run_eagle_verify`, which returns `predict` and `accept_lens` as device tensors. `GenerationBatchResult.copy_to_cpu` later passes both through `_async_d2h`, whose GPU path allocates pinned host memory, issues `copy_(..., non_blocking=True)`, and records the source tensor on the active stream for lifetime safety.
++
++This mechanism arrived in upstream PR https://github.com/sgl-project/sglang/pull/29075 (merge commit `8e1988b746f7ee3072ea2b0199efb01d8273c2eb`), whose stated purpose includes speculative `accept_lens` and avoiding scheduler-thread stalls from pageable result D2H copies.
++
++The added regression would reject the reported implementation's host conversion in the verify hot path. On the assigned gfx950 it also checks exact token and acceptance-length values after the real result-copy path for a two-request result, plus the empty-batch boundary.
++
++Raw investigation artifacts are retained under `/tmp/amdpilot-repo-j-f2862992c228/evidence/`, including the v0.5.12 source excerpt, upstream commit/PR metadata, issue timeline, GPU test output, and the initial regression refinement output.
++
++The full production report remains unverified: GLM-5.1 FP8 weights and eight H200 GPUs were unavailable, and a single gfx950 cannot reproduce TP8 topology or CUDA/H200 near-full-KV behavior.
+diff --git a/reports/j-f2862992c228/result.json b/reports/j-f2862992c228/result.json
+new file mode 100644
+index 0000000..e38dfb8
+--- /dev/null
++++ b/reports/j-f2862992c228/result.json
+@@ -0,0 +1,34 @@
++{
++  "source_issue_url": "https://github.com/sgl-project/sglang/issues/26399",
++  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
++  "outcome": "candidate_verified",
++  "summary": "The prepared main revision already removes the synchronous GPU Tensor.tolist() calls from EAGLE verification. run_eagle_verify returns device tensors, and GenerationBatchResult.copy_to_cpu stages token IDs and accept lengths into pinned host buffers with nonblocking D2H. A regression test verifies the source invariant and the real gfx950 copy path for empty and multi-request results. No additional runtime correction was justified.",
++  "tests": [
++    {
++      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f2862992c228/venv/bin/python -m pytest -q test/registered/spec/test_eagle_verify_result_d2h.py",
++      "exit_code": 0,
++      "what_was_measured": "Three tests passed: no cpu/tolist/numpy conversion in run_eagle_verify; pinned asynchronous device-to-host copies preserve multi-request token IDs and accept lengths on gfx950; zero-length results are handled correctly."
++    },
++    {
++      "command": "gh api 'repos/sgl-project/sglang/contents/python/sglang/srt/speculative/eagle_info.py?ref=v0.5.12' --jq .content | base64 -d; rg -n -C 3 'def verify|tolist\\('",
++      "exit_code": 0,
++      "what_was_measured": "The reported v0.5.12 implementation contains synchronous accept_index.tolist(), predict.tolist(), num_correct_drafts_cpu.tolist(), and num_accept_tokens_cpu.tolist() calls in EagleVerifyInput.verify, establishing that the regression would fail on the reported source."
++    },
++    {
++      "command": "rocm-smi --showproductname --showuniqueid --showmeminfo vram",
++      "exit_code": 0,
++      "what_was_measured": "The assigned device is one AMD Instinct MI355X, gfx950, unique ID 0x91222c17f0f648d7."
++    }
++  ],
++  "gpu_execution": {
++    "value": true,
++    "evidence": "The regression executed real ROCm tensor creation, nonblocking GPU-to-pinned-host copies, CUDA/HIP event synchronization, and exact host-value comparison on HIP_VISIBLE_DEVICES=0 (gfx950)."
++  },
++  "native_rebuilt": false,
++  "remaining_limitations": [
++    "The reported GLM-5.1 FP8 weights were unavailable.",
++    "The assigned environment has one gfx950 AMD GPU, not eight H200 GPUs, so TP8, CUDA/H200 behavior, 80K-160K prompts, near-full KV pressure, and the original watchdog hang were not reproduced.",
++    "The test qualifies the corrected EAGLE result-transfer boundary and transport values only; it does not qualify GLM-5.1 model semantics or a distributed workload.",
++    "On HIP, the scheduler currently performs this pinned asynchronous copy on the forward stream by design; the regression verifies absence of Python-side Tensor.tolist() in run_eagle_verify and correct pinned D2H, not CUDA copy-stream overlap."
++  ]
++}
+diff --git a/test/registered/spec/test_eagle_verify_result_d2h.py b/test/registered/spec/test_eagle_verify_result_d2h.py
+new file mode 100644
+index 0000000..44b0262
+--- /dev/null
++++ b/test/registered/spec/test_eagle_verify_result_d2h.py
+@@ -0,0 +1,68 @@
++import ast
++from pathlib import Path
++from types import SimpleNamespace
++
++import pytest
++import torch
++
++from sglang.srt.managers.utils import GenerationBatchResult
++
++
++def test_eagle_verify_hot_path_has_no_host_tensor_conversion():
++    """Keep EAGLE verification free of synchronous device-to-host conversions."""
++    speculative_dir = (
++        Path(__file__).resolve().parents[3]
++        / "python"
++        / "sglang"
++        / "srt"
++        / "speculative"
++    )
++    source = speculative_dir / "eagle_worker_common.py"
++    tree = ast.parse(source.read_text())
++    verify = next(
++        node
++        for node in tree.body
++        if isinstance(node, ast.FunctionDef) and node.name == "run_eagle_verify"
++    )
++    forbidden = []
++    for node in ast.walk(verify):
++        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
++            if node.func.attr in {"cpu", "tolist", "numpy"}:
++                forbidden.append(f"{source.name}:{node.lineno}:{node.func.attr}")
++
++    assert forbidden == []
++
++
++@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a GPU")
++@pytest.mark.parametrize(
++    ("token_ids", "accept_lens"),
++    [
++        ([], []),
++        ([101, 102, 103, 201, 202, 203], [3, 2]),
++    ],
++)
++def test_eagle_result_uses_async_pinned_d2h(token_ids, accept_lens):
++    device = torch.device("cuda")
++    result = GenerationBatchResult(
++        logits_output=SimpleNamespace(
++            hidden_states=None,
++            auxiliary_device_output=None,
++            sampling_mask_output=None,
++        ),
++        next_token_ids=torch.tensor(token_ids, dtype=torch.int64, device=device),
++        accept_lens=torch.tensor(accept_lens, dtype=torch.int32, device=device),
++    )
++    result.copy_done = torch.cuda.Event()
++
++    result.copy_to_cpu(return_logprob=False)
++    result.copy_done.synchronize()
++
++    assert result.next_token_ids.device.type == "cpu"
++    assert result.accept_lens.device.type == "cpu"
++    # PyTorch does not mark zero-sized allocations pinned on every backend.
++    if token_ids:
++        assert result.next_token_ids.is_pinned()
++    if accept_lens:
++        assert result.accept_lens.is_pinned()
++    assert result.next_token_ids.tolist() == token_ids
++    assert result.accept_lens.tolist() == accept_lens
