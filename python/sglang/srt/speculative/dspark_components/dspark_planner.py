@@ -821,6 +821,30 @@ def ragged_layout_exceeds_captured_grid(
     return tier_tokens > capture_num_tokens[-1]
 
 
+def clamp_verify_lens(
+    *,
+    requested_verify_lens: torch.Tensor,
+    seq_lens: torch.Tensor,
+    remaining_generation_tokens: torch.Tensor,
+    max_context_len: int,
+) -> torch.Tensor:
+    """Clamp each DSpark verify row to its remaining legal token budget."""
+    if max_context_len < 1:
+        raise ValueError(f"max_context_len must be positive, got {max_context_len}")
+    verify_lens = torch.minimum(
+        requested_verify_lens.to(torch.int64),
+        (max_context_len - seq_lens.to(torch.int64)).clamp_min_(0),
+    )
+    verify_lens = torch.minimum(
+        verify_lens, remaining_generation_tokens.to(torch.int64).clamp_min_(0)
+    )
+    if not bool(torch.all(verify_lens > 0)):
+        raise RuntimeError(
+            "DSpark scheduled a request with no context or generation budget"
+        )
+    return verify_lens
+
+
 def alloc_verify_window(
     *,
     batch: ScheduleBatch,
@@ -829,10 +853,18 @@ def alloc_verify_window(
     verify_num_draft_tokens: int,
     block_pos_offsets: torch.Tensor,
     model_runner,
+    verify_lens: torch.Tensor,
+    max_context_len: int,
 ) -> VerifyWindow:
     prefix_lens = batch.seq_lens
     verify_w = verify_num_draft_tokens
-    positions_2d = prefix_lens.unsqueeze(1) + block_pos_offsets
+    # The draft pass remains fixed-width. Its unused tail repeats the final
+    # legal position; the ragged target layout below discards those tail rows.
+    final_legal_offsets = verify_lens.to(torch.int64).sub(1).unsqueeze(1)
+    safe_offsets = torch.minimum(block_pos_offsets, final_legal_offsets)
+    positions_2d = (prefix_lens.unsqueeze(1) + safe_offsets).clamp_max_(
+        max_context_len - 1
+    )
     verify_cache_loc = assign_extend_cache_locs_func(
         req_pool_indices=batch.req_pool_indices,
         req_to_token=model_runner.req_to_token_pool.req_to_token,
