@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31021",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2857",
+  "candidate_mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2791",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2823",
+  "candidate_commit": "206d0a92883d859f4ebc6d64c7b480c7006904dc",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a meaningful partial hot-reload implementation, but its class-content copying breaks existing instances when a reloaded method uses zero-argument super(). Its own focused tests pass, yet an independent contract-level adversarial case fails deterministically, so it does not safely deliver the claimed general pure-Python class reload.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-19a943cafcf5/venv/bin/python -m sglang.launch_server --help 2>&1 | grep -F -- '--enable-dev-reload'; test -e python/sglang/srt/dev_reload.py",
+      "exit_code": 1,
+      "what_was_measured": "At the recorded base, neither the CLI flag nor the reload implementation exists, reproducing the original absence of a hot-reload path. Each check returned 1."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-19a943cafcf5/venv/bin/python -m pytest -q test/srt/test_dev_reload.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's five unit/regression cases pass at the exact candidate commit."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-19a943cafcf5/venv/bin/python /job/review-evidence/adversarial_reload.py",
+      "exit_code": 1,
+      "what_was_measured": "An existing subclass instance works before reload but fails afterward with TypeError when its reloaded method uses zero-argument super(); this directly tests the claimed existing-instance rebinding contract."
+    },
+    {
+      "command": "git diff --name-only 358c163250ad3b1f62939b01ce1314a0a31a0365 206d0a92883d859f4ebc6d64c7b480c7006904dc | grep -E '\\.(c|cc|cpp|cu|cuh|h|hpp|hip)$'",
+      "exit_code": 1,
+      "what_was_measured": "No native source files changed, so native rebuilding was not applicable."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "No GPU workload was run during this independent review. Hardware inventory found one AMD Instinct MI355X with gfx950. The decisive failure is a deterministic Python object-model error independent of GPU execution.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Reload a loaded pure-Python sglang.* module containing an inherited class whose updated method uses zero-argument super(), then call that method on an instance created before reload: the candidate raises TypeError because the copied function's __class__ closure refers to the new class while the instance belongs to the preserved old class."
+  ],
+  "remaining_limitations": [
+    "Existing-instance rebinding is unsafe for ordinary zero-argument super() methods and therefore cannot support arbitrary selected pure-Python SGLang modules as documented.",
+    "Reload is non-transactional; a failure can leave workers or modules partially mutated.",
+    "Multi-rank synchronization and consistency after mixed worker success/failure were not hardware-tested.",
+    "Native extensions, newly imported modules, object-layout changes, process-topology changes, torch.compile artifacts, and JIT kernels remain unsupported.",
+    "The issue's alternative fault-tolerant scheduler event-loop behavior is not implemented.",
+    "No independent large-model weight-preservation timing, distributed workload, other model architecture, or GPU numerical validation was performed in this review."
+  ]
+}
