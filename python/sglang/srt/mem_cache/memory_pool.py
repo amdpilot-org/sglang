@@ -3789,6 +3789,7 @@ class HybridLinearKVPool(KVCache):
         tail_extra_slots: int = 0,
         max_running_requests: Optional[int] = None,
         skip_topk_layers: Optional[List[bool]] = None,
+        index_buf_size: Optional[int] = None,
         start_layer: Optional[int] = None,
         full_kv_pool_class: Optional[type] = None,
         quant_method=None,
@@ -3881,6 +3882,7 @@ class HybridLinearKVPool(KVCache):
                 tail_extra_slots=tail_extra_slots,
                 max_running_requests=max_running_requests,
                 skip_topk_layers=skip_topk_layers,
+                index_buf_size=index_buf_size,
             )
         else:
             TokenToKVPoolClass = MLATokenToKVPool
@@ -3916,6 +3918,10 @@ class HybridLinearKVPool(KVCache):
     @property
     def post_capture_active(self) -> bool:
         return self.full_kv_pool.post_capture_active
+
+    @property
+    def index_buf_size(self) -> Optional[int]:
+        return getattr(self.full_kv_pool, "index_buf_size", None)
 
     @property
     def post_capture_backed_bytes(self) -> int:

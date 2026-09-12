@@ -1,0 +1,101 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+______ test_set_mla_kv_buffer_dcp_sharded_localizes_virtual_locs[False-0] ______
+
+rank = 0, with_rope = False
+
+    @pytest.mark.parametrize("rank", [0, 1])
+    @pytest.mark.parametrize("with_rope", [False, True])
+    def test_set_mla_kv_buffer_dcp_sharded_localizes_virtual_locs(rank, with_rope):
+        """DCP owners write loc//world_size; non-owners leave the row untouched."""
+        world_size = 2
+        # Two owned locs plus one non-owned loc, all within the physical fixture so
+        # the pre-fix raw write fails deterministically without relying on an OOB.
+        loc = torch.tensor([2 + rank, 4 + rank, 7 - rank], device=DEVICE)
+        nope = torch.arange(
+            loc.numel() * TRITON_NOPE_DIM, dtype=torch.float32, device=DEVICE
+        ).reshape(loc.numel(), 1, TRITON_NOPE_DIM)
+        rope = (
+            torch.arange(
+                loc.numel() * TRITON_ROPE_DIM, dtype=torch.float32, device=DEVICE
+            ).reshape(loc.numel(), 1, TRITON_ROPE_DIM)
+            if with_rope
+            else None
+        )
+        total_dim = TRITON_NOPE_DIM + (TRITON_ROPE_DIM if with_rope else 0)
+        kv_buffer = torch.full((8, 1, total_dim), -1.0, device=DEVICE)
+    
+        with get_parallel().override(attn_dcp_size=world_size, attn_dcp_rank=rank):
+            set_mla_kv_buffer_dcp_sharded_triton(
+                kv_buffer, loc, nope, rope, reserved_skip_index=-1
+            )
+    
+        for source_row, virtual_loc in enumerate(loc.tolist()):
+            local_loc = virtual_loc // world_size
+            if virtual_loc % world_size == rank:
+                expected = nope[source_row, 0]
+                if with_rope:
+                    expected = torch.cat((expected, rope[source_row, 0]))
+>               torch.testing.assert_close(kv_buffer[local_loc, 0], expected)
+E               AssertionError: Tensor-likes are not close!
+E               
+E               Mismatched elements: 128 / 128 (100.0%)
+E               Greatest absolute difference: 128.0 at index (127,) (up to 1e-05 allowed)
+E               Greatest relative difference: inf at index (0,) (up to 1.3e-06 allowed)
+
+test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py:287: AssertionError
+______ test_set_mla_kv_buffer_dcp_sharded_localizes_virtual_locs[False-1] ______
+
+rank = 1, with_rope = False
+
+    @pytest.mark.parametrize("rank", [0, 1])
+    @pytest.mark.parametrize("with_rope", [False, True])
+    def test_set_mla_kv_buffer_dcp_sharded_localizes_virtual_locs(rank, with_rope):
+        """DCP owners write loc//world_size; non-owners leave the row untouched."""
+        world_size = 2
+        # Two owned locs plus one non-owned loc, all within the physical fixture so
+        # the pre-fix raw write fails deterministically without relying on an OOB.
+        loc = torch.tensor([2 + rank, 4 + rank, 7 - rank], device=DEVICE)
+        nope = torch.arange(
+            loc.numel() * TRITON_NOPE_DIM, dtype=torch.float32, device=DEVICE
+        ).reshape(loc.numel(), 1, TRITON_NOPE_DIM)
+        rope = (
+            torch.arange(
+                loc.numel() * TRITON_ROPE_DIM, dtype=torch.float32, device=DEVICE
+            ).reshape(loc.numel(), 1, TRITON_ROPE_DIM)
+            if with_rope
+            else None
+        )
+        total_dim = TRITON_NOPE_DIM + (TRITON_ROPE_DIM if with_rope else 0)
+        kv_buffer = torch.full((8, 1, total_dim), -1.0, device=DEVICE)
+    
+        with get_parallel().override(attn_dcp_size=world_size, attn_dcp_rank=rank):
+            set_mla_kv_buffer_dcp_sharded_triton(
+                kv_buffer, loc, nope, rope, reserved_skip_index=-1
+            )
+    
+        for source_row, virtual_loc in enumerate(loc.tolist()):
+            local_loc = virtual_loc // world_size
+            if virtual_loc % world_size == rank:
+                expected = nope[source_row, 0]
+                if with_rope:
+                    expected = torch.cat((expected, rope[source_row, 0]))
+>               torch.testing.assert_close(kv_buffer[local_loc, 0], expected)
+E               AssertionError: Tensor-likes are not close!
+E               
+E               Mismatched elements: 128 / 128 (100.0%)
+E               Greatest absolute difference: 128.0 at index (127,) (up to 1e-05 allowed)
+E               Greatest relative difference: inf at index (0,) (up to 1.3e-06 allowed)
+
+test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py:287: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py::test_set_mla_kv_buffer_dcp_sharded_localizes_virtual_locs[False-0]
+FAILED test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py::test_set_mla_kv_buffer_dcp_sharded_localizes_virtual_locs[False-1]
+2 failed, 65 deselected, 1 warning in 4.72s
