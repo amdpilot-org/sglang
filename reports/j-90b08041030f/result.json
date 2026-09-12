@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32204",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2322",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2286",
+  "candidate_commit": "ba181c94c9b71a3126d83d7d390e6ea7eb7f2caa",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "prepared_checkout_difference": "none; prepared HEAD matched the recorded base commit",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The base independently reproduced Qwen3.5 terminal-position IndexError and silent Qwen2/Qwen3 terminal omission. The exact candidate fixes both and also passes independent checks for deferred Qwen3.5 FlashInfer finalization and stale-flag reconfiguration.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-90b08041030f/venv/bin/python - <<'PY' ... base fixture ... PY",
+      "exit_code": 0,
+      "what_was_measured": "On the recorded base, Qwen3.5 set_dflash_layers_to_capture([num_layers]) raised IndexError; Qwen2Model and Qwen3Model silently returned a tensor rather than a tensor/captures pair for terminal position num_layers. Imports resolved under /job/repo/python."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-90b08041030f/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen3_5_dflash_capture.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact-candidate regression: 8 tests and 2 subtests passed, covering wrapper shifting, terminal acceptance, invalid bounds, stale-flag clearing, regular terminal capture, deferred handoff capture, and Qwen2/Qwen3 terminal capture."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-90b08041030f/venv/bin/python - <<'PY' ... independent adversarial fixture ... PY",
+      "exit_code": 0,
+      "what_was_measured": "Independent CPU cases verified clearing configuration to empty, negative and past-end rejection, ordered in-range plus terminal capture with non-null residuals for Qwen2/Qwen3, Qwen3.5 normal finalization, and Qwen35MoeFinalizeHandoff deferred finalization. The same fixture executed the actual Qwen2 terminal forward path with GPU tensors on gfx950."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-90b08041030f/venv/bin/python -m pytest -q test/registered/unit/layers/moe/test_qwen35_flashinfer_fusion.py",
+      "exit_code": 0,
+      "what_was_measured": "10 related FlashInfer fusion protocol tests passed."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..ba181c94c9b71a3126d83d7d390e6ea7eb7f2caa",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI355X, gfx950:sramecc+:xnack-, executed the Qwen2 terminal-capture forward fixture with ROCm 7.2 tensors; output was 1700 and the independently expected pre-norm terminal capture was 17."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_reason": "No native source or generated native binding changed; the candidate modifies Python model code and tests only.",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Qwen3.5-4B model weights were unavailable, so no full model/server startup or semantic-accuracy run was performed.",
+    "Ascend NPU hardware was unavailable; device-independent source behavior was reproduced on CPU and the assigned AMD gfx950 GPU.",
+    "A real multi-node FlashInfer MNNVL deployment was unavailable; deferred finalization was verified using the concrete Qwen35MoeFinalizeHandoff type and a deterministic fusion-service fixture, plus the related fusion unit suite.",
+    "The GPU check qualifies terminal capture arithmetic and execution only, not Qwen3.5 architecture behavior or a distributed workload."
+  ]
+}
