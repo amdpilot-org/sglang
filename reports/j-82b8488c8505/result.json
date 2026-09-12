@@ -1,0 +1,71 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19352",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "3f01b12dfb5ac76975f41964819f07ebf3b8696a",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a valid partial cleanup and regression guard for model IDs that are already centralized in multimodal_gen/test/test_utils.py. It reproduces and removes 20 such executable duplicates, and its focused tests pass. It does not fully enforce the original common-entry refactor: repeated runnable model IDs without an existing DEFAULT_* constant remain hard-coded and are invisible to the guard. The candidate should not be described as a complete fix of the original issue.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-82b8488c8505/venv/bin/python /job/base_duplicate_scan.py (scanner reads git show at recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Independent failing-before reproduction found exactly 20 executable copies of the 25 model IDs already centralized in test_utils.py across six non-unit test files. The nonzero exit was expected. Raw output: /job/base-duplicate-scan.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-82b8488c8505/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_common_model_names.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, both candidate regression tests passed: no executable non-unit duplicates of existing constants and the supplied code-versus-docstring adversarial case. Raw output: /job/review-evidence/candidate-regression.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-82b8488c8505/venv/bin/python /job/review-evidence/adversarial_scan.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent broader inventory found 57 existing-canonical literals in the excluded unit tree and repeated runnable model IDs that have no shared constant and therefore evade the candidate guard, including Lightricks/LTX-2.3, Lightricks/LTX-2, FastVideo/FastHunyuan-diffusers, and Rabinovich/LongLive-2.0-5B-Diffusers. Raw output: /job/review-evidence/adversarial-scan.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-82b8488c8505/venv/bin/python -m pytest --collect-only -q python/sglang/multimodal_gen/test/server/test_request_logger.py python/sglang/multimodal_gen/test/single_test_file/test_dp_serving_2_gpu.py",
+      "exit_code": 0,
+      "what_was_measured": "All four request-logger tests and the two-GPU DP test collected from the candidate source tree, confirming those touched imports and discovery paths. Raw output: /job/review-evidence/collect.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-82b8488c8505/venv/bin/python -m compileall -q <five modified runnable Python modules>",
+      "exit_code": 0,
+      "what_was_measured": "All modified runnable Python modules compiled under the prepared interpreter."
+    },
+    {
+      "command": "pre-commit run --files <six candidate Python files>",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository hooks passed at the exact candidate commit. Raw output: /job/review-evidence/precommit.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-82b8488c8505/venv/bin/python -c 'import sglang, torch; ...'",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed sglang loaded from /job/repo/python/sglang/__init__.py, Torch loaded from /opt/venv/lib/python3.12/site-packages/torch, Torch 2.11.0+rocm7.2 with HIP 7.2.26015, and one AMD Instinct MI350X device. Raw output: /job/review-evidence/import-environment.log."
+    },
+    {
+      "command": "git diff 3f01b12^..3f01b12 --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the candidate diff."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The candidate changes Python test references and an AST policy test, not inference or numerical code. The node exposes one AMD Instinct MI350X, while the directly touched DP runtime case needs two GPUs; Ascend and MUSA execution require unavailable architectures. GPU inference would not establish completeness of the source-refactor contract."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "python/sglang/multimodal_gen/test/server/gpu_cases.py retains four executable occurrences of Lightricks/LTX-2.3; no matching shared constant exists, so the guard cannot report them.",
+    "Lightricks/LTX-2 remains hard-coded across server/gpu_cases.py and server/ascend/testcase_configs_npu.py; no matching shared constant exists.",
+    "FastVideo/FastHunyuan-diffusers remains hard-coded across server/gpu_cases.py and server/musa/testcase_configs_musa.py; no matching shared constant exists.",
+    "Rabinovich/LongLive-2.0-5B-Diffusers remains hard-coded twice in server/gpu_cases.py; no matching shared constant exists.",
+    "The guard excludes the complete unit tree, where the independent inventory found 57 literals equal to existing shared constants. Some are intentional parser/config test vectors, but the blanket exclusion does not distinguish those from ordinary reusable test fixtures."
+  ],
+  "remaining_limitations": [
+    "Recommendation is request_changes because the candidate is partial hardening, not a full original-issue fix.",
+    "No native files changed, repository-environment.json declares native and wheel as null, and no native rebuild was applicable.",
+    "Only one ROCm GPU was assigned; the touched two-GPU DP runtime case was not executed.",
+    "Ascend and MUSA accelerator paths were syntax-checked but could not be executed on the ROCm host.",
+    "Gated model credentials/weights were unavailable and unnecessary for the source-level contract; no semantic or numerical model claim was made.",
+    "An attempted broad import of all touched configuration modules triggered model metadata access (including gated 401 responses), demonstrating that collection/import is not a clean architecture-neutral runtime test; it was not counted as proof of correctness."
+  ]
+}
