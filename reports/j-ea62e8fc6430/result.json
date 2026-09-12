@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38618",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the silent drop through Glm5NextForConditionalGeneration.load_weights, normalized transformers-written mHC/KDA/MoE names into the released layout, validated the actual destination loaders with representative tensors, and made malformed or unsupported required transformers-native weights fail explicitly. This verifies loader routing and tensor values/shapes, not end-to-end model quality.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-ea62e8fc6430/venv/bin/python - <<'PY' ... Glm5NextForConditionalGeneration.load_weights(...attn_hc.fn...) ... PY",
+      "exit_code": 0,
+      "what_was_measured": "Before the fix, the actual loader left the representative mHC destination at its sentinel value, demonstrating a silent drop. Raw output: /job/raw/before_actual_loader.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-ea62e8fc6430/venv/bin/python -m pytest test/registered/unit/models/test_glm5_next_hf_layout.py test/registered/unit/models/test_glm5_next_dflash_capture.py test/registered/unit/models/test_glm5_next_modelopt.py -q",
+      "exit_code": 0,
+      "what_was_measured": "9 tests and 2 subtests passed. The regression invokes the production load_weights implementation and checks exact mHC, KDA forget-gate, packed conv1d, and packed MoE destination values/shapes; it also checks explicit errors for malformed and unsupported required weights. Raw output: /job/raw/pytest_glm5_adjacent.txt"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/models/glm5_next.py test/registered/unit/models/test_glm5_next_hf_layout.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, and registered-test validation hooks passed. Raw output: /job/raw/precommit.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-ea62e8fc6430/venv/bin/python - <<'PY' ... actual loader with CUDA tensors ... PY",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X, exact GPU comparisons against independently indexed source tensors passed for two experts' gate/up/down matrices and all q/k/v conv1d slices; destination shapes were also checked. Raw output: /job/raw/gpu_actual_loader.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "PyTorch 2.11.0+rocm7.2 exposed exactly one assigned AMD Instinct MI350X. The actual loader consumed CUDA tensors and all exact numerical/shape assertions passed; see /job/raw/gpu_environment.txt and /job/raw/gpu_actual_loader.txt.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The full 628 GB GLM-5.3-Flash checkpoint was not present, so full server startup, generation, and benchmark quality were not tested.",
+    "Name routing plus representative exact tensor validation does not establish full-model quality.",
+    "No native C++ or FlyDSL code changed, so no native rebuild was applicable."
+  ],
+  "source_paths": [
+    "/job/repo/python/sglang/srt/models/glm5_next.py",
+    "/job/repo/test/registered/unit/models/test_glm5_next_hf_layout.py"
+  ],
+  "raw_output_paths": [
+    "/job/raw/before_actual_loader.txt",
+    "/job/raw/pytest_glm5_loader.txt",
+    "/job/raw/pytest_glm5_adjacent.txt",
+    "/job/raw/precommit.txt",
+    "/job/raw/gpu_environment.txt",
+    "/job/raw/gpu_actual_loader.txt"
+  ]
+}

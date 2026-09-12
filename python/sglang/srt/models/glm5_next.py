@@ -118,6 +118,118 @@ if _use_aiter_gfx95:
 logger = logging.getLogger(__name__)
 
 
+# transformers rewrites these GLM-5.3-Flash checkpoint names on load and
+# save_pretrained keeps the rewritten layout. Normalize that layout before the
+# existing SGLang loaders apply tensor-parallel and quantization sharding.
+_HF_NATIVE_RENAMES = (
+    (".self_attn.forget_gate.", ".self_attn."),
+    (".attn_hc.fn", ".hc_attn_fn"),
+    (".attn_hc.base", ".hc_attn_base"),
+    (".attn_hc.scale", ".hc_attn_scale"),
+    (".ffn_hc.fn", ".hc_ffn_fn"),
+    (".ffn_hc.base", ".hc_ffn_base"),
+    (".ffn_hc.scale", ".hc_ffn_scale"),
+)
+
+_HF_PACKED_GATE_UP = ".mlp.experts.gate_up_proj"
+_HF_PACKED_DOWN = ".mlp.experts.down_proj"
+_HF_PACKED_CONV1D = ".self_attn.conv1d.weight"
+_HF_REQUIRED_NAMESPACES = (
+    ".attn_hc.",
+    ".ffn_hc.",
+    ".self_attn.forget_gate.",
+    ".mlp.experts.gate_up_proj",
+    ".mlp.experts.down_proj",
+    ".self_attn.conv1d.",
+)
+
+
+def _split_hf_packed_gate_up(name, weight, expected_num_experts):
+    if weight.dim() != 3:
+        raise ValueError(f"{name}: expected shape [E, 2I, H], got {weight.shape}")
+    n_experts, gate_and_up, _ = weight.shape
+    if n_experts != expected_num_experts:
+        raise ValueError(
+            f"{name}: expected {expected_num_experts} experts, got {n_experts}"
+        )
+    if gate_and_up % 2:
+        raise ValueError(f"{name}: dim 1 is {gate_and_up}, which is not two halves")
+    inter = gate_and_up // 2
+    prefix = name[: -len("gate_up_proj")]
+    for expert in range(n_experts):
+        yield f"{prefix}{expert}.gate_proj.weight", weight[expert, :inter]
+        yield f"{prefix}{expert}.up_proj.weight", weight[expert, inter:]
+
+
+def _split_hf_packed_down(name, weight, expected_num_experts):
+    if weight.dim() != 3:
+        raise ValueError(f"{name}: expected shape [E, H, I], got {weight.shape}")
+    if weight.shape[0] != expected_num_experts:
+        raise ValueError(
+            f"{name}: expected {expected_num_experts} experts, got {weight.shape[0]}"
+        )
+    prefix = name[: -len("down_proj")]
+    for expert in range(weight.shape[0]):
+        yield f"{prefix}{expert}.down_proj.weight", weight[expert]
+
+
+def _split_hf_packed_conv1d(name, weight):
+    if weight.dim() != 3 or weight.shape[1] != 1:
+        raise ValueError(f"{name}: expected shape [3P, 1, K], got {weight.shape}")
+    if weight.shape[0] % 3:
+        raise ValueError(
+            f"{name}: dim 0 is {weight.shape[0]}, which is not three parts"
+        )
+    prefix = name[: -len("conv1d.weight")]
+    for shard, chunk in zip("qkv", weight.chunk(3, dim=0)):
+        yield f"{prefix}{shard}_conv1d.weight", chunk
+
+
+def convert_hf_native_weights(weights, expected_num_experts):
+    """Convert transformers-written GLM-5.3 weights to released names."""
+    announced = False
+    for original_name, loaded_weight in weights:
+        name = original_name
+        converted = False
+        for source, target in _HF_NATIVE_RENAMES:
+            if source in name:
+                name = name.replace(source, target)
+                converted = True
+                break
+
+        if name.endswith(_HF_PACKED_GATE_UP):
+            converted = True
+            converted_weights = _split_hf_packed_gate_up(
+                name, loaded_weight, expected_num_experts
+            )
+        elif name.endswith(_HF_PACKED_DOWN):
+            converted = True
+            converted_weights = _split_hf_packed_down(
+                name, loaded_weight, expected_num_experts
+            )
+        elif name.endswith(_HF_PACKED_CONV1D):
+            converted = True
+            converted_weights = _split_hf_packed_conv1d(name, loaded_weight)
+        else:
+            converted_weights = ((name, loaded_weight),)
+
+        if not converted and any(
+            namespace in original_name for namespace in _HF_REQUIRED_NAMESPACES
+        ):
+            raise ValueError(
+                "Unsupported required transformers GLM-5.3 weight: "
+                f"{original_name} with shape {tuple(loaded_weight.shape)}"
+            )
+        if converted and not announced:
+            announced = True
+            log_info_on_rank0(
+                logger,
+                "glm5_next: mapping transformers checkpoint names to the "
+                "released layout",
+            )
+        yield from converted_weights
+
+
 @torch.compile
 def swiglu_clamped(y: torch.Tensor, limit: float):
     gate, up = torch.chunk(y, 2, dim=-1)
@@ -1423,7 +1535,9 @@ class Glm5NextForConditionalGeneration(nn.Module):
 
         params_dict = dict(self.named_parameters())
         weight_names = []
-        for name, loaded_weight in weights:
+        for name, loaded_weight in convert_hf_native_weights(
+            weights, self.config.n_routed_experts
+        ):
             is_visual_weight = "visual" in name
             if getattr(self, "encoder_only", False) and not is_visual_weight:
                 continue
