@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39103",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/644",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/528",
+  "candidate_commit": "c3469e06635506f3c36836b342ef488e964b8201",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The original leak was independently reproduced on the prepared base in the Responses, chat-completion, and completion conversion/streaming paths. At the exact candidate commit, the focused regressions, the complete four-file endpoint suite, request-isolation and tool-preservation cases, and independent split-delimiter/echo streaming cases pass. The patch changes no native source and imports resolve to the checked-out Python tree. Live HTTP inference was not run because the prepared environment has no model weights.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-48638a0e63cd/venv/bin/python -m pytest -q <six candidate include_reasoning regression node IDs, with candidate tests over base source>",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction on base: all 6 cases failed, demonstrating reasoning leakage in chat non-stream/stream, completion non-stream/stream, Responses non-stream/stream, including request isolation and tool-call preservation expectations."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-48638a0e63cd/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_completions.py test/registered/unit/entrypoints/openai/test_serving_chat.py test/registered/unit/entrypoints/openai/test_serving_responses.py test/registered/unit/entrypoints/openai/test_serving_responses_stream.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate: 204 passed and 72 subtests passed across actual endpoint response builders and stream converters."
+    },
+    {
+      "command": "PYTHONPATH=test/registered/unit/entrypoints/openai /tmp/amdpilot-repo-j-48638a0e63cd/venv/bin/python -m pytest -q <three temporary independent adversarial node IDs>",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate: legacy completion streaming suppresses reasoning across split delimiters for both cumulative and incremental engine output and preserves prompt echo; 3 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-48638a0e63cd/venv/bin/python - <<'PY' # float64 ROCm elementwise product checked against an independent CPU tensor reference",
+      "exit_code": 0,
+      "what_was_measured": "One visible AMD Instinct MI355X executed the operation; result [2.5, -7.5, -2.0], maximum absolute error 0.0."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "torch 2.11.0+rocm7.2, HIP 7.2.26015, one AMD Instinct MI355X; exact float64 numerical comparison had max_abs_error=0.0. Endpoint tests themselves use mocked generation because no model weights were prepared."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No live model server or HTTP curl reproduction was run because the prepared environment contains no model weights.",
+    "The review validates the real Python request schemas, response builders, reasoning/tool parsers, and streaming converters with synthetic engine output; it does not validate model-specific generation quality.",
+    "No native source changed, repository-environment.json reports native=null, and therefore no native rebuild was applicable."
+  ]
+}
