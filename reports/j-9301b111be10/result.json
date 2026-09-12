@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31890",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the multi-tokenizer BatchEmbeddingOutput repack dropping retraction_counts, cached_tokens_details, time_stats, and pooled_hidden_states. The repack now preserves those fields and correctly partitions both supported pooled-hidden-state IPC representations.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-9301b111be10/venv/bin/python -m pytest -q test/registered/unit/managers/test_multi_tokenizer_mixin.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Regression reproduced on the recorded base: retraction_counts and pooled_hidden_states were None after embedding output repack; 2 failed, 7 passed. Raw output: reports/j-9301b111be10/raw/failing-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9301b111be10/venv/bin/python -m pytest -q test/registered/unit/managers/test_multi_tokenizer_mixin.py",
+      "exit_code": 0,
+      "what_was_measured": "Final unit coverage of per-request fields, absent optional fields, non-stacked pooled states, and the scheduler's stacked pooled-state representation; 9 passed. Raw output: reports/j-9301b111be10/raw/final-unit.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9301b111be10/venv/bin/python < focused GPU stacked-state check",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, splitting request index 1 from a stacked two-request tensor produced [7.0, 9.25], exactly equal to an independently constructed reference. Raw output: reports/j-9301b111be10/raw/gpu-stacked-pooled-hidden-state.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9301b111be10/venv/bin/python -m pre_commit run --files python/sglang/srt/managers/multi_tokenizer_mixin.py test/registered/unit/managers/test_multi_tokenizer_mixin.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, and registered-test validation hooks passed."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The Qwen/Qwen3-Embedding-0.6B weights were not available, so the original HTTP server reproduction was not run end-to-end.",
+    "The prepared hardware is AMD gfx950 rather than the report's NVIDIA RTX A6000; this Python repack fix is device-independent, but the original NVIDIA environment was not reproduced.",
+    "The qualified tiny Llama fixture is not an embedding architecture and therefore was not used to claim end-to-end embedding-model validation.",
+    "No native code changed, so no native rebuild was applicable."
+  ]
+}

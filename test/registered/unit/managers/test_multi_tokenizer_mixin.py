@@ -1,12 +1,19 @@
 import unittest
 
+import torch
+
 from sglang.srt.utils.weight_versions import WeightVersionSpan
 from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import maybe_stub_sgl_kernel
 
 maybe_stub_sgl_kernel()
 
-from sglang.srt.managers.io_struct import BatchStrOutput
+from sglang.srt.managers.io_struct import (
+    BatchEmbeddingOutput,
+    BatchStrOutput,
+    unwrap_from_pickle,
+    wrap_as_pickle,
+)
 from sglang.srt.managers.multi_tokenizer_mixin import (
     TokenizerWorker,
     _handle_output_by_index,
@@ -87,7 +94,69 @@ def _make_batch_str_output() -> BatchStrOutput:
     )
 
 
+def _make_batch_embedding_output(**overrides) -> BatchEmbeddingOutput:
+    fields = dict(
+        rids=["rid-0", "rid-1"],
+        finished_reasons=[None, {"type": "length"}],
+        embeddings=[[0.1, 0.2], [0.3, 0.4]],
+        prompt_tokens=[10, 20],
+        cached_tokens=[3, 4],
+        placeholder_tokens_idx=None,
+        placeholder_tokens_val=None,
+        retraction_counts=[0, 2],
+        cached_tokens_details=[
+            {"device": 3, "host": 0},
+            {"device": 1, "host": 3},
+        ],
+        time_stats=wrap_as_pickle(["stats-0", "stats-1"]),
+        pooled_hidden_states=[torch.tensor([1.0]), torch.tensor([2.0])],
+    )
+    fields.update(overrides)
+    return BatchEmbeddingOutput(**fields)
+
+
 class TestMultiTokenizerMixin(unittest.TestCase):
+    def test_batch_embedding_output_preserves_per_request_fields(self):
+        single_output = _handle_output_by_index(_make_batch_embedding_output(), 1)
+
+        self.assertEqual(single_output.rids, ["rid-1"])
+        self.assertEqual(single_output.retraction_counts, [2])
+        self.assertEqual(
+            single_output.cached_tokens_details,
+            [{"device": 1, "host": 3}],
+        )
+        self.assertEqual(unwrap_from_pickle(single_output.time_stats), ["stats-1"])
+        torch.testing.assert_close(
+            single_output.pooled_hidden_states[0], torch.tensor([2.0])
+        )
+
+    def test_batch_embedding_output_splits_stacked_pooled_hidden_states(self):
+        output = _make_batch_embedding_output(
+            pooled_hidden_states=[torch.tensor([[1.0, 1.5], [2.0, 2.5]])]
+        )
+
+        single_output = _handle_output_by_index(output, 1)
+
+        self.assertEqual(len(single_output.pooled_hidden_states), 1)
+        torch.testing.assert_close(
+            single_output.pooled_hidden_states[0], torch.tensor([2.0, 2.5])
+        )
+
+    def test_batch_embedding_output_preserves_absent_optional_fields(self):
+        output = _make_batch_embedding_output(
+            retraction_counts=None,
+            cached_tokens_details=None,
+            time_stats=None,
+            pooled_hidden_states=None,
+        )
+
+        single_output = _handle_output_by_index(output, 0)
+
+        self.assertIsNone(single_output.retraction_counts)
+        self.assertIsNone(single_output.cached_tokens_details)
+        self.assertIsNone(single_output.time_stats)
+        self.assertIsNone(single_output.pooled_hidden_states)
+
     def test_batch_str_output_preserves_cached_tokens_details(self):
         output = _make_batch_str_output()
 
