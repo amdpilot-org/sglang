@@ -216,6 +216,55 @@ class TestBreakableCUDAGraphBasic(CustomTestCase):
             "eager output bridge buffer must be strongly captured",
         )
 
+    def test_break_inputs_survive_later_capture_into_shared_pool(self):
+        """Later bucket captures must not reclaim live break-input storage."""
+        for shape in ((64, 2048), (128, 1024)):
+            with self.subTest(shape=shape):
+                pool = torch.cuda.graph_pool_handle()
+                break_input_ptrs = []
+
+                @self.eager_on_graph(enable=True)
+                def bridge(src):
+                    break_input_ptrs.append(src.data_ptr())
+                    return src * 2.0
+
+                x = torch.zeros(shape, device=self.device)
+                y = torch.zeros(shape, device=self.device)
+                graph_a = self.BreakableCUDAGraph()
+                stream = torch.cuda.Stream(self.device)
+                with self.BreakableCUDAGraphCapture(
+                    graph_a, pool=pool, stream=stream
+                ):
+                    intermediate = x + 1.0
+                    broken = bridge(intermediate)
+                    y.copy_(broken)
+                del intermediate, broken
+                torch.cuda.synchronize()
+
+                graph_b = self.BreakableCUDAGraph()
+                with self.BreakableCUDAGraphCapture(
+                    graph_b, pool=pool, stream=stream
+                ):
+                    junk = torch.zeros(shape, device=self.device)
+                torch.cuda.synchronize()
+                reused = junk.data_ptr() == break_input_ptrs[0]
+                junk.fill_(-999.0)
+                torch.cuda.synchronize()
+
+                x.fill_(10.0)
+                graph_a.replay()
+                torch.cuda.synchronize()
+
+                self.assertFalse(
+                    reused,
+                    "later capture reused a break-input block from the shared pool",
+                )
+                torch.testing.assert_close(junk, torch.full_like(junk, -999.0))
+                torch.testing.assert_close(y, torch.full_like(y, 22.0))
+
+                del graph_a, graph_b, x, y, junk, stream, pool
+                torch.cuda.synchronize()
+
     def test_attention_narrows_padded_positions(self):
         from sglang.srt.layers.radix_attention import unified_attention_with_output
 

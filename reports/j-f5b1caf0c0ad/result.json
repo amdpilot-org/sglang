@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37606",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "On the assigned MI350X, the prepared base still weak-referenced SGLang breakable-graph inputs. Two 512 KiB tensor shapes reproduced exact shared-pool pointer reuse, bridge corruption, and reverse clobbering; strong-reference controls stayed intact. The actual SGLang bridge regression failed before and passed after retaining captured args and kwargs strongly.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f5b1caf0c0ad/venv/bin/python reports/j-f5b1caf0c0ad/shared_pool_reproducer.py",
+      "exit_code": 0,
+      "what_was_measured": "ROCm graph-pool pointer reuse, bridge values after a later bucket capture, reverse clobbering after earlier graph replay, and strong-reference controls for shapes (64, 2048) and (128, 1024). Raw output: /job/artifacts/j-f5b1caf0c0ad/model_free_reproducer.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f5b1caf0c0ad/venv/bin/python -m pytest -q test/registered/cuda_graph/breakable/test_breakable_cuda_graph.py::TestBreakableCUDAGraphBasic::test_break_inputs_survive_later_capture_into_shared_pool -s",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression against the actual checked-out SGLang breakable graph bridge: both shapes reused the captured break-input pointer. Raw output: /job/artifacts/j-f5b1caf0c0ad/before_actual_bridge.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f5b1caf0c0ad/venv/bin/python -m pytest -q test/registered/cuda_graph/breakable/test_breakable_cuda_graph.py::TestBreakableCUDAGraphBasic -s",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after actual bridge regression for both shapes plus all nearby basic capture/replay tests: 10 passed and 2 subtests passed. Raw output: /job/artifacts/j-f5b1caf0c0ad/after_bridge_suite.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Torch 2.11.0+rocm7.2 (HIP 7.2.26015) executed graph capture and replay on one visible AMD Instinct MI350X. Weak references reused identical addresses and produced [-999, -999, -999, -999] bridge reads followed by [7, 7, 7, 7] reverse clobbering for both shapes."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No large-model, greedy-output, throughput, or memory-overhead validation was performed; the model-free result does not establish those issue claims.",
+    "No compiler or ISA claim was made, and no native rebuild was required because the fix is confined to Python reference lifetime.",
+    "The ROCm runtime warned that host NUMA balancing is enabled; node-wide configuration was intentionally left unchanged and did not prevent deterministic reproduction or validation."
+  ]
+}
