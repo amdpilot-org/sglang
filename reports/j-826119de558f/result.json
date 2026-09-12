@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36447",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "summary": "The prepared base already contains the GLM DSA, Quark MXFP4, topk=2048, Mega-MoE adapter, context-parallel, and MTP implementation surfaces added after the source issue opened. Component-level CPU and real gfx950 GPU checks passed, but the complete GLM-5.2-MXFP4 distributed serving contract could not be qualified with one visible GPU and no staged 744B-class checkpoint, so this is not reported as a complete fix.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-826119de558f/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_fp8_utils_mxfp4.py test/registered/unit/layers/quantization/test_mxfp4_flashinfer_activation_prep.py test/registered/unit/layers/attention/test_dsa_mqa_logits_chunking.py test/registered/unit/layers/moe/test_flashinfer_megamoe.py",
+      "exit_code": 0,
+      "what_was_measured": "16 CPU contract tests covering FP8-to-MXFP4 conversion metadata, activation quantization handoff, the ROCm MQA logits chunking bound, and FlashInfer Mega-MoE adapter semantics."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-826119de558f/venv/bin/python -m pytest -q test/registered/kernel/jit/test_fast_topk.py",
+      "exit_code": 0,
+      "what_was_measured": "23 real gfx950 JIT-kernel tests, including topk=2048 comparisons with independent torch.topk references for ragged, strided, duplicate-heavy, constant, negative, and mixed-length inputs."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-826119de558f/venv/bin/python -m pytest -q test/registered/amd/test_dsa_skip_logits_clean.py",
+      "exit_code": 0,
+      "what_was_measured": "Real gfx950 AITER FP8 MQA logits plus SGL top-k integration; one test and three decode/prefill subtests verified identical valid topk=2048 selections with and without invalid-tail initialization."
+    },
+    {
+      "command": "huggingface_hub.hf_hub_download('amd/GLM-5.2-MXFP4', 'config.json') followed by a JSON contract probe",
+      "exit_code": 0,
+      "what_was_measured": "Checkpoint metadata only: GlmMoeDsaForCausalLM, 1M maximum positions, index_topk=2048, 256 experts/8 active, and Quark grouped FP4 with E8M0 scales and explicit non-MXFP4 exclusions. No weights were downloaded."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "One assigned AMD Instinct MI355X (gfx950, unique ID 0x91222c17f0f648d7) executed the fast-top-k and DSA MQA/top-k tests. Logs: raw/gpu-fast-topk.txt, raw/gpu-dsa-skip-logits.txt, and raw/intake.txt.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The amd/GLM-5.2-MXFP4 weights were not staged or loaded; no model semantic accuracy or HTTP serving result was produced.",
+    "The requested TP/EP=8 deployment and current TP=4 AMD recipe require more GPUs than the single assigned MI355X.",
+    "Mega-MoE collectives/symmetric buffers, context parallelism, 1M-token memory behavior, and EAGLE/MTP generation were not exercised end to end.",
+    "CUDA-only DeepGEMM behavior cannot be verified on this ROCm node; passing ROCm Quark/AITER component tests does not establish CUDA parity.",
+    "No native C++ source changed, so a native rebuild was not applicable.",
+    "The private prototype referenced by the open upstream issue was unavailable, so exact parity with every unpublished optimization cannot be established."
+  ]
+}
