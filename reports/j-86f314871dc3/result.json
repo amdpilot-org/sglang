@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31093",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source already contains upstream commit 78dc58151843ff3381b7913e6833ba8f8a668204, merged after the reported failing b94ac87e revision. That commit directly stabilizes GLM-5.2 MTP IndexShare across CUDA-graph replay by preserving the draft-extend DSA seed during capture, clearing the carried seed after replay, and falling back to eager execution when a required seed is unavailable. Its focused regression and independent IndexTopKShare lifecycle boundaries pass on the assigned gfx950. No new runtime correction is justified from the available evidence. The exact 8xB200 TP8 GLM-5.2 NVFP4 workload was not reproduced because this job has one AMD gfx950 and no reported checkpoint.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-86f314871dc3/venv/bin/python -m pytest -q test/registered/unit/spec/test_eagle_worker_v2_topk1_fastpath.py",
+      "exit_code": 0,
+      "what_was_measured": "Nine tests plus seven subtests passed on gfx950. The issue-specific fallback matrix checks that GLM-5.2 IndexShare draft decode does not use graph replay when the required DSA seed is missing, does use it when the seed is present, and remains graph-eligible when seed sharing is disabled. Additional boundaries cover topk=1 chains for one through four speculative steps and invalid steps/token-count combinations. Raw output: /tmp/amdpilot-repo-j-86f314871dc3/evidence/test_eagle_worker_v2_topk1_fastpath.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-86f314871dc3/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_index_topk_share.py",
+      "exit_code": 0,
+      "what_was_measured": "Eleven tests passed on gfx950, independently covering enabled/disabled carry, draft-extend seed capture, non-extend isolation, cleanup on success and exception, and present/missing seed lifecycle. Raw output: /tmp/amdpilot-repo-j-86f314871dc3/evidence/test_index_topk_share.log"
+    },
+    {
+      "command": "git merge-base --is-ancestor 78dc58151843ff3381b7913e6833ba8f8a668204 b94ac87e0c411e3c1b120b3d13bba9092b198fe0",
+      "exit_code": 1,
+      "what_was_measured": "The targeted fix was not present in the reporter's failing main revision b94ac87e. This nonzero result is the expected ancestry result, not a test failure."
+    },
+    {
+      "command": "git merge-base --is-ancestor 78dc58151843ff3381b7913e6833ba8f8a668204 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "The targeted fix is present in the prepared base."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "HIP_VISIBLE_DEVICES=0 exposed exactly one AMD Instinct MI355X (gfx950), torch 2.11.0+rocm7.2 / HIP 7.2.26015. The focused fixtures allocated and compared their tensors on that GPU. Inventory: /tmp/amdpilot-repo-j-86f314871dc3/evidence/gpu_inventory.txt. This was not CUDA or B200 execution."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported GLM-5.2 NVFP4 checkpoint was unavailable.",
+    "The assigned hardware is one AMD gfx950, not eight NVIDIA B200 GPUs; TP8, CUDA, SM100, ModelOpt FP4 kernels, and actual CUDA-graph capture were not exercised locally.",
+    "The focused tests validate the seed lifecycle and graph-admission correction on GPU tensors, but cannot establish full-model semantic accuracy or exclude a separate B200-only illegal-memory-access cause.",
+    "The upstream issue remains open and includes conflicting 8xB200 observations. The result is therefore candidate_verified rather than fixed or not_reproduced.",
+    "No native C++ or FlyDSL source was changed, so no native rebuild was applicable."
+  ]
+}
