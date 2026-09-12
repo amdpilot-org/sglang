@@ -76,6 +76,60 @@ logger = logging.getLogger(__name__)
 
 _is_hip = is_hip()
 
+
+def _get_dcp_extend_metadata(forward_batch: ForwardBatch):
+    """Return the sequence geometry consumed by the DCP extend planner.
+
+    Target verification uses the extend execution path, but its generic
+    ForwardBatch intentionally omits extend-only fields.  For DFLASH/DSpark,
+    the committed sequence is the prefix and every request verifies one fixed
+    block.  Keep this normalization local to DCP instead of changing metadata
+    seen by the other target-verify attention backends.
+    """
+    if not (
+        forward_batch.forward_mode.is_target_verify()
+        and forward_batch.extend_prefix_lens is None
+    ):
+        return (
+            forward_batch.seq_lens,
+            forward_batch.extend_prefix_lens,
+            forward_batch.extend_prefix_lens_cpu,
+            forward_batch.extend_seq_lens,
+            forward_batch.seq_lens_sum,
+        )
+
+    draft_token_num = getattr(forward_batch.spec_info, "draft_token_num", None)
+    if draft_token_num is None:
+        return (
+            forward_batch.seq_lens,
+            forward_batch.extend_prefix_lens,
+            forward_batch.extend_prefix_lens_cpu,
+            forward_batch.extend_seq_lens,
+            forward_batch.seq_lens_sum,
+        )
+
+    prefix_lens = forward_batch.seq_lens
+    extend_seq_lens = torch.full_like(prefix_lens, int(draft_token_num))
+    seq_lens = prefix_lens + extend_seq_lens
+    live_seq_lens_cpu = getattr(forward_batch.spec_info, "live_seq_lens_cpu", None)
+    if live_seq_lens_cpu is not None:
+        prefix_lens_cpu = live_seq_lens_cpu.tolist()
+    else:
+        # run_non_compact may snapshot draft_input.nxt_kv_lens_cpu into the
+        # ForwardBatch host mirror after live_seq_lens_cpu was captured as
+        # None.  Those values already include the verify block, so using them
+        # here would disagree with the committed prefix tensor above.
+        prefix_lens_cpu = prefix_lens.tolist()
+
+    return (
+        seq_lens,
+        prefix_lens,
+        prefix_lens_cpu,
+        extend_seq_lens,
+        int(seq_lens.sum().item()),
+    )
+
+
 if TYPE_CHECKING:
     from sglang.srt.layers.logits_processor import LogitsProcessorOutput
     from sglang.srt.model_executor.model_runner import ModelRunner
@@ -300,15 +354,22 @@ class EagerRunner(BaseRunner):
                 model_runner.model, "prepare_context_parallel_metadata_for_dcp"
             ):
                 # prepare kv cache buffer for dcp to gather kv cache
+                (
+                    dcp_seq_lens,
+                    dcp_extend_prefix_lens,
+                    dcp_extend_prefix_lens_cpu,
+                    dcp_extend_seq_lens,
+                    dcp_seq_lens_sum,
+                ) = _get_dcp_extend_metadata(forward_batch)
                 forward_batch.attn_dcp_metadata = (
                     model_runner.model.prepare_context_parallel_metadata_for_dcp(
-                        forward_batch.seq_lens,
-                        forward_batch.extend_prefix_lens,
-                        forward_batch.extend_prefix_lens_cpu,
-                        forward_batch.extend_seq_lens,
+                        dcp_seq_lens,
+                        dcp_extend_prefix_lens,
+                        dcp_extend_prefix_lens_cpu,
+                        dcp_extend_seq_lens,
                         forward_batch.req_pool_indices,
                         get_req_to_token_pool().req_to_token,
-                        forward_batch.seq_lens_sum,
+                        dcp_seq_lens_sum,
                         get_token_to_kv_pool().get_kv_buffer_shape()[0],
                         model_runner.kv_cache_dtype,
                         model_runner.device,
