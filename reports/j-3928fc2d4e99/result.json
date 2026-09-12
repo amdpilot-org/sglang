@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32938",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The issue's H200 trace identified speculative_attention_mode=prefill as the cause: Kimi-K3 DSPARK target verification used FA3, which widened FP8 KV cache chunks to BF16 on every step. The prepared base already routes supported Kimi-K3 DSPARK verification through decode on SM100/SM103, but that override exits on Hopper, so the reported H200 command still retains the faulty prefill route. This change narrowly recognizes fp8_e4m3 FlashMLA as a valid DSPARK verification backend on Hopper and resolves speculative_attention_mode to decode. Configuration-level regression and boundary tests pass; full H200 throughput validation was not possible in this environment.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-3928fc2d4e99/venv/bin/python -m pytest -q test/registered/unit/test_model_overrides.py -k 'kimi_k3_hopper_dspark_flashmla_verify_uses_decode or m3_fp8_attn_gemm_resolution'",
+      "exit_code": 0,
+      "what_was_measured": "The reported Hopper + Kimi-K3 + DSPARK + fp8_e4m3 + explicit FlashMLA decode configuration resolves target verification to decode. Independent boundaries retain prefill for FA3, BF16 FlashMLA, and non-Hopper gfx950, and the adjacent MiniMax override test remains passing. Result: 2 passed, 93 deselected."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3928fc2d4e99/venv/bin/python -m pytest -q test/registered/unit/test_model_overrides.py",
+      "exit_code": 1,
+      "what_was_measured": "Full model-override module: 91 passed and 4 unrelated CUDA-assumption tests failed on the prepared ROCm host (DeepSeek V4 SM100 MoE expectation, DLLM CUDA routing, MiniMax modelopt_fp4 unsupported on ROCm, and MXFP8 SM100 runner expectation). The new regression passed within this run."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3928fc2d4e99/venv/bin/python -m ruff check python/sglang/srt/arg_groups/model_override_base.py python/sglang/srt/arg_groups/model_overrides/kimi_k3.py test/registered/unit/test_model_overrides.py",
+      "exit_code": 1,
+      "what_was_measured": "Formatting/lint tool availability; the prepared interpreter does not contain the ruff module, so this check was environment-blocked before examining files. git diff --check passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned device is one AMD Instinct MI350X (gfx950) with ROCm 7.2. The defect and correction concern CUDA FlashMLA on H200 (SM90); running an AMD kernel would not validate that path. No model GPU execution is claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No H200/SM90 GPU was available, so the 3.89x throughput regression and elimination of FP8-to-BF16 copy kernels were not independently profiled.",
+    "Kimi-K3 and Kimi-K3-DSpark weights were unavailable; no full-model semantic or performance run was performed.",
+    "Only one gfx950 GPU was assigned, so the reported TP32/EP32 four-node workload could not be reproduced.",
+    "The source issue comment supplies the corrected H200 benchmark (668.79 output tok/s versus 173.32 before), but this report treats that as upstream evidence rather than locally reproduced measurement.",
+    "No native code changed and no native rebuild was needed."
+  ]
+}

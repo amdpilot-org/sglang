@@ -372,6 +372,8 @@ def _dspark_verify_on_decode_backend(
     backend: Optional[str], q_len: int, kv_cache_dtype: Optional[str]
 ) -> bool:
     """Whether the MLA decode backend can serve a q_len-wide target verify."""
+    if backend == "flashmla":
+        return kv_cache_dtype == "fp8_e4m3"
     if backend == "trtllm_mla":
         return True
     if backend == "tokenspeed_mla":
