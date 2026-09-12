@@ -1,0 +1,41 @@
+/job/repo/python/sglang/srt/mem_cache/hybrid_cache/hybrid_cache_controller.py
+    def _page_backup(self, operation):
+        # MLA KV is replicated across TP ranks and should still be written only
+        # by TP0. Rank-sharded sidecars still need every TP rank.
+        backup_transfers = [
+            transfer
+            for transfer in operation.pool_transfers or []
+            if self.should_backup(transfer)
+        ]
+
+        if backup_transfers:
+            self._resolve_sidecar_kv_derived_pool_transfers(operation)
+            self._resolve_sidecar_nonkv_derived_pool_transfers(operation)
+            results = self.storage_backend.batch_set_v2(backup_transfers)
+            pool_hits = count_pool_hits(results)
+            operation.pool_storage_result.update_extra_pool_hit_pages(pool_hits)
+
+        if not self.backup_skip:
+            super()._page_backup(operation)
+        else:
+            # A follower with no rank-sharded sidecars has no writes of its own;
+            # TP0 backs up all replicated MLA/DeepSeek-V4 pools.
+            sidecar_ok = True
+            for transfer in backup_transfers:
+                result = results.get(transfer.name)
+                if result is None:
+                    result = results.get(transfer.name.value)
+                expected = len(transfer.keys or [])
+                if expected == 0 and transfer.host_indices is not None:
+                    expected = int(transfer.host_indices.numel())
+                if (
+                    not isinstance(result, (list, tuple))
+                    or len(result) != expected
+                    or not all(bool(ok) for ok in result)
+                ):
+                    sidecar_ok = False
+                    break
+            operation.completed_tokens = (
+                len(operation.hash_value) * self.page_size if sidecar_ok else 0
+            )
+
