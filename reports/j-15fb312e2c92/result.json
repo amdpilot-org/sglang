@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34920",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1716",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1674",
+  "candidate_commit": "5546ca0f85f6e38c689b06bff6ae70a741f7d502",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The prepared base reproduces the original cumsum(None) failure. The exact candidate derives consistent DCP target-verify prefix and extend geometry and fixes both the original crash and the reviewed expanded-host-length fallback counterexample.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-15fb312e2c92/venv/bin/python /job/review-j-15fb312e2c92/reproduce_planner_none.py",
+      "exit_code": 1,
+      "what_was_measured": "On recorded base, the actual imported DCP planner raised TypeError at torch.cumsum when extend_prefix_lens was None."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-15fb312e2c92/venv/bin/python -m pytest -q test/registered/unit/model_executor/runner/test_eager_dcp_target_verify.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 5 passed, including its ROCm CUDA-device parameter and missing-live-host-length counterexample."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-15fb312e2c92/venv/bin/python /job/review-j-15fb312e2c92/adversarial_candidate.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent gfx950 multi-request case: committed prefixes [0,8,15], expanded host totals [7,15,22], normalized CPU/GPU prefixes [0,8,15], extend [7,7,7], total 44, planner buffer [44,1], prefix sum 23; ordinary extend metadata passed through unchanged."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-15fb312e2c92/venv/bin/python -m pytest -q test/registered/dcp/test_dcp_layout_unit.py test/registered/spec/dspark/test_ragged_verify.py",
+      "exit_code": 0,
+      "what_was_measured": "Nearby DCP layout and DSpark ragged verification coverage: 27 tests and 18 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-15fb312e2c92/venv/bin/python -m pre_commit run --files python/sglang/srt/model_executor/runner/eager_runner.py test/registered/unit/model_executor/runner/test_eager_dcp_target_verify.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable focused static and registration checks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "PyTorch 2.11.0+rocm7.2 used one AMD Instinct MI350X with capability (9,5)/gfx950. Candidate helper arithmetic and DCP planner tensor allocation ran on that device; index-generation kernels were no-op test doubles."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Kimi K3 weights were unavailable.",
+    "Only one gfx950 GPU was assigned, not the reported two-node eight-B300-per-side deployment.",
+    "Mooncake PD transport, TP/EP/DCP size 8, full Kimi K3 serving, multi-node behavior, and semantic accuracy were not exercised.",
+    "No native source changed, so a native rebuild was not applicable; planner index-generation kernels were replaced by no-op test doubles in the isolated GPU check."
+  ]
+}
