@@ -99,6 +99,9 @@ from sglang.srt.speculative.dspark_components.dspark_planner import (
 from sglang.srt.speculative.dspark_components.dspark_sps import (
     load_sps_table_from_path,
 )
+from sglang.srt.speculative.dspark_components.dspark_sts import (
+    load_sts_calibration_from_path,
+)
 from sglang.srt.speculative.ragged_verify import (
     RaggedVerifyLayout,
     ragged_verify_compact_enabled,
@@ -801,6 +804,7 @@ class DFlashWorkerV2(BaseSpecWorker):
                     model_block_size,
                 )
         self.draft_model.set_block_size(self.block_size)
+        self._load_confidence_sts_calibration()
         self.speculative_num_draft_tokens = int(self.block_size)
         if self._is_domino and self.block_size <= 1:
             raise ValueError(
@@ -1663,6 +1667,57 @@ class DFlashWorkerV2(BaseSpecWorker):
         if self.ps.tp_rank == 0:
             logger.info("Loaded DFLASH_CONFIDENCE SPS cost table from %s.", path)
         return table
+
+    def _load_confidence_sts_calibration(self) -> None:
+        path = getattr(
+            self.server_args, "speculative_dflash_confidence_sts_path", None
+        )
+        if not path:
+            return
+        confidence_head = getattr(self.draft_model, "confidence_head", None)
+        if confidence_head is None:
+            raise ValueError(
+                "--speculative-dflash-confidence-sts-path requires a DFlash2 "
+                "checkpoint with enable_confidence_head=true and trained "
+                "confidence_head weights."
+            )
+        calibration = load_sts_calibration_from_path(path)
+        temperatures = torch.tensor(
+            calibration.temperatures, dtype=torch.float32, device=self.device
+        )
+        gamma = int(self.block_size) - 1
+        if temperatures.numel() != gamma:
+            raise ValueError(
+                "DFLASH STS calibration was fit for gamma="
+                f"{temperatures.numel()} but runtime gamma is {gamma}."
+            )
+        confidence_head.sts_temperatures = temperatures
+        if self.ps.tp_rank == 0:
+            logger.info(
+                "Loaded DFLASH_CONFIDENCE STS calibration from %s (gamma=%d).",
+                path,
+                gamma,
+            )
+
+    def _trained_confidence(
+        self,
+        *,
+        draft_logits_output,
+        bs: int,
+        anchor_tokens: torch.Tensor,
+        sampled_tokens: torch.Tensor,
+    ) -> Optional[torch.Tensor]:
+        if not self._uses_confidence_scheduling():
+            return None
+        draft_hidden = draft_logits_output.hidden_states
+        if draft_hidden is None:
+            raise RuntimeError("DFLASH confidence head requires draft hidden states.")
+        draft_hidden = draft_hidden.view(bs, int(self.block_size), -1)[:, 1:, :]
+        return self.draft_model.compute_confidence(
+            draft_hidden=draft_hidden,
+            anchor_tokens=anchor_tokens,
+            sampled_tokens=sampled_tokens,
+        )
 
     def _ragged_verify_graph_buckets(self) -> Optional[list[int]]:
         runner = self.model_runner.decode_cuda_graph_runner
@@ -2915,6 +2970,15 @@ class DFlashWorkerV2(BaseSpecWorker):
                 ),
                 lm_head=lm_head,
             ).view(bs, int(self.block_size) - 1)
+
+        trained_confidence = self._trained_confidence(
+            draft_logits_output=draft_logits_output,
+            bs=bs,
+            anchor_tokens=block_ids[:, 0],
+            sampled_tokens=draft_next,
+        )
+        if trained_confidence is not None:
+            self._selector_confidence = trained_confidence
 
         draft_tokens = self._draft_block_tokens_buf[:bs]
         draft_tokens[:, 0].copy_(block_ids[:, 0])

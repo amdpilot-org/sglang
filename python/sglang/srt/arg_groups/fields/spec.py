@@ -89,6 +89,10 @@ class Spec(msgspec.Struct):
         Optional[str],
         "DFLASH_CONFIDENCE only. Path to a DSpark-format pre-profiled SPS cost table JSON.",
     ] = None
+    speculative_dflash_confidence_sts_path: A[
+        Optional[str],
+        "DFLASH_CONFIDENCE only. Optional path to a per-position sequential temperature scaling calibration JSON for a trained confidence head.",
+    ] = None
     speculative_dflash_confidence_align_verify_tokens_to_graph_tier: A[
         bool,
         "DFLASH_CONFIDENCE only. Fill compact ragged verification to its CUDA Graph token bucket.",

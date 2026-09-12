@@ -1,8 +1,12 @@
 import unittest
+import tempfile
 from types import SimpleNamespace
 from unittest import mock
 
 import torch
+
+from sglang.srt.models.dflash import DFlashDraftModel
+from sglang.srt.models.dspark import DSparkConfidenceHead
 
 from sglang.srt.managers import overlap_utils
 from sglang.srt.model_executor.cuda_graph_config import Backend
@@ -40,6 +44,103 @@ register_cpu_ci(est_time=1, suite="base-a-test-cpu")
 
 
 class TestDFlashConfidence(unittest.TestCase):
+    def test_trained_head_confidence_takes_selected_path_tokens(self):
+        model = SimpleNamespace()
+        model.confidence_head = DSparkConfidenceHead(
+            hidden_size=2, markov_rank=0, with_markov=False
+        )
+        model.markov_head = None
+        with torch.no_grad():
+            model.confidence_head.proj.weight.copy_(torch.tensor([[1.0, 0.0]]))
+            model.confidence_head.proj.bias.zero_()
+        model.confidence_head.sts_temperatures = torch.tensor([1.0, 2.0])
+
+        confidence = DFlashDraftModel.compute_confidence(
+            model,
+            draft_hidden=torch.tensor([[[2.0, 9.0], [2.0, -3.0]]]),
+            anchor_tokens=torch.tensor([7]),
+            sampled_tokens=torch.tensor([[11, 13]]),
+        )
+
+        torch.testing.assert_close(
+            confidence, torch.sigmoid(torch.tensor([[2.0, 1.0]]))
+        )
+
+    def test_enabled_confidence_head_weights_are_required_and_loaded(self):
+        class MinimalDraft(torch.nn.Module):
+            load_weights = DFlashDraftModel.load_weights
+
+            def __init__(self):
+                super().__init__()
+                self.confidence_head = DSparkConfidenceHead(
+                    hidden_size=2, markov_rank=0, with_markov=False
+                )
+                self.markov_head = None
+                self.projector_type = "linear"
+                self.is_nemotron_35_draft = False
+
+        model = MinimalDraft()
+        with self.assertRaisesRegex(ValueError, "missing required trained parameters"):
+            model.load_weights([])
+
+        weight = torch.tensor([[3.0, 4.0]])
+        bias = torch.tensor([5.0])
+        model.load_weights(
+            [("confidence_head.proj.weight", weight), ("confidence_head.proj.bias", bias)]
+        )
+        torch.testing.assert_close(model.confidence_head.proj.weight, weight)
+        torch.testing.assert_close(model.confidence_head.proj.bias, bias)
+
+    def test_dflash_sts_loader_applies_per_position_temperatures(self):
+        worker = object.__new__(DFlashWorkerV2)
+        worker.block_size = 3
+        worker.device = torch.device("cpu")
+        worker.ps = SimpleNamespace(tp_rank=0)
+        head = DSparkConfidenceHead(
+            hidden_size=2, markov_rank=0, with_markov=False
+        )
+        worker.draft_model = SimpleNamespace(confidence_head=head)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as calibration:
+            calibration.write('{"temperatures":[1.0,2.0]}')
+            calibration.flush()
+            worker.server_args = SimpleNamespace(
+                speculative_dflash_confidence_sts_path=calibration.name
+            )
+            worker._load_confidence_sts_calibration()
+        torch.testing.assert_close(head.sts_temperatures, torch.tensor([1.0, 2.0]))
+
+    def test_dflash_sts_loader_rejects_headless_checkpoint(self):
+        worker = object.__new__(DFlashWorkerV2)
+        worker.block_size = 3
+        worker.device = torch.device("cpu")
+        worker.ps = SimpleNamespace(tp_rank=0)
+        worker.draft_model = SimpleNamespace(confidence_head=None)
+        worker.server_args = SimpleNamespace(
+            speculative_dflash_confidence_sts_path="calibration.json"
+        )
+        with self.assertRaisesRegex(ValueError, "requires a DFlash2 checkpoint"):
+            worker._load_confidence_sts_calibration()
+
+    def test_trained_head_overrides_selector_lattice_confidence(self):
+        worker = object.__new__(DFlashWorkerV2)
+        worker.block_size = 3
+        worker.server_args = SimpleNamespace(
+            speculative_algorithm="DFLASH_CONFIDENCE"
+        )
+        expected = torch.tensor([[0.8, 0.7]])
+        worker.draft_model = SimpleNamespace(
+            compute_confidence=mock.Mock(return_value=expected)
+        )
+        output = SimpleNamespace(hidden_states=torch.zeros(1, 3, 2))
+        actual = worker._trained_confidence(
+            draft_logits_output=output,
+            bs=1,
+            anchor_tokens=torch.tensor([1]),
+            sampled_tokens=torch.tensor([[2, 3]]),
+        )
+        self.assertIs(actual, expected)
+        worker.draft_model.compute_confidence.assert_called_once()
+
     def test_ragged_verify_input_advertises_nonuniform_width(self):
         verify_input = DFlashVerifyInput(
             draft_token=torch.tensor([1, 2, 3]),
