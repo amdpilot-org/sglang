@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35331",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3262",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3257",
+  "candidate_commit": "742d70f1088d617a50e85c86f6ba84ade84350a1",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the independently reported standard action-response envelope loss and preserves candidate fields in JSON and NumPy/msgpack-oriented modes. Its focused tests pass and its mean reducer matches an independent MI350X reference. It is still a partial original-issue implementation: a candidate_trajectory request sent to a non-opt-in ActionSamplingParams model is silently ignored and executes with num_outputs_per_prompt=1 instead of being rejected, contrary to the requested capability-validation contract.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-16ffd0038b1f/venv/bin/python -c '<base action_generation_response reproduction>'",
+      "exit_code": 0,
+      "what_was_measured": "At the recorded base commit, an internal output containing candidate_group and candidates produced a standard response with neither field."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-16ffd0038b1f/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_candidate_trajectory.py python/sglang/multimodal_gen/test/unit/test_cosmos3.py python/sglang/multimodal_gen/test/unit/test_pi05_action_api.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression/unit coverage: 157 passed, 43 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-16ffd0038b1f/venv/bin/python - <<'PY' # independent action transport, reducer, seed, and non-opt-in capability checks",
+      "exit_code": 0,
+      "what_was_measured": "Standard JSON retains candidate fields and converts arrays to lists; preserve_numpy retains ndarrays; mean and seed-order references pass; Pi05/non-opt-in candidate_trajectory is silently ignored with one output."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-16ffd0038b1f/venv/bin/python - <<'PY' # MI350X reducer reference",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X, a 3-candidate float32 mean matched a float64-sum/divide independent reference after conversion, max absolute error 0.0."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X was used for the reducer numerical reference only. No Cosmos3 weights were available, so this does not validate model execution or semantic action quality."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "The candidate changes only Python and report files; repository-environment.json declares native=null and no C/C++/CUDA/HIP source changed, so no native rebuild was applicable.",
+  "remaining_counterexamples": [
+    "For an ActionSamplingParams model without a declared candidate capability (reproduced with Pi05SamplingParams), parameters.candidate_trajectory={count:2,reducer:mean} is silently omitted and num_outputs_per_prompt remains 1. The original contract requires non-opt-in pipelines to reject the field rather than treating or ignoring it as an ordinary request."
+  ],
+  "remaining_limitations": [
+    "Cosmos3 model weights were unavailable; no model-backed HTTP serving, denoising, action denormalization, semantic accuracy, or end-to-end batched-versus-sequential parity was run.",
+    "CFG serial/parallel membership, TP/SP reconstruction-before-reduction, unrelated-request dynamic co-batching, cancellation and one-candidate failure semantics remain unverified.",
+    "Candidate observability metrics requested by the issue (candidate count, physical forwards, fallback reason, reducer time, action-only branch time) are not implemented by this candidate.",
+    "The requested N={1,2,4,8,10} latency, memory, forward-count, conditioning-time, reducer-time, parity, quality, and multi-topology benchmarks were not supplied or independently runnable without the model.",
+    "The tiny Llama transport fixture is not a Cosmos3 action architecture and cannot qualify these missing model-specific paths, so it was not used as substitute evidence."
+  ]
+}
