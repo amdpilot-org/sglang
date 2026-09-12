@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34857",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1779",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1734",
+  "candidate_commit": "48f2160e1dfe73a357bd8d257a5b97ab13330fff",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "The recorded base reproduces bf16 router output and loss of logit precision. The exact candidate produces genuine fp32 router logits on gfx950 across production and adversarial shapes, while the base's existing GLM-5.2 correction-bias fix remains covered by 9 passing tests.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 AITER_CACHE_DIR=/tmp/amdpilot-repo-j-61a67d4bc776/cache /tmp/amdpilot-repo-j-61a67d4bc776/venv/bin/python /job/review_probe.py (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "Actual imported router GEMM dtype and numerical content for production and four adversarial shapes; all outputs were bf16 and all values bf16-representable."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 AITER_CACHE_DIR=/tmp/amdpilot-repo-j-61a67d4bc776/cache /tmp/amdpilot-repo-j-61a67d4bc776/venv/bin/python -m pytest -q test/registered/unit/layers/test_aiter_router_gemm_dtype.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression requiring fp32 output with numerical content beyond widened bf16 for production, fallback, and skinny shapes."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 AITER_CACHE_DIR=/tmp/amdpilot-repo-j-61a67d4bc776/cache /tmp/amdpilot-repo-j-61a67d4bc776/venv/bin/python /job/review_probe.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent fp32-reference comparison across five shapes; every element retained precision beyond bf16 and max error was at most 7.153e-7."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 AITER_CACHE_DIR=/tmp/amdpilot-repo-j-61a67d4bc776/cache /tmp/amdpilot-repo-j-61a67d4bc776/venv/bin/python -m pytest -q test/registered/unit/models/test_glmmoedsa_correction_bias_fp32.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Nine tests covering GLM-5.2 correction-bias allocation and routing precision; 9 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-61a67d4bc776/venv/bin/python -m py_compile python/sglang/srt/layers/rocm_linear_utils.py test/registered/unit/layers/test_aiter_router_gemm_dtype.py && git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 48f2160e1dfe73a357bd8d257a5b97ab13330fff",
+      "exit_code": 0,
+      "what_was_measured": "Python syntax and patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X, gfx950:sramecc+:xnack-, executed both base and exact-candidate numerical probes under HIP_VISIBLE_DEVICES=0."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No GLM-5.2 model weights were available, so no full-model semantic or accuracy run was performed.",
+    "Only one gfx950 GPU was used; no multi-GPU or multi-node behavior was validated.",
+    "The candidate's performance relative to a tuned aiter router GEMM entry was not benchmarked.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
