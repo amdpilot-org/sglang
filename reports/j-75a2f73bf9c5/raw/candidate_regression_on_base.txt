@@ -1,0 +1,302 @@
+FFFFFF.                                                                  [100%]
+=================================== FAILURES ===================================
+_________ test_mp_finish_submits_without_waiting_and_keeps_node_locked _________
+
+    def test_mp_finish_submits_without_waiting_and_keeps_node_locked():
+        cache = _bare_cache()
+        node = object()
+        future = ControlledFuture()
+        cache.lmcache_connector.store_kv_async.return_value = future
+        cache.inc_lock_ref = MagicMock()
+        cache.req_to_token_pool = SimpleNamespace(
+            req_to_token=torch.tensor([[7, 8, 9]], dtype=torch.int64)
+        )
+        req = SimpleNamespace(
+            rid="request-1",
+            origin_input_ids=[1, 2, 3],
+            output_ids=[],
+            extra_key=None,
+            cache_salt=None,
+            kv=SimpleNamespace(req_pool_idx=0, kv_committed_len=3),
+        )
+    
+        with (
+            patch.object(mod.RadixCache, "cache_finished_req"),
+            patch.object(
+                mod.RadixCache,
+                "match_prefix",
+                return_value=SimpleNamespace(last_device_node=node),
+            ),
+            patch.object(
+                mod, "get_spec", return_value=SimpleNamespace(speculative_eagle_topk=None)
+            ),
+        ):
+            cache.cache_finished_req(req, kv_len_to_handle=3)
+    
+        assert future.called is False
+        cache.inc_lock_ref.assert_called_once_with(node)
+>       cache.dec_lock_ref.assert_not_called()
+
+/tmp/amdpilot-repo-j-75a2f73bf9c5/review-evidence/shared/test_lmcache_mp_async_store.py:108: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock id='140581739491456'>
+
+    def assert_not_called(self):
+        """assert that the mock was never called.
+        """
+        if self.call_count != 0:
+            msg = ("Expected '%s' to not have been called. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'mock' to not have been called. Called 1 times.
+E           Calls: [call(<object object at 0x7fd30c972020>)].
+
+/usr/lib/python3.12/unittest/mock.py:905: AssertionError
+_______ test_evict_resolves_future_before_unlock_cleanup_and_slot_reuse ________
+
+    def test_evict_resolves_future_before_unlock_cleanup_and_slot_reuse():
+        cache = _bare_cache()
+        events = []
+        node = object()
+    
+        class OrderedFuture:
+            def result(self):
+                events.append("future")
+                return True
+    
+        cache._in_flight_mp_stores = [(node, OrderedFuture(), "request-1")]
+        cache._mp_load_back_markers["request-1"] = object()
+        cache.dec_lock_ref.side_effect = lambda _: events.append("unlock")
+        cache.lmcache_connector.end_session.side_effect = lambda _: events.append("end")
+    
+        with patch.object(
+            mod.RadixCache, "evict", side_effect=lambda _: events.append("evict")
+        ):
+            cache.evict(mod.EvictParams(num_tokens=1))
+    
+>       assert events == ["future", "unlock", "end", "evict"]
+E       AssertionError: assert ['evict'] == ['future', 'u...end', 'evict']
+E         
+E         At index 0 diff: 'evict' != 'future'
+E         Right contains 3 more items, first extra item: 'unlock'
+E         Use -v to get more diff
+
+/tmp/amdpilot-repo-j-75a2f73bf9c5/review-evidence/shared/test_lmcache_mp_async_store.py:133: AssertionError
+_____________ test_submit_failure_releases_lock_marker_and_session _____________
+
+    def test_submit_failure_releases_lock_marker_and_session():
+        cache = _bare_cache()
+        node = object()
+        cache.lmcache_connector.store_kv_async.side_effect = RuntimeError("send failed")
+        cache.inc_lock_ref = MagicMock()
+        cache.req_to_token_pool = SimpleNamespace(
+            req_to_token=torch.tensor([[7]], dtype=torch.int64)
+        )
+        cache._mp_load_back_markers["request-1"] = object()
+        req = SimpleNamespace(
+            rid="request-1",
+            origin_input_ids=[1],
+            output_ids=[],
+            extra_key=None,
+            cache_salt=None,
+            kv=SimpleNamespace(req_pool_idx=0, kv_committed_len=1),
+        )
+    
+>       with (
+            patch.object(mod.RadixCache, "cache_finished_req"),
+            patch.object(
+                mod.RadixCache,
+                "match_prefix",
+                return_value=SimpleNamespace(last_device_node=node),
+            ),
+            patch.object(
+                mod, "get_spec", return_value=SimpleNamespace(speculative_eagle_topk=None)
+            ),
+            pytest.raises(RuntimeError, match="send failed"),
+        ):
+E       Failed: DID NOT RAISE <class 'RuntimeError'>
+
+/tmp/amdpilot-repo-j-75a2f73bf9c5/review-evidence/shared/test_lmcache_mp_async_store.py:156: Failed
+_ test_failed_future_still_unlocks_ends_session_and_clears_marker[future0-store failed] _
+
+future = <test_lmcache_mp_async_store.ControlledFuture object at 0x7fd2dfb0c320>
+match = 'store failed'
+
+    @pytest.mark.parametrize(
+        "future,match",
+        [
+            (ControlledFuture(result=False), "store failed"),
+            (ControlledFuture(error=ValueError("daemon error")), "daemon error"),
+        ],
+    )
+    def test_failed_future_still_unlocks_ends_session_and_clears_marker(future, match):
+        cache = _bare_cache()
+        node = object()
+        cache._in_flight_mp_stores = [(node, future, "request-1")]
+        cache._mp_load_back_markers["request-1"] = object()
+    
+        with pytest.raises(Exception, match=match):
+>           cache.evict(mod.EvictParams(num_tokens=1))
+
+/tmp/amdpilot-repo-j-75a2f73bf9c5/review-evidence/shared/test_lmcache_mp_async_store.py:189: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/srt/mem_cache/storage/lmcache/lmc_radix_cache.py:514: in evict
+    return super().evict(params)
+           ^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.storage.lmcache.lmc_radix_cache.LMCRadixCache object at 0x7fd2df38d670>
+params = EvictParams(num_tokens=1, swa_num_tokens=0, mamba_num=0)
+
+    def evict(self, params: EvictParams) -> EvictResult:
+        if self.disable:
+            return EvictResult()
+    
+        start_time = time.perf_counter()
+        num_tokens = params.num_tokens
+>       leaves = list(self.evictable_leaves)
+                      ^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'LMCRadixCache' object has no attribute 'evictable_leaves'. Did you mean: 'evictable_size'?
+
+python/sglang/srt/mem_cache/radix_cache.py:622: AttributeError
+
+During handling of the above exception, another exception occurred:
+
+future = <test_lmcache_mp_async_store.ControlledFuture object at 0x7fd2dfb0c320>
+match = 'store failed'
+
+    @pytest.mark.parametrize(
+        "future,match",
+        [
+            (ControlledFuture(result=False), "store failed"),
+            (ControlledFuture(error=ValueError("daemon error")), "daemon error"),
+        ],
+    )
+    def test_failed_future_still_unlocks_ends_session_and_clears_marker(future, match):
+        cache = _bare_cache()
+        node = object()
+        cache._in_flight_mp_stores = [(node, future, "request-1")]
+        cache._mp_load_back_markers["request-1"] = object()
+    
+>       with pytest.raises(Exception, match=match):
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'store failed'
+E         Actual message: "'LMCRadixCache' object has no attribute 'evictable_leaves'"
+
+/tmp/amdpilot-repo-j-75a2f73bf9c5/review-evidence/shared/test_lmcache_mp_async_store.py:188: AssertionError
+_ test_failed_future_still_unlocks_ends_session_and_clears_marker[future1-daemon error] _
+
+future = <test_lmcache_mp_async_store.ControlledFuture object at 0x7fd2dfb0c290>
+match = 'daemon error'
+
+    @pytest.mark.parametrize(
+        "future,match",
+        [
+            (ControlledFuture(result=False), "store failed"),
+            (ControlledFuture(error=ValueError("daemon error")), "daemon error"),
+        ],
+    )
+    def test_failed_future_still_unlocks_ends_session_and_clears_marker(future, match):
+        cache = _bare_cache()
+        node = object()
+        cache._in_flight_mp_stores = [(node, future, "request-1")]
+        cache._mp_load_back_markers["request-1"] = object()
+    
+        with pytest.raises(Exception, match=match):
+>           cache.evict(mod.EvictParams(num_tokens=1))
+
+/tmp/amdpilot-repo-j-75a2f73bf9c5/review-evidence/shared/test_lmcache_mp_async_store.py:189: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/srt/mem_cache/storage/lmcache/lmc_radix_cache.py:514: in evict
+    return super().evict(params)
+           ^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.storage.lmcache.lmc_radix_cache.LMCRadixCache object at 0x7fd2df38cdd0>
+params = EvictParams(num_tokens=1, swa_num_tokens=0, mamba_num=0)
+
+    def evict(self, params: EvictParams) -> EvictResult:
+        if self.disable:
+            return EvictResult()
+    
+        start_time = time.perf_counter()
+        num_tokens = params.num_tokens
+>       leaves = list(self.evictable_leaves)
+                      ^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'LMCRadixCache' object has no attribute 'evictable_leaves'. Did you mean: 'evictable_size'?
+
+python/sglang/srt/mem_cache/radix_cache.py:622: AttributeError
+
+During handling of the above exception, another exception occurred:
+
+future = <test_lmcache_mp_async_store.ControlledFuture object at 0x7fd2dfb0c290>
+match = 'daemon error'
+
+    @pytest.mark.parametrize(
+        "future,match",
+        [
+            (ControlledFuture(result=False), "store failed"),
+            (ControlledFuture(error=ValueError("daemon error")), "daemon error"),
+        ],
+    )
+    def test_failed_future_still_unlocks_ends_session_and_clears_marker(future, match):
+        cache = _bare_cache()
+        node = object()
+        cache._in_flight_mp_stores = [(node, future, "request-1")]
+        cache._mp_load_back_markers["request-1"] = object()
+    
+>       with pytest.raises(Exception, match=match):
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'daemon error'
+E         Actual message: "'LMCRadixCache' object has no attribute 'evictable_leaves'"
+
+/tmp/amdpilot-repo-j-75a2f73bf9c5/review-evidence/shared/test_lmcache_mp_async_store.py:188: AssertionError
+_____ test_reset_drains_before_tree_reset_and_shutdown_drains_before_close _____
+
+    def test_reset_drains_before_tree_reset_and_shutdown_drains_before_close():
+        for operation in ("reset", "release_host_resources"):
+            cache = _bare_cache()
+            events = []
+            node = object()
+            cache._in_flight_mp_stores = [(node, ControlledFuture(), "request-1")]
+            cache.dec_lock_ref.side_effect = lambda _: events.append("unlock")
+            cache.lmcache_connector.end_session.side_effect = lambda _: events.append("end")
+            cache.lmcache_connector.close.side_effect = lambda: events.append("close")
+    
+            with patch.object(
+                mod.RadixCache, "reset", side_effect=lambda: events.append("reset")
+            ):
+                getattr(cache, operation)()
+    
+            expected_tail = "reset" if operation == "reset" else "close"
+>           assert events == ["unlock", "end", expected_tail]
+E           AssertionError: assert ['reset'] == ['unlock', 'end', 'reset']
+E             
+E             At index 0 diff: 'reset' != 'unlock'
+E             Right contains 2 more items, first extra item: 'end'
+E             Use -v to get more diff
+
+/tmp/amdpilot-repo-j-75a2f73bf9c5/review-evidence/shared/test_lmcache_mp_async_store.py:213: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../../tmp/amdpilot-repo-j-75a2f73bf9c5/review-evidence/shared/test_lmcache_mp_async_store.py::test_mp_finish_submits_without_waiting_and_keeps_node_locked
+FAILED ../../tmp/amdpilot-repo-j-75a2f73bf9c5/review-evidence/shared/test_lmcache_mp_async_store.py::test_evict_resolves_future_before_unlock_cleanup_and_slot_reuse
+FAILED ../../tmp/amdpilot-repo-j-75a2f73bf9c5/review-evidence/shared/test_lmcache_mp_async_store.py::test_submit_failure_releases_lock_marker_and_session
+FAILED ../../tmp/amdpilot-repo-j-75a2f73bf9c5/review-evidence/shared/test_lmcache_mp_async_store.py::test_failed_future_still_unlocks_ends_session_and_clears_marker[future0-store failed]
+FAILED ../../tmp/amdpilot-repo-j-75a2f73bf9c5/review-evidence/shared/test_lmcache_mp_async_store.py::test_failed_future_still_unlocks_ends_session_and_clears_marker[future1-daemon error]
+FAILED ../../tmp/amdpilot-repo-j-75a2f73bf9c5/review-evidence/shared/test_lmcache_mp_async_store.py::test_reset_drains_before_tree_reset_and_shutdown_drains_before_close
+6 failed, 1 passed, 16 warnings in 26.33s
+pytest_exit=1

@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31842",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3491",
+  "candidate_commit": "2ab32e15eddf8f8ba765a382dca23d475f0c6fc3",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate converts MP request-finish storage to a real asynchronous future and safely reconciles it at eviction, reset, and shutdown, but it can leave completed stores pinned indefinitely because it does not reap them at the scheduler capacity boundary. Locked slots reduce evictable_size, which can prevent the allocation path from ever calling evict and therefore prevent slot reuse.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-75a2f73bf9c5/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-75a2f73bf9c5/review-evidence/shared/test_lmcache_mp_async_store.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction using the candidate regression unchanged: 6 failed, 1 passed; the base blocks in store_kv and does not defer lock/session cleanup."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-75a2f73bf9c5/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_lmcache_mp_async_store.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate-provided lifecycle regression at exact commit: 7 passed, covering asynchronous submission, eviction ordering, submit/future failures, reset, shutdown, and IP reconciliation."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-75a2f73bf9c5/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-75a2f73bf9c5/review-evidence/shared/test_review_adversarial.py (exact candidate)",
+      "exit_code": 1,
+      "what_was_measured": "Independent adversarial cases: 1 failed and 2 passed. A completed future is not checked or unlocked at evictable_size, demonstrating the circular slot-reuse counterexample; multi-future and IP-error cleanup drain correctly."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-75a2f73bf9c5/venv/bin/python -m py_compile python/sglang/srt/mem_cache/storage/lmcache/lmc_radix_cache.py test/registered/unit/mem_cache/test_lmcache_mp_async_store.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python syntax and patch whitespace integrity."
+    },
+    {
+      "command": "Mandated-interpreter import and architecture probes",
+      "exit_code": 0,
+      "what_was_measured": "SGLang resolves to /job/repo/python; LMCache is not installed; Torch 2.11.0+rocm7.2 sees one AMD Instinct MI350X and exposes IPC event methods."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned MI350X was visible, but no LMCache package or daemon was available, so no real MP connector or GPU-copy execution was possible. Device visibility is not counted as GPU execution."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "After an MP future completes, evictable_size() does not query or reap it. If locked stores consume the capacity required for another batch, no allocation-triggered evict() occurs, so the node remains pinned and its slots cannot be reused.",
+    "Real LMCache connector/daemon behavior, including actual cross-process GPU event completion on the prepared ROCm architecture, remains unverified because LMCache is not installed and no daemon is available."
+  ],
+  "remaining_limitations": [
+    "No installed LMCache distribution or daemon; connector integration and actual daemon-copy completion were not tested.",
+    "No GPU workload was executed; the MI350X and IPC event APIs were only probed for visibility.",
+    "The candidate changes only Python, so no native rebuild was applicable.",
+    "The review did not use the tiny Llama serving fixture because it cannot supply the missing LMCache MP dependency/daemon and would only prove an unrelated transport/engine smoke."
+  ]
+}
