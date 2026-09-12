@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/29162",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "not_reproduced",
+  "summary": "The reported GLM-5.2 pipeline-parallel IndexError could not be reproduced on the prepared single AMD gfx950 host. The report requires GLM-5.2-FP8 weights and four pipeline stages on NVIDIA B300 GPUs; neither the weights nor matching hardware/topology were available. The current source has substantially reworked PP batch-state and output relay handling since the reported revision 2cbe1e6404144dc753de01525a51cbd7a89c1fda, including explicit per-microbatch planning and typed PP tensor messages, and focused result-normalization/communication tests pass. However, those facts do not establish that the intermittent GLM-5.2 PP=4 failure is fixed, so no speculative runtime change was made.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a0a2f79388fc/venv/bin/python -m pytest -q test/registered/unit/managers/test_batch_result_processor_spec_grammar.py test/registered/unit/managers/test_batch_result_processor_hidden_states.py",
+      "exit_code": 0,
+      "what_was_measured": "Decode-result normalization boundaries for ordinary/speculative grammar and hidden-state output; 13 tests and 2 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a0a2f79388fc/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_recv_skipper.py test/registered/unit/managers/test_batch_result_processor_mamba_boundary.py",
+      "exit_code": 0,
+      "what_was_measured": "Scheduler receive/skip communication and independent batch-result boundary behavior; 9 tests and 2 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a0a2f79388fc/venv/bin/python -m pytest -q test/manual/chunked_prefill/test_scripted_pp.py",
+      "exit_code": 130,
+      "what_was_measured": "Weightless scripted PP scheduler fixture. It produced no test result within 133 seconds and was interrupted. This is inconclusive and is not a model, GPU, or full PP reproduction."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-a0a2f79388fc/venv/bin/python -c 'import torch; ...'",
+      "exit_code": 0,
+      "what_was_measured": "Environment inventory only: one AMD Instinct MI350X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned gfx950 GPU was detected, but no issue-relevant GLM-5.2 model execution or four-stage pipeline execution was possible. CPU/unit and scripted-runtime checks must not be represented as GPU reproduction."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "GLM-5.2-FP8 weights at the reporter's snapshot were unavailable.",
+    "Only one AMD MI350X/gfx950 GPU was assigned; the report uses four NVIDIA B300 GPUs with PP=4 and a custom 19,20,20,19 layer partition.",
+    "The failure is intermittent under production requests, and no exact triggering request was provided in the issue.",
+    "Passing focused tests and inspection of later PP refactors do not prove the original GLM-5.2 architecture/workload is fixed.",
+    "The weightless scripted PP test did not finish before interruption and therefore supplied no positive or negative reproduction result."
+  ]
+}
