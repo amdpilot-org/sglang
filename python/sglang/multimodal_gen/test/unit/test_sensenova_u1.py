@@ -48,6 +48,9 @@ from sglang.multimodal_gen.runtime.pipelines_core.stages.model_specific_stages.s
 from sglang.multimodal_gen.runtime.platforms import current_platform
 from sglang.multimodal_gen.runtime.server_args.server_args import ServerArgs
 from sglang.multimodal_gen.runtime.utils.perf_logger import MemorySnapshot
+from sglang.multimodal_gen.test.test_utils import (
+    DEFAULT_SENSENOVA_U1_MODEL_NAME_FOR_TEST,
+)
 
 
 class _FakeSenseNovaModel:
@@ -233,7 +236,7 @@ def test_sensenova_u1_registry_resolves_local_and_hf_paths(tmp_path):
     assert local_model_info.pipeline_config_cls is SenseNovaU1PipelineConfig
     assert local_model_info.sampling_param_cls is SenseNovaU1SamplingParams
 
-    model_info = get_model_info("sensenova/SenseNova-U1.5-8B-MoT")
+    model_info = get_model_info(DEFAULT_SENSENOVA_U1_MODEL_NAME_FOR_TEST)
     assert model_info is not None
     assert model_info.pipeline_config_cls is SenseNovaU1PipelineConfig
     assert model_info.sampling_param_cls is SenseNovaU1SamplingParams
@@ -516,7 +519,7 @@ def test_sensenova_u1_rejects_direct_server_args_quantization():
 
     with pytest.raises(ValueError, match="quantization"):
         ServerArgs(
-            model_path="sensenova/SenseNova-U1.5-8B-MoT",
+            model_path=DEFAULT_SENSENOVA_U1_MODEL_NAME_FOR_TEST,
             pipeline_config=config,
             quantization="fp8",
         )
@@ -527,7 +530,7 @@ def test_sensenova_u1_rejects_file_valued_component_paths(tmp_path):
 
     with pytest.raises(ValueError, match="component weight path overrides"):
         ServerArgs(
-            model_path="sensenova/SenseNova-U1.5-8B-MoT",
+            model_path=DEFAULT_SENSENOVA_U1_MODEL_NAME_FOR_TEST,
             pipeline_config=config,
             component_paths={"model": str(tmp_path / "model.safetensors")},
         )

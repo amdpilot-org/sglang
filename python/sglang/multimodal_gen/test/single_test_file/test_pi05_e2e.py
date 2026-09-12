@@ -12,13 +12,14 @@ import numpy as np
 import pytest
 
 from sglang.multimodal_gen.runtime.entrypoints.diffusion_generator import DiffGenerator
+from sglang.multimodal_gen.test.test_utils import DEFAULT_PI05_MODEL_NAME_FOR_TEST
 
 pytestmark = pytest.mark.skipif(
     os.getenv("SGLANG_RUN_PI05_E2E") != "1",
     reason="set SGLANG_RUN_PI05_E2E=1 to run Pi0.5 GPU e2e tests",
 )
 
-_MODEL_PATH = os.getenv("SGLANG_PI05_E2E_MODEL", "lerobot/pi05_base")
+_MODEL_PATH = os.getenv("SGLANG_PI05_E2E_MODEL", DEFAULT_PI05_MODEL_NAME_FOR_TEST)
 _CAMERA_ORDER = ("base_0_rgb", "left_wrist_0_rgb", "right_wrist_0_rgb")
 
 

@@ -44,16 +44,21 @@ from sglang.multimodal_gen.test.server.testcase_configs import (
 from sglang.multimodal_gen.test.test_utils import (
     DEFAULT_COSMOS3_NANO_MODEL_NAME_FOR_TEST,
     DEFAULT_FAST_HUNYUAN_MODEL_NAME_FOR_TEST,
+    DEFAULT_FASTH3_MODEL_NAME_FOR_TEST,
     DEFAULT_FLUX_1_DEV_MODEL_NAME_FOR_TEST,
     DEFAULT_FLUX_2_DEV_MODEL_NAME_FOR_TEST,
     DEFAULT_FLUX_2_KLEIN_4B_MODEL_NAME_FOR_TEST,
     DEFAULT_FLUX_2_KLEIN_BASE_4B_MODEL_NAME_FOR_TEST,
+    DEFAULT_IDEOGRAM4_MODEL_NAME_FOR_TEST,
     DEFAULT_JOYAI_IMAGE_EDIT_MODEL_NAME_FOR_TEST,
+    DEFAULT_LINGBOT_WORLD_MODEL_NAME_FOR_TEST,
     DEFAULT_LONGLIVE2_MODEL_NAME_FOR_TEST,
     DEFAULT_LTX_2_3_MODEL_NAME_FOR_TEST,
+    DEFAULT_LTX_2_5_MODEL_NAME_FOR_TEST,
     DEFAULT_LTX_2_MODEL_NAME_FOR_TEST,
     DEFAULT_MINIMAX_H3_MODEL_NAME_FOR_TEST,
     DEFAULT_MOVA_360P_MODEL_NAME_FOR_TEST,
+    DEFAULT_PI05_MODEL_NAME_FOR_TEST,
     DEFAULT_QWEN_IMAGE_EDIT_2509_MODEL_NAME_FOR_TEST,
     DEFAULT_QWEN_IMAGE_EDIT_2511_MODEL_NAME_FOR_TEST,
     DEFAULT_QWEN_IMAGE_EDIT_MODEL_NAME_FOR_TEST,
@@ -116,7 +121,7 @@ ONE_GPU_CASES: list[DiffusionTestCase] = [
     DiffusionTestCase(
         "pi05_action_http",
         DiffusionServerArgs(
-            model_path="lerobot/pi05_base",
+            model_path=DEFAULT_PI05_MODEL_NAME_FOR_TEST,
         ),
         PI05_ACTION_CI_sampling_params,
         run_perf_check=False,
@@ -487,7 +492,7 @@ ONE_GPU_CASES: list[DiffusionTestCase] = [
     DiffusionTestCase(
         "lingbot_world_realtime_plastic_beach",
         DiffusionServerArgs(
-            model_path="robbyant/lingbot-world-fast-diffusers",
+            model_path=DEFAULT_LINGBOT_WORLD_MODEL_NAME_FOR_TEST,
             modality="video",
             num_gpus=1,
             extras=[
@@ -600,7 +605,7 @@ else:
         ),
         _make_modelopt_ci_case(
             "ideogram4_nvfp4_t2i",
-            model_path="Comfy-Org/Ideogram-4",
+            model_path=DEFAULT_IDEOGRAM4_MODEL_NAME_FOR_TEST,
             modality="image",
             sampling_params=IDEOGRAM4_CI_sampling_params,
             extras=[],
@@ -696,7 +701,7 @@ MINIMAX_H3_FOUR_GPU_H100_CASES = [
     DiffusionTestCase(
         "fasth3_t2va_vsa_4gpu_h100",
         DiffusionServerArgs(
-            model_path="FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree",
+            model_path=DEFAULT_FASTH3_MODEL_NAME_FOR_TEST,
             modality="video",
             num_gpus=4,
             extras=[
@@ -1058,7 +1063,7 @@ TWO_GPU_CASES = [
     DiffusionTestCase(
         "ltx_2_5_diffusion_decoder_2gpus",
         DiffusionServerArgs(
-            model_path="Lightricks/LTX-2.5-Diffusers",
+            model_path=DEFAULT_LTX_2_5_MODEL_NAME_FOR_TEST,
             modality="video",
             ulysses_degree=2,
             # Offload both the DiT and text encoder between stages to leave

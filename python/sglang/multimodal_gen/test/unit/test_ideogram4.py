@@ -103,6 +103,9 @@ from sglang.multimodal_gen.runtime.pipelines_core.stages.text_encoding import (
 from sglang.multimodal_gen.runtime.platforms import AttentionBackendEnum
 from sglang.multimodal_gen.runtime.platforms.interface import DeviceCapability
 from sglang.multimodal_gen.runtime.server_args import set_global_server_args
+from sglang.multimodal_gen.test.test_utils import (
+    DEFAULT_IDEOGRAM4_MODEL_NAME_FOR_TEST,
+)
 
 
 def _reference_qwen3_mrope(position_ids, head_dim, rope_theta, mrope_section):
@@ -248,7 +251,7 @@ class TestIdeogram4(unittest.TestCase):
         get_model_info.cache_clear()
         _get_config_info.cache_clear()
 
-        info = get_model_info("Comfy-Org/Ideogram-4", backend="sglang")
+        info = get_model_info(DEFAULT_IDEOGRAM4_MODEL_NAME_FOR_TEST, backend="sglang")
 
         self.assertEqual(info.pipeline_cls.__name__, "Ideogram4Nvfp4Pipeline")
         self.assertIs(info.pipeline_config_cls, Ideogram4PipelineConfig)

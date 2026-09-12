@@ -35,6 +35,9 @@ from sglang.multimodal_gen.test.server.testcase_configs import (
     LONGLIVE2_T2V_CI_sampling_params,
     REALTIME_MODEL_sampling_params,
 )
+from sglang.multimodal_gen.test.test_utils import (
+    DEFAULT_LINGBOT_WORLD_MODEL_NAME_FOR_TEST,
+)
 
 # Request construction
 
@@ -56,7 +59,7 @@ def test_realtime_init_payload_uses_sampling_params_and_extras():
     )
 
     payload = build_realtime_init_payload(
-        model_path="robbyant/lingbot-world-fast-diffusers",
+        model_path=DEFAULT_LINGBOT_WORLD_MODEL_NAME_FOR_TEST,
         sampling_params=params,
         output_size="832x480",
         first_frame="https://example.com/first.png",
@@ -64,7 +67,7 @@ def test_realtime_init_payload_uses_sampling_params_and_extras():
 
     assert payload == {
         "type": "init",
-        "model": "robbyant/lingbot-world-fast-diffusers",
+        "model": DEFAULT_LINGBOT_WORLD_MODEL_NAME_FOR_TEST,
         "prompt": "turn camera left",
         "size": "832x480",
         "seconds": 1,
@@ -84,7 +87,7 @@ def test_realtime_init_payload_can_request_preview_transport():
     )
 
     payload = build_realtime_init_payload(
-        model_path="robbyant/lingbot-world-fast-diffusers",
+        model_path=DEFAULT_LINGBOT_WORLD_MODEL_NAME_FOR_TEST,
         sampling_params=params,
         output_size="832x480",
         first_frame=None,
@@ -487,7 +490,7 @@ def test_realtime_sampling_params_route_to_realtime_video_generator():
     )
 
     generate_fn = get_generate_fn(
-        "robbyant/lingbot-world-fast-diffusers",
+        DEFAULT_LINGBOT_WORLD_MODEL_NAME_FOR_TEST,
         "video",
         params,
     )

@@ -28,8 +28,7 @@ from sglang.multimodal_gen.runtime.models.dits.minimax_h3 import MiniMaxH3DiTMod
 from sglang.multimodal_gen.test.single_test_file.component_accuracy.utils import (
     ensure_distributed_env_defaults,
 )
-
-FASTH3_MODEL_ID = "FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree"
+from sglang.multimodal_gen.test.test_utils import DEFAULT_FASTH3_MODEL_NAME_FOR_TEST
 
 
 def _ensure_single_process_parallel_runtime() -> None:
@@ -40,10 +39,13 @@ def _ensure_single_process_parallel_runtime() -> None:
 
 
 def test_registry_resolves_fasth3_configs() -> None:
-    info = get_model_info(FASTH3_MODEL_ID)
+    info = get_model_info(DEFAULT_FASTH3_MODEL_NAME_FOR_TEST)
     assert info.sampling_param_cls is FastH3SamplingParams
     assert info.pipeline_config_cls is FastH3PipelineConfig
-    assert get_non_diffusers_pipeline_name(FASTH3_MODEL_ID) == "FastH3Pipeline"
+    assert (
+        get_non_diffusers_pipeline_name(DEFAULT_FASTH3_MODEL_NAME_FOR_TEST)
+        == "FastH3Pipeline"
+    )
     materialized = (
         "/cache/materialized_models/"
         "FastVideo__FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree-0123abcd"

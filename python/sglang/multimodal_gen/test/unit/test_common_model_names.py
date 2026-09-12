@@ -7,6 +7,7 @@ TEST_ROOT = Path(__file__).resolve().parents[1]
 TEST_UTILS = TEST_ROOT / "test_utils.py"
 LITERAL_VECTOR_PATHS = {
     Path(__file__).resolve(),
+    TEST_ROOT / "unit" / "test_cli_generate_common.py",
     TEST_ROOT / "unit" / "test_server_args.py",
 }
 
@@ -62,7 +63,12 @@ def _find_repeated_uncentralized_model_names(
     cannot evade the policy merely because nobody added its constant yet.
     """
     occurrences: dict[str, list[str]] = defaultdict(list)
-    model_resolvers = {"get_model_info", "hf_cached_model", "use_modelscope"}
+    model_resolvers = {
+        "_get_config_info",
+        "get_model_info",
+        "hf_cached_model",
+        "use_modelscope",
+    }
 
     for path in paths:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -83,6 +89,19 @@ def _find_repeated_uncentralized_model_names(
                 )
                 if function_name in model_resolvers and node.args:
                     values.append(node.args[0])
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
+                )
+                if any(
+                    isinstance(target, ast.Name)
+                    and "MODEL" in target.id.upper()
+                    and any(
+                        part in target.id.upper() for part in {"ID", "NAME", "PATH"}
+                    )
+                    for target in targets
+                ):
+                    values.append(node.value)
 
             for value in values:
                 if (
@@ -111,8 +130,7 @@ def test_runnable_test_entries_use_common_model_name_constants():
     ]
     duplicates = _find_hard_coded_model_names(paths, _common_model_names())
     uncentralized = _find_repeated_uncentralized_model_names(
-        [path for path in paths if TEST_ROOT / "unit" not in path.parents],
-        _common_model_names(),
+        paths, _common_model_names()
     )
 
     assert not duplicates, (
@@ -156,3 +174,21 @@ def test_model_name_guard_rejects_repeated_uncentralized_ids(tmp_path: Path):
     assert _find_repeated_uncentralized_model_names(paths, _common_model_names()) == [
         f"example-org/new-model: {paths[0]}:1, {paths[1]}:1"
     ]
+
+
+def test_model_name_guard_scans_unit_resolvers_and_named_fixtures(tmp_path: Path):
+    server_path = tmp_path / "server_case.py"
+    unit_path = tmp_path / "unit_case.py"
+    server_path.write_text(
+        'case = DiffusionServerArgs(model_path="example-org/new-model")\n',
+        encoding="utf-8",
+    )
+    unit_path.write_text(
+        'MODEL_ID = "example-org/new-model"\n'
+        '_get_config_info("example-org/new-model")\n',
+        encoding="utf-8",
+    )
+
+    assert _find_repeated_uncentralized_model_names(
+        [server_path, unit_path], _common_model_names()
+    ) == [f"example-org/new-model: {server_path}:1, {unit_path}:1, {unit_path}:2"]

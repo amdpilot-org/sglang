@@ -41,6 +41,7 @@ from sglang.multimodal_gen.runtime.vla.prompt_bucketing import (
     effective_token_length,
     select_prompt_token_bucket,
 )
+from sglang.multimodal_gen.test.test_utils import DEFAULT_PI05_MODEL_NAME_FOR_TEST
 from sglang.srt.models.siglip import SiglipVisionModel
 from sglang.srt.runtime_context import get_context
 
@@ -323,7 +324,7 @@ def test_prefix_cache_key_distinguishes_bucket_layouts_and_mask_holes():
     model = Pi05PolicyModel.__new__(Pi05PolicyModel)
     model.config = Pi05PipelineConfig(prompt_token_buckets=[32, 64])
     model.dtype = torch.bfloat16
-    model.model_path = "lerobot/pi05_base"
+    model.model_path = DEFAULT_PI05_MODEL_NAME_FOR_TEST
     model._prompt_token_bucketing_enabled = lambda: True
     common = dict(
         metadata={"camera_order": ("front",)},

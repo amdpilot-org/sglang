@@ -215,9 +215,17 @@ DEFAULT_SANA_VIDEO_MODEL_NAME_FOR_TEST = (
 
 # Other video generation models shared by accelerator test suites
 DEFAULT_FAST_HUNYUAN_MODEL_NAME_FOR_TEST = "FastVideo/FastHunyuan-diffusers"
+DEFAULT_FASTH3_MODEL_NAME_FOR_TEST = (
+    "FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree"
+)
+DEFAULT_IDEOGRAM4_MODEL_NAME_FOR_TEST = "Comfy-Org/Ideogram-4"
+DEFAULT_LINGBOT_WORLD_MODEL_NAME_FOR_TEST = "robbyant/lingbot-world-fast-diffusers"
 DEFAULT_LONGLIVE2_MODEL_NAME_FOR_TEST = "Rabinovich/LongLive-2.0-5B-Diffusers"
 DEFAULT_LTX_2_MODEL_NAME_FOR_TEST = "Lightricks/LTX-2"
 DEFAULT_LTX_2_3_MODEL_NAME_FOR_TEST = "Lightricks/LTX-2.3"
+DEFAULT_LTX_2_5_MODEL_NAME_FOR_TEST = "Lightricks/LTX-2.5-Diffusers"
+DEFAULT_PI05_MODEL_NAME_FOR_TEST = "lerobot/pi05_base"
+DEFAULT_SENSENOVA_U1_MODEL_NAME_FOR_TEST = "sensenova/SenseNova-U1.5-8B-MoT"
 DEFAULT_MINIMAX_H3_MODEL_NAME_FOR_TEST = "MiniMaxAI/MiniMax-H3"
 
 
