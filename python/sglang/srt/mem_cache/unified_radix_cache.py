@@ -1037,7 +1037,9 @@ class UnifiedRadixCache(BasePrefixCache):
         if self.session.try_cache_unfinished_req(req, chunked=chunked, **kwargs):
             return
 
-        token_ids = req.get_fill_ids()
+        # dLLM's trailing incomplete block is rewritten in place and cannot be
+        # transferred to the tree until it is resolved.
+        token_ids = req.get_cacheable_fill_ids()
 
         if self.disable:
             kv_indices = self.req_to_token_pool.req_to_token[

@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35270",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the dLLM volatile-block ownership defect in the checked-out classic RadixCache with real paged pools: two denoise keys made 128 tokens of tree accounting refer to only 96 tokens of distinct physical pages. The correction excludes dllm_incomplete_ids from unfinished-request radix insertion until the block resolves, and applies this to both classic RadixCache and the current UnifiedRadixCache path. Related upstream PRs #35470 and #35781 were inspected before implementation.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-d58e7286dc7e/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_dllm_volatile_radix_block.py (before fix)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before ownership/accounting regression. Classic RadixCache reported 128 accounted tokens for 96 tokens of distinct owned physical pages; the unified fixture also exposed missing fix/API state before source changes. Raw output: reports/j-d58e7286dc7e/raw/failing-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d58e7286dc7e/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_dllm_volatile_radix_block.py test/registered/unit/mem_cache/test_radix_cache_unit.py test/registered/unit/mem_cache/test_decode_radix_lock_ref.py",
+      "exit_code": 0,
+      "what_was_measured": "54 tests and 61 subtests passed, including classic and unified physical-page ownership regressions, resolved-block behavior, a short non-dLLM boundary, and existing radix lock/free contracts. Raw output: reports/j-d58e7286dc7e/raw/focused-tests.log"
+    },
+    {
+      "command": "rocminfo; Python torch CPU/GPU float32 reduction comparison",
+      "exit_code": 0,
+      "what_was_measured": "The assigned accelerator reports gfx950 / AMD Instinct MI350X. A 4096-element float32 squared-sum matched the independent CPU Torch result exactly (22898102272.0). This validates GPU availability only, not the unavailable LLaDA serving reproduction. Raw output: reports/j-d58e7286dc7e/raw/gfx950-evidence.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A numerical Torch operation executed on the assigned gfx950 and matched the CPU reference exactly; the issue-specific regression itself is allocator/tree logic and ran deterministically on CPU paged pools."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "LLaDA2.1 model weights and an Ascend NPU were not available, so the original 256-request HTTP serving workload was not rerun.",
+    "The GPU check is only a device/numerical smoke and is not claimed as a full-model reproduction.",
+    "The correction covers classic RadixCache and UnifiedRadixCache, the directly reproduced and current default paths. SWA, Mamba, and experimental C++ radix caches were not exercised with dLLM and remain outside this narrow change.",
+    "No native code changed, so no native rebuild was applicable."
+  ]
+}

@@ -40,6 +40,19 @@ class ReqDllmMixin:
             DllmReqPhase.INCOMING_PREFILL,
         ]
 
+    def get_cacheable_fill_ids(self: Req) -> array:
+        """Return only fill ids whose KV pages may be owned by the radix tree.
+
+        An incomplete dLLM block is rewritten in place on every denoise step.
+        Caching it would let different token keys claim the same physical KV
+        page. Once the block is resolved, ``dllm_incomplete_ids`` is empty and
+        the full committed prefix becomes cacheable normally.
+        """
+        fill_ids = self.get_fill_ids()
+        if self.dllm_incomplete_ids:
+            return fill_ids[: len(fill_ids) - len(self.dllm_incomplete_ids)]
+        return fill_ids
+
     def determine_dllm_phase(self: Req):
         if self.dllm_incomplete_ids:
             self.dllm_phase = DllmReqPhase.STAGING_DECODE
