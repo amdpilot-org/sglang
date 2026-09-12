@@ -15,6 +15,8 @@ import time
 from contextlib import ExitStack
 from typing import Any, List, Optional, Union
 
+import torch
+
 from sglang.multimodal_gen.configs.sample.sampling_params import (
     DataType,
     SamplingParams,
@@ -36,6 +38,11 @@ from sglang.multimodal_gen.runtime.entrypoints.utils import (
 from sglang.multimodal_gen.runtime.launch_server import launch_server
 from sglang.multimodal_gen.runtime.pipelines_core import Req
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import OutputBatch
+from sglang.multimodal_gen.runtime.post_training.rl_dataclasses import (
+    RolloutDebugTensors,
+    RolloutDitTrajectory,
+    RolloutTrajectoryData,
+)
 from sglang.multimodal_gen.runtime.scheduler_client import sync_scheduler_client
 from sglang.multimodal_gen.runtime.server_args import PortArgs, ServerArgs
 from sglang.multimodal_gen.runtime.server_warmup import (
@@ -65,6 +72,54 @@ try:
 except RuntimeError:
     # The start method can only be set once per program execution.
     pass
+
+
+def _slice_output_dim(
+    tensor: torch.Tensor | None, output_index: int
+) -> torch.Tensor | None:
+    if tensor is None or tensor.dim() < 1 or output_index >= tensor.shape[0]:
+        return tensor
+    return tensor[output_index : output_index + 1]
+
+
+def _select_output_rollout_trajectory(
+    trajectory: RolloutTrajectoryData | None, output_index: int | None
+) -> RolloutTrajectoryData | None:
+    """Select one output while preserving the single-output batch dimension."""
+    if trajectory is None or output_index is None:
+        return trajectory
+
+    debug_tensors = trajectory.rollout_debug_tensors
+    if debug_tensors is not None:
+        debug_tensors = RolloutDebugTensors(
+            rollout_variance_noises=_slice_output_dim(
+                debug_tensors.rollout_variance_noises, output_index
+            ),
+            rollout_prev_sample_means=_slice_output_dim(
+                debug_tensors.rollout_prev_sample_means, output_index
+            ),
+            rollout_noise_std_devs=_slice_output_dim(
+                debug_tensors.rollout_noise_std_devs, output_index
+            ),
+            rollout_model_outputs=_slice_output_dim(
+                debug_tensors.rollout_model_outputs, output_index
+            ),
+        )
+
+    dit_trajectory = trajectory.dit_trajectory
+    if dit_trajectory is not None:
+        dit_trajectory = RolloutDitTrajectory(
+            latents=_slice_output_dim(dit_trajectory.latents, output_index),
+            timesteps=dit_trajectory.timesteps,
+            sigmas=dit_trajectory.sigmas,
+        )
+
+    return RolloutTrajectoryData(
+        rollout_log_probs=_slice_output_dim(trajectory.rollout_log_probs, output_index),
+        rollout_debug_tensors=debug_tensors,
+        denoising_env=trajectory.denoising_env,
+        dit_trajectory=dit_trajectory,
+    )
 
 
 def _replace_sampling_params_for_prompt(
@@ -542,7 +597,9 @@ class DiffGenerator:
             action=output_batch.action_pred,
             trajectory_latents=output_batch.trajectory_latents,
             trajectory_timesteps=output_batch.trajectory_timesteps,
-            rollout_trajectory_data=output_batch.rollout_trajectory_data,
+            rollout_trajectory_data=_select_output_rollout_trajectory(
+                output_batch.rollout_trajectory_data, output_index
+            ),
             trajectory_decoded=output_batch.trajectory_decoded,
         )
 

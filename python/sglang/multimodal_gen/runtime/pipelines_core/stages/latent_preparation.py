@@ -141,18 +141,25 @@ class LatentPreparationStage(PipelineStage):
                 f" size of {batch_size}. Make sure the batch size matches the length of the generators."
             )
 
-        # Generate or use provided latents
+        # Prepare caller-provided unpacked latents exactly like freshly drawn noise.
+        spec = self.get_latent_preparation_spec(
+            batch, server_args, batch_size, latent_num_frames, device
+        )
         if latents is None:
-            spec = self.get_latent_preparation_spec(
-                batch, server_args, batch_size, latent_num_frames, device
-            )
             latents = randn_tensor(
                 spec.shape,
                 generator=generator,
                 device=spec.device,
                 dtype=spec.dtype,
             )
+            needs_preparation = True
+        else:
+            latents = latents.to(device)
+            # Some callers provide the already-packed transformer layout. Only
+            # tensors matching the stage's raw-noise shape should be packed.
+            needs_preparation = tuple(latents.shape) == tuple(spec.shape)
 
+        if needs_preparation:
             latent_ids = (
                 server_args.pipeline_config.maybe_prepare_latent_ids(latents)
                 if spec.prepare_latent_ids
@@ -166,8 +173,6 @@ class LatentPreparationStage(PipelineStage):
                 latents = server_args.pipeline_config.maybe_pack_latents(
                     latents, batch_size, batch
                 )
-        else:
-            latents = latents.to(device)
 
         # Scale the initial noise if needed
         if self.should_scale_initial_noise(batch, server_args) and hasattr(
