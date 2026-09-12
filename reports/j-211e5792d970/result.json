@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19090",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3092",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3065",
+  "candidate_commit": "d2019b162a993952a2c4728ccad0a1b2b940fc4d",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a partial fix. It adds the missing local DiffGenerator sleep, wake, and disk-refit methods and correctly normalizes the previously reported scheduler ConnectionError/TimeoutError cases. It does not qualify the complete original diffusion feature contract: no real diffusion checkpoint completed sleep, wake, generation, and refit; no kill/relaunch comparison was run; and FSDP sleep/wake remains unsupported. Malformed scheduler response objects can also leak raw AttributeError.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-211e5792d970/venv/bin/python -c 'import DiffGenerator; assert lifecycle methods exist' (expanded command retained in raw/base_original_failure.txt)",
+      "exit_code": 1,
+      "what_was_measured": "On exact recorded base, imports resolved to checked-out source and all three requested local DiffGenerator methods were absent."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-211e5792d970/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_diffusion_generator_lifecycle.py python/sglang/multimodal_gen/test/unit/test_diffusion_generator_shutdown.py python/sglang/multimodal_gen/test/unit/test_component_residency.py::test_snapshot_offload_sleep_uses_existing_host_storage python/sglang/multimodal_gen/test/unit/test_weight_snapshot.py::test_sleep_keeps_the_pin_lease_and_existing_pins_are_reused",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and compatibility suite: 13 passed, including its synthetic GPU controller test."
+    },
+    {
+      "command": "independent in-process adversarial lifecycle calls retained in raw/independent_adversarial.txt",
+      "exit_code": 0,
+      "what_was_measured": "ConnectionError and TimeoutError are normalized and chained; declared error, non-dict, negative, and success payloads are handled; None/missing-output response objects leak AttributeError."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-211e5792d970/venv/bin/python -m pytest -vv -s python/sglang/multimodal_gen/test/unit/test_diffusion_generator_lifecycle.py::test_memory_occupation_round_trip_matches_cpu_reference",
+      "exit_code": 0,
+      "what_was_measured": "One synthetic torch.nn.Linear sleep/wake numerical controller round trip passed on AMD Instinct MI355X; it does not cover the candidate transport surface end to end."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 d2019b162a993952a2c4728ccad0a1b2b940fc4d",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI355X / ROCm 7.2 synthetic controller round trip passed. This exercises controller code already in base, not a real diffusion checkpoint or end-to-end DiffGenerator transport."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_reason": "No native C/C++/HIP/Rust source changed between the recorded base and candidate, so rebuilding native code was not applicable.",
+  "remaining_counterexamples": [
+    "No real diffusion checkpoint was run through sleep, wake, generation, and disk refit, so model-specific correctness and memory behavior remain unverified.",
+    "No end-to-end sleep+wake+refit versus kill-and-relaunch timing comparison was supplied, despite being an explicit original-issue objective.",
+    "FSDP inference sleep/wake remains explicitly unsupported and raises RuntimeError.",
+    "The GPU round trip exercises MemoryOccupationController code present in the base, not the candidate's new DiffGenerator transport surface end to end.",
+    "A scheduler response of None or an object missing output leaks AttributeError rather than a lifecycle-specific RuntimeError."
+  ],
+  "remaining_limitations": [
+    "Only one AMD Instinct MI355X was available; CUDA-specific behavior was not tested.",
+    "No diffusion model weights/checkpoint were available. The tiny Llama fixture is transport-only and cannot qualify diffusion behavior, so it was not used.",
+    "Distributed and FSDP behavior, real generation/refit numerical correctness, memory savings, and comparative relaunch timing remain unverified.",
+    "No native rebuild was performed because the candidate changes no native source."
+  ]
+}
