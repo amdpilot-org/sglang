@@ -121,6 +121,16 @@ class TestCPStrategyUnit(CustomTestCase):
         ):
             self.assertFalse(is_dsa_enable_prefill_cp())
 
+    def test_hip_dsa_cp_does_not_require_published_parallel_context(self):
+        with (
+            patch("sglang.srt.layers.attention.dsa.utils.is_hip", return_value=True),
+            patch(
+                "sglang.srt.layers.attention.dsa.utils.get_parallel",
+                side_effect=AssertionError("parallel context must not be read"),
+            ),
+        ):
+            self.assertFalse(is_dsa_enable_prefill_cp())
+
 
 class TestPrefillCPBCGReplay(CustomTestCase):
     def tearDown(self):

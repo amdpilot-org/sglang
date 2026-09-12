@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39054",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 628's import-time MUSA predicate, which fixes the reproduced cold- and warm-cache TorchDynamo import failure, while correcting its reviewed ROCm initialization-order regression by retaining platform guards before the parallel runtime lookup. Added regressions for both behaviors.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9fb2c877cc7d/venv/bin/python -c 'from sglang.srt.layers.attention.dsa.utils import is_dsa_enable_prefill_cp; print(is_dsa_enable_prefill_cp())'",
+      "exit_code": 0,
+      "what_was_measured": "On the ROCm base, the uninitialized runtime returned False. Exact candidate a50933dc exited 1 with ValueError: config namespace parallel not published. The consolidated correction again returned False."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9fb2c877cc7d/venv/bin/python -m pytest -q test/registered/unit/utils/test_common.py -k MusaDetection",
+      "exit_code": 0,
+      "what_was_measured": "The real SGLang is_musa probe completed under torch.compile fullgraph tracing with both cold and warm LRU caches: 1 test and 2 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9fb2c877cc7d/venv/bin/python -m pytest -q test/registered/cp/test_cp_strategy_unit.py -k hip_dsa_cp",
+      "exit_code": 0,
+      "what_was_measured": "Two HIP ordering tests passed, including a regression that fails if get_parallel is read after HIP has already determined the result."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9fb2c877cc7d/venv/bin/python -m pytest -q test/registered/unit/utils/test_common.py test/registered/cp/test_cp_strategy_unit.py test/registered/unit/server_args/test_platform_prefill_cp_deprecation.py",
+      "exit_code": 0,
+      "what_was_measured": "Related utility, context-parallel, and platform suites passed: 38 tests and 57 subtests."
+    },
+    {
+      "command": "TORCHINDUCTOR_CACHE_DIR=<private tmp> PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9fb2c877cc7d/venv/bin/python <fullgraph ROCm numerical control>",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI355X, a fullgraph Inductor kernel calling is_musa matched an independent NumPy reference with maximum absolute error 2.384185791015625e-07; generated metadata targeted hip:gfx950."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI355X, PyTorch 2.11.0+rocm7.2, HIP 7.2.26015; generated Inductor metadata identified hip:gfx950."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original 8-GPU NVIDIA B200 MiniMax-M3 tc_piecewise prefill CUDA-graph deployment and model weights were unavailable and were not run; the one-GPU ROCm control does not qualify it.",
+    "MUSA hardware and the real torchada package were unavailable; the candidate's previously reviewed predicate semantics were preserved.",
+    "No native C++ or FlyDSL source changed, so a native rebuild was not applicable.",
+    "Raw command output is retained under /job/evidence-j-9fb2c877cc7d; compiler caches remained private under /tmp."
+  ]
+}
