@@ -51,6 +51,7 @@ class _TinyMxfp4Layer(torch.nn.Module):
             hidden_size=64,
             intermediate_size_per_partition=64,
             params_dtype=torch.bfloat16,
+            with_bias=True,
         )
         for name, value in (
             ("w13_weight", 17),
