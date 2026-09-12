@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35332",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Added an opt-in framework StepReuseController and model-adapter contract beside the shared diffusion denoising loop. It owns request/scope-local prediction history, bounded reuse, post-CFG observations, trace-only decisions, replica-control-rank decision broadcast, forced terminal forwards, terminal side-effect verification, scheduler-step preservation, and per-scope metrics. Reuse remains disabled by default.",
+  "tests": [
+    {
+      "command": "git grep -n 'class StepReuseController' 358c163250ad3b1f62939b01ce1314a0a31a0365 -- python/sglang/multimodal_gen",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: the recorded base has no framework step-reuse controller or contract. Raw evidence: reports/j-d12b97de72cb/before-reproduction.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d12b97de72cb/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_step_reuse.py python/sglang/multimodal_gen/test/unit/test_cfg_gating.py",
+      "exit_code": 0,
+      "what_was_measured": "16 tests covering real-history warmup, bounded countdown, no recursive observations, scheduler advancement during reuse, terminal writes, request/modality/CFG-role/retry isolation, malformed configuration and budgets, control-rank tokens, trace-only mode, and compatibility with CFG gating. Raw output: reports/j-d12b97de72cb/unit-tests.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d12b97de72cb/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_sampling_params.py python/sglang/multimodal_gen/test/unit/test_diffusion_bcg_padding.py",
+      "exit_code": 0,
+      "what_was_measured": "68 compatibility tests plus 30 subtests for unchanged request configuration and denoising graph behavior. Raw output: reports/j-d12b97de72cb/compatibility-tests.log"
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files python/sglang/multimodal_gen/runtime/pipelines_core/step_reuse.py python/sglang/multimodal_gen/runtime/pipelines_core/stages/denoising.py python/sglang/multimodal_gen/configs/pipeline_configs/base.py python/sglang/multimodal_gen/test/unit/test_step_reuse.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, AST, secret, and policy hooks. Raw output: reports/j-d12b97de72cb/pre-commit.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d12b97de72cb/venv/bin/python < inline GPU scheduler/reference script",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X, a six-step FP32 recurrence with trace real,real,reuse,reuse,real,terminal-real agreed with an independent CPU float64 recurrence (maximum absolute difference 3.784894948566375e-07, rtol=1e-5, atol=1e-6). Raw output: reports/j-d12b97de72cb/gpu-numerical.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X was used with torch 2.11.0+rocm7.2 / HIP 7.2.26015; reports/j-d12b97de72cb/gpu-numerical.log records device discovery and the independent CPU-reference comparison."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No model adapter is enabled: the issue requires architecture-specific observation points, similarity/quality thresholds, and side-effect metadata, and none can be honestly selected without a qualified model and evaluation data.",
+    "No cache-off versus cache-on public output quality metric or full internal model trajectory was run because model weights and a qualified diffusion fixture were unavailable; the tiny Llama serving fixture is not applicable to diffusion semantics.",
+    "Persistent session/KV equality was tested only through the synthetic terminal verification contract, not against a stateful world-model implementation.",
+    "Replica decision synchronization is unit-tested with independent control/follower controllers, but no multi-GPU distributed job was run because the task permits one assigned GPU.",
+    "The integration applies to the shared DenoisingStage path. Model-specific stages that override _run_denoising_step must explicitly adopt the same controller hooks before opting in.",
+    "No native rebuild was applicable because all changed implementation and tests are Python; the prepared environment records native=null."
+  ]
+}
