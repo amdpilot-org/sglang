@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31953",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "e681fb82bac9961a901c84b233ed494ee28efca1",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact base reproduced the original control-path failure: SetInternalStateReq rejected string schedule_policy values during msgpack decoding and Scheduler.set_internal_state did not allow the key. The exact candidate widens the wire schema, validates against the actual cache-aware and cache-agnostic enums, and replaces SchedulePolicy synchronously while preserving waiting requests, running state, and the tree cache. Candidate tests, independent adversarial tests, and an independent real HTTP run on one MI350X passed.",
+  "tests": [
+    {
+      "command": "base inline msgspec decode and scheduler allowlist assertions at 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: msgspec.ValidationError for string schedule_policy and absence from the runtime-update allowlist."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8b7e433885b4/venv/bin/python -m pytest -q test/registered/unit/managers/test_io_struct.py -k SetInternalStateReqSerialization",
+      "exit_code": 0,
+      "what_was_measured": "Candidate string/numeric SetInternalStateReq msgpack round trip; 1 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8b7e433885b4/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_runtime_policy.py test/registered/unit/managers/test_schedule_policy.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression plus existing policy behavior; 6 passed."
+    },
+    {
+      "command": "independent inline adversarial scheduler/wire probe at e681fb82bac9961a901c84b233ed494ee28efca1",
+      "exit_code": 0,
+      "what_was_measured": "All seven real enum values, effective LOF ordering, queue/running/cache identity, atomic mixed-update rejection, and invalid types/casing."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-8b7e433885b4/venv/bin/python reports/j-326f6c074471/run_server_probe.py --fixture /tmp/amdpilot-repo-j-8b7e433885b4/models/tiny-random-llama --output /job/review-evidence-j-8b7e433885b4/http",
+      "exit_code": 0,
+      "what_was_measured": "Independent real HTTP path: seven accepted policies, unknown rejection, four concurrent updates during generation, unchanged startup identity, continued generation, and a 15-token device-cache hit after switching."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8b7e433885b4/venv/bin/python -m py_compile python/sglang/srt/managers/io_struct.py python/sglang/srt/managers/scheduler.py test/registered/unit/managers/test_scheduler_runtime_policy.py && git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 e681fb82bac9961a901c84b233ed494ee28efca1",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python syntax and patch whitespace."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Independent server execution used the assigned AMD Instinct MI350X with gfx950 via pinned Torch 2.11.0+rocm7.2. The real response reported cached_tokens=15 with device=15 after live policy updates; startup_time was unchanged.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Only a single MI350X (gfx950), TP1, deterministic tiny random Llama was available; GLM-5.2-NVFP4, B300, and TP8 were not available.",
+    "The source 115K-token, approximately 96% cache-hit production traffic and TTFT starvation distribution were not reproduced and are not claimed as current AMD measurements.",
+    "The tiny fixture validates transport, scheduler control, engine execution, and cache retention only, not semantic accuracy or another model architecture.",
+    "Concurrent callers are serialized by the scheduler path, but their final winning policy is intentionally ordering-dependent.",
+    "No native source changed, so native rebuild and compiler/ISA validation were not applicable."
+  ]
+}
