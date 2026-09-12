@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import concurrent.futures
 import threading
 import time
 from types import SimpleNamespace
@@ -10,6 +11,9 @@ import pytest
 import torch
 
 from sglang.multimodal_gen.runtime.disaggregation.roles import RoleType
+from sglang.multimodal_gen.runtime.loader.component_loaders.component_loader import (
+    ComponentLoader,
+)
 from sglang.multimodal_gen.runtime.loader.utils import set_default_torch_dtype
 from sglang.multimodal_gen.runtime.pipelines_core.composed_pipeline_base import (
     ComposedPipelineBase,
@@ -100,6 +104,40 @@ def test_component_loads_overlap_and_preserve_results():
         "text_encoder": 12.0,
         "vae": 3.0,
     }
+
+
+def test_native_loads_overlap_outside_model_construction_contexts():
+    class NativeLoader(ComponentLoader):
+        def load_customized(self, *args, **kwargs):
+            raise NotImplementedError
+
+    loader = NativeLoader()
+    barrier = threading.Barrier(2)
+    active = 0
+    max_active = 0
+    active_lock = threading.Lock()
+
+    def load_native(*args, **kwargs):
+        nonlocal active, max_active
+        with active_lock:
+            active += 1
+            max_active = max(max_active, active)
+        barrier.wait(timeout=2)
+        with active_lock:
+            active -= 1
+        return object()
+
+    loader.load_native = load_native
+
+    def run(name):
+        return loader._load_native_with_context(
+            f"/model/{name}", object(), name, "transformers", None, name, False
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        list(executor.map(run, ["text_encoder", "text_encoder_2"]))
+
+    assert max_active == 2
 
 
 def test_parallel_loading_can_be_disabled():
