@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37711",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/984",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/950",
+  "candidate_commit": "5fa7c272cedb2e1988fb14eff3e9f388e6f28ce5",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "The recorded base reproduces the invalid mapping-like chat-template input path and retains the unsafe fixed 2048-token default. At the exact candidate commit, the candidate regression passes and independent handler cases confirm a flat chat token list plus context-, prompt-, and reserved-token-aware defaults for both Ollama endpoints. No counterexample to the original two-part contract remains.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-0fa47946d530/venv/bin/python /tmp/amdpilot-repo-j-0fa47946d530/review-evidence/adversarial_ollama_review.py (base commit)",
+      "exit_code": 0,
+      "what_was_measured": "The independent harness caught chat handler failures for context sizes 10, 4, and 3 because the base passed the mapping-like tokenizer result through as input_ids; its log records KeyError 0 at each boundary. The harness catches exceptions so its process exit is zero."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-0fa47946d530/venv/bin/python -m pytest test/registered/unit/entrypoints/ollama/test_serving.py -q (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate's focused handler regressions and boundaries: 5 passed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-0fa47946d530/venv/bin/python /tmp/amdpilot-repo-j-0fa47946d530/review-evidence/adversarial_ollama_review.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Independent chat and generate handler execution produced flat chat IDs and max_new_tokens 6 with six tokens of room, then max_new_tokens 0 at zero/negative remaining-room boundaries."
+    },
+    {
+      "command": "git diff 358c163250ad3b1f62939b01ce1314a0a31a0365..5fa7c272cedb2e1988fb14eff3e9f388e6f28ce5 --check",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X gfx950 is visible through Torch and rocminfo, but the reviewed defects are deterministic Python request shaping and validation paths; no GPU kernel or model execution was needed or claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Qwen/Qwen3-0.6B or other model weights were used, so this review does not claim semantic model accuracy.",
+    "No live HTTP server, multi-node, or distributed workload was run; direct handler execution covers the original request-shaping contract without transport.",
+    "The candidate is Python-only, so native rebuild validation is not applicable."
+  ]
+}
