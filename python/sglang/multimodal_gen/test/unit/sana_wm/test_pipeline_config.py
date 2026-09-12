@@ -59,7 +59,10 @@ from sglang.multimodal_gen.runtime.server_args import set_global_server_args
 from sglang.multimodal_gen.runtime.utils.model_overlay import (
     resolve_model_overlay_target,
 )
-from sglang.multimodal_gen.test.test_utils import DEFAULT_SANA_WM_MODEL_NAME_FOR_TEST
+from sglang.multimodal_gen.test.test_utils import (
+    DEFAULT_LTX_2_3_MODEL_NAME_FOR_TEST,
+    DEFAULT_SANA_WM_MODEL_NAME_FOR_TEST,
+)
 
 _SANA_WM_REFINER_STAGE_MODULE = (
     "sglang.multimodal_gen.runtime.pipelines_core.stages."
@@ -385,7 +388,7 @@ class TestSanaWMRegistry(unittest.TestCase):
             target = resolve_model_overlay_target(snapshot_dir)
         self.assertIsNotNone(target)
         source_model_id, _ = target
-        self.assertEqual(source_model_id, "Lightricks/LTX-2.3")
+        self.assertEqual(source_model_id, DEFAULT_LTX_2_3_MODEL_NAME_FOR_TEST)
 
 
 class TestSanaWMTwoStagePipeline(unittest.TestCase):

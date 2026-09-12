@@ -16,6 +16,7 @@ from sglang.multimodal_gen.test.server.testcase_configs import (
     TI2V_sampling_params,
 )
 from sglang.multimodal_gen.test.test_utils import (
+    DEFAULT_FAST_HUNYUAN_MODEL_NAME_FOR_TEST,
     DEFAULT_QWEN_IMAGE_2512_MODEL_NAME_FOR_TEST,
     DEFAULT_QWEN_IMAGE_EDIT_2509_MODEL_NAME_FOR_TEST,
     DEFAULT_QWEN_IMAGE_EDIT_MODEL_NAME_FOR_TEST,
@@ -92,7 +93,7 @@ NIGHTLY_1_GPU_MUSA_CASES: list[DiffusionTestCase] = [
     DiffusionTestCase(
         "fast_hunyuan_video_musa",
         DiffusionServerArgs(
-            model_path=hf_cached_model("FastVideo/FastHunyuan-diffusers"),
+            model_path=hf_cached_model(DEFAULT_FAST_HUNYUAN_MODEL_NAME_FOR_TEST),
             modality="video",
             custom_validator="video",
         ),

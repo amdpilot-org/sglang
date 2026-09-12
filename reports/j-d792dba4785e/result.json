@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19352",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR https://github.com/amdpilot-org/sglang/pull/2896 and corrected the independently reviewed gaps from https://github.com/amdpilot-org/sglang/pull/2986. Exact candidate commit 3f01b12dfb5ac76975f41964819f07ebf3b8696a was independently reproduced with 10 remaining executable occurrences of four repeated model IDs that had no shared constants, while its guard reported zero; its blanket unit-tree exclusion also hid 57 literals equal to existing constants. The correction centralizes those four IDs plus another repeated runnable ID exposed by the strengthened inventory, scans ordinary unit fixtures for existing shared literals, explicitly exempts the parser/config vector file, and rejects newly repeated runnable model IDs even before a constant exists.",
+  "tests": [
+    {
+      "command": "rg plus prepared-Python AST inventory against a git archive of exact candidate commit 3f01b12dfb5ac76975f41964819f07ebf3b8696a",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before reproduction: the candidate guard found 0 issues, adding the four reviewed values to its prohibited set found exactly 10 executable occurrences (LTX-2.3 x4, LTX-2 x2, FastHunyuan x2, LongLive2 x2), and scanning its excluded unit tree found exactly 57 existing-constant literals. Raw evidence: /tmp/amdpilot-repo-j-d792dba4785e/evidence/candidate-before/guard-inventory.log and counterexample-lines.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d792dba4785e/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_common_model_names.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression: 3 tests passed, covering shared literals throughout non-exempt tests, repeated uncentralized runnable IDs, and executable-code versus docstring behavior. Raw output: /tmp/amdpilot-repo-j-d792dba4785e/evidence/after-focused.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d792dba4785e/venv/bin/python -m pytest -q <9 selected affected unit tests>",
+      "exit_code": 0,
+      "what_was_measured": "Nine directly affected unit tests passed with six subtests, covering Cosmos3, Sana-WM overlay resolution, LTX variant registration, VAE repo-id handling, video profiling, MiniMax web UI lifecycle/error cleanup, OpenAI sampling arguments, and Sana Video registration. Raw output: /tmp/amdpilot-repo-j-d792dba4785e/evidence/affected-unit-tests.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d792dba4785e/venv/bin/python -m compileall -q <all changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python modules compiled with the prepared interpreter. Raw output: /tmp/amdpilot-repo-j-d792dba4785e/evidence/compileall.log."
+    },
+    {
+      "command": "pre-commit run --files <all changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository hooks passed after formatting. Raw output: /tmp/amdpilot-repo-j-d792dba4785e/evidence/precommit-rerun.log."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "The consolidated diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "This correction changes shared test identifiers and AST policy only; it does not change inference or numerical code. The Ascend and MUSA paths require unavailable architectures, and model weights were neither available nor needed to validate source identity preservation. No GPU correctness claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Ascend and MUSA runtime cases were not executed on the ROCm host; only architecture-neutral source, compilation, and regression behavior was validated.",
+    "No model weights were downloaded and no semantic or numerical model-output claim is made.",
+    "python/sglang/multimodal_gen/test/unit/test_server_args.py remains explicitly exempt because its model strings are intentional parser/configuration input and expected-value vectors; ordinary unit fixtures are now scanned."
+  ]
+}
