@@ -1,0 +1,68 @@
+F..                                                                      [100%]
+=================================== FAILURES ===================================
+_ test_successful_transfer_preserves_abort_reason[True-False-FINISH_ABORT-503] _
+
+release_kv_cache = <MagicMock name='release_kv_cache' id='138111410194480'>
+poll = <MagicMock name='poll_and_all_reduce_attn_cp_tp_group' id='138111410201728'>
+pending_abort = True, finished_abort = False
+expected_type = <class 'sglang.srt.managers.schedule_batch.FINISH_ABORT'>
+expected_status = 503
+
+    @pytest.mark.parametrize(
+        "pending_abort,finished_abort,expected_type,expected_status",
+        [
+            (True, False, FINISH_ABORT, 503),
+            (False, True, FINISH_ABORT, None),
+            (False, False, FINISH_LENGTH, None),
+        ],
+    )
+    @patch(
+        "sglang.srt.disaggregation.prefill.poll_and_all_reduce_attn_cp_tp_group",
+        return_value=[KVPoll.Success],
+    )
+    @patch("sglang.srt.disaggregation.prefill.release_kv_cache")
+    def test_successful_transfer_preserves_abort_reason(
+        release_kv_cache,
+        poll,
+        pending_abort,
+        finished_abort,
+        expected_type,
+        expected_status,
+    ):
+        scheduler = _Scheduler()
+        scheduler.attn_cp_cpu_group = None
+        scheduler.attn_tp_cpu_group = None
+        scheduler.req_to_metadata_buffer_idx_allocator = Mock()
+        req = _inflight_req(
+            pending_abort=pending_abort, finished_abort=finished_abort
+        )
+        scheduler.disagg_prefill_inflight_queue = [req]
+    
+        done = scheduler.process_disagg_prefill_inflight_queue()
+    
+        assert done == [req]
+>       assert isinstance(req.finished_reason, expected_type)
+E       AssertionError: assert False
+E        +  where False = isinstance(<sglang.srt.managers.schedule_batch.FINISH_LENGTH object at 0x7d9c918b77d0>, <class 'sglang.srt.managers.schedule_batch.FINISH_ABORT'>)
+E        +    where <sglang.srt.managers.schedule_batch.FINISH_LENGTH object at 0x7d9c918b77d0> = <test_prefill_abort_result_cleanup._Req object at 0x7d9c918b7500>.finished_reason
+
+test/registered/unit/disaggregation/test_prefill_abort_result_cleanup.py:142: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/disaggregation/test_prefill_abort_result_cleanup.py::test_successful_transfer_preserves_abort_reason[True-False-FINISH_ABORT-503]
+1 failed, 2 passed, 11 deselected, 17 warnings in 8.91s
