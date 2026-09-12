@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37772",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Added a DSpark-specific --speculative-dspark-lora-path that creates a draft-local, pinned LoRA manager and routes every DSpark draft forward through that adapter without altering target-model LoRA routing. This is a verified single-adapter foundation, not the complete request-selectable multi-adapter proposal.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-db7867ac91bd/venv/bin/python -m pytest -q test/registered/unit/spec/test_dspark_lora.py test/registered/spec/dspark/test_dspark_draft_path_default.py",
+      "exit_code": 0,
+      "what_was_measured": "Nine CPU tests covering draft-local manager construction, deterministic pinned adapter identity, fixed adapter routing on every request in a DSpark draft batch, and existing DSpark startup behavior."
+    },
+    {
+      "command": "PYTHONPATH=python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-db7867ac91bd/venv/bin/python -m pytest -q test/registered/unit/lora/test_lora_spec_verify_batch_info.py",
+      "exit_code": 0,
+      "what_was_measured": "Three GPU tests for speculative verification LoRA segment metadata, including eager and CUDA-graph layouts."
+    },
+    {
+      "command": "PYTHONPATH=python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-db7867ac91bd/venv/bin/python -m pytest -q 'test/registered/lora/test_fused_moe_lora_kernel.py::test_fused_moe_lora_kernel[42-cuda:0-dtype0-16-16-2048-1408-4-64-6-100-False]'",
+      "exit_code": 0,
+      "what_was_measured": "Real MI355X execution of the LoRA fused MoE kernel against the test's independent PyTorch numerical reference."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-db7867ac91bd/venv/bin/python -m ruff check ...; /tmp/amdpilot-repo-j-db7867ac91bd/venv/bin/python -m black --check ...",
+      "exit_code": 1,
+      "what_was_measured": "Formatter/linter availability only; neither ruff nor black is installed in the pinned interpreter. git diff --check passed."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI355X (gfx950), HIP_VISIBLE_DEVICES=0. Raw logs: reports/j-db7867ac91bd/raw/gpu_lora_spec_verify.txt and gpu_lora_numerical.txt.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one fixed DSpark draft adapter can be selected at server startup. Per-request selection, dynamic load/unload, and batching multiple draft adapters remain unimplemented.",
+    "No public DSpark base checkpoint plus compatible stage-2 LoRA adapter was available in the prepared runtime, so an end-to-end DSpark model serving run and acceptance-rate comparison were not performed.",
+    "The qualified tiny Llama transport fixture cannot validate DSpark architecture or draft-adapter semantics and therefore was not used as substitute evidence.",
+    "CUDA graph integration follows the existing LoRA manager path and GPU metadata tests passed, but a full DSpark CUDA graph with real DSpark adapter weights remains unverified.",
+    "No native code changed, so no native rebuild was applicable."
+  ]
+}

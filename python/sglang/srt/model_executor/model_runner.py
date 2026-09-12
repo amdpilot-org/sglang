@@ -784,7 +784,25 @@ class ModelRunner:
             self.lora_manager, self.uno_lora_id = init_uno_lora_manager(self)
             return
 
-        # Adapters apply to the target model only; the draft runs unadapted.
+        if (
+            self.is_draft_worker
+            and self.spec_algorithm.is_dspark()
+            and get_spec().speculative_dspark_lora_path is not None
+        ):
+            from sglang.srt.speculative.dspark_lora import init_dspark_lora_manager
+
+            self.lora_manager, self.dspark_lora_id = init_dspark_lora_manager(self)
+            if not cuda_graph_fully_disabled():
+                init_lora_cuda_graph_moe_buffers(
+                    model=self.model,
+                    lora_manager=self.lora_manager,
+                    dtype=self.dtype,
+                )
+            return
+
+        # General serving adapters apply to the target model only. Draft-side
+        # adapters use algorithm-specific managers above so their routing and
+        # residency cannot leak into target requests.
         if get_lora().enable_lora and not self.is_draft_worker:
             self.init_lora_manager()
 

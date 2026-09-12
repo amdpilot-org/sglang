@@ -39,6 +39,10 @@ class Spec(msgspec.Struct):
         "Speculative algorithm. Builtins: EAGLE, EAGLE3, NEXTN, STANDALONE, NGRAM, DFLASH, DSPARK, UNO. Or any name registered via `SpeculativeAlgorithm.register`.",
     ] = None
     uno_lora_path: A[Optional[str], "Path to the UNO draft LoRA checkpoint."] = None
+    speculative_dspark_lora_path: A[
+        Optional[str],
+        "DSPARK only. Path to a LoRA adapter applied to the draft model. The adapter is independent of target-model LoRA and is active for every request.",
+    ] = None
     speculative_draft_model_path: A[
         Optional[str],
         Arg(
