@@ -2550,6 +2550,68 @@ class ServingChatTestCase(unittest.TestCase):
         with self.assertRaises(ValueError):
             encode("preview", "low")
 
+    def test_dsv4_defaults_and_explicit_overrides(self):
+        from sglang.srt.entrypoints.openai import encoding_dsv4
+
+        self.template_manager.chat_template_name = None
+        self.template_manager.jinja_template_content_format = "string"
+        self.chat.chat_encoding_spec = "dsv4"
+        self.chat._dsv4_reasoning_effort_profile = "official"
+
+        def render(**request_kwargs):
+            self.tm.tokenizer.encode.reset_mock()
+            request = ChatCompletionRequest(
+                model="x",
+                messages=[{"role": "user", "content": "Solve this."}],
+                **request_kwargs,
+            )
+            with patch.object(
+                encoding_dsv4,
+                "encode_messages",
+                wraps=encoding_dsv4.encode_messages,
+            ) as encode:
+                self.chat._process_messages(request, is_multimodal=False)
+            return (
+                self.tm.tokenizer.encode.call_args.args[0],
+                encode.call_args_list[0].kwargs,
+            )
+
+        envs.SGLANG_DEFAULT_THINKING.clear()
+        envs.SGLANG_DSV4_REASONING_EFFORT.clear()
+        prompt, encode_args = render()
+        self.assertEqual(encode_args["thinking_mode"], "thinking")
+        self.assertIn("<think>", prompt)
+        self.assertIn("Reasoning Effort: Absolute maximum", prompt)
+
+        with envs.SGLANG_DEFAULT_THINKING.override(False):
+            prompt, encode_args = render()
+        self.assertEqual(encode_args["thinking_mode"], "chat")
+
+        with envs.SGLANG_DSV4_REASONING_EFFORT.override("max"):
+            prompt, encode_args = render(chat_template_kwargs={"thinking": False})
+        self.assertEqual(encode_args["reasoning_effort"], "max")
+
+        prompt, encode_args = render(reasoning_effort="low")
+        self.assertEqual(encode_args["reasoning_effort"], "low")
+        self.assertNotIn("Reasoning Effort:", prompt)
+
+    def test_default_thinking_does_not_change_other_encoders(self):
+        self.template_manager.chat_template_name = None
+        self.template_manager.jinja_template_content_format = "string"
+        envs.SGLANG_DEFAULT_THINKING.clear()
+
+        for spec in (None, "dsv32"):
+            with self.subTest(spec=spec):
+                self.chat.chat_encoding_spec = spec
+                request = ChatCompletionRequest(
+                    model="x", messages=[{"role": "user", "content": "Hello"}]
+                )
+                with patch.object(
+                    self.chat, "_encode_messages", return_value=None
+                ) as encode:
+                    self.chat._process_messages(request, is_multimodal=False)
+                self.assertEqual(encode.call_args.args[2], "chat")
+
     def test_dsv4_reasoning_effort_profile_resolution(self):
         resolve = resolve_dsv4_reasoning_effort_profile
         preview_model_path = _create_dsv4_checkpoint(self, _DSV4_PREVIEW_ENCODER)
