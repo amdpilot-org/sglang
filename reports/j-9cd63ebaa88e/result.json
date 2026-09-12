@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/28157",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3368",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3365",
+  "candidate_commit": "3fa63e29ff7226e4097aaea27ec426a1eb52a85e",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The base synchronously blocks the ASGI event loop during slow Prometheus collection. The exact candidate moves collection to a bounded child process, fails overlapping scrapes fast, and fixes the independently reproduced repeated Accept and Accept-Encoding regressions. No remaining source-level counterexample was found.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-9cd63ebaa88e/venv/bin/python /job/review-evidence-j-9cd63ebaa88e/reproduce_base_starvation.py (at base)",
+      "exit_code": 0,
+      "what_was_measured": "A 0.35-second synchronous collector caused 0.331 seconds of event-loop timer lag while /metrics returned 200."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9cd63ebaa88e/venv/bin/python /job/review-evidence-j-9cd63ebaa88e/candidate_headers_probe.py (at a5b60944c1762c4b9196fec907c2a72a58e9143b)",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced both prior-review counterexamples: duplicate Accept failed OpenMetrics selection and duplicate Accept-Encoding failed gzip selection."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9cd63ebaa88e/venv/bin/python -m pytest -q test/registered/unit/utils/test_common.py -k PrometheusMetricsExporter (at candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Five candidate regression tests covering real exposition, singleflight, timeout, failure, and cancellation passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9cd63ebaa88e/venv/bin/python /job/review-evidence-j-9cd63ebaa88e/candidate_headers_probe.py (at candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Repeated Accept and Accept-Encoding behavior matched prometheus_client.make_asgi_app."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9cd63ebaa88e/venv/bin/python /job/review-evidence-j-9cd63ebaa88e/candidate_isolation_probe.py (at candidate)",
+      "exit_code": 0,
+      "what_was_measured": "A slow mocked child returned 200, an overlapping scrape returned 503, and event-loop lag was 0.001 seconds."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9cd63ebaa88e/venv/bin/python /job/review-evidence-j-9cd63ebaa88e/independent_adversarial.py (at candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent weighted/repeated negotiation cases and slash routing matched the Prometheus reference."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reviewed contract is CPU-side ASGI and Prometheus process isolation; the available ROCm/gfx950 GPU cannot reproduce the reported eight-H100 PD topology and was not used."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The original eight-H100 multi-node single-tokenizer PD deployment and decode-side connection-loss logs were unavailable.",
+    "No model weights or sustained production scrape workload were used; deterministic ASGI-level reproduction establishes the blocking mechanism and isolation behavior.",
+    "The prepared host is ROCm 7.2/gfx950 rather than CUDA 13/H100.",
+    "No native source changed and repository-environment.json declares no native build target, so a native rebuild was not applicable."
+  ]
+}
