@@ -1,0 +1,25 @@
+Command:
+PYTHONPATH=python /tmp/amdpilot-repo-j-7d34e3ff1e26/venv/bin/python - <<'PY'
+from sglang.srt.entrypoints.openai.protocol import Function, Tool
+from sglang.srt.function_call.function_call_parser import FunctionCallParser
+
+tools = [Tool(type="function", function=Function(name="get_weather", parameters={"type": "object", "properties": {}}))]
+parser = FunctionCallParser(tools=tools, tool_call_parser="qwen25")
+for label, text in [
+    ("mixed", '<tool_call>\n[{"name": "get_weather", "arguments": {"city": "Paris"}}, "junk"]\n</tool_call>'),
+    ("integers", '<tool_call>\n[1, 2]\n</tool_call>'),
+]:
+    print(f"CASE={label}")
+    try:
+        print(parser.parse_non_stream(text))
+    except Exception as exc:
+        print(f"EXCEPTION={type(exc).__name__}: {exc}")
+PY
+
+Exit code: 0 (the reproduction catches and prints the exceptions)
+
+Output:
+CASE=mixed
+EXCEPTION=AttributeError: 'str' object has no attribute 'get'
+CASE=integers
+EXCEPTION=AttributeError: 'int' object has no attribute 'get'
