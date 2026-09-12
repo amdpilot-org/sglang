@@ -1,0 +1,91 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+___________ test_one_processor_expanded_span_is_one_load_placeholder ___________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f930ca55550>
+
+    def test_one_processor_expanded_span_is_one_load_placeholder(monkeypatch):
+        image_token_id = 99
+        expanded = [1, 10, 99, 99, 99, 99, 11, 2]
+        collapsed = [1, 10, 99, 11, 2]
+        image = Image.new("RGB", (28, 28))
+        item = MultimodalDataItem(
+            modality=Modality.IMAGE,
+            feature=torch.ones((4, 3)),
+            model_specific_data={"image_grid_thw": torch.tensor([[1, 2, 2]])},
+        )
+        processor_output = SimpleNamespace(
+            image_grid_thw=torch.tensor([[1, 2, 2]]),
+            video_grid_thw=None,
+            attention_mask=torch.ones((1, len(expanded))),
+        )
+
+        processor = object.__new__(Glm4vImageProcessor)
+        processor.hf_config = SimpleNamespace(model_type="glm5_next")
+        processor.IM_TOKEN_ID = image_token_id
+        processor.mm_tokens = MultimodalSpecialTokens(
+            image_token_id=image_token_id, video_token_id=98
+        )
+        processor.video_config = {}
+        processor._processor = SimpleNamespace(
+            video_processor=None,
+            _get_num_multimodal_tokens=lambda **_: SimpleNamespace(
+                num_image_tokens=[4]
+            ),
+        )
+        processor._tokenizer = MagicMock()
+        processor.preserve_processor_input_ids = False
+        processor.precompute_hash_before_cpu_transfer = False
+        processor.use_cuda_ipc = False
+        processor.load_mm_data = AsyncMock(
+            return_value=BaseMultiModalProcessorOutput(
+                input_text="unused", input_ids=collapsed, images=[image]
+            )
+        )
+        processor.process_and_combine_mm_data_async = AsyncMock(
+            return_value=([item], torch.tensor(expanded), processor_output)
+        )
+        monkeypatch.setattr(
+            MRotaryEmbedding,
+            "get_rope_index_glm4v",
+            MagicMock(
+                return_value=(
+                    torch.zeros((3, 1, len(expanded))),
+                    torch.zeros(1),
+                )
+            ),
+        )
+
+        output = asyncio.run(
+            processor.process_mm_data_async(
+                image_data=["image"],
+                input_text=expanded,
+                request_obj=SimpleNamespace(video_data=None),
+            )
+        )
+
+>       assert processor.load_mm_data.await_args.kwargs["prompt"] == collapsed
+E       assert [1, 10, 99, 99, 99, 99, ...] == [1, 10, 99, 11, 2]
+E
+E         At index 3 diff: 99 != 11
+E         Left contains 3 more items, first extra item: 99
+E         Use -v to get more diff
+
+../review-evidence-j-792bdb020b2f/test_candidate_serving_path.py:77: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+<frozen abc>:106
+  <frozen abc>:106: DeprecationWarning: MultiPlatformOp is deprecated; subclass sglang.kernels.fused_op.BaseFusedOp instead (RFC #29630).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../review-evidence-j-792bdb020b2f/test_candidate_serving_path.py::test_one_processor_expanded_span_is_one_load_placeholder
+1 failed, 17 warnings in 12.33s
