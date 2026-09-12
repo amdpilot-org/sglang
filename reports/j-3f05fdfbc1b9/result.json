@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32470",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 2319's valid gfx950 planner parity and bounds coverage, corrected its source invariant to reject __syncthreads() inside the tx < kNumWarps initializer branch, and corrected the documented private JIT cache variable from SGLANG_JIT_KERNEL_CACHE_DIR to the implemented SGLANG_JIT_CACHE_DIR.",
+  "tests": [
+    {
+      "command": "Exact candidate helper extracted from 732c5174c612e2ca662eebec2075e55f2bf15b8a, invoked on a synthetic initializer with __syncthreads() nested inside if (tx < kNumWarps), with assertRaises(AssertionError)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: the candidate helper accepted a divergent block barrier. Raw result: reports/j-3f05fdfbc1b9/evidence/failing-before-divergent-barrier.log"
+    },
+    {
+      "command": "SGLANG_JIT_KERNEL_CACHE_DIR=/tmp/amdpilot-repo-j-3f05fdfbc1b9/wrong-name Python probe of envs.SGLANG_JIT_CACHE_DIR and cache.py",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before diagnostic: the candidate's documented variable was present but the implemented cache setting remained unset and defaulted to ~/.cache/sglang/jit. Raw result: reports/j-3f05fdfbc1b9/evidence/failing-before-cache-variable.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3f05fdfbc1b9/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py::TestCompressPlanRaggedReduction::test_barrier_based_initialization_boundary -vv",
+      "exit_code": 0,
+      "what_was_measured": "Focused passing-after regression accepted the safe block-wide barrier and rejected both missing and divergent barriers. One test passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-3f05fdfbc1b9/cache-correction /tmp/amdpilot-repo-j-3f05fdfbc1b9/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py -vv",
+      "exit_code": 0,
+      "what_was_measured": "Five tests and nine subtests passed. The real JIT GPU planner matched the independent CPU plan and preserved ragged-ID bounds for the reported compact shape and boundary controls; the library was freshly compiled in the stated private cache. Raw result: reports/j-3f05fdfbc1b9/evidence/passing-after.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Consolidated patch whitespace validation."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI350X gfx950 with PyTorch 2.11.0+rocm7.2 and HIP 7.2.26015 executed the real plan_compress_prefill_kernel0 JIT planner from a fresh library under /tmp/amdpilot-repo-j-3f05fdfbc1b9/cache-correction. See reports/j-3f05fdfbc1b9/evidence/environment-and-jit.log.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original CUDA/H20 TP=2 DeepSeek-V4-Flash-DSpark graph-capture reproduction was not run: the environment provides one AMD gfx950 GPU and no reported model weights.",
+    "The GPU run qualifies planner metadata and bounds on HIP, not CUDA scheduler behavior, a full model, CUDA graph capture, semantic accuracy, or a distributed serving workload.",
+    "No monolithic native rebuild is configured (repository-environment.json native is null); the applicable JIT extension was freshly compiled from the checked-out source for gfx950."
+  ]
+}
