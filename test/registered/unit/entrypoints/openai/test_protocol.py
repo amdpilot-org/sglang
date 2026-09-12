@@ -717,7 +717,10 @@ class TestFunctionDeferLoading(unittest.TestCase):
             ],
         )
 
-        self.assertIsNone(request.tools[0].function.strict)
+        self.assertIs(request.tools[0].function.strict, False)
+        self.assertIs(
+            request.model_dump()["tools"][0]["function"]["strict"], False
+        )
 
     def test_chat_function_tool_rejects_non_boolean_strict(self):
         with self.assertRaises(ValidationError):

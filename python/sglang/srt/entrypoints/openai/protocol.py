@@ -768,6 +768,11 @@ class Function(BaseModel):
     strict: Optional[bool] = False
     defer_loading: Optional[bool] = None
 
+    @field_validator("strict", mode="before")
+    @classmethod
+    def normalize_nullable_strict(cls, value):
+        return False if value is None else value
+
     @model_serializer(mode="wrap")
     def _serialize(self, handler):
         data = handler(self)
@@ -1581,6 +1586,11 @@ class ResponseTool(BaseModel):
     strict: Optional[bool] = False
     # Inner schemas for ``namespace`` tools.
     tools: Optional[List[Dict[str, Any]]] = None
+
+    @field_validator("strict", mode="before")
+    @classmethod
+    def normalize_nullable_strict(cls, value):
+        return False if value is None else value
 
     @model_validator(mode="after")
     def validate_function_tool(self) -> ResponseTool:

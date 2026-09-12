@@ -11,6 +11,7 @@ from sglang.srt.entrypoints.openai.protocol import (
     ResponsesResponse,
     UsageInfo,
 )
+from sglang.srt.entrypoints.openai.serving_responses import OpenAIServingResponses
 from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import CustomTestCase
 
@@ -68,7 +69,11 @@ class ResponsesRequestTestCase(CustomTestCase):
             store=False,
         )
 
-        self.assertIsNone(request.tools[0].strict)
+        self.assertIs(request.tools[0].strict, False)
+        self.assertIs(request.model_dump()["tools"][0]["strict"], False)
+
+        chat_tools = OpenAIServingResponses._response_tools_to_chat_tools(request)
+        self.assertIs(chat_tools[0].function.strict, False)
 
     def test_function_tool_omitted_strict_defaults_to_false(self):
         request = ResponsesRequest(
