@@ -169,6 +169,9 @@ from sglang.multimodal_gen.runtime.utils.precision import (
     resolve_precision,
 )
 from sglang.multimodal_gen.runtime.utils.profiler import SGLDiffusionProfiler
+from sglang.multimodal_gen.runtime.utils.compile_trajectory import (
+    CompilePlanResolution,
+)
 from sglang.multimodal_gen.runtime.utils.torch_compile import (
     CompiledModuleRegistry,
     build_torch_compile_kwargs,
@@ -534,7 +537,11 @@ class DenoisingStage(PipelineStage, RolloutDenoisingMixin):
                     moved.append(module)
         return moved
 
-    def _maybe_torch_compile(self, module: object) -> None:
+    def _maybe_torch_compile(
+        self,
+        module: object,
+        resolved_plan: CompilePlanResolution | None = None,
+    ) -> None:
         """
         Compile a module with torch.compile, and enable inductor overlap tweak if available.
         No-op if torch compile is disabled or the object is not a nn.Module.
@@ -553,6 +560,13 @@ class DenoisingStage(PipelineStage, RolloutDenoisingMixin):
         if self._torch_compile_registry.is_compiled(module):
             return
 
+        if resolved_plan is not None and not resolved_plan.use_compiled:
+            logger.info(
+                "Using eager transformer; compile plan fallback reason=%s",
+                resolved_plan.fallback_reason,
+            )
+            return
+
         if current_platform.is_npu():
             compile_kwargs = build_torch_compile_kwargs(mode=None)
             logger.info("Compiling transformer with torchair backend on NPU")
@@ -568,6 +582,19 @@ class DenoisingStage(PipelineStage, RolloutDenoisingMixin):
             logger.info(f"Compiling transformer with mode: {mode}")
 
         if getattr(self.server_args, "regional_compile", False):
+            if resolved_plan is not None:
+                manifest = resolved_plan.manifest
+                assert manifest is not None
+                actual_regions = self._torch_compile_registry.region_inventory(module)
+                if actual_regions != manifest.regions:
+                    logger.warning(
+                        "Using eager transformer; promoted region inventory changed "
+                        "(manifest=%s runtime=%s)",
+                        manifest.regions,
+                        actual_regions,
+                    )
+                    return
+                compile_kwargs = dict(manifest.compile_options)
             compiled_count = self._torch_compile_registry.compile_regions_once(
                 module,
                 compile_kwargs=compile_kwargs,
