@@ -144,6 +144,8 @@ def _make_scheduler(
         is_empty=lambda: running_bs == 0,
     )
     s.chunked_req = chunked_req
+    if chunked_req is not None:
+        chunked_req.beam_group = None
     s.waiting_queue = list(waiting_queue)
     for req in s.waiting_queue:
         req.beam_group = None
@@ -340,6 +342,42 @@ class TestGetNewBatchPrefillChunkedSlot(CustomTestCase):
         # The chunk contributes its already-held row before beam-width
         # accounting: min(4 ceiling rows, (3 + 1) // 2) = 2 requests.
         self.assertEqual(num_allocatable, 2)
+
+    def test_width_two_request_uses_exactly_two_free_rows_beside_width_one_chunk(self):
+        q = MagicMock(name="queued_width_2")
+        chunk = MagicMock(name="chunked_width_1")
+        s = _make_scheduler(
+            ceiling=16,
+            running_bs=12,
+            pool_avail=2,
+            chunked_req=chunk,
+            waiting_queue=[q],
+        )
+        q.beam_group = SimpleNamespace(beam_width=2)
+
+        _, adder = _run_prefill(s)
+
+        self.assertEqual(adder.can_run_list, [chunk, q])
+        self.assertEqual(s.waiting_queue, [])
+        self.assertFalse(s.running_batch.batch_is_full)
+
+    def test_width_two_request_stays_queued_with_only_one_free_row(self):
+        q = MagicMock(name="queued_width_2")
+        chunk = MagicMock(name="chunked_width_1")
+        s = _make_scheduler(
+            ceiling=16,
+            running_bs=12,
+            pool_avail=1,
+            chunked_req=chunk,
+            waiting_queue=[q],
+        )
+        q.beam_group = SimpleNamespace(beam_width=2)
+
+        _, adder = _run_prefill(s)
+
+        self.assertEqual(adder.can_run_list, [chunk])
+        self.assertEqual(s.waiting_queue, [q])
+        self.assertTrue(s.running_batch.batch_is_full)
 
 
 if __name__ == "__main__":
