@@ -1654,19 +1654,21 @@ class TestGoldenModelOverrides(_IsolatedPublish):
             defaults.update(kw)
             return SimpleNamespace(**defaults)
 
-        with (
-            envs.SGLANG_DSV4_FP4_DEQUANT.override(False),
-            override_platform(is_sm100=True),
-        ):
-            self.assertEqual(
-                _deepseek_v4_overrides(_args(), hf),
-                {
-                    "attention_backend": "dsv4",
-                    "moe_runner_backend": "flashinfer_mxfp4",
-                    "page_size": 256,
-                    "swa_full_tokens_ratio": 0.1,
-                },
-            )
+        for capability in ("is_sm90", "is_sm100", "is_sm120"):
+            with (
+                self.subTest(capability=capability),
+                envs.SGLANG_DSV4_FP4_DEQUANT.override(False),
+                override_platform(is_hip=False, **{capability: True}),
+            ):
+                self.assertEqual(
+                    _deepseek_v4_overrides(_args(), hf),
+                    {
+                        "attention_backend": "dsv4",
+                        "moe_runner_backend": "flashinfer_mxfp4",
+                        "page_size": 256,
+                        "swa_full_tokens_ratio": 0.1,
+                    },
+                )
         # NPU pool geometry
         self.assertEqual(
             _deepseek_v4_overrides(_args(device="npu"), hf)["page_size"], 128
@@ -1684,7 +1686,7 @@ class TestGoldenModelOverrides(_IsolatedPublish):
         # FlashInfer MXFP4 only supports the standard (non-A2A) dispatcher.
         with (
             envs.SGLANG_DSV4_FP4_DEQUANT.override(False),
-            override_platform(is_sm100=True),
+            override_platform(is_hip=False, is_sm100=True),
         ):
             self.assertNotIn(
                 "moe_runner_backend",
@@ -1693,7 +1695,7 @@ class TestGoldenModelOverrides(_IsolatedPublish):
         # Runtime FP4-to-FP8 dequantization must retain the generic FP8 runner.
         with (
             envs.SGLANG_DSV4_FP4_DEQUANT.override(True),
-            override_platform(is_sm100=True),
+            override_platform(is_hip=False, is_sm100=True),
         ):
             self.assertNotIn(
                 "moe_runner_backend",
@@ -1718,9 +1720,9 @@ class TestGoldenModelOverrides(_IsolatedPublish):
         # Unsupported NVIDIA architectures keep the generic auto-resolution
         # path instead of selecting a FlashInfer kernel that cannot launch.
         with (
-            override_platform(is_sm90=False),
-            override_platform(is_sm100=False),
-            override_platform(is_sm120=False),
+            override_platform(
+                is_hip=False, is_sm90=False, is_sm100=False, is_sm120=False
+            ),
         ):
             self.assertNotIn(
                 "moe_runner_backend",
@@ -1729,9 +1731,9 @@ class TestGoldenModelOverrides(_IsolatedPublish):
         # SM120 uses the same model hook; no later pass is needed.
         with (
             envs.SGLANG_DSV4_FP4_DEQUANT.override(False),
-            override_platform(is_sm90=False),
-            override_platform(is_sm100=False),
-            override_platform(is_sm120=True),
+            override_platform(
+                is_hip=False, is_sm90=False, is_sm100=False, is_sm120=True
+            ),
         ):
             self.assertEqual(
                 _deepseek_v4_overrides(_args(), hf)["moe_runner_backend"],
