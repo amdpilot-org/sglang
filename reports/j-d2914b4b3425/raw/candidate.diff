@@ -1,0 +1,553 @@
+diff --git a/python/sglang/multimodal_gen/test/unit/test_flux2_weight_reload.py b/python/sglang/multimodal_gen/test/unit/test_flux2_weight_reload.py
+new file mode 100644
+index 0000000..982b16a
+--- /dev/null
++++ b/python/sglang/multimodal_gen/test/unit/test_flux2_weight_reload.py
+@@ -0,0 +1,80 @@
++import torch
++
++from sglang.multimodal_gen.runtime.models.dits.flux_2 import (
++    Flux2Transformer2DModel,
++)
++from sglang.multimodal_gen.runtime.post_training.weights_updater import (
++    _load_weights_into_module,
++)
++
++
++class _Flux2ReloadFixture(torch.nn.Module):
++    """Minimal module exposing the real FLUX.2 checkpoint-name mapping."""
++
++    param_names_mapping = Flux2Transformer2DModel.param_names_mapping
++
++    def __init__(self, device: torch.device):
++        super().__init__()
++        attention = torch.nn.Module()
++        attention.to_qkv = torch.nn.Module()
++        attention.to_qkv.weight = torch.nn.Parameter(torch.zeros(6, 2, device=device))
++        attention.to_added_qkv = torch.nn.Module()
++        attention.to_added_qkv.weight = torch.nn.Parameter(
++            torch.zeros(6, 2, device=device)
++        )
++        block = torch.nn.Module()
++        block.attn = attention
++        self.transformer_blocks = torch.nn.ModuleList([block])
++
++
++def _install_sharded_loader(parameter: torch.nn.Parameter) -> None:
++    def loader(param, weight, shard_id):
++        param.data[shard_id * 2 : (shard_id + 1) * 2].copy_(weight)
++
++    parameter.weight_loader = loader
++
++
++def test_flux2_diffusers_qkv_reload_routes_each_fused_shard():
++    module = _Flux2ReloadFixture(torch.device("cpu"))
++    _install_sharded_loader(module.transformer_blocks[0].attn.to_qkv.weight)
++    _install_sharded_loader(module.transformer_blocks[0].attn.to_added_qkv.weight)
++
++    prefix = "transformer_blocks.0.attn"
++    weights = []
++    for value, name in enumerate(
++        ("to_q", "to_k", "to_v", "add_q_proj", "add_k_proj", "add_v_proj"),
++        start=1,
++    ):
++        weights.append((f"{prefix}.{name}.weight", torch.full((2, 2), value)))
++
++    _load_weights_into_module(module, weights)
++
++    expected_image = torch.tensor([[1.0] * 2] * 2 + [[2.0] * 2] * 2 + [[3.0] * 2] * 2)
++    expected_text = torch.tensor([[4.0] * 2] * 2 + [[5.0] * 2] * 2 + [[6.0] * 2] * 2)
++    torch.testing.assert_close(
++        module.transformer_blocks[0].attn.to_qkv.weight, expected_image
++    )
++    torch.testing.assert_close(
++        module.transformer_blocks[0].attn.to_added_qkv.weight, expected_text
++    )
++
++
++def test_flux2_runtime_layout_reload_keeps_plain_two_argument_loader():
++    module = _Flux2ReloadFixture(torch.device("cpu"))
++    parameter = module.transformer_blocks[0].attn.to_qkv.weight
++    calls = []
++
++    def loader(param, weight, *args):
++        calls.append(args)
++        param.data.copy_(weight)
++
++    parameter.weight_loader = loader
++    expected = torch.arange(12, dtype=torch.float32).reshape(6, 2)
++
++    _load_weights_into_module(
++        module,
++        [("transformer_blocks.0.attn.to_qkv.weight", expected)],
++    )
++
++    assert calls == [()]
++    torch.testing.assert_close(parameter, expected)
+diff --git a/reports/j-f63772dce09a/raw/cpu_tests.log b/reports/j-f63772dce09a/raw/cpu_tests.log
+new file mode 100644
+index 0000000..3e18643
+--- /dev/null
++++ b/reports/j-f63772dce09a/raw/cpu_tests.log
+@@ -0,0 +1,16 @@
++ERROR: not found: /job/repo/python/sglang/multimodal_gen/test/unit/test_transformer_quant.py::TestTransformerQuantConfig::test_flux2_modelopt_fp8_qkv_checkpoint_tensors_are_merged
++(no match in any of [<Module test_transformer_quant.py>])
++
++
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++16 warnings in 0.80s
+diff --git a/reports/j-f63772dce09a/raw/cpu_tests_pass.log b/reports/j-f63772dce09a/raw/cpu_tests_pass.log
+new file mode 100644
+index 0000000..2f039f7
+--- /dev/null
++++ b/reports/j-f63772dce09a/raw/cpu_tests_pass.log
+@@ -0,0 +1,13 @@
++.....                                                                    [100%]
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++5 passed, 70 deselected, 16 warnings in 0.33s
+diff --git a/reports/j-f63772dce09a/raw/failing_before_july_base.log b/reports/j-f63772dce09a/raw/failing_before_july_base.log
+new file mode 100644
+index 0000000..b063942
+--- /dev/null
++++ b/reports/j-f63772dce09a/raw/failing_before_july_base.log
+@@ -0,0 +1,12 @@
++[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
++[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-f63772dce09a/cache/aiter/module_aiter_core.so
++Traceback (most recent call last):
++  File "<string>", line 1, in <module>
++  File "/tmp/sglang-j-f63772dce09a-before/python/sglang/multimodal_gen/runtime/post_training/weights_updater.py", line 203, in _load_weights_into_module
++    load_weights_into_model(weights_iter, model_params)
++  File "/tmp/sglang-j-f63772dce09a-before/python/sglang/multimodal_gen/runtime/post_training/weights_updater.py", line 295, in load_weights_into_model
++    weight_loader(param, loaded_weight.to(param.dtype))
++  File "<string>", line 1, in <lambda>
++  File "<string>", line 1, in <genexpr>
++AssertionError
++source /tmp/sglang-j-f63772dce09a-before/python/sglang/multimodal_gen/runtime/post_training/weights_updater.py
+diff --git a/reports/j-f63772dce09a/raw/gfx950_reload.log b/reports/j-f63772dce09a/raw/gfx950_reload.log
+new file mode 100644
+index 0000000..90f690f
+--- /dev/null
++++ b/reports/j-f63772dce09a/raw/gfx950_reload.log
+@@ -0,0 +1,3 @@
++[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
++[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-f63772dce09a/cache/aiter/module_aiter_core.so
++{'device': 'AMD Instinct MI355X', 'arch': 'gfx950:sramecc+:xnack-', 'result': [[1.0, 1.0], [1.0, 1.0], [2.0, 2.0], [2.0, 2.0], [3.0, 3.0], [3.0, 3.0]], 'expected': [[1.0, 1.0], [1.0, 1.0], [2.0, 2.0], [2.0, 2.0], [3.0, 3.0], [3.0, 3.0]]}
+diff --git a/reports/j-f63772dce09a/raw/precommit.log b/reports/j-f63772dce09a/raw/precommit.log
+new file mode 100644
+index 0000000..4a71c53
+--- /dev/null
++++ b/reports/j-f63772dce09a/raw/precommit.log
+@@ -0,0 +1,57 @@
++[INFO] Initializing environment for https://github.com/pre-commit/pre-commit-hooks.
++[INFO] Initializing environment for https://github.com/PyCQA/isort.
++[INFO] Initializing environment for https://github.com/astral-sh/ruff-pre-commit.
++[INFO] Initializing environment for https://github.com/codespell-project/codespell.
++[INFO] Initializing environment for https://github.com/pre-commit/mirrors-clang-format.
++[INFO] Initializing environment for https://github.com/kynan/nbstripout.
++[INFO] Initializing environment for https://github.com/lycheeverse/lychee.git.
++[INFO] Installing environment for https://github.com/pre-commit/pre-commit-hooks.
++[INFO] Once installed this environment will be reused.
++[INFO] This may take a few minutes...
++[INFO] Installing environment for https://github.com/PyCQA/isort.
++[INFO] Once installed this environment will be reused.
++[INFO] This may take a few minutes...
++[INFO] Installing environment for https://github.com/astral-sh/ruff-pre-commit.
++[INFO] Once installed this environment will be reused.
++[INFO] This may take a few minutes...
++[INFO] Installing environment for https://github.com/codespell-project/codespell.
++[INFO] Once installed this environment will be reused.
++[INFO] This may take a few minutes...
++[INFO] Installing environment for https://github.com/pre-commit/mirrors-clang-format.
++[INFO] Once installed this environment will be reused.
++[INFO] This may take a few minutes...
++[INFO] Installing environment for https://github.com/kynan/nbstripout.
++[INFO] Once installed this environment will be reused.
++[INFO] This may take a few minutes...
++check for broken symlinks..............................(no files to check)Skipped
++detect destroyed symlinks..................................................Passed
++trim trailing whitespace...................................................Passed
++fix end of files...........................................................Passed
++check yaml.............................................(no files to check)Skipped
++check toml.............................................(no files to check)Skipped
++check python ast...........................................................Passed
++check for added large files................................................Passed
++check for merge conflicts..................................................Passed
++check that scripts with shebangs are executable............................Passed
++detect private key.........................................................Passed
++debug statements (python)..................................................Passed
++don't commit to branch.....................................................Passed
++isort......................................................................Passed
++ruff (legacy alias)........................................................Passed
++ruff format................................................................Passed
++codespell..................................................................Passed
++clang-format...........................................(no files to check)Skipped
++nbstripout.............................................(no files to check)Skipped
++forbid docs_new/ (renamed to docs/)....................(no files to check)Skipped
++check chinese characters in multimodal_gen.................................Passed
++sort CI_PERMISSIONS.json...............................(no files to check)Skipped
++check for duplicate workflow job names.................(no files to check)Skipped
++check rust-ext cache key prefix defaults match.........(no files to check)Skipped
++reject bare pytest.main calls in __main__ blocks...........................Passed
++unit tests for lint checkers...........................(no files to check)Skipped
++validate registered test CI registries.................(no files to check)Skipped
++reject CI-registered tests inside the sglang package.......................Passed
++rustfmt sgl-model-gateway (nightly)....................(no files to check)Skipped
++rustfmt experimental/sgl-router........................(no files to check)Skipped
++clippy rust/ workspace (auto-fix)......................(no files to check)Skipped
++rustfmt rust/ workspace................................(no files to check)Skipped
+diff --git a/reports/j-f63772dce09a/raw/regression_after_format.log b/reports/j-f63772dce09a/raw/regression_after_format.log
+new file mode 100644
+index 0000000..7bc6e44
+--- /dev/null
++++ b/reports/j-f63772dce09a/raw/regression_after_format.log
+@@ -0,0 +1,13 @@
++..                                                                       [100%]
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++2 passed, 16 warnings in 0.70s
+diff --git a/reports/j-f63772dce09a/raw/source_comparison.log b/reports/j-f63772dce09a/raw/source_comparison.log
+new file mode 100644
+index 0000000..54be0e1
+--- /dev/null
++++ b/reports/j-f63772dce09a/raw/source_comparison.log
+@@ -0,0 +1,265 @@
++
++def _build_module_weight_name_mapper(module: torch.nn.Module):
++    """Build a chained regex mapper from mapping dicts exposed by the module."""
++    mapping_fns = []
++    for attr in ("lora_param_names_mapping", "param_names_mapping"):
++        mapping = getattr(module, attr, None)
++        if not mapping:
++            continue
++        mapping_fns.append(get_param_names_mapping(mapping))
++
++    if not mapping_fns:
++        return None
++
++    def map_name(name: str) -> str:
++        mapped_name = name
++        for mapping_fn in mapping_fns:
++            mapped_name = mapping_fn(mapped_name)[0]
++        return mapped_name
++
++    return map_name
++
++
++def _strip_param_weight_suffix(param_name: str) -> str:
++    if param_name.endswith(".weight"):
++        return param_name[: -len(".weight")]
++    if param_name.endswith(".bias"):
++        return param_name[: -len(".bias")]
++    return param_name
++
++
++def _resolve_lora_ipc_layer_dict_key(
++    layer_prefix: str,
++    layer_dict: dict,
++    module: torch.nn.Module,
++) -> tuple[Any | None, str]:
++    """Map training-side LoRA layer prefix to lora_layers key (Layer 2)."""
++    layer = layer_dict.get(layer_prefix)
++    if layer is not None:
++        return layer, layer_prefix
++
++    map_name = _build_module_weight_name_mapper(module)
++    if map_name is None:
++        return None, layer_prefix
++
++    mapped = _strip_param_weight_suffix(map_name(f"{layer_prefix}.weight"))
++    if mapped != layer_prefix:
++        layer = layer_dict.get(mapped)
++        if layer is not None:
++            return layer, mapped
++
++    return None, layer_prefix
++
++
++def _iter_module_weight_updates(
++    module: torch.nn.Module,
++    weights_iter,
++    model_params: dict,
++):
++    map_name = _build_module_weight_name_mapper(module)
++    module_name = type(module).__name__
++
++    for name, loaded_weight in weights_iter:
++        if name in model_params:
++            yield name, loaded_weight
++            continue
++
++        mapped_name = map_name(name) if map_name is not None else name
++        if mapped_name in model_params:
++            yield mapped_name, loaded_weight
++            continue
++
++        logger.warning(
++            "Skipping weight update for %s: parameter %r not found after mapping to %r",
++            module_name,
++            name,
++            mapped_name,
++        )
++
++
++def load_weights_into_model(
++    weights_iter, model_params: dict, module_name: str | None = None
++) -> None:
++    """Copy weights from weights_iter into model_params in-place."""
++    for name, loaded_weight in weights_iter:
++        if name not in model_params:
++            logger.warning("Skipping weight update: parameter %r not found", name)
++            continue
++        param = model_params[name]
++        weight_loader = getattr(param, "weight_loader", None)
++        if callable(weight_loader):
++            weight_loader(param, loaded_weight.to(param.dtype))
++        else:
++            dtensor_param = param if isinstance(param, DTensor) else None
++            if dtensor_param is None and isinstance(
++                getattr(param, "data", None), DTensor
++            ):
++                dtensor_param = param.data
++
++            if dtensor_param is not None:
++                distributed_weight = distribute_tensor(
++                    loaded_weight.to(param.dtype),
++
++CURRENT
++            for manager in offload_managers:
++                offloaded_names.update(manager.update_cpu_weights(weight_dict))
++            remaining = (
++                (n, w) for n, w in weight_dict.items() if n not in offloaded_names
++            )
++            load_weights_into_model(remaining, model_params)
++        else:
++            load_weights_into_model(weights_iter, model_params)
++
++
++def _build_module_weight_name_mapper(module: torch.nn.Module):
++    """Build a chained regex mapper from mapping dicts exposed by the module."""
++    mapping_fns = []
++    for attr in ("lora_param_names_mapping", "param_names_mapping"):
++        mapping = getattr(module, attr, None)
++        if not mapping:
++            continue
++        mapping_fns.append(get_param_names_mapping(mapping))
++
++    if not mapping_fns:
++        return None
++
++    def map_name(name: str) -> tuple[str, Any]:
++        mapped_name = name
++        merge_index = None
++        for mapping_fn in mapping_fns:
++            mapped_name, index, _ = mapping_fn(mapped_name)
++            if index is not None:
++                merge_index = index
++        return mapped_name, merge_index
++
++    return map_name
++
++
++def _strip_param_weight_suffix(param_name: str) -> str:
++    if param_name.endswith(".weight"):
++        return param_name[: -len(".weight")]
++    if param_name.endswith(".bias"):
++        return param_name[: -len(".bias")]
++    return param_name
++
++
++def _resolve_lora_ipc_layer_dict_key(
++    layer_prefix: str,
++    layer_dict: dict,
++    module: torch.nn.Module,
++) -> tuple[Any | None, str, int | None]:
++    """Map training-side LoRA layer prefix to lora_layers key (Layer 2)."""
++    layer = layer_dict.get(layer_prefix)
++    if layer is not None:
++        return layer, layer_prefix, None
++
++    map_name = _build_module_weight_name_mapper(module)
++    if map_name is None:
++        return None, layer_prefix, None
++
++    mapped_name, merge_index = map_name(f"{layer_prefix}.weight")
++    mapped = _strip_param_weight_suffix(mapped_name)
++    if mapped != layer_prefix:
++        layer = layer_dict.get(mapped)
++        if layer is not None:
++            return layer, mapped, merge_index
++
++    return None, layer_prefix, None
++
++
++def _iter_module_weight_updates(
++    module: torch.nn.Module,
++    weights_iter,
++    model_params: dict,
++):
++    """Yield (mapped_name, weight, shard_id); shard_id is the merge index for
++    weights that map into a fused parameter (e.g. q/k/v -> to_qkv), else None.
++    """
++    map_name = _build_module_weight_name_mapper(module)
++    module_name = type(module).__name__
++
++    for name, loaded_weight in weights_iter:
++        if name in model_params:
++            yield name, loaded_weight, None
++            continue
++
++        mapped_name, merge_index = (
++            map_name(name) if map_name is not None else (name, None)
++        )
++        if mapped_name in model_params:
++            yield mapped_name, loaded_weight, merge_index
++            continue
++
++        logger.warning(
++            "Skipping weight update for %s: parameter %r not found after mapping to %r",
++            module_name,
++            name,
++            mapped_name,
++        )
++
++
++def load_weights_into_model(
++    weights_iter, model_params: dict, module_name: str | None = None
++) -> None:
++    """Copy weights into model_params in-place; entries are (name, weight) or
++    (name, weight, shard_id), shard_id routing fused parts via weight_loader."""
++    for entry in weights_iter:
++        name, loaded_weight, *rest = entry
++        shard_id = rest[0] if rest else None
++        if name not in model_params:
++            logger.warning("Skipping weight update: parameter %r not found", name)
++            continue
++        param = model_params[name]
++        weight_loader = getattr(param, "weight_loader", None)
++        if callable(weight_loader):
++            if shard_id is not None:
++                weight_loader(param, loaded_weight.to(param.dtype), shard_id)
++            else:
++                weight_loader(param, loaded_weight.to(param.dtype))
++        else:
++            dtensor_param = param if isinstance(param, DTensor) else None
++            if dtensor_param is None and isinstance(
++                getattr(param, "data", None), DTensor
++            ):
++                dtensor_param = param.data
++
++FLUX2_MAPPING
++    param_names_mapping = {
++        # ModelOpt FP8 exports separate Diffusers projections. Merge Q/K/V and
++        # their static scales into the runtime MergedColumnParallelLinear.
++        r"^(transformer_blocks\.\d+\.attn)\.to_q\.(weight|bias|weight_scale|input_scale)$": (
++            r"\1.to_qkv.\2",
++            0,
++            3,
++        ),
++        r"^(transformer_blocks\.\d+\.attn)\.to_k\.(weight|bias|weight_scale|input_scale)$": (
++            r"\1.to_qkv.\2",
++            1,
++            3,
++        ),
++        r"^(transformer_blocks\.\d+\.attn)\.to_v\.(weight|bias|weight_scale|input_scale)$": (
++            r"\1.to_qkv.\2",
++            2,
++            3,
++        ),
++        r"^(transformer_blocks\.\d+\.attn)\.add_q_proj\.(weight|bias|weight_scale|input_scale)$": (
++            r"\1.to_added_qkv.\2",
++            0,
++            3,
++        ),
++        r"^(transformer_blocks\.\d+\.attn)\.add_k_proj\.(weight|bias|weight_scale|input_scale)$": (
++            r"\1.to_added_qkv.\2",
++            1,
++            3,
++        ),
++        r"^(transformer_blocks\.\d+\.attn)\.add_v_proj\.(weight|bias|weight_scale|input_scale)$": (
++            r"\1.to_added_qkv.\2",
++            2,
++            3,
++        ),
++        **FluxConfig().arch_config.param_names_mapping,
++    }
++    packed_modules_mapping = {
++        "to_qkv": ["to_q", "to_k", "to_v"],
++        "to_added_qkv": ["add_q_proj", "add_k_proj", "add_v_proj"],
++    }
+diff --git a/reports/j-f63772dce09a/result.json b/reports/j-f63772dce09a/result.json
+new file mode 100644
+index 0000000..a5c7cc6
+--- /dev/null
++++ b/reports/j-f63772dce09a/result.json
+@@ -0,0 +1,40 @@
++{
++  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31924",
++  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
++  "outcome": "fixed",
++  "summary": "The prepared source already contains the relevant fused-checkpoint reload correction. Relative to the July failing base a25164bda355250015c0ba6d8821f0d4b37abe7d, the mapper now preserves merge_index, load_weights_into_model forwards it as shard_id, and Flux2Transformer2DModel declares diffusers to_q/to_k/to_v and add_q/add_k/add_v mappings for fused runtime parameters. An issue-specific integrated regression was added. The July code reproduces the bare AssertionError on the same mapped fused-shard contract; the current code passes on CPU and gfx950.",
++  "tests": [
++    {
++      "command": "PYTHONPATH=/tmp/sglang-j-f63772dce09a-before/python /tmp/amdpilot-repo-j-f63772dce09a/venv/bin/python -c '<historical fused-shard reload fixture>'",
++      "exit_code": 1,
++      "what_was_measured": "Failing-before reproduction using the actual July base implementation: merge_index was discarded, the two-argument loader received a [2,2] shard for a [6,2] fused parameter, and raised the reported bare AssertionError. Raw traceback: raw/failing_before_july_base.log."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-f63772dce09a/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_flux2_weight_reload.py python/sglang/multimodal_gen/test/unit/test_cosmos3_rollout.py::TestWeightsUpdaterFusedParams python/sglang/multimodal_gen/test/unit/test_transformer_quant.py -k 'flux2_modelopt_fp8_qkv_checkpoint_tensors_are_merged or TestWeightsUpdaterFusedParams or flux2_weight_reload'",
++      "exit_code": 0,
++      "what_was_measured": "Five focused tests passed: integrated FLUX.2 diffusers shard routing, runtime-layout two-argument boundary behavior, generic merge-index forwarding, and FLUX.2 ModelOpt mapping/merge behavior. Raw output: raw/cpu_tests_pass.log."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-f63772dce09a/venv/bin/python -c '<gfx950 FLUX.2 mapped-shard reload and independent expected tensor check>'",
++      "exit_code": 0,
++      "what_was_measured": "The actual current reload path on AMD Instinct MI355X gfx950 routed q/k/v shards into the correct rows of a GPU-resident fused parameter; torch.testing.assert_close passed against an independently constructed expected tensor. Raw output: raw/gfx950_reload.log."
++    },
++    {
++      "command": "git diff --check",
++      "exit_code": 0,
++      "what_was_measured": "No whitespace errors in the proposed report and regression changes."
++    }
++  ],
++  "gpu_execution": {
++    "value": true,
++    "evidence": "Single assigned AMD Instinct MI355X, gfx950:sramecc+:xnack-, executed the current mapped fused-shard reload path and matched the independent expected GPU tensor; see raw/gfx950_reload.log."
++  },
++  "native_rebuilt": false,
++  "remaining_limitations": [
++    "The Qwen-Image and FLUX.2-klein-base-4B checkpoint weights were not available, so no full model boot or HTTP endpoint reproduction was claimed.",
++    "The regression validates the exact name-mapping, merge-index, weight-loader, and GPU copy contract with a minimal FLUX.2 fixture; it does not validate model semantic accuracy.",
++    "Layerwise-offloaded fused-parameter reload remains explicitly unsupported by the current implementation and was not tested here.",
++    "FSDP, tensor-parallel, multi-GPU, and multi-node reload paths were not exercised.",
++    "No native C++ or FlyDSL source changed, so no native rebuild was applicable."
++  ]
++}
