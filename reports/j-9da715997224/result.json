@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/1715",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Preserved candidate 362ed639d20c2e872dd054f05c609d8e8bb0baad's valid eager ordinary-decode cascade implementation. Independently reproduced its regression and the review's explicit mode exclusions. No further source correction is justified on this ROCm-only host because the remaining counterexamples require NVIDIA FlashInfer CUDA-graph, wrapper/kernel, and serving validation.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9da715997224/venv/bin/python -m pytest -q test/registered/unit/test_flashinfer_cascade_attention.py (exact candidate 362ed639)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate selection, page-table construction, mocked forwarding, and an independent float64 split-softmax numerical reference passed; the real NVIDIA FlashInfer wrapper/merge integration skipped. Result: 6 passed, 1 skipped, 7 subtests passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9da715997224/venv/bin/python -m pytest -q /tmp/j-9da715997224-cascade-test.py (base 358c163)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression on the recorded base. Result: 11 failed, 2 passed, 1 skipped."
+    },
+    {
+      "command": "rg -n -C 3 'Cascade decode is intentionally eager-only|decode_cuda_graph_metadata\\[bs\\]|dispatch_reason is None and not self.decode_uses_dequant_workspace|forward_batch.spec_info is None' python/sglang/srt/layers/attention/flashinfer_backend.py",
+      "exit_code": 0,
+      "what_was_measured": "Source evidence that graph replay uses ordinary decode wrappers and cascade excludes dispatch modes, speculation, and dequant workspace."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..HEAD",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace hygiene."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "The portable float64 PyTorch numerical identity ran on one AMD Instinct MI355X (gfx950). No FlashInfer CUDA kernel ran; torch.version.cuda is null and flashinfer is absent.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "CUDA-graph decode cascade integration remains unimplemented and unverified.",
+    "Sliding-window attention, encoder-decoder cross attention, speculative decode, and dequant-workspace KV cache configurations remain outside cascade.",
+    "Production BatchPrefillWithPagedKVCacheWrapper.forward_return_lse and merge_state execution remains unverified because NVIDIA CUDA and FlashInfer are unavailable.",
+    "No NVIDIA end-to-end shared-prefix serving correctness or performance workload was run.",
+    "The tiny Llama fixture cannot qualify the unavailable CUDA-only FlashInfer path."
+  ]
+}
