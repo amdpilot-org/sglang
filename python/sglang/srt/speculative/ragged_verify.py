@@ -216,6 +216,22 @@ def build_capture_verify_lens(
     return [base + 1] * rem + [base] * (num_slots - rem)
 
 
+def capture_num_slots(*, num_tokens: int, request_width: int, max_bs: int) -> int:
+    """Return the request-row count represented by a capture token tier."""
+    if num_tokens < 1 or request_width < 1 or max_bs < 1:
+        raise ValueError(
+            "capture geometry must be positive, got "
+            f"num_tokens={num_tokens}, request_width={request_width}, max_bs={max_bs}"
+        )
+    slots = (num_tokens + request_width - 1) // request_width
+    if slots > max_bs:
+        raise ValueError(
+            f"num_tokens={num_tokens} needs {slots} request slots at width "
+            f"{request_width}, exceeding max_bs={max_bs}"
+        )
+    return slots
+
+
 def resolve_ragged_verify_layout(forward_batch) -> Optional[RaggedVerifyLayout]:
     """Layout riding the batch's spec input, or None. Tolerates the runner's
     ad-hoc replay batch views, which may not carry spec_info at all."""

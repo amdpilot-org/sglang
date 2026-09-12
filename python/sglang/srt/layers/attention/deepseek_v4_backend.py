@@ -165,6 +165,15 @@ def _copy_or_replace(dst, src):
     return src
 
 
+def _copy_tensor_allowing_shared_storage_(dst: torch.Tensor, src: torch.Tensor):
+    """Copy replay metadata even when live and captured views share storage."""
+    if dst.is_set_to(src):
+        return
+    if dst.untyped_storage().data_ptr() == src.untyped_storage().data_ptr():
+        src = src.clone()
+    dst.copy_(src)
+
+
 @dataclass
 class DSV4AttnMetadata:
     page_size: int
@@ -540,9 +549,11 @@ class DSV4RawVerifyMetadata:
     total_verify_tokens: int = 0
 
     def copy_(self, other: DSV4RawVerifyMetadata):
-        self.req_pool_indices.copy_(other.req_pool_indices)
-        self.seq_lens.copy_(other.seq_lens)
-        self.out_cache_loc.copy_(other.out_cache_loc)
+        _copy_tensor_allowing_shared_storage_(
+            self.req_pool_indices, other.req_pool_indices
+        )
+        _copy_tensor_allowing_shared_storage_(self.seq_lens, other.seq_lens)
+        _copy_tensor_allowing_shared_storage_(self.out_cache_loc, other.out_cache_loc)
 
         self.extend_seq_lens = other.extend_seq_lens
         self.seq_lens_cpu = other.seq_lens_cpu
@@ -562,9 +573,11 @@ class DSV4RawDecodeMetadata:
     out_cache_loc: torch.Tensor
 
     def copy_(self, other: DSV4RawDecodeMetadata):
-        self.req_pool_indices.copy_(other.req_pool_indices)
-        self.seq_lens.copy_(other.seq_lens)
-        self.out_cache_loc.copy_(other.out_cache_loc)
+        _copy_tensor_allowing_shared_storage_(
+            self.req_pool_indices, other.req_pool_indices
+        )
+        _copy_tensor_allowing_shared_storage_(self.seq_lens, other.seq_lens)
+        _copy_tensor_allowing_shared_storage_(self.out_cache_loc, other.out_cache_loc)
 
 
 class _GraphBucket(enum.Enum):

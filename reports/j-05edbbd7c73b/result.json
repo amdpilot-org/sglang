@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39173",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the reported 42-token/8-slot/width-6 capture geometry and the DSV4 first-replay overlapping-copy failure. The candidate derives capture slots from request width (42 -> 7) without forcing verify-all and makes raw DSV4 replay metadata copies safe when live and captured tensors share storage. Focused tests and independent MI355X tensor references pass. Full Engram validation is blocked because the recorded checkout and public upstream main contain no EngramHasher or layers/engram.py, and the reported image revision e087e662ba1ac4ef7747537e2a9141085efd4561 is not fetchable.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-05edbbd7c73b/venv/bin/python prechange reproduction script",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X, actual build_capture_verify_lens produced [6,6,5,5,5,5,5,5] for 42 tokens/8 slots/width 6 and the issue assertion failed; DSV4RawVerifyMetadata.copy_ raised the reported overlapping-memory RuntimeError. Raw output: /job/raw-output/prechange-reproduction.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-05edbbd7c73b/venv/bin/python -m pytest -q test/registered/spec/dspark/test_ragged_verify.py test/registered/unit/layers/test_dsv4_metadata_copy.py",
+      "exit_code": 0,
+      "what_was_measured": "14 tests and 5 subtests passed, covering capture tiers including 42 -> 7 slots and overlapping raw verify/decode metadata copies. Raw output: /job/raw-output/focused-tests.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-05edbbd7c73b/venv/bin/python GPU layout reference script",
+      "exit_code": 0,
+      "what_was_measured": "Actual ROCm BuildQoIndptr outputs and repeat_interleave per-request token contexts matched independent Python references for 6, 12, 24, 42, 43, and 48 token tiers. Raw output: /job/raw-output/gpu-layout-reference.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-05edbbd7c73b/venv/bin/python -m pytest -q test/registered/unit/layers/test_dsv4_metadata_copy.py",
+      "exit_code": 0,
+      "what_was_measured": "Both overlap-copy regressions passed on the assigned ROCm GPU. Raw output: /job/raw-output/gpu-alias-regression.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "AMD Instinct MI355X, torch 2.11.0+rocm7.2, HIP 7.2.26015; real device tensors exercised RaggedVerifyLayout/BuildQoIndptr and overlapping DSV4 metadata copies.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The recorded base and public upstream main have no EngramHasher, no python/sglang/srt/layers/engram.py, and no DeepSeek-V4.1 Engram integration, so actual Engram hash tensor outputs and per-request hash context could not be validated.",
+    "The issue's reported revision e087e662ba1ac4ef7747537e2a9141085efd4561 could not be fetched from the public upstream repository.",
+    "Full TP4/EP4 DeepSeek-V4.1-Flash deployment and CUDA graph capture/replay remain unverified on the single AMD MI355X ROCm GPU.",
+    "No FlyDSL C++ or LLVM code was changed; a native rebuild was not applicable."
+  ],
+  "source_paths": [
+    "python/sglang/srt/model_executor/runner/decode_cuda_graph_runner.py",
+    "python/sglang/srt/speculative/ragged_verify.py",
+    "python/sglang/srt/layers/attention/deepseek_v4_backend.py"
+  ],
+  "native_paths": []
+}

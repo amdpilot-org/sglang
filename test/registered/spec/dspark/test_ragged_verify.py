@@ -97,6 +97,21 @@ class TestPaddedRaggedVerifyGeometry(CustomTestCase):
 
 
 class TestCaptureVerifyLens(CustomTestCase):
+    def test_capture_slots_follow_request_width_across_tiers(self):
+        from sglang.srt.speculative.ragged_verify import capture_num_slots
+
+        for num_tokens, expected in [(6, 1), (12, 2), (24, 4), (42, 7), (48, 8)]:
+            with self.subTest(num_tokens=num_tokens):
+                self.assertEqual(
+                    capture_num_slots(num_tokens=num_tokens, request_width=6, max_bs=8),
+                    expected,
+                )
+
+    def test_capture_slots_keep_partial_last_request(self):
+        from sglang.srt.speculative.ragged_verify import capture_num_slots
+
+        self.assertEqual(capture_num_slots(num_tokens=43, request_width=6, max_bs=8), 8)
+
     def test_small_tier_one_token_rows(self):
         from sglang.srt.speculative.ragged_verify import build_capture_verify_lens
 
