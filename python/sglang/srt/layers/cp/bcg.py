@@ -68,7 +68,11 @@ def filter_prefill_cp_bcg_capture_num_tokens(
     capture_num_tokens: list[int], server_args: ServerArgs
 ) -> list[int]:
     """Keep only token buckets where the zigzag CP strategy can run."""
-    min_num_tokens = resolved_view(server_args).attn_cp_size * 2
+    resolved = resolved_view(server_args)
+    min_num_tokens = max(
+        resolved.attn_cp_size * 2,
+        resolved.prefill_cp_min_tokens,
+    )
     filtered = [size for size in capture_num_tokens if size >= min_num_tokens]
     if not filtered:
         raise ValueError(

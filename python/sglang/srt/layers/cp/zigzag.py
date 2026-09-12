@@ -107,7 +107,11 @@ class ZigzagCPStrategy(ContextParallelStrategy):
     kind = ContextParallelStrategyKind.ZIGZAG
 
     def can_apply(self, num_tokens: int, forward_batch) -> bool:
-        if self.cp_size <= 1 or num_tokens < self.cp_size * 2:
+        if (
+            self.cp_size <= 1
+            or num_tokens < self.cp_size * 2
+            or not self.meets_token_threshold(num_tokens)
+        ):
             return False
         forward_mode = getattr(forward_batch, "forward_mode", None)
         if forward_mode is not None and not forward_mode.is_context_parallel_extend():
