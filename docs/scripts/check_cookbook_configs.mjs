@@ -26,6 +26,7 @@ import { fileURLToPath } from "node:url";
 
 const SNIPPETS = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "snippets");
 const CONFIGS = join(SNIPPETS, "configs");
+const DOCS = join(SNIPPETS, "..", "..");
 const DIFFUSION_COOKBOOK = join(SNIPPETS, "..", "..", "cookbook", "diffusion");
 const COOKBOOK_MODEL_TEMPLATE = join(
   SNIPPETS, "..", "..", "..", ".claude", "skills", "cookbook-add-model",
@@ -126,6 +127,51 @@ const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
       && !e.name.includes("benchmark")
       && e.name !== "popular-models.jsx"
       ? [join(dir, e.name)] : []));
+const walkMarkdown = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+  e.isDirectory() ? walkMarkdown(join(dir, e.name))
+    : (/\.mdx?$/.test(e.name) ? [join(dir, e.name)] : []));
+
+// uv before 0.12 ignores transitive pre-release specifiers. Since SGLang's
+// dependencies include pre-releases, an unflagged PyPI install can silently
+// resolve to an old SGLang release. Check all documentation and the cookbook
+// template, including normal shell commands continued with a backslash. Source
+// and git installs are excluded because their project metadata makes the
+// pre-release dependencies direct requirements.
+const isUnsafeSglangUvInstall = (command) => {
+  const isUvInstall = /uv\s+pip\s+install\b/i.test(command);
+  const installsSglangFromPypi = /\bsglang(?:\[[^\]]+\])?(?:[<>=!~]|\b)/i.test(command)
+    && !/\bsglang-/i.test(command)
+    && !/git\+/i.test(command);
+  return isUvInstall && installsSglangFromPypi
+    && !/--prerelease(?:=|\s+)allow\b/i.test(command);
+};
+for (const [command, expected] of [
+  ["uv pip install sglang", true],
+  ["uv pip install SGLang", true],
+  ["uv pip install \\\n  sglang", true],
+  ["uv pip install \"sglang>=0.5.10\"", true],
+  ["uv pip install --prerelease=allow sglang", false],
+  ["uv pip install sglang --prerelease allow", false],
+  ["uv pip install -e \"python[all]\"", false],
+  ["uv pip install \"sglang @ git+https://example.test/sglang.git\"", false],
+  ["uv pip install lmms_eval", false],
+  ["uv pip install sglang-router", false],
+  ["uv pip install .", false],
+]) {
+  if (isUnsafeSglangUvInstall(command) !== expected) {
+    fail("prerelease install guard", `misclassified: ${command}`);
+  }
+}
+for (const path of [...walkMarkdown(DOCS), COOKBOOK_MODEL_TEMPLATE]) {
+  const where = relative(DOCS, path);
+  const source = readFileSync(path, "utf8");
+  const logicalLines = source.replace(/\\\r?\n[ \t]*/g, " ").split("\n");
+  for (const [i, line] of logicalLines.entries()) {
+    if (isUnsafeSglangUvInstall(line)) {
+      fail(`${where}:${i + 1}`, "SGLang uv install is missing --prerelease=allow");
+    }
+  }
+}
 
 for (const path of walk(CONFIGS)) {
   const where = relative(join(SNIPPETS, ".."), path);
@@ -427,11 +473,7 @@ for (const path of walk(CONFIGS)) {
 // Keep the first screen consistent across model pages. This check intentionally
 // guards structure, not editorial judgment; the authoring skill carries the
 // capability/strength/boundary rubric that cannot be reduced to keywords.
-const walkMdx = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
-  e.isDirectory() ? walkMdx(join(dir, e.name))
-    : (e.name.endsWith(".mdx") ? [join(dir, e.name)] : []));
-
-for (const path of walkMdx(DIFFUSION_COOKBOOK)) {
+for (const path of walkMarkdown(DIFFUSION_COOKBOOK).filter((path) => path.endsWith(".mdx"))) {
   if (["README.mdx", "intro.mdx"].includes(basename(path))) continue;
 
   const where = relative(join(SNIPPETS, "..", ".."), path);
