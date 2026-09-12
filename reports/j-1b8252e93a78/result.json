@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33656",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "PR 2013 at 8a0f2af independently verifies a narrow correction: a follower with no rank-local sidecar writes must publish successful completion rather than completed_tokens=0. It does not establish that the original DeepSeek-V4 SWA position corruption or downstream NaN is fixed.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-1b8252e93a78/venv/bin/python -m pytest -q /job/review-evidence-j-1b8252e93a78/test_hybrid_cache_controller_backup.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Original candidate regression on base: empty follower-local transfers yielded completed_tokens=0 rather than 128; 1 failed and 2 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1b8252e93a78/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hybrid_cache_controller_backup.py (candidate 8a0f2af)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression at the exact commit: vacuous follower success, complete sidecar success, and partial sidecar failure; 3 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1b8252e93a78/venv/bin/python -m pytest -q /job/review-evidence-j-1b8252e93a78/adversarial_backup.py (candidate 8a0f2af)",
+      "exit_code": 0,
+      "what_was_measured": "Independent accounting cases for skipped replicated DSV4/SWA transfers and missing/incomplete rank-local acknowledgements; 4 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1b8252e93a78/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hybrid_pool_assembler.py test/registered/unit/mem_cache/test_mooncake_group_semantics.py test/registered/unit/mem_cache/test_unified_cache_linker.py (candidate 8a0f2af)",
+      "exit_code": 1,
+      "what_was_measured": "Adjacent cache assembly, Mooncake semantics, and linker coverage: 56 passed; 7 Rust-backend cases were environment-blocked because cargo could not be executed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The tested correction is host-side accounting. One AMD MI350X gfx950 was visible, but the required DeepSeek-V4 weights and reported 8x H20 CUDA topology were unavailable; no unrelated GPU smoke was used as original-issue evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No DeepSeek-V4 FULL+SWA hierarchical-cache backup, GPU eviction, large-prefix restore, and subsequent SWA write-position check was performed.",
+    "The reproduced base defect is completed_tokens=0 on a follower; it does not reproduce a successful restore with stored position 512 where 8448 was expected.",
+    "No kv-canary TAIL_K_SWA evidence or independent position oracle was obtained.",
+    "No multi-rank test in a fresh Mooncake namespace proves identical replicated DSV4 draft/SWA publication and restoration across TP ranks.",
+    "No downstream logits or sampling-probability test establishes removal of the reported NaN crash."
+  ],
+  "remaining_limitations": [
+    "Only one AMD MI350X gfx950 GPU was available, not the reported eight NVIDIA H20 GPUs.",
+    "DeepSeek-V4 model weights were unavailable.",
+    "Seven Rust-backed linker tests were blocked because cargo could not be executed.",
+    "No native code changed in the candidate, so no native rebuild was applicable."
+  ]
+}
