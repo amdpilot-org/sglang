@@ -1,0 +1,58 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/29864",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate is accurate test-only hardening for the current successor KV-write path, not a kernel or compiler fix. The historical store_cache_4d implementation was already absent from the recorded base. Its faithful copied kernel and independent envelope-stride boundary cases compile and match numerical references on the prepared ROCm 7.2/Triton 3.7 gfx950 system, while the replacement suite passes both before and after. Accept the narrow AMD CI registration, but do not treat it as a failing-before/passing-after resolution of the original Triton compiler defect.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-475756cc3fa9/venv/bin/python /job/review-evidence-j-475756cc3fa9/candidate-reproducer.py (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's faithful historical store_cache_4d kernel compiled on the recorded base and matched exact PyTorch references for its page-size 1 and 4 cases. This was a non-reproduction, not a failing-before result."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-475756cc3fa9/venv/bin/python test/registered/unit/mem_cache/test_unified_mha_views.py -v (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "All 13 successor-layout tests passed before the candidate, establishing that the candidate does not change their runtime behavior."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-475756cc3fa9/venv/bin/python reports/j-6b061592c983/reproduce_historical_store_cache_4d.py (exact candidate f7420f4eb0379aba502980c67f10af5316feb33d)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate regression compiled the historical Triton kernel and obtained exact GPU parity for both supplied cases."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-475756cc3fa9/venv/bin/python /job/review-evidence-j-475756cc3fa9/adversarial_historical.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent exact-buffer parity including padding preservation for non-contiguous envelope strides, page sizes 1/3/8, int32/int64 locations, asymmetric K/V rows, and widths around the 128-element Triton block boundary."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-475756cc3fa9/venv/bin/python test/registered/unit/mem_cache/test_unified_mha_views.py -v (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "All 13 current replacement-layout tests passed on the candidate."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-475756cc3fa9/venv/bin/python -c collect_tests(...) (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed that the candidate adds AMD collection in stage-b-test-1-gpu-small-amd while retaining CPU collection."
+    },
+    {
+      "command": "git diff 358c163250ad3b1f62939b01ce1314a0a31a0365 f7420f4eb0379aba502980c67f10af5316feb33d --check",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace validity."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI355X, gfx950:sramecc+:xnack-, executed the historical Triton kernel and current replacement write tests under torch 2.11.0+rocm7.2, HIP 7.2.26015, and Triton 3.7.0. Source imported from /job/repo/python/sglang; Torch and Triton imported from /opt/venv/lib/python3.12/site-packages.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The originally failing older ROCm 7.2/Triton package combination remains untested locally and could still fail TritonAMDGPUCanonicalizePointers.",
+    "The assigned gfx950 GPU cannot qualify the original gfx942 lane; only external issue evidence reports a later gfx942 pass.",
+    "The newly registered replacement suite does not compile the deleted store_cache_4d_kernel, so it cannot catch a recurrence confined to that historical kernel."
+  ],
+  "remaining_limitations": [
+    "No local failing-before compiler crash was available, and the candidate changes no compiler or kernel code.",
+    "No native code changed; native rebuilding was not applicable.",
+    "No model weights, serving path, full-model accuracy, or multi-node workload was exercised because the issue is a standalone kernel compiler failure."
+  ]
+}
