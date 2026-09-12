@@ -22,6 +22,7 @@ from sglang.srt.constrained.base_grammar_backend import (
     BaseGrammarBackend,
     BaseGrammarObject,
     InvalidGrammarObject,
+    PlaceholderGrammarObject,
 )
 from sglang.srt.constrained.grammar_manager import GrammarManager
 from sglang.srt.constrained.reasoner_grammar_backend import ReasonerGrammarObject
@@ -264,6 +265,39 @@ class TestProcessReqWithGrammar(unittest.TestCase):
         self.assertFalse(result)
         req.set_finish_with_abort.assert_called_once()
         self.assertIn("bad schema", req.set_finish_with_abort.call_args[0][0])
+
+    def test_non_entry_tp_rank_queues_placeholder_without_compiling(self):
+        mgr = self._make_mgr()
+        mgr.tp_grammar_entry_only = True
+        mgr.is_grammar_sync_entry = False
+
+        req = _make_req(json_schema='{"type": "object"}')
+        result = mgr.process_req_with_grammar(req)
+
+        self.assertTrue(result)
+        self.assertIsInstance(req.grammar, PlaceholderGrammarObject)
+        self.assertEqual(req.grammar_key, ("json", '{"type": "object"}'))
+        mgr.grammar_backend.get_cached_or_future_value.assert_not_called()
+
+    def test_entry_tp_rank_compiles_and_queues_even_on_cache_hit(self):
+        mgr = self._make_mgr()
+        mgr.tp_grammar_entry_only = True
+        mgr.is_grammar_sync_entry = True
+        grammar_obj = MagicMock(spec=BaseGrammarObject)
+        mgr.grammar_backend.get_cached_or_future_value.return_value = (
+            grammar_obj,
+            True,
+        )
+
+        req = _make_req(regex="[a-z]+")
+        result = mgr.process_req_with_grammar(req)
+
+        self.assertTrue(result)
+        self.assertIs(req.grammar, grammar_obj)
+        self.assertEqual(req.grammar_key, ("regex", "[a-z]+"))
+        mgr.grammar_backend.get_cached_or_future_value.assert_called_once_with(
+            ("regex", "[a-z]+"), False
+        )
 
     def test_no_backend_aborts(self):
         """No grammar backend should abort request."""
@@ -684,8 +718,8 @@ class TestGetReadyGrammarRequests(unittest.TestCase):
 
         # Simulate all_gather: rank 0 has {0} ready, rank 1 has {0,1} ready
         def fake_all_gather(output_list, _obj, group=None):  # noqa: ARG001
-            output_list[0] = ({0}, set())  # rank 0: only idx 0 ready
-            output_list[1] = ({0, 1}, set())  # rank 1: both ready
+            output_list[0] = ({0}, set(), {})  # rank 0: only idx 0 ready
+            output_list[1] = ({0, 1}, set(), {})  # rank 1: both ready
 
         mock_all_gather.side_effect = fake_all_gather
 
@@ -714,8 +748,8 @@ class TestGetReadyGrammarRequests(unittest.TestCase):
 
         # Simulate: rank 0 has no ready and idx 0 failed, rank 1 has no ready/failed
         def fake_all_gather(output_list, _obj, group=None):  # noqa: ARG001
-            output_list[0] = (set(), {0})  # rank 0: idx 0 timed out
-            output_list[1] = (set(), set())  # rank 1: nothing
+            output_list[0] = (set(), {0}, {})  # rank 0: idx 0 timed out
+            output_list[1] = (set(), set(), {})  # rank 1: nothing
 
         mock_all_gather.side_effect = fake_all_gather
 
@@ -774,21 +808,21 @@ class TestGrammarManagerPPSync(unittest.TestCase):
         pp_group = _FakePPGroup()
         mgr = self._make_mgr_for_pp(pp_rank=0, pp_size=3, pp_group=pp_group)
 
-        data = mgr._pp_sync_ready_failed({1}, {3})
+        data = mgr._pp_sync_ready_failed({1}, {3}, {3: "failed"})
 
-        self.assertEqual(data, ({1}, {3}))
+        self.assertEqual(data, ({1}, {3}, {3: "failed"}))
         self.assertEqual(pp_group.recv_calls, [])
         self.assertEqual(
             pp_group.send_calls,
-            [(({1}, {3}), 1, True, P2PTag.GRAMMAR_PP_SYNC)],
+            [(({1}, {3}, {3: "failed"}), 1, True, P2PTag.GRAMMAR_PP_SYNC)],
         )
 
     def test_middle_pp_rank_receives_and_forwards_pp0_result(self):
-        pp0_data = ({1, 2}, {4})
+        pp0_data = ({1, 2}, {4}, {4: "failed"})
         pp_group = _FakePPGroup(recv_data=pp0_data)
         mgr = self._make_mgr_for_pp(pp_rank=1, pp_size=3, pp_group=pp_group)
 
-        data = mgr._pp_sync_ready_failed(set(), set())
+        data = mgr._pp_sync_ready_failed(set(), set(), {})
 
         self.assertEqual(data, pp0_data)
         self.assertEqual(pp_group.recv_calls, [(0, P2PTag.GRAMMAR_PP_SYNC)])
@@ -798,11 +832,11 @@ class TestGrammarManagerPPSync(unittest.TestCase):
         )
 
     def test_last_pp_rank_receives_without_forwarding(self):
-        pp0_data = ({0}, {2})
+        pp0_data = ({0}, {2}, {2: "failed"})
         pp_group = _FakePPGroup(recv_data=pp0_data)
         mgr = self._make_mgr_for_pp(pp_rank=2, pp_size=3, pp_group=pp_group)
 
-        data = mgr._pp_sync_ready_failed(set(), set())
+        data = mgr._pp_sync_ready_failed(set(), set(), {})
 
         self.assertEqual(data, pp0_data)
         self.assertEqual(pp_group.recv_calls, [(1, P2PTag.GRAMMAR_PP_SYNC)])
@@ -814,7 +848,7 @@ class TestGrammarManagerPPSync(unittest.TestCase):
         work = _FakePPSendWork()
         mgr.grammar_pp_sync_work_list = [work]
 
-        mgr._pp_sync_ready_failed({1}, set())
+        mgr._pp_sync_ready_failed({1}, set(), {})
 
         self.assertTrue(work.waited)
 
