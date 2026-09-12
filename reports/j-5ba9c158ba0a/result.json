@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34384",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1723",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Reproduced the review gap: the candidate helper test passes with runner replay staging disabled. Preserved its valid cases and added a failing-before/passing-after integration regression for runner staging, pointer-stable capture buffers, DSV4 replay layout resolution, and a 160-live-token layout rounded to tier 192. No justified production source change was found on the prepared source.",
+  "tests": [
+    {
+      "command": "controlled mutation: disable DecodeCudaGraphRunner._stage_ragged_verify_layout, then run candidate issue-specific helper test",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the candidate regression does not detect removal of runner replay staging."
+    },
+    {
+      "command": "controlled mutation: disable DecodeCudaGraphRunner._stage_ragged_verify_layout, then run test/registered/unit/model_executor/runner/test_ragged_verify_replay_layout.py",
+      "exit_code": 1,
+      "what_was_measured": "All three consolidated integration cases failed against broken staging, including DSV4 resolution and the lower-token same-tier boundary."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5ba9c158ba0a/venv/bin/python -m pytest -q test/registered/spec/dspark/test_ragged_verify.py test/registered/unit/model_executor/runner/test_ragged_verify_replay_layout.py",
+      "exit_code": 0,
+      "what_was_measured": "15 focused helper and integration tests passed after restoring production staging."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-5ba9c158ba0a/venv/bin/python reports/j-5ba9c158ba0a/gpu_replay_geometry.py",
+      "exit_code": 0,
+      "what_was_measured": "Real gfx950 execution of runner staging for 32x6 and 32x5 layouts into a 192-slot capture; the latter assigned tokens to 32 synthetic slots."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "AMD Instinct MI355X gfx950 under ROCm 7.2 executed DecodeCudaGraphRunner._stage_ragged_verify_layout device tensor copies and padding kernels for both reviewed geometries.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The exact four-NVIDIA-H20 TP4 DeepSeek-V4-Flash CUDA Graph replay was not executable in the assigned single-gfx950 environment.",
+    "DeepSeek-V4-Flash DSpark model weights were unavailable.",
+    "CUDA/Hopper behavior, distributed collectives, full DSV4 attention execution, model semantics, and the serving workload remain unverified.",
+    "No production source defect was found from the available source-level and gfx950 evidence; a speculative runtime change was therefore not made."
+  ]
+}
