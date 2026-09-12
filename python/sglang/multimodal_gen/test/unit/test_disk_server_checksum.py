@@ -6,6 +6,7 @@ from pathlib import Path
 import torch
 from safetensors.torch import save_file
 
+from sglang.multimodal_gen.runtime.models.parameter import BasevLLMParameter
 from sglang.multimodal_gen.runtime.post_training.gpu_worker_post_training_mixin import (
     GPUWorkerPostTrainingMixin,
 )
@@ -75,6 +76,35 @@ def test_comparison_detects_single_value_corruption(tmp_path):
 
     assert result["match"] is False
     assert result["server_checksum"] != result["disk_checksum"]
+
+
+class _ColumnParallelTextEncoder(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        def load_column_parallel(param, loaded_weight):
+            param.load_column_parallel_weight(loaded_weight)
+
+        self.weight = BasevLLMParameter(
+            torch.zeros(2), weight_loader=load_column_parallel
+        )
+
+
+def test_comparison_preserves_parameter_subclass_loader_api(tmp_path):
+    checkpoint = tmp_path / "text_encoder"
+    checkpoint.mkdir()
+    save_file(
+        {"weight": torch.tensor([5.0, 6.0])}, checkpoint / "model.safetensors"
+    )
+    module = _ColumnParallelTextEncoder()
+
+    _load_weights_into_module(module, _get_weights_iter(str(checkpoint)))
+    result = compare_module_weights_with_disk(module, str(checkpoint))
+
+    assert module.weight.tolist() == [5.0, 6.0]
+    assert result["match"] is True
+    module.weight.data[1] = 7.0
+    assert compare_module_weights_with_disk(module, str(checkpoint))["match"] is False
 
 
 def test_comparison_rejects_checkpoint_with_no_loadable_parameters(tmp_path):

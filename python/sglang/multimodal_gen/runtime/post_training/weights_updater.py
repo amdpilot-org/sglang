@@ -359,10 +359,15 @@ def _local_parameter_tensor(param: torch.Tensor) -> torch.Tensor:
 def _make_checksum_scratch(param: torch.Tensor) -> torch.nn.Parameter:
     """Make a CPU parameter accepted by the original parameter's weight loader."""
     local = _local_parameter_tensor(param)
-    scratch = torch.nn.Parameter(
-        torch.zeros(local.shape, dtype=local.dtype, device="cpu"),
-        requires_grad=False,
-    )
+    scratch_data = torch.zeros(local.shape, dtype=local.dtype, device="cpu")
+    if type(param) is torch.nn.Parameter:
+        scratch = torch.nn.Parameter(scratch_data, requires_grad=False)
+    else:
+        # Diffusion parallel-linear loaders call methods implemented by
+        # BasevLLMParameter subclasses.  Construct the scratch tensor as the
+        # same subclass without invoking architecture-specific constructors.
+        scratch = scratch_data.as_subclass(type(param))
+        scratch.requires_grad_(False)
     # Parallel-linear loaders keep shard metadata on the Parameter object.
     scratch.__dict__.update(getattr(param, "__dict__", {}))
     return scratch
