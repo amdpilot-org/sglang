@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37215",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1098",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1062",
+  "candidate_commit": "e5ce94b77e1db3a2c4641abf97ebf391926af8ba",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a verified partial mitigation: automatic TCPStore ports avoid Linux's ephemeral range and its focused tests pass, but the reservation is still released before TCPStore binds and the reported explicit --nccl-port 30101 DP=8 configuration still reuses one port across replicas. It therefore does not establish unique, collision-free ports for the full original contract.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d0119d69af03/venv/bin/python /job/review-evidence/base/reproduce_port_race.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "64/64 old allocator samples were inside 32768-60999; after the controller-style reservation was released and an unrelated client acquired the port, real torch.distributed.TCPStore failed with DistNetworkError EADDRINUSE."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d0119d69af03/venv/bin/python -m pytest -q test/registered/utils/test_socket_utils.py test/registered/unit/server_args/test_server_args.py::TestPortArgs (candidate e5ce94b77e1db3a2c4641abf97ebf391926af8ba)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and focused PortArgs suite: 37 passed. Imports resolved to the exact checkout under /job/repo/python."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d0119d69af03/venv/bin/python /job/review-evidence/candidate/adversarial_candidate.py (candidate e5ce94b77e1db3a2c4641abf97ebf391926af8ba)",
+      "exit_code": 0,
+      "what_was_measured": "Eight automatically chosen ports were outside the ephemeral range and eight real TCPStores bound; independently acquiring a chosen port after reservation release still caused real TCPStore EADDRINUSE."
+    },
+    {
+      "command": "Candidate PortArgs.init_new/bind_port loop with ServerArgs(model_path='dummy', dp_size=8, nccl_port=30101)",
+      "exit_code": 0,
+      "what_was_measured": "Every allocation returned explicit port 30101; repeated reservations failed with OSError by DP iteration 2 (the third replica), demonstrating the original explicit-port mode is not made unique per replica."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and candidate change are Python socket/TCPStore initialization paths. Tests used real CPU TCPStore networking. No GPU kernel or model server was executed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A listener that acquires the selected non-ephemeral port after DataParallelController closes its reservation and before TCPStore binds still produces the reported EADDRINUSE.",
+    "With the reported --nccl-port 30101 and --dp 8, candidate PortArgs returns the same explicit port for each independent DP scheduler; repeated reservation cannot provide eight unique ports.",
+    "When procfs is unavailable or the non-ephemeral range is exhausted, the candidate intentionally falls back to the old ephemeral allocator and restores the original race exposure."
+  ],
+  "remaining_limitations": [
+    "Prepared hardware is one AMD MI355X/gfx950-class GPU with ROCm 7.2, not eight NVIDIA H800 GPUs with CUDA/NCCL.",
+    "Qwen3-Embedding weights were unavailable, so full serving startup and intermittent frequency were not measured.",
+    "The tiny transport fixture was unnecessary for this TCPStore allocator review and would not qualify the Qwen3-Embedding architecture or eight-GPU distributed workload.",
+    "No native source changed; native rebuild was not applicable."
+  ]
+}
