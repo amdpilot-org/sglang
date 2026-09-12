@@ -94,6 +94,9 @@ def _build_server_args(scheduler: Scheduler) -> ServerArgs:
         # can serve them statically (no scheduler round-trip).
         version=__version__,
         max_total_num_tokens=scheduler.max_total_num_tokens,
+        kv_events_config=sa.kv_events_config,
+        page_size=sa.page_size,
+        dp_size=sa.dp_size,
     )
 
 
