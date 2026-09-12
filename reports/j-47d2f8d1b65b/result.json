@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37379",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Consolidated candidate https://github.com/amdpilot-org/sglang/pull/3498 with the concrete correction identified by review https://github.com/amdpilot-org/sglang/pull/3513. Qwen3.5 dense/MoE causal models and both conditional-generation wrappers load external FP8 KV scales for attention layers, preserve model/rank/layer/dtype validation, populate tensor and float scale representations, and now accept both the nested schema and the exact flat scaling_factor schema from the issue.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-47d2f8d1b65b/venv/bin/python - <<'PY' ... exact candidate flat-JSON harness ... PY",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction against the candidate logic: the exact flat issue JSON was rejected and k_scale, v_scale, k_scale_float, and v_scale_float remained unset. Raw output: reports/j-47d2f8d1b65b/candidate-flat-json-failing-before.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-47d2f8d1b65b/venv/bin/python - <<'PY' ... actual load_model_utils RuntimeError harness ... PY",
+      "exit_code": 0,
+      "what_was_measured": "The original loader guard raises the reported RuntimeError for the actual Qwen3_5MoeForConditionalGeneration class when its base-commit API lacks load_kv_cache_scales. Raw output: reports/j-47d2f8d1b65b/base-loader-runtime-reproduction.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-47d2f8d1b65b/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen3_5_kv_cache_scales.py test/registered/unit/models/test_qwen3_5_pipeline_parallel.py",
+      "exit_code": 0,
+      "what_was_measured": "10 tests and 13 subtests passed for flat/nested schemas, dense/MoE causal classes, actual loader delegation through both conditional wrappers, hybrid attention/SSM selection, TP-rank selection, model/schema validation, all four scale representations, Triton descales, and pipeline-parallel coverage. Raw output: reports/j-47d2f8d1b65b/unit-tests.log"
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files python/sglang/srt/layers/attention/triton_backend.py python/sglang/srt/model_loader/weight_utils.py python/sglang/srt/models/qwen3_5.py test/registered/unit/models/test_qwen3_5_kv_cache_scales.py",
+      "exit_code": 0,
+      "what_was_measured": "All repository pre-commit hooks applicable to the changed source and test files passed. Raw output: reports/j-47d2f8d1b65b/pre-commit.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-47d2f8d1b65b/venv/bin/python - <<'PY' ... FP8 E4M3 quantize/dequantize reference check ... PY",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X gfx950 with Torch 2.11.0+rocm7.2/HIP 7.2, FP8 E4M3 quantize/dequantize output at scale 0.5 exactly matched an independently specified CPU reference. Raw output: reports/j-47d2f8d1b65b/amd-fp8-numerical.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI350X gfx950 performed the FP8 numerical check; reports/j-47d2f8d1b65b/amd-fp8-numerical.log records device, ISA, Torch/HIP versions, reference, output, and exact match.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The exact Qwen/Qwen3.5-122B-A10B weights, eight NVIDIA L20 GPUs, CUDA, and TP=8 deployment were unavailable, so full server startup, distributed execution, and semantic output remain unverified.",
+    "The AMD arithmetic check qualifies supported gfx950 FP8 execution but is not a Qwen3.5 attention-kernel or serving run.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable."
+  ],
+  "source_paths": [
+    "/job/repo/python/sglang/srt/layers/attention/triton_backend.py",
+    "/job/repo/python/sglang/srt/model_loader/weight_utils.py",
+    "/job/repo/python/sglang/srt/models/qwen3_5.py",
+    "/job/repo/test/registered/unit/models/test_qwen3_5_kv_cache_scales.py"
+  ],
+  "native_paths": []
+}

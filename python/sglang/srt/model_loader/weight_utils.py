@@ -1881,16 +1881,16 @@ class KVCacheQuantSchema(BaseModel):
         context = info.context
         if context:
             tp_size = context["tp_size"]
-            num_hidden_layers = context["num_hidden_layers"]
+            expected_layer_indices = context["expected_layer_indices"]
             assert len(self.scaling_factor) == tp_size, (
                 f"Loaded dictionary has TP size {len(self.scaling_factor)} "
                 f"but LLM engine is currently running with TP size {tp_size}."
             )
             for tp_rank, layer_maps in self.scaling_factor.items():
-                assert len(layer_maps) == num_hidden_layers, (
+                assert set(layer_maps) == expected_layer_indices, (
                     f"KV cache scales map for TP rank {tp_rank} is malformed. "
-                    f"Expected {num_hidden_layers} layers, got "
-                    f"{len(layer_maps)}."
+                    f"Expected layers {sorted(expected_layer_indices)}, got "
+                    f"{sorted(layer_maps)}."
                 )
             for i in range(tp_size):
                 assert i in self.scaling_factor, (
@@ -1903,9 +1903,9 @@ class KVCacheQuantSchema(BaseModel):
         context = info.context
         if context:
             tp_rank = context["tp_rank"]
-            num_hidden_layers = context["num_hidden_layers"]
+            expected_layer_indices = context["expected_layer_indices"]
             layer_scales_map = self.scaling_factor[tp_rank]
-            for i in range(num_hidden_layers):
+            for i in expected_layer_indices:
                 assert i in layer_scales_map, (
                     f"Could not find KV cache scales for layer {i} in "
                     f"TP rank {tp_rank}."
@@ -1919,6 +1919,27 @@ class QuantParamSchema(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
     model_type: Optional[str]
     kv_cache: KVCacheQuantSchema
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_flat_kv_cache_schema(cls, data: Any) -> Any:
+        """Accept the legacy flat KV-scale format documented by SGLang."""
+        if not isinstance(data, dict) or "scaling_factor" not in data:
+            return data
+        if "kv_cache" in data:
+            raise ValueError(
+                "KV cache scaling factors must use either the flat or nested "
+                "schema, not both."
+            )
+
+        normalized = dict(data)
+        scaling_factor = normalized.pop("scaling_factor")
+        dtype = normalized.pop("dtype", "float8_e4m3fn")
+        normalized["kv_cache"] = {
+            "dtype": dtype,
+            "scaling_factor": scaling_factor,
+        }
+        return normalized
 
     @model_validator(mode="after")
     def check_model_type(self, info: ValidationInfo) -> "QuantParamSchema":
@@ -1940,6 +1961,7 @@ def kv_cache_scales_loader(
     tp_size: int,
     num_hidden_layers: int,
     model_type: Optional[str],
+    expected_layer_indices: Optional[set[int]] = None,
 ) -> Iterable[Tuple[int, float]]:
     """
     A simple utility to read in KV cache scaling factors that have been
@@ -1950,9 +1972,12 @@ def kv_cache_scales_loader(
     """
     try:
         with open(filename) as f:
+            if expected_layer_indices is None:
+                expected_layer_indices = set(range(num_hidden_layers))
             context = {
                 "model_type": model_type,
                 "num_hidden_layers": num_hidden_layers,
+                "expected_layer_indices": expected_layer_indices,
                 "tp_rank": tp_rank,
                 "tp_size": tp_size,
             }
