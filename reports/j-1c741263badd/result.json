@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33268",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2238",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2203",
+  "candidate_commit": "8665dbfc8eac3fd74113ba2365e7409ce80f1c44",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the recorded base collision for file keys, preserves explicit fp8_e4m3 versus fp8_e5m2 in the production storage config, and threads dtype into UMBP. Its focused 60-test suite passes. It does not fulfill the original issue's all-backend contract: the built-in AIBrix HiCache backend ignores HiCacheStorageConfig.kv_cache_dtype and neither namespaces BlockHashes nor refuses operation. An independent stubbed-client harness demonstrated identical AIBrix hash inputs for fp8_e4m3 and fp8_e5m2.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1c741263badd/venv/bin/python /job/review-evidence-j-1c741263badd/independent_contract.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Original failure: bf16 and fp8_e4m3 HiCacheFile keys were identical; production E4M3/E5M2 configs both lacked a dtype; UMBP prefix construction did not mention dtype."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1c741263badd/venv/bin/python /job/review-evidence-j-1c741263badd/independent_contract.py (candidate 8665dbfc8eac3fd74113ba2365e7409ce80f1c44)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate passes independent file-key, explicit FP8 logical-format, and UMBP source-path checks."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1c741263badd/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_kv_cache_dtype_key.py test/registered/unit/mem_cache/test_mem_pool_host.py test/registered/unit/mem_cache/test_mooncake_tenant_config.py test/registered/unit/mem_cache/test_umbp_store.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 60 passed, including local hf3fs round-trip/isolation mocks and UMBP prefix/config propagation."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1c741263badd/venv/bin/python /job/review-evidence-j-1c741263badd/adversarial_aibrix.py",
+      "exit_code": 1,
+      "what_was_measured": "Independent AIBrix boundary: fp8_e4m3 and fp8_e5m2 produced the identical BlockHashes input ((same_page,), 64), proving the backend ignores the new dtype namespace and does not fail closed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned GPU was detected as one AMD Instinct MI355X, gfx950:sramecc+:xnack-, with Torch 2.11.0+rocm7.2/HIP 7.2.26015. Contract tests exercised CPU key derivation and stubbed unavailable external clients; no model or GPU kernel execution was needed or claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "AibrixKVCacheStorage accepts HiCacheStorageConfig.kv_cache_dtype but passes the original unscoped page keys directly to BlockHashes. With a shared native FP8 dtype, fp8_e4m3 and fp8_e5m2 therefore produce identical key inputs, and the backend does not refuse loudly.",
+    "The original issue's external FlexKV and LMCache client key derivation was not changed by this candidate and could not be verified because those packages/services are absent. This is an unverified portion of the original all-backend contract, not evidence of resolution.",
+    "Other registered persistent HiCache backends not modified by the candidate, including NPU memcache and SiMM, derive component keys without the new dtype field; their services and required architectures were unavailable for end-to-end confirmation."
+  ],
+  "remaining_limitations": [
+    "AIBrix, FlexKV, LMCache, EIC, UMBP, NPU memcache, SiMM, and external hf3fs services were unavailable; only source-path tests, local hf3fs mocks, and a stubbed AIBrix manager were possible.",
+    "No model weights, serving process, multi-node environment, or cross-run external cache service was used.",
+    "The host is gfx950 (AMD Instinct MI355X). NPU-only and service-specific architectures were not available.",
+    "No native source changed in the candidate, so no native rebuild was applicable."
+  ]
+}
