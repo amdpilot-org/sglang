@@ -1,8 +1,10 @@
 import logging
 import os
+import re
 from typing import Optional
 
 from sglang.srt.environ import envs
+from sglang.srt.mem_cache.hicache_storage import PoolName
 from sglang.srt.mem_cache.storage.nixl.nixl_routing import (
     _BUCKET_MASK,
     BUCKET_HEX_CHARS,
@@ -12,13 +14,20 @@ from sglang.srt.mem_cache.storage.nixl.nixl_routing import (
 logger = logging.getLogger(__name__)
 
 _CACHE_KEY_HEX_LENGTH = 64
+_POOL_NAME_PATTERN = "|".join(
+    sorted((re.escape(pool.value) for pool in PoolName), key=len, reverse=True)
+)
+_COMPONENT_SUFFIX_RE = re.compile(
+    rf"_(?:(?:{_POOL_NAME_PATTERN})(?:_(?:temporal|conv_\d+|[kv]|\d+))?|[kv])$"
+)
 
 
 def _name_matches_suffix(name: str, suffix: str) -> bool:
     """Return whether a cache file belongs to an instance suffix.
 
     NIXL cache file names start with a SHA-256 page key, followed by the
-    instance suffix and, optionally, an underscore-prefixed pool component.
+    instance suffix and, optionally, a component suffix from the key formats
+    produced by ``HiCacheNixl``.
     Anchoring the suffix after the fixed-width key avoids treating a shorter
     model name as the underscore-delimited tail of a longer model name.
     """
@@ -32,7 +41,7 @@ def _name_matches_suffix(name: str, suffix: str) -> bool:
     if not scoped_name.startswith(suffix):
         return False
     remainder = scoped_name[len(suffix) :]
-    return not remainder or remainder.startswith("_")
+    return not remainder or _COMPONENT_SUFFIX_RE.fullmatch(remainder) is not None
 
 
 _SGLANG_NIXL_CONFIG_KEYS = {

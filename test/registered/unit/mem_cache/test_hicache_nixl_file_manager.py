@@ -65,6 +65,24 @@ class TestNixlFileManagerClear(unittest.TestCase):
                 self.assertFalse(os.path.exists(owned))
                 self.assertTrue(os.path.exists(foreign))
 
+    def test_mla_clear_does_not_match_prefix_overlapping_deployments(self):
+        owned = [
+            self._write(f"{self.KEY}_model"),
+            self._write(f"{self.KEY}_model_mamba_temporal"),
+            self._write(f"{self.KEY}_model_mamba_conv_0"),
+            self._write(f"{self.KEY}_model_swa_k"),
+            self._write(f"{self.KEY}_model_k"),
+        ]
+        preserved = [
+            self._write(f"{self.KEY}_model_variant"),
+            self._write(f"{self.KEY}_model_0_1"),
+        ]
+
+        self.manager.clear(suffix="_model")
+
+        self.assertTrue(all(not os.path.exists(path) for path in owned))
+        self.assertTrue(all(os.path.exists(path) for path in preserved))
+
     def test_clear_requires_a_sha256_cache_key_prefix(self):
         cache_file = self._write(f"{self.KEY}_model-a_0_1")
         non_cache_file = self._write("notes_model-a_0_1")
