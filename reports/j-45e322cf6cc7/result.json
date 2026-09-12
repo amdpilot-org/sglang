@@ -1,0 +1,59 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31719",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/2561",
+  "candidate_commit": "a2cc4cf09ea789b28e8c3db0c80d3b71d6e9f0f2",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "The exact candidate fixes the original mixed-dtype indexed store, the ordinary and MIS Triton prefill paths, and PAD_SLOT_ID skip semantics. Independent gfx950 numerical and compiler-path tests found no remaining counterexample in the source-level contract.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-45e322cf6cc7/venv/bin/python /job/review-evidence-j-45e322cf6cc7/independent_gdn_boundary.py (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced both indexed-store dtype failures and both real Triton new_conv_state branch-type compilation failures; confirmed MIS bypassed the absent helper. The fixture records expected failures without exiting nonzero."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-45e322cf6cc7/venv/bin/python /job/review-evidence-j-45e322cf6cc7/independent_gdn_boundary.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Both original store directions and both prior compiler counterexamples passed; output and final state matched an independent grouped-convolution reference; padded cache row stayed unchanged; MIS used the helper."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-45e322cf6cc7/venv/bin/python reports/j-badb4e8b86a3/reproduce_mixed_conv_dtype.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate four-way GPU regression passed for FP16/BF16, BF16/FP32, BF16/FP16, and BF16/BF16 activation/cache pairs."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-45e322cf6cc7/venv/bin/python reports/j-90144626db2a/reproduce_corrected_boundaries.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate MIS and padded mixed-cache regression matched independent grouped-convolution output and state references for FP32 and FP16 caches."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-45e322cf6cc7/venv/bin/python /job/review-evidence-j-45e322cf6cc7/adversarial_multi_slot.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent FP16/BF16 multi-slot case covered noncontiguous slots, empty padded segment, initial/no-initial branches, numerical output/state references, and untouched unrelated rows."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-45e322cf6cc7/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_gdn_prefill_backend_policy.py",
+      "exit_code": 0,
+      "what_was_measured": "19 focused policy/backend tests and 27 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-45e322cf6cc7/venv/bin/python -m pytest -q test/registered/layers/mamba/test_causal_conv1d.py -k branches_from_cloned_query_state",
+      "exit_code": 0,
+      "what_was_measured": "Existing GPU causal-convolution cloned-query-state regression passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2, HIP 7.2.26015; real Triton compilation and numerical GPU kernels executed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "QuantTrio/Qwen3.6-27B-AWQ weights and the full qwen3_5 serving path were unavailable.",
+    "The reporter's NVIDIA RTX 5090, SM120, and CUDA 13.3 environment was unavailable; validation used one AMD Instinct MI355X/gfx950 with ROCm 7.2.",
+    "No native source changed, so no native rebuild was applicable.",
+    "No full-model semantic-accuracy or multi-node claim is made."
+  ]
+}
