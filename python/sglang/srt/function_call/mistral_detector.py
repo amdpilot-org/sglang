@@ -38,6 +38,7 @@ class MistralDetector(BaseFormatDetector):
         self.bot_token = "[TOOL_CALLS] ["
         # Common marker shared by both JSON-array and compact formats.
         self._tool_calls_marker = "[TOOL_CALLS"
+        self._streaming_canonical_array = False
         self.eot_token = "]"
         self.tool_call_separator = ", "
 
@@ -125,6 +126,12 @@ class MistralDetector(BaseFormatDetector):
         self._buffer += new_text
         current_text = self._buffer
 
+        # Once canonical-array parsing has begun, the base parser consumes the
+        # marker and leaves only separators/objects buffered. Keep delegating
+        # those continuations instead of misclassifying them as normal text.
+        if self._streaming_canonical_array:
+            return super().parse_streaming_increment(new_text="", tools=tools)
+
         # No marker: either flush as normal text or keep buffering a partial marker.
         if self._tool_calls_marker not in current_text:
             if not self._ends_with_partial_token(self._buffer, self._tool_calls_marker):
@@ -190,6 +197,7 @@ class MistralDetector(BaseFormatDetector):
 
         # Canonical format delegates to the BaseFormatDetector JSON streaming logic.
         if self.bot_token in current_text:
+            self._streaming_canonical_array = True
             return super().parse_streaming_increment(new_text="", tools=tools)
 
         # Otherwise, keep buffering.

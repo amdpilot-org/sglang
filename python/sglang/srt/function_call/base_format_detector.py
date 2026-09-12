@@ -158,7 +158,10 @@ class BaseFormatDetector(ABC):
             self.has_tool_call(current_text)
             or (
                 (self.current_tool_id > 0 or self._skipped_tool_in_sequence)
-                and current_text.startswith(self.tool_call_separator)
+                and (
+                    current_text.startswith(self.tool_call_separator)
+                    or self.tool_call_separator.startswith(current_text)
+                )
             )
         ):
             # Only clear buffer if we're sure no tool call is starting
@@ -374,7 +377,45 @@ class BaseFormatDetector(ABC):
         Detectors that hold text back while waiting for a marker that can no
         longer arrive (the stream is over) override this to release it.
         """
-        return StreamingParseResult()
+        normal_text = ""
+        calls = []
+
+        # One increment can intentionally emit only one state transition (for
+        # example, a tool name before its arguments). Drain every transition
+        # that can be made from bytes already received before declaring EOF.
+        while self._buffer:
+            state_before = (
+                self._buffer,
+                self.current_tool_id,
+                self.current_tool_name_sent,
+                self._skipping_unknown_tool,
+                self._skipped_tool_in_sequence,
+                tuple(self.streamed_args_for_tool),
+            )
+            result = self.parse_streaming_increment("", tools)
+            normal_text += result.normal_text or ""
+            calls.extend(result.calls or [])
+            state_after = (
+                self._buffer,
+                self.current_tool_id,
+                self.current_tool_name_sent,
+                self._skipping_unknown_tool,
+                self._skipped_tool_in_sequence,
+                tuple(self.streamed_args_for_tool),
+            )
+            if state_after == state_before:
+                wrapper = self._buffer
+                if self.tool_call_separator and wrapper.startswith(
+                    self.tool_call_separator
+                ):
+                    wrapper = wrapper[len(self.tool_call_separator) :]
+                if self.eot_token:
+                    wrapper = wrapper.replace(self.eot_token, "")
+                if not wrapper.strip():
+                    self._buffer = ""
+                break
+
+        return StreamingParseResult(normal_text=normal_text, calls=calls)
 
     def supports_structural_tag(self) -> bool:
         """Return True if this detector supports structural tag format."""

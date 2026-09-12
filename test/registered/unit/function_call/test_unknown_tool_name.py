@@ -7,8 +7,12 @@ from sglang.srt.entrypoints.openai.protocol import Function, Tool
 from sglang.srt.environ import envs
 from sglang.srt.function_call.base_format_detector import BaseFormatDetector
 from sglang.srt.function_call.core_types import StreamingParseResult
+from sglang.srt.function_call.hermes_detector import HermesDetector
 from sglang.srt.function_call.json_array_parser import JsonArrayParser
+from sglang.srt.function_call.llama32_detector import Llama32Detector
+from sglang.srt.function_call.mistral_detector import MistralDetector
 from sglang.srt.function_call.qwen25_detector import Qwen25Detector
+from sglang.srt.function_call.trinity_detector import TrinityDetector
 from sglang.test.ci.ci_register import register_cpu_ci
 
 register_cpu_ci(5, "base-a-test-cpu")
@@ -154,6 +158,100 @@ def test_streaming_unknown_tool_last_preserves_completed_state():
     assert calls == {0: {"name": "get_weather", "arguments": '{"city": "Tokyo"}'}}
     assert detector.streamed_args_for_tool == ['{"city": "Tokyo"}']
     assert detector.prev_tool_call_arr[0]["arguments"] == {"city": "Tokyo"}
+
+
+@pytest.mark.parametrize(
+    ("detector", "first", "final"),
+    [
+        (
+            JsonArrayParser(),
+            "[" + WEATHER_CALL.replace('"arguments"', '"parameters"'),
+            ","
+            + UNKNOWN_CALL.replace('"arguments"', '"parameters"')
+            + ","
+            + TIME_CALL.replace('"arguments"', '"parameters"')
+            + "]",
+        ),
+        (
+            Qwen25Detector(),
+            f"<tool_call>\n{WEATHER_CALL}",
+            f"\n</tool_call>\n<tool_call>\n{UNKNOWN_CALL}\n</tool_call>\n"
+            f"<tool_call>\n{TIME_CALL}\n</tool_call>",
+        ),
+        (
+            HermesDetector(),
+            f"<tool_call>{WEATHER_CALL}",
+            f"</tool_call><tool_call>{UNKNOWN_CALL}</tool_call>"
+            f"<tool_call>{TIME_CALL}</tool_call>",
+        ),
+        (
+            Llama32Detector(),
+            f"<|python_tag|>{WEATHER_CALL}",
+            f";{UNKNOWN_CALL};{TIME_CALL}",
+        ),
+        (
+            TrinityDetector(),
+            f"<tool_call>\n{WEATHER_CALL}",
+            f"\n</tool_call>\n<tool_call>\n{UNKNOWN_CALL}\n</tool_call>\n"
+            f"<tool_call>\n{TIME_CALL}\n</tool_call>",
+        ),
+        (
+            MistralDetector(),
+            f"[TOOL_CALLS] [{WEATHER_CALL}",
+            f", {UNKNOWN_CALL}, {TIME_CALL}]",
+        ),
+    ],
+)
+def test_finish_drains_valid_call_after_unknown_final_chunk(detector, first, final):
+    calls = _collect_streamed_calls(detector, [*first, final])
+    finish_result = detector.finish(STREAMING_TOOLS)
+    for call in finish_result.calls:
+        slot = calls.setdefault(call.tool_index, {"name": None, "arguments": ""})
+        if call.name:
+            slot["name"] = call.name
+        if call.parameters:
+            slot["arguments"] += call.parameters
+
+    assert calls == {
+        0: {"name": "get_weather", "arguments": '{"city": "Tokyo"}'},
+        1: {"name": "get_time", "arguments": '{"tz": "JST"}'},
+    }
+
+
+def test_mistral_character_stream_preserves_calls_after_unknown():
+    detector = MistralDetector()
+    wire = f"[TOOL_CALLS] [{WEATHER_CALL}, {UNKNOWN_CALL}, {TIME_CALL}]"
+
+    calls = _collect_streamed_calls(detector, wire)
+
+    assert calls == {
+        0: {"name": "get_weather", "arguments": '{"city": "Tokyo"}'},
+        1: {"name": "get_time", "arguments": '{"tz": "JST"}'},
+    }
+
+
+def test_finish_drains_coarse_chunked_arguments():
+    detector = JsonArrayParser()
+    wire = (
+        "["
+        + ",".join(
+            call.replace('"arguments"', '"parameters"')
+            for call in (WEATHER_CALL, UNKNOWN_CALL, TIME_CALL)
+        )
+        + "]"
+    )
+
+    calls = _collect_streamed_calls(
+        detector, [wire[index : index + 31] for index in range(0, len(wire), 31)]
+    )
+    for call in detector.finish(STREAMING_TOOLS).calls:
+        slot = calls.setdefault(call.tool_index, {"name": None, "arguments": ""})
+        if call.name:
+            slot["name"] = call.name
+        if call.parameters:
+            slot["arguments"] += call.parameters
+
+    assert calls[1] == {"name": "get_time", "arguments": '{"tz": "JST"}'}
 
 
 if __name__ == "__main__":
