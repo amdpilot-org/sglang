@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34366",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the Qwen3-VL processor/model contract mismatch in the checked-out ImageEncodingStage: processor output can contain mm_token_type_ids, but both positive and classifier-free-guidance text-encoder calls discarded it while forwarding image_grid_thw. The stage now conditionally forwards mm_token_type_ids, preserving compatibility with processors that do not emit the newer field.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-639aac416805/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_image_encoding_mm_token_type_ids.py (with the source fix temporarily reversed)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression at the actual ImageEncodingStage input-building boundary; all four new cases failed before the helper and passthrough existed. Raw output: reports/j-639aac416805/raw/pytest_before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-639aac416805/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_image_encoding_mm_token_type_ids.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression plus boundaries for processor output with mm_token_type_ids, legacy output without it, the Qwen3-VL multimodal contract, and independent positive/negative CFG values. Raw output: reports/j-639aac416805/raw/pytest_after.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-639aac416805/venv/bin/python < GPU passthrough/checksum fixture",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned gfx950 GPU, mm_token_type_ids remained on cuda:0 and retained identical storage through ImageEncodingStage input construction; an independent weighted GPU checksum was 572.0. Raw output: reports/j-639aac416805/raw/gpu_passthrough.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-639aac416805/venv/bin/python -m compileall -q python/sglang/multimodal_gen/runtime/pipelines_core/stages/image_encoding.py python/sglang/multimodal_gen/test/unit/test_image_encoding_mm_token_type_ids.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed source and regression test compile successfully. Raw output: reports/j-639aac416805/raw/compileall.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-639aac416805/raw/gpu_passthrough.log records AMD Instinct MI350X, gfx950:sramecc+:xnack-, ROCm 7.2, device-resident passthrough, and checksum 572.0.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The jdopensource/JoyAI-Image-Edit-Diffusers weights were not available locally, so the full model server request and semantic image output were not run.",
+    "GPU execution validates only device-resident argument passthrough and a numerical checksum; it is not a full-model or distributed reproduction.",
+    "No native code changed, so no native rebuild was applicable.",
+    "The prepared environment does not include ruff; the attempted ruff command is retained in reports/j-639aac416805/raw/ruff.log. git diff --check and compileall succeeded."
+  ]
+}
