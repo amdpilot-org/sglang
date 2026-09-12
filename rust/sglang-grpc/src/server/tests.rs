@@ -4,7 +4,72 @@ use super::{
 };
 use crate::bridge::TerminalError;
 use std::collections::HashMap;
+use std::time::Duration;
+use tokio_stream::StreamExt;
 use tonic::Code;
+use tonic::Request;
+use tonic_health::ServingStatus;
+use tonic_health::pb::HealthCheckRequest;
+use tonic_health::pb::health_check_response::ServingStatus as WireServingStatus;
+use tonic_health::pb::health_server::Health;
+
+#[test]
+fn standard_health_status_matches_native_health() {
+    assert_eq!(super::serving_status(true), ServingStatus::Serving);
+    assert_eq!(super::serving_status(false), ServingStatus::NotServing);
+}
+
+#[tokio::test]
+async fn standard_health_watch_ignores_unchanged_updates() {
+    let (mut reporter, service) = super::health_pair();
+    reporter
+        .set_service_status("test.Service", ServingStatus::NotServing)
+        .await;
+    let mut stream = service
+        .watch(Request::new(HealthCheckRequest {
+            service: "test.Service".into(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(
+        stream.next().await.unwrap().unwrap().status,
+        WireServingStatus::NotServing as i32
+    );
+    reporter
+        .set_service_status("test.Service", ServingStatus::NotServing)
+        .await;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), stream.next())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn standard_health_watch_observes_late_registration() {
+    let (mut reporter, service) = super::health_pair();
+    let mut stream = service
+        .watch(Request::new(HealthCheckRequest {
+            service: "late.Service".into(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(
+        stream.next().await.unwrap().unwrap().status,
+        WireServingStatus::ServiceUnknown as i32
+    );
+    reporter
+        .set_service_status("late.Service", ServingStatus::Serving)
+        .await;
+    assert_eq!(
+        stream.next().await.unwrap().unwrap().status,
+        WireServingStatus::Serving as i32
+    );
+}
 
 #[test]
 fn openai_status_code_uses_forwarded_status_when_present() {

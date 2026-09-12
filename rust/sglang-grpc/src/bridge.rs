@@ -288,6 +288,14 @@ impl PyBridge {
         })
     }
 
+    pub fn get_operational_state(&self) -> PyResult<String> {
+        Python::attach(|py| {
+            self.runtime_handle
+                .call_method0(py, "get_operational_state")?
+                .extract::<String>(py)
+        })
+    }
+
     /// Tokenize via Python (fallback when Rust tokenizer unavailable).
     pub fn tokenize_py(&self, text: &str, add_special_tokens: bool) -> PyResult<String> {
         Python::attach(|py| {

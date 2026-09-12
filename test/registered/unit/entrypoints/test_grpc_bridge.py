@@ -43,6 +43,58 @@ def _make_runtime_handle(responses):
     return handle
 
 
+class TestGrpcOperationalState(CustomTestCase):
+    def _handle(self, *, status, paused=False, exiting=False, updating=False):
+        handle = RuntimeHandle.__new__(RuntimeHandle)
+        handle.tokenizer_manager = SimpleNamespace(
+            server_status=status, is_pause=paused, gracefully_exit=exiting
+        )
+        handle._grpc_weight_update_in_progress = updating
+        return handle
+
+    def test_pause_update_resume_lifecycle(self):
+        import json
+        from sglang.srt.managers.tokenizer_manager import ServerStatus
+
+        cases = [
+            ({}, "SERVING", True, False),
+            ({"paused": True}, "DRAINING", False, True),
+            ({"paused": True, "updating": True}, "UPDATING_WEIGHTS", False, True),
+            ({"paused": True}, "DRAINING", False, True),
+            ({}, "SERVING", True, False),
+        ]
+        for overrides, phase, accepting, draining in cases:
+            state = json.loads(
+                self._handle(status=ServerStatus.Up, **overrides).get_operational_state()
+            )
+            self.assertEqual(state["phase"], phase)
+            self.assertEqual(state["accepting_new_requests"], accepting)
+            self.assertEqual(state["ready_to_serve"], accepting)
+            self.assertEqual(state["draining"], draining)
+            self.assertEqual(
+                self._handle(
+                    status=ServerStatus.Up, **overrides
+                ).health_check(),
+                accepting,
+            )
+
+    def test_startup_unhealthy_and_shutdown_are_not_ready(self):
+        import json
+        from sglang.srt.managers.tokenizer_manager import ServerStatus
+
+        for status, exiting, phase in (
+            (ServerStatus.Starting, False, "STARTING"),
+            (ServerStatus.UnHealthy, False, "NOT_SERVING"),
+            (ServerStatus.Up, True, "NOT_SERVING"),
+        ):
+            state = json.loads(
+                self._handle(status=status, exiting=exiting).get_operational_state()
+            )
+            self.assertEqual(state["phase"], phase)
+            self.assertFalse(state["accepting_new_requests"])
+            self.assertFalse(state["ready_to_serve"])
+
+
 class TestNativeGrpcParallelResponses(CustomTestCase):
     def test_non_streaming_returns_every_choice_before_finishing(self):
         callback = _RecordingCallback()

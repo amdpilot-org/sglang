@@ -78,6 +78,7 @@ class RuntimeHandle:
         self.template_manager = template_manager
         self.server_args = server_args
         self.scheduler_info = scheduler_info or {}
+        self._grpc_weight_update_in_progress = False
 
         self._openai_serving_classes = None
 
@@ -441,10 +442,38 @@ class RuntimeHandle:
 
         if self.tokenizer_manager.gracefully_exit:
             return False
-        return self.tokenizer_manager.server_status not in (
-            ServerStatus.Starting,
-            ServerStatus.UnHealthy,
+        return (
+            self.tokenizer_manager.server_status == ServerStatus.Up
+            and not self.tokenizer_manager.is_pause
+            and not self._grpc_weight_update_in_progress
         )
+
+    def get_operational_state(self) -> str:
+        from sglang.srt.managers.tokenizer_manager import ServerStatus
+
+        status = self.tokenizer_manager.server_status
+        exiting = bool(self.tokenizer_manager.gracefully_exit)
+        paused = bool(self.tokenizer_manager.is_pause)
+        updating = bool(self._grpc_weight_update_in_progress)
+        healthy = status == ServerStatus.Up and not exiting
+        accepting = healthy and not paused and not updating
+        if exiting or status == ServerStatus.UnHealthy:
+            phase = "NOT_SERVING"
+        elif status == ServerStatus.Starting:
+            phase = "STARTING"
+        elif updating:
+            phase = "UPDATING_WEIGHTS"
+        elif paused:
+            phase = "DRAINING"
+        else:
+            phase = "SERVING"
+        return json.dumps({
+            "phase": phase,
+            "accepting_new_requests": accepting,
+            "draining": paused,
+            "ready_to_serve": accepting,
+            "weight_update_in_progress": updating,
+        })
 
     def tokenize(self, text: str, add_special_tokens: bool = True) -> str:
         tokenizer = self.tokenizer_manager.tokenizer
@@ -550,11 +579,15 @@ class RuntimeHandle:
             obj = UpdateWeightFromDiskReqInput(
                 model_path=model_path, load_format=load_format
             )
-            (
-                success,
-                message,
-                num_paused,
-            ) = await self.tokenizer_manager.update_weights_from_disk(obj, request=None)
+            self._grpc_weight_update_in_progress = True
+            try:
+                (
+                    success,
+                    message,
+                    num_paused,
+                ) = await self.tokenizer_manager.update_weights_from_disk(obj, request=None)
+            finally:
+                self._grpc_weight_update_in_progress = False
             return {
                 "success": success,
                 "message": message,
