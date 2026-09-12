@@ -315,9 +315,10 @@ class TestRVVLMHeadPacking(unittest.TestCase):
             ),
         )
 
-        with patch.object(
-            rvv_utils, "cpu_has_rvv_support", return_value=True
-        ), patch.object(rvv_utils, "_get_convert_weight_packed_op") as mock_get_op:
+        with (
+            patch.object(rvv_utils, "cpu_has_rvv_support", return_value=True),
+            patch.object(rvv_utils, "_get_convert_weight_packed_op") as mock_get_op,
+        ):
             rvv_utils._rvv_process_weight_after_loading(module, ["weight"])
 
         mock_get_op.assert_not_called()
@@ -344,9 +345,10 @@ class TestRVVLMHeadPacking(unittest.TestCase):
             )
         )
 
-        with patch.object(
-            rvv_utils, "cpu_has_rvv_support", return_value=True
-        ), patch.object(rvv_utils, "_convert_weight_packed", side_effect=fake_convert):
+        with (
+            patch.object(rvv_utils, "cpu_has_rvv_support", return_value=True),
+            patch.object(rvv_utils, "_convert_weight_packed", side_effect=fake_convert),
+        ):
             packed_1 = rvv_utils.resolve_rvv_lm_head_weight(lm_head)
             packed_2 = rvv_utils.resolve_rvv_lm_head_weight(lm_head)
             self.assertEqual(len(pack_calls), 1)
@@ -393,9 +395,10 @@ class TestRVVLMHeadPacking(unittest.TestCase):
             weight=torch.nn.Parameter(torch.randn(2, 2, dtype=torch.float32))
         )
 
-        with patch.object(
-            rvv_utils, "cpu_has_rvv_support", return_value=True
-        ), patch.object(rvv_utils, "_get_convert_weight_packed_op") as mock_get_op:
+        with (
+            patch.object(rvv_utils, "cpu_has_rvv_support", return_value=True),
+            patch.object(rvv_utils, "_get_convert_weight_packed_op") as mock_get_op,
+        ):
             self.assertFalse(rvv_utils.use_rvv_lm_head_backend(lm_head))
             with self.assertRaises(RuntimeError):
                 rvv_utils.resolve_rvv_lm_head_weight(lm_head)
@@ -413,9 +416,10 @@ class TestRVVLMHeadPacking(unittest.TestCase):
             apply_lora=lambda *args, **kwargs: None,
         )
 
-        with patch.object(
-            rvv_utils, "cpu_has_rvv_support", return_value=True
-        ), patch.object(rvv_utils, "_convert_weight_packed", return_value=object()):
+        with (
+            patch.object(rvv_utils, "cpu_has_rvv_support", return_value=True),
+            patch.object(rvv_utils, "_convert_weight_packed", return_value=object()),
+        ):
             self.assertFalse(rvv_utils.use_rvv_lm_head_backend(lm_head))
             with self.assertRaises(RuntimeError):
                 rvv_utils.resolve_rvv_lm_head_weight(lm_head)

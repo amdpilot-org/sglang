@@ -170,7 +170,9 @@ class W8A8Int8LinearMethod(LinearMethodBase):
             elif _is_cpu_arm64:
                 layer.weight = Parameter(layer.weight.data, requires_grad=False)
             else:
-                assert False, "W8A8Int8LinearMethod on CPU requires Intel AMX, RISC-V RVV, or Arm64 support"
+                assert False, (
+                    "W8A8Int8LinearMethod on CPU requires Intel AMX, RISC-V RVV, or Arm64 support"
+                )
         else:
             layer.weight = Parameter(layer.weight.t(), requires_grad=False)
         layer.weight_scale = Parameter(layer.weight_scale.data, requires_grad=False)
@@ -212,7 +214,11 @@ class W8A8Int8LinearMethod(LinearMethodBase):
         x: torch.Tensor,
         bias: Optional[torch.Tensor] = None,
     ):
-        if use_intel_amx_backend(layer) or use_riscv_rvv_backend(layer) or _is_cpu_arm64:
+        if (
+            use_intel_amx_backend(layer)
+            or use_riscv_rvv_backend(layer)
+            or _is_cpu_arm64
+        ):
             return torch.ops.sgl_kernel.int8_scaled_mm_with_quant(
                 x,
                 layer.weight,
