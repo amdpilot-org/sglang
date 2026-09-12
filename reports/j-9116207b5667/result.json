@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38013",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1061",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1026",
+  "candidate_commit": "6530140b906df8d7d24180aa99d6b43c737d79f8",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is a valid narrow parser correction for clean, schema-disambiguated DeepSeek V4 arguments/args envelopes in one-shot and streaming parsing. It is not a full fix for the original report: it cannot reconstruct corrupted inner command content, repair syntactically invalid inner JSON, disambiguate free-form schemas, or verify model-side retry escalation without the named model.",
+  "tests": [
+    {
+      "command": "git checkout --detach 358c163250ad3b1f62939b01ce1314a0a31a0365 && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9116207b5667/venv/bin/python /job/review-evidence-j-9116207b5667/independent_review.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction. All clean envelope cases failed in one-shot and streaming parsing; boundary expectations also showed that the base retained every outer envelope. Raw output is preserved outside the checkout in /job/review-evidence-j-9116207b5667/base-independent.txt."
+    },
+    {
+      "command": "git checkout --detach 6530140b906df8d7d24180aa99d6b43c737d79f8 && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9116207b5667/venv/bin/python /job/review-evidence-j-9116207b5667/independent_review.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial suite verified clean object, JSON-string, args, mixed repeated, and repeatedly encoded envelopes across one-shot and streaming chunk sizes 1, 2, 3, 7, and 64. It also verified preservation of irrecoverable corruption, declared arguments properties, unknown keys, mixed top-level objects, and free-form schemas."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9116207b5667/venv/bin/python -m pytest -q test/registered/unit/function_call/test_deepseekv4_detector.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate focused regression suite: 11 passed, 10 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9116207b5667/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "Broader existing function-call parser suite: 243 passed, 4 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9116207b5667/venv/bin/python -c 'import inspect,sglang.srt.function_call.deepseekv4_detector as m; print(inspect.getfile(m))'",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the tested import resolved to /job/repo/python/sglang/srt/function_call/deepseekv4_detector.py."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "A gfx950 / AMD Instinct MI350X was visible, but the reviewed change is deterministic Python parser logic and required no GPU execution. No model-level claim is based on a startup smoke."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Mid-stream duplication or corruption of inner command text remains unrecoverable from the emitted payload and is not corrected by the candidate.",
+    "A quadruple-wrapped payload whose innermost JSON/string is syntactically damaged cannot be normalized into valid tool arguments without guessing.",
+    "Schemas without a usable declared top-level property set retain an added envelope because it is indistinguishable from a legitimate free-form arguments or args key.",
+    "The model-side validation-error escalation loop was not reproduced or corrected."
+  ],
+  "remaining_limitations": [
+    "deepseek-ai/DeepSeek-V4-Flash-Vision-Exp weights were unavailable, so generation frequency, vision/model semantics, mid-stream generation corruption, and retry escalation were not tested end to end.",
+    "The tiny Llama fixture is a different architecture and was not used as substitute evidence.",
+    "Only one gfx950 GPU was assigned; no multi-GPU or distributed behavior was tested.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
