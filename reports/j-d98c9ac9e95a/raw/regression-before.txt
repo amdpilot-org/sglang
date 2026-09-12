@@ -1,0 +1,137 @@
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+_________ test_awq_parameters_are_bound_and_split_in_checkpoint_units __________
+
+    def test_awq_parameters_are_bound_and_split_in_checkpoint_units():
+        module = _MergedProjection()
+        calls = []
+        original_loader = _recording_loader(calls)
+        module.register_parameter(
+            "qweight",
+            PackedvLLMParameter(
+                data=torch.empty(4, 6, dtype=torch.int32),
+                input_dim=0,
+                output_dim=1,
+                packed_dim=1,
+                packed_factor=8,
+                weight_loader=original_loader,
+            ),
+        )
+        module.register_parameter(
+            "scales",
+            GroupQuantScaleParameter(
+                data=torch.empty(4, 48),
+                input_dim=0,
+                output_dim=1,
+                weight_loader=original_loader,
+            ),
+        )
+
+        owner = object.__new__(Qwen3_5GatedDeltaNet)
+        owner._bind_packed_weight_loaders(module)
+
+        packed = torch.arange(24, dtype=torch.int32).reshape(4, 6)
+        module.qweight.weight_loader(module.qweight, packed, (0, 1, 2))
+>       assert [shard_id for shard_id, _ in calls] == [0, 1, 2]
+E       assert [(0, 1, 2)] == [0, 1, 2]
+E
+E         At index 0 diff: (0, 1, 2) != 0
+E         Right contains 2 more items, first extra item: 1
+E         Use -v to get more diff
+
+test/registered/unit/models/test_qwen3_5_awq_weight_loading.py:58: AssertionError
+___ test_packed_split_sizes_respect_nonzero_shard_selection_and_marlin_tiles ___
+
+    def test_packed_split_sizes_respect_nonzero_shard_selection_and_marlin_tiles():
+        module = _MergedProjection()
+>       param = PackedvLLMParameter(
+            data=torch.empty(1, 20, dtype=torch.int32),
+            input_dim=0,
+            output_dim=1,
+            packed_dim=1,
+            packed_factor=8,
+            marlin_tile_size=2,
+        )
+
+test/registered/unit/models/test_qwen3_5_awq_weight_loading.py:71:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+python/sglang/srt/layers/parameter.py:505: in __init__
+    super().__init__(**kwargs)
+python/sglang/srt/layers/parameter.py:139: in __init__
+    super().__init__(**kwargs)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = Parameter containing:
+Parameter(PackedvLLMParameter([[        0,       939,         0, 142346365,      5482,
+         ...
+                              0,         0,  90439680,       427,         0]],
+                    dtype=torch.int32))
+input_dim = 0
+kwargs = {'data': tensor([[        0,       939,         0, 142346365,      5482,         0,
+                 0,         0,    ... 359270524,         0,         0,         0,         0,  90439680,
+               427,         0]], dtype=torch.int32)}
+
+    def __init__(self, input_dim: int, **kwargs):
+        self._input_dim = input_dim
+>       super().__init__(**kwargs)
+E       TypeError: BasevLLMParameter.__init__() missing 1 required positional argument: 'weight_loader'
+
+python/sglang/srt/layers/parameter.py:287: TypeError
+________ test_packing_on_input_dimension_does_not_change_output_splits _________
+
+    def test_packing_on_input_dimension_does_not_change_output_splits():
+        module = _MergedProjection()
+>       param = PackedvLLMParameter(
+            data=torch.empty(1, 80, dtype=torch.int32),
+            input_dim=0,
+            output_dim=1,
+            packed_dim=0,
+            packed_factor=8,
+        )
+
+test/registered/unit/models/test_qwen3_5_awq_weight_loading.py:87:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+python/sglang/srt/layers/parameter.py:505: in __init__
+    super().__init__(**kwargs)
+python/sglang/srt/layers/parameter.py:139: in __init__
+    super().__init__(**kwargs)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = Parameter containing:
+Parameter(PackedvLLMParameter([[  352274524,           0,           0,           0,
+            ... 0,
+                                0,           0,           1,           0]],
+                    dtype=torch.int32))
+input_dim = 0
+kwargs = {'data': tensor([[  352274524,           0,           0,           0,           0,
+                   0,           0, ... 0,           0,
+                   0,           0,           0,           1,           0]],
+       dtype=torch.int32)}
+
+    def __init__(self, input_dim: int, **kwargs):
+        self._input_dim = input_dim
+>       super().__init__(**kwargs)
+E       TypeError: BasevLLMParameter.__init__() missing 1 required positional argument: 'weight_loader'
+
+python/sglang/srt/layers/parameter.py:287: TypeError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/models/test_qwen3_5_awq_weight_loading.py::test_awq_parameters_are_bound_and_split_in_checkpoint_units
+FAILED test/registered/unit/models/test_qwen3_5_awq_weight_loading.py::test_packed_split_sizes_respect_nonzero_shard_selection_and_marlin_tiles
+FAILED test/registered/unit/models/test_qwen3_5_awq_weight_loading.py::test_packing_on_input_dimension_does_not_change_output_splits
+3 failed, 17 warnings in 27.25s

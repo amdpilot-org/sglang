@@ -65,6 +65,7 @@ from sglang.srt.layers.moe.utils import (
 )
 from sglang.srt.layers.parameter import (
     BlockQuantScaleParameter,
+    PackedvLLMParameter,
     PerTensorScaleParameter,
 )
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
@@ -509,7 +510,15 @@ class Qwen3_5GatedDeltaNet(nn.Module):
 
     def _bind_packed_weight_loaders(self, module):
         """Bind packed-checkpoint-aware loaders to all relevant params of a merged module."""
-        for attr_name in ("weight", "weight_scale_inv", "weight_scale", "input_scale"):
+        for attr_name in (
+            "weight",
+            "qweight",
+            "qzeros",
+            "scales",
+            "weight_scale_inv",
+            "weight_scale",
+            "input_scale",
+        ):
             param = getattr(module, attr_name, None)
             if param is None:
                 continue
@@ -534,6 +543,20 @@ class Qwen3_5GatedDeltaNet(nn.Module):
         if isinstance(param, PerTensorScaleParameter):
             # One logical scale per logical shard.
             return [1 for _ in loaded_shard_id]
+
+        if (
+            isinstance(param, PackedvLLMParameter)
+            and param.packed_dim == param.output_dim
+        ):
+            split_sizes = []
+            for idx in loaded_shard_id:
+                shard_size = module.output_sizes[idx]
+                shard_offset = sum(module.output_sizes[:idx])
+                shard_size, _ = param.adjust_shard_indexes_for_packing(
+                    shard_size, shard_offset
+                )
+                split_sizes.append(shard_size)
+            return split_sizes
 
         # Normal weight / non-block quant tensor
         return [module.output_sizes[idx] for idx in loaded_shard_id]
