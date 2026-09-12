@@ -98,10 +98,7 @@ async fn non_igw_bounded_spill_uses_key_relative_clockwise_ring() {
         RoutingMode::Regular {
             worker_urls: vec![],
         },
-        PolicyConfig::BoundedConsistentHashing {
-            max_load_skew: 1.5,
-            min_load_gap: 1,
-        },
+        PolicyConfig::BoundedConsistentHashing { max_load_skew: 1.5 },
     );
     config.disable_retries = true;
     config.disable_circuit_breaker = true;

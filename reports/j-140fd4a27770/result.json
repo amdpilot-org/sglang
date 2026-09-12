@@ -1,0 +1,63 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33625",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3218",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2809",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/2898",
+  "candidate_commit": "16c841bb1b6f1e5bb44ec52e3b97d701e85c5149",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved the candidate's bounded consistent hashing policy, explicit-key-only spillover, strict target/implicit affinity, deterministic ring traversal, metrics, worker load lifetime tracking, non-IGW aggregate ring, and Python integration. Corrected the reviewed contract violation by making preferred_load > average_healthy_worker_load * max_load_skew the sole spill trigger and removing the extra min_load_gap configuration surface. The independently reproduced [1,0,0,0] and [2,0,0,0] counterexamples now spill deterministically to the first eligible healthy worker on the ring.",
+  "tests": [
+    {
+      "command": "cargo test original_contract_spills_when_relative_threshold_is_exceeded --lib -- --nocapture (exact candidate behavior, before correction)",
+      "exit_code": 101,
+      "what_was_measured": "Failing-before reproduction at loads [2,0,0,0] and max_load_skew 1.5: average healthy load was 0.5, the preferred load 2 exceeded the 0.75 bound, but candidate commit 16c841bb returned Some(0). Raw log: /tmp/amdpilot-repo-j-140fd4a27770/failing-before.log"
+    },
+    {
+      "command": "cargo test bounded_consistent_hashing --lib",
+      "exit_code": 0,
+      "what_was_measured": "18 bounded-policy/config/router tests passed, including permanent adversarial coverage for [1,0,0,0] and [2,0,0,0], below-bound affinity, deterministic spillover, one-worker safety, strict target routing, and strict implicit keys."
+    },
+    {
+      "command": "cargo test --test load_guard_raii_test",
+      "exit_code": 0,
+      "what_was_measured": "8 streaming and non-streaming request-lifetime load guard tests passed."
+    },
+    {
+      "command": "cargo test --test routing_tests non_igw_bounded",
+      "exit_code": 0,
+      "what_was_measured": "The real Router-to-two-HTTP-worker regression passed and verified key-relative clockwise spillover."
+    },
+    {
+      "command": "cargo test consistent_hashing --lib",
+      "exit_code": 0,
+      "what_was_measured": "32 strict and bounded consistent-hashing related tests passed, including strict consistent hashing load invariance."
+    },
+    {
+      "command": "cargo test --lib",
+      "exit_code": 0,
+      "what_was_measured": "All 415 Rust library tests passed."
+    },
+    {
+      "command": "cargo check --all-targets",
+      "exit_code": 0,
+      "what_was_measured": "All gateway Rust targets compiled with the pinned Rust 1.90 toolchain and private target directory."
+    },
+    {
+      "command": "maturin develop --manifest-path bindings/python/Cargo.toml; PYTHONPATH=/job/repo/sgl-model-gateway/bindings/python/src:/job/repo/python python -m pytest bindings/python/tests/test_arg_parser.py bindings/python/tests/test_pyo3_binding.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Rebuilt the checkout PyO3 extension and passed 100 Python parser/binding tests with 1 skipped."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The corrected defect is in CPU/Rust HTTP worker selection and was reproduced directly with deterministic worker loads. No model weights, GPU numerical path, architecture claim, throughput claim, or semantic-accuracy claim was used as evidence."
+  },
+  "native_rebuilt": true,
+  "native_rebuild_evidence": "Rust gateway tests and all-target checks used artifacts under /tmp/amdpilot-repo-j-140fd4a27770/target. The PyO3 extension was rebuilt with maturin against /tmp/amdpilot-repo-j-140fd4a27770/venv.",
+  "remaining_limitations": [
+    "The active-request load signal remains local to one gateway process; spill decisions are not coordinated among multiple gateway replicas.",
+    "No model-backed GPU benchmark was run, so throughput, p95 latency, cache/prefill work, semantic accuracy, architecture-specific behavior, and distributed workload behavior remain unverified.",
+    "The gateway directory has no committed Cargo.lock; dependency resolution and build caches were kept in the private runtime."
+  ]
+}

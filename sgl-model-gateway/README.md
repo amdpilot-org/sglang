@@ -739,10 +739,9 @@ Router flags map to these values:
 - `cache_aware`: maintains a prefix tree of prompts to route repeat traffic and evens load with configurable thresholds (`--cache-threshold`, `--balance-abs-threshold`, `--balance-rel-threshold`, `--eviction-interval`, `--max-tree-size`).
 - `power_of_two`: chooses the lighter worker among two random candidates; integrates with `LoadMonitor`.
 - `consistent_hashing`: keeps an explicit `X-SMG-Routing-Key` on its preferred healthy worker and does not consider load.
-- `bounded_consistent_hashing`: an opt-in variant of consistent hashing. With an explicit `X-SMG-Routing-Key`, it spills only when both `preferred_load - min_healthy_load > min_load_gap` and `preferred_load > mean_healthy_load * max_load_skew`; `min_load_gap` is measured in active requests. It then walks the ring clockwise to the first healthy worker within the relative bound, retaining the preferred worker if no candidate qualifies.
+- `bounded_consistent_hashing`: an opt-in variant of consistent hashing. With an explicit `X-SMG-Routing-Key`, it spills when `preferred_load > mean_healthy_load * max_load_skew`. It then walks the ring clockwise to the first healthy worker within the relative bound, retaining the preferred worker if no candidate qualifies.
   `X-SMG-Target-Worker` and implicit keys from `Authorization`, `X-Forwarded-For`, or `Cookie` remain strict. The active-load signal is best-effort and local to each gateway process, and this soft-affinity policy must not be used when worker-local session state requires strict affinity.
-  Configure it with `--policy bounded_consistent_hashing --max-load-skew 1.5 --min-load-gap <active-requests>`.
-  The default `min_load_gap` is 2 as a conservative middle setting for this opt-in policy, not as an empirically optimal value. Operators should tune it for their worker count, concurrent fan-out, request length, and cache-reuse trade-off. Existing `consistent_hashing` behavior is unchanged.
+  Configure it with `--policy bounded_consistent_hashing --max-load-skew 1.5`. Existing `consistent_hashing` behavior is unchanged.
   Per-model overrides are available in PD mode (`--prefill-policy`, `--decode-policy`) and IGW mode via the worker registry.
 
 ## Observability

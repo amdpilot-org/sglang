@@ -316,11 +316,6 @@ pub enum PolicyConfig {
         /// Defaults to 1.5 (150% of average).
         #[serde(default = "default_max_load_skew")]
         max_load_skew: f64,
-
-        /// Minimum active-request gap between the preferred worker and the
-        /// least-loaded healthy worker before spillover is allowed.
-        #[serde(default = "default_min_load_gap")]
-        min_load_gap: usize,
     },
 
     /// Prefix hash policy for KV cache-aware load balancing.
@@ -346,11 +341,6 @@ fn default_prefix_token_count() -> usize {
 
 fn default_max_load_skew() -> f64 {
     1.5
-}
-
-// Conservative configurable default for this opt-in policy.
-fn default_min_load_gap() -> usize {
-    2
 }
 
 fn default_load_factor() -> f64 {
@@ -848,10 +838,7 @@ mod tests {
         };
         assert_eq!(power_of_two.name(), "power_of_two");
 
-        let bounded = PolicyConfig::BoundedConsistentHashing {
-            max_load_skew: 1.5,
-            min_load_gap: 2,
-        };
+        let bounded = PolicyConfig::BoundedConsistentHashing { max_load_skew: 1.5 };
         assert_eq!(bounded.name(), "bounded_consistent_hashing");
     }
 
@@ -882,22 +869,16 @@ mod tests {
 
         let bounded = PolicyConfig::BoundedConsistentHashing {
             max_load_skew: 1.75,
-            min_load_gap: 4,
         };
         let json = serde_json::to_string(&bounded).unwrap();
         assert!(json.contains("\"type\":\"bounded_consistent_hashing\""));
         assert!(json.contains("\"max_load_skew\":1.75"));
-        assert!(json.contains("\"min_load_gap\":4"));
 
         let default_bounded: PolicyConfig =
             serde_json::from_str(r#"{"type":"bounded_consistent_hashing"}"#).unwrap();
         match default_bounded {
-            PolicyConfig::BoundedConsistentHashing {
-                max_load_skew,
-                min_load_gap,
-            } => {
+            PolicyConfig::BoundedConsistentHashing { max_load_skew } => {
                 assert!((max_load_skew - 1.5).abs() < f64::EPSILON);
-                assert_eq!(min_load_gap, 2);
             }
             _ => panic!("Expected bounded consistent hashing policy"),
         }

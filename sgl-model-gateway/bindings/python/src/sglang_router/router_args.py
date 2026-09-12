@@ -61,9 +61,6 @@ class RouterArgs:
     balance_abs_threshold: int = 64
     balance_rel_threshold: float = 1.5
     max_load_skew: float = 1.5
-    min_load_gap: int = (
-        2  # Conservative configurable default for opt-in bounded routing
-    )
     eviction_interval_secs: int = 60
     max_tree_size: int = 2**26
     max_idle_secs: int = 4 * 3600
@@ -329,12 +326,6 @@ class RouterArgs:
             type=float,
             default=RouterArgs.max_load_skew,
             help="Maximum preferred-worker load relative to the healthy-worker mean for bounded_consistent_hashing",
-        )
-        routing_group.add_argument(
-            f"--{prefix}min-load-gap",
-            type=int,
-            default=RouterArgs.min_load_gap,
-            help="Minimum active-request gap between the preferred and least-loaded healthy worker before bounded_consistent_hashing may spill",
         )
         routing_group.add_argument(
             f"--{prefix}bucket-adjust-interval-secs",

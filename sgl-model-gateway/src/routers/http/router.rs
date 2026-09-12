@@ -1050,10 +1050,7 @@ mod tests {
 
         let bounded = create_test_hashing_router(
             Arc::clone(&worker_registry),
-            PolicyConfig::BoundedConsistentHashing {
-                max_load_skew: 1.5,
-                min_load_gap: 1,
-            },
+            PolicyConfig::BoundedConsistentHashing { max_load_skew: 1.5 },
         );
         let mut explicit = HeaderMap::new();
         explicit.insert("x-smg-routing-key", key.parse().unwrap());
