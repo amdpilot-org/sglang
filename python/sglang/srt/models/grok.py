@@ -156,6 +156,7 @@ class Grok1MoE(nn.Module):
             intermediate_size=intermediate_size,
             params_dtype=params_dtype,
             quant_config=quant_config,
+            prefix=add_prefix("experts", prefix),
             activation="gelu",
             reduce_results=reduce_results,
             use_presharded_weights=use_presharded_weights,
