@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38580",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate adds meaningful fail-closed validation and rejects the prior stale token-metadata counterexample, but its passing DSA fixture does not match metadata produced by the actual DRAFT_EXTEND_V2 planner. Actual planner-shaped metadata is rejected after padding, so a functioning matched or explicitly compact speculative DSA execution is not established.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-740364c16a5b/venv/bin/python -m pytest -q <candidate tests copied outside checkout>",
+      "exit_code": 1,
+      "what_was_measured": "At recorded base, all five candidate regression cases failed; notably the GPU padding calculation returned 3 rather than the physical aligned extent 4."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-740364c16a5b/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_eager_metadata_extent.py test/registered/kernel/attention/test_dsa_padding_metadata.py test/registered/unit/model_executor/test_forward_metadata_plan_record.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 43c2db023064dfbfe823e0147be6b47d3fc06f2b, 14 focused tests passed on the prepared ROCm environment."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-740364c16a5b/venv/bin/python reports/j-740364c16a5b/adversarial_actual_planner_shapes.py",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate, actual DRAFT_EXTEND_V2 planner behavior yielded four padded DSA rows but three expanded rows and no indexer/token-to-batch arrays; the candidate validator rejected this real planner-shaped state."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Focused padding and independent planner-shape checks ran on AMD Instinct MI350X under ROCm 7.2.26015. This was metadata-level GPU execution, not an end-to-end DeepSeek model run."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "For DRAFT_EXTEND_V2 planned at three real tokens and physically padded to four, the actual planner pads dsa_cache_seqlens_int32 but retains three-row dsa_seqlens_expanded and produces no indexer_k_start_end or token_to_batch_idx. The candidate validator rejects this state, so the eager speculative DSA path remains non-executable rather than validated end to end.",
+    "No evidence proves attention, indexer, DeepGEMM schedule metadata, top-k transforms, and KV writes all use a consistent declared physical or compact extent in a real speculative DSA execution."
+  ],
+  "remaining_limitations": "No DeepSeek DSA weights or qualified end-to-end speculative DSA fixture were available. The tiny Llama fixture is architecturally inapplicable. CUDA-only and distributed paths were not exercised. No native source changed, so native rebuild was not applicable."
+}
