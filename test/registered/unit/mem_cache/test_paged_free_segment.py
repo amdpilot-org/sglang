@@ -212,6 +212,18 @@ class TestFreeSegments(unittest.TestCase):
             )
             self.assertTrue(torch.equal(torch.sort(freed)[0], reference))
 
+    def test_kv_row_cleanup_retry_is_idempotent(self):
+        alloc = _make_allocator()
+        row = _make_kv_row(alloc, 7)
+        segments = [(row[:5], 0), (row[5:], 5)]
+        before = len(alloc.free_pages)
+
+        free_kv_row_segments(alloc, segments, swa_evicted_seqlen=0)
+        self.assertEqual(len(alloc.free_pages), before + 2)
+
+        free_kv_row_segments(alloc, segments, swa_evicted_seqlen=0)
+        self.assertEqual(len(alloc.free_pages), before + 2)
+
 
 class _RecordingBaseAllocator(BaseTokenToKVPoolAllocator):
     """Base-fallback allocator: free_segment inherits the default (ignore

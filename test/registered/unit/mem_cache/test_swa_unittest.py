@@ -1119,6 +1119,21 @@ class TestFreeKvRow(CustomTestCase):
             self.assertEqual(allocator.full_available_size(), full_baseline)
             self.assertEqual(allocator.swa_available_size(), swa_baseline)
 
+    def test_touching_abort_cleanup_retry_is_idempotent(self):
+        _, allocator, _ = _build_swa_tree(is_eagle=False, page_size=4)
+        indices = _swa_alloc(allocator, 8)
+        allocator.free_swa(indices[:4])
+        segments = [(indices[:5], 0), (indices[5:], 5)]
+
+        free_kv_row_segments(allocator, segments, swa_evicted_seqlen=4)
+        full_after_first = allocator.full_available_size()
+        swa_after_first = allocator.swa_available_size()
+
+        free_kv_row_segments(allocator, segments, swa_evicted_seqlen=4)
+        self.assertEqual(allocator.full_available_size(), full_after_first)
+        self.assertEqual(allocator.swa_available_size(), swa_after_first)
+        self.assertEqual(allocator.verify_byte_accounting(), [])
+
     def test_grouped_full_side_frees_defer_and_skip_the_unique_path(self):
         _, allocator, _ = _build_swa_tree(is_eagle=False, page_size=4)
         indices = _swa_alloc(allocator, 12)
