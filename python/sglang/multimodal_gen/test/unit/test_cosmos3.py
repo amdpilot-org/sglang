@@ -768,6 +768,54 @@ class TestCosmos3ActionEndpoint(unittest.TestCase):
         self.assertEqual(response["usage"]["action_horizon"], 4)
         self.assertEqual(response["usage"]["action_dim"], 3)
 
+    def test_action_response_preserves_candidate_trajectory_payload(self):
+        candidate_actions = [
+            torch.zeros(4, 3).numpy(),
+            torch.ones(4, 3).numpy(),
+        ]
+        output = {
+            "request_id": "cosmos-candidate-group",
+            "actions": torch.full((4, 3), 0.5).numpy(),
+            "candidate_group": {
+                "request_id": "cosmos-candidate-group",
+                "candidate_ids": [0, 1],
+                "reducer": "mean",
+                "seed_policy": "per_candidate",
+                "physical_batch_size": 2,
+            },
+            "candidates": [
+                {"candidate_id": index, "seed": 42 + index, "actions": actions}
+                for index, actions in enumerate(candidate_actions)
+            ],
+        }
+
+        response = action_generation_response(output, _cosmos3_server_args())
+
+        self.assertEqual(response["candidate_group"], output["candidate_group"])
+        self.assertEqual(
+            [candidate["candidate_id"] for candidate in response["candidates"]],
+            [0, 1],
+        )
+        self.assertEqual(response["candidates"][0]["actions"], [[0.0] * 3] * 4)
+        self.assertEqual(response["candidates"][1]["actions"], [[1.0] * 3] * 4)
+
+    def test_action_response_preserves_candidate_numpy_for_msgpack(self):
+        candidate_actions = torch.arange(12, dtype=torch.float32).reshape(4, 3).numpy()
+        output = {
+            "request_id": "cosmos-candidate-msgpack",
+            "actions": candidate_actions,
+            "candidate_group": {"candidate_ids": [0]},
+            "candidates": [
+                {"candidate_id": 0, "seed": 42, "actions": candidate_actions}
+            ],
+        }
+
+        response = action_generation_response(
+            output, _cosmos3_server_args(), preserve_numpy=True
+        )
+
+        self.assertIs(response["candidates"][0]["actions"], candidate_actions)
+
     def test_action_response_rejects_empty_batch(self):
         output = {
             "request_id": "cosmos-action-empty",

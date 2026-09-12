@@ -511,6 +511,17 @@ def action_generation_response(
         response["cache"] = output["cache"]
     if "parallel" in output:
         response["parallel"] = output["parallel"]
+    if "candidate_group" in output:
+        response["candidate_group"] = dict(output["candidate_group"])
+    if "candidates" in output:
+        candidates = []
+        for candidate in output["candidates"]:
+            candidate_response = dict(candidate)
+            candidate_actions = candidate_response.get("actions")
+            if isinstance(candidate_actions, np.ndarray) and not preserve_numpy:
+                candidate_response["actions"] = candidate_actions.tolist()
+            candidates.append(candidate_response)
+        response["candidates"] = candidates
     return response
 
 
