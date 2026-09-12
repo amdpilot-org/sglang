@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38009",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source already contains the issue-specific candidate fix from upstream PR #33614 (commit f60bc73c5836d45457575c17f4722c6bd60f06b0): DFlash now broadcasts greedy target predictions and other acceptance decisions from TP rank 0 before deriving committed tokens and state. The reported image commit 5f55db35e926d50676f75b812640ea2410b0fe0e predates that fix. Added regression coverage for greedy, stochastic, and selector acceptance paths. Exact Qwen3.8-27B target-vs-DFlash output equivalence remains unverified because the assigned environment has one AMD gfx950 GPU and lacks both reported model checkpoints, versus the report's four NVIDIA GPUs and TP=4.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-21cdfd37193e/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_logits.py",
+      "exit_code": 0,
+      "what_was_measured": "All 13 DFlash logits/unit regressions passed, including the three new acceptance-path TP synchronization boundary cases. Raw output: /tmp/amdpilot-repo-j-21cdfd37193e/test-dflash-logits.log"
+    },
+    {
+      "command": "Import dflash_worker_v2 from exact reported commit 5f55db35 and assert DFlashWorkerV2._accept_block exists",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before evidence: the reported image source has no centralized synchronized acceptance boundary. Raw output: /tmp/amdpilot-repo-j-21cdfd37193e/pre-fix-regression.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-21cdfd37193e/venv/bin/python -c <ROCm tensor probe>",
+      "exit_code": 0,
+      "what_was_measured": "A real tensor addition executed on cuda:0, identified by PyTorch as AMD Instinct MI350X with ROCm 7.2 and capability (9, 5). Raw output: /tmp/amdpilot-repo-j-21cdfd37193e/gpu-evidence.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A real PyTorch tensor operation ran on the assigned AMD Instinct MI350X/gfx950. This was only an environment/device check; it did not execute DFlash or either Qwen3.8-27B checkpoint."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original reproduction requires four NVIDIA RTX 3090 GPUs with tensor parallelism 4; only one AMD MI350X/gfx950 was assigned.",
+    "The Qwen/Qwen3.8-27B target and incoai/Qwen3.8-27B-DFlash2 weights were not available locally.",
+    "Therefore the exact token-30 divergence, thinking/no-thinking control, full model architecture, CUDA/NCCL behavior, and multi-rank runtime behavior were not reproduced.",
+    "The evidence verifies the source-level correction and its decision-boundary regression, not semantic equivalence of the full reported model run."
+  ]
+}
