@@ -71,6 +71,7 @@ class TestSchedulerPauseGeneration(unittest.TestCase):
         )
         scheduler.disaggregation_mode = DisaggregationMode.NULL
         scheduler.hisparse_coordinator = None
+        scheduler.req_to_metadata_buffer_idx_allocator = MagicMock()
         scheduler.server_args = MagicMock()
         scheduler.waiting_queue = []
         # pause_generation zeros gen_throughput and flushes KV events.
@@ -472,25 +473,33 @@ class TestSchedulerPauseGeneration(unittest.TestCase):
         scheduler.req_to_token_pool.clear.assert_called_once_with()
         scheduler.req_to_token_pool.reset_aux_cache_allocator.assert_called_once_with()
 
-    def test_retract_disagg_prefill_keeps_live_chunked_req(self):
-        """disagg-PREFILL retract must leave a live mid-chunk chunked_req untouched."""
+    def test_retract_disagg_prefill_restarts_live_chunk_without_old_kv(self):
+        """A live disagg-PREFILL chunk is re-bootstrapped after releasing its KV."""
         scheduler = self._new_scheduler()
         scheduler.disaggregation_mode = DisaggregationMode.PREFILL
         scheduler._add_request_to_queue = MagicMock()
+        scheduler.clear_pending_chunk_send = MagicMock()
         scheduler.last_batch = None
 
-        chunked_req = MagicMock()
-        chunked_req.finished.return_value = False
+        chunked_req = self._make_req("chunked")
+        chunked_req.disagg_kv_sender = MagicMock()
+        chunked_req.metadata_buffer_index = 7
+        chunked_req.pending_bootstrap = False
         scheduler.chunked_req = chunked_req
 
         with patch("sglang.srt.managers.scheduler.retract_all") as mock_retract_all:
             scheduler.pause_generation(PauseGenerationReqInput(mode="retract"))
 
-        mock_retract_all.assert_not_called()
-        scheduler._add_request_to_queue.assert_not_called()
-        self.assertIs(scheduler.chunked_req, chunked_req)
-        scheduler.tree_cache.reset.assert_not_called()
-        scheduler.token_to_kv_pool_allocator.clear.assert_not_called()
+        scheduler.clear_pending_chunk_send.assert_called_once_with(chunked_req)
+        chunked_req.disagg_kv_sender.abort.assert_called_once_with()
+        scheduler.req_to_metadata_buffer_idx_allocator.free.assert_called_once_with(7)
+        self.assertEqual(chunked_req.metadata_buffer_index, -1)
+        mock_retract_all.assert_called_once()
+        self.assertEqual(mock_retract_all.call_args.kwargs["reqs"], [chunked_req])
+        scheduler.tree_cache.reset.assert_called_once_with()
+        scheduler.token_to_kv_pool_allocator.clear.assert_called_once_with()
+        scheduler._add_request_to_queue.assert_called_once_with(chunked_req)
+        self.assertIsNone(scheduler.chunked_req)
 
     def test_retract_drains_overlap_queue(self):
         """retract with overlap enabled should drain the result_queue."""
