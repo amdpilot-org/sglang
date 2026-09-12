@@ -1,7 +1,7 @@
+import inspect
 import types
 import unittest
 from unittest.mock import patch
-import inspect
 
 import torch
 
