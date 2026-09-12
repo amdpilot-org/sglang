@@ -1,0 +1,60 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35324",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1681",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1647",
+  "candidate_commit": "4896853f26a6f6571d82aee3d965db71e6ec9fac",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate correctly fixes the inherited malformed-row counterexamples at the eager DSPARK torch.multinomial boundary. The base failed for NaN outside column 0, infinities, negative values, and zero mass; the exact candidate recovered those rows on CPU and a synchronized gfx950 GPU probe while preserving valid rows. This is a narrow partial containment, not proof that the intermittent DeepSeek-V4 CUDA TP=8 issue is fully resolved.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bd8bbeec70b4/venv/bin/python /job/review_probability_probe.py cpu (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Independent base probe: NaN outside column 0, positive/negative infinity, a negative element, and a zero-sum row remained unrecovered and torch.multinomial rejected them; valid rows sampled successfully."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bd8bbeec70b4/venv/bin/python /job/review_probability_probe.py gpu (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "The malformed base probability reached GPU torch.multinomial, triggered the async assertion kernel, and produced HSA_STATUS_ERROR_EXCEPTION / unspecified launch failure."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bd8bbeec70b4/venv/bin/python -m pytest -q test/registered/unit/spec/test_dspark_draft_probability_recovery.py (candidate 4896853f26a6f6571d82aee3d965db71e6ec9fac)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite passed: 4 tests and 8 CPU/GPU subtests."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bd8bbeec70b4/venv/bin/python /job/review_probability_probe.py cpu (candidate 4896853f26a6f6571d82aee3d965db71e6ec9fac)",
+      "exit_code": 0,
+      "what_was_measured": "Independent CPU adversarial probe recovered NaNs in multiple positions, both infinities, negative values, and zero mass; valid normalized and unnormalized rows were preserved."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bd8bbeec70b4/venv/bin/python /job/review_probability_probe.py gpu (candidate 4896853f26a6f6571d82aee3d965db71e6ec9fac)",
+      "exit_code": 0,
+      "what_was_measured": "Independent synchronized gfx950 probe recovered all malformed rows and completed torch.multinomial for every row using the checked-out source module."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bd8bbeec70b4/venv/bin/python -m compileall -q python/sglang/srt/speculative/dspark_components/dspark_draft.py test/registered/unit/spec/test_dspark_draft_probability_recovery.py && git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..4896853f26a6f6571d82aee3d965db71e6ec9fac",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python files compiled and the candidate diff passed whitespace checks."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X, architecture gfx950:sramecc+:xnack-, using PyTorch 2.11.0+rocm7.2 and HIP 7.2.26015. The base produced a real device assertion; the candidate completed the synchronized adversarial probe."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The rare malformed-probability producer in the original DeepSeek-V4-Flash-0731 CUDA TP=8 workload remains unidentified and unreproduced.",
+    "The candidate only changes the eager non-fast torch.multinomial branch; current default fast sampling and folded sampling paths are unchanged and were not qualified for the original workload.",
+    "Invariant signaling still uses NotNaN(), so positive/negative infinity, negative values, and zero-sum rows are recovered but are not identified by this invariant's telemetry."
+  ],
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 weights were unavailable.",
+    "The available architecture was one AMD gfx950 GPU under ROCm, not eight NVIDIA H100 GPUs under CUDA 13.",
+    "TP=8, the reported HTTP server configuration, model semantics, and week-long production traffic were not reproduced.",
+    "The base device failure is a deterministic malformed-input reproduction of the same multinomial assertion class, not a reproduction of the rare upstream producer.",
+    "No native files changed, so native rebuild validation was not applicable."
+  ]
+}
