@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35241",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/722",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/718",
+  "candidate_commit": "f8853833a75e992e618a9e5d74efe493c3bfefe2",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate deterministically prevents idle generation-health probes from entering ordinary scheduler admission and preserves subsequent user admission state in the focused model. However, it does so by returning HealthCheckOutput immediately when idle, without executing the model. That contradicts the documented /health_generate contract to generate one token and removes the idle-path check of model/GPU execution. The reported TP8/DP8 B30Z throughput regime could not be reproduced on the prepared single-GPU AMD environment, so elimination of the 16,384-token rank divergence and LOW regime is unverified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-1df7d16e59fa/venv/bin/python -m pytest /job/review-evidence-j-1df7d16e59fa/test_scheduler_health_check_admission.py -q (prepared base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: 2 of 3 tests failed because idle health probes entered _request_dispatcher, changed modeled waiting/prefill state, and preceded subsequent user admission."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1df7d16e59fa/venv/bin/python -m pytest test/registered/unit/managers/test_scheduler_health_check_admission.py test/registered/unit/managers/test_data_parallel_controller.py -q (candidate f8853833)",
+      "exit_code": 0,
+      "what_was_measured": "28 focused unit tests passed, including routing-budget isolation, idle/busy scheduler handling, modeled waiting queue, attempted prefill size, PrefillDelayer outcome counters, prefill progress, and subsequent user admission."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1df7d16e59fa/venv/bin/python -m pytest test/registered/scheduler/test_scheduler_control.py -vv -x (candidate f8853833)",
+      "exit_code": 1,
+      "what_was_measured": "End-to-end scheduler suite was blocked before server startup by a 401 for gated meta-llama/Llama-3.1-8B-Instruct weights; this is an environment limitation, not a candidate failure."
+    },
+    {
+      "command": "source inspection of python/sglang/srt/entrypoints/http_server.py, python/sglang/srt/managers/scheduler.py, and docs/docs/basic_usage/native_api.mdx at candidate f8853833",
+      "exit_code": 0,
+      "what_was_measured": "The endpoint still constructs a one-token generation request and documentation says /health_generate generates one token, but the candidate intercepts an idle probe before _request_dispatcher and immediately emits HealthCheckOutput. No model forward is required for a 200 response."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The prepared host exposes one AMD Instinct MI355X (gfx950) through torch 2.11.0+rocm7.2; nvidia-smi is unavailable. No DeepSeek-V4-Pro weights or 8x NVIDIA B30Z topology were available. GPU execution would not validate the reported architecture-specific TP8/DP8 regime.",
+  "native_rebuilt": false,
+  "native_rebuild_reason": "The candidate changes only Python, tests, documentation text, and reports; repository-environment.json reports no prepared native component. Imported scheduler and data_parallel_controller modules resolved to /job/repo/python/sglang/srt/managers/ on the exact candidate checkout.",
+  "remaining_counterexamples": [
+    "On a fully idle server, /health_generate can return success from a synthetic HealthCheckOutput without any model forward or generated token, so a wedged model/GPU path can be reported healthy.",
+    "No TP8/DP8 run on 8x NVIDIA B30Z with DeepSeek-V4-Pro demonstrates elimination of the 62-79k tok/s LOW regime, one-chunk (16,384-token) rank divergence, persistent mixed/delay state, or running-request collapse.",
+    "The focused scheduler test models PrefillDelayer counters and progress as side effects of a MagicMock dispatcher; it proves the probe bypasses that dispatcher, not that real distributed PrefillDelayer state remains synchronized under the reported workload."
+  ],
+  "remaining_limitations": [
+    "Only one AMD Instinct MI355X (gfx950) was assigned; the reported NVIDIA B30Z TP8/DP8 architecture is unsupported here.",
+    "DeepSeek-V4-Pro weights were unavailable. The broader scheduler test also required gated Llama-3.1-8B-Instruct weights and failed with HTTP 401 before startup.",
+    "No native code changed, so no native rebuild or compiler/ISA validation was relevant."
+  ]
+}
