@@ -1,0 +1,277 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_ TestPrefetchCheckpoints.test_fastsafetensors_retries_without_gds_when_unavailable _
+
+self = <test_prefetch_checkpoints.TestPrefetchCheckpoints testMethod=test_fastsafetensors_retries_without_gds_when_unavailable>
+_ = <MagicMock name='is_initialized' id='133115855511504'>
+
+    @patch("torch.distributed.is_initialized", return_value=False)
+    def test_fastsafetensors_retries_without_gds_when_unavailable(self, _):
+        attempts = []
+    
+        class FakeGroup:
+            def rank(self):
+                return 0
+    
+            def size(self):
+                return 1
+    
+        class FakeLoader:
+            def __init__(self, group, device, nogds):
+                attempts.append(nogds)
+                if not nogds:
+                    raise RuntimeError("is_gds_supported(0) failed")
+    
+            def add_filenames(self, rank_file_map):
+                pass
+    
+            def copy_files_to_device(self):
+                return type("FakeBuffer", (), {"key_to_rank_lidx": {}})()
+    
+            def close(self):
+                pass
+    
+        with (
+            patch("sglang.srt.model_loader.weight_utils.SingleGroup", FakeGroup),
+            patch(
+                "sglang.srt.model_loader.weight_utils.SafeTensorsFileLoader",
+                FakeLoader,
+            ),
+            patch("torch.cuda.current_device", return_value=0),
+        ):
+>           list(fastsafetensors_weights_iterator(["model.safetensors"]))
+
+test/registered/unit/model_loader/test_prefetch_checkpoints.py:436: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/srt/model_loader/weight_utils.py:1249: in fastsafetensors_weights_iterator
+    loader = SafeTensorsFileLoader(pg, device, nogds=not enable_gds)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <test_prefetch_checkpoints.TestPrefetchCheckpoints.test_fastsafetensors_retries_without_gds_when_unavailable.<locals>.FakeLoader object at 0x7911734d2480>
+group = <test_prefetch_checkpoints.TestPrefetchCheckpoints.test_fastsafetensors_retries_without_gds_when_unavailable.<locals>.FakeGroup object at 0x791173631760>
+device = device(type='cuda', index=0), nogds = False
+
+    def __init__(self, group, device, nogds):
+        attempts.append(nogds)
+        if not nogds:
+>           raise RuntimeError("is_gds_supported(0) failed")
+E           RuntimeError: is_gds_supported(0) failed
+
+test/registered/unit/model_loader/test_prefetch_checkpoints.py:417: RuntimeError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x791173494fe0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x791a570580e0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestPrefetchCheckpoints.test_fastsafetensors_retries_without_gds_when_unavailable
+----------------------------- Captured stderr call -----------------------------
+Loading safetensors using Fastsafetensor loader:   0%|          | 0/1 [00:00<?, ?it/s]Loading safetensors using Fastsafetensor loader:   0%|          | 0/1 [00:00<?, ?it/s]
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1390, in patched
+    return func(*newargs, **newkeywargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/test/registered/unit/model_loader/test_prefetch_checkpoints.py", line 436, in test_fastsafetensors_retries_without_gds_when_unavailable
+    list(fastsafetensors_weights_iterator(["model.safetensors"]))
+  File "/job/repo/python/sglang/srt/model_loader/weight_utils.py", line 1249, in fastsafetensors_weights_iterator
+    loader = SafeTensorsFileLoader(pg, device, nogds=not enable_gds)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/test/registered/unit/model_loader/test_prefetch_checkpoints.py", line 417, in __init__
+    raise RuntimeError("is_gds_supported(0) failed")
+RuntimeError: is_gds_supported(0) failed
+_ TestPrefetchCheckpoints.test_fastsafetensors_uses_local_device_not_global_rank _
+
+self = <test_prefetch_checkpoints.TestPrefetchCheckpoints testMethod=test_fastsafetensors_uses_local_device_not_global_rank>
+_ = <MagicMock name='is_initialized' id='133115855845856'>
+
+    @patch("torch.distributed.is_initialized", return_value=True)
+    def test_fastsafetensors_uses_local_device_not_global_rank(self, _):
+        devices = []
+    
+        class FakeGroup:
+            def rank(self):
+                return 11
+    
+            def size(self):
+                return 12
+    
+        class FakeLoader:
+            def __init__(self, group, device, nogds):
+                devices.append(device)
+    
+            def add_filenames(self, rank_file_map):
+                pass
+    
+            def copy_files_to_device(self):
+                return type("FakeBuffer", (), {"key_to_rank_lidx": {}})()
+    
+            def close(self):
+                pass
+    
+        with (
+            patch(
+                "sglang.srt.model_loader.weight_utils.torch.distributed.group",
+                type("FakeDistributedGroup", (), {"WORLD": FakeGroup()})(),
+            ),
+            patch("torch.cuda.current_device", return_value=0),
+            patch(
+                "sglang.srt.model_loader.weight_utils.SafeTensorsFileLoader",
+                FakeLoader,
+            ),
+        ):
+            list(fastsafetensors_weights_iterator(["model.safetensors"]))
+    
+>       self.assertEqual(devices, [torch.device("cuda:0")])
+E       AssertionError: Lists differ: [device(type='cuda', index=11)] != [device(type='cuda', index=0)]
+E       
+E       First differing element 0:
+E       device(type='cuda', index=11)
+E       device(type='cuda', index=0)
+E       
+E       - [device(type='cuda', index=11)]
+E       ?                            ^^
+E       
+E       + [device(type='cuda', index=0)]
+E       ?                            ^
+
+test/registered/unit/model_loader/test_prefetch_checkpoints.py:400: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x791172b22340>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x791a570580e0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestPrefetchCheckpoints.test_fastsafetensors_uses_local_device_not_global_rank
+----------------------------- Captured stderr call -----------------------------
+Loading safetensors using Fastsafetensor loader:   0%|          | 0/1 [00:00<?, ?it/s]Loading safetensors using Fastsafetensor loader: 100%|██████████| 1/1 [00:00<00:00, 27413.75it/s]
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1390, in patched
+    return func(*newargs, **newkeywargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/test/registered/unit/model_loader/test_prefetch_checkpoints.py", line 400, in test_fastsafetensors_uses_local_device_not_global_rank
+    self.assertEqual(devices, [torch.device("cuda:0")])
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1091, in assertListEqual
+    self.assertSequenceEqual(list1, list2, msg, seq_type=list)
+  File "/usr/lib/python3.12/unittest/case.py", line 1073, in assertSequenceEqual
+    self.fail(msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: Lists differ: [device(type='cuda', index=11)] != [device(type='cuda', index=0)]
+
+First differing element 0:
+device(type='cuda', index=11)
+device(type='cuda', index=0)
+
+- [device(type='cuda', index=11)]
+?                            ^^
+
++ [device(type='cuda', index=0)]
+?                            ^
+
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/model_loader/test_prefetch_checkpoints.py::TestPrefetchCheckpoints::test_fastsafetensors_retries_without_gds_when_unavailable
+FAILED test/registered/unit/model_loader/test_prefetch_checkpoints.py::TestPrefetchCheckpoints::test_fastsafetensors_uses_local_device_not_global_rank
+2 failed, 23 deselected, 17 warnings in 8.68s
