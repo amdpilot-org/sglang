@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34239",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "PR 1682 at 6d5477605b06c845b25f9260c59599dc33a0aedd correctly reserves EAGLE/NEXTN target-verify slots in scheduler generation clipping. This is a verified partial source-level fix, not proof that the reported H800 TP8 CUDA illegal-memory-access incident is fully resolved.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-7f6e91fd8856/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_init_req_max_new_tokens.py (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "The pre-existing base suite passed 8 tests and 542 subtests; it did not cover speculative reserve slots."
+    },
+    {
+      "command": "independent Scheduler.init_req_max_new_tokens boundary probe (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "Base selected 52 new tokens for input length 262091, so adding four verify slots reaches 262147 and exceeds context length 262144."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7f6e91fd8856/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_init_req_max_new_tokens.py (candidate 6d5477605b06c845b25f9260c59599dc33a0aedd)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate suite passed 9 tests and 542 subtests, including the new four-slot context-boundary regression."
+    },
+    {
+      "command": "independent adversarial Scheduler boundary script (candidate 6d5477605b06c845b25f9260c59599dc33a0aedd)",
+      "exit_code": 0,
+      "what_was_measured": "Reported boundary and six independent cases passed, followed by 3,895 exhaustive combinations of small contexts and reserve widths."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7f6e91fd8856/venv/bin/python -m compileall -q python/sglang/srt/managers/scheduler.py test/registered/unit/managers/test_scheduler_init_req_max_new_tokens.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python source and regression test compiled successfully."
+    },
+    {
+      "command": "candidate interpreter import/environment probe",
+      "exit_code": 0,
+      "what_was_measured": "Imported scheduler from /job/repo/python/sglang/srt/managers/scheduler.py using Python 3.12.3 and Torch 2.11.0+rocm7.2; visible accelerator was AMD Instinct MI355X gfx950."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A CUDA Graph/static-buffer or dangling-pointer failure independent of scheduler token clipping would remain unfixed by this Python-only change.",
+    "Any request path that bypasses Scheduler.init_req_max_new_tokens would not receive this new reserve.",
+    "The exact Qwen3.5-397B hybrid Mamba/attention, FA3, TP8, overlap-scheduled H800 failure may have an additional or different cause."
+  ],
+  "remaining_limitations": [
+    "No Qwen/Qwen3.5-397B-A17B-FP8 weights were available.",
+    "The assigned hardware was one AMD MI355X gfx950 GPU, not eight NVIDIA H800 GPUs.",
+    "CUDA, FA3 CUDA kernels, TP8, CUDA Graph replay, NVIDIA Xid 31, and the production illegal-memory-access failure could not be reproduced.",
+    "No native source changed in the candidate, so a native rebuild was not applicable.",
+    "The deterministic tiny Llama serving fixture cannot qualify the affected Qwen3.5 hybrid architecture or distributed CUDA failure and was therefore not used as proof."
+  ]
+}
