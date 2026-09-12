@@ -1,4 +1,5 @@
 import time
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -91,3 +92,66 @@ def test_global_profiler_is_reset_after_fork():
     finally:
         startup_profiler._profiler = old_profiler
         startup_profiler._profiler_pid = old_pid
+
+
+def test_record_adds_previously_measured_phase():
+    profiler = StartupProfiler(enabled=True)
+    profiler.record("imports", 1234.5)
+    assert profiler.render() == "imports: 1234.50ms (100.0%)"
+
+
+def test_log_startup_summary_only_logs_once():
+    profiler = StartupProfiler(enabled=True)
+    profiler.record("startup", 1.0)
+    with (
+        patch.object(startup_profiler, "get_startup_profiler", return_value=profiler),
+        patch.object(startup_profiler, "get_is_main_process", return_value=True),
+        patch.object(startup_profiler.logger, "info") as info,
+    ):
+        startup_profiler.log_startup_summary()
+        startup_profiler.log_startup_summary()
+    info.assert_called_once()
+
+
+def test_launch_server_profiles_process_start_and_ready_wait():
+    from sglang.multimodal_gen.runtime import launch_server
+
+    profiler = StartupProfiler(enabled=True)
+
+    class Reader:
+        def recv(self):
+            return {"status": "ready"}
+
+        def close(self):
+            pass
+
+    class Writer:
+        def close(self):
+            pass
+
+    class Process:
+        def __init__(self, **kwargs):
+            self.args = kwargs["args"]
+
+        def start(self):
+            pass
+
+    server_args = SimpleNamespace(num_gpus=1, nnodes=1, node_rank=0, master_port=1)
+    with (
+        patch.object(launch_server, "configure_logger"),
+        patch.object(launch_server.mp, "Pipe", return_value=(Reader(), Writer())),
+        patch.object(launch_server.mp, "Process", Process),
+        patch.object(launch_server, "get_startup_profiler", return_value=profiler),
+        patch.object(startup_profiler, "get_startup_profiler", return_value=profiler),
+        patch.object(launch_server, "log_startup_summary") as log_summary,
+    ):
+        processes = launch_server.launch_server(server_args, launch_http_server=False)
+
+    assert len(processes) == 1
+    assert processes[0].args[-1] is not None
+    summary = profiler.render()
+    assert "launch_server.prepare_processes:" in summary
+    assert "launch_server.start_worker_0:" in summary
+    assert "launch_server.wait_for_workers_ready:" in summary
+    assert "launch_server.total:" in summary
+    log_summary.assert_called_once()
