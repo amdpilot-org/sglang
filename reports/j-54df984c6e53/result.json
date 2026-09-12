@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37912",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "reproduced",
+  "summary": "Reproduced the full-tier Responses deserialization failure and the Responses-to-Chat effort drop. Fixed the two self-contained gateway bugs: Chat Harmony now clamps all seven OpenAI strings and Responses-to-Chat forwards every tier representable by the pinned protocol. Full seven-tier /v1/responses acceptance remains blocked because crates.io openai-protocol 1.13.0 still has four variants, while pinning smg merge commit 73b1b2c779a8e088b00987c4fea6a0be24d612fd breaks this checkout against extensive protocol API changes.",
+  "tests": [
+    {
+      "command": "cargo test --test api_tests reasoning_effort_accepts_every_openai_tier -- --nocapture (temporary regression on base production code)",
+      "exit_code": 101,
+      "what_was_measured": "JSON deserialization rejected reasoning.effort=none with expected variants minimal/low/medium/high. Raw log: /tmp/amdpilot-repo-j-54df984c6e53/failing-before-deserialization.log"
+    },
+    {
+      "command": "cargo test --lib test_reasoning_effort_forwarding -- --nocapture (regression before production change)",
+      "exit_code": 101,
+      "what_was_measured": "responses_to_chat returned reasoning_effort=None for a request containing minimal. Raw log: /tmp/amdpilot-repo-j-54df984c6e53/failing-before-forwarding.log"
+    },
+    {
+      "command": "cargo test --lib reasoning_effort -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "All four tiers representable by openai-protocol 1.0.0 are forwarded into ChatCompletionRequest. Raw log: /tmp/amdpilot-repo-j-54df984c6e53/passing-after-lib.log"
+    },
+    {
+      "command": "cargo test --lib harmony_effort -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "All seven OpenAI string tiers clamp to Harmony Low/Medium/High as intended, and an unknown value independently defaults to Medium. Raw log: /tmp/amdpilot-repo-j-54df984c6e53/passing-after-harmony.log"
+    },
+    {
+      "command": "cargo test --test api_tests reasoning -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Seven existing Responses and parser reasoning tests passed after the gateway-local changes."
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "exit_code": 0,
+      "what_was_measured": "Modified Rust source conforms to rustfmt; stable rustfmt emitted only existing warnings for nightly-only repository settings."
+    },
+    {
+      "command": "cargo test --lib reasoning_effort -- --nocapture with openai-protocol git rev 73b1b2c779a8e088b00987c4fea6a0be24d612fd",
+      "exit_code": 101,
+      "what_was_measured": "The documented git fallback was rejected: the newer protocol API removes or changes gateway-required types including ResponsesGetParams, ResponseToolType, worker_spec, ResponseTool fields, and multiple request/response fields. Raw compiler output: /tmp/amdpilot-repo-j-54df984c6e53/candidate-git-dependency.log"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The affected code is Rust JSON deserialization and request conversion before model execution; no GPU kernel or model execution is involved, so using the assigned gfx950 would not measure this issue.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The pinned and latest published openai-protocol crates expose only Minimal/Low/Medium/High, so /v1/responses still rejects none/xhigh/max before a handler runs.",
+    "The exact smg #2410 merge commit cannot be used as a drop-in dependency for this checkout because its broader protocol API is incompatible.",
+    "No HTTP server/model reproduction was run because deserialization and conversion unit tests directly exercise the failing pre-handler paths; no model weights or GPU execution are relevant to those claims."
+  ]
+}
