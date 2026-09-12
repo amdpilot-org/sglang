@@ -1,0 +1,29 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35970",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared base already contains the quantization-aware LoRA merge policy from open upstream PR #35975. A real online-FP8 layer reproduced unsafe legacy static-merge behavior, while current auto mode selected dynamic LoRA, explicit merge failed before mutation, and ordinary/mixed boundaries behaved as intended.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-fe43c9b7cb95/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_lora_pipeline.py",
+      "exit_code": 0,
+      "what_was_measured": "Existing LoRA pipeline policy and lifecycle regression suite: 8 tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-fe43c9b7cb95/venv/bin/python reports/j-fe43c9b7cb95/reproduce_fp8_lora_policy.py",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, online FP8 transposed a logical (48,32) weight to (32,48) float8 runtime storage; the legacy direct merge raised, current auto selected dynamic, explicit merge rejected without mutation, dynamic output matched an independent BF16 reference within recorded tolerance, ordinary auto still merged, and a mixed module fell back to dynamic."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "gpu_evidence.log records execution on AMD Instinct MI350X gfx950:sramecc+:xnack- with actual online FP8 post-load quantization and FP8 base-layer execution."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The exact MiniMax-H3 FL2VA model and Larry Turbo LoRA weights were not available.",
+    "Only one assigned AMD gfx950 GPU was available, so the reported NVIDIA SM89 TP2 startup/generation path was not reproduced.",
+    "The smaller fixture validates the merge-policy mechanism and GPU numerics, not MiniMax-H3 architecture semantics, distributed behavior, video quality, or performance.",
+    "On ROCm the legacy direct merge fails first because float8 addmm is unsupported; the reported CUDA execution instead proceeds to the transposed-shape mismatch. Both demonstrate that direct generic merging into runtime FP8 storage is invalid."
+  ]
+}
