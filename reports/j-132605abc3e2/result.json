@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38408",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "b083b511e7dcc34ac3fd22b8b980bd6006c64037",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Accept as valid, intentionally bounded test-only hardening: the candidate implements and tests the original issue's proposed supervisor mitigation. It does not repair the underlying intermittent H200 JIT/compiler/kernel stall, and that hardware-specific failure remains unverified. Prior review PR 1944's provenance allegation was incorrect because issue 1814 is the candidate's source-task mirror; issue 1884 was created later for the review deliverable.",
+  "tests": [
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 SGLANG_JIT_CACHE_DIR=<private> TORCH_EXTENSIONS_DIR=<private> timeout --signal=KILL 90s /tmp/amdpilot-repo-j-132605abc3e2/venv/bin/python test/registered/expert_pack/test_expert_pack_mxfp4.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "The actual base source and MXFP4 JIT path; four tests ran and hipcc targeted gfx950, but CUDA-only cuda_bf16.h was unavailable before kernel execution."
+    },
+    {
+      "command": "timeout --signal=KILL 3s python -c <run recorded-base file with unittest.main replaced by a pre-result signal.pause>",
+      "exit_code": 137,
+      "what_was_measured": "At the base file's real unittest entry boundary, a controlled pre-result stall had no internal deadline and survived until the external timeout killed it."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-132605abc3e2/venv/bin/python -m pytest -vv test/registered/kernels/test_jit_cache.py -k 'mxfp4_registered_test_retries_a_stalled_worker_attempt or build_lock_ignores_an_orphaned_lock_file or build_lock_is_released_when_the_holder_process_dies or build_lock_excludes_a_second_holder'",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate supervisor regression and advisory-lock boundaries; 4 passed, 41 deselected in 33.30 seconds."
+    },
+    {
+      "command": "SGLANG_MXFP4_TEST_TIMEOUT_SECONDS=1 SGLANG_MXFP4_TEST_STALL_ATTEMPT=2 SGLANG_MXFP4_TEST_SUPERVISOR_SELF_TEST=1 /tmp/amdpilot-repo-j-132605abc3e2/venv/bin/python test/registered/expert_pack/test_expert_pack_mxfp4.py",
+      "exit_code": 124,
+      "what_was_measured": "Independent final-attempt boundary: both isolated worker attempts were timed out and killed, and the supervisor returned its documented timeout status."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 SGLANG_JIT_CACHE_DIR=<private> TORCH_EXTENSIONS_DIR=<private> SGLANG_MXFP4_TEST_TIMEOUT_SECONDS=90 /tmp/amdpilot-repo-j-132605abc3e2/venv/bin/python test/registered/expert_pack/test_expert_pack_mxfp4.py (exact candidate)",
+      "exit_code": 1,
+      "what_was_measured": "The real candidate worker used fresh caches and reached hipcc for gfx950, but failed on cuda_bf16.h before any MXFP4 GPU kernel ran."
+    },
+    {
+      "command": "timeout --signal=KILL 3s /tmp/amdpilot-repo-j-132605abc3e2/venv/bin/python -c <live _build_lock holder and contender probe>",
+      "exit_code": 137,
+      "what_was_measured": "A contender remains blocked while the advisory-lock owner is alive; this unchanged production behavior is outside the candidate's intentionally test-only supervisor scope."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "AMD MI355X gfx950 was detected and hipcc was invoked with --offload-arch=gfx950:sramecc+:xnack-, but compilation stopped at missing CUDA-only cuda_bf16.h before an MXFP4 kernel could execute."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The intermittent NVIDIA H200 stall was not statistically reproduced because the assigned device is AMD gfx950, not H200.",
+    "The candidate bounds this registered test process; the underlying production _build_lock can still wait indefinitely while a live owner holds it.",
+    "The deterministic supervisor regression exits before unittest discovery and therefore does not itself execute MXFP4 JIT compilation or a GPU kernel."
+  ],
+  "remaining_limitations": [
+    "No NVIDIA H200 was available, so the reported roughly 1% intermittent failure rate could not be measured.",
+    "The CUDA-specific MXFP4 extension cannot compile on the assigned ROCm gfx950 environment because cuda_bf16.h is unavailable.",
+    "No MXFP4 GPU numerical comparison was possible.",
+    "No native rebuild was applicable because the candidate contains no native-source changes."
+  ]
+}
