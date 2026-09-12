@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/6531",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "1c188f4af08171c7c6404a163b2e46e51bcf2ee9",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base's rebuilt native router reproduced the original missing-route failure with HTTP 404. The exact candidate's rebuilt native router returned HTTP 200 and independently forwarded the abort request body and allowed authorization header to the registered worker. Focused adversarial tests and the complete Rust library suite passed; no router-contract counterexample remains.",
+  "tests": [
+    {
+      "command": "cargo build --bin sgl-router at 358c163250ad3b1f62939b01ce1314a0a31a0365; launch rebuilt router; curl -X POST http://127.0.0.1:49125/abort_request --data '{\"rid\":\"original-failure\"}'",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before reproduction on the actual recorded base: POST /abort_request returned HTTP 404. Build and HTTP evidence are under /tmp/amdpilot-repo-j-347c3536db45/evidence/base-* ."
+    },
+    {
+      "command": "cargo test --lib server::routes::abort::tests -- --nocapture at exact candidate 1c188f4af08171c7c6404a163b2e46e51bcf2ee9",
+      "exit_code": 0,
+      "what_was_measured": "Eight candidate regression/adversarial tests passed, covering multi-worker fan-out, exact opaque bodies and future fields, safe headers, partial HTTP failure, unreachable workers, no workers, trailing-slash URLs, and prefill/decode workers."
+    },
+    {
+      "command": "cargo test --lib at exact candidate 1c188f4af08171c7c6404a163b2e46e51bcf2ee9",
+      "exit_code": 0,
+      "what_was_measured": "Full native router library regression suite: 553 passed, 0 failed."
+    },
+    {
+      "command": "cargo build --bin sgl-router at exact candidate; launch rebuilt router against independent recording worker; curl POST /abort_request with abort_all, nested future field, Authorization, and Cookie",
+      "exit_code": 0,
+      "what_was_measured": "Independent passing-after black box: router returned 200; worker received /abort_request, byte-equivalent JSON, and Authorization. Cookie was not forwarded. Raw captures are under /tmp/amdpilot-repo-j-347c3536db45/evidence/candidate-* and worker-capture.log."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X (gfx950) was visible, but GPU execution is not applicable to this CPU-only Rust HTTP routing change. No numerical or model-architecture claim is made."
+  },
+  "native_rebuilt": true,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No weighted model or distributed inference workload was run; worker-side live-generation cancellation was not independently requalified because the reviewed change only supplies the missing router transport.",
+    "The design intentionally sends one bounded request to every registered worker because the router has no durable request-owner map.",
+    "Rust was not initially present on PATH; pinned Rust 1.90.0 was installed in the private job runtime and used to rebuild both revisions."
+  ]
+}
