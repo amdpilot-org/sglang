@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34737",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1826",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1776",
+  "candidate_commit": "176f90767c89458d462c29d12583309886648522",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review reproduced both original lifecycle defects on the recorded base, then verified that the exact candidate refreshes request-scoped receivers and removes a failed node's subscriber even when its key concatenates multiple connection_pool CP groups. Independent boundary cases confirmed healthy-subscriber selectivity and generation-safe re-registration.",
+  "tests": [
+    {
+      "command": "git switch amdpilot/j-3ba451b01a3d && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3ba451b01a3d/venv/bin/python <independent base lifecycle harness>",
+      "exit_code": 0,
+      "what_was_measured": "On base 358c163, refresh_receiver_is_new=False, multi_cp_remaining_after_failure=1, and stale_broadcast_calls=1, reproducing both original defects through the actual imported implementation."
+    },
+    {
+      "command": "git switch --detach 176f90767c89458d462c29d12583309886648522 && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3ba451b01a3d/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_nixl_backend_basic.py::TestNixlNodeFailure::test_handle_node_failure_removes_watermark_subscriber test/registered/unit/disaggregation/test_nixl_backend_basic.py::TestNixlNodeFailure::test_handle_node_failure_removes_multi_cp_watermark_subscriber test/registered/unit/disaggregation/test_nixl_backend_basic.py::TestStagingWatermarkSubscriberLifecycle",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's five focused lifecycle regressions passed, covering single- and multi-CP cleanup, receiver refresh, stale generation tokens, and selective unregister."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3ba451b01a3d/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_nixl_backend_basic.py test/registered/unit/disaggregation/test_disaggregation_wire.py",
+      "exit_code": 0,
+      "what_was_measured": "91 relevant tests and 14 subtests passed against the exact candidate."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3ba451b01a3d/venv/bin/python <independent candidate adversarial harness>",
+      "exit_code": 0,
+      "what_was_measured": "A concatenated two-CP subscriber was removed, the healthy subscriber remained and was the only later watermark target, receiver refresh selected the new request receiver, and a re-registered generation survived cleanup using a stale snapshot token."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is in the backend-shared Python staging control plane and the deterministic reproductions require no tensor or kernel execution. No GPU claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Only one gfx950 GPU was assigned. The reported heterogeneous-TP topology needs at least three GPUs and multiple serving processes, so no full distributed serving reproduction is claimed.",
+    "No model weights were used. Validation covers the actual control-plane lifecycle and transport subscriber selection, not model semantics or end-to-end distributed performance.",
+    "The prepared environment is ROCm 7.2 on gfx950, whereas the report used CUDA systems. The affected code is backend-shared Python, but cross-architecture serving was not exercised."
+  ]
+}
