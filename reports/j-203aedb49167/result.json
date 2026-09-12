@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36127",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The pinned correction validly rejects STS temperatures that overflow to float32 infinity, but it does not enforce the full positive finite runtime-temperature contract: finite positive JSON values such as 1e-50 underflow to float32 zero and are accepted. The accumulated dynamic-verification feature also remains unverified with a real DFlash2 checkpoint/pair and live serving workload.",
+  "tests": [
+    {
+      "command": "Detached checkout a6054529682765cc1846bc6239d283363162f3ad; PYTHONPATH=/job/repo/python pinned-python inline DFlashWorkerV2 STS load with [1e308, 2.0] and finite-runtime assertion",
+      "exit_code": 1,
+      "what_was_measured": "The candidate parent accepted the finite JSON value, stored tensor([inf, 2.]), and produced confidence 0.5 for a positive logit at the overflowed position."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python pinned-python -m pytest -q test/registered/unit/spec/test_dflash_confidence.py::TestDFlashConfidence::test_dflash_sts_loader_rejects_float32_overflow",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate rejects float32 overflow and preserves the prior confidence-head calibration state."
+    },
+    {
+      "command": "Exact-candidate inline boundary probe for float32 maximum, overflow, underflow, and ordinary positive STS values",
+      "exit_code": 0,
+      "what_was_measured": "Overflowing 3.4028236e38 and 1e308 were rejected, but positive 1e-50 underflowed to float32 zero and was accepted and installed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python pinned-python -m pytest -q test/registered/unit/spec/test_dflash_confidence.py test/registered/unit/spec/test_dflash_logits.py test/registered/spec/dspark/test_dspark_scheduler.py test/registered/spec/dspark/test_dspark_sts.py",
+      "exit_code": 0,
+      "what_was_measured": "76 tests and 18 subtests passed across DFlash confidence/logits and shared scheduler/STS behavior."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python pinned-python -m pytest -q test/registered/spec/dspark/test_dspark_kernel_parity.py",
+      "exit_code": 0,
+      "what_was_measured": "One ROCm GPU test and 22 parameterized subtests passed against independent PyTorch references for shared scheduling and verification kernels."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Shared kernel parity ran on one AMD Instinct MI350X (gfx950) with ROCm/HIP 7.2 and passed 22 independent numerical-reference subtests. No real DFlash2 model execution was possible."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A finite positive STS JSON temperature such as 1e-50 passes shared validation, underflows to float32 zero in DFlashWorkerV2, passes the candidate's isfinite-only check, and is installed despite the strictly-positive runtime temperature contract.",
+    "No real compatible DFlash2 checkpoint with a trained survival head was loaded, so enable_confidence_head/confidence_head naming, tensor shapes, bias, dtype, and optional Markov schema remain unverified.",
+    "No real compatible DFlash2 target/draft pair was available to verify lossless end-to-end behavior across sampling, grammar, continuous batching, overlap relay, and live compact graph replay.",
+    "The expected mixed-quality concurrent-serving throughput benefit remains unmeasured."
+  ],
+  "remaining_limitations": [
+    "No compatible DFlash2 checkpoint or target/draft pair was supplied or cached.",
+    "The tiny Llama fixture cannot qualify DFlash2-specific checkpoint compatibility, semantic correctness, graph replay, or throughput and was not used as proof.",
+    "GPU evidence covers shared kernels only, not real DFlash2 serving.",
+    "No native C/C++/CUDA/HIP/FlyDSL source changed, so no native rebuild was applicable."
+  ]
+}
