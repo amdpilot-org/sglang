@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38849",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "summary": "The reported million-token GLM 5.3 TP8 hang could not be reproduced because the assigned host has one gfx950 GPU, not eight gfx942 MI300X GPUs, and no GLM 5.3 weights. Exact and adjacent synthetic AITER MoE shapes completed on gfx950; related MI300X AITER investigations show current dispatch avoiding the reported older kernel. No SGLang code change is justified.",
+  "tests": [
+    {
+      "command": "rocm-smi --showproductname --showuniqueid --showmeminfo vram; /tmp/amdpilot-repo-j-996d8dac5799/venv/bin/python (Torch/HIP device query)",
+      "exit_code": 0,
+      "what_was_measured": "One AMD Instinct MI350X gfx950 GPU, 270566162432 bytes VRAM; Torch 2.11.0+rocm7.2, HIP 7.2.26015."
+    },
+    {
+      "command": "AITER test_moe_2stage.py -q 5 -t 304 -dim 2048,6144 -e 256 -k 9 -a silu -s f -p t -hip 0,0 --no-flydsl-csv",
+      "exit_code": 0,
+      "what_was_measured": "Exact available geometry on gfx950 selected one-stage 32x384 HSACO, completed without hang, and reported aggregate logits_diff 0.000171621; legacy elementwise allclose diagnostic warned and is retained."
+    },
+    {
+      "command": "Same AITER command with -t 288 and -t 320",
+      "exit_code": 0,
+      "what_was_measured": "Independent lower/upper token-count controls both selected the same one-stage gfx950 dispatch and completed without GPU fault."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Raw logs record real gfx950 AITER HSACO loading and execution for M=288/304/320 under reports/j-996d8dac5799/raw/.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No assigned gfx942/MI300X hardware; the reported kernel ISA was not executed locally.",
+    "No GLM 5.3 weights or million-token longevity workload.",
+    "One GPU only; TP8 and multi-rank scheduler behavior remain unverified.",
+    "The synthetic gfx950 kernel run cannot establish model semantic accuracy or prove the original gfx942 issue fixed.",
+    "The exact M=304 synthetic test emitted AITER's non-strict elementwise allclose warning despite low aggregate logits_diff; this separate numerical behavior was not changed."
+  ]
+}
