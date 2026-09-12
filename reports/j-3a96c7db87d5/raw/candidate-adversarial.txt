@@ -1,0 +1,54 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_________ test_transformers_auto_direct_hf_processor_path_is_observed __________
+
+    def test_transformers_auto_direct_hf_processor_path_is_observed():
+        collector = RecordingCollector()
+        processor = TransformersAutoMultimodalProcessor.__new__(
+            TransformersAutoMultimodalProcessor
+        )
+        processor.metrics_collector = collector
+        processor.mm_tokens = SimpleNamespace(
+            image_token_id=None, video_token_id=None, audio_token_id=None
+        )
+        processor.hf_config = SimpleNamespace()
+        processor._is_mrope = False
+        processor._load_images = lambda image_data: []
+    
+        def apply_hf_processor(**kwargs):
+            time.sleep(0.02)
+            return {"input_ids": torch.tensor([[1]])}
+    
+        processor._apply_hf_processor = apply_hf_processor
+        processor._build_mm_items = lambda output, input_ids: []
+    
+        result = asyncio.run(
+            processor.process_mm_data_async(
+                image_data=[],
+                audio_data=[],
+                input_text="fixture",
+                request_obj=SimpleNamespace(video_data=None),
+            )
+        )
+    
+        assert result.input_ids == [1]
+>       assert len(collector.processor) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+E        +    where [] = <test_adversarial_async_bypass.RecordingCollector object at 0x7ae73f40d100>.processor
+
+../review-evidence-j-3a96c7db87d5/test_adversarial_async_bypass.py:50: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../review-evidence-j-3a96c7db87d5/test_adversarial_async_bypass.py::test_transformers_auto_direct_hf_processor_path_is_observed
+1 failed, 16 warnings in 8.52s

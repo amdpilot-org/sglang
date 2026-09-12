@@ -1,0 +1,256 @@
+FFFFFFF                                                                  [100%]
+=================================== FAILURES ===================================
+_________ test_media_timings_preserve_absent_download_and_error_paths __________
+
+    def test_media_timings_preserve_absent_download_and_error_paths():
+        collector = _RecordingCollector()
+        payload = _png_bytes()
+        _ImageHandler.payload = payload
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _ImageHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{server.server_port}/fixture.png"
+>           loaded = _StubProcessor._load_single_item(
+                url, Modality.IMAGE, metrics_collector=collector
+            )
+E           TypeError: BaseMultimodalProcessor._load_single_item() got an unexpected keyword argument 'metrics_collector'
+
+../review-evidence-j-3a96c7db87d5/test_mm_latency_metrics.py:74: TypeError
+___________________ test_request_stage_timings_are_isolated ____________________
+
+    def test_request_stage_timings_are_isolated():
+        collector = _RecordingCollector()
+        processor = _StubProcessor.__new__(_StubProcessor)
+        processor.metrics_collector = collector
+        processor.io_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        processor._tokenizer_auto_adds_specials = False
+        processor.image_config = None
+        processor.video_config = None
+        processor.audio_config = None
+        processor.disable_fast_image_processor = True
+        processor.video_preprocessing_device = None
+        processor.mm_feature_transport = "cpu"
+        processor.precompute_hash_before_cpu_transfer = False
+        processor.FEATURE_NAMES = []
+    
+        class _Processor:
+            def __call__(self, **kwargs):
+                time.sleep(kwargs.pop("delay"))
+                return {"input_ids": [[1]]}
+    
+        processor._resolve_processor = lambda value: (_Processor(), object())
+    
+        async def run_load(delay):
+            await processor._observe_mm_load_data(asyncio.sleep(delay))
+    
+        async def exercise():
+            await asyncio.gather(run_load(0.02), run_load(0.04))
+    
+        try:
+>           asyncio.run(exercise())
+
+../review-evidence-j-3a96c7db87d5/test_mm_latency_metrics.py:137: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/usr/lib/python3.12/asyncio/runners.py:194: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+../review-evidence-j-3a96c7db87d5/test_mm_latency_metrics.py:134: in exercise
+    await asyncio.gather(run_load(0.02), run_load(0.04))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+delay = 0.02
+
+    async def run_load(delay):
+>       await processor._observe_mm_load_data(asyncio.sleep(delay))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: '_StubProcessor' object has no attribute '_observe_mm_load_data'
+
+../review-evidence-j-3a96c7db87d5/test_mm_latency_metrics.py:131: AttributeError
+_____________ test_processor_override_is_timed_at_shared_dispatch ______________
+
+    def test_processor_override_is_timed_at_shared_dispatch():
+        collector = _RecordingCollector()
+    
+        class _OverrideProcessor(_StubProcessor):
+            def process_mm_data(self, **kwargs):
+                time.sleep(0.02)
+                return {"input_ids": [[1]]}
+    
+        processor = _OverrideProcessor.__new__(_OverrideProcessor)
+        processor.metrics_collector = collector
+    
+>       processor._call_process_mm_data(input_text="override")
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: '_OverrideProcessor' object has no attribute '_call_process_mm_data'. Did you mean: 'process_mm_data'?
+
+../review-evidence-j-3a96c7db87d5/test_mm_latency_metrics.py:162: AttributeError
+___________ test_direct_processor_call_from_async_override_is_timed ____________
+
+    def test_direct_processor_call_from_async_override_is_timed():
+        collector = _RecordingCollector()
+    
+        class _DirectAsyncProcessor(_StubProcessor):
+            async def process_mm_data_async(self, *args, **kwargs):
+                return self.process_mm_data()
+    
+            def process_mm_data(self, **kwargs):
+                time.sleep(0.02)
+                return {"input_ids": [[1]]}
+    
+        processor = _DirectAsyncProcessor.__new__(_DirectAsyncProcessor)
+        processor.metrics_collector = collector
+    
+        asyncio.run(processor.process_mm_data_async())
+    
+>       assert len(collector.processor) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+E        +    where [] = <test_mm_latency_metrics._RecordingCollector object at 0x7a3cad0c52e0>.processor
+
+../review-evidence-j-3a96c7db87d5/test_mm_latency_metrics.py:184: AssertionError
+_____________ test_nested_processor_overrides_emit_one_observation _____________
+
+    def test_nested_processor_overrides_emit_one_observation():
+        collector = _RecordingCollector()
+    
+        class _ParentProcessor(_StubProcessor):
+            def process_mm_data(self, **kwargs):
+                return {"input_ids": [[1]]}
+    
+        class _NestedProcessor(_ParentProcessor):
+            def process_mm_data(self, **kwargs):
+                return super().process_mm_data(**kwargs)
+    
+        processor = _NestedProcessor.__new__(_NestedProcessor)
+        processor.metrics_collector = collector
+    
+        processor.process_mm_data(input_text="nested")
+    
+>       assert len(collector.processor) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+E        +    where [] = <test_mm_latency_metrics._RecordingCollector object at 0x7a3cad0c5b20>.processor
+
+../review-evidence-j-3a96c7db87d5/test_mm_latency_metrics.py:204: AssertionError
+__________ test_transformers_auto_remote_image_observes_item_metrics ___________
+
+    def test_transformers_auto_remote_image_observes_item_metrics():
+        collector = _RecordingCollector()
+        payload = _png_bytes()
+        _ImageHandler.payload = payload
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _ImageHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            processor = TransformersAutoMultimodalProcessor.__new__(
+                TransformersAutoMultimodalProcessor
+            )
+            processor.metrics_collector = collector
+            images = processor._load_images(
+                [f"http://127.0.0.1:{server.server_port}/fixture.png"]
+            )
+    
+            assert images[0].size == (2, 2)
+>           assert len(collector.media) == 1
+E           assert 0 == 1
+E            +  where 0 = len([])
+E            +    where [] = <test_mm_latency_metrics._RecordingCollector object at 0x7a3cad0c6510>.media
+
+../review-evidence-j-3a96c7db87d5/test_mm_latency_metrics.py:224: AssertionError
+____________ test_specialized_video_download_observes_item_metrics _____________
+
+obj = <module 'sglang.srt.utils.common' from '/job/repo/python/sglang/srt/utils/common.py'>
+name = '_download_remote_media', ann = 'sglang.srt.utils.common'
+
+    def annotated_getattr(obj: object, name: str, ann: str) -> object:
+        try:
+>           obj = getattr(obj, name)
+                  ^^^^^^^^^^^^^^^^^^
+E           AttributeError: module 'sglang.srt.utils.common' has no attribute '_download_remote_media'. Did you mean: 'download_remote_media'?
+
+/opt/venv/lib/python3.12/site-packages/_pytest/monkeypatch.py:92: AttributeError
+
+The above exception was the direct cause of the following exception:
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a3cad0c7980>
+
+    def test_specialized_video_download_observes_item_metrics(monkeypatch):
+        collector = _RecordingCollector()
+        processor = MossVLImageProcessor.__new__(MossVLImageProcessor)
+        processor.metrics_collector = collector
+        payload = b"bounded-video-fixture"
+    
+        def fake_download(url, timeout):
+            from sglang.srt.utils.common import download_remote_media
+    
+            # Exercise the real capture hook while keeping the fixture local.
+            monkeypatch.setattr(
+                "sglang.srt.utils.common._download_remote_media",
+                lambda requested_url, requested_timeout: payload,
+            )
+            return download_remote_media(url, timeout)
+    
+        monkeypatch.setattr(
+            "sglang.srt.multimodal.processors.moss_vl.download_remote_media",
+            fake_download,
+        )
+        path = None
+        try:
+>           path, cleanup_paths = processor._normalize_single_video_input(
+                "https://fixture.invalid/sample.mp4"
+            )
+
+../review-evidence-j-3a96c7db87d5/test_mm_latency_metrics.py:255: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/srt/multimodal/processors/moss_vl.py:474: in _normalize_single_video_input
+    normalized_path, temp_path = self._normalize_video_string(video_input)
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/multimodal/processors/moss_vl.py:436: in _normalize_video_string
+    content = download_remote_media(value, timeout=timeout)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../review-evidence-j-3a96c7db87d5/test_mm_latency_metrics.py:243: in fake_download
+    monkeypatch.setattr(
+/opt/venv/lib/python3.12/site-packages/_pytest/monkeypatch.py:106: in derive_importpath
+    annotated_getattr(target, attr, ann=module)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+obj = <module 'sglang.srt.utils.common' from '/job/repo/python/sglang/srt/utils/common.py'>
+name = '_download_remote_media', ann = 'sglang.srt.utils.common'
+
+    def annotated_getattr(obj: object, name: str, ann: str) -> object:
+        try:
+            obj = getattr(obj, name)
+        except AttributeError as e:
+>           raise AttributeError(
+                f"{type(obj).__name__!r} object at {ann} has no attribute {name!r}"
+            ) from e
+E           AttributeError: 'module' object at sglang.srt.utils.common has no attribute '_download_remote_media'
+
+/opt/venv/lib/python3.12/site-packages/_pytest/monkeypatch.py:94: AttributeError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../review-evidence-j-3a96c7db87d5/test_mm_latency_metrics.py::test_media_timings_preserve_absent_download_and_error_paths
+FAILED ../review-evidence-j-3a96c7db87d5/test_mm_latency_metrics.py::test_request_stage_timings_are_isolated
+FAILED ../review-evidence-j-3a96c7db87d5/test_mm_latency_metrics.py::test_processor_override_is_timed_at_shared_dispatch
+FAILED ../review-evidence-j-3a96c7db87d5/test_mm_latency_metrics.py::test_direct_processor_call_from_async_override_is_timed
+FAILED ../review-evidence-j-3a96c7db87d5/test_mm_latency_metrics.py::test_nested_processor_overrides_emit_one_observation
+FAILED ../review-evidence-j-3a96c7db87d5/test_mm_latency_metrics.py::test_transformers_auto_remote_image_observes_item_metrics
+FAILED ../review-evidence-j-3a96c7db87d5/test_mm_latency_metrics.py::test_specialized_video_download_observes_item_metrics
+7 failed, 16 warnings in 21.11s
