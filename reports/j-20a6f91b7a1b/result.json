@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35333",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2783",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2748",
+  "candidate_commit": "b9fdebd698e93283f02acc4095f1fcda71233f4e",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate adds useful schema, resolver, capture, gate, and region-inventory primitives, and its focused tests and toy GPU rollout pass. It does not fully implement the open feature: no production path loads/resolves a manifest or passes a resolution into DenoisingStage, so runtime behavior remains the pre-existing global compile policy. Independent adversarial tests also show that NaN tensor and output metrics pass the gate and tensor-valued terminal state comparison raises instead of returning a rejection.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-20a6f91b7a1b/venv/bin/python -c 'from sglang.multimodal_gen.runtime.utils.compile_trajectory import CompileWorkloadSignature' (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: the recorded base has no trajectory compile manifest/gate implementation; import raises ModuleNotFoundError."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-20a6f91b7a1b/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_compile_trajectory_gate.py python/sglang/multimodal_gen/test/unit/test_regional_torch_compile.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate commit focused regression suite: 18 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TORCHINDUCTOR_CACHE_DIR=/tmp/amdpilot-repo-j-20a6f91b7a1b/inductor-review-cache /tmp/amdpilot-repo-j-20a6f91b7a1b/venv/bin/python reports/j-ca997a4b410d/gpu_trajectory_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "Real torch.compile/Inductor execution on AMD Instinct MI355X (gfx950): eager versus compiled four-step toy state rollout passed, reset/short rollout passed, and an injected step-1 perturbation was rejected. This is not a diffusion/model-semantic qualification."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-20a6f91b7a1b/venv/bin/python /job/review-evidence-j-20a6f91b7a1b/adversarial_review.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial contract cases: NaN checkpoint metrics passed with no failures; a NaN public metric passed with no failures; equal tensor-valued terminal states raised RuntimeError due to ambiguous tensor truth value."
+    },
+    {
+      "command": "rg -n 'CompilePlanResolver|CompilePlanResolution|CompiledPlanManifest|TrajectoryCapture|evaluate_trajectory_gate' python/sglang --glob '!**/test/**'",
+      "exit_code": 0,
+      "what_was_measured": "Production wiring audit: resolver/manifest/capture APIs occur only in their new utility module; DenoisingStage only accepts an optional CompilePlanResolution, and no production caller supplies one."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X, gfx950, Torch 2.11.0+rocm7.2. Candidate toy GPU script completed with maximum per-step absolute error 1.1920928955078125e-07. Torch emitted non-fatal Dynamo metrics serialization errors."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A candidate checkpoint containing NaN is promoted because all threshold comparisons against NaN evaluate false.",
+    "A model/output adapter returning NaN is promoted for the same reason.",
+    "Tensor-valued terminal state mappings raise RuntimeError during direct mapping inequality instead of producing a structural gate failure.",
+    "No server/configuration or request path constructs CompilePlanResolver, derives the current workload signature, loads a manifest, or passes resolved_plan to DenoisingStage; therefore an uncovered production request is not made eager by this feature.",
+    "No real diffusion or stateful world-model trajectory validates history regimes, cache on/off, CFG serial/parallel, reset isolation, mutation/alias metadata, or semantic output metrics."
+  ],
+  "remaining_limitations": [
+    "No production model weights were available, so model-semantic accuracy and architecture-specific behavior were not tested.",
+    "Only one AMD gfx950 GPU was used; distributed and other GPU architectures were not tested.",
+    "No native source changed in the candidate and repository-environment.json declares no native build target, so a native rebuild was not applicable.",
+    "The candidate GPU script is a small Linear/tanh toy and does not exercise DenoisingStage regional compilation, cache wrappers, CFG, manifests, fallback metrics, or a serving path.",
+    "Cold/warm timing was observed only for the toy script; p50/p95, graph breaks, recompiles, and peak memory were not independently qualified."
+  ]
+}
