@@ -1276,6 +1276,21 @@ def set_time_batch(
             method(ts, attrs)
 
 
+def set_spec_verify_end_time_batch(reqs: List[Any], accept_lens: Any):
+    """Close speculative verify spans using drafts-only acceptance counts.
+
+    ``accept_lens`` includes the target-model bonus token. Keep the device to
+    host copy entirely out of the tracing-disabled serving path.
+    """
+    if reqs is None or len(reqs) == 0 or not get_global_tracing_enabled():
+        return
+
+    num_correct_drafts = (accept_lens - 1).tolist()
+    ts = time.perf_counter()
+    for req, count in zip(reqs, num_correct_drafts, strict=True):
+        req.time_stats.set_spec_verify_end_time(ts, num_correct_drafts=count)
+
+
 def flush_trace_batch(reqs: List[Any]):
     """Proactively flush buffered trace ops for a batch of requests.
 

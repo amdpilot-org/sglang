@@ -15,6 +15,7 @@ from sglang.srt.model_executor.forward_batch_info import (
     ForwardBatch,
     ForwardMode,
 )
+from sglang.srt.observability.req_time_stats import set_spec_verify_end_time_batch
 from sglang.srt.speculative.eagle_info import EagleDraftInput, EagleVerifyInput
 from sglang.srt.speculative.eagle_utils import (
     TreeMaskMode,
@@ -657,6 +658,9 @@ def run_eagle_verify(
     # (draft_token / out_cache_loc / ...) that must outlive the imminent
     # batch.input_ids rebind in prepare_for_draft_extend.
     # Scheduler pins it in batch_record_buf for the 2-iter window.
+    # This is outside plan_stream_ctx, so the trace-only device read cannot
+    # accidentally synchronize the planning stream.
+    set_spec_verify_end_time_batch(batch.reqs, accept_lens)
     return GenerationBatchResult(
         logits_output=logits_output,
         next_token_ids=predict,
