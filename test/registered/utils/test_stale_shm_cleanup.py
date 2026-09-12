@@ -28,6 +28,23 @@ class TestMakeShmName(unittest.TestCase):
         self.assertNotEqual(a, b)
         self.assertEqual(_creator_pid(a), os.getpid())
 
+    def test_fits_macos_posix_shm_limit(self):
+        with patch("sglang.srt.utils.stale_shm_cleanup.os.getpid", return_value=12345):
+            name = make_shm_name("nodecheck")
+        self.assertLessEqual(len(name), 30)
+        self.assertEqual(_creator_pid(name), 12345)
+
+    def test_long_kind_still_fits_and_is_unique(self):
+        with patch(
+            "sglang.srt.utils.stale_shm_cleanup.os.getpid", return_value=4194304
+        ):
+            a = make_shm_name("future_shared_memory_consumer")
+            b = make_shm_name("future_shared_memory_consumer")
+        self.assertLessEqual(len(a), 30)
+        self.assertLessEqual(len(b), 30)
+        self.assertNotEqual(a, b)
+        self.assertEqual(_creator_pid(a), 4194304)
+
     def test_creator_pid_parsing(self):
         self.assertEqual(_creator_pid("sgl_shm_mq_1234_abcd1234"), 1234)
         self.assertEqual(_creator_pid("multi_tokenizer_args_5678"), 5678)

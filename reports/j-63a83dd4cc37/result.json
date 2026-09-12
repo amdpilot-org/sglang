@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34800",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that make_shm_name('nodecheck') exceeds macOS's 30-character caller-visible POSIX shared-memory budget and that an OSError on the source rank makes in_the_same_node_as enter mismatched collectives. Shared-memory names are now capped while preserving the cleanup parser format, and every rank reaches the name broadcast even when creation fails.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-63a83dd4cc37/venv/bin/python -m pytest -q test/registered/utils/test_stale_shm_cleanup.py -k 'fits_macos or long_kind'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: nodecheck was 32 characters for PID 12345 and a long future kind was 54 characters, both above the macOS limit. Raw output: reports/j-63a83dd4cc37/raw/failing_before_name.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-63a83dd4cc37/venv/bin/python -m pytest -q test/registered/unit/distributed/test_same_node_shm_failure.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before two-rank Gloo reproduction: injecting OSError(63, 'File name too long') on the source rank caused collective timeouts/peer closure. The test was initially run at the equivalent temporary path test/registered/distributed/test_same_node_shm_failure.py before being moved into the registered unit layout. Raw output: reports/j-63a83dd4cc37/raw/failing_before_collective.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-63a83dd4cc37/venv/bin/python -m pytest -q test/registered/utils/test_stale_shm_cleanup.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after name-limit, uniqueness, PID parsing, cleanup, and production ShmRingBuffer coverage: 9 passed, 1 skipped. Raw output: reports/j-63a83dd4cc37/raw/passing_after_stale_shm.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-63a83dd4cc37/venv/bin/python -m pytest -q test/registered/unit/distributed/test_same_node_shm_failure.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after two-rank Gloo coverage: source creation failure returns false on both ranks without deadlock, and the independent successful shared-memory probe returns true on both ranks; 2 passed. Raw output: reports/j-63a83dd4cc37/raw/passing_after_collective_final.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-63a83dd4cc37/venv/bin/python -m pre_commit run --files python/sglang/srt/utils/stale_shm_cleanup.py python/sglang/srt/distributed/parallel_state.py test/registered/utils/test_stale_shm_cleanup.py test/registered/unit/distributed/test_same_node_shm_failure.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, registered-test validation, and static hooks all passed. Raw output: reports/j-63a83dd4cc37/raw/pre_commit_final.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and regression concern POSIX shared-memory naming and CPU Gloo collective control flow. Running an unrelated gfx950 smoke would not validate the reported macOS behavior."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No macOS host was available, so the platform's shm_open limit was validated from the reported boundary and deterministic length checks rather than an actual macOS kernel call.",
+    "The MLX Qwen --tp 2 launch was not run because this environment is Linux/ROCm and the requested model weights were not available; the regression covers the actual in_the_same_node_as implementation with a two-rank process group and the exact reported OSError.",
+    "This change prevents the silent deadlock and keeps generated names portable; it does not claim to make MLX tensor parallelism functional beyond this startup probe."
+  ]
+}
