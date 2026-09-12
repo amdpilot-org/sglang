@@ -35,6 +35,9 @@ class HiCacheStorageConfig:
     enable_storage_metrics: bool
     is_page_first_layout: bool
     model_name: Optional[str]
+    # Scheduler DP identity is distinct from attention DP: pure-DP replicas all
+    # have attn_dp_rank == 0 but still own separate embedded storage clients.
+    dp_rank: int = 0
     tp_lcm_size: Optional[int] = None
     should_split_heads: bool = False
     extra_config: Optional[dict] = None

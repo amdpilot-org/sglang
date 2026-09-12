@@ -264,7 +264,7 @@ You can configure it through `tenant_id` in `--hicache-storage-backend-extra-con
 
 When `enable_ssd_offload` is set to `true`, SGLang will request that Mooncake enable SSD offloading for the KV cache. This allows Mooncake to spill overflow data from DRAM to local SSDs, effectively expanding the available L3 cache capacity.
 
-If you need to explicitly control the SSD spill directory, set `ssd_offload_path` or the `MOONCAKE_OFFLOAD_FILE_STORAGE_PATH` environment variable. SGLang forwards this value to `MooncakeDistributedStore.setup(..., ssd_offload_path=...)`, while other SSD offload tuning parameters continue to be read directly by the Mooncake C++ library.
+If you need to explicitly control the SSD spill directory, set `ssd_offload_path` or the `MOONCAKE_OFFLOAD_FILE_STORAGE_PATH` environment variable. For embedded HiCache clients, SGLang treats this value as a base directory and gives every client a private `rank_<dp>_<tp>_<pp>` subdirectory (with `_cp<cp>` appended when attention context parallelism is enabled) before calling `MooncakeDistributedStore.setup(..., ssd_offload_path=...)`. Mooncake's local-disk tier supports one client per storage directory; do not configure multiple external or standalone Mooncake clients with the same final directory. Other SSD offload tuning parameters continue to be read directly by the Mooncake C++ library.
 
 You can enable it in any of the three supported configuration methods:
 

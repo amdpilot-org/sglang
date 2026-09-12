@@ -31,6 +31,25 @@ logger = logging.getLogger(__name__)
 device_module = get_device_module()
 
 
+def _direct_linker_storage_config(
+    *, params, tp_rank: int, tp_size: int, rank_replicated: bool, extra_config: dict
+) -> HiCacheStorageConfig:
+    return HiCacheStorageConfig(
+        dp_rank=params.dp_rank,
+        tp_rank=tp_rank,
+        tp_size=tp_size,
+        pp_rank=params.pp_rank,
+        pp_size=params.pp_size,
+        attn_cp_rank=params.attn_cp_rank,
+        attn_cp_size=params.attn_cp_size,
+        is_mla_model=rank_replicated,
+        enable_storage_metrics=False,
+        is_page_first_layout=False,
+        model_name=get_model().model_path,
+        extra_config=extra_config,
+    )
+
+
 def _storage_suffix(
     *, rank_replicated: bool, tp_rank: int, attn_cp_rank: int, pp_rank: int
 ) -> str:
@@ -116,17 +135,11 @@ class MooncakeDirectLinker(UnifiedCacheLinker):
         extra_config, *_ = HybridCacheController.parse_storage_backend_extra_config(
             get_memory().hicache_storage_backend_extra_config
         )
-        storage_config = HiCacheStorageConfig(
+        storage_config = _direct_linker_storage_config(
+            params=params,
             tp_rank=tp_rank,
             tp_size=tp_size,
-            pp_rank=params.pp_rank,
-            pp_size=params.pp_size,
-            attn_cp_rank=params.attn_cp_rank,
-            attn_cp_size=params.attn_cp_size,
-            is_mla_model=rank_replicated,
-            enable_storage_metrics=False,
-            is_page_first_layout=False,
-            model_name=get_model().model_path,
+            rank_replicated=rank_replicated,
             extra_config=extra_config,
         )
         if storage is None:
