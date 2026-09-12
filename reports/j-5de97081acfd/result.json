@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38207",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/875",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/834",
+  "candidate_commit": "bd2ec8e34d5dfbca94ed31ed264610ac60c1b5bf",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the demonstrated DCP-widened no-RoPE MLA KV-scatter indexing and reserved-slot defect. The exact regression fails on the recorded base and passes on the exact candidate, and an independent GPU matrix found no counterexample. The original eight-B200 GLM-5.3 serving crash remains unverified in this single-gfx950 ROCm environment.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5de97081acfd/venv/bin/python -m pytest /job/review-evidence/meta/test_set_mla_kv_buffer_candidate.py -k 'norope_localizes_dcp_virtual_locs or norope_dcp_skips_reserved_index' -vv",
+      "revision": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before behavior of the candidate's unchanged three-test regression on the prepared base; all three failed on GPU."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5de97081acfd/venv/bin/python -m pytest test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py -k 'norope_localizes_dcp_virtual_locs or norope_dcp_skips_reserved_index' -vv",
+      "revision": "bd2ec8e34d5dfbca94ed31ed264610ac60c1b5bf",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after behavior of the exact candidate regression; 3 passed."
+    },
+    {
+      "command": "independent inline PyTorch-reference GPU matrix retained at /job/review-evidence/adversarial/matrix.txt",
+      "revision": "bd2ec8e34d5dfbca94ed31ed264610ac60c1b5bf",
+      "exit_code": 0,
+      "what_was_measured": "130 no-RoPE DCP scatter cases plus empty input across DCP sizes 2/3/8, all ranks, int32/int64 locations, arbitrary reserved index, and dimensions 1/127/128/129/513."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5de97081acfd/venv/bin/python -m pytest test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py -vv",
+      "revision": "bd2ec8e34d5dfbca94ed31ed264610ac60c1b5bf",
+      "exit_code": 0,
+      "what_was_measured": "Candidate file regression suite: 8 passed, 58 CUDA-TMA-only tests skipped on ROCm."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "All focused and adversarial kernels executed on AMD Instinct MI350X gfx950:sramecc+:xnack-; torch.cuda.synchronize completed after the independent matrix."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_reason": "The candidate changes Python/Triton source and tests only; no native C++ or FlyDSL compiler source changed. Triton JIT compiled the exercised kernels for gfx950.",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No NVIDIA B200 or CUDA 13 environment was available, so CUDA code generation and the reported architecture-specific illegal-memory-access symptom were not tested.",
+    "Only one GPU was assigned; TP8/DCP8 communication and multi-rank process behavior were simulated one rank at a time through the real GPU kernel.",
+    "GLM-5.3 weights were unavailable; full-model semantics, 262144 context, chunked prefill, HiCache, and the complete serving command were not run.",
+    "FlashInfer TRT-LLM MLA execution was not available on ROCm; this review verifies the upstream KV-scatter contract feeding that path, not the downstream CUDA attention kernel.",
+    "The 58 skipped tests in the full file require NVIDIA TMA/SM90+ and do not exercise the changed no-RoPE DCP branch."
+  ]
+}
