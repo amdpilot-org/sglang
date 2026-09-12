@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/3642",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared base already included upstream PR 9391's combined prompt-plus-completion auto-truncation. This change preserves that behavior and fixes its reserved-token edge case: prompt truncation now subtracts speculative decoding's reserved output slots and retains those slots in total-token accounting. Added compatibility, regression, and adversarial unit coverage, plus a real source-checkout HTTP/GPU probe of the original OpenAI completion scenario.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-5f9146f066fb/venv/bin/python -m pytest -q test/registered/unit/managers/test_auto_truncate_validation.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression on the recorded base with the proposed tests present: the reserved-token prompt case retained 10 tokens when only 7 fit. Three existing-contract cases passed. Raw output: evidence/regression-before.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5f9146f066fb/venv/bin/python -m pytest -q test/registered/unit/managers/test_auto_truncate_validation.py test/registered/unit/managers/test_sampling_mask_validation.py test/registered/unit/managers/test_hidden_state_server_mode.py",
+      "exit_code": 0,
+      "what_was_measured": "11 tests and 11 subtests passed, covering enabled auto-truncation, disabled compatibility/error behavior, exact reserved-token prompt and completion budgets, and adjacent tokenizer-manager validation. Raw output: evidence/unit-after.txt."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-5f9146f066fb/venv/bin/python reports/j-5f9146f066fb/run_auto_truncate_probe.py --fixture /tmp/amdpilot-repo-j-5f9146f066fb/tiny-random-llama --output reports/j-5f9146f066fb/evidence/http-gpu-final",
+      "exit_code": 0,
+      "what_was_measured": "A real source-checkout server on the assigned MI355X accepted an OpenAI completion requesting 9 prompt + 30 completion tokens with context 32, returned HTTP 200, truncated completion usage to 21 tokens, and reported 30 total tokens. Server logs record the truncation warning, Triton compilation, GPU prefill/decode, request, response, and cleanup."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-5f9146f066fb/evidence/http-gpu-final/server.log and completion.json show execution on the assigned AMD Instinct MI355X/gfx950 through the SGLang Triton backend; run-metadata.json records all assertions true and owned descendants reaped."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The qualified fixture has deterministic random Llama weights and validates transport and engine execution only; it does not establish semantic model quality.",
+    "The reserved-token regression is validated directly at TokenizerManager with nonzero reserved slots. No speculative draft model was available in the qualified fixture, so that edge case was not exercised end-to-end with EAGLE speculative decoding.",
+    "No native C++ or FlyDSL source changed, so a native rebuild was not applicable.",
+    "Independent numerical GPU reference comparison was not applicable to this request-validation/control-flow change; the GPU evidence checks protocol status and independently reported token counts against the configured context budget."
+  ]
+}
