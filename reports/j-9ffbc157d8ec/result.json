@@ -1,0 +1,31 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39096",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the ChatCompletionRequest eager-default loss and fixed tokenizer-manager precedence by carrying the request's explicitly supplied sampling keys. Effective precedence is now explicit client value > preferred sampling params > model generation config > protocol defaults, while native requests without explicit-key metadata retain their existing behavior.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-9ffbc157d8ec/venv/bin/python -m pytest -q test/registered/unit/managers/test_chat_preferred_sampling_params.py",
+      "exit_code": 1,
+      "what_was_measured": "Before the implementation, the new regression could not import merge_preferred_sampling_params, preserving a failing-before result. Raw output: /job/pre_fix_test_output.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9ffbc157d8ec/venv/bin/python -m pytest -q test/registered/unit/managers/test_chat_preferred_sampling_params.py test/registered/unit/entrypoints/openai/test_protocol.py",
+      "exit_code": 0,
+      "what_was_measured": "48 tests plus 25 subtests passed. The regression covers every ChatCompletionRequest sampling-field mapping, all reported sampler keys, explicit values equal to schema defaults, generation-config fallback, and legacy native-request precedence. Raw output: /job/post_fix_test_output.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9ffbc157d8ec/venv/bin/python -m pre_commit run --files python/sglang/srt/entrypoints/openai/protocol.py python/sglang/srt/entrypoints/openai/serving_chat.py python/sglang/srt/managers/io_struct.py python/sglang/srt/managers/tokenizer_manager.py test/registered/unit/managers/test_chat_preferred_sampling_params.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, security, and registered-test metadata hooks passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9ffbc157d8ec/venv/bin/python -c 'import torch; x=torch.arange(8, device=\"cuda\", dtype=torch.float32); print(torch.cuda.get_device_name(0), (x*x).cpu().tolist())'",
+      "exit_code": 0,
+      "what_was_measured": "One assigned AMD Instinct MI355X executed ROCm tensor arithmetic and returned [0.0, 1.0, 4.0, 9.0, 16.0, 25.0, 36.0, 49.0]. This is GPU environment evidence only, not validation of the CPU request-path defect."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": "GPU evidence: torch 2.11.0+rocm7.2 reported one AMD Instinct MI355X (gfx950), and device tensor arithmetic completed successfully. No model-backed server startup was run because no model weights were prepared and it would not validate this CPU-only precedence path. No native code changed. The generic native GenerateReqInput path intentionally retains historical request-over-preference behavior when explicit-key metadata is absent. Raw outputs are /job/pre_fix_test_output.txt and /job/post_fix_test_output.txt; modified source is under /job/repo/python and the regression is /job/repo/test/registered/unit/managers/test_chat_preferred_sampling_params.py."
+}
