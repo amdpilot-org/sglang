@@ -60,6 +60,7 @@ from sglang.srt.model_executor.runner import (
 from sglang.srt.runtime_context import (
     get_context,
     get_device,
+    get_disagg,
     get_exec,
     get_model,
     get_parallel,
@@ -604,6 +605,20 @@ class EagleDraftWorker(EagleDraftWorkerBase):
             self.topk,
             self.speculative_num_steps,
         )
+        # A PD decode worker can receive requests without DSA seeds when its
+        # prefill peer does not run EAGLE.  Do not make the graph/eager choice
+        # from that rank-local metadata under DP attention: idle ranks have no
+        # seed either, so doing so lets different ranks enter collectives with
+        # graph-padded and eager buffer sizes.  Keep all ranks on eager in this
+        # narrow configuration; a missing seed then retains its normal
+        # recomputation semantics instead of being replaced by a fake KV slot.
+        if (
+            can_run_decode_cuda_graph
+            and self.seed_dsa_topk_from_draft_extend
+            and get_disagg().disaggregation_mode == "decode"
+            and get_parallel().attn_dp_size > 1
+        ):
+            can_run_decode_cuda_graph = False
         if (
             can_run_decode_cuda_graph
             and not forward_batch.forward_mode.is_idle()

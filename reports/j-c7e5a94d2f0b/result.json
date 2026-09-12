@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32527",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The checked-out implementation still made the EAGLE draft graph/eager decision from rank-local DSA seed availability. In PD decode with DP attention this permits a seeded request rank to replay a graph while an idle or seedless rank runs eager, matching the reported collective mismatch mechanism. The correction forces all ranks to use eager draft execution only for PD decode with attn_dp_size > 1 and DSA draft-extend seed sharing enabled. This preserves missing-seed recomputation and avoids treating a dummy zero tensor as valid KV-slot indices.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-c7e5a94d2f0b/venv/bin/python -m pytest test/registered/unit/spec/test_eagle_worker_v2_topk1_fastpath.py::TestEagleWorkerV2BackendFallback::test_dsa_seed_cuda_graph_fallback -q --junitxml=reports/j-c7e5a94d2f0b/failing-before.xml",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: the uncorrected seeded PD-decode/attn-DP=8 case selected CUDA graph replay instead of the required rank-independent eager path; the other five boundary subtests passed. Raw JUnit: reports/j-c7e5a94d2f0b/failing-before.xml"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c7e5a94d2f0b/venv/bin/python -m pytest test/registered/unit/spec/test_eagle_worker_v2_topk1_fastpath.py -q --junitxml=reports/j-c7e5a94d2f0b/passing-after.xml",
+      "exit_code": 0,
+      "what_was_measured": "9 tests and 10 parameterized subtests passed, including seed present/absent, PD/non-PD, DP=1/8, and seed-sharing disabled boundaries. Raw JUnit: reports/j-c7e5a94d2f0b/passing-after.xml"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c7e5a94d2f0b/venv/bin/python -m pytest test/registered/unit/disaggregation/test_disaggregation_wire.py -q --junitxml=reports/j-c7e5a94d2f0b/disaggregation-wire.xml",
+      "exit_code": 0,
+      "what_was_measured": "37 neighboring PD metadata/wire tests and 12 parameterized subtests passed. Raw JUnit: reports/j-c7e5a94d2f0b/disaggregation-wire.xml"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c7e5a94d2f0b/venv/bin/python (torch CUDA tensor arithmetic)",
+      "exit_code": 0,
+      "what_was_measured": "A deterministic int32 GPU result on the assigned AMD Instinct MI355X matched an independent CPU reference. Raw values: reports/j-c7e5a94d2f0b/gpu-smoke.json"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X was visible and executed the deterministic tensor check in reports/j-c7e5a94d2f0b/gpu-smoke.json. The focused unit tests also selected CUDA when available, but do not instantiate the reported model or an 8-rank collective."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one GPU was assigned, while the reported deadlock requires asymmetric execution across eight DP ranks; the original NCCL hang and its absence after the patch were not reproduced end-to-end.",
+    "The zai-org/GLM-5.2-FP8 weights and a speculative-enabled PD prefill/decode pair were not available, so model architecture behavior and semantic accuracy remain unverified.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable.",
+    "The fix deliberately uses eager draft execution for PD decode + multi-rank DP attention + DSA seed sharing. It prioritizes collective correctness; performance for that exact configuration was not measured."
+  ],
+  "source_paths": [
+    "python/sglang/srt/speculative/eagle_worker_v2.py",
+    "test/registered/unit/spec/test_eagle_worker_v2_topk1_fastpath.py"
+  ],
+  "native_paths": []
+}

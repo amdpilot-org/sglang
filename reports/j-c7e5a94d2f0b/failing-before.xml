@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="7" time="19.874" timestamp="2026-09-12T12:22:16.610736+00:00" hostname="smci355-ccs-aus-n08-13"><testcase classname="registered.unit.spec.test_eagle_worker_v2_topk1_fastpath.TestEagleWorkerV2BackendFallback" name="test_dsa_seed_cuda_graph_fallback" time="0.197"><failure message="AssertionError: True != False">self = &lt;test_eagle_worker_v2_topk1_fastpath.TestEagleWorkerV2BackendFallback testMethod=test_dsa_seed_cuda_graph_fallback&gt;
+
+    def test_dsa_seed_cuda_graph_fallback(self):
+        graph_result = (
+            [],
+            torch.zeros((1, 1), dtype=torch.long, device=DEVICE),
+            torch.zeros((1, 1), dtype=torch.long, device=DEVICE),
+            None,
+        )
+        tree_result = (
+            torch.empty((0,), dtype=torch.bool, device=DEVICE),
+            torch.zeros((1,), dtype=torch.long, device=DEVICE),
+            torch.zeros((1, 2), dtype=torch.long, device=DEVICE),
+            torch.zeros((1, 2), dtype=torch.long, device=DEVICE),
+            torch.zeros((1, 2), dtype=torch.long, device=DEVICE),
+            torch.zeros((2,), dtype=torch.long, device=DEVICE),
+        )
+    
+        for seed_enabled, seed_present, disagg_mode, attn_dp_size, expect_graph in (
+            # Missing seeds retain the existing eager recomputation fallback.
+            (True, False, "null", 1, False),
+            # A valid seed normally permits graph replay.
+            (True, True, "null", 1, True),
+            # PD+DP must make one rank-independent choice.  Both the request
+            # rank and idle ranks take eager regardless of seed availability.
+            (True, False, "decode", 8, False),
+            (True, True, "decode", 8, False),
+            # PD decode without DP does not need the synchronized fallback.
+            (True, True, "decode", 1, True),
+            # Models without DSA seed sharing retain graph replay.
+            (False, False, "decode", 8, True),
+        ):
+            with self.subTest(
+                seed_enabled=seed_enabled,
+                seed_present=seed_present,
+                disagg_mode=disagg_mode,
+                attn_dp_size=attn_dp_size,
+            ):
+                worker = object.__new__(EagleDraftWorker)
+                worker.req_to_token_pool = None
+                worker.cuda_graph_runner = SimpleNamespace(
+                    execute=MagicMock(return_value=graph_result)
+                )
+                worker.draft_runner = SimpleNamespace(canary_manager=None)
+                worker.topk = 1
+                worker.speculative_num_steps = 1
+                worker.speculative_num_draft_tokens = 2
+                worker.device = DEVICE
+                worker.plan_stream = None
+                worker.tree_mask_mode = None
+                worker.seed_dsa_topk_from_draft_extend = seed_enabled
+                worker.index_share_for_mtp_iteration = True
+                forward_batch = SimpleNamespace(forward_mode=ForwardMode.DECODE)
+                worker.draft_forward = MagicMock(return_value=graph_result)
+                attn_backend = SimpleNamespace(
+                    verify_mask=None,
+                    max_context_len=1,
+                )
+                worker.target_worker = SimpleNamespace(
+                    model_runner=SimpleNamespace(attn_backend=attn_backend)
+                )
+                draft_input = SimpleNamespace(
+                    bonus_tokens=torch.zeros((1,), dtype=torch.long, device=DEVICE),
+                    dsa_topk_indices=(
+                        torch.ones((1, 1), dtype=torch.int32, device=DEVICE)
+                        if seed_present
+                        else None
+                    ),
+                )
+                batch = SimpleNamespace(
+                    spec_info=draft_input,
+                    forward_mode=ForwardMode.DECODE,
+                    seq_lens_sum=1,
+                    seq_lens=torch.ones((1,), dtype=torch.int32, device=DEVICE),
+                )
+    
+                with (
+                    patch(
+                        "sglang.srt.speculative.eagle_worker_common.build_tree_kernel_efficient",
+                        return_value=tree_result,
+                    ),
+                    patch(
+                        "sglang.srt.speculative.eagle_worker_v2.prepare_for_draft",
+                        return_value=(forward_batch, True),
+                    ),
+                    patch(
+                        "sglang.srt.speculative.eagle_worker_v2.get_disagg",
+                        return_value=SimpleNamespace(
+                            disaggregation_mode=disagg_mode
+                        ),
+                    ),
+                    patch(
+                        "sglang.srt.speculative.eagle_worker_v2.get_parallel",
+                        return_value=SimpleNamespace(attn_dp_size=attn_dp_size),
+                    ),
+                ):
+                    worker.draft(batch)
+    
+&gt;               self.assertEqual(worker.cuda_graph_runner.execute.called, expect_graph)
+E               AssertionError: True != False
+
+test/registered/unit/spec/test_eagle_worker_v2_topk1_fastpath.py:268: AssertionError</failure></testcase></testsuite></testsuites>
