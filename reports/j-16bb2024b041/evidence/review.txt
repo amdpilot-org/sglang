@@ -1,0 +1,52 @@
+Prepared base: 358c163250ad3b1f62939b01ce1314a0a31a0365
+Exact candidate: ddf07cc615936af999def11b6d5417853b6f2da4
+Candidate runtime diff: draft_token_num -> num_tokens_per_req in QwenSparseAttnBackend._speculative_max_row_length
+Imported source: /job/repo/python/sglang/srt/layers/attention/qwen_sparse_attn_backend.py
+
+BASE REPRODUCTION
+EagleDraftExtendInput(num_tokens_per_req=4), seq_lens_cpu=[11, 21]
+AttributeError: 'EagleDraftExtendInput' object has no attribute 'draft_token_num'
+EXIT_CODE=1
+
+CANDIDATE FOCUSED REGRESSION
+/tmp/amdpilot-repo-j-16bb2024b041/venv/bin/python -m pytest -q test/registered/kernel/qsa/test_qsa.py -k 'speculative_row_bound or cuda_graph_pads_dynamic_draft_extend_rows or cuda_graph_target_verify_ignores_capture_bucket_requests'
+5 passed, 37 deselected
+EXIT_CODE=0
+
+CANDIDATE FULL QSA FILE
+/tmp/amdpilot-repo-j-16bb2024b041/venv/bin/python -m pytest -q test/registered/kernel/qsa/test_qsa.py
+41 passed, 1 skipped
+The skipped test requires NVIDIA SM121.
+EXIT_CODE=0
+
+GPU REFERENCE CASES
+/tmp/amdpilot-repo-j-16bb2024b041/venv/bin/python -m pytest -vv test/registered/kernel/qsa/test_qsa.py::test_qsa_triton_block_expansion_matches_torch_reference test/registered/kernel/qsa/test_qsa.py::test_qsa_graph_metadata_kernels_match_legacy_host_path test/registered/kernel/qsa/test_qsa.py::test_qsa_graph_layout_covers_speculative_rows_and_padded_tail
+3 passed
+EXIT_CODE=0
+
+INDEPENDENT BOUNDARIES
+draft width 1: got 9, expected 9
+draft width 4: got 25, expected 25
+canonical width 4 with legacy width 99: got 13, expected 13
+no speculation: got 7, expected 7
+empty host-length fallback on GPU: got 1, expected 1
+PASS
+EXIT_CODE=0
+
+ENVIRONMENT
+torch 2.11.0+rocm7.2
+HIP 7.2.26015
+CUDA None
+GPU count 1
+GPU 0 AMD Instinct MI355X, capability (9, 5) / gfx950
+
+SOURCE/NATIVE VALIDATION
+The candidate changes one Python runtime file and tests/reports; no C++ or other native source changes.
+repository-environment.json reports native=null and wheel=null.
+Native rebuild: not applicable.
+
+ORIGINAL CONTRACT NOT EXECUTED
+No NVIDIA GB10/SM121, second GPU/node, TP2/RoCEv2, or Qwen3.8-Flash-Next-NVFP4 weights were available.
+No 1,024-token eager/graph semantic A/B was run.
+No approximately 25K-token ordered-marker eager/graph semantic A/B was run.
+Candidate source contains no fail-closed guard specific to the reported QSA + NEXTN decode-graph profile.
