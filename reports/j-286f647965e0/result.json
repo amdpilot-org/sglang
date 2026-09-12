@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34676",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1610",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1576",
+  "candidate_commit": "b6ca9a3b9c47a1faaced6e588e46faec4693717f",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes ordinary late-prefill KV allocation exception propagation and request-slot cleanup, but mishandles an existing chunked prefill: after a late allocation miss the same request remains Scheduler.chunked_req and is also appended to waiting_queue. This leaves duplicate scheduler ownership and a next-pass double-admission path, so the original graceful-recovery contract is only partially resolved.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-286f647965e0/venv/bin/python -m pytest -vv /job/review-evidence/test_prefill_alloc_oom_requeue.py::TestSchedulerPrefillOOM::test_late_allocation_miss_requeues_instead_of_escaping",
+      "exit_code": 1,
+      "what_was_measured": "On recorded base, an issue-shaped injected late allocation miss escaped the real Scheduler._get_new_batch_prefill_raw call as RuntimeError. Raw log: /job/review-evidence/base/scheduler_requeue.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-286f647965e0/venv/bin/python -m pytest -vv /job/review-evidence/test_prefill_alloc_oom_requeue.py::TestAllocForExtendOOM",
+      "exit_code": 1,
+      "what_was_measured": "On recorded base, the pre-existing request-slot boundary passed but the newly acquired request slot remained allocated after a real paged alloc_extend None result. Raw log: /job/review-evidence/base/allocation_cleanup.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-286f647965e0/venv/bin/python -m pytest -q test/registered/unit/managers/test_prefill_alloc_oom_requeue.py test/registered/unit/managers/test_prefill_adder.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, the candidate's focused scheduler, allocation ownership, and Mamba admission tests passed: 34 tests and 12 subtests. Raw log: /job/review-evidence/candidate/candidate_tests.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python:/job/review-evidence /tmp/amdpilot-repo-j-286f647965e0/venv/bin/python -m pytest -vv /job/review-evidence/test_candidate_adversarial.py",
+      "exit_code": 1,
+      "what_was_measured": "At exact candidate commit, an existing chunked request remained Scheduler.chunked_req and was also appended to waiting_queue after a late KV allocation miss. Raw log: /job/review-evidence/candidate/adversarial.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Only device inventory was inspected: one AMD Instinct MI350X with gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2, ROCm 7.2.26015. The reviewed changes and deterministic tests are CPU scheduler/control flow; no GPU numerical result is claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "When Scheduler.chunked_req already references an active chunked prefill and prepare_for_extend raises KVCacheOOMError, the candidate decrements its inflight counter but retains Scheduler.chunked_req and also sends that same request through _add_request_to_queue. The next pass can admit the same object via add_chunked_req and the ordinary waiting_queue loop."
+  ],
+  "remaining_limitations": [
+    "The exact Kimi-K3 TP8/DCP4 sustained-traffic reproduction was not run because the job provides one AMD gfx950 GPU rather than eight NVIDIA B300 GPUs and no Kimi-K3 weights.",
+    "The tiny Llama fixture cannot exercise the hybrid Mamba allocator and was not treated as evidence for this issue.",
+    "No GPU execution or distributed-model behavior was validated; the review establishes deterministic scheduler and allocator control-flow behavior only.",
+    "No native rebuild was performed because the candidate changes no native source."
+  ]
+}
