@@ -1,0 +1,271 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0 -- /tmp/amdpilot-repo-j-752f67c926d3/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /job/repo/test
+configfile: pytest.ini
+plugins: hypothesis-6.155.0, anyio-4.15.1
+collecting ... collected 4 items
+
+test/registered/unit/layers/moe/test_deep_gemm_standard_input_ownership.py::test_standard_pre_permute_respects_input_ownership[False-False] FAILED [ 25%]
+test/registered/unit/layers/moe/test_deep_gemm_standard_input_ownership.py::test_standard_pre_permute_respects_input_ownership[False-True] FAILED [ 50%]
+test/registered/unit/layers/moe/test_deep_gemm_standard_input_ownership.py::test_standard_pre_permute_respects_input_ownership[True-False] PASSED [ 75%]
+test/registered/unit/layers/moe/test_deep_gemm_standard_input_ownership.py::test_standard_pre_permute_respects_input_ownership[True-True] PASSED [100%]
+
+=================================== FAILURES ===================================
+_______ test_standard_pre_permute_respects_input_ownership[False-False] ________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fba7d0d5970>
+use_masked_layout = False, inplace = False
+
+    @pytest.mark.parametrize("use_masked_layout", [False, True])
+    @pytest.mark.parametrize("inplace", [False, True])
+    def test_standard_pre_permute_respects_input_ownership(
+        monkeypatch, use_masked_layout, inplace
+    ):
+        """Only an inplace runner may invalidate the caller's aliased activation."""
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        hidden_states = torch.arange(16, device=device, dtype=torch.bfloat16).reshape(4, 4)
+        caller_alias = hidden_states
+        expected = hidden_states.clone()
+        topk_ids = torch.tensor([[0], [1], [0], [1]], device=device, dtype=torch.int64)
+        topk_weights = torch.ones((4, 1), device=device, dtype=torch.float32)
+        dispatch_output = StandardDispatchOutput(
+            hidden_states=hidden_states,
+            hidden_states_scale=None,
+            topk_output=(topk_weights, topk_ids, None),
+        )
+        quant_info = DeepGemmMoeQuantInfo(
+            w13_weight=torch.empty((2, 1, 4), device=device, dtype=torch.bfloat16),
+            w2_weight=torch.empty((2, 4, 1), device=device, dtype=torch.bfloat16),
+            use_fp8=False,
+        )
+        runner_config = MoeRunnerConfig(
+            num_experts=2,
+            num_local_experts=2,
+            hidden_size=4,
+            top_k=1,
+            inplace=inplace,
+        )
+
+        disposed = []
+
+        def dispose(tensor):
+            disposed.append(tensor)
+            tensor.set_(torch.empty((0,), device=tensor.device, dtype=tensor.dtype))
+
+        monkeypatch.setattr(deep_gemm, "dispose_tensor", dispose)
+        monkeypatch.setattr(deep_gemm.deep_gemm_sm120, "is_supported", lambda: True)
+        monkeypatch.setattr(
+            deep_gemm.deep_gemm_sm120, "maybe_pre_permute", lambda *args: None
+        )
+        monkeypatch.setattr(
+            deep_gemm.deep_gemm_sm120,
+            "allows_masked_standard_layout",
+            lambda: use_masked_layout,
+        )
+        monkeypatch.setattr(
+            deep_gemm,
+            "_should_use_masked_standard_layout",
+            lambda *args: use_masked_layout,
+        )
+
+        import sglang.kernels.ops.moe.ep_moe_kernels as kernels
+
+        def preprocess(*args, **kwargs):
+            return (
+                torch.tensor([2, 2], device=device, dtype=torch.int32),
+                None,
+                torch.arange(4, device=device, dtype=torch.int32).reshape(4, 1),
+                expected.clone(),
+                torch.ones((4, 1), device=device, dtype=torch.float32),
+            )
+
+        monkeypatch.setattr(kernels, "moe_ep_deepgemm_preprocess", preprocess)
+
+        if not use_masked_layout:
+            monkeypatch.setattr(
+                deep_gemm.deep_gemm_wrapper,
+                "get_contiguous_layout_alignment",
+                lambda *args: 1,
+            )
+            monkeypatch.setattr(
+                kernels,
+                "fused_moe_dispatch_index",
+                lambda *args, **kwargs: (
+                    torch.tensor([2, 2], device=device, dtype=torch.int32),
+                    torch.empty(1, device=device),
+                ),
+            )
+
+            def scatter(source, _source_scale, *args, **kwargs):
+                packed_input = args[4]
+                src2dst = args[7]
+                packed_input.copy_(source)
+                src2dst.copy_(torch.arange(4, device=device).reshape(4, 1))
+
+            monkeypatch.setattr(kernels, "ep_scatter", scatter)
+            monkeypatch.setattr(
+                deep_gemm, "get_exec", lambda: SimpleNamespace(deterministic=None)
+            )
+
+        result = deep_gemm.pre_permute_standard_to_deep_gemm(
+            dispatch_output, quant_info, runner_config, {}
+        )
+
+        assert result.hidden_states.numel() == expected.numel()
+        if inplace:
+            assert caller_alias.numel() == 0
+            assert any(tensor is caller_alias for tensor in disposed)
+        else:
+>           assert caller_alias.shape == expected.shape
+E           assert torch.Size([0]) == torch.Size([4, 4])
+E
+E             At index 0 diff: 0 != 4
+E             Right contains one more item: 4
+E
+E             Full diff:
+E             - torch.Size([4, 4])
+E             ?             ^^^^
+E             + torch.Size([0])
+E             ?             ^
+
+test/registered/unit/layers/moe/test_deep_gemm_standard_input_ownership.py:118: AssertionError
+________ test_standard_pre_permute_respects_input_ownership[False-True] ________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fba7cc4b830>
+use_masked_layout = True, inplace = False
+
+    @pytest.mark.parametrize("use_masked_layout", [False, True])
+    @pytest.mark.parametrize("inplace", [False, True])
+    def test_standard_pre_permute_respects_input_ownership(
+        monkeypatch, use_masked_layout, inplace
+    ):
+        """Only an inplace runner may invalidate the caller's aliased activation."""
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        hidden_states = torch.arange(16, device=device, dtype=torch.bfloat16).reshape(4, 4)
+        caller_alias = hidden_states
+        expected = hidden_states.clone()
+        topk_ids = torch.tensor([[0], [1], [0], [1]], device=device, dtype=torch.int64)
+        topk_weights = torch.ones((4, 1), device=device, dtype=torch.float32)
+        dispatch_output = StandardDispatchOutput(
+            hidden_states=hidden_states,
+            hidden_states_scale=None,
+            topk_output=(topk_weights, topk_ids, None),
+        )
+        quant_info = DeepGemmMoeQuantInfo(
+            w13_weight=torch.empty((2, 1, 4), device=device, dtype=torch.bfloat16),
+            w2_weight=torch.empty((2, 4, 1), device=device, dtype=torch.bfloat16),
+            use_fp8=False,
+        )
+        runner_config = MoeRunnerConfig(
+            num_experts=2,
+            num_local_experts=2,
+            hidden_size=4,
+            top_k=1,
+            inplace=inplace,
+        )
+
+        disposed = []
+
+        def dispose(tensor):
+            disposed.append(tensor)
+            tensor.set_(torch.empty((0,), device=tensor.device, dtype=tensor.dtype))
+
+        monkeypatch.setattr(deep_gemm, "dispose_tensor", dispose)
+        monkeypatch.setattr(deep_gemm.deep_gemm_sm120, "is_supported", lambda: True)
+        monkeypatch.setattr(
+            deep_gemm.deep_gemm_sm120, "maybe_pre_permute", lambda *args: None
+        )
+        monkeypatch.setattr(
+            deep_gemm.deep_gemm_sm120,
+            "allows_masked_standard_layout",
+            lambda: use_masked_layout,
+        )
+        monkeypatch.setattr(
+            deep_gemm,
+            "_should_use_masked_standard_layout",
+            lambda *args: use_masked_layout,
+        )
+
+        import sglang.kernels.ops.moe.ep_moe_kernels as kernels
+
+        def preprocess(*args, **kwargs):
+            return (
+                torch.tensor([2, 2], device=device, dtype=torch.int32),
+                None,
+                torch.arange(4, device=device, dtype=torch.int32).reshape(4, 1),
+                expected.clone(),
+                torch.ones((4, 1), device=device, dtype=torch.float32),
+            )
+
+        monkeypatch.setattr(kernels, "moe_ep_deepgemm_preprocess", preprocess)
+
+        if not use_masked_layout:
+            monkeypatch.setattr(
+                deep_gemm.deep_gemm_wrapper,
+                "get_contiguous_layout_alignment",
+                lambda *args: 1,
+            )
+            monkeypatch.setattr(
+                kernels,
+                "fused_moe_dispatch_index",
+                lambda *args, **kwargs: (
+                    torch.tensor([2, 2], device=device, dtype=torch.int32),
+                    torch.empty(1, device=device),
+                ),
+            )
+
+            def scatter(source, _source_scale, *args, **kwargs):
+                packed_input = args[4]
+                src2dst = args[7]
+                packed_input.copy_(source)
+                src2dst.copy_(torch.arange(4, device=device).reshape(4, 1))
+
+            monkeypatch.setattr(kernels, "ep_scatter", scatter)
+            monkeypatch.setattr(
+                deep_gemm, "get_exec", lambda: SimpleNamespace(deterministic=None)
+            )
+
+        result = deep_gemm.pre_permute_standard_to_deep_gemm(
+            dispatch_output, quant_info, runner_config, {}
+        )
+
+        assert result.hidden_states.numel() == expected.numel()
+        if inplace:
+            assert caller_alias.numel() == 0
+            assert any(tensor is caller_alias for tensor in disposed)
+        else:
+>           assert caller_alias.shape == expected.shape
+E           assert torch.Size([0]) == torch.Size([4, 4])
+E
+E             At index 0 diff: 0 != 4
+E             Right contains one more item: 4
+E
+E             Full diff:
+E             - torch.Size([4, 4])
+E             ?             ^^^^
+E             + torch.Size([0])
+E             ?             ^
+
+test/registered/unit/layers/moe/test_deep_gemm_standard_input_ownership.py:118: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/layers/moe/test_deep_gemm_standard_input_ownership.py::test_standard_pre_permute_respects_input_ownership[False-False]
+FAILED test/registered/unit/layers/moe/test_deep_gemm_standard_input_ownership.py::test_standard_pre_permute_respects_input_ownership[False-True]
+================== 2 failed, 2 passed, 17 warnings in 12.26s ===================
