@@ -461,7 +461,9 @@ class OpenAIServingCompletion(OpenAIServingBase):
                     if request_metrics[index] is not None
                 ]
                 if metrics:
-                    sglext_request_metrics = metrics if request.n > 1 else metrics[0]
+                    sglext_request_metrics = (
+                        metrics if len(request_metrics) > 1 else metrics[0]
+                    )
 
             if any(
                 obj is not None
@@ -582,7 +584,9 @@ class OpenAIServingCompletion(OpenAIServingBase):
             )
             if metric is not None
         ]
-        request_metrics = metrics if request.n > 1 else (metrics[0] if metrics else None)
+        request_metrics = (
+            metrics if len(ret) > 1 else (metrics[0] if metrics else None)
+        )
         response_sglext = None
         if (
             routed_experts

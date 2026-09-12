@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36678",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Consolidated the opt-in OpenAI request-metrics candidate and corrected completion response cardinality. For batched prompts, normal and streaming serialization now return one ordered metrics object per emitted choice even when n=1; prompt cardinality multiplied by n is covered, while single-choice and opt-out shapes remain unchanged.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-be06f611c82e/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_completions.py -k 'batched_prompt_metrics_preserve_all_choices'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before candidate behavior through the non-streaming serving handler/JSON serializer and streaming generator/SSE JSON serializer: prompt=[\"first\",\"second\"], n=1 produced two choices but only the first metrics object in both paths. Raw output: reports/j-be06f611c82e/evidence/failing-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-be06f611c82e/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_completions.py",
+      "exit_code": 0,
+      "what_was_measured": "25 completion-serving tests passed, including normal and streaming two-prompt n=1 association, 2 prompts multiplied by n=2 yielding four ordered metrics, single-choice scalar shape, and opt-out omission. Raw output: reports/j-be06f611c82e/evidence/passing-after-completions.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-be06f611c82e/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py",
+      "exit_code": 0,
+      "what_was_measured": "136 chat-serving tests passed, preserving the candidate's per-choice and response-shape behavior. Raw output: reports/j-be06f611c82e/evidence/passing-after-chat.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-be06f611c82e/venv/bin/python -m pytest -q test/registered/unit/observability/test_req_time_stats.py",
+      "exit_code": 0,
+      "what_was_measured": "9 request timing calculation tests passed. Raw output: reports/j-be06f611c82e/evidence/passing-after-stats.txt"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-be06f611c82e/venv/bin/python < independent CPU/GPU numerical comparison",
+      "exit_code": 0,
+      "what_was_measured": "One assigned AMD Instinct MI350X executed 4096 float32 elements; CPU/GPU max absolute error was 1.1920928955078125e-07 and torch.allclose(rtol=1e-5, atol=1e-6) was true. This validates GPU execution only, not HTTP model generation. Raw output: reports/j-be06f611c82e/evidence/gpu-numerical.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-be06f611c82e/venv/bin/python -m compileall -q python/sglang/srt/entrypoints/openai test/registered/unit/entrypoints/openai/test_serving_completions.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources compiled and the patch passed whitespace validation."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-be06f611c82e/evidence/gpu-numerical.txt records Torch 2.11.0+rocm7.2, HIP 7.2.26015, one AMD Instinct MI350X, and an independently computed CPU/GPU numerical comparison."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": "No native sources changed, so no native rebuild was applicable. No local model weights path was supplied, so a live model-backed HTTP server was not launched; the actual OpenAI completion serving handlers and their normal JSON and streaming SSE serialization paths were exercised with deterministic generated outputs. The embedded Rust server remains outside the source issue's stated initial scope."
+}
