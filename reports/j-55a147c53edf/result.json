@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33164",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the independent review's two max_length=1 counterexamples at candidate commit 90b5ae30848c43a54f1ad293ab3b4dd2ce4bf478, preserved its recursive list and tuple element truncation, and guarded zero-half tail slices so Python's [-0:] cannot retain complete strings or collections.",
+  "tests": [
+    {
+      "command": "git switch --detach 90b5ae30848c43a54f1ad293ab3b4dd2ce4bf478 && /tmp/amdpilot-repo-j-55a147c53edf/venv/bin/python -c '<max_length=1 probe>'",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before exact-candidate evidence: JSON returned 3 items with two 10003-character transformed strings, and text output was 20029 characters and contained the complete 10000-character input."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-55a147c53edf/venv/bin/python -m pytest -q test/registered/unit/utils/test_request_logger.py",
+      "exit_code": 0,
+      "what_was_measured": "Seven focused CPU regressions covering the candidate's valid ordinary, nested, exact-boundary, and tuple behavior plus JSON, text, and direct-string max_length=1 counterexamples."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-55a147c53edf/venv/bin/python -c '<max_length=1 probe>'",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after evidence: JSON became one sentinel item with serialized length 7; text became '[] ... []' with length 9; neither retained the complete input."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The affected functions are pure Python serialization helpers and have no GPU-specific branch; GPU execution would not add issue-specific evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No server or model-weight validation was performed because the defect and regression are entirely within pure Python logging helpers.",
+    "Ruff was unavailable in the prepared interpreter; focused pytest and git diff --check passed."
+  ]
+}
