@@ -1,0 +1,92 @@
+def gemm_a16w16(
+    A: Tensor,
+    B: Tensor,
+    bias: Tensor | None = None,
+    otype: torch.dtype | None = None,
+    scale_a: Tensor | None = None,
+    scale_b: Tensor | None = None,
+    scale_c: Tensor | None = None,
+) -> Tensor:
+    bpreshuffle = False
+    if hasattr(B, "is_shuffled") and B.is_shuffled is True:
+        bpreshuffle = True
+    if A.dim() >= 3:
+        try:
+            inp_view = A.view(-1, A.size(-1))
+            batched = True
+        except RuntimeError:
+            return F.linear(A, B, bias)
+    else:
+        inp_view = A
+        batched = False
+    m, k = inp_view.shape
+    n = B.shape[0]
+    use_bias = bias is not None
+    otype = otype if otype is not None else inp_view.dtype
+    config = get_GEMM_A16W16_config(
+        M=m,
+        N=n,
+        K=k,
+        bias=use_bias,
+        dtype=str(inp_view.dtype),
+        otype=str(otype),
+        scaleAB=scale_a is not None or scale_b is not None,
+        bpreshuffle=bpreshuffle,
+    )
+    libtype = config["libtype"]
+    solution_idx = config["solidx"]
+    solfunc = solMap[libtype]
+    out = solfunc(
+        inp_view,
+        B,
+        solution_idx,
+        bias,
+        otype,
+        scale_a,
+        scale_b,
+        scale_c,
+        bpreshuffle,
+        config=config,
+    )
+    if batched:
+        out = out.view(*A.shape[:-1], B.shape[0])
+    if otype is not None and out.dtype != otype:
+        out = out.to(otype)
+    save_shapes(
+        m,
+        n,
+        k,
+        bias,
+        inp_view.dtype,
+        otype,
+def torch_gemm(
+    inp: Tensor,
+    weights: Tensor,
+    solidx: int,
+    bias: Tensor | None = None,
+    otype: torch.dtype | None = None,
+    scale_a: Tensor | None = None,
+    scale_b: Tensor | None = None,
+    scale_c: Tensor | None = None,
+    bpreshuffle=False,
+    config: dict | None = None,
+):
+    assert not bpreshuffle, "bpreshuffle is not supported in torch_gemm!"
+    if inp.dtype == dtypes.fp8:
+        if scale_a is None:
+            scale_a = torch.ones(1, dtype=dtypes.fp32, device=inp.device)
+        if scale_b is None:
+            scale_b = torch.ones(1, dtype=dtypes.fp32, device=inp.device)
+        try:
+            out = torch._scaled_mm(
+                inp,
+                weights.t(),
+                out_dtype=otype,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                bias=bias,
+            )
+        except RuntimeError:
+            out = (
+                F.linear(inp.to(dtypes.fp32), weights.to(dtypes.fp32))
+                * scale_a
