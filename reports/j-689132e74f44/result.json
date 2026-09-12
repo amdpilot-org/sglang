@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36302",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1303",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1266",
+  "candidate_commit": "2f3dfee039131afc685e53b42d34d2b8fb412b45",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base selects the dynamically resolved cudaMemcpyBatchAsync ABI from compile-time CUDA_VERSION and therefore misplaces arguments when CUDA 12.8 headers are paired with a CUDA 13 runtime. The candidate selects the 8- or 9-argument ABI from cudaRuntimeGetVersion() and directly covers the reported mismatch. Independent testing also covered the reverse header/runtime mismatch. Real NVIDIA execution was unavailable, but the ABI contract and dispatch behavior were verified with native C++ harnesses.",
+  "tests": [
+    {
+      "command": "c++ -std=c++17 -Wall -Wextra -Werror /job/review-evidence-j-689132e74f44/base_mismatch.cpp -o /job/review-evidence-j-689132e74f44/base_mismatch && /job/review-evidence-j-689132e74f44/base_mismatch",
+      "exit_code": 0,
+      "what_was_measured": "Base-equivalent CUDA 12.8 compile-time dispatch into an 8-argument CUDA 13 mock receives failIdx instead of the intended stream, reproducing the ABI mismatch without claiming an NVIDIA segfault."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-689132e74f44/venv/bin/python -m pytest -q test/registered/unit/kernels/test_jit_cuda_memcpy_batch_compat.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression compiled with CUDA_VERSION=12080 and dispatched correctly at runtime version boundaries 12999 and 13000; 1 passed."
+    },
+    {
+      "command": "c++ -std=c++17 -Wall -Wextra -Werror /job/review-evidence-j-689132e74f44/adversarial_dispatch.cpp -o /job/review-evidence-j-689132e74f44/adversarial_dispatch && /job/review-evidence-j-689132e74f44/adversarial_dispatch",
+      "exit_code": 0,
+      "what_was_measured": "Independent mirror-image case compiled with CUDA_VERSION=13000 and correctly invoked both CUDA 12.8 nine-argument and CUDA 13 eight-argument mock entry points."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-689132e74f44/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_staged_write_back_dispatch.py",
+      "exit_code": 0,
+      "what_was_measured": "Existing staged write-back dispatch boundaries and fallback behavior; 16 passed, 1 skipped."
+    },
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=/tmp/j-689132e74f44-jit-cache SGLANG_JIT_CACHE_DEBUG=1 /tmp/amdpilot-repo-j-689132e74f44/venv/bin/python -m pytest -q -s test/registered/kernels/ops/kvcache/test_hicache_page_first_write_back.py",
+      "exit_code": 0,
+      "what_was_measured": "Freshly rebuilt gfx950 staged HiCache JIT device/host round-trip equality; 12 passed. This measures only the ROCm path."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X gfx950 executed 12 freshly rebuilt staged HiCache JIT round-trip tests. No NVIDIA GPU was available."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No NVIDIA GPU, nvcc 12.8, or CUDA 13 libcudart was available, so the exact reported SIGSEGV and actual dlsym-resolved CUDA entry point were not executed.",
+    "The fresh gfx950 native rebuild preprocesses out the changed CUDA-only branch and therefore does not qualify as a rebuild of that branch.",
+    "The reported 27B AWQ checkpoint, TP2 topology, and full serving path were not reproduced; the issue-specific failure is below those layers and was tested at its ABI boundary.",
+    "No NVIDIA compiler or ISA evidence could be collected in the ROCm-only environment."
+  ]
+}
