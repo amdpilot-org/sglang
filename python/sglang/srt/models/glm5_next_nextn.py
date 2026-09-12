@@ -32,8 +32,7 @@ class Glm5NextForConditionalGenerationNextN(DeepseekV3ForCausalLMNextN):
         )
 
     def _resolve_nextn_quant_config(self, config, quant_config):
-        """Mixed checkpoints list the BF16 NextN block in ``quantization_config.ignore``;
-        inheriting global FP8 quantization would corrupt its QKV weights."""
+        """Honor whether the checkpoint stores its NextN block quantized."""
         raw_quant_config = getattr(config, "quantization_config", None) or {}
         if hasattr(raw_quant_config, "to_dict"):
             raw_quant_config = raw_quant_config.to_dict()
@@ -50,6 +49,8 @@ class Glm5NextForConditionalGenerationNextN(DeepseekV3ForCausalLMNextN):
                 nextn_layer_pattern,
             )
             return None
+        if quant_config is not None and quant_config.get_name() == "modelopt_fp4":
+            return quant_config
         return super()._resolve_nextn_quant_config(config, quant_config)
 
     def __init__(self, config, quant_config=None, prefix: str = "") -> None:
