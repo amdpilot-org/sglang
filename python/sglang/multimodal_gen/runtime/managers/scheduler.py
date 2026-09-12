@@ -27,6 +27,7 @@ from sglang.multimodal_gen.runtime.entrypoints.control_requests import (
     UnmergeLoraWeightsReq,
 )
 from sglang.multimodal_gen.runtime.entrypoints.post_training.io_struct import (
+    CompareWeightsWithDiskReqInput,
     GetWeightsChecksumReqInput,
     ReleaseMemoryOccupationReqInput,
     ResumeMemoryOccupationReqInput,
@@ -155,6 +156,7 @@ class Scheduler(SchedulerWarmupMixin, SchedulerPostTrainingMixin, SchedulerDisag
                 self._handle_update_weights_from_tensor_checker
             ),
             GetWeightsChecksumReqInput: self._handle_get_weights_checksum,
+            CompareWeightsWithDiskReqInput: self._handle_compare_weights_with_disk,
             ReleaseMemoryOccupationReqInput: self._handle_release_memory_occupation,
             ResumeMemoryOccupationReqInput: self._handle_resume_memory_occupation,
         }
