@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36495",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1281",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1247",
+  "candidate_commit": "6b37f294aa085347e44d747b235dc4987c747823",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a partial functional fix: its rebuilt native constructor guard prevents the reported 4/4 invalid free, but its claimed early server-argument validation uses assert and disappears under python -O. Full NVIDIA/Qwen HTTP serving was unavailable on the prepared AMD ROCm host.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-b5a9caeaccab/review-cache-base-1 timeout 300 /tmp/amdpilot-repo-j-b5a9caeaccab/venv/bin/python -u -c '<production NgramCorpus capacity=4, depth=4, one four-token insertion>'",
+      "exit_code": 134,
+      "what_was_measured": "Recorded-base failure reproduced after a fresh native JIT build: construction and queueing succeeded, then Trie insertion aborted with munmap_chunk(): invalid pointer."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-b5a9caeaccab/review-cache-candidate-1 /tmp/amdpilot-repo-j-b5a9caeaccab/venv/bin/python -u -c '<production NgramCorpus boundary matrix>'",
+      "exit_code": 0,
+      "what_was_measured": "Fresh candidate native build rejected 4/4 and 3/4 synchronously and successfully inserted at 5/4 and 3/2."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-b5a9caeaccab/review-cache-candidate-1 /tmp/amdpilot-repo-j-b5a9caeaccab/venv/bin/python -m pytest -q test/registered/unit/spec/test_ngram_corpus.py",
+      "exit_code": 0,
+      "what_was_measured": "45 native-backed NGRAM corpus tests passed against the candidate-built shared library."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b5a9caeaccab/venv/bin/python -m pytest -q test/registered/unit/spec/test_ngram_server_args.py",
+      "exit_code": 0,
+      "what_was_measured": "All 4 candidate validation unit tests passed in normal Python mode."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b5a9caeaccab/venv/bin/python -O -c '<construct resolved NGRAM ServerArgs at 4/4; call validate_ngram_capacity>'",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial case printed OPTIMIZED_ACCEPTED, proving assert-based early validation is removed under optimized Python."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The trie extension exercised here is CPU-only. The host exposed one AMD Instinct MI350X, but no GPU kernel was used for this reproduction."
+  },
+  "native_rebuilt": true,
+  "remaining_counterexamples": [
+    "Under python -O, validate_ngram_capacity accepts NGRAM capacity=4 and max_trie_depth=4 because its assert is stripped; the native constructor catches it later rather than the serving-argument validation layer."
+  ],
+  "remaining_limitations": [
+    "The original NVIDIA L40S/CUDA/Qwen3-4B HTTP serving reproduction was not run because the prepared environment has AMD MI350X/ROCm and lacks the reported weights.",
+    "NGRAM serving declares CUDA or CPU support, so no ROCm serving claim is made.",
+    "No model semantic accuracy, HTTP transport, or distributed workload was tested.",
+    "Candidate native library: /tmp/amdpilot-repo-j-b5a9caeaccab/review-cache-candidate-1/gfx950/sgl_kernel_jit_ngram_corpus/build-f977ae1b18709294/deps-f7007fddf719da23/sgl_kernel_jit_ngram_corpus.so"
+  ]
+}
