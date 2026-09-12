@@ -1,0 +1,58 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31995",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "b69f9348b5345908eb752b5fa04172b229026dfb",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduced the original public DWDP import failure in the prepared ROCm interpreter, where cuda-python is genuinely absent: importing DwdpManager raised ModuleNotFoundError from dwdp/transport.py. The exact candidate makes the two remaining eager CUDA-driver imports in transport.py and page_pool.py optional. Its regression passed, and independent checks confirmed the public entry point, all DWDP modules, and ModelRunner import from the checkout without cuda.bindings. The current base had already removed the issue snapshot's vmm.py path and made ModelRunner's DwdpManager import conditional; the candidate completes the remaining import-safety contract on that base.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c146fc1fbb8e/venv/bin/python -c 'from sglang.srt.layers.moe.dwdp import DwdpManager; print(DwdpManager)' (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction with the actual prepared interpreter. importlib.util.find_spec('cuda') returned None and the public import raised ModuleNotFoundError in python/sglang/srt/layers/moe/dwdp/transport.py."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c146fc1fbb8e/venv/bin/python -m pytest -q test/registered/unit/layers/test_dwdp_optional_cuda_import.py --junitxml=/job/review-evidence-j-c146fc1fbb8e/candidate/pytest.xml (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's missing-CUDA public-import regression and fake-driver preservation boundary both passed (2 passed in 44.55s)."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c146fc1fbb8e/venv/bin/python - <<'PY' ... import DwdpManager, page_pool, and transport; assert both cuda globals are None and source paths start with /job/repo/python ... PY (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after check against the new checkout source with cuda genuinely unavailable, rather than an installed wheel or only a mocked smoke."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c146fc1fbb8e/venv/bin/python - <<'PY' ... pkgutil.walk_packages and import every sglang.srt.layers.moe.dwdp module ... PY (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial package sweep imported the public package and all six DWDP submodules without cuda-python; no failures occurred."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c146fc1fbb8e/venv/bin/python -c 'import sglang.srt.model_executor.model_runner as model_runner; print(model_runner.__file__)' (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "The issue-relevant ModelRunner import path completed and resolved to /job/repo/python/sglang/srt/model_executor/model_runner.py."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c146fc1fbb8e/venv/bin/python -m compileall -q python/sglang/srt/layers/moe/dwdp (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "All DWDP Python sources compiled successfully."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 b69f9348b5345908eb752b5fa04172b229026dfb",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned device was detected as one AMD Instinct MI350X with gfx950:sramecc+:xnack- under PyTorch 2.11.0+rocm7.2, but the original contract is an import-time failure and required no GPU kernel execution. No numerical, model-serving, CUDA/NVLink, or distributed claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Intel XPU hardware and the reported Qwen model weights were unavailable, so the issue's full XPU server command was not run.",
+    "CUDA/NVLink DWDP execution was not tested on this ROCm gfx950 host; the candidate's CUDA-present case only verifies preservation of an available driver module.",
+    "The current recorded base differs from the issue snapshot: vmm.py is gone and ModelRunner conditionally imports DwdpManager only for dwdp_size greater than one. Review conclusions apply to candidate b69f9348b5345908eb752b5fa04172b229026dfb on recorded base 358c163250ad3b1f62939b01ce1314a0a31a0365.",
+    "No native sources changed, so there was no native library to rebuild; the prepared environment also declares no separate native build target."
+  ]
+}
