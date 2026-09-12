@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32928",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "f924d21cd65995706d9180fe289f088ec3ef8e2b",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate independently reproduces and fixes the parent's 1.0-second timeout failure for a valid 1.2-second STATUS reply, and its focused tests pass. However, Prometheus divergence and communicator series remain stale after recovery or communicator disappearance, so the original current-state diagnostics contract is only partially resolved.",
+  "tests": [
+    {
+      "command": "base import discovery and pytest -q test/registered/unit/distributed/test_nccl_ras.py",
+      "exit_code": 4,
+      "what_was_measured": "The recorded base lacks both the NCCL RAS module and candidate regression file, reproducing absence of the requested feature."
+    },
+    {
+      "command": "real loopback delayed STATUS probe at parent 93773a6d3a67ed79e50d198c20f9964be234832e",
+      "exit_code": 0,
+      "what_was_measured": "A valid response delayed 1.2 seconds returned None with the parent's 1.0-second default timeout."
+    },
+    {
+      "command": "real loopback delayed STATUS probe at candidate f924d21cd65995706d9180fe289f088ec3ef8e2b",
+      "exit_code": 0,
+      "what_was_measured": "The same response parsed successfully with the candidate's 5.0-second default timeout."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7733b368341b/venv/bin/python -m pytest -q test/registered/unit/distributed/test_nccl_ras.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate CPU regression suite: 35 passed plus 2 subtests."
+    },
+    {
+      "command": "independent prometheus_client recovery/disappearance sequence through SchedulerMetricsCollector.log_nccl_ras",
+      "exit_code": 0,
+      "what_was_measured": "A divergence value of 7 remained exported after recovery and after the communicator disappeared, proving stale health series."
+    },
+    {
+      "command": "python -m compileall on changed NCCL RAS integration modules",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python modules compile and import from the candidate checkout."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Only environment capability was inspected. The assigned system has one AMD Instinct MI350X with RCCL API 2.27.7; no qualified NVIDIA NCCL RAS or distributed GPU execution was possible."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "nccl_ras_collective_divergence retains its prior nonzero label value after a recovered poll omits that collective from comm.divergence.",
+    "All per-communicator gauge series remain exported when a communicator disappears from subsequent STATUS snapshots.",
+    "Live NVIDIA NCCL 2.28.7+ polling, two-node unresponsive/dead transitions, and TP=2 serving metrics remain unverified."
+  ],
+  "remaining_limitations": [
+    "Single AMD MI350X with RCCL 2.27.7 cannot qualify the NVIDIA NCCL 2.28.7+ RAS protocol.",
+    "No second node or second assigned GPU was available.",
+    "The tiny Llama fixture cannot substitute for missing NVIDIA NCCL RAS or a distributed allocation.",
+    "No native source changed; native rebuild was not applicable."
+  ]
+}
