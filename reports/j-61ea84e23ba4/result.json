@@ -1,0 +1,65 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37892",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/969",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/938",
+  "candidate_commit": "f21c189be8eed6f307b07179764f756af2ef94a2",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The base deterministically routes DSV4 paged prefill through top-k v1 because prefill allocates c4_sparse_raw_indices while the v2 branch requires raw_indices to be None. The exact candidate removes that contradictory guard and uses v2 to produce raw indices followed by a separate page-table transform when both outputs are required. Candidate regressions, existing real v2 kernel tests, and an independent 32K gfx950 numerical/adversarial check passed. This verifies the narrow dispatch correction but cannot establish absence of the original four-GB300 DeepSeek-V4-Pro serving crash.",
+  "tests": [
+    {
+      "command": "rg -n -C 4 'c4_sparse_raw_indices = torch.empty_like|should_use_topk_v2\\(\\) and raw_indices is None' python/sglang/srt/layers/attention/deepseek_v4_backend.py python/sglang/srt/layers/attention/dsv4/indexer.py (base)",
+      "exit_code": 0,
+      "what_was_measured": "Issue-specific source reproduction: prefill allocates the raw-index buffer and the paged dispatcher consequently excludes v2."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-61ea84e23ba4/venv/bin/python -m pytest -q test/registered/unit/layers/test_dsv4_paged_topk_dispatch.py (base)",
+      "exit_code": 4,
+      "what_was_measured": "Failing-before preservation: the candidate regression file/helper does not exist on the recorded base. The stronger behavioral failure is the contradictory base dispatch condition recorded above."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-61ea84e23ba4/venv/bin/python -m pytest -q test/registered/unit/layers/test_dsv4_paged_topk_dispatch.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Three candidate cases passed: raw and physical outputs use v2 without v1, no-raw retains the fused v2 path, and page_size=1 plus -1 padding translate correctly."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-61ea84e23ba4/venv/bin/python -m pytest -q 'test/registered/kernels/ops/attention/test_topk_v2.py::test_topk_v2[8-4096-1024-perm]' 'test/registered/kernels/ops/attention/test_topk_v2.py::test_topk_v2_output_indices[8-4096-1024]' (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Two existing tests executed the actual v2 JIT kernel on the assigned AMD GPU in physical-page and raw-index modes."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-61ea84e23ba4/venv/bin/python /job/review-evidence-j-61ea84e23ba4/adversarial_review.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Actual v2 raw selections at sequence length 32768 matched torch.topk multisets. Independent wrapper cases matched a torch.gather reference with page_size=3, repeated physical pages, invalid padding, and noncontiguous output views."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-61ea84e23ba4/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_dsa_indexer.py::TestDSAIndexer::test_topk_v2_respects_topk_backend (candidate)",
+      "exit_code": 1,
+      "what_was_measured": "Known nearby ROCm-specific expectation mismatch: sgl-kernel expected dsa_drop_wide_page_table=true but observed false; the flashinfer subcase passed. This test does not exercise the changed helper."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 f21c189be8eed6f307b07179764f756af2ef94a2 && /tmp/amdpilot-repo-j-61ea84e23ba4/venv/bin/python -m compileall -q python/sglang/srt/layers/attention/dsv4/indexer.py test/registered/unit/layers/test_dsv4_paged_topk_dispatch.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate whitespace and Python syntax."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X, gfx950-class capability [9,5], PyTorch 2.11.0+rocm7.2 / HIP 7.2.26015. Real v2 JIT execution and the 32K numerical comparison passed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The original four-NVIDIA-GB300, CUDA 13, DeepSeek-V4-Pro FP4 TP/DP/EP serving workload was unavailable, so the reported illegal address was not reproduced on base and its absence was not observed on the candidate.",
+    "No model weights were available; the review does not validate DeepSeek-V4-Pro semantics, FP4 indexer execution, DP attention, hierarchical cache, speculative decoding, or multi-GPU behavior.",
+    "The candidate's extra PyTorch page-table transform is numerically verified on gfx950 but its performance and CUDA behavior on GB300 remain unmeasured.",
+    "A nearby ROCm test retains a pre-existing dsa_drop_wide_page_table expectation failure unrelated to the changed helper."
+  ],
+  "remaining_limitations": [
+    "Architecture mismatch: AMD gfx950-class MI350X instead of NVIDIA GB300 compute capability 10.3.",
+    "Single GPU instead of the reported four-GPU TP4/DP4/EP4 workload.",
+    "No DeepSeek-V4-Pro weights or full serving reproduction.",
+    "No native source changed. The prepared repository declared no native rebuild target; source imports resolved to /job/repo while sgl_kernel resolved to the prepared installed package."
+  ]
+}
