@@ -376,8 +376,20 @@ def create_grammar_backend(
             XGrammarGrammarBackend,
         )
 
-        # Convert Set[int] to List[int] if needed
-        eos_list = list(eos_token_ids) if eos_token_ids else None
+        # XGrammar only unmasks stop tokens from this list, so it must match
+        # the EOS set that Req._check_token_based_finish accepts. Otherwise a
+        # tokenizer EOS omitted by the model config remains masked even when
+        # the grammar is in an accepting state.
+        eos_set = set(eos_token_ids) if eos_token_ids else set()
+        tokenizer_eos_token_id = getattr(tokenizer, "eos_token_id", None)
+        if isinstance(tokenizer_eos_token_id, int):
+            eos_set.add(tokenizer_eos_token_id)
+        additional_stop_token_ids = getattr(
+            tokenizer, "additional_stop_token_ids", None
+        )
+        if isinstance(additional_stop_token_ids, (list, tuple, set)):
+            eos_set.update(additional_stop_token_ids)
+        eos_list = sorted(eos_set) if eos_set else None
 
         try:
             grammar_backend = XGrammarGrammarBackend(

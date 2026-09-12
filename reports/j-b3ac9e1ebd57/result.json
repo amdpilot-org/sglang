@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31533",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "XGrammar now receives the union of model-config EOS IDs, tokenizer.eos_token_id, and tokenizer.additional_stop_token_ids, matching server-side token finish detection.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-b3ac9e1ebd57/venv/bin/python -m pytest test/registered/unit/constrained/test_base_grammar_backend.py -k 'xgrammar_stop_tokens' -q",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: tokenizer EOS and additional stop IDs were absent from the XGrammar constructor arguments. Raw output: raw/failing_before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b3ac9e1ebd57/venv/bin/python -m pytest test/registered/unit/constrained/test_base_grammar_backend.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after focused factory suite: 35 tests and 17 subtests passed, including mismatch, deduplication, and empty-input boundaries. Raw output: raw/passing_after.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b3ac9e1ebd57/venv/bin/python < inline XGrammar matcher reproduction",
+      "exit_code": 0,
+      "what_was_measured": "Actual XGrammar bitmask after regex acceptance: tokenizer EOS was disallowed with model-only stops and allowed with the union; model EOS remained allowed. Raw output: raw/xgrammar_mask_reproduction.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b3ac9e1ebd57/venv/bin/python -m pre_commit run --files python/sglang/srt/constrained/base_grammar_backend.py test/registered/unit/constrained/test_base_grammar_backend.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, safety, and registered-test checks for changed source and test files. Raw output: raw/pre_commit.log"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The defect is CPU-side stop-token plumbing and XGrammar mask construction. The reported private Qwen3.5-MoE weights and B200 environment were unavailable; no smaller fixture was represented as a full-model reproduction.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No end-to-end HTTP serving run with the reported private Qwen3.5-MoE checkpoint or NVIDIA B200 hardware.",
+    "Per-request sampling_params.stop_token_ids still do not reach the grammar matcher and are outside this narrow fix."
+  ]
+}
