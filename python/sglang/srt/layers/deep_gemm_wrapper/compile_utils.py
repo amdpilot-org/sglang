@@ -15,7 +15,7 @@ from sglang.srt.distributed.device_communicators.pynccl_allocator import (
     disable_symmetric_memory_context,
     restore_symmetric_memory_context,
 )
-from sglang.srt.environ import deep_gemm_cache_dir, envs
+from sglang.srt.environ import envs
 from sglang.srt.layers.deep_gemm_wrapper.configurer import ENABLE_JIT_DEEPGEMM
 from sglang.srt.model_executor.forward_batch_info import ForwardMode
 from sglang.srt.runtime_context import (
@@ -29,9 +29,6 @@ from sglang.srt.utils import ceil_align, ceil_div, get_available_gpu_memory, is_
 logger = logging.getLogger(__name__)
 
 _is_musa = is_musa()
-
-# DeepGEMM resolves its JIT cache while importing, so configure it first.
-os.environ["DG_JIT_CACHE_DIR"] = deep_gemm_cache_dir()
 
 if ENABLE_JIT_DEEPGEMM:
     import deep_gemm

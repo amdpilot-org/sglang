@@ -153,13 +153,58 @@ def test_import_time_redirect_in_clean_process(tmp_path):
     }
 
 
-def test_deep_gemm_cache_is_configured_before_import():
-    source = (
-        Path(__file__).parents[3]
-        / "python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py"
-    ).read_text()
-    configure_at = source.index(
-        'os.environ["DG_JIT_CACHE_DIR"] = deep_gemm_cache_dir()'
+def test_deep_gemm_cache_is_configured_before_configurer_probe(tmp_path):
+    configurer = (
+        Path(__file__).parents[4]
+        / "python/sglang/srt/layers/deep_gemm_wrapper/configurer.py"
     )
-    import_at = source.index("    import deep_gemm")
-    assert configure_at < import_at
+    code = textwrap.dedent(
+        f"""
+        import importlib.abc
+        import importlib.machinery
+        import importlib.util
+        import os
+        import sys
+        import types
+
+        observed = []
+
+        class DeepGemmLoader(importlib.abc.Loader):
+            def exec_module(self, module):
+                observed.append(os.environ.get("DG_JIT_CACHE_DIR"))
+
+        class DeepGemmFinder(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path, target=None):
+                if fullname == "deep_gemm":
+                    return importlib.machinery.ModuleSpec(fullname, DeepGemmLoader())
+
+        sys.meta_path.insert(0, DeepGemmFinder())
+        for name in ("sglang", "sglang.srt"):
+            module = types.ModuleType(name)
+            module.__path__ = []
+            sys.modules[name] = module
+
+        environ = types.ModuleType("sglang.srt.environ")
+        environ.deep_gemm_cache_dir = lambda: {str(tmp_path / "deep_gemm")!r}
+        environ.envs = types.SimpleNamespace(
+            SGLANG_ENABLE_JIT_DEEPGEMM=types.SimpleNamespace(get=lambda: True)
+        )
+        sys.modules[environ.__name__] = environ
+
+        runtime_context = types.ModuleType("sglang.srt.runtime_context")
+        runtime_context.get_platform = lambda: types.SimpleNamespace(is_sm100=False)
+        sys.modules[runtime_context.__name__] = runtime_context
+
+        utils = types.ModuleType("sglang.srt.utils")
+        utils.get_device_sm = lambda: 90
+        utils.is_cuda = lambda: True
+        utils.is_musa = lambda: False
+        sys.modules[utils.__name__] = utils
+
+        spec = importlib.util.spec_from_file_location("test_configurer", {str(configurer)!r})
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        assert observed == [{str(tmp_path / "deep_gemm")!r}], observed
+        """
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)
