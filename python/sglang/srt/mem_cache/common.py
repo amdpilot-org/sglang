@@ -108,6 +108,27 @@ def free_swa_out_of_window_slots(
         req.kv.swa_evicted_seqlen = new_swa_evicted_seqlen
 
 
+def _coalesce_touching_segments(
+    segments: list[tuple[torch.Tensor, int]],
+) -> list[tuple[torch.Tensor, int]]:
+    """Join touching segments of one kv row and discard empty segments."""
+    # A truncated finished request contributes its unaligned cached tail and
+    # its deferred truncation tail as two touching slices. Join all touching
+    # slices before page ownership is split so their shared boundary page is
+    # emitted exactly once. Keep gaps separate: they can belong to the tree.
+    coalesced: list[tuple[torch.Tensor, int]] = []
+    for kv_indices, start_pos in segments:
+        if kv_indices.numel() == 0:
+            continue
+        if coalesced:
+            prev_indices, prev_start = coalesced[-1]
+            if prev_start + prev_indices.numel() == start_pos:
+                coalesced[-1] = (torch.cat((prev_indices, kv_indices)), prev_start)
+                continue
+        coalesced.append((kv_indices, start_pos))
+    return coalesced
+
+
 def free_kv_row_segments(
     allocator: BaseTokenToKVPoolAllocator,
     segments: list[tuple[torch.Tensor, int]],
@@ -116,12 +137,11 @@ def free_kv_row_segments(
 ) -> None:
     """Free ascending disjoint ``(kv_indices, start_pos)`` segments of one
     request's kv row, split at the SWA eviction floor."""
+
     swa_dead: list[tuple[torch.Tensor, int]] = []
     swa_alive: list[tuple[torch.Tensor, int]] = []
-    for kv_indices, start_pos in segments:
+    for kv_indices, start_pos in _coalesce_touching_segments(segments):
         num_indices = kv_indices.numel()
-        if num_indices == 0:
-            continue
         # Below the floor the SWA peers are already gone -- window eviction, or
         # the deliberately unmapped prefix of a PD decode SWA-tail prealloc.
         num_dead = min(max(swa_evicted_seqlen - start_pos, 0), num_indices)
