@@ -20,7 +20,7 @@ from sglang.srt.constants import GPU_MEMORY_TYPE_KV_CACHE
 from sglang.srt.environ import envs
 from sglang.srt.mem_cache.base_swa_memory_pool import BaseSWAKVPool
 from sglang.srt.mem_cache.deepseek_v4_compress_state import CompressStatePool
-from sglang.srt.mem_cache.memory_pool import KVCache
+from sglang.srt.mem_cache.memory_pool import GB, KVCache
 from sglang.srt.runtime_context import get_exec, get_spec
 from sglang.srt.utils import ceil_div, is_hip
 
@@ -113,6 +113,10 @@ class DeepSeekV4SingleKVPool(KVCache):
                     )
                     for _ in range(self.layer_num)
                 ]
+        self.mem_usage = sum(buf.nbytes for buf in self.allocated_tensors()) / GB
+
+    def allocated_tensors(self) -> List[torch.Tensor]:
+        return self.kv_buffer
 
     def get_bytes_per_token(self) -> int:
         dim_per_token = (
@@ -390,17 +394,27 @@ class DeepSeekV4IndexerPool(KVCache):
                         for _ in range(self.layer_num)
                     ]
                     self.index_k_with_scale_buffer = None
-                    return
+                else:
+                    self.index_k_with_scale_buffer = [
+                        torch.zeros(
+                            num_pages,
+                            page_bytes,
+                            dtype=self.index_k_with_scale_buffer_dtype,
+                            device=self.device,
+                        )
+                        for _ in range(self.layer_num)
+                    ]
+        self.mem_usage = sum(
+            buf.nbytes for buf in self.allocated_tensors()
+        ) / GB
 
-                self.index_k_with_scale_buffer = [
-                    torch.zeros(
-                        num_pages,
-                        page_bytes,
-                        dtype=self.index_k_with_scale_buffer_dtype,
-                        device=self.device,
-                    )
-                    for _ in range(self.layer_num)
-                ]
+    def allocated_tensors(self) -> List[torch.Tensor]:
+        tensors = list(self.contiguous_page_row_buffers())
+        # NPU keeps dedicated kernel-layout buffers in addition to the packed
+        # transfer-compatible representation allocated by the base class.
+        tensors.extend(getattr(self, "index_k_buffer", ()))
+        tensors.extend(getattr(self, "index_scale_buffer", ()))
+        return tensors
 
     def get_kv_buffer(self, layer_id: int) -> Tuple[torch.Tensor, torch.Tensor]:
         raise NotImplementedError()
@@ -759,6 +773,46 @@ class DeepSeekV4TokenToKVPool(BaseSWAKVPool):
         self._init_compressed_layer_mapping()
 
         self._init_paged_compress_states(enable_memory_saver)
+        self._finalize_mem_usage()
+
+    def _finalize_mem_usage(self) -> None:
+        """Record bytes held by the physical tensors owned by this pool."""
+        tensors: List[torch.Tensor] = []
+
+        if self._unified_kv:
+            tensors.extend(self.unified_kv_pool.kv_buffer)
+            self.unified_kv_pool.mem_usage = (
+                sum(buf.nbytes for buf in self.unified_kv_pool.kv_buffer) / GB
+            )
+        else:
+            swa_tensors = self.swa_kv_pool.allocated_tensors()
+            self.swa_kv_pool.mem_usage = sum(buf.nbytes for buf in swa_tensors) / GB
+            tensors.extend(swa_tensors)
+            for pool in self.kv_pools.values():
+                if pool is not None:
+                    pool_tensors = pool.allocated_tensors()
+                    pool.mem_usage = sum(buf.nbytes for buf in pool_tensors) / GB
+                    tensors.extend(pool_tensors)
+
+        for pool in self.index_pools.values():
+            pool_tensors = pool.allocated_tensors()
+            pool.mem_usage = sum(buf.nbytes for buf in pool_tensors) / GB
+            tensors.extend(pool_tensors)
+
+        for pools in (
+            self.compress_state_pools,
+            self.indexer_compress_state_pools,
+        ):
+            tensors.extend(
+                pool.kv_score_buffer.kv_score
+                for pool in pools
+                if pool is not None
+            )
+
+        if self.online_c128_mtp_pending_seq_lens is not None:
+            tensors.append(self.online_c128_mtp_pending_seq_lens)
+
+        self.mem_usage = sum(tensor.nbytes for tensor in tensors) / GB
 
     def get_unified_kv(self, layer_id: int) -> torch.Tensor:
         # Under HiCache the compressed region is loaded H->D per layer; wait for this
