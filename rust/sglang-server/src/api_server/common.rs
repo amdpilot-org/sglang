@@ -13,7 +13,7 @@ use axum::{
     routing::get,
 };
 use serde::Deserialize;
-use std::sync::Arc;
+use std::{net::Ipv6Addr, sync::Arc};
 
 use super::app::AppState;
 use super::guard::AbortGuard;
@@ -218,6 +218,7 @@ fn parse_advertisable_tcp(endpoint: &str) -> Option<(&str, u16)> {
     let address = endpoint.strip_prefix("tcp://")?;
     let (host, port_text) = if let Some(bracketed) = address.strip_prefix('[') {
         let close = bracketed.find(']')?;
+        bracketed[..close].parse::<Ipv6Addr>().ok()?;
         let host = &address[..close + 2];
         let port = address.get(close + 2..)?.strip_prefix(':')?;
         (host, port)
@@ -337,14 +338,17 @@ mod tests {
         assert!(!text.contains("API_SECRET_CANARY"));
         let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(value["internal_states"][0]["last_gen_throughput"], 2.5);
-        assert_eq!(value["kv_events"], serde_json::json!({
-            "publisher": "zmq",
-            "endpoint_host": "*",
-            "endpoint_port_base": 5557,
-            "topic": "kv",
-            "block_size": 64,
-            "dp_size": 2,
-        }));
+        assert_eq!(
+            value["kv_events"],
+            serde_json::json!({
+                "publisher": "zmq",
+                "endpoint_host": "*",
+                "endpoint_port_base": 5557,
+                "topic": "kv",
+                "block_size": 64,
+                "dp_size": 2,
+            })
+        );
         assert!(value.get("kv_events_config").is_none());
     }
 
@@ -389,5 +393,10 @@ mod tests {
             parse_advertisable_tcp("tcp://[2001:db8::5]:5557"),
             Some(("[2001:db8::5]", 5557))
         );
+    }
+
+    #[test]
+    fn bracketed_non_ipv6_host_is_not_advertisable() {
+        assert_eq!(parse_advertisable_tcp("tcp://[not-ipv6]:5557"), None);
     }
 }
