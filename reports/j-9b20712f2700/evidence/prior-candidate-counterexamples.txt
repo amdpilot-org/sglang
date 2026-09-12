@@ -1,0 +1,256 @@
+FFFF                                                                     [100%]
+=================================== FAILURES ===================================
+_ ServingCompletionTestCase.test_batched_prompt_metrics_preserve_unmeasured_choice_position _
+
+self = <test_serving_completions_candidate.ServingCompletionTestCase testMethod=test_batched_prompt_metrics_preserve_unmeasured_choice_position>
+
+    def test_batched_prompt_metrics_preserve_unmeasured_choice_position(self):
+        ret = [
+            {
+                "text": f"answer-{index}",
+                "meta_info": {
+                    "id": "cmpl-partial-metrics",
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "cached_tokens": 0,
+                    "finish_reason": {"type": "stop"},
+                    "weight_version": "default",
+                    **({"e2e_latency": 2.5} if index == 1 else {}),
+                },
+            }
+            for index in range(2)
+        ]
+        req = CompletionRequest(
+            model="x",
+            prompt=["first", "second"],
+            max_tokens=1,
+            n=1,
+            return_request_metrics=True,
+        )
+
+        serialized = json.loads(
+            self.sc._build_completion_response(req, ret, 123).model_dump_json(
+                exclude_none=True
+            )
+        )
+
+        self.assertEqual(len(serialized["choices"]), 2)
+>       self.assertEqual(
+            serialized["sglext"]["request_metrics"],
+            [None, {"e2e_latency": 2.5}],
+        )
+E       AssertionError: Lists differ: [{'e2e_latency': 2.5}] != [None, {'e2e_latency': 2.5}]
+E
+E       First differing element 0:
+E       {'e2e_latency': 2.5}
+E       None
+E
+E       Second list contains 1 additional elements.
+E       First extra element 1:
+E       {'e2e_latency': 2.5}
+E
+E       - [{'e2e_latency': 2.5}]
+E       + [None, {'e2e_latency': 2.5}]
+E       ?  ++++++
+
+../review-evidence-j-9b20712f2700/test_serving_completions_candidate.py:269: AssertionError
+_ ServingCompletionTestCase.test_streaming_metrics_preserve_unmeasured_choice_position _
+
+self = <test_serving_completions_candidate.ServingCompletionTestCase testMethod=test_streaming_metrics_preserve_unmeasured_choice_position>
+
+    def test_streaming_metrics_preserve_unmeasured_choice_position(self):
+        outputs = [
+            {
+                "text": f"answer-{index}",
+                "index": index,
+                "meta_info": {
+                    "id": "cmpl-stream-partial-metrics",
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "cached_tokens": 0,
+                    "finish_reason": {"type": "stop"},
+                    **({"e2e_latency": 2.5} if index == 1 else {}),
+                },
+            }
+            for index in range(2)
+        ]
+        self.sc.tokenizer_manager.generate_request = Mock(
+            return_value=self._async_generator(*outputs)
+        )
+        req = CompletionRequest(
+            model="x",
+            prompt=["first", "second"],
+            max_tokens=1,
+            n=1,
+            stream=True,
+            return_request_metrics=True,
+        )
+        internal, _ = self.sc._convert_to_internal_request(req)
+
+        async def collect():
+            return [
+                chunk
+                async for chunk in self.sc._generate_completion_stream(
+                    internal, req, self.fastapi_request
+                )
+            ]
+
+        chunks = get_or_create_event_loop().run_until_complete(collect())
+        parsed = [
+            json.loads(chunk[len("data: ") :])
+            for chunk in chunks
+            if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]"
+        ]
+        metric_chunk = next(item for item in parsed if "sglext" in item)
+>       self.assertEqual(
+            metric_chunk["sglext"]["request_metrics"],
+            [None, {"e2e_latency": 2.5}],
+        )
+E       AssertionError: Lists differ: [{'e2e_latency': 2.5}] != [None, {'e2e_latency': 2.5}]
+E
+E       First differing element 0:
+E       {'e2e_latency': 2.5}
+E       None
+E
+E       Second list contains 1 additional elements.
+E       First extra element 1:
+E       {'e2e_latency': 2.5}
+E
+E       - [{'e2e_latency': 2.5}]
+E       + [None, {'e2e_latency': 2.5}]
+E       ?  ++++++
+
+../review-evidence-j-9b20712f2700/test_serving_completions_candidate.py:403: AssertionError
+_ ServingChatTestCase.test_non_streaming_request_metrics_preserve_unmeasured_choice_position _
+
+self = <test_serving_chat_candidate.ServingChatTestCase testMethod=test_non_streaming_request_metrics_preserve_unmeasured_choice_position>
+
+    def test_non_streaming_request_metrics_preserve_unmeasured_choice_position(self):
+        req = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "Hi?"}],
+            max_tokens=2,
+            n=2,
+            return_request_metrics=True,
+        )
+        ret = [_spec_result(index) for index in range(2)]
+        ret[1]["meta_info"]["e2e_latency"] = 2.5
+
+        response = self.chat._build_chat_response(req, ret, 1234567890)
+
+>       self.assertEqual(
+            response.model_dump()["sglext"]["request_metrics"],
+            [None, {"e2e_latency": 2.5}],
+        )
+E       AssertionError: Lists differ: [{'e2e_latency': 2.5}] != [None, {'e2e_latency': 2.5}]
+E
+E       First differing element 0:
+E       {'e2e_latency': 2.5}
+E       None
+E
+E       Second list contains 1 additional elements.
+E       First extra element 1:
+E       {'e2e_latency': 2.5}
+E
+E       - [{'e2e_latency': 2.5}]
+E       + [None, {'e2e_latency': 2.5}]
+E       ?  ++++++
+
+../review-evidence-j-9b20712f2700/test_serving_chat_candidate.py:3067: AssertionError
+_ ServingChatTestCase.test_streaming_request_metrics_preserve_unmeasured_choice_position _
+
+self = <test_serving_chat_candidate.ServingChatTestCase testMethod=test_streaming_request_metrics_preserve_unmeasured_choice_position>
+
+    def test_streaming_request_metrics_preserve_unmeasured_choice_position(self):
+        async def generate():
+            for index in range(2):
+                yield {
+                    "text": f"response-{index}",
+                    "index": index,
+                    "meta_info": {
+                        "id": "chatcmpl-stream-partial-metrics",
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "cached_tokens": 0,
+                        "finish_reason": {"type": "stop", "matched": None},
+                        "output_token_logprobs": None,
+                        "output_top_logprobs": None,
+                        **({"e2e_latency": 2.5} if index == 1 else {}),
+                    },
+                }
+
+        self.tm.generate_request.return_value = generate()
+        req = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "Hi?"}],
+            max_tokens=2,
+            n=2,
+            stream=True,
+            return_request_metrics=True,
+        )
+
+        with patch(
+            "sglang.srt.entrypoints.openai.serving_chat.generate_chat_conv"
+        ) as conv_mock:
+            conv_ins = Mock()
+            conv_ins.get_prompt.return_value = "Test prompt"
+            conv_mock.return_value = conv_ins
+            adapted_request, _ = self.chat._convert_to_internal_request(
+                req, self.fastapi_request
+            )
+
+            async def collect():
+                return [
+                    chunk
+                    async for chunk in self.chat._generate_chat_stream(
+                        adapted_request, req, self.fastapi_request
+                    )
+                ]
+
+        chunks = get_or_create_event_loop().run_until_complete(collect())
+        parsed = [
+            json.loads(chunk[len("data: ") :])
+            for chunk in chunks
+            if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]"
+        ]
+        metric_chunk = next(item for item in parsed if "sglext" in item)
+>       self.assertEqual(
+            metric_chunk["sglext"]["request_metrics"],
+            [None, {"e2e_latency": 2.5}],
+        )
+E       AssertionError: Lists differ: [{'e2e_latency': 2.5}] != [None, {'e2e_latency': 2.5}]
+E
+E       First differing element 0:
+E       {'e2e_latency': 2.5}
+E       None
+E
+E       Second list contains 1 additional elements.
+E       First extra element 1:
+E       {'e2e_latency': 2.5}
+E
+E       - [{'e2e_latency': 2.5}]
+E       + [None, {'e2e_latency': 2.5}]
+E       ?  ++++++
+
+../review-evidence-j-9b20712f2700/test_serving_chat_candidate.py:3363: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+review-evidence-j-9b20712f2700/test_serving_chat_candidate.py::ServingChatTestCase::test_streaming_request_metrics_preserve_unmeasured_choice_position
+  /job/repo/python/sglang/srt/entrypoints/openai/protocol.py:1142: DeprecationWarning: max_tokens is deprecated in favor of the max_completion_tokens field
+    "max_new_tokens": self.max_completion_tokens or self.max_tokens,
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../review-evidence-j-9b20712f2700/test_serving_completions_candidate.py::ServingCompletionTestCase::test_batched_prompt_metrics_preserve_unmeasured_choice_position
+FAILED ../review-evidence-j-9b20712f2700/test_serving_completions_candidate.py::ServingCompletionTestCase::test_streaming_metrics_preserve_unmeasured_choice_position
+FAILED ../review-evidence-j-9b20712f2700/test_serving_chat_candidate.py::ServingChatTestCase::test_non_streaming_request_metrics_preserve_unmeasured_choice_position
+FAILED ../review-evidence-j-9b20712f2700/test_serving_chat_candidate.py::ServingChatTestCase::test_streaming_request_metrics_preserve_unmeasured_choice_position
+4 failed, 17 warnings in 12.45s
