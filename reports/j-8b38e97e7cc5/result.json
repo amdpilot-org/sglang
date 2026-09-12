@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36140",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Added a fail-fast validation error for DFLASH combined with either PD disaggregation role because the current transfer path does not carry DFLASH draft KV or auxiliary hidden states. Preserved standalone DFLASH and PD EAGLE/DSPARK behavior.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-8b38e97e7cc5/venv/bin/python -m pytest test/registered/unit/server_args/test_dflash_pd_disaggregation_gate.py -v (before fix)",
+      "exit_code": 1,
+      "what_was_measured": "Regression reproduced: both PD roles and lowercase DFLASH were accepted instead of raising; standalone and supported-algorithm boundary cases passed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-8b38e97e7cc5/venv/bin/python -m pytest test/registered/unit/server_args/test_dflash_pd_disaggregation_gate.py -v",
+      "exit_code": 0,
+      "what_was_measured": "Four tests passed with six subtests: DFLASH rejected for prefill/decode, case-insensitive input rejected, standalone DFLASH accepted, and EAGLE/DSPARK accepted for both PD roles."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-8b38e97e7cc5/venv/bin/python -m pytest test/registered/unit/server_args/test_server_args.py -k TestLoadBalanceMethod -v",
+      "exit_code": 0,
+      "what_was_measured": "All 13 existing PD argument-handler tests passed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-8b38e97e7cc5/venv/bin/python -m pytest test/registered/unit/server_args/test_server_args.py -q",
+      "exit_code": 1,
+      "what_was_measured": "224 passed and two unrelated tests failed because existing HIP prefill-CP deprecation validation now fires before their older expected behavior."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-8b38e97e7cc5/venv/bin/python -m py_compile python/sglang/srt/arg_groups/pd_disaggregation_hook.py test/registered/unit/server_args/test_dflash_pd_disaggregation_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed source and regression test compile successfully."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8b38e97e7cc5/venv/bin/python -m ruff check python/sglang/srt/arg_groups/pd_disaggregation_hook.py test/registered/unit/server_args/test_dflash_pd_disaggregation_gate.py",
+      "exit_code": 1,
+      "what_was_measured": "Formatting/lint command could not run because the prepared interpreter does not contain the ruff module."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned runtime reports one AMD Instinct MI350X through torch 2.11.0+rocm7.2, but the corrected path is deterministic CPU-side startup validation and no model/GPU execution was claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported 8x RTX 6000D multi-node Kimi-K3/Kimi-K3-DFlash workload and weights were unavailable.",
+    "MoonCake RDMA transport was not exercised.",
+    "This change intentionally rejects unsupported DFLASH PD launches; it does not add DFLASH draft-state transfer support.",
+    "The broader server-args suite retains two unrelated HIP prefill-context-parallel expectation failures documented in the raw log.",
+    "Ruff was unavailable in the prepared Python environment."
+  ]
+}
