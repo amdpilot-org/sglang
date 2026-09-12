@@ -15,10 +15,9 @@ use crate::{
             UsageInfo,
         },
         responses::{
-            ReasoningEffort, ResponseContentPart, ResponseInput, ResponseInputOutputItem,
-            ResponseOutputItem, ResponseReasoningContent::ReasoningText, ResponseStatus,
-            ResponsesRequest, ResponsesResponse, ResponsesUsage, StringOrContentParts, TextConfig,
-            TextFormat,
+            ResponseContentPart, ResponseInput, ResponseInputOutputItem, ResponseOutputItem,
+            ResponseReasoningContent::ReasoningText, ResponseStatus, ResponsesRequest,
+            ResponsesResponse, ResponsesUsage, StringOrContentParts, TextConfig, TextFormat,
         },
         UNKNOWN_MODEL_ID,
     },
@@ -198,12 +197,7 @@ pub(crate) fn responses_to_chat(req: &ResponsesRequest) -> Result<ChatCompletion
             .reasoning
             .as_ref()
             .and_then(|reasoning| reasoning.effort.as_ref())
-            .map(|effort| match effort {
-                ReasoningEffort::Minimal => "minimal".to_string(),
-                ReasoningEffort::Low => "low".to_string(),
-                ReasoningEffort::Medium => "medium".to_string(),
-                ReasoningEffort::High => "high".to_string(),
-            }),
+            .map(|effort| effort.as_str().to_string()),
         ..Default::default()
     })
 }
@@ -378,7 +372,7 @@ pub(crate) fn chat_to_responses(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocols::responses::ResponseReasoningParam;
+    use crate::protocols::responses::{ReasoningEffort, ResponseReasoningParam};
 
     #[test]
     fn test_text_input_conversion() {
@@ -429,10 +423,13 @@ mod tests {
     #[test]
     fn test_reasoning_effort_forwarding() {
         for (effort, expected) in [
+            (ReasoningEffort::None, "none"),
             (ReasoningEffort::Minimal, "minimal"),
             (ReasoningEffort::Low, "low"),
             (ReasoningEffort::Medium, "medium"),
             (ReasoningEffort::High, "high"),
+            (ReasoningEffort::Xhigh, "xhigh"),
+            (ReasoningEffort::Max, "max"),
         ] {
             let req = ResponsesRequest {
                 input: ResponseInput::Text("Hello".to_string()),
@@ -444,6 +441,17 @@ mod tests {
             };
             let chat_req = responses_to_chat(&req).unwrap();
             assert_eq!(chat_req.reasoning_effort.as_deref(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn test_all_reasoning_effort_tiers_deserialize_and_forward() {
+        for effort in ["none", "minimal", "low", "medium", "high", "xhigh", "max"] {
+            let json = format!(r#"{{"input":"Hello","reasoning":{{"effort":"{effort}"}}}}"#);
+            let request: ResponsesRequest = serde_json::from_str(&json)
+                .unwrap_or_else(|error| panic!("failed to deserialize {effort}: {error}"));
+            let chat_request = responses_to_chat(&request).unwrap();
+            assert_eq!(chat_request.reasoning_effort.as_deref(), Some(effort));
         }
     }
 

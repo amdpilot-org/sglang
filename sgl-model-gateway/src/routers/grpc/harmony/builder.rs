@@ -45,9 +45,13 @@ const BUILTIN_TOOLS: &[&str] = &["web_search_preview", "code_interpreter", "cont
 
 fn harmony_reasoning_effort(effort: &ResponsesReasoningEffort) -> ReasoningEffort {
     match effort {
-        ResponsesReasoningEffort::Minimal | ResponsesReasoningEffort::Low => ReasoningEffort::Low,
+        ResponsesReasoningEffort::None
+        | ResponsesReasoningEffort::Minimal
+        | ResponsesReasoningEffort::Low => ReasoningEffort::Low,
         ResponsesReasoningEffort::Medium => ReasoningEffort::Medium,
-        ResponsesReasoningEffort::High => ReasoningEffort::High,
+        ResponsesReasoningEffort::High
+        | ResponsesReasoningEffort::Xhigh
+        | ResponsesReasoningEffort::Max => ReasoningEffort::High,
     }
 }
 
@@ -921,10 +925,13 @@ mod tests {
         use ResponsesReasoningEffort as Tier;
 
         for (tier, expected) in [
+            (Tier::None, ReasoningEffort::Low),
             (Tier::Minimal, ReasoningEffort::Low),
             (Tier::Low, ReasoningEffort::Low),
             (Tier::Medium, ReasoningEffort::Medium),
             (Tier::High, ReasoningEffort::High),
+            (Tier::Xhigh, ReasoningEffort::High),
+            (Tier::Max, ReasoningEffort::High),
         ] {
             assert_eq!(harmony_reasoning_effort(&tier), expected, "{tier:?}");
         }
