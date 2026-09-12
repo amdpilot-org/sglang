@@ -1,0 +1,67 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_ ServingCompletionTestCase.test_request_metrics_opt_in_propagates_to_internal_request _
+
+self = <test_serving_completions_candidate.ServingCompletionTestCase testMethod=test_request_metrics_opt_in_propagates_to_internal_request>
+
+    def test_request_metrics_opt_in_propagates_to_internal_request(self):
+        req = CompletionRequest(
+            model="x", prompt="Hi", max_tokens=1, return_request_metrics=True
+        )
+        internal, _ = self.sc._convert_to_internal_request(req)
+>       self.assertTrue(internal.return_request_metrics)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'GenerateReqInput' object has no attribute 'return_request_metrics'
+
+../review-evidence-j-9b20712f2700/test_serving_completions_candidate.py:115: AttributeError
+_ ServingCompletionTestCase.test_request_metrics_are_opt_in_and_omit_unmeasured_values _
+
+self = <test_serving_completions_candidate.ServingCompletionTestCase testMethod=test_request_metrics_are_opt_in_and_omit_unmeasured_values>
+
+    def test_request_metrics_are_opt_in_and_omit_unmeasured_values(self):
+        ret = [
+            {
+                "text": "answer",
+                "meta_info": {
+                    "id": "cmpl-metrics",
+                    "prompt_tokens": 2,
+                    "completion_tokens": 3,
+                    "cached_tokens": 0,
+                    "finish_reason": {"type": "stop"},
+                    "weight_version": "default",
+                    "queue_time": 0.25,
+                    "time_to_first_token": 0.5,
+                    "generation_time": 1.0,
+                    "e2e_latency": 1.5,
+                    "mean_inter_token_latency": 0.5,
+                    "output_token_throughput": 2.0,
+                },
+            }
+        ]
+        disabled = CompletionRequest(model="x", prompt="Hi", max_tokens=3)
+        disabled_response = self.sc._build_completion_response(disabled, ret, 123)
+        self.assertNotIn("sglext", disabled_response.model_dump())
+
+        ret[0]["meta_info"]["queue_time"] = 0.0
+        enabled = disabled.model_copy(update={"return_request_metrics": True})
+        response = self.sc._build_completion_response(enabled, ret, 123)
+>       metrics = response.model_dump()["sglext"]["request_metrics"]
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'sglext'
+
+../review-evidence-j-9b20712f2700/test_serving_completions_candidate.py:144: KeyError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../review-evidence-j-9b20712f2700/test_serving_completions_candidate.py::ServingCompletionTestCase::test_request_metrics_opt_in_propagates_to_internal_request
+FAILED ../review-evidence-j-9b20712f2700/test_serving_completions_candidate.py::ServingCompletionTestCase::test_request_metrics_are_opt_in_and_omit_unmeasured_values
+2 failed, 16 warnings in 12.47s
