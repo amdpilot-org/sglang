@@ -35,8 +35,10 @@ if _HAS_MLX:
         MlxAuxiliaryStatePool,
         MlxAuxiliaryStateReqToTokenPool,
         MlxModelCacheLayout,
+        clear_context,
         find_attention_layers,
         patch_model_attention,
+        set_context,
     )
     from sglang.srt.hardware_backend.mlx.model_runner import (
         MlxModelRunner,
@@ -187,6 +189,36 @@ class TestMlxAttentionPatching(unittest.TestCase):
 
         self.assertEqual(out.shape, (1, 1, 4))
         self.assertEqual(inner.o_proj.last_input_shape, (1, 1, 4))
+
+    def test_hunyuan_decode_delegates_attention_contract(self):
+        inner = FakeHunyuanAttention()
+        wrapper = MLXAttentionWrapper(inner, layer_idx=0)
+        caches = [
+            ContiguousAttentionKVCache(
+                n_kv_heads=1, head_dim=2, max_seq_len=4, dtype=mx.float32
+            )
+            for _ in range(2)
+        ]
+        ctx = BatchedDecodeContext(
+            batch_size=2,
+            seq_lens=[0, 1],
+            attention_layer_caches=[caches],
+        )
+        shared_kv = ("shared-k", "shared-v")
+
+        set_context(ctx)
+        try:
+            output, returned_kv = wrapper(
+                mx.zeros((2, 1, 4), dtype=mx.float32), None, None, shared_kv
+            )
+            mx.eval(output)
+        finally:
+            clear_context()
+
+        self.assertIs(returned_kv, shared_kv)
+        self.assertIs(inner.seen_shared_kv, shared_kv)
+        self.assertEqual(inner.seen_offsets.tolist(), [0, 1])
+        self.assertEqual([cache.offset for cache in caches], [1, 2])
 
     def test_write_token_grows_buffer_past_max_seq_len(self):
         max_seq_len = 4
@@ -1316,6 +1348,41 @@ if _HAS_MLX:
             self.v_proj = FakeProjection(2)
             self.o_proj = FakeProjection(4)
             self.rope = lambda x, offset=None: x
+
+        def __call__(self, x, mask=None, cache=None):
+            B, L, _ = x.shape
+            hd = self.head_dim
+            q = self.q_proj(x).reshape(B, L, -1, hd).transpose(0, 2, 1, 3)
+            k = self.k_proj(x).reshape(B, L, -1, hd).transpose(0, 2, 1, 3)
+            v = self.v_proj(x).reshape(B, L, -1, hd).transpose(0, 2, 1, 3)
+            offset = cache.offset if cache is not None else 0
+            q = self.rope(q, offset=offset)
+            k = self.rope(k, offset=offset)
+            if cache is not None:
+                k, v = cache.update_and_fetch(k, v)
+            out = mx.fast.scaled_dot_product_attention(
+                q, k, v, scale=self.scale, mask=mask
+            )
+            return self.o_proj(out.transpose(0, 2, 1, 3).reshape(B, L, -1))
+
+    class FakeHunyuanAttention(FakeAttention):
+        """Matches mlx-lm Hunyuan's extra shared-KV argument and tuple return."""
+
+        def __init__(self):
+            super().__init__()
+            self.query_layernorm = IdentityNorm()
+            self.key_layernorm = IdentityNorm()
+            self.seen_shared_kv = None
+            self.seen_offsets = None
+
+        def __call__(self, x, mask=None, cache=None, kv_states=None):
+            self.seen_shared_kv = kv_states
+            self.seen_offsets = cache.offset
+            B, L, _ = x.shape
+            keys = mx.zeros((B, 1, L, 2), dtype=x.dtype)
+            values = mx.zeros((B, 1, L, 2), dtype=x.dtype)
+            cache.update_and_fetch(keys, values)
+            return x, kv_states
 
     class ProjectionOnlyMixer(nn.Module):
         def __init__(self):

@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32521",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Preserved PR 2194's valid MLX architecture-resolution bypass and corrected its remaining Hunyuan batched-decode counterexample by delegating model-specific attention through a batched cache adapter. The exact candidate rejects Hunyuan's positional shared-KV argument; the corrected contract probe passes.",
+  "tests": [
+    {
+      "command": "python reports/j-b43cd9e8bcc3/reproduce_decode_contract.py /tmp/amdpilot-repo-j-b43cd9e8bcc3/reproduction/candidate-attention-wrapper.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before execution of the exact candidate's MLXAttentionWrapper.__call__ with the pinned mlx-lm Hunyuan shared-KV call shape; it raised TypeError because the fourth positional argument was unsupported."
+    },
+    {
+      "command": "python reports/j-b43cd9e8bcc3/reproduce_decode_contract.py python/sglang/srt/hardware_backend/mlx/kv_cache/attention_wrapper.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after routing of Hunyuan's shared-KV positional argument to delegated model attention while preserving return arity."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/model_loader/test_mlx_model_impl.py test/registered/unit/model_loader/test_transformers_fallback.py",
+      "exit_code": 0,
+      "what_was_measured": "Five CPU tests passed: MLX skips architecture resolution, while non-MLX resolution, cached implementation behavior, and Transformers fallback boundaries remain intact."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/hardware_backend/mlx/test_attention_patching.py -rs",
+      "exit_code": 0,
+      "what_was_measured": "The MLX suite collected 39 tests, including the Hunyuan shared-KV regression, but all 39 were skipped because MLX is unavailable on Linux."
+    },
+    {
+      "command": "python -m py_compile python/sglang/srt/hardware_backend/mlx/kv_cache/attention_wrapper.py python/sglang/srt/model_loader/utils.py test/registered/unit/hardware_backend/mlx/test_attention_patching.py test/registered/unit/model_loader/test_mlx_model_impl.py reports/j-b43cd9e8bcc3/reproduce_decode_contract.py",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python sources compile successfully."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the patch."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned AMD gfx950 GPU is not an Apple Metal device and cannot execute MLX; no unrelated ROCm workload was used as model evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Apple Silicon, MLX, or Metal runtime was available, so the MLX numerical regression could not execute in this environment.",
+    "Hunyuan model weights were not downloaded; launch_server and token-for-token equivalence against raw mlx_lm remain unverified here.",
+    "The deterministic tiny Llama serving fixture cannot qualify Hunyuan architecture semantics and was therefore not used as substitute evidence.",
+    "The fused AOT RoPE path intentionally retains hand-written attention and is only selected for model/kernel combinations that opt into that kernel."
+  ]
+}
