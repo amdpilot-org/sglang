@@ -1,0 +1,537 @@
+diff --git a/python/sglang/srt/speculative/dflash_utils.py b/python/sglang/srt/speculative/dflash_utils.py
+index 49273b2..ce51648 100644
+--- a/python/sglang/srt/speculative/dflash_utils.py
++++ b/python/sglang/srt/speculative/dflash_utils.py
+@@ -216,8 +216,8 @@ def apply_dflash_verify_logits_adjustments(
+     """Apply sampling-time logit adjustments for DFlash verify in place.
+ 
+     This keeps v1 and v2 verify semantics aligned while letting overlap scheduling
+-    use the cheaper precomputed `acc_linear_penalties` path instead of allocating a
+-    repeated `[bs * draft_token_num, vocab]` penalty tensor every step.
++    use the cheaper precomputed `acc_additive_penalties` path instead of allocating
++    a repeated `[bs * draft_token_num, vocab]` penalty tensor every step.
+     """
+     if sampling_info is None:
+         return
+@@ -242,7 +242,7 @@ def apply_dflash_verify_logits_adjustments(
+             num_tokens_in_batch=draft_token_num,
+         )
+ 
+-    acc_linear_penalties = getattr(sampling_info, "acc_linear_penalties", None)
++    acc_additive_penalties = getattr(sampling_info, "acc_additive_penalties", None)
+     penalizer = getattr(sampling_info, "penalizer_orchestrator", None)
+     grammar_mask = getattr(sampling_info, "grammar_mask", None)
+     logit_bias = getattr(sampling_info, "logit_bias", None)
+@@ -256,32 +256,34 @@ def apply_dflash_verify_logits_adjustments(
+         return logits_3d
+ 
+     # Dense fallback only when we need live penalizer application or a vocab mask.
+-    # In overlap scheduling the common path is `acc_linear_penalties`, which can be
+-    # broadcast over the verify block without materializing a repeated buffer.
++    # In overlap scheduling the common path is `acc_additive_penalties`, which can
++    # be broadcast over the verify block without materializing a repeated buffer.
+     if (
+-        penalizer is not None and penalizer.is_required and acc_linear_penalties is None
++        penalizer is not None
++        and penalizer.is_required
++        and acc_additive_penalties is None
+     ) or grammar_mask is not None:
+-        linear_penalty = torch.zeros(
++        additive_adjustment = torch.zeros(
+             (bs, next_token_logits.shape[1]),
+             dtype=torch.float32,
+             device=next_token_logits.device,
+         )
+-        sampling_info.apply_logits_bias(linear_penalty)
++        sampling_info.apply_logits_bias(additive_adjustment)
+         get_logits_3d().add_(
+-            linear_penalty[:, None, :].to(dtype=next_token_logits.dtype)
++            additive_adjustment[:, None, :].to(dtype=next_token_logits.dtype)
+         )
+         return
+ 
+-    if acc_linear_penalties is not None:
++    if acc_additive_penalties is not None:
+         if (
+-            acc_linear_penalties.device != next_token_logits.device
+-            or acc_linear_penalties.dtype != next_token_logits.dtype
++            acc_additive_penalties.device != next_token_logits.device
++            or acc_additive_penalties.dtype != next_token_logits.dtype
+         ):
+-            acc_linear_penalties = acc_linear_penalties.to(
++            acc_additive_penalties = acc_additive_penalties.to(
+                 device=next_token_logits.device,
+                 dtype=next_token_logits.dtype,
+             )
+-        get_logits_3d().add_(acc_linear_penalties[:, None, :])
++        get_logits_3d().add_(acc_additive_penalties[:, None, :])
+ 
+     if logit_bias is not None:
+         if (
+diff --git a/python/sglang/srt/speculative/dspark_components/dspark_verify.py b/python/sglang/srt/speculative/dspark_components/dspark_verify.py
+index f118c2d..4809d78 100644
+--- a/python/sglang/srt/speculative/dspark_components/dspark_verify.py
++++ b/python/sglang/srt/speculative/dspark_components/dspark_verify.py
+@@ -61,7 +61,7 @@ def verify_logits_adjustments_are_noop(sampling_info) -> bool:
+         return True
+     if sampling_info.has_custom_logit_processor:
+         return False
+-    if getattr(sampling_info, "acc_linear_penalties", None) is not None:
++    if getattr(sampling_info, "acc_additive_penalties", None) is not None:
+         return False
+     penalizer = getattr(sampling_info, "penalizer_orchestrator", None)
+     if penalizer is not None and penalizer.is_required:
+diff --git a/reports/j-16e675513d6c/gfx950_numerical_check.py b/reports/j-16e675513d6c/gfx950_numerical_check.py
+new file mode 100644
+index 0000000..baa0efd
+--- /dev/null
++++ b/reports/j-16e675513d6c/gfx950_numerical_check.py
+@@ -0,0 +1,57 @@
++"""Compare DFlash verify adjustments on GPU with an explicit CPU reference."""
++
++from types import SimpleNamespace
++
++import torch
++
++from sglang.test.test_utils import maybe_stub_sgl_kernel
++
++maybe_stub_sgl_kernel()
++
++from sglang.srt.speculative.dflash_utils import (
++    apply_dflash_verify_logits_adjustments,
++)
++
++
++class _SamplingInfo(SimpleNamespace):
++    def __len__(self) -> int:
++        return self.batch_size
++
++
++penalty_cpu = torch.tensor(
++    [[0.0, float("-inf"), 2.25], [-3.5, 0.75, 1.0]], dtype=torch.float32
++)
++bias_cpu = torch.tensor([[1.0, 0.5, -0.25], [0.25, -1.0, 2.0]])
++initial_cpu = torch.tensor([[0.5, -1.0, 3.0], [4.0, 2.0, -2.0]]).repeat_interleave(
++    4, dim=0
++)
++sampling_info = _SamplingInfo(
++    batch_size=2,
++    has_custom_logit_processor=False,
++    acc_additive_penalties=penalty_cpu.cuda(),
++    penalizer_orchestrator=None,
++    grammar_mask=None,
++    logit_bias=bias_cpu.cuda(),
++)
++actual = initial_cpu.cuda()
++apply_dflash_verify_logits_adjustments(
++    next_token_logits=actual, sampling_info=sampling_info, draft_token_num=4
++)
++
++# Independent reference: explicit rows rather than the implementation's broadcast.
++expected = initial_cpu.clone()
++for batch in range(2):
++    for step in range(4):
++        expected[batch * 4 + step] += penalty_cpu[batch]
++        expected[batch * 4 + step] += bias_cpu[batch]
++
++torch.testing.assert_close(actual.cpu(), expected)
++print("device_name=", torch.cuda.get_device_name(0))
++print("arch=", torch.cuda.get_device_properties(0).gcnArchName)
++print("shape=", tuple(actual.shape), "dtype=", actual.dtype)
++print("stop_column_all_negative_inf=", bool(torch.isneginf(actual[:4, 1]).all()))
++print(
++    "max_finite_abs_error=",
++    torch.nan_to_num((actual.cpu() - expected).abs(), nan=0.0, posinf=0.0).max().item(),
++)
++print("PASS: GPU implementation matches explicit CPU row-loop reference")
+diff --git a/reports/j-16e675513d6c/investigation.md b/reports/j-16e675513d6c/investigation.md
+new file mode 100644
+index 0000000..d8da27d
+--- /dev/null
++++ b/reports/j-16e675513d6c/investigation.md
+@@ -0,0 +1,39 @@
++# Investigation: DSPARK accumulated additive penalties
++
++Upstream issue: https://github.com/sgl-project/sglang/issues/33493
++
++Mirror issue: https://github.com/amdpilot-org/sglang/issues/1860
++
++## Finding
++
++The prepared base still read `SamplingBatchInfo.acc_linear_penalties` in the
++DFlash verify adjustment helper and the DSPARK no-adjustment predicate. That
++attribute does not exist; overlap-mode additive penalties are stored in
++`acc_additive_penalties`. Consequently, the verify block omitted accumulated
++additive penalties, including the negative-infinity stop-token mask used for
++`min_new_tokens`, and DSPARK could select its no-adjustment fast path.
++
++The failing-before regression recorded in `raw/failing_before.log` measured both
++effects: four assertions failed because the adjustment was absent and the no-op
++predicate returned true. The correction reads the existing field and broadcasts
++it over each position in the verify block. Independent cases cover a one-token
++boundary, a multi-token block, two batch rows, negative infinity, dtype
++conversion, composition with logit bias, and the no-adjustment fast path.
++
++## Related changes checked
++
++- https://github.com/sgl-project/sglang/pull/33531 is closed and contained this
++  diagnosis as part of a substantially broader patch.
++- https://github.com/sgl-project/sglang/pull/33869 is open and proposes the same
++  narrow field-name correction. It was not merged into base commit
++  `358c163250ad3b1f62939b01ce1314a0a31a0365`.
++
++## Limits
++
++The reported DeepSeek-V4-Flash command requires model weights and TP4, while the
++job provides one gfx950 GPU. No full-model or distributed serving reproduction
++was claimed. The gfx950 check validates only the affected tensor adjustment on
++the actual GPU. Separately, current DFlash decode preparation does not visibly
++use the ordinary/EAGLE `cumulate_penalty_output_tokens` hook; whether that makes
++the minimum-token mask lift later than intended needs a qualified model-level
++investigation and is intentionally not folded into this stale-field fix.
+diff --git a/reports/j-16e675513d6c/raw/existing_dflash_logits.log b/reports/j-16e675513d6c/raw/existing_dflash_logits.log
+new file mode 100644
+index 0000000..f337a53
+--- /dev/null
++++ b/reports/j-16e675513d6c/raw/existing_dflash_logits.log
+@@ -0,0 +1,18 @@
++..........                                                               [100%]
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++  
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++10 passed, 17 warnings in 42.93s
+diff --git a/reports/j-16e675513d6c/raw/failing_before.log b/reports/j-16e675513d6c/raw/failing_before.log
+new file mode 100644
+index 0000000..0bf16c8
+--- /dev/null
++++ b/reports/j-16e675513d6c/raw/failing_before.log
+@@ -0,0 +1,133 @@
++FFFF.                                                                    [100%]
++=================================== FAILURES ===================================
++________ test_broadcasts_additive_penalties_over_entire_verify_block[1] ________
++
++draft_token_num = 1
++
++    @pytest.mark.parametrize("draft_token_num", [1, 3])
++    def test_broadcasts_additive_penalties_over_entire_verify_block(draft_token_num):
++        additive_penalties = torch.tensor(
++            [[0.0, float("-inf"), 2.0], [3.0, 0.5, -4.0]], dtype=torch.float32
++        )
++        sampling_info = _sampling_info(
++            batch_size=2, additive_penalties=additive_penalties
++        )
++        logits = torch.zeros((2 * draft_token_num, 3), dtype=torch.float64)
++    
++        apply_dflash_verify_logits_adjustments(
++            next_token_logits=logits,
++            sampling_info=sampling_info,
++            draft_token_num=draft_token_num,
++        )
++    
++        expected = (
++            additive_penalties.to(dtype=logits.dtype)
++            .unsqueeze(1)
++            .expand(-1, draft_token_num, -1)
++            .reshape_as(logits)
++        )
++>       torch.testing.assert_close(logits, expected)
++E       AssertionError: Tensor-likes are not close!
++E       
++E       Mismatched elements: 5 / 6 (83.3%)
++E       Greatest absolute difference: inf at index (0, 1) (up to 1e-07 allowed)
++E       Greatest relative difference: nan at index (0, 1) (up to 1e-07 allowed)
++
++test/registered/unit/spec/test_dflash_verify_logits_adjustments.py:61: AssertionError
++________ test_broadcasts_additive_penalties_over_entire_verify_block[3] ________
++
++draft_token_num = 3
++
++    @pytest.mark.parametrize("draft_token_num", [1, 3])
++    def test_broadcasts_additive_penalties_over_entire_verify_block(draft_token_num):
++        additive_penalties = torch.tensor(
++            [[0.0, float("-inf"), 2.0], [3.0, 0.5, -4.0]], dtype=torch.float32
++        )
++        sampling_info = _sampling_info(
++            batch_size=2, additive_penalties=additive_penalties
++        )
++        logits = torch.zeros((2 * draft_token_num, 3), dtype=torch.float64)
++    
++        apply_dflash_verify_logits_adjustments(
++            next_token_logits=logits,
++            sampling_info=sampling_info,
++            draft_token_num=draft_token_num,
++        )
++    
++        expected = (
++            additive_penalties.to(dtype=logits.dtype)
++            .unsqueeze(1)
++            .expand(-1, draft_token_num, -1)
++            .reshape_as(logits)
++        )
++>       torch.testing.assert_close(logits, expected)
++E       AssertionError: Tensor-likes are not close!
++E       
++E       Mismatched elements: 15 / 18 (83.3%)
++E       Greatest absolute difference: inf at index (0, 1) (up to 1e-07 allowed)
++E       Greatest relative difference: nan at index (0, 1) (up to 1e-07 allowed)
++
++test/registered/unit/spec/test_dflash_verify_logits_adjustments.py:61: AssertionError
++_______________ test_additive_penalties_compose_with_logit_bias ________________
++
++    def test_additive_penalties_compose_with_logit_bias():
++        additive_penalties = torch.tensor([[0.0, -2.0, 1.0]])
++        logit_bias = torch.tensor([[4.0, 0.5, -3.0]])
++        sampling_info = _sampling_info(
++            batch_size=1,
++            additive_penalties=additive_penalties,
++            logit_bias=logit_bias,
++        )
++        logits = torch.zeros((2, 3))
++    
++        apply_dflash_verify_logits_adjustments(
++            next_token_logits=logits,
++            sampling_info=sampling_info,
++            draft_token_num=2,
++        )
++    
++>       torch.testing.assert_close(
++            logits, (additive_penalties + logit_bias).expand_as(logits)
++        )
++E       AssertionError: Tensor-likes are not close!
++E       
++E       Mismatched elements: 4 / 6 (66.7%)
++E       Greatest absolute difference: 2.0 at index (0, 1) (up to 1e-05 allowed)
++E       Greatest relative difference: 1.3333333730697632 at index (0, 1) (up to 1.3e-06 allowed)
++
++test/registered/unit/spec/test_dflash_verify_logits_adjustments.py:80: AssertionError
++____________ test_additive_penalties_disable_dspark_noop_fast_path _____________
++
++    def test_additive_penalties_disable_dspark_noop_fast_path():
++        sampling_info = _sampling_info(
++            batch_size=1,
++            additive_penalties=torch.zeros((1, 4), dtype=torch.float32),
++        )
++    
++>       assert not verify_logits_adjustments_are_noop(sampling_info)
++E       assert not True
++E        +  where True = verify_logits_adjustments_are_noop(_SamplingInfo(batch_size=1, has_custom_logit_processor=False, acc_additive_penalties=tensor([[0., 0., 0., 0.]]), penalizer_orchestrator=None, grammar_mask=None, logit_bias=None))
++
++test/registered/unit/spec/test_dflash_verify_logits_adjustments.py:91: AssertionError
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++  
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++=========================== short test summary info ============================
++FAILED test/registered/unit/spec/test_dflash_verify_logits_adjustments.py::test_broadcasts_additive_penalties_over_entire_verify_block[1]
++FAILED test/registered/unit/spec/test_dflash_verify_logits_adjustments.py::test_broadcasts_additive_penalties_over_entire_verify_block[3]
++FAILED test/registered/unit/spec/test_dflash_verify_logits_adjustments.py::test_additive_penalties_compose_with_logit_bias
++FAILED test/registered/unit/spec/test_dflash_verify_logits_adjustments.py::test_additive_penalties_disable_dspark_noop_fast_path
++4 failed, 1 passed, 17 warnings in 27.43s
+diff --git a/reports/j-16e675513d6c/raw/gfx950_numerical.log b/reports/j-16e675513d6c/raw/gfx950_numerical.log
+new file mode 100644
+index 0000000..3d2e22d
+--- /dev/null
++++ b/reports/j-16e675513d6c/raw/gfx950_numerical.log
+@@ -0,0 +1,8 @@
++[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
++[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-16e675513d6c/cache/aiter/module_aiter_core.so
++device_name= AMD Instinct MI350X
++arch= gfx950:sramecc+:xnack-
++shape= (8, 3) dtype= torch.float32
++stop_column_all_negative_inf= True
++max_finite_abs_error= 0.0
++PASS: GPU implementation matches explicit CPU row-loop reference
+diff --git a/reports/j-16e675513d6c/raw/passing_after_cpu.log b/reports/j-16e675513d6c/raw/passing_after_cpu.log
+new file mode 100644
+index 0000000..4cd4784
+--- /dev/null
++++ b/reports/j-16e675513d6c/raw/passing_after_cpu.log
+@@ -0,0 +1,18 @@
++.....                                                                    [100%]
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++  
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++5 passed, 17 warnings in 12.46s
+diff --git a/reports/j-16e675513d6c/result.json b/reports/j-16e675513d6c/result.json
+new file mode 100644
+index 0000000..b711ad8
+--- /dev/null
++++ b/reports/j-16e675513d6c/result.json
+@@ -0,0 +1,40 @@
++{
++  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33493",
++  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
++  "outcome": "fixed",
++  "summary": "The prepared base still queried the nonexistent acc_linear_penalties field in DFlash/DSPARK verification. The fix reads SamplingBatchInfo.acc_additive_penalties, applies it across the verify block, and prevents the DSPARK no-adjustment fast path when accumulated additive penalties are present.",
++  "tests": [
++    {
++      "command": "/tmp/amdpilot-repo-j-16e675513d6c/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_verify_logits_adjustments.py (before source fix)",
++      "exit_code": 1,
++      "what_was_measured": "Failing-before regression: additive penalties, including a -inf stop-token mask, were absent from one- and three-token verify blocks; composition with logit bias was incomplete; DSPARK incorrectly admitted the no-adjustment fast path. Four failed, one passed."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-16e675513d6c/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_verify_logits_adjustments.py",
++      "exit_code": 0,
++      "what_was_measured": "Five passing focused CPU cases covering one- and multi-token blocks, two batch rows, -inf masking, dtype conversion, logit-bias composition, and both sides of the DSPARK no-op predicate."
++    },
++    {
++      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-16e675513d6c/venv/bin/python reports/j-16e675513d6c/raw/gfx950_numerical_check.py (inline script retained as output log)",
++      "exit_code": 0,
++      "what_was_measured": "On AMD Instinct MI350X gfx950, the GPU adjustment for an 8x3 two-row/four-position block exactly matched an explicit CPU row-loop reference; maximum finite absolute error was 0 and all masked stop-token entries remained -inf."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-16e675513d6c/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_logits.py",
++      "exit_code": 0,
++      "what_was_measured": "Existing DFlash logits unit coverage passed."
++    },
++    {
++      "command": "git diff --check && /tmp/amdpilot-repo-j-16e675513d6c/venv/bin/python -m py_compile python/sglang/srt/speculative/dflash_utils.py python/sglang/srt/speculative/dspark_components/dspark_verify.py test/registered/unit/spec/test_dflash_verify_logits_adjustments.py",
++      "exit_code": 0,
++      "what_was_measured": "Patch whitespace and Python syntax validation."
++    }
++  ],
++  "gpu_execution": true,
++  "native_rebuilt": false,
++  "remaining_limitations": [
++    "The reported DeepSeek-V4-Flash TP4 serving command was not run: the assigned environment has one gfx950 GPU and no qualified model weights. No full-model, semantic-accuracy, or distributed-workload claim is made.",
++    "The deterministic tiny Llama fixture cannot qualify the DeepSeek-V4 DSPARK architecture and therefore was not substituted for the reported reproduction.",
++    "Current DFlash decode preparation does not visibly call the ordinary/EAGLE penalty token-count accumulation hook. Whether this delays lifting min_new_tokens suppression requires a qualified model-level follow-up and was not included in this narrow stale-field correction."
++  ]
++}
+diff --git a/test/registered/unit/spec/test_dflash_verify_logits_adjustments.py b/test/registered/unit/spec/test_dflash_verify_logits_adjustments.py
+new file mode 100644
+index 0000000..576d41e
+--- /dev/null
++++ b/test/registered/unit/spec/test_dflash_verify_logits_adjustments.py
+@@ -0,0 +1,93 @@
++"""Regression tests for DFlash/DSpark verify-time logit adjustments."""
++
++from types import SimpleNamespace
++
++import pytest
++import torch
++
++from sglang.test.ci.ci_register import register_cpu_ci
++from sglang.test.test_utils import maybe_stub_sgl_kernel
++
++maybe_stub_sgl_kernel()
++
++from sglang.srt.speculative.dflash_utils import (
++    apply_dflash_verify_logits_adjustments,
++)
++from sglang.srt.speculative.dspark_components.dspark_verify import (
++    verify_logits_adjustments_are_noop,
++)
++
++register_cpu_ci(est_time=5, suite="base-a-test-cpu")
++
++
++class _SamplingInfo(SimpleNamespace):
++    def __len__(self) -> int:
++        return self.batch_size
++
++
++def _sampling_info(*, batch_size: int, additive_penalties=None, logit_bias=None):
++    return _SamplingInfo(
++        batch_size=batch_size,
++        has_custom_logit_processor=False,
++        acc_additive_penalties=additive_penalties,
++        penalizer_orchestrator=None,
++        grammar_mask=None,
++        logit_bias=logit_bias,
++    )
++
++
++@pytest.mark.parametrize("draft_token_num", [1, 3])
++def test_broadcasts_additive_penalties_over_entire_verify_block(draft_token_num):
++    additive_penalties = torch.tensor(
++        [[0.0, float("-inf"), 2.0], [3.0, 0.5, -4.0]], dtype=torch.float32
++    )
++    sampling_info = _sampling_info(batch_size=2, additive_penalties=additive_penalties)
++    logits = torch.zeros((2 * draft_token_num, 3), dtype=torch.float64)
++
++    apply_dflash_verify_logits_adjustments(
++        next_token_logits=logits,
++        sampling_info=sampling_info,
++        draft_token_num=draft_token_num,
++    )
++
++    expected = (
++        additive_penalties.to(dtype=logits.dtype)
++        .unsqueeze(1)
++        .expand(-1, draft_token_num, -1)
++        .reshape_as(logits)
++    )
++    torch.testing.assert_close(logits, expected)
++
++
++def test_additive_penalties_compose_with_logit_bias():
++    additive_penalties = torch.tensor([[0.0, -2.0, 1.0]])
++    logit_bias = torch.tensor([[4.0, 0.5, -3.0]])
++    sampling_info = _sampling_info(
++        batch_size=1,
++        additive_penalties=additive_penalties,
++        logit_bias=logit_bias,
++    )
++    logits = torch.zeros((2, 3))
++
++    apply_dflash_verify_logits_adjustments(
++        next_token_logits=logits,
++        sampling_info=sampling_info,
++        draft_token_num=2,
++    )
++
++    torch.testing.assert_close(
++        logits, (additive_penalties + logit_bias).expand_as(logits)
++    )
++
++
++def test_additive_penalties_disable_dspark_noop_fast_path():
++    sampling_info = _sampling_info(
++        batch_size=1,
++        additive_penalties=torch.zeros((1, 4), dtype=torch.float32),
++    )
++
++    assert not verify_logits_adjustments_are_noop(sampling_info)
++
++
++def test_absent_adjustments_keep_dspark_noop_fast_path():
++    assert verify_logits_adjustments_are_noop(_sampling_info(batch_size=1))
