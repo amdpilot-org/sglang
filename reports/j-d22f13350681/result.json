@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31861",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "Candidate d184e1cb9c82e4d4e062000539d8fe0c92e39e1a is a verified partial fix: DeepSeek-family non-CUDA MoEGate BF16 and FP32 router weights produce FP32 logits, but the AMX biased_grouped_topk boundary still accepts and forwards BF16 logits, leaving a required original-issue contract unenforced. Actual Intel AMX execution was unavailable.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/review-evidence-j-d22f13350681:/job/repo/python /tmp/amdpilot-repo-j-d22f13350681/venv/bin/python -m pytest -q /job/review-evidence-j-d22f13350681/test_deepseek_amx_router_logits.py (base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before attempt on the recorded base: 1 failed, 2 passed. The focused test failed before its dtype assertion because get_exec() had no published exec namespace, so it did not reproduce the candidate report's claimed assertion failure. Raw output: evidence/base-regression.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d22f13350681/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_amx_router_logits.py test/registered/unit/models/test_glmmoedsa_correction_bias_fp32.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and adjacent correction-bias suite: 12 passed. Raw output: evidence/candidate-regression-and-adjacent.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d22f13350681/venv/bin/python < independent gate and TopK boundary script (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "BF16- and FP32-weight gates returned FP32 and exactly matched an explicit FP32 F.linear reference. Independently demonstrated that biased_grouped_topk_cpu still forwards BF16 gating_output unchanged and that nearby FP32 logits collapse after BF16 conversion. Raw output: evidence/candidate-adversarial.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-d22f13350681/venv/bin/python < linear_bf16_fp32 numerical script (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned gfx950, linear_bf16_fp32 returned torch.float32 for shape (7, 9) and matched CPU FP32 matmul of identical BF16 operands with max absolute error 2.384185791015625e-07. Raw output: evidence/gpu-reference.txt"
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 d184e1cb9c82e4d4e062000539d8fe0c92e39e1a",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace validity."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X gfx950 executed the CUDA/ROCm FP32-output reference kernel; this did not execute Intel AMX.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "biased_grouped_topk_cpu still forwards a caller-supplied torch.bfloat16 gating_output unchanged, and the unchanged native topk.cpp dispatch accepts BF16; therefore the original FP32-at-TopK contract is not enforced.",
+    "FP32 logits 1.001 and 1.002 both become 1.0 after a BF16 round trip, so a BF16-producing caller can still lose routing distinctions before the native TopK upcast.",
+    "The candidate regression does not force the base AMX branch and, on the prepared base, fails at unpublished runtime context rather than at the asserted output dtype.",
+    "No specialized BF16 activation x FP32 router-weight AMX kernel was added; FP32 router weights use the semantically correct but unaccelerated fallback."
+  ],
+  "remaining_limitations": [
+    "The AMD EPYC 9965 host has no Intel AMX, and the prepared installed sgl_kernel does not expose weight_packed_linear, so native AMX execution and packed-weight loading were not validated.",
+    "No native source changed in the candidate; consequently no native rebuild was applicable.",
+    "No DeepSeek, LongCat, or other affected model weights were available; no full-model, serving, semantic-accuracy, or distributed-workload claim is made.",
+    "The gfx950 run validates only the independent GPU numerical reference, not AMX behavior."
+  ]
+}

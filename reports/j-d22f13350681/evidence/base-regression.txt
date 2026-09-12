@@ -1,0 +1,143 @@
+.F.                                                                      [100%]
+=================================== FAILURES ===================================
+_ TestDeepseekAmxRouterLogits.test_cpu_bf16_weight_emits_fp32_logits_without_packed_linear _
+
+self = <test_deepseek_amx_router_logits.TestDeepseekAmxRouterLogits testMethod=test_cpu_bf16_weight_emits_fp32_logits_without_packed_linear>
+
+    def test_cpu_bf16_weight_emits_fp32_logits_without_packed_linear(self):
+        """CPU must not round the fp32 accumulator through the AMX BF16 output."""
+        gate = MoEGate.__new__(MoEGate)
+        torch.nn.Module.__init__(gate)
+        gate.weight = torch.nn.Parameter(
+            torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.bfloat16),
+            requires_grad=False,
+        )
+        hidden_states = torch.tensor([[1.001, 1.002]], dtype=torch.bfloat16)
+
+        with (
+            patch.object(deepseek_v2, "_is_cuda", False),
+            patch.object(
+                torch.ops.sgl_kernel,
+                "weight_packed_linear",
+                create=True,
+            ) as packed_linear,
+        ):
+>           logits = gate(hidden_states)
+                     ^^^^^^^^^^^^^^^^^^^
+
+../review-evidence-j-d22f13350681/test_deepseek_amx_router_logits.py:36:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py:1779: in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py:1790: in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/models/deepseek_v2.py:520: in forward
+    if get_exec().deterministic.enable_deterministic_inference:
+       ^^^^^^^^^^
+python/sglang/srt/runtime_context.py:1382: in get_exec
+    return _CONTEXT.config_bag("exec")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sglang.srt.runtime_context.RuntimeContext object at 0x7ff06b547e80>
+name = 'exec'
+
+    def config_bag(self, name: str) -> _ConfigBag:
+        """Return the top-level config namespace bag (``device`` / ``model`` /
+        ``exec`` / ``schedule`` / ``memory`` / ``spec`` / ``lora`` / ``mm`` /
+        ``disagg`` / ``serving`` / ``observability``). Fails closed until
+        ``publish`` / ``set_server_args`` has projected it."""
+        bags = self._config_bags
+        if not bags or name not in bags:
+>           raise ValueError(f"config namespace {name!r} not published")
+E           ValueError: config namespace 'exec' not published
+
+python/sglang/srt/runtime_context.py:1079: ValueError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7fe78314b560>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7ff06b5f9760>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestDeepseekAmxRouterLogits.test_cpu_bf16_weight_emits_fp32_logits_without_packed_linear
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/review-evidence-j-d22f13350681/test_deepseek_amx_router_logits.py", line 36, in test_cpu_bf16_weight_emits_fp32_logits_without_packed_linear
+    logits = gate(hidden_states)
+             ^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/models/deepseek_v2.py", line 520, in forward
+    if get_exec().deterministic.enable_deterministic_inference:
+       ^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/runtime_context.py", line 1382, in get_exec
+    return _CONTEXT.config_bag("exec")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/runtime_context.py", line 1079, in config_bag
+    raise ValueError(f"config namespace {name!r} not published")
+ValueError: config namespace 'exec' not published
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+<frozen abc>:106
+  <frozen abc>:106: DeprecationWarning: MultiPlatformOp is deprecated; subclass sglang.kernels.fused_op.BaseFusedOp instead (RFC #29630).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../review-evidence-j-d22f13350681/test_deepseek_amx_router_logits.py::TestDeepseekAmxRouterLogits::test_cpu_bf16_weight_emits_fp32_logits_without_packed_linear
+1 failed, 2 passed, 17 warnings in 12.59s
