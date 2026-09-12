@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33385",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2321",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2282",
+  "candidate_commit": "e0a959e5ddc6d2718cf8d94e8730dc07ebb463f2",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The recorded base reproduced the unconditional disabled-offload NotImplementedError. The exact candidate prevents that call and routes disabled or unsupported cpu_tensor backup through PD rebootstrap, while preserving unrelated-error propagation, host-pool exhaustion semantics, and the established decode queue call contract. Source-level regressions and independent adversarial cases pass; the original distributed DeepSeek-V4 race remains unavailable for end-to-end verification.",
+  "tests": [
+    {
+      "command": "recorded base 358c163: independent Python fixture invoking release_req in decode mode with disaggregation_decode_enable_offload_kvcache=False and a DeepSeek-V4-compatible unsupported CPU-copy behavior",
+      "exit_code": 1,
+      "what_was_measured": "Imported /job/repo/python/sglang, confirmed DeepSeekV4TokenToKVPool inherits KVCache.get_cpu_copy, observed one offload call despite the disabled flag, and reproduced NotImplementedError."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-16628218c239/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_retraction_backup_fallback.py test/registered/unit/managers/test_priority_scheduling_disaggregation.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate e0a959e5: candidate regression coverage for disabled/unsupported CPU backup fallback and decode queue compatibility; 20 passed and 3 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-16628218c239/venv/bin/python -m pytest -q test/registered/unit/managers/test_priority_scheduling_disaggregation.py test/registered/unit/mem_cache/test_retraction_backup_fallback.py test/registered/unit/managers/test_retraction_order.py test/registered/unit/mem_cache/test_retraction_mamba_backup.py test/registered/unit/managers/test_scheduler_pause_generation.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate e0a959e5: queue behavior, backup fallback, retraction ordering, Mamba backup, and pause/rebootstrap compatibility; 48 passed and 5 subtests passed."
+    },
+    {
+      "command": "exact candidate e0a959e5: independent Python adversarial fixture",
+      "exit_code": 0,
+      "what_was_measured": "Disabled cpu_tensor made zero offload calls and requested rebootstrap; enabled unsupported CPU copy requested rebootstrap; RuntimeError propagated; host-pool exhaustion returned False; unknown backend raised ValueError."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-16628218c239/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_decode_retraction_backup.py",
+      "exit_code": 0,
+      "what_was_measured": "On one gfx950 GPU, exact-value supported MHA target/draft KV backup and restore plus host-capacity boundary; 2 passed. This is not DeepSeek-V4 evidence."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X (gfx950), capability (9, 5), Torch 2.11.0+rocm7.2. Only supported MHA backup/restore was exercised; no DeepSeek-V4 or distributed serving run was possible."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "DeepSeek-V4 weights and the reported tp8/dp8 distributed PD topology were unavailable.",
+    "The natural MTP4/HiSparse KV-full race, distributed rebootstrap transport, timing, and semantic output remain unverified.",
+    "The single-GPU gfx950 test validates supported MHA backup mechanics, not DeepSeekV4TokenToKVPool.",
+    "The candidate changes only Python and reports no prepared native artifact, so a native rebuild was not applicable."
+  ]
+}
