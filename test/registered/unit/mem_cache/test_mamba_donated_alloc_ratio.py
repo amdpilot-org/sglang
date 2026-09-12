@@ -101,10 +101,12 @@ def _build_peak(pool_size: int, lock_prefixes: bool):
 
 
 class TestMambaRatioEnvGate(unittest.TestCase):
-    """SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK gates the pool ratio: off restores the
-    original base 3 (overlap 5, lazy 4, no_buffer 3), on drops the base to 2
-    (overlap 4, lazy 3) while no_buffer stays 3. Guards the flag wiring so the
-    ratio can never drift out of sync with whether the decode lock is skipped."""
+    """Decode lock skipping must not shrink admission-time pool headroom.
+
+    The matched-prefix lock is skipped only after a request reaches decode. At
+    admission, the request can still hold its own slot plus a locked prefix and
+    need a donated slot, so both switch settings require the original ratios.
+    """
 
     @staticmethod
     def _ratio(*, extra_buffer, lazy, disable_overlap, skip):
@@ -146,7 +148,7 @@ class TestMambaRatioEnvGate(unittest.TestCase):
             r(extra_buffer=True, lazy=False, disable_overlap=False), 5
         )  # overlap
 
-    def test_flag_on_drops_base_but_keeps_no_buffer(self):
+    def test_flag_on_preserves_admission_peak_ratios(self):
         def r(**kwargs):
             return self._ratio(skip=True, **kwargs)
 
@@ -154,10 +156,10 @@ class TestMambaRatioEnvGate(unittest.TestCase):
             r(extra_buffer=False, lazy=False, disable_overlap=True), 3
         )  # no_buffer
         self.assertEqual(
-            r(extra_buffer=True, lazy=True, disable_overlap=False), 3
+            r(extra_buffer=True, lazy=True, disable_overlap=False), 4
         )  # lazy
         self.assertEqual(
-            r(extra_buffer=True, lazy=False, disable_overlap=False), 4
+            r(extra_buffer=True, lazy=False, disable_overlap=False), 5
         )  # overlap
 
     def test_decode_lock_skip_is_enabled_by_default(self):
