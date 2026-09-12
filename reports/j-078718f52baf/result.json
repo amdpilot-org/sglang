@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31205",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "1d3dec7eab68bfaf1e28ab1068b2438543d3c406",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate adds sound regression coverage for the exact reported DeepSeek-V4 SWA geometry and confirms that the already-present base implementation makes progress by chunking. It is test-only hardening, not a production fix. Its broad claim that intrinsically oversized requests no longer starve is incomplete: when the drained SWA pool cannot hold even the reserved page/decode headroom, _swa_chunk_cap is zero and add_one_req silently returns NO_TOKEN forever.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-078718f52baf/venv/bin/python -m pytest -q test/registered/unit/managers/test_prefill_adder.py -k 'dsv4 or swa_never_fits or add_chunked_req_hybrid_swa'",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression at commit 1d3dec7: 7 focused tests passed, including the reported 20,992/32,768/512/20,742 geometry."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-078718f52baf/venv/bin/python -m pytest -q test/registered/unit/managers/test_prefill_adder.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate PrefillAdder module: 30 tests and 12 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-078718f52baf/venv/bin/python -m pytest -q /job/review-evidence/test_independent_swa_review.py -k 'old_gate_repeatedly or reported_and_larger or zero_chunk_capacity'",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial review: simulated historical gate repeatedly blocked the reported head while a short tail was runnable; current source progressed for 20,742 through 65,536-token prompts; a drained 512-token pool with 512-token pages produced zero chunk capacity and three permanent NO_TOKEN deferrals."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "HIP_VISIBLE_DEVICES=0 exposed one AMD Instinct MI350X with gfx950, but the reviewed scheduler admission path is CPU-only and launched no GPU kernel.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With size_swa=rem_swa=512, page_size=512, max_new_tokens=1, and a 2,000-token prompt, _swa_req_never_fits is true but _swa_chunk_cap is zero; add_one_req returns NO_TOKEN indefinitely with no terminal rejection.",
+    "Any intrinsically oversized request for which reserved page/decode/load-back headroom leaves less than one page-aligned extend chunk follows the same permanent-deferral branch."
+  ],
+  "remaining_limitations": [
+    "The prepared base already includes the production escape hatch, so failing-before was reproduced by disabling that decision in-process rather than by running an actual historical buggy checkout.",
+    "DeepSeek-V4-Pro/DSpark weights and the reported 1P1D TP4+TP4, mooncake, multi-node, 8xB300 deployment were unavailable; no full serving-path or model-semantic verification is claimed.",
+    "The deterministic fixture validates scheduler admission arithmetic and FCFS-head progress only.",
+    "No native source changed in the candidate, so a native rebuild was not applicable."
+  ],
+  "evidence_directory": "/job/review-evidence"
+}
