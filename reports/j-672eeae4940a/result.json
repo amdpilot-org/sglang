@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/26794",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Preserved the candidate's valid NPU MoE reload regression and corrected its concrete reviewed evidence defect: the assigned gfx950 device reports AMD Instinct MI355X, not MI350X. The production fix was already present on the prepared base; no additional source correction was justified.",
+  "tests": [
+    {
+      "command": "git switch --detach 81bdd3011b40fea2c36354e3ae6f5b5d94df4189 && /tmp/amdpilot-repo-j-672eeae4940a/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_npu_unquant_moe_reload.py",
+      "exit_code": 0,
+      "what_was_measured": "Before changing the candidate, its three focused post-process/reload tests passed. A direct torch query reported AMD Instinct MI355X and gfx950:sramecc+:xnack-, reproducing the review's mismatch with the committed MI350X record."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-672eeae4940a/venv/bin/python -c '<reported-size FusedMoE._load_w13 numerical check>'",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI355X (gfx950), distinct 1408x64 BF16 gate and up tensors were loaded into a 2816x64 fused destination through the actual loader and both halves were independently compared."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-672eeae4940a/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_npu_unquant_moe_reload.py",
+      "exit_code": 0,
+      "what_was_measured": "After integrating the candidate and correcting its evidence, the three focused regressions still pass."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-672eeae4940a/raw/gpu_loader_after.txt records the one-GPU BF16 loader check and direct AMD Instinct MI355X identity."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Ascend NPU or CANN/torch_npu runtime was available, so actual npu_format_cast and Ascend grouped-matmul behavior were not independently executed.",
+    "The reported DeepSeekV3.2 weights were unavailable, so no full Engine or HTTP update_weights_from_disk run established scheduler survival after reload.",
+    "The gfx950 fixture validates tensor-loader behavior only; it does not qualify NPU kernels, DeepSeekV3.2 semantics, HTTP transport, or distributed execution."
+  ]
+}
