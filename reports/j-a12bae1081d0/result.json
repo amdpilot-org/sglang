@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32124",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Implemented an opt-in, compatibility-keyed completion marker for successful DeepGEMM exhaustive all-M warmups. Exact valid restored markers skip only the all-M sweep; missing, corrupt, incomplete, incompatible, failed, and memory-reduced warmups retain the existing behavior. Unit/integration tests verify the marker protocol and warmup dispatch. End-to-end NVIDIA DeepGEMM and DeepSeek-V4-Pro TP=8 validation was unavailable on the assigned AMD MI350X ROCm node.",
+  "tests": [
+    {
+      "command": "Run the new regression against a git archive of base 358c163250ad3b1f62939b01ce1314a0a31a0365 with the prepared interpreter and base python path",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before evidence: collection fails because the base has no DeepGEMM warmup marker module. Raw output: reports/j-a12bae1081d0/failing-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a12bae1081d0/venv/bin/python -m pytest -q test/registered/utils/test_deep_gemm_warmup_marker.py",
+      "exit_code": 0,
+      "what_was_measured": "Nine marker and warmup-dispatch tests: exact M normalization, atomic round trip, corrupt/missing/incomplete/incompatible fallback, restored-cache skip, default opt-out compatibility, failure/partial-coverage non-marking, and compile-mode restoration. Raw output: reports/j-a12bae1081d0/marker-tests-final.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a12bae1081d0/venv/bin/python -m compileall -q python/sglang/srt/layers/deep_gemm_wrapper/warmup_marker.py python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py",
+      "exit_code": 0,
+      "what_was_measured": "Python syntax/bytecode compilation for the new marker and modified integration modules."
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files python/sglang/srt/environ.py python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py python/sglang/srt/layers/deep_gemm_wrapper/warmup_marker.py test/registered/utils/test_deep_gemm_warmup_marker.py docs/docs/references/environment_variables.mdx",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, AST, registered-test metadata, and file-integrity hooks. Raw output: reports/j-a12bae1081d0/precommit-final.log"
+    },
+    {
+      "command": "Prepared-interpreter Torch/DeepGEMM hardware probe",
+      "exit_code": 0,
+      "what_was_measured": "Assigned device is AMD Instinct MI350X with torch 2.11.0+rocm7.2 and HIP 7.2; CUDA is absent and deep_gemm is not installed. Raw output: reports/j-a12bae1081d0/hardware-probe.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the contribution."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The assigned GPU is AMD Instinct MI350X under ROCm 7.2. DeepGEMM is unavailable and the requested CUDA/Hopper-or-Blackwell path cannot execute on this node. The GPU was probed but no unrelated ROCm smoke was represented as source-issue validation.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No NVIDIA CUDA GPU or DeepGEMM installation was available, so real DeepGEMM kernel compilation, cache restoration, and independent GPU numerical comparison remain unverified.",
+    "DeepSeek-V4-Pro TP=8 model weights and eight compatible GPUs were unavailable, so startup-latency improvement and graph/inference parity for that deployment remain unverified.",
+    "The change is intentionally opt-in via SGLANG_JIT_DEEPGEMM_WARMUP_MARKER=1 pending deployment-level validation.",
+    "No native C++/FlyDSL source changed, so a native rebuild was not applicable."
+  ]
+}
