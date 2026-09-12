@@ -1,0 +1,32 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36598",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The recorded base already contains the required non-DSA guard in get_dsa_seed_metadata_dim, introduced incidentally by upstream PR #37500. The exact reported config state now returns zero without reaching the DSA-only width helper. Added focused regression and boundary coverage; no production source change was needed.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-d8942fcd4231/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_dsa_seed_metadata_dim.py",
+      "exit_code": 0,
+      "what_was_measured": "Five configuration-path cases: DSA disabled with sharing true (the reported assertion state), DSA disabled with sharing false, DSA enabled with sharing false, and DSA enabled with index_kpool values 1 and 128. All passed; enabled pooled widths were independently expected as index_topk + index_kpool - 1."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-d8942fcd4231/venv/bin/python < reports/j-d8942fcd4231/behavior probe (inline source; raw output retained in behavior_probe.log)",
+      "exit_code": 0,
+      "what_was_measured": "The current helper returned 0 for the exact reported state. Directly invoking the now-guarded DSA-only width path with index_topk=None raised TypeError, confirming that the early return is what prevents invalid DSA arithmetic on the current implementation."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-d8942fcd4231/pre-commit /opt/venv/bin/pre-commit run --files test/registered/unit/disaggregation/test_dsa_seed_metadata_dim.py reports/j-d8942fcd4231/investigation.md reports/j-d8942fcd4231/result.json",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository checks passed, including Python AST, isort, Ruff lint, Ruff format, codespell, test registry validation, whitespace, merge-conflict, and credential checks."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The corrected helper is CPU configuration logic. The assigned device was observed with rocm-smi as one AMD Instinct MI355X, gfx950; it is not the reporter's NVIDIA GB10 sm_121 and was not used to claim a serving-path reproduction.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "GLM-5.3-Flash-NVFP4 weights were unavailable, so no full-model or HTTP serving run was performed.",
+    "The available gfx950 GPU cannot validate the reported GB10 sm_121 DSA backend limitations.",
+    "No TP2/EP2 or multi-node workload was run.",
+    "The source fix predates this investigation; this change adds regression evidence rather than altering production behavior."
+  ]
+}
