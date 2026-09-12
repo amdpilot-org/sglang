@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31890",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "0d6e265297a65f941ace003b29dbc46b41f518c9",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the field-loss precondition for the reported tokenizer-manager crash. The exact candidate preserves all four omitted BatchEmbeddingOutput fields and correctly handles both scheduler pooled-hidden-state formats, including the stacked batch representation.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f2c2f76995c0/venv/bin/python /job/review-evidence/repack_contract.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before direct repack contract: retraction_counts, cached_tokens_details, time_stats, and pooled_hidden_states all became None."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f2c2f76995c0/venv/bin/python /job/review-evidence/repack_contract.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after independent three-request checks for populated metadata, heterogeneous pooled states, stacked pooled states, and a single-request pooled state."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f2c2f76995c0/venv/bin/python -m pytest -q test/registered/unit/managers/test_multi_tokenizer_mixin.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 9 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f2c2f76995c0/venv/bin/python - (pickle round-trip and GPU stacked-state adversarial check)",
+      "exit_code": 0,
+      "what_was_measured": "Metadata survived serialization and gfx950 GPU request index 1 exactly matched independent [7.0, 9.25] reference with zero tolerance."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X, gfx950:sramecc+:xnack-, one assigned GPU; exact stacked pooled-state extraction and pickle round-trip passed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Qwen/Qwen3-Embedding-0.6B weights were unavailable, so the original HTTP embedding server warmup/request was not rerun end-to-end.",
+    "The prepared GPU was AMD Instinct MI350X gfx950, not the reported NVIDIA RTX A6000; NVIDIA-specific execution was not tested.",
+    "The tiny Llama fixture is not an embedding architecture and was intentionally not treated as proof of the original model path.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
