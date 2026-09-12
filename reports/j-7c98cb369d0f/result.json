@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36140",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1306",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1269",
+  "candidate_commit": "4b285c99dbd89dc86294cf0a7f03f5e0f1f2e78f",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate implements the original issue's explicitly acceptable fail-fast resolution. Normal server resolution now rejects DFLASH with either PD role before scheduler/worker startup and gives an actionable explanation. It does not implement DFLASH draft-state transfer.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-7c98cb369d0f/venv/bin/python (direct handle_pd_disaggregation matrix on recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "On base 358c1632, both prefill+DFLASH and decode+DFLASH were accepted, reproducing the missing compatibility validation."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-7c98cb369d0f/venv/bin/python (direct spec_prepare_for_decode with DFLASH-family batch and spec_info=None on recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced the reported AttributeError at spec_utils.py when DFLASH reaches decode preparation without disaggregation draft input."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-7c98cb369d0f/venv/bin/python -m pytest test/registered/unit/server_args/test_dflash_pd_disaggregation_gate.py -v",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 4b285c99, 4 tests and 6 subtests passed for both PD roles, mixed-case DFLASH, standalone DFLASH, and EAGLE/DSPARK boundaries."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-7c98cb369d0f/venv/bin/python (independent ServerArgs.resolve_once and direct-handler adversarial matrix at exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Normal full resolution rejected prefill/decode DFLASH; direct checks preserved standalone DFLASH, PD EAGLE/DSPARK, and non-speculative PD. The dummy/none early-return bypass was identified."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-7c98cb369d0f/venv/bin/python -m pytest test/registered/unit/server_args/test_server_args.py -k TestLoadBalanceMethod -v",
+      "exit_code": 0,
+      "what_was_measured": "All 13 selected existing PD argument-handler tests passed at the exact candidate commit."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X gfx950 was visible, but the candidate is a deterministic Python argument-validation change and no GPU result is claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The special model_path values dummy and none return from the resolution pipeline before handle_pd_disaggregation, so synthetic DFLASH+PD records are accepted. This path does not instantiate the reported DFLASH serving workload.",
+    "A DFLASH spelling with trailing whitespace misses this guard but is rejected later as an unknown speculative algorithm."
+  ],
+  "remaining_limitations": [
+    "The candidate rejects unsupported DFLASH PD configurations; it does not transfer or rebuild DFLASH draft KV or auxiliary hidden states.",
+    "The reported Kimi-K3/Kimi-K3-DFlash weights were unavailable.",
+    "The reported 8x RTX 6000D sm_120 multi-node environment and MoonCake RDMA transport were unavailable.",
+    "No full-model, NVIDIA, multi-node, RDMA, semantic-accuracy, or performance execution was performed.",
+    "The available GPU was a single AMD Instinct MI350X gfx950 under ROCm 7.2; it was not relevant to the CPU-side validation change."
+  ],
+  "evidence_directory": "/job/review-evidence/j-7c98cb369d0f",
+  "source_import_path": "/job/repo/python/sglang/srt/arg_groups/pd_disaggregation_hook.py",
+  "native_change": "none"
+}
