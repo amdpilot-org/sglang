@@ -1,0 +1,30 @@
+
+def build_full_draft_pools(
+    *,
+    draft_kv_pool: Any,
+    tree_cache: Any,
+    server_args: ServerArgs,
+) -> tuple[list[SidecarPoolSpec], list[PoolEntry]]:
+    """Build draft KV/DSA sidecars whose indices follow target full KV."""
+    from sglang.srt.mem_cache.memory_pool import (
+        DSATokenToKVPool,
+        HybridLinearKVPool,
+    )
+
+    pool = draft_kv_pool
+    if isinstance(pool, HybridLinearKVPool):
+        # Hybrid draft runners keep their sole attention layer in this sub-pool.
+        pool = pool.full_kv_pool
+    if pool.layer_num == 0:
+        return [], []
+
+    controller = tree_cache.cache_controller
+    host_pool_group = controller.mem_pool_host
+
+    draft_host_pool = _build_mha_mla_host_pool(
+        pool=pool,
+        host_to_device_ratio=host_pool_group.size / pool.size,
+        page_size=controller.page_size,
+        layout=server_args.hicache_mem_layout,
+        allocator_type=_get_allocator_type(server_args),
+        pool_label="draft",

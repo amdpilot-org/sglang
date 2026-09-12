@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34611",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "not_reproduced",
+  "summary": "The reported scheduler-initialization defect is already fixed in the prepared main checkout. Upstream PR https://github.com/sgl-project/sglang/pull/34560 merged commit 41cd5a718942f97bc45b0b5d7fca82992e8ae529 on 2026-08-14 and explicitly addresses the reported AttributeError. Current code both synchronizes Qwen3.5 MTP depth into hf_text_config and unwraps HybridLinearKVPool to full_kv_pool before reading layer_num. The existing failing-before/passing-after regressions and additional independent boundary checks pass, so no duplicate source correction was made.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-207f562ceaa8/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hybrid_pool_assembler.py test/registered/unit/configs/test_model_config.py",
+      "exit_code": 0,
+      "what_was_measured": "14 tests and 4 subtests passed, including Qwen3.5 nested text-config MTP normalization, the issue-shaped HybridLinearKVPool-without-layer_num regression, empty draft handling, and host logical-space sizing. Raw output: reports/j-207f562ceaa8/evidence/focused_tests.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-207f562ceaa8/venv/bin/python reports/j-207f562ceaa8/evidence/draft_pool_boundary_check.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent checks covered an empty hybrid wrapper, a non-empty hybrid wrapper, and a non-empty plain pool; all passed and the hybrid sidecar used the inner full_kv_pool. Raw output: reports/j-207f562ceaa8/evidence/draft_pool_boundary_check.log"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-207f562ceaa8/venv/bin/python <GPU inventory probe>",
+      "exit_code": 0,
+      "what_was_measured": "Environment inventory only: one AMD Instinct MI350X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2, HIP 7.2.26015. This did not execute the affected model or qualify the serving path. Raw output: reports/j-207f562ceaa8/evidence/gpu_inventory.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned single gfx950 GPU was inventoried, but no issue-valid GPU execution was possible or necessary for the Python attribute-access regression. No GPU smoke is claimed as model-level evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported Qwen3.5-class model weights were not available locally.",
+    "The original multi-rank production topology was not reproduced on the assigned single GPU.",
+    "No full-model performance or semantic-accuracy claim is made.",
+    "Historical failure evidence comes from the exact pre-fix source and merged upstream PR record; the prepared current checkout no longer reproduces the AttributeError."
+  ]
+}
