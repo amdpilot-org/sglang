@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32124",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "4c7768d36ecfa2fb078ad51cfed49932677dfda0",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The marker implementation and prior DeepGEMM artifact-identity correction pass their committed unit tests, but a compatible cache copied to a different absolute directory is not reused because DG_JIT_CACHE_DIR is included in the compatibility payload. The exhaustive warmup runs again, so the original cache-transfer contract is only partially implemented.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8ba52f401262/venv/bin/python /tmp/amdpilot-repo-j-8ba52f401262/review-evidence/base_reproduction.py",
+      "exit_code": 0,
+      "what_was_measured": "At recorded base commit, two simulated restored-cache processes invoke the all-M warmup twice and create no completion marker."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8ba52f401262/venv/bin/python -m pytest -q test/registered/unit/deep_gemm/test_deep_gemm_warmup_marker.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression suite: marker atomicity/matching, compatibility dimensions, full DeepGEMM package/distribution artifact identity, same-path reuse, fallback, partial coverage, and compile-mode restoration; 12 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8ba52f401262/venv/bin/python /tmp/amdpilot-repo-j-8ba52f401262/review-evidence/candidate_adversarial.py",
+      "exit_code": 1,
+      "what_was_measured": "Independent expected-to-pass cache-transfer contract: copy a completed cache to a different absolute path and require the same marker to skip warmup. It failed; warmup call count became 2 and a second marker was written."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Hardware was probed but no GPU kernel was executed. The node exposes one AMD Instinct MI355X under ROCm 7.2; CUDA is unavailable and deep_gemm is not installed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A completed compatible DeepGEMM cache copied or restored under a different DG_JIT_CACHE_DIR gets a different marker key, so exhaustive all-M warmup is repeated despite compatible artifacts."
+  ],
+  "remaining_limitations": [
+    "No NVIDIA CUDA architecture was available; the assigned GPU was AMD Instinct MI355X with ROCm 7.2.",
+    "deep_gemm was not installed, so real JIT artifact generation and restoration could not be executed.",
+    "CUDA graph parity, independent NVIDIA GPU numerical results, DeepSeek-V4-Pro TP=8 startup latency, and steady-state performance remain unverified.",
+    "No native source changed in the candidate, so a native rebuild was not applicable."
+  ]
+}
