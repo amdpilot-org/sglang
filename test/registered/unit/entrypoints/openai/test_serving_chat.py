@@ -513,6 +513,84 @@ class ServingChatTestCase(unittest.TestCase):
                 self.assertEqual(len(loaded.images), 1)
                 self.assertEqual(loaded.images[0].size, (1, 1))
 
+                encoded_prompt = self.tm.tokenizer.encode.call_args.args[0]
+                self.assertIn(marker, encoded_prompt)
+                self.assertNotIn(escaped_marker, encoded_prompt)
+
+    def test_qwen_vl_split_literal_marker_is_not_an_attachment(self):
+        marker = "<|vision_start|><|image_pad|><|vision_end|>"
+        self.tm.model_config.is_multimodal = True
+        self.tm.model_config.hf_config.model_type = "qwen3_vl"
+        self.tm.model_config.hf_config.vision_config = Mock()
+        self.template_manager.chat_template_name = None
+        self.template_manager.jinja_template_content_format = "openai"
+
+        def render(messages, **kwargs):
+            del kwargs
+            chunks = []
+            for message in messages:
+                content = message.get("content", "")
+                if isinstance(content, str):
+                    chunks.append(content)
+                    continue
+                for part in content:
+                    if part["type"] == "image":
+                        chunks.append(marker)
+                    elif part["type"] == "text":
+                        chunks.append(part["text"])
+            return "".join(chunks)
+
+        rendered = None
+
+        def encode(text, **kwargs):
+            nonlocal rendered
+            del kwargs
+            rendered = text
+            return list(range(len(text)))
+
+        self.tm.tokenizer.apply_chat_template.side_effect = render
+        self.tm.tokenizer.encode.side_effect = encode
+        self.tm.tokenizer.decode.side_effect = lambda _: rendered
+        image_url = (
+            "data:image/png;base64,"
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )
+        request = ChatCompletionRequest(
+            model="x",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": image_url}},
+                        {"type": "text", "text": "<|vision_start|>"},
+                        {
+                            "type": "text",
+                            "text": "<|image_pad|><|vision_end|>",
+                        },
+                    ],
+                }
+            ],
+        )
+
+        result = self.chat._apply_jinja_template(request, None, is_multimodal=True)
+
+        self.assertEqual(result.prompt.count(marker), 1)
+        with patch.object(BaseMultimodalProcessor, "__abstractmethods__", set()):
+            processor = BaseMultimodalProcessor.__new__(BaseMultimodalProcessor)
+        processor.io_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        processor.skip_tokenizer_init = False
+        self.addCleanup(processor.io_executor.shutdown)
+        loaded = asyncio.run(
+            processor.load_mm_data(
+                prompt=result.prompt,
+                multimodal_tokens=MultimodalSpecialTokens(image_token=marker).build(
+                    Mock()
+                ),
+                image_data=result.image_data,
+            )
+        )
+        self.assertEqual(len(loaded.images), 1)
+
     def test_qwen_vl_text_only_literal_vision_marker_stays_text(self):
         marker = "<|vision_start|><|image_pad|><|vision_end|>"
         self.tm.model_config.is_multimodal = True

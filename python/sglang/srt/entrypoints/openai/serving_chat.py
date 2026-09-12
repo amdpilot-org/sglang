@@ -247,13 +247,63 @@ def neutralize_qwen_vl_message_markers(message: Dict[str, Any]) -> None:
         return
     if not isinstance(content, list):
         return
-    for part in content:
-        if (
+    rewritten = []
+    index = 0
+    while index < len(content):
+        part = content[index]
+        if not (
             isinstance(part, dict)
             and part.get("type") in ("text", "input_text")
             and isinstance(part.get("text"), str)
         ):
-            part["text"] = neutralize_qwen_vl_vision_markers(part["text"])
+            rewritten.append(part)
+            index += 1
+            continue
+
+        part_type = part["type"]
+        run = [part]
+        index += 1
+        while index < len(content):
+            next_part = content[index]
+            if not (
+                isinstance(next_part, dict)
+                and next_part.get("type") == part_type
+                and isinstance(next_part.get("text"), str)
+            ):
+                break
+            run.append(next_part)
+            index += 1
+
+        combined = "".join(item["text"] for item in run)
+        neutralized = neutralize_qwen_vl_vision_markers(combined)
+        if neutralized == combined:
+            rewritten.extend(run)
+        else:
+            first = run[0]
+            first["text"] = neutralized
+            rewritten.append(first)
+
+    message["content"] = rewritten
+
+
+def render_qwen_vl_loader_prompt(
+    tokenizer: Any,
+    messages: List[Dict[str, Any]],
+    *,
+    tools: Optional[List[Dict[str, Any]]],
+    extra_template_kwargs: Dict[str, Any],
+) -> str:
+    loader_messages = copy.deepcopy(messages)
+    for message in loader_messages:
+        neutralize_qwen_vl_message_markers(message)
+    return tokenizer.apply_chat_template(
+        loader_messages,
+        tokenize=False,
+        add_generation_prompt=True,
+        tools=tools,
+        return_dict=False,
+        **extra_template_kwargs,
+    )
 
 
 def _extract_video_question(request: ChatCompletionRequest) -> Optional[str]:
@@ -1549,6 +1599,7 @@ class OpenAIServingChat(OpenAIServingBase):
                 if self._tokenizer_auto_adds_specials
                 else {}
             )
+            loader_rendered_prompt = None
             try:
                 rendered_prompt = self.tokenizer_manager.tokenizer.apply_chat_template(
                     openai_compatible_messages,
@@ -1557,6 +1608,9 @@ class OpenAIServingChat(OpenAIServingBase):
                     tools=tools,
                     return_dict=False,
                     **extra_template_kwargs,
+                )
+                prompt_ids = self.tokenizer_manager.tokenizer.encode(
+                    rendered_prompt, **encode_kwargs
                 )
                 hf_config = self.tokenizer_manager.model_config.hf_config
                 model_type = getattr(hf_config, "model_type", None)
@@ -1569,22 +1623,12 @@ class OpenAIServingChat(OpenAIServingBase):
                     # Render the exact client content first.  Only the separate
                     # prompt sent to the legacy multimodal scanner is escaped;
                     # text-only requests never need that scanner protection.
-                    loader_messages = copy.deepcopy(openai_compatible_messages)
-                    for message in loader_messages:
-                        neutralize_qwen_vl_message_markers(message)
-                    rendered_prompt = (
-                        self.tokenizer_manager.tokenizer.apply_chat_template(
-                            loader_messages,
-                            tokenize=False,
-                            add_generation_prompt=True,
-                            tools=tools,
-                            return_dict=False,
-                            **extra_template_kwargs,
-                        )
+                    loader_rendered_prompt = render_qwen_vl_loader_prompt(
+                        self.tokenizer_manager.tokenizer,
+                        openai_compatible_messages,
+                        tools=tools,
+                        extra_template_kwargs=extra_template_kwargs,
                     )
-                prompt_ids = self.tokenizer_manager.tokenizer.encode(
-                    rendered_prompt, **encode_kwargs
-                )
             except Exception:
                 # If the first attempt fails, try with flat function-only format.
                 # Some templates (e.g. Mistral) expect tools without the OpenAI wrapper.
@@ -1604,6 +1648,9 @@ class OpenAIServingChat(OpenAIServingBase):
                             **extra_template_kwargs,
                         )
                     )
+                    prompt_ids = self.tokenizer_manager.tokenizer.encode(
+                        rendered_prompt, **encode_kwargs
+                    )
                     hf_config = self.tokenizer_manager.model_config.hf_config
                     model_type = getattr(hf_config, "model_type", None)
                     if (
@@ -1612,22 +1659,12 @@ class OpenAIServingChat(OpenAIServingBase):
                         and model_type.startswith("qwen")
                         and getattr(hf_config, "vision_config", None) is not None
                     ):
-                        loader_messages = copy.deepcopy(openai_compatible_messages)
-                        for message in loader_messages:
-                            neutralize_qwen_vl_message_markers(message)
-                        rendered_prompt = (
-                            self.tokenizer_manager.tokenizer.apply_chat_template(
-                                loader_messages,
-                                tokenize=False,
-                                add_generation_prompt=True,
-                                tools=tools,
-                                return_dict=False,
-                                **extra_template_kwargs,
-                            )
+                        loader_rendered_prompt = render_qwen_vl_loader_prompt(
+                            self.tokenizer_manager.tokenizer,
+                            openai_compatible_messages,
+                            tools=tools,
+                            extra_template_kwargs=extra_template_kwargs,
                         )
-                    prompt_ids = self.tokenizer_manager.tokenizer.encode(
-                        rendered_prompt, **encode_kwargs
-                    )
                 except _CHAT_TEMPLATE_CLIENT_ERRORS as template_error:
                     # Template errors (e.g., from raise_exception in Jinja templates)
                     # and TypeError (e.g., tojson filter on Jinja2 Undefined variables)
@@ -1641,7 +1678,10 @@ class OpenAIServingChat(OpenAIServingBase):
                 )
 
             if is_multimodal:
-                prompt = self.tokenizer_manager.tokenizer.decode(prompt_ids)
+                prompt = (
+                    loader_rendered_prompt
+                    or self.tokenizer_manager.tokenizer.decode(prompt_ids)
+                )
 
         stop = request.stop
         image_data = image_data if image_data else None
