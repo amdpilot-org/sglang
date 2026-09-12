@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35345",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared base already supports [3, T] mRoPE in the fused QK RMSNorm+RoPE kernel by selecting each rotary lane's temporal, height, or width position through MRotaryEmbedding.axis_map. A gfx950 tensor regression matched the native rotary implementation within BF16 tolerance; replaying the historical temporal-only behavior differed by 10.5 max absolute error.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-31af2c22cfe8/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_fused_qk_rmsnorm_rope_gate.py",
+      "exit_code": 1,
+      "what_was_measured": "Unmodified focused GPU suite. Compilation was blocked before numerical execution because HIP was misdetected as PDL-capable CUDA and Triton emitted the invalid AMD instruction griddepcontrol.launch_dependents. See raw/current_gpu_test.log."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-31af2c22cfe8/venv/bin/python - <<'PY' ... set fused module _ENABLE_PDL=False; pytest.main([...]) ... PY",
+      "exit_code": 0,
+      "what_was_measured": "Existing fused kernel regression on gfx950 with only the unrelated optional CUDA PDL specialization disabled in-process: 3 tests passed, including five mRoPE subtests, against independent PyTorch and MRotaryEmbedding references. See raw/current_gpu_test_pdl_disabled.log."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-31af2c22cfe8/venv/bin/python reports/j-31af2c22cfe8/verify_mrope_regression.py",
+      "exit_code": 0,
+      "what_was_measured": "Distinct-axis Qwen3.5 [11,11,10] interleaved mRoPE: current fused vs native max absolute error 0.03125 and passed BF16 tolerance; historical temporal-only replay error 10.5; equal-axis [3,T] vs 1D error 0.0. See raw/mrope_regression_gpu.log."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X, gfx950, ROCm 7.2 was used for tensor-level fused-kernel execution. Device evidence is in raw/gpu_environment.log."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported NVIDIA CUDA dispatch was not executed because the assigned device is AMD gfx950.",
+    "Qwen3.6/Qwen3.8 27B weights were unavailable; no full model server or image request was run.",
+    "No tensor-parallel, multi-GPU, multi-node, grounding benchmark, or semantic-accuracy claim is made.",
+    "The unmodified focused test is independently blocked on this ROCm environment by existing PDL backend detection; PDL was disabled only in the validating test process and production source was not changed."
+  ]
+}

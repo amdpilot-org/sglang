@@ -1,0 +1,405 @@
+F..                                                                 [100%]
+=================================== FAILURES ===================================
+______ TestFusedQKRMSNormRoPEGate.test_matches_reference_for_1d_positions ______
+
+self = <test_fused_qk_rmsnorm_rope_gate.TestFusedQKRMSNormRoPEGate testMethod=test_matches_reference_for_1d_positions>
+
+    def test_matches_reference_for_1d_positions(self):
+        positions = torch.arange(self.tokens, device="cuda", dtype=torch.int64)
+>       q_out, k_out, gate_out = self.call(positions)
+                                 ^^^^^^^^^^^^^^^^^^^^
+
+test/registered/kernels/ops/attention/test_fused_qk_rmsnorm_rope_gate.py:110: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/kernels/ops/attention/test_fused_qk_rmsnorm_rope_gate.py:69: in call
+    return fused_qk_gemma_rmsnorm_rope_gate(
+python/sglang/kernels/ops/attention/fused_qk_rmsnorm_rope_gate.py:193: in fused_qk_gemma_rmsnorm_rope_gate
+    _fused_qk_rmsnorm_rope_gate_kernel[grid](
+/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py:370: in <lambda>
+    return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py:751: in run
+    kernel = self._do_compile(key, signature, device, constexprs, options, attrs, warmup)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py:896: in _do_compile
+    kernel = self.compile(src, target=target, options=options.__dict__)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/triton/compiler/compiler.py:327: in compile
+    next_module = compile_ir(module, metadata)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/triton/backends/amd/compiler.py:574: in <lambda>
+    stages["hsaco"] = lambda src, metadata: self.make_hsaco(src, metadata, options)
+                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+src = '\t.amdgcn_target "amdgcn-amd-amdhsa--gfx950"\n\t.amdhsa_code_object_version 5\n\t.text\n\t.globl\t_fused_qk_rmsnorm_r...sa.version:\n  - 1\n  - 2\n...\n\n\t.end_amdgpu_metadata\n\t.section\t.debug_line,"",@progbits\n.Lline_table_start0:\n'
+metadata = {'allow_flush_denorm': False, 'allowed_dot_input_precisions': ('ieee', 'bf16x3', 'bf16x6'), 'arch': 'gfx950', 'backend_name': 'hip', ...}
+options = HIPOptions(num_warps=4, waves_per_eu=0, num_stages=2, num_ctas=1, extern_libs=(('ocml', '/opt/venv/lib/python3.12/site...flush_denorm=False, max_num_imprecise_acc_default=0, backend_name='hip', instrumentation_mode='', schedule_hint='none')
+
+    @staticmethod
+    def make_hsaco(src, metadata, options):
+        target_features = ''
+        if knobs.compilation.enable_asan:
+            target_features = '+xnack'
+        hsaco = amd.assemble_amdgcn(src, options.arch, target_features)
+        with tempfile.NamedTemporaryFile() as tmp_out:
+            with tempfile.NamedTemporaryFile() as tmp_in:
+                with open(tmp_in.name, "wb") as fd_in:
+                    fd_in.write(hsaco)
+>               amd.link_hsaco(tmp_in.name, tmp_out.name)
+E               RuntimeError: LLD failed to link hsaco source /tmp/tmpexz2fa1x into object file /tmp/tmpq1lt3ihs because ld.lld: error: target emulation unknown: -m or at least one .o file required
+
+/opt/venv/lib/python3.12/site-packages/triton/backends/amd/compiler.py:561: RuntimeError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f76af868040>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f7f9018a520>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stderr call -----------------------------
+error: invalid instruction
+        griddepcontrol.launch_dependents; // dummy s0
+        ^
+error: invalid instruction
+        griddepcontrol.launch_dependents; // dummy s0
+        ^
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/kernels/ops/attention/test_fused_qk_rmsnorm_rope_gate.py", line 110, in test_matches_reference_for_1d_positions
+    q_out, k_out, gate_out = self.call(positions)
+                             ^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/test/registered/kernels/ops/attention/test_fused_qk_rmsnorm_rope_gate.py", line 69, in call
+    return fused_qk_gemma_rmsnorm_rope_gate(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/kernels/ops/attention/fused_qk_rmsnorm_rope_gate.py", line 193, in fused_qk_gemma_rmsnorm_rope_gate
+    _fused_qk_rmsnorm_rope_gate_kernel[grid](
+  File "/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py", line 370, in <lambda>
+    return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py", line 751, in run
+    kernel = self._do_compile(key, signature, device, constexprs, options, attrs, warmup)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py", line 896, in _do_compile
+    kernel = self.compile(src, target=target, options=options.__dict__)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/triton/compiler/compiler.py", line 327, in compile
+    next_module = compile_ir(module, metadata)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/triton/backends/amd/compiler.py", line 574, in <lambda>
+    stages["hsaco"] = lambda src, metadata: self.make_hsaco(src, metadata, options)
+                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/triton/backends/amd/compiler.py", line 561, in make_hsaco
+    amd.link_hsaco(tmp_in.name, tmp_out.name)
+RuntimeError: LLD failed to link hsaco source /tmp/tmpexz2fa1x into object file /tmp/tmpq1lt3ihs because ld.lld: error: target emulation unknown: -m or at least one .o file required
+
+_ TestFusedQKRMSNormRoPEGate.test_mrope_matches_the_rotary_module (section=[11, 11, 10], interleaved=False) _
+
+self = <test_fused_qk_rmsnorm_rope_gate.TestFusedQKRMSNormRoPEGate testMethod=test_mrope_matches_the_rotary_module>
+
+    def test_mrope_matches_the_rotary_module(self):
+        """With t == h == w every layout agrees, so only distinct rows catch a wrong
+        axis. Interleaved [11, 11, 10] is what Qwen3.6-35B-A3B ships, and [24, 20, 20]
+        fills the head dimension, leaving no pass-through tail.
+        """
+        for section, interleaved in (
+            ([11, 11, 10], False),
+            ([11, 11, 10], True),
+            ([24, 20, 20], True),
+        ):
+            with self.subTest(section=section, interleaved=interleaved):
+                rope = self.build_mrope(section, interleaved)
+                positions = self.graph_buffer_positions()
+    
+                q_in = self.q_gate.view(
+                    self.tokens, self.num_q_heads, 2 * self.head_dim
+                )[..., : self.head_dim].reshape(self.tokens, -1)
+                want_q, want_k = rope.forward_native(
+                    positions,
+                    gemma_rmsnorm(
+                        q_in.view(self.tokens, self.num_q_heads, self.head_dim),
+                        self.q_weight,
+                        self.eps,
+                    ).reshape(self.tokens, -1),
+                    gemma_rmsnorm(
+                        self.k.view(self.tokens, self.num_kv_heads, self.head_dim),
+                        self.k_weight,
+                        self.eps,
+                    ).reshape(self.tokens, -1),
+                )
+    
+>               q_out, k_out, _gate = self.call(
+                    positions,
+                    cos_sin_cache=rope.cos_sin_cache,
+                    mrope_axis_map=rope.axis_map,
+                    rotary_dim=rope.rotary_dim,
+                )
+
+test/registered/kernels/ops/attention/test_fused_qk_rmsnorm_rope_gate.py:171: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/kernels/ops/attention/test_fused_qk_rmsnorm_rope_gate.py:69: in call
+    return fused_qk_gemma_rmsnorm_rope_gate(
+python/sglang/kernels/ops/attention/fused_qk_rmsnorm_rope_gate.py:193: in fused_qk_gemma_rmsnorm_rope_gate
+    _fused_qk_rmsnorm_rope_gate_kernel[grid](
+/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py:370: in <lambda>
+    return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py:751: in run
+    kernel = self._do_compile(key, signature, device, constexprs, options, attrs, warmup)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py:896: in _do_compile
+    kernel = self.compile(src, target=target, options=options.__dict__)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/triton/compiler/compiler.py:327: in compile
+    next_module = compile_ir(module, metadata)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/triton/backends/amd/compiler.py:574: in <lambda>
+    stages["hsaco"] = lambda src, metadata: self.make_hsaco(src, metadata, options)
+                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+src = '\t.amdgcn_target "amdgcn-amd-amdhsa--gfx950"\n\t.amdhsa_code_object_version 5\n\t.text\n\t.globl\t_fused_qk_rmsnorm_r...sa.version:\n  - 1\n  - 2\n...\n\n\t.end_amdgpu_metadata\n\t.section\t.debug_line,"",@progbits\n.Lline_table_start0:\n'
+metadata = {'allow_flush_denorm': False, 'allowed_dot_input_precisions': ('ieee', 'bf16x3', 'bf16x6'), 'arch': 'gfx950', 'backend_name': 'hip', ...}
+options = HIPOptions(num_warps=4, waves_per_eu=0, num_stages=2, num_ctas=1, extern_libs=(('ocml', '/opt/venv/lib/python3.12/site...flush_denorm=False, max_num_imprecise_acc_default=0, backend_name='hip', instrumentation_mode='', schedule_hint='none')
+
+    @staticmethod
+    def make_hsaco(src, metadata, options):
+        target_features = ''
+        if knobs.compilation.enable_asan:
+            target_features = '+xnack'
+        hsaco = amd.assemble_amdgcn(src, options.arch, target_features)
+        with tempfile.NamedTemporaryFile() as tmp_out:
+            with tempfile.NamedTemporaryFile() as tmp_in:
+                with open(tmp_in.name, "wb") as fd_in:
+                    fd_in.write(hsaco)
+>               amd.link_hsaco(tmp_in.name, tmp_out.name)
+E               RuntimeError: LLD failed to link hsaco source /tmp/tmpsxginqd2 into object file /tmp/tmp454c0ifv because ld.lld: error: target emulation unknown: -m or at least one .o file required
+
+/opt/venv/lib/python3.12/site-packages/triton/backends/amd/compiler.py:561: RuntimeError
+_ TestFusedQKRMSNormRoPEGate.test_mrope_matches_the_rotary_module (section=[11, 11, 10], interleaved=True) _
+
+self = <test_fused_qk_rmsnorm_rope_gate.TestFusedQKRMSNormRoPEGate testMethod=test_mrope_matches_the_rotary_module>
+
+    def test_mrope_matches_the_rotary_module(self):
+        """With t == h == w every layout agrees, so only distinct rows catch a wrong
+        axis. Interleaved [11, 11, 10] is what Qwen3.6-35B-A3B ships, and [24, 20, 20]
+        fills the head dimension, leaving no pass-through tail.
+        """
+        for section, interleaved in (
+            ([11, 11, 10], False),
+            ([11, 11, 10], True),
+            ([24, 20, 20], True),
+        ):
+            with self.subTest(section=section, interleaved=interleaved):
+                rope = self.build_mrope(section, interleaved)
+                positions = self.graph_buffer_positions()
+    
+                q_in = self.q_gate.view(
+                    self.tokens, self.num_q_heads, 2 * self.head_dim
+                )[..., : self.head_dim].reshape(self.tokens, -1)
+                want_q, want_k = rope.forward_native(
+                    positions,
+                    gemma_rmsnorm(
+                        q_in.view(self.tokens, self.num_q_heads, self.head_dim),
+                        self.q_weight,
+                        self.eps,
+                    ).reshape(self.tokens, -1),
+                    gemma_rmsnorm(
+                        self.k.view(self.tokens, self.num_kv_heads, self.head_dim),
+                        self.k_weight,
+                        self.eps,
+                    ).reshape(self.tokens, -1),
+                )
+    
+>               q_out, k_out, _gate = self.call(
+                    positions,
+                    cos_sin_cache=rope.cos_sin_cache,
+                    mrope_axis_map=rope.axis_map,
+                    rotary_dim=rope.rotary_dim,
+                )
+
+test/registered/kernels/ops/attention/test_fused_qk_rmsnorm_rope_gate.py:171: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/kernels/ops/attention/test_fused_qk_rmsnorm_rope_gate.py:69: in call
+    return fused_qk_gemma_rmsnorm_rope_gate(
+python/sglang/kernels/ops/attention/fused_qk_rmsnorm_rope_gate.py:193: in fused_qk_gemma_rmsnorm_rope_gate
+    _fused_qk_rmsnorm_rope_gate_kernel[grid](
+/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py:370: in <lambda>
+    return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py:751: in run
+    kernel = self._do_compile(key, signature, device, constexprs, options, attrs, warmup)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py:896: in _do_compile
+    kernel = self.compile(src, target=target, options=options.__dict__)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/triton/compiler/compiler.py:327: in compile
+    next_module = compile_ir(module, metadata)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/triton/backends/amd/compiler.py:574: in <lambda>
+    stages["hsaco"] = lambda src, metadata: self.make_hsaco(src, metadata, options)
+                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+src = '\t.amdgcn_target "amdgcn-amd-amdhsa--gfx950"\n\t.amdhsa_code_object_version 5\n\t.text\n\t.globl\t_fused_qk_rmsnorm_r...sa.version:\n  - 1\n  - 2\n...\n\n\t.end_amdgpu_metadata\n\t.section\t.debug_line,"",@progbits\n.Lline_table_start0:\n'
+metadata = {'allow_flush_denorm': False, 'allowed_dot_input_precisions': ('ieee', 'bf16x3', 'bf16x6'), 'arch': 'gfx950', 'backend_name': 'hip', ...}
+options = HIPOptions(num_warps=4, waves_per_eu=0, num_stages=2, num_ctas=1, extern_libs=(('ocml', '/opt/venv/lib/python3.12/site...flush_denorm=False, max_num_imprecise_acc_default=0, backend_name='hip', instrumentation_mode='', schedule_hint='none')
+
+    @staticmethod
+    def make_hsaco(src, metadata, options):
+        target_features = ''
+        if knobs.compilation.enable_asan:
+            target_features = '+xnack'
+        hsaco = amd.assemble_amdgcn(src, options.arch, target_features)
+        with tempfile.NamedTemporaryFile() as tmp_out:
+            with tempfile.NamedTemporaryFile() as tmp_in:
+                with open(tmp_in.name, "wb") as fd_in:
+                    fd_in.write(hsaco)
+>               amd.link_hsaco(tmp_in.name, tmp_out.name)
+E               RuntimeError: LLD failed to link hsaco source /tmp/tmpexznibnn into object file /tmp/tmpu41u65cb because ld.lld: error: target emulation unknown: -m or at least one .o file required
+
+/opt/venv/lib/python3.12/site-packages/triton/backends/amd/compiler.py:561: RuntimeError
+_ TestFusedQKRMSNormRoPEGate.test_mrope_matches_the_rotary_module (section=[24, 20, 20], interleaved=True) _
+
+self = <test_fused_qk_rmsnorm_rope_gate.TestFusedQKRMSNormRoPEGate testMethod=test_mrope_matches_the_rotary_module>
+
+    def test_mrope_matches_the_rotary_module(self):
+        """With t == h == w every layout agrees, so only distinct rows catch a wrong
+        axis. Interleaved [11, 11, 10] is what Qwen3.6-35B-A3B ships, and [24, 20, 20]
+        fills the head dimension, leaving no pass-through tail.
+        """
+        for section, interleaved in (
+            ([11, 11, 10], False),
+            ([11, 11, 10], True),
+            ([24, 20, 20], True),
+        ):
+            with self.subTest(section=section, interleaved=interleaved):
+                rope = self.build_mrope(section, interleaved)
+                positions = self.graph_buffer_positions()
+    
+                q_in = self.q_gate.view(
+                    self.tokens, self.num_q_heads, 2 * self.head_dim
+                )[..., : self.head_dim].reshape(self.tokens, -1)
+                want_q, want_k = rope.forward_native(
+                    positions,
+                    gemma_rmsnorm(
+                        q_in.view(self.tokens, self.num_q_heads, self.head_dim),
+                        self.q_weight,
+                        self.eps,
+                    ).reshape(self.tokens, -1),
+                    gemma_rmsnorm(
+                        self.k.view(self.tokens, self.num_kv_heads, self.head_dim),
+                        self.k_weight,
+                        self.eps,
+                    ).reshape(self.tokens, -1),
+                )
+    
+>               q_out, k_out, _gate = self.call(
+                    positions,
+                    cos_sin_cache=rope.cos_sin_cache,
+                    mrope_axis_map=rope.axis_map,
+                    rotary_dim=rope.rotary_dim,
+                )
+
+test/registered/kernels/ops/attention/test_fused_qk_rmsnorm_rope_gate.py:171: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/kernels/ops/attention/test_fused_qk_rmsnorm_rope_gate.py:69: in call
+    return fused_qk_gemma_rmsnorm_rope_gate(
+python/sglang/kernels/ops/attention/fused_qk_rmsnorm_rope_gate.py:193: in fused_qk_gemma_rmsnorm_rope_gate
+    _fused_qk_rmsnorm_rope_gate_kernel[grid](
+/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py:370: in <lambda>
+    return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py:751: in run
+    kernel = self._do_compile(key, signature, device, constexprs, options, attrs, warmup)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py:896: in _do_compile
+    kernel = self.compile(src, target=target, options=options.__dict__)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/triton/compiler/compiler.py:327: in compile
+    next_module = compile_ir(module, metadata)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/triton/backends/amd/compiler.py:574: in <lambda>
+    stages["hsaco"] = lambda src, metadata: self.make_hsaco(src, metadata, options)
+                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+src = '\t.amdgcn_target "amdgcn-amd-amdhsa--gfx950"\n\t.amdhsa_code_object_version 5\n\t.text\n\t.globl\t_fused_qk_rmsnorm_r...sa.version:\n  - 1\n  - 2\n...\n\n\t.end_amdgpu_metadata\n\t.section\t.debug_line,"",@progbits\n.Lline_table_start0:\n'
+metadata = {'allow_flush_denorm': False, 'allowed_dot_input_precisions': ('ieee', 'bf16x3', 'bf16x6'), 'arch': 'gfx950', 'backend_name': 'hip', ...}
+options = HIPOptions(num_warps=4, waves_per_eu=0, num_stages=2, num_ctas=1, extern_libs=(('ocml', '/opt/venv/lib/python3.12/site...flush_denorm=False, max_num_imprecise_acc_default=0, backend_name='hip', instrumentation_mode='', schedule_hint='none')
+
+    @staticmethod
+    def make_hsaco(src, metadata, options):
+        target_features = ''
+        if knobs.compilation.enable_asan:
+            target_features = '+xnack'
+        hsaco = amd.assemble_amdgcn(src, options.arch, target_features)
+        with tempfile.NamedTemporaryFile() as tmp_out:
+            with tempfile.NamedTemporaryFile() as tmp_in:
+                with open(tmp_in.name, "wb") as fd_in:
+                    fd_in.write(hsaco)
+>               amd.link_hsaco(tmp_in.name, tmp_out.name)
+E               RuntimeError: LLD failed to link hsaco source /tmp/tmpqoy5c34k into object file /tmp/tmpq5ofdoyh because ld.lld: error: target emulation unknown: -m or at least one .o file required
+
+/opt/venv/lib/python3.12/site-packages/triton/backends/amd/compiler.py:561: RuntimeError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/kernels/ops/attention/test_fused_qk_rmsnorm_rope_gate.py::TestFusedQKRMSNormRoPEGate::test_matches_reference_for_1d_positions
+SUBFAILED(section=[11, 11, 10], interleaved=False) test/registered/kernels/ops/attention/test_fused_qk_rmsnorm_rope_gate.py::TestFusedQKRMSNormRoPEGate::test_mrope_matches_the_rotary_module
+SUBFAILED(section=[11, 11, 10], interleaved=True) test/registered/kernels/ops/attention/test_fused_qk_rmsnorm_rope_gate.py::TestFusedQKRMSNormRoPEGate::test_mrope_matches_the_rotary_module
+SUBFAILED(section=[24, 20, 20], interleaved=True) test/registered/kernels/ops/attention/test_fused_qk_rmsnorm_rope_gate.py::TestFusedQKRMSNormRoPEGate::test_mrope_matches_the_rotary_module
+4 failed, 2 passed, 17 warnings, 2 subtests passed in 28.33s
