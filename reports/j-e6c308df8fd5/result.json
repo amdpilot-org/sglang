@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36352",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reject speculative decoding before model loading when either resolved target-model attention backend is torch_native, with coverage for the reported NGRAM combination, split backends, and valid controls.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-e6c308df8fd5/venv/bin/python -m pytest test/registered/unit/server_args/test_server_args.py::TestTorchNativeSpeculativeCompatibility -q (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "The actual attention compatibility hook accepted NGRAM with combined, prefill-only, and decode-only torch_native backends; the new rejection assertions failed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e6c308df8fd5/venv/bin/python -m pytest test/registered/unit/server_args/test_server_args.py::TestTorchNativeSpeculativeCompatibility -q",
+      "exit_code": 0,
+      "what_was_measured": "Four regression tests and two split-backend subtests passed: unsupported configurations reject early, while both valid boundary configurations remain accepted."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e6c308df8fd5/venv/bin/python -m pytest test/registered/unit/server_args/test_server_args.py -q",
+      "exit_code": 1,
+      "what_was_measured": "228 tests and 46 subtests passed; two unrelated context-parallel tests failed because HIP prefill CP is deprecated on the prepared ROCm platform."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e6c308df8fd5/venv/bin/python -m compileall -q python/sglang/srt/arg_groups/attention_hook.py test/registered/unit/server_args/test_server_args.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source and regression test compile successfully."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the patch."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No inference kernel was needed or run for this pre-model-load argument validation. evidence/gpu-inventory.txt records the assigned AMD Instinct MI355X gfx950 only."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No full server warmup was run because no production model weights were available; the failing-before regression proves the actual prepared validation hook accepted the unsupported configuration, not the later GPU traceback.",
+    "The deterministic tiny Llama fixture validates transport and engine execution only and was not used to claim Qwen, NVIDIA, semantic, or distributed behavior.",
+    "The full server-args test file has two unrelated ROCm context-parallel expectation failures documented in evidence/test-server-args.txt.",
+    "The prepared environment does not contain the pre-commit executable; evidence/pre-commit.txt records that limitation."
+  ]
+}
