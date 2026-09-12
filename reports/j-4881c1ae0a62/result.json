@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35692",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the generic-template failure caused by unconditional structured tool_reference conversion, then applied and verified the issue-specific upstream candidate. Generic templates now receive a text marker and only referenced deferred tools, while templates with native deferred-reference support retain structured references and the complete deferred catalog.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-4881c1ae0a62/venv/bin/python <pre-fix strict generic-template reproduction>",
+      "exit_code": 17,
+      "what_was_measured": "Before the fix, conversion emitted a structured tool_reference part and a strict generic Jinja renderer raised 'Unexpected item type in content.' Exit 17 was the reproduction script's expected failure sentinel."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-4881c1ae0a62/venv/bin/python -m pytest -q test/registered/unit/entrypoints/anthropic/test_tool_reference.py test/registered/unit/entrypoints/anthropic/test_serving.py",
+      "exit_code": 0,
+      "what_was_measured": "74 tests and 5 subtests passed, covering capability detection, strict generic/Qwen-style rendering, discovery gating, forced-tool choices, content boundaries, and the native GLM path."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-4881c1ae0a62/venv/bin/python <post-fix strict generic-template and deferred-tool visibility reproduction>",
+      "exit_code": 0,
+      "what_was_measured": "The formerly failing history rendered '[tool reference: DemoTool]'; DemoTool became visible after reference while unreferenced HiddenTool remained hidden."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..HEAD",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4881c1ae0a62/venv/bin/python -m ruff check <changed Python files>",
+      "exit_code": 1,
+      "what_was_measured": "Lint could not start because the prepared interpreter does not contain the ruff module."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No full HTTP server/model reproduction was performed because model weights were not provided; validation exercises the actual checked-out Anthropic converter and real Jinja rendering, not model semantics.",
+    "The prepared interpreter lacks ruff, so focused lint was not run; git diff --check passed.",
+    "Generic templates cannot preserve native GLM inline placement or prompt-cache semantics; they preserve discovery gating and render references safely as text."
+  ]
+}
