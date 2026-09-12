@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32924",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The B300 launch failure could not be reproduced or root-caused on the assigned gfx950 GPU. Added and regression-tested an independent runtime opt-out for only the Kimi-K3 fused route/pack/MXFP8-quant launch, enabling the issue-requested same-precision field A/B without claiming the unknown crash is fixed.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ae3826b76c2e/venv/bin/python -m pytest -q test/registered/unit/layers/moe/test_route_quant_handoff.py (before implementation)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: all 3 cases failed because SGLANG_DISABLE_KIMI_K3_ROUTE_QUANT_FUSION did not exist."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ae3826b76c2e/venv/bin/python -m pytest -q test/registered/unit/layers/moe/test_route_quant_handoff.py test/registered/unit/layers/quantization/test_mxfp4_flashinfer_activation_prep.py",
+      "exit_code": 0,
+      "what_was_measured": "8 tests verified default fused dispatch, disabled early fallback without JIT probing or launch, explicit re-enable, and downstream standalone activation-quant fallback boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ae3826b76c2e/venv/bin/python -m pytest -q test/registered/unit/test_environ.py test/registered/unit/layers/moe/test_route_quant_handoff.py",
+      "exit_code": 0,
+      "what_was_measured": "16 tests and 2 subtests verified environment descriptor behavior and the new handoff gate."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-ae3826b76c2e/venv/bin/python (portable torch GPU arithmetic fixture)",
+      "exit_code": 0,
+      "what_was_measured": "Actual execution on the assigned AMD Instinct MI350X gfx950; sum result 1572352.0. This does not exercise the CUDA-only Kimi-K3 kernel."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ae3826b76c2e/venv/bin/python -m ruff check ...",
+      "exit_code": 1,
+      "what_was_measured": "Tool availability only: Ruff is not installed in the prepared interpreter, so this check did not run."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-ae3826b76c2e/raw/gpu-environment.txt records torch 2.11.0+rocm7.2 executing a deterministic tensor calculation on one AMD Instinct MI350X, gfx950:sramecc+:xnack-. The issue-specific CUDA kernel was not executable.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No NVIDIA B300/CUDA hardware, Kimi-K3 weights, eight-GPU TP8/DCP8 topology, or production long-context traffic was available.",
+    "The original asynchronous unspecified-launch-failure was not reproduced and its root cause remains unknown.",
+    "The switch and fallback selection are verified, but neither the CUDA fused kernel nor its standalone CUDA fallback kernels can execute on gfx950.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}

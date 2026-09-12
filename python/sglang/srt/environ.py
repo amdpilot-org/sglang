@@ -1023,6 +1023,10 @@ class Envs:
     SGLANG_TRTLLM_MOE_PDL_MAX_TOKENS = EnvInt(8192)
     # Use FlashInfer's fused atomic CUTLASS/CuTe DSL MoE finalize.
     SGLANG_FLASHINFER_MOE_FUSED_FINALIZE = EnvBool(True)
+    # Disable only Kimi-K3's fused route + TRT-LLM pack + MXFP8 quant launch.
+    # This retains the same FlashInfer MXFP4 precision and runner while using
+    # the three standalone kernels, which is useful for field A/B diagnosis.
+    SGLANG_DISABLE_KIMI_K3_ROUTE_QUANT_FUSION = EnvBool(False)
     # Master switch for the experimental TRT-LLM LoRA fast path; when OFF (default) every
     # fine-grained opt switch reads False, keeping non-experimental paths byte-identical.
     SGLANG_EXPERIMENTAL_LORA_OPTI = EnvBool(False)
