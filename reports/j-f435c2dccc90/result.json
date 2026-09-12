@@ -1,0 +1,58 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34709",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1629",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1596",
+  "candidate_commit": "bcc77a2a914ee6e6410f4b066714239d95e86905",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review reproduced the original inherited-accelerator-context failure on the recorded base and verified that the exact candidate changes the outer benchmark server process from Linux fork to an explicit spawn context. On one assigned AMD Instinct MI355X (gfx950), the base child failed its first ROCm allocation after parent initialization, while the candidate child independently initialized ROCm and computed 7.0. The production launch_server function and ServerArgs object were also confirmed spawn-picklable. The change is Python-only, so no native rebuild applies.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-f435c2dccc90/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-f435c2dccc90/candidate_test_endpoint.py (base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "The candidate regression failed before the change because multiprocessing.get_context('spawn') was never called; the two reuse/connect boundary cases passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f435c2dccc90/venv/bin/python /tmp/amdpilot-repo-j-f435c2dccc90/candidate_repro_endpoint_gpu.py (base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "After the parent initialized ROCm, the fork child reported initialized=False and its first torch GPU allocation failed with 'Cannot re-initialize CUDA in forked subprocess'."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f435c2dccc90/venv/bin/python -m pytest -q test/registered/unit/benchmark/test_endpoint.py (candidate bcc77a2)",
+      "exit_code": 0,
+      "what_was_measured": "All three candidate regressions passed: explicit spawn, live-server reuse, and explicit-base-URL behavior."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f435c2dccc90/venv/bin/python reports/j-67eb4114c75c/repro_endpoint_gpu.py (candidate bcc77a2; marker parent directory created)",
+      "exit_code": 0,
+      "what_was_measured": "After parent ROCm initialization, the spawned child reported initialized=True, allocated on gfx950, computed 7.0, and remained alive until endpoint readiness."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f435c2dccc90/venv/bin/python -c '<ForkingPickler checks>' (candidate bcc77a2)",
+      "exit_code": 0,
+      "what_was_measured": "The actual module-level sglang.srt.entrypoints.http_server.launch_server, a real ServerArgs(model_path='dummy-model-for-pickle-only'), and their pair serialized successfully for spawn."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f435c2dccc90/venv/bin/python -c '<lambda launch_server_func boundary>' (candidate bcc77a2)",
+      "exit_code": 1,
+      "what_was_measured": "An intentionally non-picklable lambda supplied through the public custom launch_server_func hook now fails at Process.start with PicklingError; the repository production path does not use such a callable."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X, gfx950:sramecc+:xnack-, with torch 2.11.0+rocm7.2 and HIP 7.2.26015. Source imports resolved to /job/repo/python/sglang and /job/repo/python/sglang/benchmark/endpoint.py."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A lambda, nested function, or otherwise non-picklable custom launch_server_func fails under spawn. This is a compatibility boundary of the generic Callable hook, not a counterexample to the repository's production module-level launch_server path or the original issue reproduction."
+  ],
+  "remaining_limitations": [
+    "No Qwen/Qwen3.5-9B weights were available, so no full model startup, multimodal warmup, semantic inference, or tensor-parallel run was performed.",
+    "Only one AMD gfx950 GPU was assigned. NVIDIA CUDA and Intel XPU hardware were unavailable, so their vendor-specific paths were not executed.",
+    "The deterministic fixture qualifies the benchmark endpoint process boundary and real ROCm execution only, not another model architecture or a distributed workload.",
+    "The candidate's checked-in GPU script hard-codes its originating job runtime marker directory. It initially failed here with FileNotFoundError until that parent directory was created; this is test-artifact portability hardening, not a source-fix failure.",
+    "No C++, FlyDSL, or other native source changed; native_rebuilt is false because rebuilding was not applicable."
+  ]
+}
