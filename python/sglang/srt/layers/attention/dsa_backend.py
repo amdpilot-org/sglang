@@ -1145,6 +1145,48 @@ class DeepseekSparseAttnBackend(
         )
         self.forward_metadata = metadata
 
+    def validate_preplanned_metadata_extent(self, forward_batch: ForwardBatch) -> None:
+        """Accept post-plan DSA padding only when kernel-facing rows are covered."""
+        if not forward_batch.has_stale_forward_metadata_plan():
+            return
+        if not forward_batch.forward_mode.is_draft_extend_v2():
+            return super().validate_preplanned_metadata_extent(forward_batch)
+
+        physical_tokens = len(forward_batch.input_ids)
+        metadata = self.forward_metadata
+        dsa_rows = (
+            len(metadata.dsa_cache_seqlens_int32)
+            if metadata is not None and metadata.dsa_cache_seqlens_int32 is not None
+            else -1
+        )
+        dsa_offsets = (
+            len(metadata.dsa_cu_seqlens_k)
+            if metadata is not None and metadata.dsa_cu_seqlens_k is not None
+            else -1
+        )
+        query_offsets = (
+            len(metadata.dsa_cu_seqlens_q)
+            if metadata is not None and metadata.dsa_cu_seqlens_q is not None
+            else -1
+        )
+        kv_rows = (
+            len(forward_batch.out_cache_loc)
+            if forward_batch.out_cache_loc is not None
+            else -1
+        )
+        if (
+            dsa_rows != physical_tokens
+            or dsa_offsets != physical_tokens + 1
+            or query_offsets != physical_tokens + 1
+            or kv_rows != physical_tokens
+        ):
+            raise RuntimeError(
+                "DSA preplanned metadata does not cover the physical execution "
+                f"extent: physical_tokens={physical_tokens}, dsa_rows={dsa_rows}, "
+                f"dsa_offsets={dsa_offsets}, query_offsets={query_offsets}, "
+                f"kv_rows={kv_rows}."
+            )
+
     def _cal_indexer_k_start_end(
         self,
         forward_batch: ForwardBatch,
@@ -3754,6 +3796,10 @@ class DeepseekSparseAttnMultiStepBackend:
     def init_forward_metadata(self, forward_batch: ForwardBatch):
         for i in range(self.speculative_num_steps - 1):
             self.attn_backends[i].init_forward_metadata(forward_batch)
+
+    def validate_preplanned_metadata_extent(self, forward_batch: ForwardBatch) -> None:
+        for backend in self.attn_backends:
+            backend.validate_preplanned_metadata_extent(forward_batch)
 
     def init_cuda_graph_state(self, max_bs: int, max_num_tokens: int):
         for i in range(self.speculative_num_steps - 1):
