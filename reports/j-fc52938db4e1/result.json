@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30570",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is valid test-only hardening for an allocation/width correction already present on the recorded base. Its GPU regression passes on both candidate and base and the historical 614406-vs-614408 shape failure is independently reproduced. It does not modify runtime code or exercise the complete Blackwell TP=8 GLM EAGLE CUDA-graph path, so it must not be represented as a fully verified original-issue fix.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-fc52938db4e1/venv/bin/python -m pytest -q test/registered/attention/test_dsa_cuda_graph_context_boundary.py -vv --junitxml=/job/candidate-pytest.xml",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate d7771df9f850e6826771f552b4690a7a6b639ee2, the reported-width allocator/copy test and three independent width boundaries passed on GPU: 2 tests and 3 subtests."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-fc52938db4e1/venv/bin/python -m pytest -q /tmp/test_dsa_cuda_graph_context_boundary_candidate.py -vv --junitxml=/job/base-with-candidate-test.xml",
+      "exit_code": 0,
+      "what_was_measured": "The candidate test passed unchanged against recorded base 358c163, proving the runtime correction predates the candidate and the candidate is coverage-only."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-fc52938db4e1/venv/bin/python -c '<allocate historical (6,614406) destination and (6,614408) source, then copy>'",
+      "exit_code": 1,
+      "what_was_measured": "Independent GPU tensor-shape reproduction emitted the exact RuntimeError: size 614406 must match size 614408 at dimension 1. The dimensions were derived from the retrieved v0.5.14 allocator and reported target-verify shape."
+    },
+    {
+      "command": "git diff --exit-code 358c163250ad3b1f62939b01ce1314a0a31a0365 d7771df9f850e6826771f552b4690a7a6b639ee2 -- python/sglang/srt/layers/attention/dsa_backend.py",
+      "exit_code": 0,
+      "what_was_measured": "No production DSA backend change exists between the recorded base and candidate."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI350X, gcnArchName gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2, HIP 7.2.26015. Candidate/base regression copies and the historical shape mismatch executed on this GPU.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The regression does not invoke _apply_cuda_graph_metadata; a later defect in surrounding target-verify metadata generation could pass this allocator/copy fixture.",
+    "No NVIDIA sm100 CUDA graph was captured or replayed, so Blackwell-specific fused metadata behavior remains unverified.",
+    "No GLM-5.2-FP8 EAGLE serving request was driven to the 614400 context boundary.",
+    "No TP=8 run verified simultaneous worker behavior, process-tree shutdown, or Kubernetes restart semantics."
+  ],
+  "remaining_limitations": [
+    "Only one gfx950 ROCm GPU was available; the reported eight-Blackwell architecture was unavailable.",
+    "ZhipuAI/GLM-5.2-FP8 weights were unavailable.",
+    "The historical failure was reproduced at the source-derived tensor-shape contract, not through the full v0.5.14 server stack.",
+    "No native source changed in the candidate, so a native rebuild was neither required nor performed."
+  ]
+}
