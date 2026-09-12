@@ -17,7 +17,7 @@ class MinimalServing(OpenAIServingBase):
         raise AssertionError("unknown models must be rejected before conversion")
 
 
-class ServedModelValidationTest(unittest.TestCase):
+class ServedModelValidationTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         manager = Mock()
         manager.served_model_name = "served-model"
@@ -77,6 +77,26 @@ class ServedModelValidationTest(unittest.TestCase):
             CompletionRequest(model="default", prompt="hello")
         )
         self.assertEqual(response.status_code, 404)
+
+    async def test_explicit_empty_model_is_not_treated_as_omitted(self):
+        request = CompletionRequest(model="", prompt="hello")
+        self.assertIn("model", request.model_fields_set)
+
+        response = self.serving.validate_served_model(request)
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            self.error(response),
+            {
+                "message": "The model '' does not exist",
+                "type": "invalid_request_error",
+                "param": None,
+                "code": "model_not_found",
+            },
+        )
+
+        handled_response = await self.serving.handle_request(request, None)
+        self.assertEqual(handled_response.status_code, 404)
+        self.assertEqual(self.error(handled_response), self.error(response))
 
 
 if __name__ == "__main__":

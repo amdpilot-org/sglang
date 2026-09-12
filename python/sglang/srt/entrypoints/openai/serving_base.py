@@ -77,7 +77,7 @@ class OpenAIServingBase(ABC):
             return None
 
         model = getattr(request, "model", None)
-        if not model:
+        if model is None:
             return None
 
         served_model = self.tokenizer_manager.served_model_name
