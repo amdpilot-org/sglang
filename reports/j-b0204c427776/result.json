@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35148",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "abca41a8c6819ed40de5d9814ea8f05dfdb69042",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "PR 1892 fixes the reproduced non-streaming HTTP passthrough and the empty-string reasoning_content counterexample, and adds gRPC prefilled-thinking initialization. It remains a partial fix because HTTP streaming explicitly bypasses reasoning parsing and forwards worker SSE bytes unchanged.",
+  "tests": [
+    {
+      "command": "temporary review regression on base: cargo test --manifest-path sgl-model-gateway/Cargo.toml --test routing_tests review_reproduces_http_reasoning_passthrough -- --nocapture",
+      "exit_code": 101,
+      "what_was_measured": "The actual base HTTP router returned the mock worker response unchanged: reasoning_content was Null instead of 'work' for content 'work</think>answer'. Raw log: /job/review-evidence/j-b0204c427776/base/original-http-failure.log"
+    },
+    {
+      "command": "cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib http_chat_response -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate abca41a8, all three candidate HTTP payload regressions passed, including the empty-string counterexample and preservation of non-empty worker reasoning. Raw log: /job/review-evidence/j-b0204c427776/candidate/http-suite.log"
+    },
+    {
+      "command": "temporary review-only candidate test: cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib review_adversarial_http_reasoning_payload_boundaries -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Independent cases passed for missing reasoning_content, explicit think tags, multiple choices, null/non-string content, and preservation of worker-owned reasoning. The stream-shaped delta remained unchanged, consistent with this helper being message-only. Raw log and patch are under /job/review-evidence/j-b0204c427776/candidate/."
+    },
+    {
+      "command": "cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib qwen3_prefill_reasoning -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate abca41a8, Qwen3 prefilled reasoning parser tests passed for non-streaming and incremental parser operation. This does not exercise HTTP SSE transport. Raw log: /job/review-evidence/j-b0204c427776/candidate/qwen3-prefill-suite.log"
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 abca41a8c6819ed40de5d9814ea8f05dfdb69042",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The defect and candidate changes are CPU-side Rust gateway parsing. One AMD Instinct MI350X/gfx950 was visible, but no GPU execution was relevant or claimed.",
+  "native_rebuilt": true,
+  "remaining_counterexamples": [
+    "HTTP streaming requests return before parse_chat_reasoning_response and the worker SSE body is forwarded as an unchanged byte stream; reasoning emitted in delta.content is not separated into delta.reasoning_content.",
+    "The exact Qwen/Qwen3.8-27B-FP8 tokenizer/template gate was not exercised because the model weights and tokenizer assets were unavailable; helper-level success does not verify that deployment-specific gate end to end."
+  ],
+  "remaining_limitations": [
+    "Reporter environment was NVIDIA L40S/CUDA; review environment was x86_64 with AMD Instinct MI350X/gfx950 and ROCm 7.2.",
+    "No Qwen/Qwen3.8-27B-FP8 weights or exact tokenizer assets were available, so no full-model or semantic-accuracy validation was performed.",
+    "No FlyDSL/C++ code changed. Rust gateway code was freshly built with Rust 1.90; the prepared Python environment was not part of the execution path."
+  ]
+}
