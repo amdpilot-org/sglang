@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30609",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2582",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2578",
+  "candidate_commit": "f8cb68f2f3e9d46b5ccdce32c5e6434579e8e03d",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is valid test-only hardening that guards the already-correct opt-in Mooncake transfer-batch default. It changes no runtime code and does not verify or fully resolve the original GLM-5.2-FP8 multi-node Mooncake/DeepEP timeout.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-f1ac32f87fe1/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_mooncake_transfer_batching.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression and existing Mooncake batching mechanics: 6 tests passed and 3 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f1ac32f87fe1/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_mooncake_transfer_batching.py -k 'slices_index_arrays or legacy_single_batch or stops_after_first_failed or device_page_indices or custom_mem_pool'",
+      "exit_code": 0,
+      "what_was_measured": "Independent selection of ordered slicing, short-transfer boundary, failure stopping, device-index, and custom-pool behavior: 5 tests and 3 subtests passed."
+    },
+    {
+      "command": "SGLANG_MOONCAKE_MAX_TRANSFER_BATCH_INDICES=1024 /tmp/amdpilot-repo-j-f1ac32f87fe1/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_mooncake_transfer_batching.py -k transfer_batch_limit_remains_opt_in",
+      "exit_code": 1,
+      "what_was_measured": "Adversarial environment isolation: the regression reads the supported effective override and fails with 1024 != 0; normal clean-environment execution passes."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU execution was relevant to the candidate's CPU-only configuration regression. Import inspection found one AMD Instinct MI350X gfx950, not the required H100 multi-node topology."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The original GLM-5.2-FP8 deployment was not reproduced before or after the candidate.",
+    "The reported 2-node prefill and 4-node/32-rank H100 decode topology with Mooncake/RDMA, DSA, HiCache, HiSparse, and DeepEP remains untested.",
+    "The source follow-up's DeepEP-enabled freeze is not exercised or fixed by a Mooncake default-value regression.",
+    "Cross-model and cross-KV-layout safety and efficacy of any nonzero batch size remain undemonstrated.",
+    "The new test assumes a clean SGLANG_MOONCAKE_MAX_TRANSFER_BATCH_INDICES environment and fails under a deliberate supported override."
+  ],
+  "remaining_limitations": [
+    "Only one AMD Instinct MI350X gfx950 GPU is available; no NVIDIA H100 is present.",
+    "GLM-5.2-FP8 weights and the required multi-node Mooncake/RDMA deployment are unavailable.",
+    "No native rebuild was needed because the candidate has no native or runtime source changes."
+  ]
+}
