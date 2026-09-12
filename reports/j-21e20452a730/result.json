@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37648",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "summary": "The reported delayed TP8 GLM-5.3-MXFP4 EAGLE/AITER memory fault was not reproducible with the assigned single gfx950 GPU and absent model weights. Current source contains relevant paged-draft index coverage, but no existing change or focused test establishes that the reported issue is fixed. The exact three logged untuned BF16 GEMM shapes completed correctly on the assigned GPU, so no narrow SGLang correction was justified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-21e20452a730/venv/bin/python (script invoking aiter.tuned_gemm.tgemm.mm for (84333,2624,6144), (84333,512,6144), and (84333,6144,256), with synchronization and sampled CPU-float32 references)",
+      "exit_code": 0,
+      "what_was_measured": "All exact reported GEMM shapes selected AITER's untuned torch solution 0 fallback, completed on gfx950 with finite outputs, and had sampled maximum relative errors of 0.00383549, 0.00377296, and 0.00388455 versus CPU float32 matmul."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-21e20452a730/venv/bin/python -m pytest -q test/registered/kernel/speculative/test_spec_kv_indices_grid.py",
+      "exit_code": 0,
+      "what_was_measured": "Three GPU test groups passed, comparing speculative KV-index kernels with historical launches and a Python reference across page-size, top-k, draft-step, batch, and long-sequence boundaries."
+    },
+    {
+      "command": "rocm-smi --showproductname --showuniqueid --showmeminfo vram",
+      "exit_code": 0,
+      "what_was_measured": "The assigned hardware is one AMD Instinct MI350X/gfx950 with 270566162432 bytes VRAM; it cannot execute the reported TP8 workload."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "The exact logged GEMM shapes and the speculative KV-index regression ran on the assigned AMD Instinct MI350X/gfx950. Raw output is under /tmp/amdpilot-repo-j-21e20452a730/evidence/.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one gfx950 GPU was assigned; the reported TP8 communication and per-rank failure cannot be reproduced.",
+    "The OneNexus/GLM-5.3-MXFP4 checkpoint and its EAGLE components were unavailable.",
+    "The reported heterogeneous 32-client, approximately 24-minute, 3.68M-token-pool workload was unavailable.",
+    "Passing isolated GEMM and KV-index tests does not establish that the serving issue is fixed.",
+    "No failing-before/passing-after regression was possible because the original behavior was not reproduced and no issue-specific defect boundary was identified."
+  ]
+}
