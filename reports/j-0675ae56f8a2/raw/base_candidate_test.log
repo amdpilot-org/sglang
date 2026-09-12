@@ -1,0 +1,289 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0 -- /tmp/amdpilot-repo-j-0675ae56f8a2/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /job
+plugins: hypothesis-6.155.0, anyio-4.15.1
+collecting ... collected 5 items
+
+../review-evidence/candidate_test_ep_scatter.py::test_ep_scatter_prefix_is_not_reloaded FAILED [ 20%]
+../review-evidence/candidate_test_ep_scatter.py::test_ep_scatter_prefix_and_indices[padded_counts0-valid_counts0-128] FAILED [ 40%]
+../review-evidence/candidate_test_ep_scatter.py::test_ep_scatter_prefix_and_indices[padded_counts1-valid_counts1-128] FAILED [ 60%]
+../review-evidence/candidate_test_ep_scatter.py::test_ep_scatter_prefix_and_indices[padded_counts2-valid_counts2-64] FAILED [ 80%]
+../review-evidence/candidate_test_ep_scatter.py::test_ep_scatter_prefix_and_indices[padded_counts3-valid_counts3-32] FAILED [100%]
+
+=================================== FAILURES ===================================
+____________________ test_ep_scatter_prefix_is_not_reloaded ____________________
+
+    def test_ep_scatter_prefix_is_not_reloaded():
+        """The prefix producer and consumer must not communicate without a barrier."""
+        tree = ast.parse(textwrap.dedent(inspect.getsource(_fwd_kernel_ep_scatter_1.fn)))
+    
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if not (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "tl"
+                and node.func.attr == "load"
+            ):
+                continue
+>           assert not any(
+                isinstance(child, ast.Name) and child.id == "expert_start_loc"
+                for child in ast.walk(node)
+            ), "expert_start_loc is written and then reloaded without a CTA barrier"
+E           AssertionError: expert_start_loc is written and then reloaded without a CTA barrier
+E           assert not True
+E            +  where True = any(<generator object test_ep_scatter_prefix_is_not_reloaded.<locals>.<genexpr> at 0x7dec29fae260>)
+
+../review-evidence/candidate_test_ep_scatter.py:29: AssertionError
+_____ test_ep_scatter_prefix_and_indices[padded_counts0-valid_counts0-128] _____
+
+padded_counts = [0], valid_counts = [0], block_e = 128
+
+    @pytest.mark.parametrize(
+        "padded_counts,valid_counts,block_e",
+        [
+            ([0], [0], 128),
+            ([0, 128, 0, 256, 128], [0, 1, 0, 255, 127], 128),
+            ([64, 192, 64], [64, 129, 0], 64),
+            ([32] * 17, [0, 1, 31, 32] * 4 + [17], 32),
+        ],
+    )
+    def test_ep_scatter_prefix_and_indices(padded_counts, valid_counts, block_e):
+        padded = torch.tensor(padded_counts, dtype=torch.int32, device="cuda")
+        valid = torch.tensor(valid_counts, dtype=torch.int32, device="cuda")
+        starts = torch.full_like(padded, -1)
+        m_indices = torch.full((sum(padded_counts),), -2, dtype=torch.int32, device="cuda")
+    
+        handle = _fwd_kernel_ep_scatter_1[(len(padded_counts),)](
+            padded,
+            valid,
+            starts,
+            m_indices,
+            num_experts=len(padded_counts),
+            BLOCK_E=block_e,
+            BLOCK_EXPERT_NUM=triton.next_power_of_2(len(padded_counts)),
+            num_warps=8,
+        )
+    
+        expected_starts = (torch.cumsum(padded, dim=0) - padded).to(torch.int32)
+        expected_indices = torch.cat(
+            [
+                torch.cat(
+                    [
+                        torch.full((valid_count,), expert, dtype=torch.int32),
+                        torch.full((padded_count - valid_count,), -1, dtype=torch.int32),
+                    ]
+                )
+                for expert, (padded_count, valid_count) in enumerate(
+                    zip(padded_counts, valid_counts)
+                )
+            ]
+        ).to("cuda")
+    
+        torch.testing.assert_close(starts, expected_starts, rtol=0, atol=0)
+        torch.testing.assert_close(m_indices, expected_indices, rtol=0, atol=0)
+>       assert "tt.load %cur_expert_start" not in handle.asm["ttir"]
+E       assert 'tt.load %cur_expert_start' not in '#loc = loc(...t #loc41))\n'
+E         
+E         'tt.load %cur_expert_start' is contained here:
+E           #loc = loc("/job/repo/python/sglang/kernels/ops/moe/ep_moe_kernels.py":1018:1)
+E           #loc2 = loc(unknown)
+E           #loc7 = loc("/job/repo/python/sglang/kernels/ops/moe/ep_moe_kernels.py":1035:14)
+E           #loc24 = loc("num_recv_tokens_per_expert"(#loc))
+E           #loc25 = loc("num_valid_tokens_per_expert"(#loc))...
+E         
+E         ...Full output truncated (78 lines hidden), use '-vv' to show
+
+../review-evidence/candidate_test_ep_scatter.py:78: AssertionError
+_____ test_ep_scatter_prefix_and_indices[padded_counts1-valid_counts1-128] _____
+
+padded_counts = [0, 128, 0, 256, 128], valid_counts = [0, 1, 0, 255, 127]
+block_e = 128
+
+    @pytest.mark.parametrize(
+        "padded_counts,valid_counts,block_e",
+        [
+            ([0], [0], 128),
+            ([0, 128, 0, 256, 128], [0, 1, 0, 255, 127], 128),
+            ([64, 192, 64], [64, 129, 0], 64),
+            ([32] * 17, [0, 1, 31, 32] * 4 + [17], 32),
+        ],
+    )
+    def test_ep_scatter_prefix_and_indices(padded_counts, valid_counts, block_e):
+        padded = torch.tensor(padded_counts, dtype=torch.int32, device="cuda")
+        valid = torch.tensor(valid_counts, dtype=torch.int32, device="cuda")
+        starts = torch.full_like(padded, -1)
+        m_indices = torch.full((sum(padded_counts),), -2, dtype=torch.int32, device="cuda")
+    
+        handle = _fwd_kernel_ep_scatter_1[(len(padded_counts),)](
+            padded,
+            valid,
+            starts,
+            m_indices,
+            num_experts=len(padded_counts),
+            BLOCK_E=block_e,
+            BLOCK_EXPERT_NUM=triton.next_power_of_2(len(padded_counts)),
+            num_warps=8,
+        )
+    
+        expected_starts = (torch.cumsum(padded, dim=0) - padded).to(torch.int32)
+        expected_indices = torch.cat(
+            [
+                torch.cat(
+                    [
+                        torch.full((valid_count,), expert, dtype=torch.int32),
+                        torch.full((padded_count - valid_count,), -1, dtype=torch.int32),
+                    ]
+                )
+                for expert, (padded_count, valid_count) in enumerate(
+                    zip(padded_counts, valid_counts)
+                )
+            ]
+        ).to("cuda")
+    
+        torch.testing.assert_close(starts, expected_starts, rtol=0, atol=0)
+        torch.testing.assert_close(m_indices, expected_indices, rtol=0, atol=0)
+>       assert "tt.load %cur_expert_start" not in handle.asm["ttir"]
+E       assert 'tt.load %cur_expert_start' not in '#loc = loc(...t #loc45))\n'
+E         
+E         'tt.load %cur_expert_start' is contained here:
+E           #loc = loc("/job/repo/python/sglang/kernels/ops/moe/ep_moe_kernels.py":1018:1)
+E           #loc2 = loc(unknown)
+E           #loc9 = loc("/job/repo/python/sglang/kernels/ops/moe/ep_moe_kernels.py":1035:14)
+E           #loc26 = loc("num_recv_tokens_per_expert"(#loc))
+E           #loc27 = loc("num_valid_tokens_per_expert"(#loc))...
+E         
+E         ...Full output truncated (88 lines hidden), use '-vv' to show
+
+../review-evidence/candidate_test_ep_scatter.py:78: AssertionError
+_____ test_ep_scatter_prefix_and_indices[padded_counts2-valid_counts2-64] ______
+
+padded_counts = [64, 192, 64], valid_counts = [64, 129, 0], block_e = 64
+
+    @pytest.mark.parametrize(
+        "padded_counts,valid_counts,block_e",
+        [
+            ([0], [0], 128),
+            ([0, 128, 0, 256, 128], [0, 1, 0, 255, 127], 128),
+            ([64, 192, 64], [64, 129, 0], 64),
+            ([32] * 17, [0, 1, 31, 32] * 4 + [17], 32),
+        ],
+    )
+    def test_ep_scatter_prefix_and_indices(padded_counts, valid_counts, block_e):
+        padded = torch.tensor(padded_counts, dtype=torch.int32, device="cuda")
+        valid = torch.tensor(valid_counts, dtype=torch.int32, device="cuda")
+        starts = torch.full_like(padded, -1)
+        m_indices = torch.full((sum(padded_counts),), -2, dtype=torch.int32, device="cuda")
+    
+        handle = _fwd_kernel_ep_scatter_1[(len(padded_counts),)](
+            padded,
+            valid,
+            starts,
+            m_indices,
+            num_experts=len(padded_counts),
+            BLOCK_E=block_e,
+            BLOCK_EXPERT_NUM=triton.next_power_of_2(len(padded_counts)),
+            num_warps=8,
+        )
+    
+        expected_starts = (torch.cumsum(padded, dim=0) - padded).to(torch.int32)
+        expected_indices = torch.cat(
+            [
+                torch.cat(
+                    [
+                        torch.full((valid_count,), expert, dtype=torch.int32),
+                        torch.full((padded_count - valid_count,), -1, dtype=torch.int32),
+                    ]
+                )
+                for expert, (padded_count, valid_count) in enumerate(
+                    zip(padded_counts, valid_counts)
+                )
+            ]
+        ).to("cuda")
+    
+        torch.testing.assert_close(starts, expected_starts, rtol=0, atol=0)
+        torch.testing.assert_close(m_indices, expected_indices, rtol=0, atol=0)
+>       assert "tt.load %cur_expert_start" not in handle.asm["ttir"]
+E       assert 'tt.load %cur_expert_start' not in '#loc = loc(...t #loc45))\n'
+E         
+E         'tt.load %cur_expert_start' is contained here:
+E           #loc = loc("/job/repo/python/sglang/kernels/ops/moe/ep_moe_kernels.py":1018:1)
+E           #loc2 = loc(unknown)
+E           #loc9 = loc("/job/repo/python/sglang/kernels/ops/moe/ep_moe_kernels.py":1035:14)
+E           #loc26 = loc("num_recv_tokens_per_expert"(#loc))
+E           #loc27 = loc("num_valid_tokens_per_expert"(#loc))...
+E         
+E         ...Full output truncated (88 lines hidden), use '-vv' to show
+
+../review-evidence/candidate_test_ep_scatter.py:78: AssertionError
+_____ test_ep_scatter_prefix_and_indices[padded_counts3-valid_counts3-32] ______
+
+padded_counts = [32, 32, 32, 32, 32, 32, ...]
+valid_counts = [0, 1, 31, 32, 0, 1, ...], block_e = 32
+
+    @pytest.mark.parametrize(
+        "padded_counts,valid_counts,block_e",
+        [
+            ([0], [0], 128),
+            ([0, 128, 0, 256, 128], [0, 1, 0, 255, 127], 128),
+            ([64, 192, 64], [64, 129, 0], 64),
+            ([32] * 17, [0, 1, 31, 32] * 4 + [17], 32),
+        ],
+    )
+    def test_ep_scatter_prefix_and_indices(padded_counts, valid_counts, block_e):
+        padded = torch.tensor(padded_counts, dtype=torch.int32, device="cuda")
+        valid = torch.tensor(valid_counts, dtype=torch.int32, device="cuda")
+        starts = torch.full_like(padded, -1)
+        m_indices = torch.full((sum(padded_counts),), -2, dtype=torch.int32, device="cuda")
+    
+        handle = _fwd_kernel_ep_scatter_1[(len(padded_counts),)](
+            padded,
+            valid,
+            starts,
+            m_indices,
+            num_experts=len(padded_counts),
+            BLOCK_E=block_e,
+            BLOCK_EXPERT_NUM=triton.next_power_of_2(len(padded_counts)),
+            num_warps=8,
+        )
+    
+        expected_starts = (torch.cumsum(padded, dim=0) - padded).to(torch.int32)
+        expected_indices = torch.cat(
+            [
+                torch.cat(
+                    [
+                        torch.full((valid_count,), expert, dtype=torch.int32),
+                        torch.full((padded_count - valid_count,), -1, dtype=torch.int32),
+                    ]
+                )
+                for expert, (padded_count, valid_count) in enumerate(
+                    zip(padded_counts, valid_counts)
+                )
+            ]
+        ).to("cuda")
+    
+        torch.testing.assert_close(starts, expected_starts, rtol=0, atol=0)
+        torch.testing.assert_close(m_indices, expected_indices, rtol=0, atol=0)
+>       assert "tt.load %cur_expert_start" not in handle.asm["ttir"]
+E       assert 'tt.load %cur_expert_start' not in '#loc = loc(...t #loc43))\n'
+E         
+E         'tt.load %cur_expert_start' is contained here:
+E           #loc = loc("/job/repo/python/sglang/kernels/ops/moe/ep_moe_kernels.py":1018:1)
+E           #loc2 = loc(unknown)
+E           #loc9 = loc("/job/repo/python/sglang/kernels/ops/moe/ep_moe_kernels.py":1035:14)
+E           #loc25 = loc("num_recv_tokens_per_expert"(#loc))
+E           #loc26 = loc("num_valid_tokens_per_expert"(#loc))...
+E         
+E         ...Full output truncated (85 lines hidden), use '-vv' to show
+
+../review-evidence/candidate_test_ep_scatter.py:78: AssertionError
+=========================== short test summary info ============================
+FAILED ../review-evidence/candidate_test_ep_scatter.py::test_ep_scatter_prefix_is_not_reloaded
+FAILED ../review-evidence/candidate_test_ep_scatter.py::test_ep_scatter_prefix_and_indices[padded_counts0-valid_counts0-128]
+FAILED ../review-evidence/candidate_test_ep_scatter.py::test_ep_scatter_prefix_and_indices[padded_counts1-valid_counts1-128]
+FAILED ../review-evidence/candidate_test_ep_scatter.py::test_ep_scatter_prefix_and_indices[padded_counts2-valid_counts2-64]
+FAILED ../review-evidence/candidate_test_ep_scatter.py::test_ep_scatter_prefix_and_indices[padded_counts3-valid_counts3-32]
+============================== 5 failed in 4.56s ===============================
