@@ -92,7 +92,7 @@ from sglang.srt.disaggregation.base import BaseKVSender
 from sglang.srt.disaggregation.decode_schedule_batch_mixin import (
     ScheduleBatchDisaggregationDecodeMixin,
 )
-from sglang.srt.disaggregation.utils import DisaggregationMode
+from sglang.srt.disaggregation.utils import FAKE_BOOTSTRAP_HOST, DisaggregationMode
 from sglang.srt.dllm.mixin.req import ReqDllmMixin
 from sglang.srt.environ import envs
 from sglang.srt.managers.embed_types import PositionalEmbeds
@@ -1283,7 +1283,9 @@ class Req(ReqDllmMixin):
         # and consumed in the decode transfer commit; never plumbed to prefill.
         self.pd_rebootstrap_forced_output_id: Optional[int] = None
         # May read cached prefixes, never publishes its own KV to any cache tier.
-        self.skip_radix_cache_insert = skip_cache_insert
+        self.skip_radix_cache_insert = (
+            skip_cache_insert or bootstrap_host == FAKE_BOOTSTRAP_HOST
+        )
         self.disagg_kv_sender: Optional[BaseKVSender] = None
 
         self.routed_dp_rank: Optional[int] = routed_dp_rank

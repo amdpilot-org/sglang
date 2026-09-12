@@ -127,16 +127,17 @@ def _make_req(**kwargs) -> Req:
 
 
 class TestReqSkipCacheInsertDerivation(CustomTestCase):
-    """The skip flag comes only from the explicit request field. Deriving it
-    from the PD fake bootstrap host kept every fake-sender request (prefill-only
-    deployments, health checks) out of the prefix cache (#38069, #38094)."""
+    """Both the public field and legacy PD sentinel suppress cache insertion."""
 
     def test_explicit_field_skips(self):
         self.assertTrue(_make_req(skip_cache_insert=True).skip_radix_cache_insert)
 
-    def test_fake_bootstrap_host_alone_does_not_skip(self):
+    def test_fake_bootstrap_host_alone_skips(self):
         req = _make_req(bootstrap_host=FAKE_BOOTSTRAP_HOST, bootstrap_room=0)
-        self.assertFalse(req.skip_radix_cache_insert)
+        self.assertTrue(req.skip_radix_cache_insert)
+
+    def test_normal_request_does_not_skip(self):
+        self.assertFalse(_make_req().skip_radix_cache_insert)
 
 
 if __name__ == "__main__":
