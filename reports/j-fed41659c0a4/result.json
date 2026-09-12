@@ -1,0 +1,32 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30570",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The v0.5.14 implementation reproduces the reported 614406-vs-614408 page-table mismatch by construction. Current main already sizes the DSA CUDA-graph page table and replay copy from req_to_token.shape[1]; a new GPU regression verifies the reported dimensions and independent boundaries. No additional production fix was justified.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-fed41659c0a4/venv/bin/python -c \"import torch; dst=torch.empty((6,614406),dtype=torch.int32,device='cuda'); src=torch.empty((6,614408),dtype=torch.int32,device='cuda'); dst[:,:614408].copy_(src)\"",
+      "exit_code": 1,
+      "what_was_measured": "Historical v0.5.14 allocation and EAGLE source widths reproduce the exact RuntimeError reported in the issue on the assigned GPU."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-fed41659c0a4/venv/bin/python -m pytest -q test/registered/attention/test_dsa_cuda_graph_context_boundary.py --junitxml=reports/j-fed41659c0a4/pytest.xml",
+      "exit_code": 0,
+      "what_was_measured": "Current allocator/helper/copy path at 614408 columns, exact GPU tensor equality, and three independent page-table width boundaries; 2 tests and 3 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fed41659c0a4/venv/bin/python -m pre_commit run --files test/registered/attention/test_dsa_cuda_graph_context_boundary.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, and registered-test metadata checks passed."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Tests ran with HIP_VISIBLE_DEVICES=0 on one AMD Instinct MI350X, gcnArchName gfx950:sramecc+:xnack-, using torch 2.11.0+rocm7.2 and HIP 7.2.26015.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No ZhipuAI/GLM-5.2-FP8 weights were available, so model architecture behavior and semantic accuracy were not tested.",
+    "Only one gfx950 ROCm GPU was assigned; the reported TP=8 Blackwell CUDA deployment and multi-worker process failure were not reproduced.",
+    "The focused test validates allocation and replay-copy shape invariants on GPU but does not execute a CUDA graph on NVIDIA hardware.",
+    "The source issue remains open, so this result is candidate verification of the existing fix rather than an upstream closure claim."
+  ]
+}
