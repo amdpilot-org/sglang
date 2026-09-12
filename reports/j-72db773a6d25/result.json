@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30781",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2456",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2422",
+  "candidate_commit": "c89391648105d687cd6591fb2d501a7ab3c2c5a3",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes enum-level acceptance and its regression passes, but the gateway's typed deserialize/reserialize path strips the reported custom tool's name and description before proxying. It also strips namespace metadata and nested tools. This is a partial fix that replaces rejection with silent request corruption.",
+  "tests": [
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-72db773a6d25/cargo-target cargo test --test spec_test review_python_contract_and_unknown_boundary -- --nocapture (temporary review test on base)",
+      "exit_code": 101,
+      "what_was_measured": "Failing-before behavior on the exact recorded base using registry openai-protocol 1.0.0; the original four-variant enum mismatch is additionally preserved in the candidate's baseline-response-tool-types.log."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-72db773a6d25/cargo-target cargo test --test spec_test response_tool_types -- --nocapture (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: all 12 current Python tool type strings deserialize, custom passes validation, and an unknown spelling is rejected."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-72db773a6d25/cargo-target cargo test --test spec_test review_roundtrip -- --nocapture (temporary independent tests on exact candidate)",
+      "exit_code": 101,
+      "what_was_measured": "Typed request round-trip used by HTTP forwarding drops name/description from the issue's custom tool and drops name/description/nested tools from a Python-supported namespace tool."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-72db773a6d25/cargo-target cargo tree -i openai-protocol (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed direct and transitive openai-protocol users resolve to the candidate's vendored source path."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The issue is deterministic CPU-only Rust JSON processing. The host exposes one gfx950 GPU, but no GPU or model execution is relevant to the demonstrated request corruption."
+  },
+  "native_rebuilt": true,
+  "remaining_counterexamples": [
+    "The issue's exact custom tool object {type, name, description} is accepted but forwarded as only {type}.",
+    "A Python-supported namespace tool loses name, description, and nested tools during gateway round-trip.",
+    "Any future or tool-specific fields absent from the Rust ResponseTool schema are silently discarded by typed proxying."
+  ],
+  "remaining_limitations": [
+    "No GLM-5.2 weights or four-node TP8 topology were available; full model/distributed serving was not reproduced.",
+    "No live backend was started; the deterministic typed serialization boundary was tested directly.",
+    "The available GPU is gfx950, not the reporter's gfx942 MI308X, and GPU execution is unrelated to this protocol defect.",
+    "native_rebuilt refers to rebuilding the changed Rust crate and gateway; no C/C++, HIP, or FlyDSL native source changed."
+  ]
+}
