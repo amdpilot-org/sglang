@@ -26,7 +26,7 @@ from sglang.kernels.ops.activation.softcap import (
     softcap_inplace_logits as fused_softcap,
 )
 from sglang.srt.beam_search.logits_capture import BeamLogitsCapture
-from sglang.srt.distributed import get_tp_group
+from sglang.srt.distributed import get_tp_group, tensor_model_parallel_gather
 from sglang.srt.distributed.device_communicators import triton_symm_mem_ag
 from sglang.srt.environ import envs
 from sglang.srt.layers import layernorm_sp
@@ -56,7 +56,7 @@ from sglang.srt.model_executor.forward_batch_info import (
     ForwardBatch,
     ForwardMode,
 )
-from sglang.srt.runtime_context import get_exec, get_parallel
+from sglang.srt.runtime_context import get_exec, get_flags, get_parallel
 from sglang.srt.sampling.sampling_observer import DeviceAuxiliaryOutput
 from sglang.srt.utils.common import (
     is_cpu,
@@ -260,6 +260,10 @@ class LogitsProcessorOutput:
     # Scheduler-local output copied alongside the ordinary generation result.
     auxiliary_device_output: Optional[DeviceAuxiliaryOutput] = None
 
+    # True when TP vocabulary shards were gathered only onto TP rank 0.  The
+    # sampler must broadcast its token ids before rank-local state is updated.
+    tp_logits_gathered: bool = False
+
 
 @dataclasses.dataclass
 class LogitsMetadata:
@@ -297,6 +301,9 @@ class LogitsMetadata:
 
     # Whether this batch is prefill-only (no token generation needed)
     is_prefill_only: bool = False
+    return_logprob: bool = False
+    is_speculative: bool = False
+    can_run_decode_cuda_graph: bool = False
 
     # Carried from ForwardBatch so logits pruning can reconstruct the SP gather.
     attn_tp_sequence_sharded: bool = False
@@ -354,6 +361,9 @@ class LogitsMetadata:
             token_ids_logprobs=forward_batch.token_ids_logprobs,
             extend_input_logprob_token_ids_gpu=forward_batch.extend_input_logprob_token_ids_gpu,
             is_prefill_only=forward_batch.is_prefill_only,
+            return_logprob=forward_batch.return_logprob,
+            is_speculative=forward_batch.spec_algorithm is not None,
+            can_run_decode_cuda_graph=forward_batch.can_run_decode_cuda_graph,
             attn_tp_sequence_sharded=forward_batch.attn_tp_sequence_sharded,
             global_num_tokens_gpu=forward_batch.global_num_tokens_gpu,
             dp_local_start_pos=forward_batch.dp_local_start_pos,
@@ -527,12 +537,15 @@ class LogitsProcessor(nn.Module):
             # Compute logits for both input and sampled tokens.
             logits = self._get_logits(pruned_states, lm_head, logits_metadata)
             sampled_logits = (
-                logits[sample_indices] if sample_indices is not None else logits
+                logits[sample_indices]
+                if logits is not None and sample_indices is not None
+                else logits
             )
 
             # Decode mode or extend mode without return_logprob.
             return LogitsProcessorOutput(
                 next_token_logits=sampled_logits,
+                tp_logits_gathered=self._use_tp_logits_gather(logits_metadata),
                 hidden_states=hidden_states_to_store,
                 mm_input_embeds=logits_metadata.mm_input_embeds,
             )
@@ -800,7 +813,7 @@ class LogitsProcessor(nn.Module):
         logits_metadata: LogitsMetadata,
         embedding_bias: Optional[torch.Tensor] = None,
         use_logits_buffer: bool = True,
-    ) -> torch.Tensor:
+    ) -> Optional[torch.Tensor]:
         """Get logits from hidden_states.
 
         If sampled_logits_only is True, it means hidden_states only contain the
@@ -850,8 +863,13 @@ class LogitsProcessor(nn.Module):
             ):
                 logits = self._tp_lm_head_all_to_all(logits)
                 used_tp_lm_head_all_to_all = True
+            elif self._use_tp_logits_gather(logits_metadata):
+                logits = tensor_model_parallel_gather(logits, dst=0, dim=-1)
             else:
                 logits = self._logits_gatherer(logits)
+            if logits is None:
+                _trace_e2e_logits("tp_logits_gather_returned", logits_shape=None)
+                return None
             _trace_e2e_logits(
                 "tp_logits_gather_returned", logits_shape=tuple(logits.shape)
             )
@@ -880,6 +898,26 @@ class LogitsProcessor(nn.Module):
                 )
 
         return logits
+
+    def _use_tp_logits_gather(self, logits_metadata: LogitsMetadata) -> bool:
+        """Whether only TP rank 0 may consume this batch's full logits.
+
+        Torch's gather collective is not graph-capturable on all supported
+        backends, and several distributed modes consume logits on every rank.
+        Those cases deliberately retain the all-gather path.
+        """
+        return (
+            self.do_tensor_parallel_all_gather
+            and not self.use_attn_tp_group
+            and not self.do_tensor_parallel_all_gather_dp_attn
+            and not logits_metadata.return_logprob
+            and not logits_metadata.extend_return_logprob
+            and not logits_metadata.is_prefill_only
+            and not logits_metadata.is_speculative
+            and not logits_metadata.can_run_decode_cuda_graph
+            and not get_flags().capture.disable_dispose_tensor
+            and not self.use_tp_lm_head_all_to_all
+        )
 
     def _compute_lm_head(
         self,
