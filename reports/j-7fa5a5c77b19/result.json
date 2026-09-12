@@ -1,0 +1,31 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/9889",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Audited all three originally reported call sites. Janus remains CPU-only and its tuple-form candidate was slower, the former Gemma call no longer exists, and Phi now uses an equivalent fixed-size bucketize mapping that avoids nonzero and its interval temporary.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-7fa5a5c77b19/venv/bin/python -m pytest -q test/srt/models/test_phi4mm_utils.py",
+      "exit_code": 0,
+      "what_was_measured": "19 equivalence and metadata cases covering empty, sparse, dense, boundary, tail, and attention-window inputs against the pre-change interval/nonzero reference."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-7fa5a5c77b19/venv/bin/python reports/j-7fa5a5c77b19/profile_nonzero.py",
+      "exit_code": 0,
+      "what_was_measured": "Actual Janus nonzero input device, Phi output metadata, controlled CPU candidate timings, and queued-work GPU synchronization timings on the assigned MI355X."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7fa5a5c77b19/venv/bin/python -m compileall -q python/sglang/srt/models/phi4mm_utils.py test/srt/models/test_phi4mm_utils.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Python syntax and patch whitespace validation."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "On AMD Instinct MI355X gfx950, both GPU nonzero forms took a median 41.51-41.53 ms behind a calibrated 41.52 ms queued sleep, while fixed-output bucketize and add returned in about 0.005 ms.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The stale Gemma nonzero call was source/history verified only because it is absent from current main; no Gemma model-weight run was applicable.",
+    "Janus used the actual processor method with deterministic fake tokenizer and image processor inputs, not model weights.",
+    "Unrelated nonzero sites introduced elsewhere after the original report were listed during audit but were not mechanically changed or claimed as resolved."
+  ]
+}
