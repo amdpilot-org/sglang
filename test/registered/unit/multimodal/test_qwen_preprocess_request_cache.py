@@ -1,5 +1,7 @@
+import asyncio
 import unittest
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from sglang.srt.managers.schedule_batch import MultimodalProcessorOutput
 from sglang.srt.multimodal.cache import MultimodalPreprocessCache
@@ -51,6 +53,36 @@ class TestQwenPreprocessRequestCache(unittest.IsolatedAsyncioTestCase):
         self.assertIsNot(result, retained)
         result.input_ids.append(4)
         self.assertEqual(retained.input_ids, [1, 2, 3])
+
+    async def test_identical_cold_requests_share_preprocessing(self):
+        processor = _processor()
+        request = _request([_HASH_A])
+        started = asyncio.Event()
+        release = asyncio.Event()
+        retained = MultimodalProcessorOutput(mm_items=[], input_ids=[1, 2, 3])
+
+        async def process_once(*args, **kwargs):
+            started.set()
+            await release.wait()
+            return retained
+
+        processor._process_mm_data_uncached = AsyncMock(side_effect=process_once)
+        first = asyncio.create_task(
+            processor.process_mm_data_async(["first-url"], "describe", request)
+        )
+        await started.wait()
+        second = asyncio.create_task(
+            processor.process_mm_data_async(["second-url"], "describe", request)
+        )
+        await asyncio.sleep(0)
+
+        self.assertEqual(processor._process_mm_data_uncached.await_count, 1)
+        release.set()
+        first_result, second_result = await asyncio.gather(first, second)
+        self.assertEqual(processor.mm_preprocess_cache.stats()["singleflight_joins"], 1)
+        self.assertIsNot(first_result, second_result)
+        first_result.input_ids.append(4)
+        self.assertEqual(second_result.input_ids, [1, 2, 3])
 
     def test_identity_is_ordered_prompt_and_processor_scoped(self):
         processor = _processor()

@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/1932",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Preserved the candidate's valid exact-request Qwen preprocessing cache and corrected its reproducible concurrent-cold-request race with cancellation-safe single-flight. The original save/load-by-ID contract remains incomplete: prompt-independent reuse, an explicit OpenAI operation, shared/durable lifecycle, and video/audio support are not implemented.",
+  "tests": [
+    {
+      "command": "candidate 5a5fa419: mandated Python invoking pytest for test_qwen_preprocess_request_cache.py, test_preprocess_cache.py, and test_mm_hashes.py with candidate source first on sys.path",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate behavior: 38 passed and 5 subtests passed."
+    },
+    {
+      "command": "candidate 5a5fa419: independent test_qwen_review_counterexamples.py::test_prompt_changes_content_addressed_key",
+      "exit_code": 0,
+      "what_was_measured": "The same image SHA-256 content ID produces a different request cache key when only the rendered prompt changes."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-932441ccd22b/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_qwen_preprocess_request_cache.py test/registered/unit/multimodal/test_preprocess_cache.py test/registered/unit/managers/test_mm_hashes.py",
+      "exit_code": 0,
+      "what_was_measured": "Corrected behavior: 39 passed and 5 subtests passed, including one owner computation, one single-flight join, and mutation isolation between simultaneous callers. The full related suite passed 115 tests and 30 subtests."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-932441ccd22b/venv/bin/python -m compileall -q python/sglang/srt/multimodal/processors/qwen_vl.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source compiles."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "AMD Instinct MI355X/gfx950 inventory was recorded, but no qualifying Qwen-VL weights were available. The supplied tiny Llama fixture cannot validate Qwen multimodal preprocessing or semantic equivalence."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Changed prompts miss because the rendered prompt remains part of the exact-output cache key.",
+    "There is no explicit OpenAI API operation to save and later load preprocessing by a caller-selected ID.",
+    "Entries remain process-local, are not shared across tokenizer workers, and do not survive restart.",
+    "Video and audio preprocessing remain excluded.",
+    "No qualifying Qwen-VL model weights were available for end-to-end serving or independent numerical validation.",
+    "No native code changed; native rebuild was not applicable."
+  ]
+}

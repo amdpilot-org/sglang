@@ -750,12 +750,30 @@ class QwenVLImageProcessor(SGLangBaseProcessor):
         cache_key = self._request_preprocess_cache_key(
             image_data, input_text, request_obj
         )
-        if cache_key is not None:
-            cached = self.mm_preprocess_cache.get(cache_key)
-            if cached is not None:
-                # Scheduler-side code annotates multimodal items while the
-                # request is running.  Never expose the retained value itself.
-                return copy.deepcopy(cached)
+        if cache_key is None:
+            return await self._process_mm_data_uncached(
+                image_data, input_text, request_obj, *args, **kwargs
+            )
+
+        lookup = await self.mm_preprocess_cache.get_or_compute(
+            cache_key,
+            lambda: self._process_mm_data_uncached(
+                image_data, input_text, request_obj, *args, **kwargs
+            ),
+        )
+        # Scheduler-side code annotates multimodal items while the request is
+        # running. Never expose either the retained value or a value shared by
+        # simultaneous waiters.
+        return copy.deepcopy(lookup.value)
+
+    async def _process_mm_data_uncached(
+        self,
+        image_data: List[Union[str, bytes]],
+        input_text,
+        request_obj,
+        *args,
+        **kwargs,
+    ):
 
         entry_time = time.perf_counter()
         base_output = await self.load_mm_data(
@@ -918,11 +936,6 @@ class QwenVLImageProcessor(SGLangBaseProcessor):
             mrope_positions=mrope_positions,
             mrope_position_delta=mrope_position_delta,
         )
-        if cache_key is not None:
-            # Cache only CPU-sized values. MultimodalPreprocessCache rejects
-            # CUDA-backed outputs (including CUDA IPC/VMM transport) rather
-            # than retaining GPU memory accidentally.
-            self.mm_preprocess_cache.put(cache_key, copy.deepcopy(output))
         return output
 
     def _request_preprocess_cache_key(self, image_data, input_text, request_obj):
