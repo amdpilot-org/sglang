@@ -55,7 +55,8 @@ class Llama32Detector(BaseFormatDetector):
         if "<|python_tag|>" not in text and not text.startswith("{"):
             return StreamingParseResult(normal_text=text, calls=[])
 
-        if "<|python_tag|>" in text:
+        has_bot_token = "<|python_tag|>" in text
+        if has_bot_token:
             normal_text, action_text = text.split("<|python_tag|>", maxsplit=1)
         else:
             normal_text, action_text = "", text
@@ -104,6 +105,11 @@ class Llama32Detector(BaseFormatDetector):
 
         # Only process if we found valid JSON objects
         calls = self.parse_base_json(all_actions, tools) if all_actions else []
+        # An unmarked leading "{" is only a heuristic tool-call candidate. If
+        # it produces no calls, none of the original content may be consumed.
+        if not has_bot_token and not calls:
+            return StreamingParseResult(normal_text=text, calls=[])
+
         # Use safe_idx to avoid idx containing the last part of an invalid JSON object
         trailing_text = (
             action_text[safe_idx:].strip() if safe_idx < action_text_len else ""
