@@ -1,0 +1,36 @@
+Prepared checkout: /job/repo
+Base commit: 358c163250ad3b1f62939b01ce1314a0a31a0365
+Python: /tmp/amdpilot-repo-j-6b061592c983/venv/bin/python
+GPU: AMD Instinct MI350X, gfx950:sramecc+:xnack-
+Torch: 2.11.0+rocm7.2
+HIP: 7.2.26015
+Triton: 3.7.0
+
+Historical kernel reproduction
+Command: HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6b061592c983/venv/bin/python reports/j-6b061592c983/reproduce_historical_store_cache_4d.py
+Exit code: 0
+Output:
+gpu AMD Instinct MI350X arch gfx950:sramecc+:xnack- torch 2.11.0+rocm7.2 hip 7.2.26015 triton 3.7.0
+PASS page_size=1 loc=torch.int64 head_dim=64 v_head_dim=64 exact=True
+PASS page_size=4 loc=torch.int32 head_dim=65 v_head_dim=33 exact=True
+ALL_PASS no PassManager::run or TritonAMDGPUCanonicalizePointers failure
+
+Current replacement regression
+Command: HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6b061592c983/venv/bin/python test/registered/unit/mem_cache/test_unified_mha_views.py -v
+Exit code: 0
+Output summary: Ran 13 tests in 0.638s; OK
+
+CI registration collection
+Command: collect_tests(['test/registered/unit/mem_cache/test_unified_mha_views.py'], sanity_check=False)
+Exit code: 0
+Measured: CPU base-a registration and AMD stage-b-test-1-gpu-small-amd registration were both present.
+
+Related-change evidence
+- sgl-project/sglang PR #30391 was closed after its author reported that upgrading Triton solved the compiler bug; its SGLang pointer-merge workaround was not merged.
+- Commit 4bea51d885538466caef09223e8beb1c307b4489 removed store_cache_4d, its wrapper, and test_store_cache_4d when dense unified-memory MHA/SWA views replaced the 4-D layout.
+- Open sgl-project/sglang PR #36753 targets the deleted historical test and predates that removal; it is not applicable to this base.
+
+Raw command logs retained outside the worktree:
+/tmp/amdpilot-repo-j-6b061592c983/evidence/j-6b061592c983/historical_store_cache_4d_gfx950.log
+/tmp/amdpilot-repo-j-6b061592c983/evidence/j-6b061592c983/current_unified_mha_views_after.log
+/tmp/amdpilot-repo-j-6b061592c983/evidence/j-6b061592c983/current_unified_mha_views_unittest.log

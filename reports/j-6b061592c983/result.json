@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/29864",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "not_reproduced",
+  "summary": "The reported TritonAMDGPUCanonicalizePointers failure is not present with the prepared ROCm 7.2/Triton 3.7 stack on gfx950. The exact historical kernel shape compiles and matches an independent PyTorch reference. Current main has also removed store_cache_4d and its 4-D layout in favor of dense unified-memory KV views. This change registers the current replacement regression on AMD CI instead of restoring the obsolete test or applying the unmerged workaround.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6b061592c983/venv/bin/python reports/j-6b061592c983/reproduce_historical_store_cache_4d.py",
+      "exit_code": 0,
+      "what_was_measured": "Compilation and exact GPU parity of the historical pointer-merge Triton kernel for page_size 1 and 4, int64 and int32 locations, equal and asymmetric K/V row widths, and first/interior/last slot boundaries."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6b061592c983/venv/bin/python test/registered/unit/mem_cache/test_unified_mha_views.py -v",
+      "exit_code": 0,
+      "what_was_measured": "13 replacement-layout regressions, including the real GPU set_kv_buffer write path at page sizes 1 and 4 against an independent strided-envelope oracle."
+    },
+    {
+      "command": "collect_tests(['test/registered/unit/mem_cache/test_unified_mha_views.py'], sanity_check=False)",
+      "exit_code": 0,
+      "what_was_measured": "The current replacement regression is collected for stage-b-test-1-gpu-small-amd after the registration change."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6b061592c983/venv/bin/python -m py_compile reports/j-6b061592c983/reproduce_historical_store_cache_4d.py test/registered/unit/mem_cache/test_unified_mha_views.py",
+      "exit_code": 0,
+      "what_was_measured": "Syntax validity of the changed Python files."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X gfx950:sramecc+:xnack-; historical Triton kernel and current set_kv_buffer replacement path executed on HIP and passed exact numerical references.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The assigned GPU is gfx950, not the originally reported gfx942 MI300/MI325 lane; this does not qualify gfx942-specific behavior.",
+    "The original failing image/older Triton build was not available, so a failing-before compiler crash could not be preserved locally.",
+    "No full model, model weights, serving path, or multi-node workload was exercised; the issue concerns a standalone KV-store kernel.",
+    "The result establishes non-reproduction on the prepared ROCm 7.2.26015/Triton 3.7 stack and current source, not that every ROCm 7.2 package revision is fixed."
+  ]
+}
