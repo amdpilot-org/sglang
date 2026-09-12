@@ -39,7 +39,10 @@ class MistralDetector(BaseFormatDetector):
         # Common marker shared by both JSON-array and compact formats.
         self._tool_calls_marker = "[TOOL_CALLS"
         self.eot_token = "]"
-        self.tool_call_separator = ", "
+        # JSON permits arbitrary whitespace after an array-item comma.  Consume
+        # only the comma here and let the JSON parser handle any following
+        # whitespace, so compact and pretty-printed arrays stream identically.
+        self.tool_call_separator = ","
 
     def has_tool_call(self, text: str) -> bool:
         """Return True if the text contains either supported tool-call marker."""

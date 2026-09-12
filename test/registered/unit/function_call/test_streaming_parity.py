@@ -217,6 +217,27 @@ class TestMistralMultipleCalls(CustomTestCase):
                     _streamed("mistral", [text[:cut], text[cut:]]), expected
                 )
 
+    def test_json_whitespace_after_separator(self):
+        for whitespace in ("", " ", "\t", "\n"):
+            text = (
+                '[TOOL_CALLS] [{"name":"get_weather","arguments":{}}]'
+            )[:-1] + (
+                f',{whitespace}'
+                '{"name":"get_weather","arguments":{"n":2}},'
+                f'{whitespace}'
+                '{"name":"f","arguments":{}}]'
+            )
+            expected = _oneshot("mistral", text)
+            with self.subTest(whitespace=repr(whitespace), delivery="whole"):
+                self.assertEqual(_streamed("mistral", [text]), expected)
+            with self.subTest(whitespace=repr(whitespace), delivery="characters"):
+                self.assertEqual(_streamed("mistral", list(text)), expected)
+            for cut in range(1, len(text)):
+                with self.subTest(whitespace=repr(whitespace), cut=cut):
+                    self.assertEqual(
+                        _streamed("mistral", [text[:cut], text[cut:]]), expected
+                    )
+
 
 if __name__ == "__main__":
     import unittest

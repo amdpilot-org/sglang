@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35564",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 1583 through exact commit bd84efaef10c01b4354e5ceed7b69a6c247d9ec5 and corrected Mistral canonical-array streaming to accept every JSON-valid whitespace choice after object-separator commas. The independently reviewed no-space array failed for whole, character, and all 124 two-way split deliveries before the correction and passed all of them afterward without leaking tool JSON into normal_text.",
+  "tests": [
+    {
+      "command": "detached bd84efaef10c01b4354e5ceed7b69a6c247d9ec5; PYTHONPATH=python /tmp/amdpilot-repo-j-98a81bb7870a/venv/bin/python -c '<independent Mistral no-space counterexample>'",
+      "exit_code": 0,
+      "what_was_measured": "Diagnostic driver confirmed one-shot returned three calls while whole and character streaming returned only call 0, leaked the remaining JSON as normal_text, and all 124 two-way splits failed parity. The driver itself completed normally; candidate-before.txt records the mismatch."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-98a81bb7870a/venv/bin/python -c '<independent Mistral no-space counterexample>'",
+      "exit_code": 0,
+      "what_was_measured": "After correction, whole and character streaming returned all three calls, normal_text was empty, and 0 of 124 two-way splits failed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-98a81bb7870a/venv/bin/python -m pytest -q test/registered/unit/function_call/test_streaming_parity.py test/registered/unit/function_call/test_mistral_detector.py",
+      "exit_code": 0,
+      "what_was_measured": "29 tests passed with 2,077 subtests, including separator whitespace variants empty, space, tab, and newline under whole, character, and every two-way split delivery."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-98a81bb7870a/venv/bin/python -m pytest -q test/registered/unit/function_call",
+      "exit_code": 0,
+      "what_was_measured": "Complete function-call unit suite: 551 tests passed with 2,098 subtests."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and correction are deterministic Python string/JSON parser behavior. No GPU kernel or model execution is involved."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No model weights, tokenizer vocabulary, HTTP serving process, semantic model accuracy, GPU kernel, multi-GPU, or distributed workload was exercised.",
+    "The prepared environment is ROCm 7.2/gfx950 rather than the reporter's CUDA/RTX 4090 environment; no cross-architecture serving claim is made.",
+    "This correction validates syntax accepted by Mistral detect_and_parse and parser chunk-boundary parity, not a particular model's likelihood of emitting each JSON whitespace form."
+  ],
+  "candidate_pr": "https://github.com/amdpilot-org/sglang/pull/1583",
+  "independent_review_pr": "https://github.com/amdpilot-org/sglang/pull/1656"
+}
