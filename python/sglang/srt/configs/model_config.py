@@ -354,6 +354,16 @@ def get_dsa_index_kpool_compress(config: PretrainedConfig) -> bool:
 REQUANTIZATION_METHODS = ["quark_mxfp4"]
 
 
+def _get_deepseek_v4_config_value(config, new_name: str, legacy_name: str):
+    new_value = getattr(config, new_name, None)
+    legacy_value = getattr(config, legacy_name, None)
+    if new_value is not None and legacy_value is not None and new_value != legacy_value:
+        raise ValueError(
+            f"DeepSeek V4 config has conflicting {new_name} and {legacy_name} values"
+        )
+    return new_value if new_value is not None else legacy_value
+
+
 def get_num_indexer_layers(config) -> int:
     """Layer count for the global indexer-topk capturer's host buffer.
 
@@ -367,7 +377,10 @@ def get_num_indexer_layers(config) -> int:
     if is_deepseek_dsa(config):
         return config.num_hidden_layers
     if is_deepseek_v4(config):
-        compress_ratios = getattr(config, "compress_ratios", None) or []
+        compress_ratios = (
+            _get_deepseek_v4_config_value(config, "compress_rates", "compress_ratios")
+            or []
+        )
         return sum(1 for r in compress_ratios if r == 4)
     return getattr(config, "num_indexer_layers", 0)
 
@@ -1118,9 +1131,20 @@ class ModelConfig:
             self.head_dim = self.qk_nope_head_dim + self.qk_rope_head_dim
             self.v_head_dim = self.head_dim
             self.index_head_dim = self.hf_config.index_head_dim
-            self.compress_ratios = self.hf_config.compress_ratios
+            compress_ratios = _get_deepseek_v4_config_value(
+                self.hf_config, "compress_rates", "compress_ratios"
+            )
+            if compress_ratios is None:
+                raise ValueError(
+                    "DeepSeek V4 config must define compress_rates "
+                    "(transformers >= 4.57) or compress_ratios"
+                )
+            self.compress_ratios = compress_ratios
             self.attention_arch = AttentionArch.MHA
-            self._init_mla_scaling(self.hf_config.rope_scaling)
+            rope_scaling = _get_deepseek_v4_config_value(
+                self.hf_config, "rope_parameters", "rope_scaling"
+            )
+            self._init_mla_scaling(rope_scaling)
         elif "Glm4MoeForCausalLMNextN" in self.hf_config.architectures:
             if self.head_dim is None:
                 self.head_dim = (

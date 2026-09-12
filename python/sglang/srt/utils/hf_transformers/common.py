@@ -183,6 +183,49 @@ try:
     class _DeepseekV4ConfigAlias(_HFDeepseekV3Config):
         model_type = "deepseek_v4"
 
+        def __init__(
+            self,
+            *args,
+            compress_rates=None,
+            compress_ratios=None,
+            rope_scaling=None,
+            rope_parameters=None,
+            **kwargs,
+        ):
+            # DeepSeek V4 configs produced by transformers >= 4.57 renamed
+            # these fields. Consume compress_rates explicitly: in newer
+            # transformers it is also a reserved PretrainedConfig field with
+            # an unrelated dict type, whose validation otherwise rejects the
+            # V4 list before the model config can be constructed.
+            if compress_rates is not None and compress_ratios is not None:
+                if compress_rates != compress_ratios:
+                    raise ValueError(
+                        "DeepSeek V4 config has conflicting compress_rates and "
+                        "compress_ratios values"
+                    )
+            if rope_parameters is not None and rope_scaling is not None:
+                if rope_parameters != rope_scaling:
+                    raise ValueError(
+                        "DeepSeek V4 config has conflicting rope_parameters and "
+                        "rope_scaling values"
+                    )
+
+            compress_rates = (
+                compress_rates if compress_rates is not None else compress_ratios
+            )
+            rope_parameters = (
+                rope_parameters if rope_parameters is not None else rope_scaling
+            )
+            super().__init__(*args, rope_parameters=rope_parameters, **kwargs)
+
+            # Keep both spellings available. SGLang's runtime historically
+            # consumes the old names, while external tooling may inspect the
+            # names emitted by the installed transformers version.
+            self.compress_rates = compress_rates
+            self.compress_ratios = compress_rates
+            self.rope_parameters = rope_parameters
+            self.rope_scaling = rope_parameters
+
     _CONFIG_REGISTRY["deepseek_v32"] = _DeepseekV32ConfigAlias
     _CONFIG_REGISTRY["deepseek_v4"] = _DeepseekV4ConfigAlias
 
