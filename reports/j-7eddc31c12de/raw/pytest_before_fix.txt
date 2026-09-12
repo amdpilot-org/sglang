@@ -1,0 +1,136 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_____ test_flashinfer_mxfp4_empty_input_stops_at_external_kernel_boundary ______
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f74e6de50d0>
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires one GPU")
+    def test_flashinfer_mxfp4_empty_input_stops_at_external_kernel_boundary(monkeypatch):
+        import sglang.srt.layers.moe.moe_runner.flashinfer_cutlass as module
+
+        calls = []
+        symmetric_allocations = []
+
+        def instrumented_kernel(**kwargs):
+            calls.append(kwargs)
+            if kwargs["input"].shape[0] == 0:
+                raise RuntimeError("external kernel requires nonempty input")
+            kwargs["output"].fill_(3)
+            return (kwargs["output"],)
+
+        @contextmanager
+        def instrumented_symmetric_memory(*args, **kwargs):
+            symmetric_allocations.append((args, kwargs))
+            yield
+
+        monkeypatch.setattr(
+            module,
+            "_flashinfer_cutlass_fused_moe",
+            lambda: (instrumented_kernel, _ActivationType),
+        )
+        monkeypatch.setattr(module, "use_symmetric_memory", instrumented_symmetric_memory)
+        monkeypatch.setattr(module, "get_tp_group", lambda: object())
+        monkeypatch.setattr(module, "is_allocation_symmetric", lambda: False)
+        monkeypatch.setattr(
+            module.envs.SGLANG_FLASHINFER_MOE_FUSED_FINALIZE, "get", lambda: False
+        )
+
+        device = torch.device("cuda")
+        runner, quant_info = _runner_and_quant_info(device)
+
+        dispatch = _dispatch(0, device)
+>       empty = runner.run(dispatch, quant_info).hidden_states
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/registered/unit/layers/quantization/test_mxfp4_empty_input.py:95:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+python/sglang/srt/layers/moe/moe_runner/runner.py:191: in run
+    return self.fused_func(dispatch_output, quant_info, self.config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py:321: in fused_experts_none_to_flashinfer_mxfp4
+    return _fused_experts_flashinfer_mxfp4_cutlass(
+python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py:438: in _fused_experts_flashinfer_mxfp4_cutlass
+    flashinfer_cutlass_fused_moe(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+kwargs = {'activation_type': <_ActivationType.Swiglu: 0>, 'ep_rank': 0, 'ep_size': 1, 'fc1_expert_biases': None, ...}
+
+    def instrumented_kernel(**kwargs):
+        calls.append(kwargs)
+        if kwargs["input"].shape[0] == 0:
+>           raise RuntimeError("external kernel requires nonempty input")
+E           RuntimeError: external kernel requires nonempty input
+
+test/registered/unit/layers/quantization/test_mxfp4_empty_input.py:70: RuntimeError
+________ test_flashinfer_mxfp4_does_not_accept_malformed_empty_routing _________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f74e6de5eb0>
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires one GPU")
+    def test_flashinfer_mxfp4_does_not_accept_malformed_empty_routing(monkeypatch):
+        import sglang.srt.layers.moe.moe_runner.flashinfer_cutlass as module
+
+        monkeypatch.setattr(
+            module,
+            "_flashinfer_cutlass_fused_moe",
+            lambda: (
+                lambda **kwargs: (_ for _ in ()).throw(AssertionError()),
+                _ActivationType,
+            ),
+        )
+        monkeypatch.setattr(
+            module,
+            "use_symmetric_memory",
+            lambda *a, **kw: __import__("contextlib").nullcontext(),
+        )
+        monkeypatch.setattr(module, "get_tp_group", lambda: object())
+        monkeypatch.setattr(module, "is_allocation_symmetric", lambda: False)
+
+        device = torch.device("cuda")
+        runner, quant_info = _runner_and_quant_info(device)
+        with pytest.raises(ValueError, match="token dimension"):
+>           runner.run(_dispatch(0, device, topk_tokens=1), quant_info)
+
+test/registered/unit/layers/quantization/test_mxfp4_empty_input.py:130:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+python/sglang/srt/layers/moe/moe_runner/runner.py:191: in run
+    return self.fused_func(dispatch_output, quant_info, self.config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py:321: in fused_experts_none_to_flashinfer_mxfp4
+    return _fused_experts_flashinfer_mxfp4_cutlass(
+python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py:438: in _fused_experts_flashinfer_mxfp4_cutlass
+    flashinfer_cutlass_fused_moe(
+test/registered/unit/layers/quantization/test_mxfp4_empty_input.py:115: in <lambda>
+    lambda **kwargs: (_ for _ in ()).throw(AssertionError()),
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+.0 = <tuple_iterator object at 0x7f74e6de6050>
+
+>           lambda **kwargs: (_ for _ in ()).throw(AssertionError()),
+            _ActivationType,
+        ),
+    )
+E   AssertionError
+
+test/registered/unit/layers/quantization/test_mxfp4_empty_input.py:115: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/layers/quantization/test_mxfp4_empty_input.py::test_flashinfer_mxfp4_empty_input_stops_at_external_kernel_boundary
+FAILED test/registered/unit/layers/quantization/test_mxfp4_empty_input.py::test_flashinfer_mxfp4_does_not_accept_malformed_empty_routing
+2 failed, 17 warnings in 11.72s
