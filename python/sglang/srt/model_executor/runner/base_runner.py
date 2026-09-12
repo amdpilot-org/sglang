@@ -67,6 +67,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def get_pp_proxy_num_tokens(
+    num_tokens: int, *, require_attn_tp_gather: bool, attn_tp_size: int
+) -> int:
+    """Return the rank-local row count at a pipeline-parallel boundary."""
+    if not require_attn_tp_gather:
+        return num_tokens
+    if attn_tp_size <= 0:
+        raise ValueError(f"attn_tp_size must be positive, got {attn_tp_size}")
+    if num_tokens % attn_tp_size != 0:
+        raise ValueError(
+            "SCATTERED PP proxy rows must be divisible by attn_tp_size: "
+            f"num_tokens={num_tokens}, attn_tp_size={attn_tp_size}"
+        )
+    return num_tokens // attn_tp_size
+
+
 def _allocate_decode_buffers(
     *,
     device: torch.device,
@@ -538,6 +554,11 @@ class BaseRunner(ABC):
                 and mr.ps.attn_cp_size > 1
             ):
                 pp_hidden_tokens = num_tokens // mr.ps.attn_cp_size
+            pp_hidden_tokens = get_pp_proxy_num_tokens(
+                pp_hidden_tokens,
+                require_attn_tp_gather=require_attn_tp_gather(),
+                attn_tp_size=self.attn_tp_size,
+            )
             pp_proxy_tensors = PPProxyTensors(
                 {k: v[:pp_hidden_tokens] for k, v in buffers.pp_proxy_tensors.items()}
             )

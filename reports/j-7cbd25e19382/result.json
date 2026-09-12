@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38707",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Corrected CUDA-graph pipeline proxy views to use rank-local token rows at SCATTERED attention-TP boundaries in capture, replay output, and dummy warmup. The invariant is covered by a failing-before/passing-after regression and was numerically checked on the assigned gfx950 GPU, but the original 8x gfx942 GLM-5.3 workload was unavailable.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-7cbd25e19382/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_pp_proxy_token_count.py",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before regression: collection failed because the rank-local PP proxy row-count implementation did not exist. Raw output: reports/j-7cbd25e19382/raw/failing_before_pp_proxy_token_count.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7cbd25e19382/venv/bin/python -m pytest -q test/registered/unit/model_executor/runner/test_pp_proxy_token_count.py test/registered/unit/model_executor/runner/test_decode_cuda_graph_runner.py test/registered/unit/model_executor/test_cuda_graph_buffer_registry.py",
+      "exit_code": 0,
+      "what_was_measured": "57 tests passed, covering scattered/full PP row counts, invalid boundary inputs, decode graph behavior, and graph buffer registry behavior. Raw output: reports/j-7cbd25e19382/raw/decode_graph_suite_final.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7cbd25e19382/venv/bin/python inline ROCm/NumPy PP-boundary comparison",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, a 32-row TP=4 boundary produced 8 rank-local rows; GPU sum 1540.0 matched the independent NumPy sum 1540.0. Raw output: reports/j-7cbd25e19382/raw/gpu_pp_proxy_boundary.txt"
+    },
+    {
+      "command": "pre-commit run isort/ruff/ruff-format --files <changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python files passed import sorting, lint, and formatting checks."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original reproduction requires 8x MI300X gfx942 with TP=4 and PP=2; only one MI350X gfx950 was assigned.",
+    "The zai-org/GLM-5.3 753B FP8 weights were unavailable.",
+    "No end-to-end multi-chunk serving reproduction was claimed.",
+    "The deterministic tiny Llama fixture cannot validate DSA/GLM semantics or distributed PP and was therefore not treated as a substitute.",
+    "The change is Python-only; no native rebuild was applicable."
+  ]
+}
