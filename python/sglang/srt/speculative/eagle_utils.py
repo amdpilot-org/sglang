@@ -16,7 +16,8 @@ from sglang.srt.hardware_backend.npu.dsv4.dsv4_common_hooks import (
 )
 from sglang.srt.mem_cache.allocation import alloc_for_spec_decode
 from sglang.srt.mem_cache.allocation_sizing import (
-    get_alloc_reserve_per_decode,
+    decode_seq_lens_from_reqs,
+    get_alloc_len_per_decode,
     page_aligned_decode_alloc_lens,
 )
 from sglang.srt.runtime_context import get_parallel, get_spec
@@ -1012,12 +1013,20 @@ def eagle_prepare_for_decode(batch: ScheduleBatch):
         batch.cumulate_penalty_output_tokens()
 
     page_size = batch.token_to_kv_pool_allocator.page_size
-    double_alloc = get_alloc_reserve_per_decode()
+    alloc_len = get_alloc_len_per_decode()
+    if batch.seq_lens_cpu is not None:
+        base_kv_lens = batch.seq_lens_cpu
+    else:
+        base_kv_lens = decode_seq_lens_from_reqs(
+            batch.reqs,
+            is_encoder_decoder=batch.model_config.is_encoder_decoder,
+        )
 
     cur_kv_lens, nxt_kv_lens, num_needed_tokens = page_aligned_decode_alloc_lens(
         batch.reqs,
-        reserve=double_alloc,
+        reserve=alloc_len,
         page_size=page_size,
+        base_kv_lens=base_kv_lens,
     )
     for r in batch.reqs:
         r.decode_batch_idx += 1
@@ -1026,7 +1035,7 @@ def eagle_prepare_for_decode(batch: ScheduleBatch):
     nxt_kv_lens_cpu = torch.tensor(nxt_kv_lens, dtype=torch.int32, device="cpu")
 
     # Fail fast if the page>1 + topk>1 draft over-allocation
-    # (get_alloc_reserve_per_decode) outgrows the req_to_token row: the write below
+    # outgrows the req_to_token row: the write below
     # would OOB and free would leak KV. The row is widened to hold it in _init_pools
     # (PR #26972); fail here with a clear error, not on a later cryptic CUDA assert.
 
@@ -1036,7 +1045,7 @@ def eagle_prepare_for_decode(batch: ScheduleBatch):
         assert max_alloc_len <= row_width, (
             f"spec v2 page>1 topk>1 draft over-allocation ({max_alloc_len}) exceeds "
             f"req_to_token row width ({row_width}); page_size={page_size}. Widen the "
-            f"row to hold committed + get_alloc_reserve_per_decode (PR #26972)."
+            f"row to hold sequence length + get_alloc_len_per_decode (PR #26972)."
         )
 
     # non_blocking H2D: a blocking .to() syncs the schedule stream, which the WAR

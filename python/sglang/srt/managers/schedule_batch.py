@@ -103,7 +103,10 @@ from sglang.srt.mem_cache.allocation import (
     alloc_for_decode,
     alloc_for_extend,
 )
-from sglang.srt.mem_cache.allocation_sizing import get_alloc_reserve_per_decode
+from sglang.srt.mem_cache.allocation_sizing import (
+    decode_seq_lens_from_reqs,
+    get_alloc_len_per_decode,
+)
 from sglang.srt.mem_cache.allocator import BaseTokenToKVPoolAllocator
 from sglang.srt.mem_cache.base_prefix_cache import (
     BasePrefixCache,
@@ -3070,14 +3073,29 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             )
             return new_pages * page_size + num_beam_member_rows(requests)
 
-        return self._new_tokens_required_next_decode_spec_v2(requests, page_size)
+        if self.seq_lens_cpu is None:
+            seq_lens = decode_seq_lens_from_reqs(
+                requests,
+                is_encoder_decoder=self.model_config.is_encoder_decoder,
+            )
+        else:
+            seq_lens = (
+                self.seq_lens_cpu
+                if selected_indices is None
+                else self.seq_lens_cpu[selected_indices]
+            )
+        return self._new_tokens_required_next_decode_spec_v2(
+            requests, page_size, seq_lens
+        )
 
-    def _new_tokens_required_next_decode_spec_v2(self, requests, page_size):
+    def _new_tokens_required_next_decode_spec_v2(
+        self, requests, page_size, seq_lens
+    ):
         """Tight estimate matching eagle_utils.eagle_prepare_for_decode allocation."""
-        reserve = get_alloc_reserve_per_decode()
+        reserve = get_alloc_len_per_decode()
         total = 0
-        for r in requests:
-            x = max(0, r.kv.kv_committed_len + reserve - r.kv.kv_allocated_len)
+        for r, seq_len in zip(requests, seq_lens, strict=True):
+            x = max(0, int(seq_len) + reserve - r.kv.kv_allocated_len)
             cur = r.kv.kv_allocated_len
             nxt = cur + x
             total += ceil_align(nxt, page_size) - ceil_align(cur, page_size)

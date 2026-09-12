@@ -59,22 +59,48 @@ def get_alloc_reserve_per_decode() -> int:
     return 2 * get_alloc_len_per_decode()
 
 
+def decode_seq_lens_from_reqs(reqs, *, is_encoder_decoder: bool):
+    """Return the scheduler's exact host-side target sequence lengths."""
+    seq_lens = [r.seqlen for r in reqs]
+    if not is_encoder_decoder:
+        return seq_lens
+    return [
+        seq_len
+        - (
+            r.multimodal_inputs.num_image_tokens
+            if r.multimodal_inputs is not None
+            else 0
+        )
+        for r, seq_len in zip(reqs, seq_lens, strict=True)
+    ]
+
+
 def page_aligned_decode_alloc_lens(
     reqs,
     *,
     reserve: int,
     page_size: int,
+    base_kv_lens=None,
 ):
     """Whole-page decode alloc lens: nxt rounds committed up to page so allocated
-    == recorded (unaligned tails leak at ps>1)."""
+    == recorded (unaligned tails leak at ps>1).
+
+    ``base_kv_lens`` lets callers with a synchronous sequence-length mirror size
+    from that mirror instead of a lagging per-request committed watermark.
+    """
+    if base_kv_lens is None:
+        base_kv_lens = [r.kv.kv_committed_len for r in reqs]
+    if len(base_kv_lens) != len(reqs):
+        raise ValueError("base_kv_lens must have one entry per request")
+
     cur_kv_lens = [0] * len(reqs)
     nxt_kv_lens = [0] * len(reqs)
     num_needed_tokens = 0
-    for i, r in enumerate(reqs):
+    for i, (r, base_kv_len) in enumerate(zip(reqs, base_kv_lens, strict=True)):
         cur = r.kv.kv_allocated_len
         nxt = max(
             cur,
-            (r.kv.kv_committed_len + reserve + page_size - 1) // page_size * page_size,
+            (int(base_kv_len) + reserve + page_size - 1) // page_size * page_size,
         )
         cur_kv_lens[i] = cur
         nxt_kv_lens[i] = nxt
