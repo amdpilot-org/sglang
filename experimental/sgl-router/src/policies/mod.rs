@@ -23,6 +23,7 @@ use crate::discovery::ModelId;
 use crate::policies::buckets::{BucketRequest, BucketSelector};
 use crate::policies::engine_load::EngineLoadSnapshot;
 use crate::policies::scoring::{EligibilityFilter, ScoringPolicy};
+use crate::server::metrics::DecodeAffinityOutcome;
 use crate::server::metrics::MetricsRegistry;
 use crate::tokenizer::{adapter, TokenizerRegistry};
 use crate::workers::Worker;
@@ -323,6 +324,8 @@ pub struct SelectionProposal {
     pub guard_hints: GuardHints,
     /// Workers available for fallback after eligibility filtering.
     pub eligible_workers: Option<Vec<Arc<Worker>>>,
+    /// Decode-affinity branch taken by the legacy host-affinity policy.
+    pub decode_affinity_outcome: Option<DecodeAffinityOutcome>,
 }
 
 /// Cache-Aware prefill candidate where `E = L - H`.
@@ -381,6 +384,7 @@ impl SelectionProposal {
             kind: ProposalKind::Generic,
             guard_hints: GuardHints::default(),
             eligible_workers: None,
+            decode_affinity_outcome: None,
         }
     }
 
@@ -392,6 +396,7 @@ impl SelectionProposal {
             kind: ProposalKind::PowerOfTwo,
             guard_hints: GuardHints::default(),
             eligible_workers: None,
+            decode_affinity_outcome: None,
         }
     }
 
@@ -407,6 +412,11 @@ impl SelectionProposal {
 
     pub fn with_eligible_workers(mut self, workers: Vec<Arc<Worker>>) -> Self {
         self.eligible_workers = Some(workers);
+        self
+    }
+
+    pub fn with_decode_affinity_outcome(mut self, outcome: DecodeAffinityOutcome) -> Self {
+        self.decode_affinity_outcome = Some(outcome);
         self
     }
 }
