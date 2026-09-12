@@ -135,6 +135,7 @@ class _OngoingLoadBack(NamedTuple):
     node_id: NodeId
     lock_params: DecLockRefParams
     host_lock_params: DecLockRefParams
+    rid: str
 
 
 class _OngoingPrefetch(NamedTuple):
@@ -1368,6 +1369,16 @@ class UnifiedRadixCache(BasePrefixCache):
             self._reclaim_retraction_host(len(device_indices))
             host_indices = self.host_pool_group.alloc(len(device_indices))
         if host_indices is None:
+            if self.metrics_collector is not None:
+                self.metrics_collector.increment_transfer_request(
+                    "l1_to_l2", "failure", "host_capacity"
+                )
+            logger.info(
+                "[HICACHE] rid=%s event=retraction_backup tier=l1_to_l2 "
+                "result=failure reason=host_capacity tokens=%d",
+                req.rid,
+                len(device_indices),
+            )
             return None
 
         resolved = self.host_pool_group.resolve_host_transfers(
@@ -1377,6 +1388,16 @@ class UnifiedRadixCache(BasePrefixCache):
         )
         if resolved is None and extra_transfers:
             self.host_pool_group.free(host_indices)
+            if self.metrics_collector is not None:
+                self.metrics_collector.increment_transfer_request(
+                    "l1_to_l2", "failure", "host_capacity"
+                )
+            logger.info(
+                "[HICACHE] rid=%s event=retraction_backup tier=l1_to_l2 "
+                "result=failure reason=host_capacity tokens=%d",
+                req.rid,
+                len(device_indices),
+            )
             return None
 
         backup = RetractionBackup(
@@ -1401,8 +1422,26 @@ class UnifiedRadixCache(BasePrefixCache):
             )
             completion.finish_event.synchronize()
         except Exception:
+            if self.metrics_collector is not None:
+                self.metrics_collector.increment_transfer_request(
+                    "l1_to_l2", "failure", "transfer_error"
+                )
+            logger.exception(
+                "[HICACHE] rid=%s event=retraction_backup tier=l1_to_l2 "
+                "result=failure reason=transfer_error tokens=%d",
+                req.rid,
+                len(device_indices),
+            )
             self.retraction_discard(backup)
             raise
+        if self.metrics_collector is not None:
+            self.metrics_collector.increment_transfer_request("l1_to_l2", "success")
+        logger.info(
+            "[HICACHE] rid=%s event=retraction_backup tier=l1_to_l2 "
+            "result=success tokens=%d",
+            req.rid,
+            len(device_indices),
+        )
         return backup
 
     def retraction_restore(self, req: Req, backup: RetractionBackup) -> None:
@@ -1443,13 +1482,34 @@ class UnifiedRadixCache(BasePrefixCache):
         load_host, load_device, load_pools = self.cache_controller._move_op_indices(
             operation
         )
-        completion = self.cache_controller.l2_transfer_engine.submit_host_to_device(
-            self.cache_controller._l2_load_transfers(
-                load_host, load_device, load_pools
-            ),
-            layer_num=self.cache_controller.layer_num,
+        try:
+            completion = self.cache_controller.l2_transfer_engine.submit_host_to_device(
+                self.cache_controller._l2_load_transfers(
+                    load_host, load_device, load_pools
+                ),
+                layer_num=self.cache_controller.layer_num,
+            )
+            completion.finish_event.synchronize()
+        except Exception:
+            if self.metrics_collector is not None:
+                self.metrics_collector.increment_transfer_request(
+                    "l2_to_l1", "failure", "transfer_error"
+                )
+            logger.exception(
+                "[HICACHE] rid=%s event=retraction_restore tier=l2_to_l1 "
+                "result=failure reason=transfer_error tokens=%d",
+                req.rid,
+                len(device_indices),
+            )
+            raise
+        if self.metrics_collector is not None:
+            self.metrics_collector.increment_transfer_request("l2_to_l1", "success")
+        logger.info(
+            "[HICACHE] rid=%s event=retraction_restore tier=l2_to_l1 "
+            "result=success tokens=%d",
+            req.rid,
+            len(device_indices),
         )
-        completion.finish_event.synchronize()
         self.retraction_discard(backup)
 
     def retraction_discard(self, backup: RetractionBackup) -> None:
@@ -1688,6 +1748,7 @@ class UnifiedRadixCache(BasePrefixCache):
             node_id,
             self.inc_lock_ref(node_id).to_dec_params(),
             host_anchor_params,
+            getattr(req, "rid", "unknown"),
         )
 
         return True
@@ -2958,7 +3019,14 @@ class UnifiedRadixCache(BasePrefixCache):
             # Blocking: wait for all pending write-backs
             while self.ongoing_write_through:
                 for ack in cc.ack_write_queue:
-                    ack.finish_event.synchronize()
+                    try:
+                        ack.finish_event.synchronize()
+                    except Exception:
+                        if self.metrics_collector is not None:
+                            self.metrics_collector.increment_transfer_request(
+                                "l1_to_l2", "failure", "transfer_error"
+                            )
+                        raise
                     for ack_id in ack.node_ids:
                         if ack_id in self.ongoing_write_through:
                             self._finish_write_through_ack(ack_id)
@@ -2982,7 +3050,14 @@ class UnifiedRadixCache(BasePrefixCache):
         # Process completed acks
         while finish_count > 0:
             ack = cc.ack_write_queue.pop(0)
-            ack.finish_event.synchronize()
+            try:
+                ack.finish_event.synchronize()
+            except Exception:
+                if self.metrics_collector is not None:
+                    self.metrics_collector.increment_transfer_request(
+                        "l1_to_l2", "failure", "transfer_error"
+                    )
+                raise
             for ack_id in ack.node_ids:
                 self._finish_write_through_ack(ack_id)
             self._log_write_ack_metrics(ack)
@@ -3029,18 +3104,40 @@ class UnifiedRadixCache(BasePrefixCache):
 
         while finish_count > 0:
             ack = cc.ack_load_queue.pop(0)
-            ack.finish_event.synchronize()
+            try:
+                ack.finish_event.synchronize()
+            except Exception:
+                if self.metrics_collector is not None:
+                    self.metrics_collector.increment_transfer_request(
+                        "l2_to_l1", "failure", "transfer_error"
+                    )
+                for ack_id in ack.node_ids:
+                    ongoing = self.ongoing_load_back.get(ack_id)
+                    if ongoing is not None:
+                        logger.exception(
+                            "[HICACHE] rid=%s event=cache_transfer tier=l2_to_l1 "
+                            "result=failure reason=transfer_error",
+                            ongoing.rid,
+                        )
+                raise
             for ack_id in ack.node_ids:
                 if (
                     self.buffer_pipeline is not None
                     and self.buffer_pipeline.try_finish_load_back(ack_id)
                 ):
                     continue
-                node, lock_params, host_lock_params = self.ongoing_load_back.pop(ack_id)
+                node, lock_params, host_lock_params, rid = self.ongoing_load_back.pop(
+                    ack_id
+                )
                 self.dec_lock_ref(node, lock_params)
                 self.dec_host_lock_ref(node, host_lock_params)
                 # Unpin the loaded nodes; host copies stay as reclaimable duplicates.
                 self.tree_core.finish_load_back(node)
+                logger.info(
+                    "[HICACHE] rid=%s event=cache_transfer tier=l2_to_l1 "
+                    "result=success",
+                    rid,
+                )
 
             if self.metrics_collector is not None:
                 self.metrics_collector.increment_transfer_request(
@@ -3075,9 +3172,12 @@ class UnifiedRadixCache(BasePrefixCache):
         mem_quota = params.mem_quota
         req = params.req
         assert req is not None
+        l1_hit_tokens = len(req.prefix_indices)
         logger.info(
-            "[HICACHE] rid=%s event=cache_lookup tier=l1 result=complete",
+            "[HICACHE] rid=%s event=cache_lookup tier=l1 result=%s hit_tokens=%d",
             req.rid,
+            "hit" if l1_hit_tokens else "miss",
+            l1_hit_tokens,
         )
         logger.info(
             "[HICACHE] rid=%s event=cache_lookup tier=l2 result=%s hit_tokens=%d",

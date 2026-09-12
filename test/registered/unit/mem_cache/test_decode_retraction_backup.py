@@ -1,5 +1,6 @@
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 import torch
 
@@ -20,6 +21,14 @@ from sglang.srt.speculative.base_spec_worker import (
 from sglang.test.ci.ci_register import register_cuda_ci
 
 register_cuda_ci(est_time=10, stage="base-b", runner_config="1-gpu-small")
+
+
+class _TransferMetricRecorder:
+    def __init__(self):
+        self.calls = []
+
+    def increment_transfer_request(self, direction, result, reason="none"):
+        self.calls.append((direction, result, reason))
 
 
 class TestDecodeRetractionBackup(unittest.TestCase):
@@ -143,12 +152,19 @@ class TestDecodeRetractionBackup(unittest.TestCase):
         # A backup-only host pool is deliberately smaller than the device pool,
         # so a large enough request cannot be preserved.
         env = self._build_cache(hicache_ratio=0.1)
+        metrics = _TransferMetricRecorder()
+        env.cache.metrics_collector = metrics
         self.assertLess(env.cache.host_pool_group.available_size(), self.num_tokens)
 
         req, source_indices = self._admit_req(env, self.num_tokens)
         host_free_before = env.cache.host_pool_group.available_size()
 
-        self.assertIsNone(env.cache.retraction_backup(req))
+        with self.assertLogs(
+            "sglang.srt.mem_cache.unified_radix_cache", level="INFO"
+        ) as logs:
+            self.assertIsNone(env.cache.retraction_backup(req))
+        self.assertIn(("l1_to_l2", "failure", "host_capacity"), metrics.calls)
+        self.assertTrue(any("rid=request" in line for line in logs.output))
         # The declined backup must not leak host slots.
         self.assertEqual(env.cache.host_pool_group.available_size(), host_free_before)
 
@@ -173,6 +189,8 @@ class TestDecodeRetractionBackup(unittest.TestCase):
         target_pool = env.target_pool
         draft_pool = env.draft_pool
         cache = env.cache
+        metrics = _TransferMetricRecorder()
+        cache.metrics_collector = metrics
 
         req, source_indices = self._admit_req(env, self.num_tokens)
 
@@ -182,7 +200,10 @@ class TestDecodeRetractionBackup(unittest.TestCase):
         draft_expected = self._snapshot_pool(draft_pool, source_indices)
 
         host_free_before = cache.host_pool_group.available_size()
-        backup = cache.retraction_backup(req)
+        with self.assertLogs(
+            "sglang.srt.mem_cache.unified_radix_cache", level="INFO"
+        ) as backup_logs:
+            backup = cache.retraction_backup(req)
         self.assertEqual(
             {transfer.name for transfer in backup.pool_transfers or []},
             {PoolName.DRAFT},
@@ -204,7 +225,15 @@ class TestDecodeRetractionBackup(unittest.TestCase):
             (req.kv.req_pool_idx, slice(0, self.num_tokens)), destination_indices
         )
 
-        cache.retraction_restore(req, backup)
+        with self.assertLogs(
+            "sglang.srt.mem_cache.unified_radix_cache", level="INFO"
+        ) as restore_logs:
+            cache.retraction_restore(req, backup)
+
+        self.assertIn(("l1_to_l2", "success", "none"), metrics.calls)
+        self.assertIn(("l2_to_l1", "success", "none"), metrics.calls)
+        self.assertTrue(any("rid=request" in line for line in backup_logs.output))
+        self.assertTrue(any("rid=request" in line for line in restore_logs.output))
 
         self._assert_pool_equal(target_pool, destination_indices, target_expected)
         self._assert_pool_equal(draft_pool, destination_indices, draft_expected)
@@ -213,6 +242,28 @@ class TestDecodeRetractionBackup(unittest.TestCase):
         allocator.free(blocker_indices)
         allocator.free(destination_indices)
         req_to_token_pool.free(req)
+
+    def test_backup_transfer_exception_records_failure(self):
+        env = self._build_cache(hicache_ratio=1.0)
+        metrics = _TransferMetricRecorder()
+        env.cache.metrics_collector = metrics
+        req, source_indices = self._admit_req(env, self.num_tokens)
+
+        with mock.patch.object(
+            env.cache.cache_controller.l2_transfer_engine,
+            "submit_device_to_host",
+            side_effect=RuntimeError("injected transfer failure"),
+        ):
+            with self.assertLogs(
+                "sglang.srt.mem_cache.unified_radix_cache", level="ERROR"
+            ) as logs:
+                with self.assertRaisesRegex(RuntimeError, "injected transfer failure"):
+                    env.cache.retraction_backup(req)
+
+        self.assertIn(("l1_to_l2", "failure", "transfer_error"), metrics.calls)
+        self.assertTrue(any("rid=request" in line for line in logs.output))
+        env.allocator.free(source_indices)
+        env.req_to_token_pool.free(req)
 
 
 if __name__ == "__main__":
