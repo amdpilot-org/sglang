@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35331",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Implemented an opt-in CandidateTrajectorySpec contract and a Cosmos3 action adapter. One logical request now uses num_outputs_per_prompt as an atomic physical candidate batch, stable base_seed+i streams, post-denormalization mean reduction, stable candidate IDs, optional raw candidate return, capability metadata, and explicit validation of reducer, seed policy, conditioning cardinality, tensor shape, and configured batch capacity. Framework and adapter behavior were verified, but no Cosmos3 action checkpoint was available for model-level quality or end-to-end serving validation.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-8e31ad6a7177/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_candidate_trajectory.py python/sglang/multimodal_gen/test/unit/test_cosmos3.py python/sglang/multimodal_gen/test/unit/test_pi05_action_api.py",
+      "exit_code": 0,
+      "what_was_measured": "153 tests and 43 subtests: candidate contract validation, count=1 compatibility, independent reducer reference, candidate-axis failures, Cosmos3 response identity/ordering, existing Cosmos3 behavior, and unrelated Pi0.5 action API compatibility."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-8e31ad6a7177/venv/bin/python reports/j-8e31ad6a7177/gpu_numerical_script.py",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X, four separately seeded GPU draws were exactly repeatable and ordered; GPU candidate mean differed from an independent float64 CPU reference by at most 1.1920928955078125e-07. Raw output is in gpu_numerical.txt."
+    },
+    {
+      "command": "pre-commit run --files <all changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, import ordering, AST, lint, spelling, secret, and policy checks."
+    },
+    {
+      "command": "PYTHONPATH=python ... pytest ... test_dynamic_batching.py test_action_endpoint.py",
+      "exit_code": 4,
+      "what_was_measured": "Intake command referenced two nonexistent test paths; no tests ran. Correct existing suites were selected afterward."
+    },
+    {
+      "command": "PYTHONPATH=python ... pytest ... test_sequential_server_requests.py ...",
+      "exit_code": 1,
+      "what_was_measured": "173 passed and 6 pre-existing AMD policy-expectation tests failed because this environment deliberately warns instead of raising for performance/VRAM regressions. These failures do not touch candidate trajectory code; raw output is in pytest.txt."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Cosmos3 action model weights were available, so model-level batched-versus-sequential transformer parity, action quality, latency, peak memory, and physical-forward benchmarks for N={1,2,4,8,10} remain unverified.",
+    "TP/SP reconstruction-before-reduction follows the existing Cosmos3 stage order but was not exercised with a Cosmos3 checkpoint or multiple GPUs.",
+    "Cosmos3 action mode disables CFG, so CFG-serial and CFG-parallel candidate membership are not applicable to this first adapter and were not tested.",
+    "Phase 1 intentionally rejects candidate groups larger than the configured physical batch and rejects multiple conditioning observations; microbatch splitting, partial reducer state, and sequential fallback are not implemented.",
+    "Only the model-declared mean reducer is implemented. A registry surface exists in the capability contract, but no additional model reducer is registered.",
+    "Cancellation and candidate failures use existing whole-request failure semantics; an end-to-end cancellation test requires a running Cosmos3 action model and remains unverified.",
+    "No native source changed, so no native rebuild was required or performed."
+  ]
+}
