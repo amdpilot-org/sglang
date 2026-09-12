@@ -1,0 +1,161 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0 -- /tmp/amdpilot-repo-j-2205162890bd/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /job/repo/test
+configfile: pytest.ini
+plugins: hypothesis-6.155.0, anyio-4.15.1
+collecting ... collected 66 items / 63 deselected / 3 selected
+
+test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py::test_set_mla_kv_buffer_norope_localizes_dcp_virtual_locs[0] FAILED [ 33%]
+test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py::test_set_mla_kv_buffer_norope_localizes_dcp_virtual_locs[1] FAILED [ 66%]
+test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py::test_set_mla_kv_buffer_norope_dcp_skips_reserved_index FAILED [100%]
+
+=================================== FAILURES ===================================
+_________ test_set_mla_kv_buffer_norope_localizes_dcp_virtual_locs[0] __________
+
+dcp_rank = 0
+
+    @pytest.mark.parametrize("dcp_rank", [0, 1])
+    def test_set_mla_kv_buffer_norope_localizes_dcp_virtual_locs(dcp_rank):
+        """No-RoPE MLA writes must not address a per-rank pool with virtual locs."""
+        dcp_size = 2
+        physical_size = 4
+        virtual_locs = torch.arange(
+            physical_size * dcp_size, dtype=torch.int64, device=DEVICE
+        )
+        cache_k_nope = torch.arange(
+            virtual_locs.numel() * TRITON_NOPE_DIM,
+            dtype=torch.float32,
+            device=DEVICE,
+        ).reshape(-1, 1, TRITON_NOPE_DIM)
+        cache_k_rope = torch.empty(
+            (virtual_locs.numel(), 1, 0), dtype=torch.float32, device=DEVICE
+        )
+        sentinel = -1.0
+        # Keep a guard half so the pre-fix raw virtual writes are observable without
+        # relying on an illegal access to reproduce the corruption boundary.
+        kv_buffer = torch.full(
+            (physical_size * dcp_size, 1, TRITON_NOPE_DIM),
+            sentinel,
+            dtype=torch.float32,
+            device=DEVICE,
+        )
+    
+        parallel = SimpleNamespace(attn_dcp_size=dcp_size, attn_dcp_rank=dcp_rank)
+        with patch("sglang.kernels.ops.kvcache.mla_buffer.get_parallel", return_value=parallel):
+            set_mla_kv_buffer_dcp_sharded_triton(
+                kv_buffer,
+                virtual_locs,
+                cache_k_nope,
+                cache_k_rope,
+                reserved_skip_index=-1,
+            )
+    
+        owned = virtual_locs.cpu() % dcp_size == dcp_rank
+        expected = cache_k_nope[owned.to(DEVICE)]
+>       torch.testing.assert_close(kv_buffer[:physical_size], expected)
+E       AssertionError: Tensor-likes are not close!
+E       
+E       Mismatched elements: 384 / 512 (75.0%)
+E       Greatest absolute difference: 384.0 at index (3, 0, 0) (up to 1e-05 allowed)
+E       Greatest relative difference: 0.5 at index (1, 0, 0) (up to 1.3e-06 allowed)
+
+test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py:294: AssertionError
+_________ test_set_mla_kv_buffer_norope_localizes_dcp_virtual_locs[1] __________
+
+dcp_rank = 1
+
+    @pytest.mark.parametrize("dcp_rank", [0, 1])
+    def test_set_mla_kv_buffer_norope_localizes_dcp_virtual_locs(dcp_rank):
+        """No-RoPE MLA writes must not address a per-rank pool with virtual locs."""
+        dcp_size = 2
+        physical_size = 4
+        virtual_locs = torch.arange(
+            physical_size * dcp_size, dtype=torch.int64, device=DEVICE
+        )
+        cache_k_nope = torch.arange(
+            virtual_locs.numel() * TRITON_NOPE_DIM,
+            dtype=torch.float32,
+            device=DEVICE,
+        ).reshape(-1, 1, TRITON_NOPE_DIM)
+        cache_k_rope = torch.empty(
+            (virtual_locs.numel(), 1, 0), dtype=torch.float32, device=DEVICE
+        )
+        sentinel = -1.0
+        # Keep a guard half so the pre-fix raw virtual writes are observable without
+        # relying on an illegal access to reproduce the corruption boundary.
+        kv_buffer = torch.full(
+            (physical_size * dcp_size, 1, TRITON_NOPE_DIM),
+            sentinel,
+            dtype=torch.float32,
+            device=DEVICE,
+        )
+    
+        parallel = SimpleNamespace(attn_dcp_size=dcp_size, attn_dcp_rank=dcp_rank)
+        with patch("sglang.kernels.ops.kvcache.mla_buffer.get_parallel", return_value=parallel):
+            set_mla_kv_buffer_dcp_sharded_triton(
+                kv_buffer,
+                virtual_locs,
+                cache_k_nope,
+                cache_k_rope,
+                reserved_skip_index=-1,
+            )
+    
+        owned = virtual_locs.cpu() % dcp_size == dcp_rank
+        expected = cache_k_nope[owned.to(DEVICE)]
+>       torch.testing.assert_close(kv_buffer[:physical_size], expected)
+E       AssertionError: Tensor-likes are not close!
+E       
+E       Mismatched elements: 512 / 512 (100.0%)
+E       Greatest absolute difference: 512.0 at index (3, 0, 0) (up to 1e-05 allowed)
+E       Greatest relative difference: 1.0 at index (0, 0, 0) (up to 1.3e-06 allowed)
+
+test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py:294: AssertionError
+____________ test_set_mla_kv_buffer_norope_dcp_skips_reserved_index ____________
+
+    def test_set_mla_kv_buffer_norope_dcp_skips_reserved_index():
+        cache_k_nope = torch.full(
+            (2, 1, TRITON_NOPE_DIM), float("nan"), dtype=torch.float32, device=DEVICE
+        )
+        cache_k_nope[1] = 7
+        cache_k_rope = torch.empty((2, 1, 0), dtype=torch.float32, device=DEVICE)
+        kv_buffer = torch.full(
+            (2, 1, TRITON_NOPE_DIM), -1.0, dtype=torch.float32, device=DEVICE
+        )
+        virtual_locs = torch.tensor([0, 2], dtype=torch.int64, device=DEVICE)
+    
+        parallel = SimpleNamespace(attn_dcp_size=2, attn_dcp_rank=0)
+        with patch("sglang.kernels.ops.kvcache.mla_buffer.get_parallel", return_value=parallel):
+            set_mla_kv_buffer_dcp_sharded_triton(
+                kv_buffer, virtual_locs, cache_k_nope, cache_k_rope
+            )
+    
+>       assert torch.all(kv_buffer[0] == -1)
+E       AssertionError: assert tensor(False, device='cuda:0')
+E        +  where tensor(False, device='cuda:0') = <built-in method all of type object at 0x7f872db1b220>(tensor([[nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan]], device='cuda:0') == -1)
+E        +    where <built-in method all of type object at 0x7f872db1b220> = torch.all
+
+test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py:315: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py::test_set_mla_kv_buffer_norope_localizes_dcp_virtual_locs[0] - AssertionError: Tensor-likes are not close!
+
+Mismatched elements: 384 / 512 (75.0%)
+Greatest absolute difference: 384.0 at index (3, 0, 0) (up to 1e-05 allowed)
+Greatest relative difference: 0.5 at index (1, 0, 0) (up to 1.3e-06 allowed)
+FAILED test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py::test_set_mla_kv_buffer_norope_localizes_dcp_virtual_locs[1] - AssertionError: Tensor-likes are not close!
+
+Mismatched elements: 512 / 512 (100.0%)
+Greatest absolute difference: 512.0 at index (3, 0, 0) (up to 1e-05 allowed)
+Greatest relative difference: 1.0 at index (0, 0, 0) (up to 1.3e-06 allowed)
+FAILED test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py::test_set_mla_kv_buffer_norope_dcp_skips_reserved_index - AssertionError: assert tensor(False, device='cuda:0')
+ +  where tensor(False, device='cuda:0') = <built-in method all of type object at 0x7f872db1b220>(tensor([[nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan]], device='cuda:0') == -1)
+ +    where <built-in method all of type object at 0x7f872db1b220> = torch.all
+================= 3 failed, 63 deselected, 1 warning in 6.98s ==================

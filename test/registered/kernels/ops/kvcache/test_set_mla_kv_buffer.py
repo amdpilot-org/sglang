@@ -1,10 +1,13 @@
 import sys
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 import torch
 
 from sglang.kernels.jit.utils import get_ci_test_range
 from sglang.kernels.ops.kvcache.mla_buffer import (
+    set_mla_kv_buffer_dcp_sharded_triton,
     set_mla_kv_buffer_triton,
     set_mla_kv_buffer_triton_fp8_quant,
     set_mla_kv_scale_buffer_triton,
@@ -248,6 +251,73 @@ def test_set_mla_kv_buffer_triton_zero_index_can_be_written_when_skip_disabled()
         rtol=0.0,
         atol=0.0,
     )
+
+
+@pytest.mark.parametrize("dcp_rank", [0, 1])
+def test_set_mla_kv_buffer_norope_localizes_dcp_virtual_locs(dcp_rank):
+    """No-RoPE MLA writes must not address a per-rank pool with virtual locs."""
+    dcp_size = 2
+    physical_size = 4
+    virtual_locs = torch.arange(
+        physical_size * dcp_size, dtype=torch.int64, device=DEVICE
+    )
+    cache_k_nope = torch.arange(
+        virtual_locs.numel() * TRITON_NOPE_DIM,
+        dtype=torch.float32,
+        device=DEVICE,
+    ).reshape(-1, 1, TRITON_NOPE_DIM)
+    cache_k_rope = torch.empty(
+        (virtual_locs.numel(), 1, 0), dtype=torch.float32, device=DEVICE
+    )
+    sentinel = -1.0
+    # Keep a guard half so the pre-fix raw virtual writes are observable without
+    # relying on an illegal access to reproduce the corruption boundary.
+    kv_buffer = torch.full(
+        (physical_size * dcp_size, 1, TRITON_NOPE_DIM),
+        sentinel,
+        dtype=torch.float32,
+        device=DEVICE,
+    )
+
+    parallel = SimpleNamespace(attn_dcp_size=dcp_size, attn_dcp_rank=dcp_rank)
+    with patch(
+        "sglang.kernels.ops.kvcache.mla_buffer.get_parallel", return_value=parallel
+    ):
+        set_mla_kv_buffer_dcp_sharded_triton(
+            kv_buffer,
+            virtual_locs,
+            cache_k_nope,
+            cache_k_rope,
+            reserved_skip_index=-1,
+        )
+
+    owned = virtual_locs.cpu() % dcp_size == dcp_rank
+    expected = cache_k_nope[owned.to(DEVICE)]
+    torch.testing.assert_close(kv_buffer[:physical_size], expected)
+    assert torch.all(kv_buffer[physical_size:] == sentinel)
+
+
+def test_set_mla_kv_buffer_norope_dcp_skips_reserved_index():
+    cache_k_nope = torch.full(
+        (2, 1, TRITON_NOPE_DIM), float("nan"), dtype=torch.float32, device=DEVICE
+    )
+    cache_k_nope[1] = 7
+    cache_k_rope = torch.empty((2, 1, 0), dtype=torch.float32, device=DEVICE)
+    kv_buffer = torch.full(
+        (2, 1, TRITON_NOPE_DIM), -1.0, dtype=torch.float32, device=DEVICE
+    )
+    virtual_locs = torch.tensor([0, 2], dtype=torch.int64, device=DEVICE)
+
+    parallel = SimpleNamespace(attn_dcp_size=2, attn_dcp_rank=0)
+    with patch(
+        "sglang.kernels.ops.kvcache.mla_buffer.get_parallel", return_value=parallel
+    ):
+        set_mla_kv_buffer_dcp_sharded_triton(
+            kv_buffer, virtual_locs, cache_k_nope, cache_k_rope
+        )
+
+    assert torch.all(kv_buffer[0] == -1)
+    assert torch.all(kv_buffer[1] == 7)
 
 
 def test_set_mla_kv_buffer_triton_fp8_quant_reserved_skip_index():
