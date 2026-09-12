@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36807",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "unsupported_architecture",
+  "summary": "The assigned gfx950 cannot execute the affected CUDA topk.cu path. Current main already substitutes an exact cooperative HIP implementation on ROCm; its full-row overflow rescan was numerically verified beyond the 4096-candidate cliff. The CUDA source still contains the reported silent truncation mechanism, so no unvalidated CUDA patch was made.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-55470ca2b722/venv/bin/python reports/j-55470ca2b722/reproduce_topk_overflow.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact selected-score multiset versus torch.topk, index range and uniqueness, and fp16-high-byte threshold-bucket population at 64x65536, 64x262144, and 4x1048576. Wrong rows were 0 in every case; the latter two cases exceeded the 4096-entry capacity described by the issue."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-55470ca2b722/venv/bin/python -m pytest -q 'python/sglang/kernels/aot/tests/test_topk.py::test_topk_is_exact_for_indexer_distributions[65536-64-diffuse]' 'python/sglang/kernels/aot/tests/test_topk.py::test_topk_is_exact_for_indexer_distributions[100500-64-narrow]' 'python/sglang/kernels/aot/tests/test_topk.py::test_topk_is_exact_for_indexer_distributions[100500-4-subnormal]'",
+      "exit_code": 0,
+      "what_was_measured": "Three independent ROCm exactness boundary/distribution cases from the checked-in test suite; 3 passed."
+    },
+    {
+      "command": "readelf -Ws /opt/venv/lib/python3.12/site-packages/sglang_kernel-0.4.6.post1-py3.12-linux-x86_64.egg/sgl_kernel/common_ops.cpython-312-x86_64-linux-gnu.so | rg 'coop_topk_kernel|fast_topk_interface'",
+      "exit_code": 0,
+      "what_was_measured": "The loaded native extension contains the cooperative HIP top-k instantiation and fast_topk interface symbols."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X (gfx950:sramecc+:xnack-) executed the numerical reproduction and focused tests; raw output is retained under reports/j-55470ca2b722/."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No CUDA GPU was assigned, so the affected CUDA topk.cu implementation was not executed and the reported CUDA failure was not independently reproduced.",
+    "The installed ROCm native extension was validated rather than rebuilt because no native source change was made.",
+    "The fixture validates the kernel API only; no DeepSeek V3.2 model weights, serving path, full-model semantics, or distributed workload were exercised.",
+    "The CUDA source still silently truncates threshold-bin candidates beyond SMEM_INPUT_SIZE; this report does not claim that CUDA is fixed."
+  ]
+}
