@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35354",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared main checkout already contains the issue's proposed DSpark correction: compute_base_logits calls project_through_lm_head, which uses the standard LM-head applicability gate and invokes quant_method.apply for a valid packed ModelOpt head while retaining dense matmul otherwise. The legacy direct matmul was reproduced with a shape-faithful 2:1 packed fixture, and a focused regression was added for the quantized path plus dense and stale-quant-method boundaries.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-46812d215bbf/venv/bin/python -m pytest -q test/registered/unit/spec/test_dspark_lm_head_projection.py",
+      "exit_code": 0,
+      "what_was_measured": "Three focused CPU tests: legacy packed-storage matmul fails before dispatch, current ModelOpt W4A16-shaped head dispatches through quant_method.apply and matches an independent dense reference, dense heads retain dtype-casting matmul, and a stale ModelOpt method on a dense tensor is not invoked. Result: 3 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-46812d215bbf/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_logits.py",
+      "exit_code": 0,
+      "what_was_measured": "Related quantized target LM-head selector coverage and boundary behavior. Result: 10 passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-46812d215bbf/venv/bin/python reports/j-46812d215bbf/raw/gpu_projection_command.py",
+      "exit_code": 0,
+      "what_was_measured": "Script executed on the assigned gfx950: legacy [245,512] x [256,1024] packed-storage matmul raised the expected shape error; current ModelOpt-gated projection returned [245,1024] and matched an independently computed dense torch.matmul reference with max_abs_error=0.0. Output is retained in raw/gpu_projection.txt."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI355X, gfx950:sramecc+:xnack-, PyTorch 2.11.0+rocm7.2. See reports/j-46812d215bbf/raw/gpu_projection.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported NVIDIA DGX Spark GB10 (SM 12.1), CUDA 13.0, FlashInfer 0.6.15, and ModelOpt NVFP4 kernel were unavailable; no CUDA graph capture on that architecture was performed.",
+    "The target and draft model weights were unavailable, so the radixark_qwen3.8-27b-nvfp4 plus radixark_qwen3.8-27b-dspark serving command was not run.",
+    "The gfx950 fixture validates the DSpark projection dispatch, packed-shape failure mode, and numerical plumbing only; it does not qualify NVIDIA ModelOpt kernel execution, full-model semantic accuracy, or a distributed workload.",
+    "No native source changed, so no native rebuild was required.",
+    "The prepared interpreter does not include the ruff module; git diff --check passed, but a ruff check could not be run."
+  ]
+}
