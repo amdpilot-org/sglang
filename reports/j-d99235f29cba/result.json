@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/16255",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2959",
+  "candidate_commit": "642e52a8e98ede176a3c4942bd18f926b40b3434",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is a behavior-preserving partial extraction of DeepSeek V3.2/DSA indexer construction and pipeline top-k policy. Its focused tests and an independent adversarial truth-table test pass, including device-preserving allocation on the assigned AMD GPU. It does not fulfill the complete original refactor proposal and lacks runtime qualification of real V3.2 indexer kernels and distributed pipeline behavior, so it should not be accepted as a full resolution of the original issue.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-d99235f29cba/venv/bin/python -c 'import sglang.srt.models.deepseek_common.v32_mixin' (on recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: the requested v32_mixin module is absent at the recorded base, while imports resolve to /job/repo/python. Evidence: evidence/base-import.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d99235f29cba/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v32_mixin.py test/registered/unit/models/test_deepseek_mla_dispatch.py (at exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 16 tests and 8 subtests passed. Evidence: evidence/candidate-focused.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d99235f29cba/venv/bin/python /job/review-evidence/adversarial_v32_review.py (at exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent oracle covering import compatibility, skip-topk/NextN construction, Indexer versus IndexerKPool keyword policy, pipeline boundary truth tables, and device/dtype/shape preservation. Evidence: evidence/candidate-adversarial.log and evidence/adversarial_v32_review.py"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d99235f29cba/venv/bin/python -m compileall -q python/sglang/srt/models/deepseek_common/v32_mixin.py python/sglang/srt/models/deepseek_v2.py (at exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Both changed source modules compile under the pinned interpreter. Evidence: evidence/candidate-compileall.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The independent adversarial test allocated the extracted empty top-k tensor on cuda:0 on AMD Instinct MI355X; rocminfo identifies gfx950. This verifies device placement only, not numerical model accuracy. Evidence: evidence/candidate-adversarial.log and evidence/architecture.log"
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The original folder proposal calls for dedicated AMD, CPU, and NPU hardware mixins; the candidate adds none of them, and DeepSeek-specific DSA/NPU dispatch remains in deepseek_v2.py.",
+    "No real DeepSeek V3.2 checkpoint was loaded, so actual Indexer/IndexerKPool execution, checkpoint compatibility, logits, and semantic accuracy remain unverified.",
+    "No multi-GPU or pipeline-parallel run exercised the extracted top-k handoff policy across a real stage boundary.",
+    "NVIDIA, NPU, CPU-only, MUSA, and other architecture-specific runtime paths were not executed."
+  ],
+  "remaining_limitations": [
+    "This review had one AMD Instinct MI355X (gfx950) with Torch 2.11.0+rocm7.2 and no V3.2 model weights.",
+    "The candidate changes Python source only. repository-environment.json declares no native rebuild target, so no native rebuild was applicable.",
+    "The original issue is a broad staged refactor rather than a numerical failure; failing-before is the absence of the requested module and inline placement of the policy."
+  ]
+}

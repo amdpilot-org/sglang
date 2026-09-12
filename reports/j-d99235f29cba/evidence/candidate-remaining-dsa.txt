@@ -1,0 +1,46 @@
+47:    is_glm_moe_dsa,
+72:from sglang.srt.layers.communicator_dsa_cp import (
+73:    DSACPLayerCommunicator,
+221:        forward_dsa_core_npu,
+222:        forward_dsa_prepare_npu,
+477:            if quant_config is not None and not is_glm_moe_dsa(config):
+1798:        self.init_dsa_indexer(
+2000:        # forward_core may return (hidden_states, topk_indices) for DSA models
+2001:        # with index cache enabled. In the TBO path, topk_indices is not
+2016:        prev_topk_indices: Optional[torch.Tensor] = None,
+2025:            prev_topk_indices=prev_topk_indices,
+2037:        prev_topk_indices: Optional[torch.Tensor] = None,
+2082:                prev_topk_indices,
+2103:                prev_topk_indices,
+2131:        elif attn_forward_method == AttnForwardMethod.DSA_NPU:
+2132:            inner_state = forward_dsa_prepare_npu(
+2139:                prev_topk_indices,
+2176:        elif attn_forward_method == AttnForwardMethod.DSA_NPU:
+2177:            return forward_dsa_core_npu(self, *inner_state)
+2339:            DSACPLayerCommunicator
+2402:        prev_topk_indices: Optional[torch.Tensor] = None,
+2425:                prev_topk_indices=prev_topk_indices,
+2428:            hidden_states, topk_indices = hidden_states
+2430:            topk_indices = None
+2485:        return hidden_states, residual, topk_indices
+2558:        self.init_dsa_model(config)
+2696:        dsa_forward_uses_topk = self._dsa_forward_uses_topk()
+2703:            initial_topk_indices = None
+2708:            initial_topk_indices = pp_proxy_tensors.tensors.get("topk_indices")
+2709:        index_topk_share = IndexTopKShareState(forward_batch, initial_topk_indices)
+2714:                and self.dsa_stage_requires_input_topk(dsa_forward_uses_topk)
+2715:                and index_topk_share.topk_indices is None
+2717:                f"PP stage starting at layer {self.start_layer} requires DSA "
+2718:                "topk_indices from the previous stage."
+2775:                hidden_states, residual, topk_indices = layer(
+2783:                    prev_topk_indices=index_topk_share.topk_indices,
+2791:                index_topk_share.update(topk_indices)
+2812:            if self.dsa_stage_must_forward_topk(dsa_forward_uses_topk):
+2813:                topk_indices = index_topk_share.topk_indices
+2818:                    assert topk_indices is not None, (
+2820:                        "DSA topk_indices because the next stage starts on a "
+2823:                if topk_indices is None:
+2824:                    topk_indices = self.empty_dsa_topk(hidden_states)
+2825:                proxy_tensors["topk_indices"] = topk_indices
+2873:        self.use_dsa = is_deepseek_dsa(config)
+2911:    # checkpoint reports a different name (the NextN drafts, GLM's DSA variant)
