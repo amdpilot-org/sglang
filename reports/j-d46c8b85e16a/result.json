@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38651",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "a6d1911d49dd87c3052eed49a000c2c6817b8154",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes native cache-ID alignment and adds valid API/identity/shared-cache plumbing, but operational caller-ID caching remains limited to Kimi K3 images. Video, audio, general image processors, and Responses previous_response_id no-I/O reuse remain unresolved or unverified.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d46c8b85e16a/venv/bin/python (base GenerateReqInput video_data plus mm_cache_ids reproduction)",
+      "exit_code": 0,
+      "what_was_measured": "The recorded base does not implement the proposed native API and raises TypeError for mm_cache_ids; the exception was captured as expected by the reproduction script."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d46c8b85e16a/venv/bin/python -m pytest -q test/registered/unit/managers/test_mm_hashes.py test/registered/unit/multimodal/test_media_artifact_processor.py test/registered/unit/entrypoints/openai/test_protocol.py test/registered/unit/parser/test_jinja_template_utils.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate focused regressions: 94 passed and 27 subtests passed, including native video alignment, protocol retention, and a synthetic shared artifact-cache hot hit."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d46c8b85e16a/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py test/registered/unit/entrypoints/openai/test_serving_responses.py",
+      "exit_code": 0,
+      "what_was_measured": "Compatibility only: 170 passed and 70 subtests passed. These tests do not prove real multimodal previous_response_id no-I/O reuse."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d46c8b85e16a/venv/bin/python -m compileall -q python/sglang/srt",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python runtime sources compile."
+    },
+    {
+      "command": "rg -n 'cache_ids|mm_cache_ids' python/sglang/srt/multimodal python/sglang/srt/managers",
+      "exit_code": 0,
+      "what_was_measured": "Independent call-site inventory: only Kimi K3 forwards request mm_cache_ids into prepare_media_artifacts; its processor supports images only."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X was visible through Torch 2.11.0+rocm7.2 / HIP 7.2.26015, but no compatible multimodal weights were available. The tiny Llama fixture cannot qualify this multimodal contract."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A repeated Chat video_url with the same cache_id cannot obtain the promised no-I/O hit because no video processor passes cache_ids to prepare_media_artifacts.",
+    "A repeated Chat audio_url with the same cache_id cannot obtain the promised no-I/O hit because no audio processor passes cache_ids to prepare_media_artifacts.",
+    "Responses previous_response_id has no real multimodal serving evidence that historical media skips read/download, decode, preprocessing, and feature hashing.",
+    "Caller-ID artifact caching is operational only for the Kimi K3 image processor, not images generally across supported processors."
+  ],
+  "remaining_limitations": [
+    "Compatible multimodal model weights were unavailable, so real HTTP/GPU multimodal serving was not run.",
+    "No native source changed; a native rebuild was not applicable.",
+    "The candidate's passing shared-cache unit test proves the cache primitive, not that video/audio/general processor call paths reach it."
+  ]
+}
