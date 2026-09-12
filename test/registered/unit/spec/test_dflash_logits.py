@@ -403,6 +403,83 @@ def test_selector_accept_uses_greedy_fallback_without_staged_sample(monkeypatch)
     assert sync_sites == [worker_mod.SpecTpSyncSite.DFLASH_ACCEPT_GREEDY]
 
 
+@pytest.mark.parametrize(
+    (
+        "selector_sample",
+        "all_greedy",
+        "sampling_available",
+        "expected_site",
+        "expected_sync_count",
+    ),
+    (
+        (None, True, False, "DFLASH_ACCEPT_GREEDY", 1),
+        (None, False, True, "DFLASH_ACCEPT_SAMPLE", 2),
+        (
+            (torch.tensor([[4, 5]]), torch.zeros((1, 2))),
+            False,
+            True,
+            "DFLASH_SELECTOR",
+            2,
+        ),
+    ),
+)
+def test_accept_block_synchronizes_every_verification_path(
+    monkeypatch,
+    selector_sample,
+    all_greedy,
+    sampling_available,
+    expected_site,
+    expected_sync_count,
+):
+    """Every verification path must agree across TP ranks before committing state."""
+    from sglang.srt.speculative import dflash_worker_v2 as worker_mod
+
+    monkeypatch.setattr(
+        worker_mod,
+        "is_dflash_sampling_verify_available",
+        lambda: sampling_available,
+    )
+    monkeypatch.setattr(
+        worker_mod,
+        "compute_dflash_correct_drafts_and_bonus",
+        lambda **kwargs: (torch.tensor([1]), torch.tensor([6])),
+    )
+    monkeypatch.setattr(
+        worker_mod,
+        "compute_dflash_sampling_correct_drafts_and_bonus",
+        lambda **kwargs: (torch.tensor([1]), torch.tensor([6])),
+    )
+
+    sync_sites = []
+    worker = SimpleNamespace(
+        _selector_sample=selector_sample,
+        _selector_sampling_accept=lambda **kwargs: (
+            torch.tensor([1]),
+            torch.tensor([6]),
+        ),
+        _tp_sync=SimpleNamespace(
+            sync=lambda site, tensor: sync_sites.append(site.name)
+        ),
+        _use_triton_accept_bonus=False,
+        block_size=2,
+    )
+
+    _, commit_lens, bonus, out_tokens, _, _ = worker_mod.DFlashWorkerV2._accept_block(
+        worker,
+        candidates=torch.tensor([[4, 5]]),
+        next_token_logits=torch.tensor([[[0.0, 1.0], [1.0, 0.0]]]),
+        sampling_info=SimpleNamespace(is_all_greedy=all_greedy),
+        draft_input=SimpleNamespace(max_top_k=8, uniform_top_k_value=8),
+        prefix_lens=torch.tensor([3]),
+        bs=1,
+    )
+
+    assert sync_sites == [expected_site] * expected_sync_count
+    assert commit_lens.tolist() == [2]
+    assert bonus.tolist() == [6]
+    assert out_tokens.tolist() == [[5, 6]]
+
+
 def test_grouped_conv_supports_runtime_block_sizes():
     """The conv indexes a position inside the block, so it must follow whatever
     block size the worker resolved -- including one that is not a power of two."""
