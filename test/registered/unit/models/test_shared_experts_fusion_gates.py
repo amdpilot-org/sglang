@@ -246,6 +246,40 @@ class TestGlmMoeLiteGate(_FusionGateCase):
 
 
 class TestGlmMoeGate(_FusionGateCase):
+    def _glm52_config(self):
+        return SimpleNamespace(
+            architectures=["GlmMoeDsaForCausalLM"],
+            n_routed_experts=256,
+            n_shared_experts=1,
+            first_k_dense_replace=3,
+            num_hidden_layers=78,
+        )
+
+    def _modelopt_fp4(self, exclude_modules):
+        from sglang.srt.layers.quantization.modelopt_quant import ModelOptFp4Config
+
+        return ModelOptFp4Config(
+            is_checkpoint_nvfp4_serialized=True,
+            group_size=16,
+            exclude_modules=exclude_modules,
+        )
+
+    def test_glm52_mixed_precision_shared_experts_cannot_fuse(self):
+        from sglang.srt.models.glm4_moe import GlmMoeDsaForCausalLM
+
+        self._seed()
+        quant = self._modelopt_fp4(["model.layers.*.mlp.shared_experts*"])
+        reason = self._reason(GlmMoeDsaForCausalLM, self._glm52_config(), quant)
+        self.assertIn("shared experts unquantized", reason)
+
+    def test_glm52_uniform_fp4_experts_are_not_rejected_as_mixed_precision(self):
+        from sglang.srt.models.glm4_moe import GlmMoeDsaForCausalLM
+
+        self._seed()
+        quant = self._modelopt_fp4([])
+        reason = self._reason(GlmMoeDsaForCausalLM, self._glm52_config(), quant)
+        self.assertNotIn("shared experts unquantized", reason or "")
+
     def test_a_w4afp8_checkpoint_cannot_fuse(self):
         from sglang.srt.models.glm4_moe import Glm4MoeForCausalLM
 

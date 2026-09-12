@@ -1445,6 +1445,21 @@ class Glm4MoeForCausalLM(nn.Module):
 class GlmMoeDsaForCausalLM(DeepseekV2ForCausalLM):
     fused_shared_experts_architecture = "GlmMoeDsaForCausalLM"
 
+    @classmethod
+    def shared_experts_fusion_disable_reason(cls, hf_config, quant_config):
+        if quant_config is not None and quant_config.get_name() == "modelopt_fp4":
+            first_sparse_layer = getattr(hf_config, "first_k_dense_replace", 0)
+            for layer_id in range(first_sparse_layer, hf_config.num_hidden_layers):
+                moe_prefix = f"model.layers.{layer_id}.mlp"
+                if quant_config.is_layer_excluded(
+                    f"{moe_prefix}.shared_experts"
+                ) and not quant_config.is_layer_excluded(f"{moe_prefix}.experts"):
+                    return (
+                        "ModelOpt FP4 keeps shared experts unquantized while routed "
+                        "experts are quantized."
+                    )
+        return super().shared_experts_fusion_disable_reason(hf_config, quant_config)
+
 
 class GlmMoeDsaForCausalLMNextN(DeepseekV3ForCausalLMNextN):
     # GLM-5.2's MTP layer index differs from DeepSeek's (61), so the inherited
