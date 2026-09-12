@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38846",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/559",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/558",
+  "candidate_commit": "dcccb77a2ce58344490b41c5c2df2b027186411c",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The base reproduces the reported mismatch: the actual KVCacheConfigurator cap path computes 9 effective requests from max_running_requests=32, max_mamba_cache_size=47, and five Mamba state slots per request, while /server_info (and therefore /get_server_info) has no top-level effective_max_running_requests. At the exact candidate commit, both HTTP aliases and Engine.get_server_info retain the requested max_running_requests and expose the scheduler's post-sizing effective value. The candidate regression suite and independent original-contract/adversarial cases passed. This is a full fix for the requested introspection field, not merely test hardening. No native source changed.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-432e800daec0/venv/bin/python inline base endpoint regression using test_server_info._call_server_info_with",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before evidence at base: requested max_running_requests was 32 and internal scheduler state was 9, but indexing top-level effective_max_running_requests raised KeyError. Raw output: /job/review-evidence-j-432e800daec0/base-endpoint-regression.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-432e800daec0/venv/bin/python inline KVCacheConfigurator.resolve_max_num_reqs probe",
+      "exit_code": 0,
+      "what_was_measured": "The actual checked-out resolver returned 9 for requested 32, max_mamba_cache_size 47, and ratio 5, reproducing the issue's cap calculation. Raw output: /job/review-evidence-j-432e800daec0/base-cache-cap.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-432e800daec0/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_server_info.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate dcccb77a2ce58344490b41c5c2df2b027186411c, 33 endpoint/Engine tests and 12 subtests passed, including the new requested-versus-effective regressions. Raw output: /job/review-evidence-j-432e800daec0/candidate-server-info-pytest.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-432e800daec0/venv/bin/python inline independent server-info adversarial probe",
+      "exit_code": 0,
+      "what_was_measured": "Independently verified requested 32/effective 9, unset requested/effective 47, heterogeneous DP states selecting the restrictive value 9, omission when all runtime values are absent, partial-state behavior, and HTTP/Engine parity. Raw output: /job/review-evidence-j-432e800daec0/candidate-adversarial.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-432e800daec0/venv/bin/python inline Torch ROCm matrix multiplication compared with NumPy",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI350X (gfx950), Torch ROCm output matched the independent NumPy reference with maximum absolute error 0.0. Raw output: /job/review-evidence-j-432e800daec0/gpu-numerical.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One assigned AMD Instinct MI350X was used. torch.cuda reported gfx950:sramecc+:xnack- and a real GPU matrix multiplication matched NumPy exactly. rocminfo independently reported gfx950 / AMD Instinct MI350X. Toolchain/ISA output: /job/review-evidence-j-432e800daec0/toolchain-isa.txt",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": "No native files differ between base and candidate, so a native rebuild was neither required nor applicable. Imports were confirmed from /job/repo/python/sglang/srt/entrypoints/engine.py and /job/repo/python/sglang/srt/entrypoints/http_server.py. The available GPU is AMD MI350X/gfx950 rather than the reporter's NVIDIA RTX 6000 Ada, and no matching 27B hybrid-model weights were prepared, so an end-to-end launch of that exact model/architecture was not performed. The control-plane fix was instead connected to the actual cache-cap resolver and scheduler state contract, then tested through both public implementations. The candidate reports a known value when only a subset of DP state dictionaries contain the field; normal get_internal_state responses are expected to include every scheduler value, but degraded partial-state behavior was not specified by the issue. Raw evidence is retained under /job/review-evidence-j-432e800daec0. Source paths reviewed: python/sglang/srt/mem_cache/kv_cache_configurator.py, python/sglang/srt/managers/scheduler.py, python/sglang/srt/entrypoints/http_server.py, and python/sglang/srt/entrypoints/engine.py. Native path: none."
+}
