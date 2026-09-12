@@ -1,0 +1,49 @@
+358c163250ad3b1f62939b01ce1314a0a31a0365
+origin	https://github.com/amdpilot-org/sglang.git (fetch)
+origin	https://github.com/amdpilot-org/sglang.git (push)
+   410	        else 0
+   411	    )
+   412	    can_run_prefill_cuda_graph = _local_prefill_cuda_graph_vote(
+   413	        local_batch=local_batch,
+   414	        prefill_graph_runner=prefill_graph_runner,
+   415	        coordinated_prefill=coordinated_prefill,
+   416	        breakable_prefill=breakable_prefill,
+   417	        spec_algorithm=model_runner.spec_algorithm,
+   418	        model_config=model_runner.model_config,
+   419	    )
+   420
+   421	    is_extend_in_batch = local_batch.forward_mode.is_extend() if local_batch else False
+   422	    if local_batch is not None:
+   423	        local_batch.is_extend_in_batch = is_extend_in_batch
+   424
+   425	    tbo_preparer = TboDPAttentionPreparer()
+   426	    use_world_group = world_dp_gather_enabled()
+   427	    if use_world_group:
+   428	        from sglang.srt.distributed.parallel_state import get_world_group
+   429
+   430	        world = get_world_group()
+   431	        group = torch.distributed.group.WORLD
+   432	        device = world.device
+   433	    elif len(offload_tags) == 0 and (
+   434	        disable_overlap_schedule
+   435	        or envs.SGLANG_NCCL_ALL_GATHER_IN_OVERLAP_SCHEDULER_SYNC_BATCH.get()
+   436	    ):
+   437	        group = tp_group.device_group
+   438	        device = tp_group.device
+   439	    else:
+   440	        group = tp_group.cpu_group
+   441	        device = "cpu"
+   442
+   443	    local_can_run_tbo, local_forward_mode = tbo_preparer.prepare_all_gather(local_batch)
+   444	    if use_world_group:
+   445	        dp_size = _resolve_elastic_world_dp_size(
+   446	            dp_size,
+   447	            group=group,
+   448	            local_num_tokens=num_tokens,
+   449	            local_forward_mode=local_forward_mode,
+   450	        )
+   451	    skip_all_gather = should_skip_scheduler_all_gather(dp_size)
+   452
+   453	    mlp_sync_info = MLPSyncBatchInfo(
+   454	        dp_size=dp_size,
+   455	        tp_size=attn_tp_size,
