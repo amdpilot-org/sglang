@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37066",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Corrected compute-mamba-ratio guidance and both live cookbook calculators to treat plain speculative intermediate state as separate request-indexed scratch, retain ReplaySSM allocation distinctions, divide request sizing per attention-DP worker, and reserve one usable transient stash slot beyond C*S. Added a focused failing-before/passing-after documentation regression. This changes guidance and calculators only; the reported eight-H100 workload was not rerun.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-417c93f919c1/venv/bin/python -m pytest -q test/registered/docs/test_mamba_ratio_guidance.py",
+      "exit_code": 0,
+      "what_was_measured": "Three regression assertions covering separate plain-spec scratch, attention-DP sizing, and the C*S+1 explicit pin; all passed after failing against the recorded base content."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-417c93f919c1/venv/bin/python /job/.codex/skills/.system/skill-creator/scripts/quick_validate.py .claude/skills/compute-mamba-ratio",
+      "exit_code": 0,
+      "what_was_measured": "Skill metadata and structure validation."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-417c93f919c1/venv/bin/python < allocator boundary probe",
+      "exit_code": 0,
+      "what_was_measured": "The checked-out MambaSlotAllocator returned None for a transient allocation after all 30 usable slots were held, then succeeded after one slot was freed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-417c93f919c1/venv/bin/python < independent accounting calculation",
+      "exit_code": 0,
+      "what_was_measured": "Derived 2.872258 GiB for (6+1)*6 intermediate rows from 2.12 GiB/31 physical state rows; confirmed floor(30/5)=6 and transient demand 31>30; derived DP8 pin boundaries."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the delivered patch."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original GLM-5.3-Flash TP8 + attention-DP8 workload on eight H100 GPUs was not rerun.",
+    "No GPU execution was used: the deliverable changes repository guidance and JSX sizing arithmetic, and the current allocator boundary was reproduced deterministically on CPU.",
+    "The calculators derive model-specific scratch geometry from current source; operators should verify final pool bytes and admitted concurrency from their boot log, especially for tree verification, non-CUDA layouts, or future allocator changes.",
+    "ReplaySSM does not use the plain-spec D term: GDN request-indexed ring scratch and KDA per-slot ring bytes remain distinct, and conv rollback scratch can remain."
+  ]
+}
