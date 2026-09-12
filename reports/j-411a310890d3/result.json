@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34092",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2879",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2771",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/2839",
+  "candidate_commit": "192a5253d3268bf9199d6854344eb01b10577510",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced all four review counterexamples against the exact candidate, then normalized Transformers 4.57+ dictionary compression rates and nested RoPE sections at the SGLang runtime boundary without forcing generated V4 configs through the incompatible V3-derived parser. Legacy fields remain supported and conflicting or incomplete schemas are rejected.",
+  "tests": [
+    {
+      "command": "Exact candidate 192a5253d3268bf9199d6854344eb01b10577510: serialize Transformers 5.12.1 DeepseekV4Config and load it through sglang.srt.utils.hf_transformers.get_config",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before generated-schema reproduction. The candidate raised StrictDataclassClassValidationError because its forced V3-derived class rejected generated hash_moe layer types. Raw log: /job/evidence-j-411a310890d3/candidate/generated-config.log"
+    },
+    {
+      "command": "Exact candidate direct adversarial case using dictionary compress_rates, layer_types, and nested rope_parameters",
+      "exit_code": 0,
+      "what_was_measured": "The candidate aliased the dictionary directly, integer indexing raised KeyError, indexer count was zero, and nested RoPE was returned unspecialized. Raw log: /job/evidence-j-411a310890d3/candidate/direct-counterexamples.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python AITER_JIT_DIR=/tmp/amdpilot-repo-j-411a310890d3/cache/aiter /tmp/amdpilot-repo-j-411a310890d3/venv/bin/python -m pytest -q test/registered/unit/configs/test_model_config.py",
+      "exit_code": 0,
+      "what_was_measured": "11 tests and 4 subtests passed, including an actual Transformers-generated config, adversarial dictionary ordering, nested RoPE selection, legacy compatibility, conflict rejection, missing layer_types, and length validation. Raw log: /job/evidence-j-411a310890d3/pytest-model-config-final.log"
+    },
+    {
+      "command": "Generated DeepseekV4Config -> get_config -> normalization -> ModelConfig",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after end-to-end configuration path produced [128, 128, 128, 4], counted one C4 layer, selected the compress RoPE subsection, preserved nested RoPE, and completed ModelConfig construction. Raw log: /job/evidence-j-411a310890d3/fixed-generated-config.log"
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-411a310890d3/pre-commit /opt/venv/bin/pre-commit run --files python/sglang/srt/configs/model_config.py python/sglang/srt/models/deepseek_v4.py test/registered/unit/configs/test_model_config.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, repository policy, and registry checks passed. Raw log: /job/evidence-j-411a310890d3/pre-commit-final.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No DeepSeek V4 weights were available. The reproduced defects are deterministic CPU-side configuration/runtime wiring; no unrelated GPU smoke is claimed as architecture or accuracy validation."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No DeepSeek V4 weights were available, so weight loading, full engine startup, semantic accuracy, GPU numerical output, and distributed serving remain unverified.",
+    "The pinned environment uses Transformers 5.12.1 rather than exactly 4.57.x; its generated dictionary compress_rates, layer_types, and nested rope_parameters schema is the modern contract under investigation.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
