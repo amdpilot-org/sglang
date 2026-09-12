@@ -128,6 +128,15 @@ from sglang.srt.utils import (
 from sglang.srt.utils.hf_transformers_utils import get_processor, get_rope_config
 
 logger = logging.getLogger(__name__)
+
+
+def _get_decoder_layer_id(weight_name: str) -> Optional[int]:
+    """Return the PP layer id only for normalized language-model weights."""
+    if not weight_name.startswith("model.layers."):
+        return None
+    return get_layer_id(weight_name)
+
+
 _is_cuda = is_cuda()
 _is_npu = is_npu()
 _is_cpu = is_cpu()
@@ -1908,7 +1917,7 @@ class Qwen3_5ForCausalLM(nn.Module):
                 name = name.replace(r"model.language_model.", r"model.")
             if ".self_attn." in name:
                 name = name.replace(".self_attn", "")
-            layer_id = get_layer_id(name)
+            layer_id = _get_decoder_layer_id(name)
             if (
                 layer_id is not None
                 and hasattr(self, "start_layer")
@@ -2053,7 +2062,7 @@ class Qwen3_5MoeForCausalLM(Qwen3_5ForCausalLM):
             if ".self_attn." in name:
                 name = name.replace(".self_attn", "")
 
-            layer_id = get_layer_id(name)
+            layer_id = _get_decoder_layer_id(name)
             if (
                 layer_id is not None
                 and hasattr(self, "start_layer")
@@ -2272,7 +2281,7 @@ class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration):
                         lm_head_param, "weight_loader", default_weight_loader
                     )
                     weight_loader(lm_head_param, loaded_weight)
-            layer_id = get_layer_id(name)
+            layer_id = _get_decoder_layer_id(name)
             if (
                 layer_id is not None
                 and hasattr(self, "start_layer")
@@ -2535,7 +2544,7 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3VLForConditionalGeneration):
                     )
                     weight_loader(lm_head_param, loaded_weight)
 
-            layer_id = get_layer_id(name)
+            layer_id = _get_decoder_layer_id(name)
             if (
                 layer_id is not None
                 and hasattr(self, "start_layer")
