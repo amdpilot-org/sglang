@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38709",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the ROCm DCP decode tensor/tuple mismatch in the actual forward_absorb_rocm_core implementation. The base code omitted return_lse=True: batch size 1 raised the reported ValueError, while batch size 2 silently unpacked two output rows and advanced with an invalid LSE. The candidate requests LSE explicitly and validates the backend return contract before any collective uses it. Focused tests cover tensor-only and tuple returns for batch size one and larger, and verify that the real forward method passes the exact returned LSE to the DCP collective. Single-GPU ROCm kernel checks preserve the existing LSE numerical semantics.",
+  "tests": [
+    {
+      "command": "temporary reverse-apply of the working patch, then /tmp/amdpilot-repo-j-fa219db85617/venv/bin/python inline reproduction invoking DeepseekMLARocmForwardMixin.forward_absorb_rocm_core for batch sizes 1 and 2",
+      "exit_code": 0,
+      "what_was_measured": "Actual base implementation reproduced ValueError: not enough values to unpack for batch 1; batch 2 advanced past unpacking without return_lse in backend kwargs, demonstrating silent row-as-LSE misinterpretation. Raw output: /job/raw-output/reproduce-base.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fa219db85617/venv/bin/python -m pytest -q test/registered/unit/models/test_forward_mla_rocm_dcp_return.py",
+      "exit_code": 0,
+      "what_was_measured": "7 tests and 4 parameterized subtests passed. Exercised the actual ROCm forward method for batch 1 and larger, tensor-only and valid tuple returns, explicit absent LSE, return_lse=True propagation, exact LSE identity at the collective boundary, and unchanged selected output. Raw output: /job/raw-output/pytest-final.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fa219db85617/venv/bin/python -m pytest -q test/registered/kernels/test_dcp_lse_combine.py -k 'n2_base_e or n2_base_2 or n2_large_batch or flashmla_natural_log_lse_correction'",
+      "exit_code": 0,
+      "what_was_measured": "4 GPU tests passed on the assigned MI350X. The actual Triton DCP LSE combine/correction kernels matched independent CPU references for natural-log and base-2 LSE, including batch 1 and batch 64 cases. Raw output: /job/raw-output/gpu-lse-numerics.log"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/models/deepseek_common/attention_forward_methods/forward_mla_rocm.py test/registered/unit/models/test_forward_mla_rocm_dcp_return.py",
+      "exit_code": 0,
+      "what_was_measured": "All configured source formatting, lint, registry, and safety hooks passed. Raw output: /job/raw-output/pre-commit-final.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "PyTorch 2.11.0+rocm7.2 reported one AMD Instinct MI350X (gfx950). Four actual Triton DCP LSE combine/correction GPU tests passed against independent CPU references; this is not evidence of an 8-rank deployment.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one assigned GPU was available, so no multi-rank DCP collective execution was possible.",
+    "The reported 8x MI300X (gfx942) GLM-5.3 deployment was not run; the available GPU was one MI350X (gfx950), and no model weights were required for the focused return-contract reproduction.",
+    "The a2a/fi_a2a and reduce-scatter communication paths were checked at their input boundary and their single-GPU numerical kernels, but not with real distributed transport.",
+    "No FlyDSL C++ or other native source changed, so a native rebuild was not applicable. Source path: /job/repo. Prepared interpreter/runtime: /tmp/amdpilot-repo-j-fa219db85617/venv/bin/python and /tmp/amdpilot-repo-j-fa219db85617."
+  ]
+}
