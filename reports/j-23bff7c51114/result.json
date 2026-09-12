@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31765",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2506",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2472",
+  "candidate_commit": "f4a3d6086303839480b83005c4a690705c826604",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "Independent review reproduced the four affected lifecycle failures on the recorded base and verified the exact candidate fixes explicit queued abort/timeout, incoming queue-limit rejection, and priority eviction. Streaming sessions are reopened without changing committed request nodes, and queued Mamba requests receive FINISH_ABORT before cache release.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-23bff7c51114/venv/bin/python -m pytest -q /job/review-evidence-j-23bff7c51114/test_candidate.py (recorded base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: 4 failed, 1 passed. Both original explicit queued-removal variants and both independently reported queue-limit variants lacked required streaming-session/Mamba cleanup. Raw output: evidence/base-candidate-regression.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-23bff7c51114/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_streaming_session_queue_abort.py (exact candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 5 passed, covering explicit queued abort, waiting-timeout reason propagation, incoming queue-limit rejection, priority Mamba eviction, and non-streaming isolation. Raw output: evidence/candidate-regression.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-23bff7c51114/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_streaming_session_queue_abort.py test/registered/unit/mem_cache/test_streaming_session_unit.py (exact candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Expanded adversarial/adjacent validation: 14 passed, including streaming slot abort versus successful finish behavior and the candidate's queue-removal boundaries. Raw output: evidence/candidate-focused-expanded.txt."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X gfx950; Torch 2.11.0+rocm7.2 / HIP 7.2. The retained server log records local FP16 Llama weight loading, GPU KV allocation, Triton gfx950 compilation, prefill/decode, /open_session, and a completed session /generate. The queue-order portion was inconclusive."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Qwen/Qwen2.5-1.5B-Instruct weights were available, so the reporter's exact model/HTTP reproduction was not repeated.",
+    "No hybrid-Mamba weights were available. Mamba correctness was verified at the scheduler/cache boundary, including FINISH_ABORT ordering before release_kv_cache, but not end to end on a real Mamba model.",
+    "The assigned system is AMD ROCm gfx950 rather than the reporter's NVIDIA CUDA environment; no cross-architecture performance or semantic-output claim is made.",
+    "The attempted tiny-Llama concurrent HTTP probe was timing-sensitive and inconclusive; it is explicitly excluded from the acceptance evidence.",
+    "The candidate changes only Python source, so a native rebuild was not applicable."
+  ]
+}
