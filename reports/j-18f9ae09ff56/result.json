@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35201",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1563",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 1437's DSV4 paged and nonpaged row chunking, then corrected the independently reviewed gaps from PR 1521. Graph-backed prefill, active stream capture, breakable graphs, and TC piecewise graphs now use the existing deterministic static logits budget without a synchronizing free-memory query. A budget smaller than one aligned logits row now raises an explicit diagnostic instead of silently launching an allocation larger than the budget. The exact H100/TP4/full-model workload remains unexecuted because the assigned hardware is gfx950 and the model weights are unavailable.",
+  "tests": [
+    {
+      "command": "Independent arithmetic and mocked graph-mode probe at exact candidate ace5d6123d773bd6fd760375352226467c82628c",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced a 1526726656-byte issue rectangle; all four graph-backed cases returned budget=None and rows_per_chunk=None; budgets below the 372736-byte aligned row were exceeded by the candidate's minimum one-row launch. Raw output: /job/review-evidence-j-18f9ae09ff56/candidate-counterexamples.txt"
+    },
+    {
+      "command": "Run corrected test_dsv4_indexer_chunk.py against exact candidate with /tmp/amdpilot-repro-j-18f9ae09ff56/python first on sys.path",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: the sub-row hard-bound test and four graph-mode subtests failed (5 failed, 9 passed, 9 subtests passed). Raw output: /job/review-evidence-j-18f9ae09ff56/candidate-new-regression.txt; JUnit: /job/review-evidence-j-18f9ae09ff56/candidate-new-regression.xml"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-18f9ae09ff56/venv/bin/python -m pytest -q test/registered/unit/layers/test_dsv4_indexer_chunk.py test/registered/unit/layers/test_dsv4_nonpaged_indexer.py test/registered/unit/layers/attention/test_dsa_mqa_logits_chunking.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after focused suite: 23 passed and 29 subtests passed, covering issue arithmetic, paged/nonpaged chunk plans, graph-safe static budgeting, eager live budgeting, and the sub-row failure boundary. JUnit: /job/review-evidence-j-18f9ae09ff56/corrected-focused-final.xml"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/layers/attention/dsa/utils.py python/sglang/srt/layers/attention/dsv4/metadata.py test/registered/unit/layers/test_dsv4_indexer_chunk.py",
+      "exit_code": 0,
+      "what_was_measured": "All configured lint, formatting, spelling, and repository validation hooks applicable to the changed files passed."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 GPU Top-K row-chunk equivalence fixture",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, sorted page selections exactly matched between one full transform and chunks of 1, 7, 16, and 36 rows. Raw output: /job/review-evidence-j-18f9ae09ff56/gpu-topk.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X (gfx950) executed the fp32 Top-K row-equivalence fixture. CUDA DeepGEMM, H100, TP4, and the DeepSeek-V4 model path were not executed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 weights were unavailable, so the reported 800K-token HTTP request and semantic model behavior were not reproduced.",
+    "The assigned hardware was one AMD Instinct MI350X gfx950 rather than 4xH100; CUDA DeepGEMM allocation behavior and TP4 replication remain unverified.",
+    "No native source changed, so a native rebuild was not applicable.",
+    "The deterministic tiny Llama fixture does not exercise the DeepSeek-V4 sparse indexer and was not used as substitute evidence."
+  ]
+}

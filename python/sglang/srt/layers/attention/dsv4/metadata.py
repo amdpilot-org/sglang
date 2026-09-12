@@ -263,25 +263,25 @@ class PagedIndexerMetadata:
         assert self.page_size == 256, "the system hardcodes page_size=256"
 
     def _mqa_logits_budget(self, *, num_rows: int) -> Optional[int]:
-        """Free-memory budget for this forward's logits; None disables chunking.
-
-        Graph-backed forwards keep a single call: their shapes are fixed at
-        capture and the free-memory read would sync the host mid-capture.
-        """
-        if self.use_prefill_cuda_graph or not self.compressed_seq_lens.is_cuda:
+        """Memory budget for this forward's logits; None disables chunking."""
+        if not self.compressed_seq_lens.is_cuda:
             return None
         if not mqa_logits_needs_budget_check(
             num_rows=num_rows, num_cols=self.max_compressed_seq_len
         ):
             return None
-        if (
-            torch.cuda.is_current_stream_capturing()
+        graph_backed = (
+            self.use_prefill_cuda_graph
+            or torch.cuda.is_current_stream_capturing()
             or is_in_breakable_cuda_graph()
             or is_in_tc_piecewise_cuda_graph()
-        ):
-            return None
+        )
+        # mem_get_info synchronizes the host and is unsafe during capture.  The
+        # configuration-only budget is deterministic and can therefore be used
+        # both while constructing a prefill graph and while executing one.
         return mqa_logits_budget_bytes(
-            device_index=self.compressed_seq_lens.device.index, allow_sync=True
+            device_index=self.compressed_seq_lens.device.index,
+            allow_sync=not graph_backed,
         )
 
     @property
