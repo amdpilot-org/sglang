@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35673",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1417",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1382",
+  "candidate_commit": "695bab76f0928ad190ac33134d5fd6f15af62638",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate correctly forwards Gemma 4's known dense seq_len as max_seqlen and eliminates the specific GPU-to-host .item() path named in the watchdog stack. Its regression fails on the recorded base and passes on the exact candidate, and independent masked/edge forwarding checks pass. This verifies a narrow synchronization mitigation, but not the original Gemma-4-31B-it TP=8 readiness fix: the blocked .item() may be observing earlier stalled GPU work, and no eight-GPU model/server reproduction was possible.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-75747dd44ba5/venv/bin/python -m pytest -q /job/review-evidence-j-75747dd44ba5/candidate-test.py (recorded base source)",
+      "exit_code": 1,
+      "what_was_measured": "The candidate's two forwarding regressions both failed on the exact recorded base because max_seqlen was absent."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-75747dd44ba5/venv/bin/python -m pytest -q test/registered/unit/models/test_gemma4_vision_attention.py test/registered/unit/layers/attention/test_vision_max_seqlen.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Nine focused contract tests passed on candidate commit 695bab76f0928ad190ac33134d5fd6f15af62638."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-75747dd44ba5/venv/bin/python reports/j-75747dd44ba5/raw/adversarial_candidate.py forward (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent masked forwarding cases batch=2/seq_len=1 and batch=4/seq_len=9 passed and received the correct host max_seqlen."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-75747dd44ba5/venv/bin/python reports/j-75747dd44ba5/raw/adversarial_candidate.py gpu_seq1 (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Actual VisionTritonAttention execution on gfx950 for batch=2/seq_len=1 matched PyTorch SDPA with max_abs=0.0."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-75747dd44ba5/venv/bin/python reports/j-75747dd44ba5/raw/adversarial_candidate.py gpu_reported_shape and gpu_batch4 (exact candidate)",
+      "exit_code": 1,
+      "what_was_measured": "The independent harness did not reproduce numerical agreement for batched shapes (3,5) and (4,9) at softmax_scale=1.0; max_abs was 1.60046 and 2.66284. This is not attributed to the forwarding change but limits independent confirmation of the candidate's GPU claim."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X, gfx950:sramecc+:xnack-, executed the actual VisionTritonAttention backend; raw outputs are retained under reports/j-75747dd44ba5/raw/."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No evidence shows /health reaches HTTP 200 for Gemma-4-31B-it with TP=8 and hybrid SWA on AMD/ROCm.",
+    "Removing the host .item() synchronization does not establish that earlier GPU kernels or TP collectives cannot remain stalled.",
+    "Independent batched direct-backend comparisons at softmax_scale=1.0 did not match PyTorch SDPA for shapes (3,5) and (4,9); this requires separate interpretation and was not shown to be introduced by the candidate."
+  ],
+  "remaining_limitations": [
+    "Only one gfx950 GPU was assigned; TP=8 collectives and the reported eight-GPU PCIe topology could not be exercised.",
+    "Gemma-4-31B-it weights were unavailable; full multimodal preprocessing, hybrid SWA allocation, server startup/readiness, and semantic output were not tested.",
+    "No native source changed, so no native rebuild was applicable.",
+    "The prepared environment used PyTorch 2.11.0+rocm7.2 and HIP 7.2.26015, which differs from the issue snapshot's ROCm 7.14 environment."
+  ]
+}
