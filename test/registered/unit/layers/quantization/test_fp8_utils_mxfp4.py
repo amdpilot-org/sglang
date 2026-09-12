@@ -1,8 +1,11 @@
 """CPU unit tests for MXFP4 conversion and MXFP8 fake-output metadata."""
 
 import unittest
+from unittest import mock
 
 import torch
+
+import sglang.srt.layers.quantization.fp8_utils as fp8_utils
 
 from sglang.srt.layers.quantization.fp8_utils import (
     _fake_flashinfer_mxfp8_quantize,
@@ -67,6 +70,34 @@ class TestFp8UtilsMxfp4(CustomTestCase):
         self.assertEqual(fp4_weight.shape, torch.Size([2, 32, 16]))
         self.assertEqual(fp4_scale.dtype, torch.float8_e8m0fnu)
         self.assertEqual(fp4_scale.shape, torch.Size([2, 32, 1]))
+
+    def test_quantize_block_fp8_weight_to_mxfp4_chunks_on_scale_rows(self):
+        """Large shared experts must not be fully dequantized at once."""
+        torch.manual_seed(0)
+        fp8_weight = torch.randn(2, 257, 128).to(torch.float8_e4m3fn)
+        fp8_scale = torch.rand(2, 3, 1, dtype=torch.float32) + 0.5
+
+        with mock.patch.object(fp8_utils, "_FP8_TO_MXFP4_CHUNK_ELEMENTS", 128 * 128):
+            chunked_weight, chunked_scale = quantize_block_fp8_weight_to_mxfp4(
+                fp8_weight, fp8_scale, [128, 128]
+            )
+        with mock.patch.object(fp8_utils, "_FP8_TO_MXFP4_CHUNK_ELEMENTS", 1 << 60):
+            reference_weight, reference_scale = quantize_block_fp8_weight_to_mxfp4(
+                fp8_weight, fp8_scale, [128, 128]
+            )
+
+        # Covers grouped input, multiple chunks, and a one-row final FP8 block.
+        torch.testing.assert_close(chunked_weight, reference_weight)
+        torch.testing.assert_close(chunked_scale, reference_scale)
+
+    def test_quantize_block_fp8_weight_to_mxfp4_rejects_partial_output_group(self):
+        fp8_weight = torch.ones(4, 48, dtype=torch.float8_e4m3fn)
+        fp8_scale = torch.ones(1, 1, dtype=torch.float32)
+
+        with self.assertRaisesRegex(ValueError, "K divisible by 32"):
+            quantize_block_fp8_weight_to_mxfp4(
+                fp8_weight, fp8_scale, [128, 128]
+            )
 
 
 if __name__ == "__main__":
