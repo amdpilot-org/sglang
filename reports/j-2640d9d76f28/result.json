@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/26794",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "8bb43fd1dd0ad1d4910508a98bfa464c86b0835c",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate's focused regression and independent loader cases pass, but it is test-only hardening for a production correction already present on the prepared base. The original Ascend end-to-end failure remains unverified, and the candidate's revised MI355X evidence conflicts with the current prepared device, which both PyTorch and rocm-smi identify as MI350X.",
+  "tests": [
+    {
+      "command": "git switch --detach 8bb43fd1dd0ad1d4910508a98bfa464c86b0835c && /tmp/amdpilot-repo-j-2640d9d76f28/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_npu_unquant_moe_reload.py",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate commit, all three focused CPU tests passed. They mock unavailable NPU format casting, run the NPU post-processing branch, and reload separate gate/up/down tensors through the actual FusedMoE loader."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-2640d9d76f28/venv/bin/python /job/review-evidence-j-2640d9d76f28/adversarial_loader.py",
+      "exit_code": 0,
+      "what_was_measured": "On one gfx950 GPU, two consecutive reported-size separate gate/up reloads and both TP=2 rank slices matched independent references. Recreating the obsolete transposed persistent layout failed through the actual loader as expected. The same checks passed on the recorded base and exact candidate because the candidate changes no production source."
+    },
+    {
+      "command": "rocm-smi --showproductname --showuniqueid --showserial; rocminfo | rg 'Marketing Name|gfx950'",
+      "exit_code": 0,
+      "what_was_measured": "The assigned device was independently identified as AMD Instinct MI350X with gfx950, contradicting the candidate's revised MI355X raw record and result metadata."
+    },
+    {
+      "command": "gh api repos/sgl-project/sglang/pulls/26717/files; gh api repos/sgl-project/sglang/pulls/29503/files",
+      "exit_code": 0,
+      "what_was_measured": "Source history shows the earlier reload shape restoration and the later canonical-layout correction that removed persistent NPU transposes and moved transpose semantics to grouped-matmul execution."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "raw/adversarial_loader.txt and raw/device_identity.txt record actual BF16 loader operations and device identity on one AMD Instinct MI350X, gfx950:sramecc+:xnack-. This is not Ascend execution."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The candidate's corrected evidence says AMD Instinct MI355X, but both PyTorch and rocm-smi identify the GPU assigned to this prepared review as AMD Instinct MI350X; gfx950 alone does not distinguish the marketed model reliably across environments.",
+    "No Ascend device, CANN, or torch_npu runtime was available, so actual npu_format_cast and Ascend grouped-matmul behavior were not independently executed.",
+    "No full DeepSeekV3.2 Engine or HTTP update_weights_from_disk run established scheduler survival after reload."
+  ],
+  "remaining_limitations": [
+    "The recorded base already contains the production correction, so the literal original failure is not reproducible there; the failing-before check recreates the obsolete persistent transposed layout through the actual loader.",
+    "The reported checkpoint and Ascend environment were unavailable.",
+    "The gfx950 checks validate loader tensor semantics only, not NPU kernels, DeepSeekV3.2 semantic accuracy, HTTP transport, scheduler survival, or distributed execution.",
+    "No native code changed, so a native rebuild was not applicable."
+  ]
+}
