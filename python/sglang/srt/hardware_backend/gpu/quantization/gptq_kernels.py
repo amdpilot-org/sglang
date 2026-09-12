@@ -11,6 +11,8 @@ from sglang.srt.layers.parameter import BasevLLMParameter, permute_param_layout_
 from sglang.srt.layers.quantization.marlin_utils import (
     apply_gptq_marlin_linear,
     check_marlin_supports_shape,
+    get_marlin_workspace_for_forward,
+    marlin_init_stream_workspaces,
     marlin_is_k_full,
     marlin_make_empty_g_idx,
     marlin_make_workspace,
@@ -98,6 +100,7 @@ class GPTQMarlinLinearKernel:
 
         # Allocate marlin workspace.
         self.workspace = marlin_make_workspace(device)
+        marlin_init_stream_workspaces(self)
 
         # Default names since marlin requires empty parameters for these,
         # TODO: remove this requirement from marlin (allow optional tensors)
@@ -209,7 +212,7 @@ class GPTQMarlinLinearKernel:
             weight_zp=w_zp,  # type: ignore
             g_idx=w_gidx,  # type: ignore
             g_idx_sort_indices=layer.g_idx_sort_indices,
-            workspace=self.workspace,
+            workspace=get_marlin_workspace_for_forward(self),
             wtype=c.weight_type,
             input_size_per_partition=c.partition_weight_shape[0],
             output_size_per_partition=c.partition_weight_shape[1],

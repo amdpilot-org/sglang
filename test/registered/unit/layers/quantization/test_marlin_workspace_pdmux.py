@@ -162,12 +162,16 @@ class TestMarlinWorkspaceSelection(CustomTestCase):
 
     def test_stream_keyed_selection_and_sizing(self):
         if not torch.cuda.is_available():
-            self.skipTest("requires CUDA")
+            self.skipTest("requires a GPU exposed through torch.cuda")
         dev = torch.device("cuda:0")
         torch.cuda.set_device(dev)
         sms = torch.cuda.get_device_properties(dev).multi_processor_count
 
-        layer = _make_fp8_marlin_layer(512, 128, dev)
+        # Workspace selection itself is backend-agnostic.  Do not construct a
+        # Marlin layer here: Marlin's repack operator is NVIDIA-only, while
+        # this boundary case can also validate stream isolation on ROCm.
+        layer = torch.nn.Module()
+        layer.workspace = torch.zeros(sms, dtype=torch.int, device=dev)
         layer.marlin_stream_workspaces = {}
         layer.marlin_workspace_make_kwargs = {"max_blocks_per_sm": 4}
 
@@ -188,6 +192,8 @@ class TestMarlinDeepQueueConcurrency(CustomTestCase):
     def test_two_streams_deep_queue_complete_and_match(self):
         if not torch.cuda.is_available():
             self.skipTest("requires CUDA")
+        if torch.version.hip is not None:
+            self.skipTest("Marlin kernels and repack operators require NVIDIA CUDA")
         ctx = mp.get_context("spawn")
         result_path = "/tmp/marlin_ws_deep_queue_result.json"
         child = ctx.Process(target=_child_deep_queue, args=(result_path,))

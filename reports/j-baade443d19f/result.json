@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37904",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Current main still shared each layer's Marlin cross-CTA workspace across concurrent PDMux streams and also retained two stale Scheduler field references. Applied the issue-specific per-stream workspace correction from upstream PR 37905, made the GPU boundary test portable to ROCm, and extended the same workspace isolation to the active GPTQ-Marlin and AWQ-Marlin hardware-backend paths found during the source audit. The selector and sizing behavior were verified on the assigned gfx950 GPU. The reported NVIDIA green-context/Marlin deadlock itself could not be reproduced or executed on this AMD host, so this is a verified candidate rather than a claim of full service-level reproduction.",
+  "tests": [
+    {
+      "command": "git show 358c163250ad3b1f62939b01ce1314a0a31a0365:python/sglang/srt/layers/quantization/marlin_utils.py | rg -n 'get_marlin_workspace_for_forward|marlin_stream_workspaces'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before source evidence: the base revision had no per-stream Marlin workspace helper; fp8.py passed layer.workspace directly."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-baade443d19f/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_marlin_workspace_pdmux.py -vv",
+      "exit_code": 0,
+      "what_was_measured": "Four regression/boundary cases passed: non-PDMux identity fallback, disabled-PDMux no-op, enabled-PDMux initialization/kwargs, and two-real-stream workspace isolation plus max_blocks_per_sm sizing on gfx950. The NVIDIA-only Marlin deep-queue kernel case was explicitly skipped on ROCm. Raw output: /tmp/amdpilot-repo-j-baade443d19f/marlin_workspace_pdmux_final.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-baade443d19f/venv/bin/python <gfx950 workspace selector probe>",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X (gfx950, ROCm 7.2, 256 CUs), two torch GPU streams received different allocations, each 1024 int32 elements for max_blocks_per_sm=4. Raw output: /tmp/amdpilot-repo-j-baade443d19f/gfx950_workspace_probe.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-baade443d19f/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_marlin_utils_fp8.py -vv",
+      "exit_code": 0,
+      "what_was_measured": "Existing FP8-Marlin logical output/bias-order regression remained passing."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-baade443d19f/venv/bin/python -m py_compile python/sglang/srt/layers/quantization/marlin_utils.py python/sglang/srt/hardware_backend/gpu/quantization/gptq_kernels.py python/sglang/srt/hardware_backend/gpu/quantization/awq_kernels.py test/registered/unit/layers/quantization/test_marlin_workspace_pdmux.py",
+      "exit_code": 0,
+      "what_was_measured": "Syntax/import compilation of the changed helper, added backend wiring, and regression test."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The assigned AMD Instinct MI355X/gfx950 executed the two-stream workspace allocation/isolation and sizing test. It did not execute NVIDIA Marlin kernels or CUDA green contexts."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported failure requires NVIDIA A100/H100 green-context PDMux plus Marlin; the assigned gfx950 ROCm GPU cannot reproduce that device-side kernel deadlock.",
+    "The Qwen3.8-27B-FP8 checkpoint and an NVIDIA GPU with at least 40 GB were unavailable, so test/manual/quant/test_pdmux_mixed_deadlock_repro.py was not run here.",
+    "The NVIDIA-only two-stream deep-queue Marlin numerical regression remains unverified locally and was skipped explicitly on ROCm.",
+    "No full-model, semantic-accuracy, multi-node, or serving-throughput claim is made.",
+    "No native rebuild was required because the change is Python-only."
+  ]
+}
