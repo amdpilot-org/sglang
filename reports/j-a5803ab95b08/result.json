@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31533",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2252",
+  "candidate_commit": "397d5948a95f62a900f4e7a108c24e8ae6378dda",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the original XGrammar masking failure: after the regex accepts `17`, tokenizer EOS 151645 is masked when only model EOS 151643 is supplied, while both are allowed with their union. The exact candidate passes tokenizer EOS and tokenizer additional stop IDs together with model-config EOS IDs, matching server-side token finish detection. Candidate tests and independent boundary cases pass. This is a full fix for the original global tokenizer/model EOS mismatch, not merely test hardening; the separately documented per-request stop_token_ids gap remains outside the original fix contract.",
+  "tests": [
+    {
+      "command": "HF_HOME=/tmp/amdpilot-repo-j-a5803ab95b08/hf-cache /tmp/amdpilot-repo-j-a5803ab95b08/venv/bin/python < inline original XGrammar matcher reproduction on base 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "Actual XGrammar regex-accepting-state bitmask with Qwen/Qwen2.5-0.5B-Instruct: model-only stops allowed model EOS 151643 but masked tokenizer EOS 151645; the union allowed both. See raw/base-xgrammar-repro.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a5803ab95b08/venv/bin/python -m pytest test/registered/unit/constrained/test_base_grammar_backend.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate 397d5948a95f62a900f4e7a108c24e8ae6378dda: 35 tests and 17 subtests passed, including candidate regressions for tokenizer EOS, additional stops, and deduplication. See raw/candidate-unit.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a5803ab95b08/venv/bin/python < inline independent create_grammar_backend adversarial cases",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate factory output for the reported mismatch, tokenizer-only EOS ID 0, additional-only stop IDs, overlapping duplicates, and no stop sources. All produced the expected sorted union or None. See raw/candidate-adversarial.log."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The assigned AMD Instinct MI350X (gfx950) was visible through PyTorch 2.11.0+rocm7.2, but the reviewed change is CPU-side Python stop-token plumbing and XGrammar mask construction. No GPU kernel was changed or required for the deterministic reproduction. The reported private Qwen3.5-MoE weights and NVIDIA B200/CUDA 13 environment were unavailable, so no full-model serving claim is made.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The private production Qwen3.5-MoE checkpoint and NVIDIA B200/CUDA 13 environment from the report were unavailable, so the exact full-model HTTP behavior was not rerun.",
+    "Per-request sampling_params.stop_token_ids still do not reach the grammar matcher. The original issue explicitly identifies this as a separate known gap outside the proposed global EOS-union fix.",
+    "No native files differ between the recorded base and candidate, so there was no native library to rebuild. Imports resolved to /job/repo/python/sglang and the prepared interpreter's xgrammar installation."
+  ]
+}
