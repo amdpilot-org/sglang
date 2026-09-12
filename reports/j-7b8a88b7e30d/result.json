@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33185",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared base already contains the solution from upstream PR #33140. It detects the DeepSeek-V4-Flash-0731 checkpoint's official low/high/max contract and injects three distinct mappings. The local official prompts are byte-identical to the checkpoint encoder at revision 7872f01b1d1fe23eabc4c98b48bffcef5a386062, and the focused serving-path regression passes. No product source change was needed.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-7b8a88b7e30d/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py -k 'dsv4_reasoning_effort'",
+      "exit_code": 0,
+      "what_was_measured": "Existing regression coverage for official low/high/max prompt injection, omitted-effort defaults, preview compatibility, checkpoint profile detection, model-config override, and invalid-profile rejection; 4 passed and 131 were deselected."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-7b8a88b7e30d/venv/bin/python <AST comparison script against the downloaded checkpoint encoding/encoding_dsv4.py>",
+      "exit_code": 0,
+      "what_was_measured": "Checkpoint profile detection returned official; local low/high/max strings were byte-identical to the checkpoint reference (0/476/528 UTF-8 bytes), encoded outputs were distinct, high contained only the Absolute maximum prefix, max contained only Beyond maximum, and omitted effort equaled low."
+    },
+    {
+      "command": "git show 198a3bc29bbf2ed169d50f5b7ad35c74262ff10f:python/sglang/srt/entrypoints/openai/encoding_dsv4.py | rg -n 'REASONING_EFFORT|Beyond maximum|reasoning_effort =='",
+      "exit_code": 0,
+      "what_was_measured": "The pre-fix parent had one REASONING_EFFORT_MAX constant and injected it only for max, with no Beyond maximum prompt, reproducing the reported static mapping defect in the actual historical implementation."
+    },
+    {
+      "command": "rocm-smi --showproductname --showuniqueid --showmeminfo vram",
+      "exit_code": 0,
+      "what_was_measured": "The assigned single GPU was visible as AMD Instinct MI350X, gfx950, with 270566162432 bytes total VRAM. This was inventory evidence only, not model execution."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU kernel or model inference was run. The issue is resolved in deterministic prompt/profile code and the DeepSeek-V4-Flash-0731 weights were not available; using a different tiny architecture would not validate these model-specific semantics."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 model weights were not available or downloaded, so full server inference and semantic output behavior were not tested.",
+    "The reported two-H200 tensor-parallel deployment was not reproduced; the assigned hardware was one gfx950 MI350X.",
+    "No multi-node or benchmark-quality claim is made.",
+    "Profile detection falls back to the preview contract if checkpoint encoder metadata cannot be read; the successful check here used the accessible checkpoint encoder file at revision 7872f01b1d1fe23eabc4c98b48bffcef5a386062."
+  ]
+}
