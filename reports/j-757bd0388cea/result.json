@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/29024",
+  "candidate_mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2444",
+  "review_mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2538",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "a3d0a65f1042501891f0a067779cf28cf9e118d5",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces missing wrapper rids/http_worker_ipcs for tokenized generate and embedding batches. The exact candidate derives absent wrapper IDs from batch children, stamps item-level IPC metadata, and fills wrapper-level routes. Candidate tests, independent boundary probes, and an independent two-tokenizer GPU serving run passed. The current split-output path remains a BaseBatchReq and correctly uses http_worker_ipcs, so the scalar-field concern in the issue snapshot does not require another change on this base.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-757bd0388cea/venv/bin/python reports/j-757bd0388cea/evidence/review_probe.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Independent failing-before reproduction for generate, embedding, and empty tokenized batches. Child IPCs were stamped, but wrapper rids and http_worker_ipcs remained None."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-757bd0388cea/venv/bin/python -m pytest test/registered/unit/managers/test_multi_tokenizer_mixin.py -q (candidate a3d0a65f1042501891f0a067779cf28cf9e118d5)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 9 tests and 2 subtests passed, including generate/embedding metadata, explicit IDs, empty batches, and existing split-output cases."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-757bd0388cea/venv/bin/python reports/j-757bd0388cea/evidence/review_probe.py (candidate a3d0a65f1042501891f0a067779cf28cf9e118d5)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial probe passed for generate and embedding wrappers, empty batches, preservation of explicit wrapper IDs, wrapper route counts, and item-level IPC stamping."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-757bd0388cea/venv/bin/python -m py_compile python/sglang/srt/managers/tokenizer_manager.py test/registered/unit/managers/test_multi_tokenizer_mixin.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python implementation and regression test compiled from the candidate checkout."
+    },
+    {
+      "command": "SGLANG_QUAL_FIXTURE=/tmp/amdpilot-repo-j-757bd0388cea/tiny-random-llama /tmp/amdpilot-repo-j-757bd0388cea/venv/bin/python /tmp/amdpilot-repo-j-757bd0388cea/fixture-tools/run_server_probe.py --fixture $SGLANG_QUAL_FIXTURE --output /tmp/amdpilot-repo-j-757bd0388cea/review-evidence/server-probe (candidate; runner configured with --tokenizer-worker-num 2 --enable-tokenizer-batch-encode)",
+      "exit_code": 0,
+      "what_was_measured": "Independent source-checkout server became ready on gfx950; generate, completion, stream, and two-item native batch endpoints returned HTTP 200. The batch returned two results with six completion tokens each."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI355X, gfx950:sramecc+:xnack-, executed the independent tiny-Llama serving probe under Torch 2.11.0+rocm7.2.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The GPU validation used a deterministic two-layer random Llama fixture and does not establish semantic accuracy or behavior of another model architecture.",
+    "Only one assigned gfx950 GPU was used; tensor parallel, data parallel, multi-GPU, and multi-node configurations were not tested.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable.",
+    "The server log includes expected shutdown-time cancellation tracebacks after SIGTERM; requests completed and the runner exited successfully before cleanup."
+  ]
+}
