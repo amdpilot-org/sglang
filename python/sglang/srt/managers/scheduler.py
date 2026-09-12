@@ -3804,9 +3804,12 @@ class Scheduler(
             prefill_tile_block_m=prefill_tile_block_m,
         )
 
+        waiting_queue = self.waiting_queue
         if self.chunked_req is not None:
             self.chunked_req.init_next_round_input()
             self.chunked_req = adder.add_chunked_req(self.chunked_req)
+            if adder.budget_state() != AddReqResult.CONTINUE:
+                waiting_queue = ()
 
         if self.enable_lora:
             running_loras = {
@@ -3823,9 +3826,9 @@ class Scheduler(
 
         mamba_allocator = getattr(self.req_to_token_pool, "mamba_allocator", None)
         if mamba_allocator is not None:
-            mamba_allocator.alloc_group_begin(len(self.waiting_queue))
+            mamba_allocator.alloc_group_begin(len(waiting_queue))
         # Get requests from the waiting queue to a new prefill batch
-        for req in self.waiting_queue:
+        for req in waiting_queue:
             if self.enable_lora and not self._can_schedule_lora_req(req, running_loras):
                 continue
 
