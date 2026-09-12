@@ -99,7 +99,7 @@ class OpenAIServingBase(ABC):
                 "error": {
                     "message": f"The model '{model}' does not exist",
                     "type": "invalid_request_error",
-                    "param": "model",
+                    "param": None,
                     "code": "model_not_found",
                 }
             },

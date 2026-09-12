@@ -41,7 +41,7 @@ class ServedModelValidationTest(unittest.TestCase):
             {
                 "message": "The model 'missing-model' does not exist",
                 "type": "invalid_request_error",
-                "param": "model",
+                "param": None,
                 "code": "model_not_found",
             },
         )
