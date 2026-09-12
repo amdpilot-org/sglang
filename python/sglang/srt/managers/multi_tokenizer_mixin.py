@@ -273,6 +273,7 @@ def _handle_output_by_index(output, i):
                 output, "customized_info", i, check_length=False
             ),
             dp_ranks=_extract_field_by_index(output, "dp_ranks", i, check_length=False),
+            load_snapshot=output.load_snapshot,
         )
     elif isinstance(output, BatchEmbeddingOutput):
         new_output = BatchEmbeddingOutput(
@@ -283,6 +284,7 @@ def _handle_output_by_index(output, i):
             cached_tokens=_extract_field_by_index(output, "cached_tokens", i),
             placeholder_tokens_idx=None,
             placeholder_tokens_val=None,
+            load_snapshot=output.load_snapshot,
         )
     elif isinstance(output, BatchStrOutput):
         new_output = BatchStrOutput(
@@ -394,6 +396,7 @@ def _handle_output_by_index(output, i):
             token_steps=_extract_field_by_index(
                 output, "token_steps", i, check_length=False
             ),
+            load_snapshot=output.load_snapshot,
         )
     else:
         new_output = output

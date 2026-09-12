@@ -2457,6 +2457,7 @@ class Scheduler(
             disaggregation_mode=self.disaggregation_mode,
             enable_hicache_storage=lambda: self.enable_hicache_storage,
             rust_server=self.rust_server,
+            load_snapshot_provider=self.load_inquirer.get_loads,
         )
 
     def get_output_streamer_class(self) -> type[SchedulerOutputStreamer]:

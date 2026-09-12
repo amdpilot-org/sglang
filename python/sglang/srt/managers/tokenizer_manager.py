@@ -576,6 +576,10 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
             port_args,
             caller="TokenizerManager",
         )
+        # Output messages update this cache without a separate scheduler query.
+        # /v1/loads merges it with watch-mode snapshots for idle ranks and
+        # compatibility with schedulers that do not yet piggyback load.
+        self.piggyback_load_snapshots = {}
 
     def _dispatch_to_scheduler(self, obj: Any) -> None:
         if self.tokenizer_ipc_name is not None:
@@ -2243,11 +2247,19 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                 recv_obj,
                 (BatchStrOutput, BatchEmbeddingOutput, BatchTokenIDOutput),
             ):
+                self._record_piggyback_load(getattr(recv_obj, "load_snapshot", None))
                 await self._handle_batch_output(recv_obj)
             else:
                 self._result_dispatcher(recv_obj)
             self.last_receive_tstamp = real_time()
             self.soft_watchdog.feed()
+
+    def _record_piggyback_load(self, load_snapshot) -> None:
+        if load_snapshot is None:
+            return
+        previous = self.piggyback_load_snapshots.get(load_snapshot.dp_rank)
+        if previous is None or load_snapshot.timestamp >= previous.timestamp:
+            self.piggyback_load_snapshots[load_snapshot.dp_rank] = load_snapshot
 
     async def _handle_batch_output(
         self,

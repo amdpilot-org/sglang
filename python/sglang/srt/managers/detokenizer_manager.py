@@ -508,6 +508,7 @@ class DetokenizerManager(MultiHttpWorkerDetokenizerMixin):
             beam_search_output=recv_obj.beam_search_output,
             dp_ranks=recv_obj.dp_ranks,
             time_stats=recv_obj.time_stats,
+            load_snapshot=recv_obj.load_snapshot,
         )
 
     def handle_freeze_gc_req(self, recv_req: FreezeGCReq):
