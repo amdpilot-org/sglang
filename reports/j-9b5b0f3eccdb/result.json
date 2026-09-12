@@ -1,0 +1,61 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32200",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3131",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3117",
+  "candidate_commit": "5ce4f2e1bdd7f4f94168b4d7c56213775d57474f",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "The recorded base independently reproduces the missing NCCL RMA contract. At the exact candidate commit, all 19 available regression tests pass, independent adversarial warm-up/fallback tests pass, and a clean ROCm rebuild proves that the changed allocator exports and publishes both window accessor functions. The candidate therefore fixes the reviewed Python scoping counterexample and has no reproduced source-level counterexample in this environment. However, the original issue's defining two-rank NVIDIA NCCL 2.30/NVLink put_signal/wait_signal data-transfer handshake cannot run on the assigned single AMD MI350X, so a full original-issue fix is not verified.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9b5b0f3eccdb/venv/bin/python -m pytest -q /job/review-evidence-j-9b5b0f3eccdb/test_pynccl_rma_candidate.py --disable-warnings (at base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before reproduction: collection fails because NCCL_WIN_COLL_SYMMETRIC is absent; direct probing also found no RMA table, no allocator handle collector, and no rma_communicator module."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9b5b0f3eccdb/venv/bin/python -m pytest -q test/registered/e2e/distributed/test_pynccl_rma.py --disable-warnings (at candidate 5ce4f2e1bdd7f4f94168b4d7c56213775d57474f)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 19 passed and 2 hardware tests skipped because fewer than two GPUs were available."
+    },
+    {
+      "command": "TMPDIR=/tmp/amdpilot-repo-j-9b5b0f3eccdb/review-tmp PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9b5b0f3eccdb/venv/bin/python reports/j-5294b228d0b5/reproduce_window_binding.py (at candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Clean native allocator compile/link against -lrccl, dynamic load of the rebuilt .so, exported get/clear symbols, and non-None module-level ctypes bindings."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9b5b0f3eccdb/venv/bin/python -m pytest -q /job/review-evidence-j-9b5b0f3eccdb/test_adversarial_rma.py --disable-warnings",
+      "exit_code": 0,
+      "what_was_measured": "Independent synthetic non-NULL handle success, NULL-handle graceful fallback, verification-error fallback, and allocation/window cleanup; 3 passed."
+    },
+    {
+      "command": "nm -D /tmp/amdpilot-repo-j-9b5b0f3eccdb/review-tmp/symm_allocator/nccl_allocator.so | rg 'nccl_allocator_(get|clear|register)|nccl_(alloc|free)_plug'",
+      "exit_code": 0,
+      "what_was_measured": "The tested artifact, rather than a wheel copy, exports nccl_alloc_plug, nccl_free_plug, register, get-windows, and clear-windows entry points."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned host exposes one AMD Instinct MI350X (gfx950) with torch 2.11.0+rocm7.2 and RCCL 2.27.7. GPU presence was measured, but no candidate RMA operation executed: the required test needs at least two NVIDIA GPUs, NCCL >=2.30, and an NVLink-capable topology."
+  },
+  "native_rebuilt": true,
+  "native_artifact": "/tmp/amdpilot-repo-j-9b5b0f3eccdb/review-tmp/symm_allocator/nccl_allocator.so",
+  "source_paths": [
+    "python/sglang/srt/distributed/device_communicators/pynccl.py",
+    "python/sglang/srt/distributed/device_communicators/pynccl_allocator.py",
+    "python/sglang/srt/distributed/device_communicators/pynccl_wrapper.py",
+    "python/sglang/srt/distributed/device_communicators/rma_communicator.py",
+    "test/registered/e2e/distributed/test_pynccl_rma.py"
+  ],
+  "remaining_counterexamples": [
+    "The real two-rank NCCL 2.30+ NVLink ring put_signal/wait_signal handshake and its independent received-data verification were not executable on this single-GPU AMD host.",
+    "The ctypes RMA bindings were checked against the NCCL 2.30.7 source declarations but were not dynamically invoked against an NVIDIA libnccl.so.2 in this environment."
+  ],
+  "remaining_limitations": [
+    "Architecture mismatch: AMD MI350X/RCCL 2.27.7 cannot qualify NVIDIA NCCL 2.30 one-sided RMA semantics.",
+    "Only one GPU is assigned, while both candidate hardware tests require two ranks and two GPUs.",
+    "Passing mocks and a successful allocator rebuild establish loader/control-flow correctness, not NCCL proxy data movement or NVLink ordering semantics."
+  ],
+  "evidence_directory": "/job/review-evidence-j-9b5b0f3eccdb"
+}
