@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37342",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Preserved PR 1027's valid host-independent backend-selection regression and added the missing exact-shape TP=4 routed-expert loader contract. The loader fixture passes on the candidate's unchanged production source, so no production correction is justified without the checkpoint and SM90 hardware.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1c25a60d5089/venv/bin/python -m pytest test/registered/unit/test_model_overrides.py::TestGoldenModelOverrides::test_deepseek_v4_overrides_at_callable_level -q (base test file)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before evidence: the physical ROCm platform leaked into the nominal SM100 selection case on the candidate parent."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1c25a60d5089/venv/bin/python -m pytest test/registered/unit/test_model_overrides.py::TestGoldenModelOverrides::test_deepseek_v4_overrides_at_callable_level -q",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after evidence for the retained candidate change: mocked SM90, SM100, and SM120 backend selection is host-independent."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1c25a60d5089/venv/bin/python -m pytest test/registered/unit/layers/quantization/test_dsv4_mxfp4_loader.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Four TP ranks load reported [2048, 2048] packed weights and [2048, 128] scales into 512-row local shards with FlashInfer [up; gate] W13 ordering."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1c25a60d5089/venv/bin/python -m pytest test/registered/unit/layers/quantization/test_mxfp4_sm90_cutlass.py -q",
+      "exit_code": 5,
+      "what_was_measured": "Module skipped because the assigned AMD Instinct MI350X is not an NVIDIA SM90 GPU; no Hopper kernel claim is made."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1c25a60d5089/venv/bin/python inline torch gfx950 matmul check",
+      "exit_code": 0,
+      "what_was_measured": "One assigned gfx950 GPU executed a float32 matrix multiply equal to its CPU reference; unrelated to FlashInfer kernel qualification."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-1c25a60d5089/evidence/gpu-check.txt records AMD Instinct MI350X and matches_cpu True. The SM90 suite skipped.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 weights were unavailable.",
+    "NVIDIA SM90/H800 hardware was unavailable; FlashInfer Hopper preprocessing and kernel execution remain unverified.",
+    "Full model loading, four-process TP=4 execution, DSPARK, HTTP serving, and semantic accuracy were not reproduced.",
+    "The exact-shape deterministic fixture proves the loader/sharding contract only; it does not establish why the reporter's release environment raised Hidden size mismatch."
+  ]
+}
