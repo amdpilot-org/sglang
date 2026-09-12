@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36481",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1352",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1237",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/1302",
+  "candidate_commit": "970ab777f74aea05733c8f5444642f26006c3f59",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "summary": "The candidate's capture guard is a verified crash-avoidance correction for unsupported ragged-verify backends and is preserved. Independent inspection confirms that Triton-backed hybrid target verification is deliberately routed to eager execution. The original B300/CUDA 13.2 extend_attention_fwd illegal memory access and compact CUDA-graph execution could not be reproduced or safely corrected on the available AMD ROCm host without the Qwen hybrid and DSpark weights.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-04c3392fd38a/venv/bin/python test/registered/spec/dspark/test_ragged_verify_backend_capability.py (candidate guard removed)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: unsupported compact capture entered warmup; 5 tests passed and the issue-specific test errored. Raw output: reports/j-04c3392fd38a/evidence/failing-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-04c3392fd38a/venv/bin/python test/registered/spec/dspark/test_ragged_verify_backend_capability.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after: 6 tests passed, covering Triton/hybrid capability composition, unsupported capture skip plus eager replay admission, supported compact continuation, and non-compact continuation. Raw output: reports/j-04c3392fd38a/evidence/passing-after.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The focused tests imported GPU backend modules but did not execute extend_attention_fwd or a numerical GPU workload. Environment evidence identifies the only device as AMD Instinct MI350X/gfx950 with ROCm 7.2 and no CUDA runtime: reports/j-04c3392fd38a/evidence/environment.log"
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The report requires NVIDIA B300/CUDA 13.2; the assigned device is AMD MI350X/gfx950 under ROCm 7.2.",
+    "Qwen3.5/Qwen3.6 hybrid and DSpark model weights were unavailable.",
+    "The exact batch-size-20, eight-tokens-per-request illegal memory access was not reproduced.",
+    "The regression proves capture and replay admission control with mocks; it does not execute extend_attention_fwd or a full-attention/GatedDeltaNet model.",
+    "Compact target-verify CUDA-graph execution remains unsupported for Triton-backed hybrid attention and falls back to eager execution."
+  ]
+}
