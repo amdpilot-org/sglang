@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34677",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1801",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1754",
+  "candidate_commit": "2ce6f8e16316f58a3f88569030a95778238a0fec",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a substantial partial fix and passes its regression and the full function-call suite, but Mistral canonical JSON arrays still reproduce the original loss/corruption when valid JSON commas use no whitespace, newline whitespace, or tab whitespace instead of exactly one space.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-48dd4697178b/venv/bin/python /job/candidate-reproduce-review.py",
+      "exit_code": 0,
+      "what_was_measured": "On the recorded base, reproduced Mistral remainder leakage, final-chunk trailing-call loss across six detectors, and coarse JsonArrayParser buffering; on the candidate, confirmed the submitted scenarios pass."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-48dd4697178b/venv/bin/python -m pytest -q test/registered/unit/function_call/test_unknown_tool_name.py test/registered/unit/function_call/test_function_call_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate commit, 256 focused tests and 4 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-48dd4697178b/venv/bin/python -m pytest -q test/registered/unit/function_call",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate commit, 551 function-call tests and 21 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-48dd4697178b/venv/bin/python reports/j-48dd4697178b/reproduce_candidate_counterexample.py",
+      "exit_code": 1,
+      "what_was_measured": "At the exact candidate commit, one-character Mistral canonical-array streams with comma-only, comma-newline, and comma-tab separators lost the trailing valid call and emitted the remainder as normal text; comma-space passed."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The changed and exercised paths are deterministic pure-Python incremental parsers; no GPU or model execution is involved.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Mistral canonical-array streaming of valid JSON with ',' separators returns only the first valid call and exposes the unknown and trailing valid calls as normal text.",
+    "The same Mistral failure occurs with valid JSON whitespace separators ',\\n' and ',\\t'; the candidate only handles the literal ', '.",
+    "Hermes coarse/whole batches containing an unknown call add an extra closing tool tag to normal text compared with the equivalent valid-only batch."
+  ],
+  "remaining_limitations": [
+    "No model weights, HTTP serving path, semantic model behavior, GPU execution, or distributed workload was tested or claimed.",
+    "No native code changed and the prepared environment declares no native component, so no native rebuild was applicable."
+  ]
+}
