@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33695",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1839",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1802",
+  "candidate_commit": "4834828b12073e0166bf3e154d5e89bba1d836ab",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "The recorded base reproduced the exact seeded min-p assertion on gfx950. At the exact candidate commit, its regression and an independent combined-filter numerical reference passed. The candidate fully fixes the original internal PyTorch sampling contract by removing an invalid assertion; filtered tokens remain impossible and sorted samples map to original vocabulary IDs.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-cfc1c66cd89c/venv/bin/python -c '<original issue reproduction>'",
+      "exit_code": 1,
+      "what_was_measured": "Exact failing-before reproduction on the recorded base, from the repository sampler source, with the reported AssertionError before sampling."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-cfc1c66cd89c/venv/bin/python -m pytest -q test/registered/unit/layers/test_seeded_min_p_sampling.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: three GPU cases for repeatability, retained support and vocabulary mapping, normalization invariance, and the inclusive threshold/top-k boundary."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-cfc1c66cd89c/venv/bin/python /job/review-evidence-j-cfc1c66cd89c/independent_adversarial.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent 4,096-row combined top-k/top-p/min-p case matched an explicitly normalized deterministic reference exactly, replayed exactly, excluded the filtered ID, and the original fixture returned only IDs 1 and 3."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X, gfx950/capability (9, 5), ROCm 7.2, torch 2.11.0+rocm7.2; candidate regression and independent numerical assertions executed on GPU.",
+  "native_rebuilt": false,
+  "native_rebuild_reason": "No native C++, HIP, or FlyDSL source changed; repository-environment.json also specifies no separate native artifact.",
+  "source_paths": [
+    "/job/repo/python/sglang/srt/layers/sampler.py",
+    "/job/repo/test/registered/unit/layers/test_seeded_min_p_sampling.py"
+  ],
+  "remaining_limitations": [
+    "Validated on one assigned gfx950 GPU only; no cross-architecture, multi-GPU, or multi-node claim is made.",
+    "No model-weight or HTTP serving run was performed; the evidence directly exercises the original issue's internal PyTorch sampling function and does not establish model semantic accuracy.",
+    "Torch emitted a non-fatal Dynamo metrics serialization traceback during the independent run; all numerical assertions still completed and the process exited zero.",
+    "Mirror main was a207786205bff0919eb2c8c9126c67f302ccff34 at review time, while failing-before evidence intentionally uses the mandated recorded base."
+  ]
+}
