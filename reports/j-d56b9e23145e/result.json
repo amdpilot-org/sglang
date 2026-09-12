@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38817",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Independently reproduced the reported Float8/BFloat16 promotion failure on the prepared base and verified exact candidate e23d8abd599e9e43ab9fffdb91ad2043a4cf37bf. On the base, public RMSNorm and GemmaRMSNorm returned FP8 for FP8 inputs and the following BF16 torch.cat raised the reported RuntimeError. The candidate routes FP8 inputs through native FP32 accumulation and returns the normalization weight/model activation dtype. Its regression and independent GPU cases passed for all four available FP8 formats, both norm variants, residual/post-residual calls, irregular shapes, and non-FP8 dtype preservation. This is a full fix for the reproducible normalization-to-MTP-concat contract represented by the issue.",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "tests": [
+    {
+      "command": "SGLANG_USE_AITER=0 /tmp/amdpilot-repo-j-d56b9e23145e/venv/bin/python < independent base reproduction script",
+      "exit_code": 0,
+      "what_was_measured": "On base 358c1632, public RMSNorm and GemmaRMSNorm returned each available FP8 dtype and downstream concatenation with BF16 raised the exact unsupported Float8 promotion RuntimeError. The script itself exited zero after recording the expected failures. Raw output: reports/j-d56b9e23145e/raw/base-reproduction.txt"
+    },
+    {
+      "command": "SGLANG_USE_AITER=0 /tmp/amdpilot-repo-j-d56b9e23145e/venv/bin/python -m pytest -q test/registered/layers/test_layernorm_fusion.py -k 'float8_input_returns_model_dtype'",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate e23d8abd599e9e43ab9fffdb91ad2043a4cf37bf, the candidate regression passed on GPU for RMSNorm and GemmaRMSNorm, checking BF16 output, downstream concatenation, and numerical reference agreement. One test and two subtests passed."
+    },
+    {
+      "command": "SGLANG_USE_AITER=0 /tmp/amdpilot-repo-j-d56b9e23145e/venv/bin/python -m pytest -q test/registered/layers/test_layernorm_fusion.py",
+      "exit_code": 0,
+      "what_was_measured": "The full registered layernorm fusion test file passed at the candidate: two tests passed, two optional FlashInfer tests skipped, and three subtests passed."
+    },
+    {
+      "command": "SGLANG_USE_AITER=1 /tmp/amdpilot-repo-j-d56b9e23145e/venv/bin/python -m pytest -q test/registered/layers/test_layernorm_fusion.py -k 'float8_input_returns_model_dtype'",
+      "exit_code": 0,
+      "what_was_measured": "The candidate regression also passed with AITER enabled: one test and two subtests passed."
+    },
+    {
+      "command": "SGLANG_USE_AITER=0 /tmp/amdpilot-repo-j-d56b9e23145e/venv/bin/python < independent adversarial GPU script",
+      "exit_code": 0,
+      "what_was_measured": "Candidate public dispatch was tested for float8_e4m3fn, float8_e4m3fnuz, float8_e5m2, and float8_e5m2fnuz; RMSNorm and GemmaRMSNorm; shapes (1,1), (3,127), and (5,512); BF16 residual plus post-residual; and FP16/BF16/FP32 preservation. Every FP8 result and concat was BF16. Maximum absolute error against independently computed FP64 references was 0.00176853 for RMSNorm and 0.00776982 for GemmaRMSNorm."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "Tests executed on the single visible AMD Instinct MI350X, gfx950:sramecc+:xnack-, with Torch 2.11.0+rocm7.2 and HIP 7.2.26015. Raw device and numerical output is retained under reports/j-d56b9e23145e/raw/.",
+  "native_rebuilt": false,
+  "remaining_limitations": "The report omits the checkpoint/model name and a complete service command, so the reporter's exact sglang 0.5.6 end-to-end launch could not be recreated. Validation instead exercised the actual current source implementation and the precise normalization-to-BF16-concat failure contract present in NEXTN/MTP model paths. Only the assigned AMD gfx950 architecture was available; NVIDIA/CUDA and other ROCm architectures remain untested. The candidate changes only Python source and tests, so no native library rebuild was required or performed. Imported source was confirmed as /job/repo/python/sglang/srt/layers/layernorm.py; no original wheel copy was used for that module."
+}
