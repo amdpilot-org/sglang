@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33035",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3150",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3148",
+  "candidate_commit": "7c363ab28fa2e7b4b390cd1105ca2c95119e221b",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate independently passes its supported Python/ASGI contract and corrects the prior weighted pre-body counterexample: with a four-item budget, only one of four concurrent unknown 4 MiB bodies reaches application receive, the other three are rejected with 503, and lease accounting returns to zero. This is a conservative partial fix, not full verification of the original Kimi-K2.6 production failure or unsupported Rust/EPD paths.",
+  "tests": [
+    {
+      "command": "recorded base 358c163250ad3b1f62939b01ce1314a0a31a0365: rg -n 'mm-max-inflight|mm_preprocessing_admission|MultimodalBodyAdmission' python/sglang test/registered/unit",
+      "exit_code": 1,
+      "what_was_measured": "The prepared original base contains no pre-scheduler multimodal admission implementation or test symbols, confirming the reported class of requests is unbounded there. Raw evidence: evidence/base-source-check.log. The exact 200-client Kimi OOM was not reproduced due unavailable weights and host scale."
+    },
+    {
+      "command": "PYTHONPATH=python:test/registered/unit/entrypoints/openai /tmp/amdpilot-repo-j-ab1c99e76686/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_mm_body_admission.py test/registered/unit/managers/test_multimodal_preprocessing_admission.py",
+      "exit_code": 0,
+      "what_was_measured": "On exact candidate 7c363ab28fa2e7b4b390cd1105ca2c95119e221b, 12 focused middleware/controller tests passed, including full-budget reservation before body receive, lease resizing, rejection, and cleanup."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-ab1c99e76686/venv/bin/python /job/review-evidence-j-ab1c99e76686/independent_adversarial.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent budget=4 adversarial case: one of four concurrent 4 MiB bodies entered receive (4 MiB retained), three were rejected with HTTP 503 before receive, and inflight accounting returned to zero."
+    },
+    {
+      "command": "pytest over all 12 changed test files",
+      "exit_code": 1,
+      "what_was_measured": "447 passed and 58 subtests passed; two unrelated context-parallel tests failed because this ROCm/HIP source explicitly rejects prefill CP. Full output is retained and the failures do not exercise admission control."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reviewed change is CPU-side Python/ASGI admission accounting. No GPU numerical claim applies. Kimi-K2.6 weights and an equivalent 1.5 TiB host were unavailable; the qualified tiny Llama fixture is text-only and cannot validate Kimi multimodal behavior."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The exact 200-client, 28-images/request Kimi-K2.6 CPU-OOM workload on a 1.5 TiB host remains unverified because equivalent model weights and host scale were unavailable.",
+    "SGLANG_RUST_SERVER is explicitly rejected, so its separate frontend and multimodal preprocessing pipeline remain unsupported.",
+    "EPD language-only mode is explicitly rejected, so remote-encoder admission ownership remains unsupported.",
+    "Full-budget admission before parsing is intentionally conservative: while any admitted request retains item weight, another unknown body cannot enter receive, even if its eventual media count would fit. This bounds memory but sacrifices weighted concurrent body admission.",
+    "Socket, kernel, and protocol-server buffering before ASGI application receive are outside this limiter."
+  ],
+  "remaining_limitations": [
+    "No exact Kimi-K2.6 end-to-end reproduction or equivalent-memory host was available.",
+    "Rust frontend and EPD language-only architectures remain unsupported by explicit validation.",
+    "No native source changed, so no native rebuild was applicable.",
+    "The environment is AMD ROCm 7.2 with Torch 2.11.0+rocm7.2; two unrelated prefill context-parallel tests are incompatible with HIP."
+  ]
+}
