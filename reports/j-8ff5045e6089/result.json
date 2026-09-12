@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31071",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "cad9443d635cf595832da6a7e4d6f82ce81adcf4",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate adds a valid regression for the ROCm-scoped broadcast already present at the recorded base; it is test-only hardening, not the implementation fix. Its exact tests pass and fail when the HIP broadcast block is temporarily removed. However, the original greedy TP-consistency contract is broader than HIP, and an independent non-HIP greedy near-tie case still returns divergent accepted-draft counts with no broadcast. The candidate's result.json therefore overstates the outcome as fixed.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python:/job/repo/python/sglang-kernel/python /tmp/amdpilot-repo-j-8ff5045e6089/venv/bin/python -m pytest -q /tmp/test_eagle_greedy_tp_sync_candidate.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate regression also passes unchanged on the exact recorded base: 3 passed. This confirms the implementation fix predates the candidate. Raw output: base-regression.log."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python:/job/repo/python/sglang-kernel/python /tmp/amdpilot-repo-j-8ff5045e6089/venv/bin/python -m pytest -q test/registered/unit/spec/test_eagle_greedy_tp_sync.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit cad9443d635cf595832da6a7e4d6f82ce81adcf4, all three candidate tests passed on GPU. Raw output: candidate-regression.log."
+    },
+    {
+      "command": "same candidate pytest after temporarily removing only the existing _is_hip broadcast block",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before mechanism check: the synchronization and DP-attention routing tests failed while TP=1 passed (2 failed, 1 passed). The source was restored byte-for-byte afterward. Raw output: mutated-failing-before.log."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python:/job/repo/python/sglang-kernel/python /tmp/amdpilot-repo-j-8ff5045e6089/venv/bin/python -m pytest -q /tmp/test_eagle_greedy_tp_sync_candidate.py::test_nonhip_greedy_near_tie_remains_rank_divergent",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial case: with _is_hip false, world_size=2, and opposite near-tied GPU logits, the greedy branch issued zero broadcasts and returned different accepted-draft counts (3 versus 2). Raw output: nonhip-counterexample.log."
+    },
+    {
+      "command": "repository-source import and ROCm environment probe with the prepared interpreter",
+      "exit_code": 0,
+      "what_was_measured": "Imported eagle_utils from /job/repo/python on Torch 2.11.0+rocm7.2; one AMD Instinct MI350X gfx950 GPU was visible. Raw output: import-environment.log."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Candidate and adversarial tests allocated the near-tied logits and decision tensors on the assigned AMD Instinct MI350X gfx950 GPU. Only one GPU was visible."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "For a non-HIP greedy path with TP world_size 2 and per-rank near-tied logits, eagle_sample performs no finalized-decision broadcast and logical ranks retain different accepted-draft counts (3 versus 2).",
+    "A real two-rank ROCm collective/deadlock reproduction remains unverified because only one GPU was assigned; the candidate uses a replay mock rather than an actual process group."
+  ],
+  "remaining_limitations": [
+    "Only one AMD Instinct MI350X gfx950 GPU was available, so no real TP=2 or multi-node collective was run.",
+    "No production EAGLE/GLM weights were available; full serving, semantic accuracy, and --enable-aiter-allreduce-fusion were not exercised.",
+    "The candidate changes only tests and reports. The existing source fix is HIP-scoped and predates both the candidate and recorded base.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
