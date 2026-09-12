@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/18891",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Added a diffusion HTTP protocol that compares live module parameters with checkpoint tensors after replaying the module's actual name mapping, dtype conversion, and custom fused-parameter weight loaders. The response reports per-module disk/server SHA-256 values and returns a conflict on mismatch. The existing update-weights integration test now requests parity for all modules after a full update and for targeted modules after a partial update.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-2c4a640e8dd9/venv/bin/python - <<'PY' ... raw-vs-fused checksum reproduction ... PY",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced the original gap: hashing raw checkpoint Q/K/V names and tensors does not equal the loaded fused-QKV server checksum. Raw output: reports/j-2c4a640e8dd9/raw/failing_before_reproduction.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-2c4a640e8dd9/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_disk_server_checksum.py python/sglang/multimodal_gen/test/unit/test_layerwise_offload.py -k 'disk_server_checksum or mapped_weights_are_visible_to_checksums'",
+      "exit_code": 0,
+      "what_was_measured": "Four focused tests passed: renamed parameters, fused QKV reconstruction, exact parity, one-value corruption detection, empty-comparison rejection, and compatibility with materialized offload weights. Raw output: reports/j-2c4a640e8dd9/raw/focused_tests.txt"
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-2c4a640e8dd9/pre-commit pre-commit run --files <changed files>",
+      "exit_code": 0,
+      "what_was_measured": "All repository formatting, lint, syntax, secret, and policy hooks applicable to the changed files passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-2c4a640e8dd9/venv/bin/python - <<'PY' ... MI350X load/reference/corruption check ... PY",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X with Torch 2.11.0+rocm7.2, loaded GPU values matched an independently specified CPU tensor bit-for-bit; disk/server checksums matched before and diverged after a single GPU value was changed. Raw output: reports/j-2c4a640e8dd9/raw/gpu_checksum_validation.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "reports/j-2c4a640e8dd9/raw/gpu_checksum_validation.txt",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The large FLUX.2-klein and Qwen-Image model-pair integration suite was not run because those model weights were not prepared locally; model-specific VAE/text-encoder parity remains unverified on this node.",
+    "Tensor-parallel and DTensor multi-GPU parity were not exercised because the task permits one assigned GPU. The implementation uses each DTensor's public local shard for server hashing, but a custom loader that cannot operate on a CPU scratch parameter will return a precise per-module comparison error.",
+    "Comparison temporarily materializes CPU scratch tensors for checkpoint-represented parameters, so peak host memory can approach the size of the requested module.",
+    "No native code changed, so no native rebuild was applicable."
+  ]
+}
