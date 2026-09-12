@@ -24,6 +24,7 @@ class TestRouterGate(unittest.TestCase):
     def test_fp32_compute_contract(self):
         gate = RouterGate(5, 3, fp32_compute=True, has_correction_bias=True)
         self.assertEqual(gate.weight.dtype, torch.float32)
+        self.assertTrue(callable(gate.weight.weight_loader))
         self.assertEqual(gate.e_score_correction_bias.dtype, torch.float32)
         self.assertEqual(
             gate(torch.randn(2, 5, dtype=torch.bfloat16)).dtype, torch.float32
@@ -40,6 +41,14 @@ class TestRouterGate(unittest.TestCase):
         torch.testing.assert_close(
             actual, x.float() @ weight.float().t(), rtol=0, atol=0
         )
+
+    def test_legacy_gemm_import_is_compatibility_alias(self):
+        from sglang.kernels.ops.attention.dsv4.gemm import (
+            linear_bf16_fp32 as legacy_linear,
+        )
+        from sglang.kernels.ops.gemm.bf16_fp32 import linear_bf16_fp32
+
+        self.assertIs(legacy_linear, linear_bf16_fp32)
 
 
 if __name__ == "__main__":
