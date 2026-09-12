@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39042",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that OFFLINE scheduler token latency and TTFT included latency-predictor wall time, then excluded predictor implementation time from the OFFLINE CPU-overhead interval while retaining predictor cost metrics and BLOCKING wall-time semantics. Identical prefill/decode predictions now produce deterministic OFFLINE TTFT/ITL for delayed and cached-style predictor queries.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=tools/sglang-simulator/src /tmp/amdpilot-repo-j-2a07bd08b4e9/venv/bin/python -m pytest -q tools/sglang-simulator/test/test_simulation_offline_blocking.py -k predictor_query_wall_time (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Regression reproduction against the checked-out scheduler: both OFFLINE cases failed because 250 ms and 1 ms predictor delays inflated token latency despite unchanged predicted latencies; both BLOCKING cases passed. Raw output: reports/j-2a07bd08b4e9/raw/failing-before-defect.txt"
+    },
+    {
+      "command": "PYTHONPATH=tools/sglang-simulator/src /tmp/amdpilot-repo-j-2a07bd08b4e9/venv/bin/python -m pytest -q tools/sglang-simulator/test/test_simulation_offline_blocking.py -k predictor_query_wall_time (after source fix)",
+      "exit_code": 0,
+      "what_was_measured": "Four scheduler-hook cases passed: delayed/cached query ordering in OFFLINE and BLOCKING modes, covering prefill TTFT, decode ITL, and retained predictor-time accounting. Raw output: reports/j-2a07bd08b4e9/raw/passing-after-final.txt"
+    },
+    {
+      "command": "PYTHONPATH=tools/sglang-simulator/src /tmp/amdpilot-repo-j-2a07bd08b4e9/venv/bin/python -m pytest -q tools/sglang-simulator/test/test_simulation_offline_blocking.py",
+      "exit_code": 1,
+      "what_was_measured": "The four new regression cases passed, but the pre-existing end-to-end serving case could not start: its CPU-mode environment clears CUDA_VISIBLE_DEVICES while an SGLang import calls torch.cuda.get_device_properties(0), raising 'No CUDA GPUs are available'. Raw output: reports/j-2a07bd08b4e9/raw/test-file.txt"
+    },
+    {
+      "command": "SKIP=pyright,clang-tidy,clang-format /opt/venv/bin/pre-commit run --files tools/sglang-simulator/src/sglang_simulator/simulation/sglang/scheduler.py tools/sglang-simulator/test/test_simulation_offline_blocking.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository pre-commit checks applicable to the two changed Python files passed, including AST, whitespace, isort, ruff format, and codespell. Raw output: reports/j-2a07bd08b4e9/raw/pre-commit.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the final patch."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The defect is host-side simulator clock accounting and the regression executes the actual scheduler hooks with controlled clocks and predictor results. No GPU kernel or numerical output changes. The existing serving test explicitly hides GPUs and was blocked during import as documented above.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The supplied H200/Qwen3.6-27B model and AIConfigurator database were not available, so the exact reported 1K/1K benchmark was not rerun.",
+    "The pre-existing end-to-end offline/blocking serving comparison remains unverified in this environment because its CPU-only subprocess hits an unrelated ROCm device-property import failure.",
+    "No native code changed, so no native rebuild was performed."
+  ]
+}
