@@ -36,6 +36,7 @@ fn config() -> Config {
         server: ServerConfig {
             host: "0".into(),
             port: 0,
+            admin_api_key: None,
         },
         observability: ObservabilityConfig::default(),
         model: ModelConfig {

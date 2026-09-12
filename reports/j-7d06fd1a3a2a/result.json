@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32772",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Added optional inbound --admin-api-key protection for the experimental Rust router's POST /flush_cache endpoint. With no key configured the existing unauthenticated behavior is preserved. With a key configured, only an exact Authorization: Bearer <key> credential is accepted, unauthorized requests return 401 before worker registry access/fan-out, and the inbound credential is not forwarded to workers.",
+  "tests": [
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-7d06fd1a3a2a/cargo-target cargo test --manifest-path experimental/sgl-router/Cargo.toml server::routes::cache::tests::all_workers_succeed_returns_200 -- --exact --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Baseline reproduction on the recorded base: the existing no-key POST /flush_cache path contacted two real local HTTP fake workers and returned success, confirming the reported unauthenticated behavior. Raw output: reports/j-7d06fd1a3a2a/raw/before_existing_unauthenticated_fanout.log"
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-7d06fd1a3a2a/cargo-target cargo test --manifest-path experimental/sgl-router/Cargo.toml server::routes::cache::tests -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Nine cache-route tests, including backward-compatible no-key fan-out, exact bearer success, missing/wrong scheme/wrong key rejection, zero worker calls for all unauthorized requests, and no forwarding of the inbound Authorization header. Raw output: reports/j-7d06fd1a3a2a/raw/after_cache_auth_tests.log"
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-7d06fd1a3a2a/cargo-target cargo test --manifest-path experimental/sgl-router/Cargo.toml",
+      "exit_code": 0,
+      "what_was_measured": "Complete router test suite: 549 library tests, 4 binary tests, 58 component tests, and 90 proxy tests passed. This includes CLI parsing and rejection of empty/header-invalid admin keys. Raw output: reports/j-7d06fd1a3a2a/raw/full_cargo_test.log"
+    },
+    {
+      "command": "cargo fmt --manifest-path experimental/sgl-router/Cargo.toml -- --check",
+      "exit_code": 0,
+      "what_was_measured": "All modified Rust source conforms to the pinned rustfmt. Raw output: reports/j-7d06fd1a3a2a/raw/cargo_fmt_check.log"
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-7d06fd1a3a2a/cargo-target cargo clippy --manifest-path experimental/sgl-router/Cargo.toml --all-targets -- -D warnings",
+      "exit_code": 101,
+      "what_was_measured": "Strict clippy reached the router crate but was blocked by an unrelated pre-existing nonminimal_bool warning at experimental/sgl-router/src/policies/buckets.rs:167. Raw output: reports/j-7d06fd1a3a2a/raw/cargo_clippy.log"
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-7d06fd1a3a2a/cargo-target cargo build --release --manifest-path experimental/sgl-router/Cargo.toml",
+      "exit_code": 0,
+      "what_was_measured": "Fresh optimized native Rust router build using pinned rustc 1.90.0. Binary: /tmp/amdpilot-repo-j-7d06fd1a3a2a/cargo-target/release/sgl-router; SHA-256 540ef806d57c09cdeece053fa5915ab2e38891ebdf01f89e2a125e6c398aeaba. Raw output: reports/j-7d06fd1a3a2a/raw/release_native_build.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7d06fd1a3a2a/cargo-target/release/sgl-router --help",
+      "exit_code": 0,
+      "what_was_measured": "Executed the newly rebuilt native binary and confirmed --admin-api-key is exposed with compatibility/authentication semantics in CLI help. Raw output: reports/j-7d06fd1a3a2a/raw/release_binary_help.log"
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "No GPU/model serving run was performed because /flush_cache inbound authentication is model-architecture-independent and is fully exercised against real local HTTP worker listeners.",
+    "Strict clippy remains blocked by an unrelated warning already present in src/policies/buckets.rs:167; the complete test suite and optimized native build both pass.",
+    "The scope requested protection starting with /flush_cache; no other router endpoints were converted into admin endpoints."
+  ]
+}
