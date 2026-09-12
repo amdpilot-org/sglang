@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36127",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "Candidate cdd6ac7 adds and unit-tests an opt-in DSpark-style confidence head, strict declared-head weight loading, DFlash2 STS loading/application, and preserves the earlier dynamic scheduling/ragged verification work. Its focused CPU and shared ROCm kernel tests pass. It does not fully resolve the original feature request: no compatible DFlash2 checkpoint or live DFlash2 target/draft pair validates the assumed checkpoint schema or end-to-end semantics, mixed-workload throughput is unmeasured, and an adversarial finite STS value can overflow during float32 conversion and be silently accepted as infinity.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-82c04e6803de/venv/bin/python -m pytest -q /tmp/j-82c04e6803de-evidence/test_dflash_confidence.py -k 'trained_head or dflash_sts_loader or enabled_confidence_head' (base checkout)",
+      "exit_code": 2,
+      "what_was_measured": "At recorded base 358c163, the candidate regression cannot collect because sglang.srt.speculative.dflash_confidence does not exist; source audit also found no DFlash2 trained-head or STS path."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-82c04e6803de/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_confidence.py test/registered/unit/spec/test_dflash_logits.py test/registered/spec/dspark/test_dspark_scheduler.py test/registered/spec/dspark/test_dspark_sts.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate cdd6ac7, 75 tests and 18 subtests passed for confidence/configuration, logits compatibility, scheduler behavior, and STS parsing/application."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-82c04e6803de/venv/bin/python -m pytest -q test/registered/spec/dspark/test_dspark_kernel_parity.py",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI355X (gfx950), the shared DSpark scheduling/verification kernel parity test passed with 22 independent numerical-reference subtests. This is shared-kernel evidence, not live DFlash2 serving evidence."
+    },
+    {
+      "command": "Inline DFlashWorkerV2 STS load with {\"temperatures\":[1e308,2.0]} followed by torch.isfinite assertion",
+      "exit_code": 1,
+      "what_was_measured": "The finite JSON value passed calibration validation, overflowed to float32 infinity, and produced confidence 0.5 for that position; the independent finiteness assertion failed."
+    },
+    {
+      "command": "Candidate source/native import audit at cdd6ac7",
+      "exit_code": 0,
+      "what_was_measured": "sglang, dflash.py, dflash_confidence.py, and dflash_worker_v2.py imported from /job/repo/python. No C/C++/CUDA/HIP/FlyDSL source changed relative to the recorded base."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X, gfx950, ran the shared kernel parity suite: 1 test passed and 22 subtests passed. No compatible DFlash2 model weights were available for architecture-qualified execution."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A finite positive STS JSON value larger than float32 range (for example 1e308) passes the shared calibration validator, becomes infinity when DFlashWorkerV2 converts it to float32, and is accepted; the calibrated confidence at that position collapses to 0.5 instead of rejecting invalid runtime calibration.",
+    "A real compatible DFlash2 checkpoint with a trained survival head has not been loaded, so the candidate's assumed enable_confidence_head/DSparkConfidenceHead naming, tensor shapes, bias, dtype, and optional Markov schema remain unverified against an actual DFlash2 artifact.",
+    "Lossless end-to-end semantics remain unverified for a real DFlash2 target/draft pair across sampling, grammar, continuous batching, overlap relay, and live compact graph replay.",
+    "The expected mixed-quality concurrent-workload throughput benefit remains unmeasured in live DFlash2 serving."
+  ],
+  "remaining_limitations": [
+    "No compatible DFlash2 target/draft weights or trained confidence-head checkpoint were supplied or cached.",
+    "The qualified tiny Llama fixture is not DFlash2 architecture-qualified and therefore was not used as semantic or throughput proof.",
+    "GPU evidence is limited to shared DSpark kernels on AMD gfx950, not CUDA graph replay on NVIDIA hardware and not live DFlash2 serving.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
