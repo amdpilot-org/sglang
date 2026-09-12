@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34366",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1713",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1675",
+  "candidate_commit": "3a6c271a6f418c3608ab9a777b0000c526ee21e3",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The recorded base reproduced the exact Qwen3-VL missing-mm_token_type_ids failure at ImageEncodingStage.forward even though processor output contained the field. The exact candidate forwards it for positive and classifier-free-guidance calls and passed both its regression and an independent whole-stage GPU test. This verifies the reported argument-contract fix. Full JoyAI serving and semantic output remain unverified because the model weights were unavailable.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-3e0a7dbf929b/venv/bin/python < independent whole-ImageEncodingStage.forward fixture on base 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: GPU-resident processor output contained mm_token_type_ids, but the base stage omitted it from the positive encoder call and the Qwen3-VL-compatible contract raised ValueError. Evidence: raw/base_forward_repro.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3e0a7dbf929b/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_image_encoding_mm_token_type_ids.py at candidate 3a6c271a6f418c3608ab9a777b0000c526ee21e3",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and helper boundaries; 4 passed. Evidence: raw/candidate_pytest.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-3e0a7dbf929b/venv/bin/python < independent installed-Qwen3-VL contract and whole-stage adversarial fixture at candidate 3a6c271a6f418c3608ab9a777b0000c526ee21e3",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the installed Qwen3-VL exact missing-field exception, then verified distinct positive and CFG mm_token_type_ids reached the encoder on cuda:0 with GPU checksum 6.0; also checked legacy omission and present-but-None boundaries. Evidence: raw/candidate_adversarial.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3e0a7dbf929b/venv/bin/python -m compileall -q <candidate changed source and test>",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python source and regression compiled successfully."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 3a6c271a6f418c3608ab9a777b0000c526ee21e3 -- <changed source and test>",
+      "exit_code": 0,
+      "what_was_measured": "Functional source and test contain no whitespace errors. The whole candidate diff exits 2 solely for trailing whitespace in its preserved pytest-before report log."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "raw/candidate_adversarial.log records AMD Instinct MI350X gfx950, ROCm 7.2.26015, both positive and CFG token-type tensors on cuda:0, and checksum 6.0.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The complete jdopensource/JoyAI-Image-Edit-Diffusers warmup and request were not executable without the model weights, so successful end-to-end request completion and semantic image output remain unverified."
+  ],
+  "remaining_limitations": [
+    "The JoyAI model weights were unavailable; no full server or semantic image-output validation was performed.",
+    "The deterministic fixture validates the exact processor-to-text-encoder contract on one GPU, not the full model architecture or a distributed workload.",
+    "No C++ or other native source changed, so no native rebuild was applicable.",
+    "The whole candidate diff has trailing whitespace only in a committed raw failure log; its source/test diff passes git diff --check."
+  ]
+}
