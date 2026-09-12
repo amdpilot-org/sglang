@@ -1,0 +1,56 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36475",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1300",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1265",
+  "candidate_commit": "8b21de71aa771d3a43d8b440937b4b551d4464d3",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the reproduced ownership defect: a request rejected before admission can no longer release the streaming-session inflight slot owned by the disconnected request. Focused tests fail on the recorded base and pass at the exact candidate commit. Independent delayed-cleanup, repeated-abort, and many-overlap cases pass. On one real gfx950 GPU, the candidate returned a visible BadRequestError for the immediate overlap, then rolled back to the correct 72-token prompt on retry and remained healthy. This is a substantive source fix, not test-only hardening. Full-resolution status remains false only because Qwen2.5/CUDA and the reported idle-invariant scheduler crash were unavailable and were not independently reproduced.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7aecad1dc257/venv/bin/python -m pytest -q /job/review-j-7aecad1dc257/candidate-files/test/registered/unit/mem_cache/test_session_token_share_unit.py /job/review-j-7aecad1dc257/candidate-files/test/registered/unit/mem_cache/test_streaming_session_unit.py (base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before ownership regression: 3 failed, 13 passed. The rejected overlap cleared Session._inflight and allowed a third request."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7aecad1dc257/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_session_token_share_unit.py test/registered/unit/mem_cache/test_streaming_session_unit.py (candidate 8b21de7)",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after focused session/cache suite: 16 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7aecad1dc257/venv/bin/python -m pytest -q /job/review-j-7aecad1dc257/adversarial_test.py (candidate 8b21de7)",
+      "exit_code": 0,
+      "what_was_measured": "Three independent ordering boundaries passed: delayed cleanup of a rejected request after a later owner is admitted, duplicate abort of an old owner, and reverse cleanup of eight rejected overlaps."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python HF_HOME=/tmp/amdpilot-repo-j-7aecad1dc257/hf-cache /tmp/amdpilot-repo-j-7aecad1dc257/venv/bin/python /job/review-j-7aecad1dc257/candidate-files/reports/j-f1b36f266e3d/run_repro_server.py --fixture /tmp/amdpilot-repo-j-7aecad1dc257/tiny-random-llama --output /job/review-j-7aecad1dc257/evidence/http-base",
+      "exit_code": 0,
+      "what_was_measured": "Independent base HTTP attempt on gfx950. This timing did not reproduce context loss: immediate turn 2 rolled back to 72 prompt tokens and health was 200. The deterministic unit regression nevertheless reproduced the underlying base defect."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python HF_HOME=/tmp/amdpilot-repo-j-7aecad1dc257/hf-cache /tmp/amdpilot-repo-j-7aecad1dc257/venv/bin/python reports/j-f1b36f266e3d/run_repro_server.py --fixture /tmp/amdpilot-repo-j-7aecad1dc257/tiny-random-llama --output /job/review-j-7aecad1dc257/evidence/http-candidate (candidate 8b21de7)",
+      "exit_code": 1,
+      "what_was_measured": "Product behavior was safe despite the runner's false-negative exit: immediate turn 2 visibly failed with BadRequestError and prompt_tokens=1; the next retry used the correct rolled-back prompt_tokens=72; health remained 200. The runner incorrectly requires two consecutive busy responses when the first response is busy."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2, HIP 7.2.26015. Source-checkout server executed real prefill/decode and streaming-session requests."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_reason": "The candidate changes only Python source and tests/reports; no C++, FlyDSL, or other native source changed. Imports were confirmed from /job/repo/python/sglang at the exact candidate commit.",
+  "remaining_counterexamples": [
+    "No tested functional counterexample was found. Exact Qwen/Qwen2.5-0.5B-Instruct behavior on the reporter's NVIDIA CUDA architecture remains unverified because those weights and architecture were unavailable.",
+    "The reported idle pool-memory invariant failure and scheduler death were not independently reproduced with the 512-token tiny Llama fixture; therefore elimination of that exact terminal symptom remains architecture/model-scale unverified.",
+    "The candidate's checked-in HTTP runner can return exit 1 for a valid sequence where turn 2 visibly reports busy and turn 3 already succeeds after abort settlement; this is a regression-harness false negative, not a source counterexample."
+  ],
+  "remaining_limitations": [
+    "The GPU fixture is a deterministic random two-layer Llama and validates transport, engine execution, token accounting, rollback, and KV lifecycle only; it does not validate Qwen semantics.",
+    "Testing used one AMD gfx950 GPU, not the reporter's NVIDIA compute capability 8.6 device, and did not cover multi-GPU or multi-node execution.",
+    "The independent base HTTP attempt did not hit the timing window, although the exact lower-level ownership failure reproduced on the recorded base and the candidate's retained base HTTP artifact records the prompt_tokens=1 overlap response.",
+    "No native rebuild was needed because native source was unchanged."
+  ],
+  "evidence_root": "/job/review-j-7aecad1dc257/evidence"
+}
