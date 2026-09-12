@@ -79,6 +79,17 @@ def _mtp_quant_config(quant_config):
             for layer in exclude_layers
         ):
             return None
+    # Compressed-tensors checkpoints likewise keep the MTP module in bf16,
+    # recording each unfused `mtp.*` linear under `ignore`. The model builds
+    # qkv_proj and gate_up_proj as fused linears, so retaining quantization here
+    # would allocate packed parameters that the plain checkpoint weights cannot
+    # load into.
+    if quant_config and quant_config.get_name() == "compressed_tensors":
+        ignore = getattr(quant_config, "ignore", None) or []
+        if any(
+            isinstance(layer, str) and layer.startswith("mtp.") for layer in ignore
+        ):
+            return None
     return quant_config
 
 

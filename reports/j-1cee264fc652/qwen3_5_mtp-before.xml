@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="8.098" timestamp="2026-09-12T08:36:37.527896+00:00" hostname="smci355-ccs-aus-n08-13"><testcase classname="registered.unit.models.test_shared_experts_fusion_gates.TestWrapperEntryClassGates" name="test_the_qwen3_5_mtp_entry_normalizes_its_quantization" time="0.237"><failure message="Exception: retry() exceed maximum number of retries.">self = &lt;test_shared_experts_fusion_gates.TestWrapperEntryClassGates testMethod=test_the_qwen3_5_mtp_entry_normalizes_its_quantization&gt;
+
+    def test_the_qwen3_5_mtp_entry_normalizes_its_quantization(self):
+        from sglang.srt.models.qwen3_5 import Qwen3_5ForCausalLM
+        from sglang.srt.models.qwen3_5_mtp import (
+            Qwen3_5ForCausalLMMTP,
+            _mtp_quant_config,
+        )
+    
+        # The normalization the constructor applies, shared with the gate.
+        self.assertIsNone(_mtp_quant_config(_quant("modelopt_mixed")))
+        serialized = SimpleNamespace(
+            get_name=lambda: "modelopt_fp4", is_checkpoint_nvfp4_serialized=True
+        )
+        self.assertIsNone(_mtp_quant_config(serialized))
+        # A non-serialized modelopt_fp4 checkpoint still converts on load, so
+        # the MTP module keeps the quantization.
+        online = SimpleNamespace(
+            get_name=lambda: "modelopt_fp4", is_checkpoint_nvfp4_serialized=False
+        )
+        self.assertIs(_mtp_quant_config(online), online)
+        quark_mtp = SimpleNamespace(
+            get_name=lambda: "quark", exclude_layers=["mtp.mlp.experts"]
+        )
+        self.assertIsNone(_mtp_quant_config(quark_mtp))
+        compressed_mtp = SimpleNamespace(
+            get_name=lambda: "compressed_tensors",
+            ignore=[
+                "mtp.fc",
+                "mtp.layers.0.self_attn.q_proj",
+                "mtp.layers.0.mlp.gate_proj",
+            ],
+        )
+&gt;       self.assertIsNone(_mtp_quant_config(compressed_mtp))
+E       AssertionError: namespace(get_name=&lt;function TestWrapperEntryClassGates.test_the_qwen3_5_mtp_entry_normalizes_its_quantization.&lt;locals&gt;.&lt;lambda&gt; at 0x79f63c2387c0&gt;, ignore=['mtp.fc', 'mtp.layers.0.self_attn.q_proj', 'mtp.layers.0.mlp.gate_proj']) is not None
+
+test/registered/unit/models/test_shared_experts_fusion_gates.py:682: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = &lt;function CustomTestCase._callTestMethod.&lt;locals&gt;.&lt;lambda&gt; at 0x79f63f49e480&gt;
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = &lt;function &lt;lambda&gt; at 0x79ff22da1e40&gt;
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index &gt;= max_retry:
+&gt;                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception</failure></testcase></testsuite></testsuites>
