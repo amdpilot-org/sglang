@@ -88,6 +88,18 @@ def _decode_total_seq_lens(batch: ScheduleBatch) -> int:
     return sum(req.seqlen for req in batch.reqs)
 
 
+def _average_request_queue_latency(reqs: List[Req], now: float) -> float:
+    """Return the mean current wait of requests with initialized timestamps."""
+    total_wait = 0.0
+    count = 0
+    for req in reqs:
+        entry_time = req.time_stats.wait_queue_entry_time
+        if entry_time > 0:
+            total_wait += max(0.0, now - entry_time)
+            count += 1
+    return total_wait / count if count else 0.0
+
+
 @dataclasses.dataclass
 class PrefillStats:
     """Stats for logging prefill batch metrics."""
@@ -779,6 +791,9 @@ class SchedulerMetricsReporter:
             self.stats.num_queue_reqs = QueueCount.from_reqs(
                 self.scheduler.waiting_queue, priority_enabled
             )
+            self.stats.avg_request_queue_latency = _average_request_queue_latency(
+                self.scheduler.waiting_queue, now
+            )
             self.stats.num_grammar_queue_reqs = len(self.scheduler.grammar_manager)
             self.stats.cache_hit_rate = cache_hit_rate
             # Refresh here too: prefill-heavy stretches can run long between
@@ -996,6 +1011,9 @@ class SchedulerMetricsReporter:
             )
             self.stats.num_queue_reqs = QueueCount.from_reqs(
                 self.scheduler.waiting_queue, priority_enabled
+            )
+            self.stats.avg_request_queue_latency = _average_request_queue_latency(
+                self.scheduler.waiting_queue, time.perf_counter()
             )
             self.stats.num_grammar_queue_reqs = len(self.scheduler.grammar_manager)
             self.stats.gen_throughput = self.last_gen_throughput
