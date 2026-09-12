@@ -108,20 +108,63 @@ def free_swa_out_of_window_slots(
         req.kv.swa_evicted_seqlen = new_swa_evicted_seqlen
 
 
+def _coalesce_touching_segments(
+    segments: list[tuple[torch.Tensor, int]],
+) -> list[tuple[torch.Tensor, int]]:
+    """Join touching segments of one kv row and discard empty segments."""
+    # A truncated finished request contributes its unaligned cached tail and
+    # its deferred truncation tail as two touching slices. Join all touching
+    # slices before page ownership is split so their shared boundary page is
+    # emitted exactly once. Keep gaps separate: they can belong to the tree.
+    coalesced: list[tuple[torch.Tensor, int]] = []
+    for kv_indices, start_pos in segments:
+        if kv_indices.numel() == 0:
+            continue
+        if coalesced:
+            prev_indices, prev_start = coalesced[-1]
+            if prev_start + prev_indices.numel() == start_pos:
+                coalesced[-1] = (torch.cat((prev_indices, kv_indices)), prev_start)
+                continue
+        coalesced.append((kv_indices, start_pos))
+    return coalesced
+
+
 def free_kv_row_segments(
     allocator: BaseTokenToKVPoolAllocator,
     segments: list[tuple[torch.Tensor, int]],
     *,
     swa_evicted_seqlen: int,
+    completed_frees: set[tuple] | None = None,
 ) -> None:
     """Free ascending disjoint ``(kv_indices, start_pos)`` segments of one
-    request's kv row, split at the SWA eviction floor."""
+    request's kv row, split at the SWA eviction floor.
+
+    When request-scoped ``completed_frees`` is provided, an identical retry is
+    a no-op even if cleanup of another request used the allocator in between.
+    The fingerprint is recorded only after a successful free, so allocator
+    errors remain retryable. Tensor addresses distinguish different request
+    rows without reading device data or synchronizing the scheduler stream.
+    """
+
+    retry_fingerprint = (
+        swa_evicted_seqlen,
+        tuple(
+            (
+                kv_indices.data_ptr(),
+                kv_indices.numel(),
+                kv_indices._version,
+                start_pos,
+            )
+            for kv_indices, start_pos in segments
+        ),
+    )
+    if completed_frees is not None and retry_fingerprint in completed_frees:
+        return
+
     swa_dead: list[tuple[torch.Tensor, int]] = []
     swa_alive: list[tuple[torch.Tensor, int]] = []
-    for kv_indices, start_pos in segments:
+    for kv_indices, start_pos in _coalesce_touching_segments(segments):
         num_indices = kv_indices.numel()
-        if num_indices == 0:
-            continue
         # Below the floor the SWA peers are already gone -- window eviction, or
         # the deliberately unmapped prefix of a PD decode SWA-tail prealloc.
         num_dead = min(max(swa_evicted_seqlen - start_pos, 0), num_indices)
@@ -141,6 +184,8 @@ def free_kv_row_segments(
         allocator.free_full_segments(swa_dead)
     if swa_alive:
         allocator.free_segments(swa_alive)
+    if completed_frees is not None:
+        completed_frees.add(retry_fingerprint)
 
 
 def maybe_cache_unfinished_req(req: Req, tree_cache: BasePrefixCache, **kwargs):

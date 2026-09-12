@@ -418,10 +418,19 @@ class BasePrefixCache(ABC, PrefixCacheTrait):
         from sglang.srt.mem_cache.common import free_kv_row_segments
 
         row = self.req_to_token_pool.req_to_token[kv.req_pool_idx]
+        completed_frees = getattr(kv, "completed_free_segments", None)
+        if completed_frees is None:
+            completed_frees = set()
+            try:
+                setattr(kv, "completed_free_segments", completed_frees)
+            except AttributeError:
+                # Compatibility for external slotted KV record stand-ins.
+                completed_frees = None
         free_kv_row_segments(
             self.token_to_kv_pool_allocator,
             [(row[start:end], start) for start, end in ranges],
             swa_evicted_seqlen=kv.swa_evicted_seqlen,
+            completed_frees=completed_frees,
         )
 
     @abstractmethod
