@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34786",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1585",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1547",
+  "candidate_commit": "ccabba009ecd391d7f97d50a7c1ca52b7490ac95",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is test-only hardening: it changes no runtime or native source. Its focused GPU unit tests pass and support the None-to-slot-0 behavior already present in the recorded base, but they do not exercise NEXTN TARGET_VERIFY end to end. The candidate report overstates this as outcome=fixed, cites the wrong mirror issue, and identifies the live MI355X as MI350X. Request changes to classify the contribution and evidence accurately. The prepared base itself already contains the production guard, so the legacy tensor expression fails while the current helper passes.",
+  "tests": [
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-80e5ef743a9c/venv/bin/python -m pytest -q test/registered/unit/managers/test_mamba_track_indices.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, 3 GPU unit tests passed for fresh None, mixed slots, and explicit override. Imported schedule_batch.py from /job/repo."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-80e5ef743a9c/venv/bin/python -m pytest -q test/registered/unit/managers/test_schedule_batch_prepare_for_decode.py test/registered/unit/managers/test_batch_result_processor_mamba_boundary.py",
+      "exit_code": 0,
+      "what_was_measured": "3 adjacent lifecycle tests and 2 subtests passed, but these are not a full NEXTN serving reproduction."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-80e5ef743a9c/venv/bin/python -c 'import torch; torch.tensor([None], dtype=torch.int64, pin_memory=True)'",
+      "exit_code": 1,
+      "what_was_measured": "Independent legacy-expression reproduction raised the original TypeError. The prepared base cannot fail at its current helper because it already contains the None-to-zero guard."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-80e5ef743a9c/venv/bin/python < independent adversarial script",
+      "exit_code": 0,
+      "what_was_measured": "All-fresh requests, noncontiguous pool rows, tuple override, exact gathered GPU values, and non-mutation passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "torch reported AMD Instinct MI355X with gfx950:sramecc+:xnack-. Candidate and independent numerical cases used ROCR_VISIBLE_DEVICES=0."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No end-to-end fresh-request NEXTN TARGET_VERIFY run on a hybrid-mamba model was performed by the candidate or this review.",
+    "Qwen3.6-27B-FP8 weights and the reported two RTX 3090 GPUs were unavailable; NVIDIA and multi-GPU behavior remain unverified.",
+    "The candidate test proves helper-level index selection, not full allocation, speculative boundary crossing, or serving correctness."
+  ],
+  "remaining_limitations": [
+    "The assigned architecture was one AMD Instinct MI355X gfx950, not the reported NVIDIA environment.",
+    "No production or native source differs between base and candidate, so no native rebuild was applicable.",
+    "The tiny Llama fixture is not hybrid-mamba and was intentionally not used as issue proof."
+  ]
+}
