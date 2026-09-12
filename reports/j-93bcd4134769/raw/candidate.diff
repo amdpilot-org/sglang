@@ -1,0 +1,2429 @@
+diff --git a/python/sglang/srt/models/deepseek_nextn.py b/python/sglang/srt/models/deepseek_nextn.py
+index 7d61f6f..fce4d92 100644
+--- a/python/sglang/srt/models/deepseek_nextn.py
++++ b/python/sglang/srt/models/deepseek_nextn.py
+@@ -70,12 +70,6 @@ class DeepseekModelNextN(nn.Module):
+         else:
+             moe_quant_config_override = None
+ 
+-        if quant_config is not None and quant_config.get_name() == "modelopt_fp4":
+-            logger.debug(
+-                "Overriding DeepseekV3ForCausalLMNextN quant config for modelopt_fp4 Deepseek model."
+-            )
+-            quant_config = None
+-
+         self.vocab_size = config.vocab_size
+ 
+         self.embed_tokens = VocabParallelEmbedding(
+@@ -259,7 +253,14 @@ class DeepseekV3ForCausalLMNextN(DeepseekV3ForCausalLM):
+         return cls.hf_to_sglang_mapper
+ 
+     def _resolve_nextn_quant_config(self, config, quant_config):
+-        if quant_config is None or quant_config.get_name() != "quark":
++        if quant_config is None:
++            return None
++        if quant_config.get_name() == "modelopt_fp4":
++            logger.debug(
++                "Using unquantized NextN modules for a modelopt_fp4 DeepSeek model."
++            )
++            return None
++        if quant_config.get_name() != "quark":
+             return quant_config
+ 
+         from sglang.srt.layers.quantization.quark.utils import should_ignore_layer
+diff --git a/python/sglang/srt/models/glm5_next_nextn.py b/python/sglang/srt/models/glm5_next_nextn.py
+index fb7cf55..9f63334 100644
+--- a/python/sglang/srt/models/glm5_next_nextn.py
++++ b/python/sglang/srt/models/glm5_next_nextn.py
+@@ -32,8 +32,7 @@ class Glm5NextForConditionalGenerationNextN(DeepseekV3ForCausalLMNextN):
+         )
+ 
+     def _resolve_nextn_quant_config(self, config, quant_config):
+-        """Mixed checkpoints list the BF16 NextN block in ``quantization_config.ignore``;
+-        inheriting global FP8 quantization would corrupt its QKV weights."""
++        """Honor whether the checkpoint stores its NextN block quantized."""
+         raw_quant_config = getattr(config, "quantization_config", None) or {}
+         if hasattr(raw_quant_config, "to_dict"):
+             raw_quant_config = raw_quant_config.to_dict()
+@@ -50,6 +49,8 @@ class Glm5NextForConditionalGenerationNextN(DeepseekV3ForCausalLMNextN):
+                 nextn_layer_pattern,
+             )
+             return None
++        if quant_config is not None and quant_config.get_name() == "modelopt_fp4":
++            return quant_config
+         return super()._resolve_nextn_quant_config(config, quant_config)
+ 
+     def __init__(self, config, quant_config=None, prefix: str = "") -> None:
+diff --git a/reports/j-7bfd059ec3e9/investigation.md b/reports/j-7bfd059ec3e9/investigation.md
+new file mode 100644
+index 0000000..45268dc
+--- /dev/null
++++ b/reports/j-7bfd059ec3e9/investigation.md
+@@ -0,0 +1,50 @@
++# GLM-5.3 NextN ModelOpt FP4 investigation
++
++Upstream issue: https://github.com/sgl-project/sglang/issues/36653
++
++Mirror issue: https://github.com/amdpilot-org/sglang/issues/1129
++
++Base commit: `358c163250ad3b1f62939b01ce1314a0a31a0365`
++
++## Finding
++
++The reported `4096` versus `2048` mismatch is not evidence of a TP sharding
++disagreement. `_load_w13` shards the output dimension, while the traceback
++reports dimension 1. For ModelOpt NVFP4, that dimension is the packed hidden
++dimension (two FP4 values per byte): an unquantized draft parameter expects
++hidden size 4096 while the serialized FP4 tensor is packed to 2048.
++
++The checked-out implementation reproduced the configuration loss directly.
++`Glm5NextForConditionalGenerationNextN._resolve_nextn_quant_config` retained
++`modelopt_fp4` for a checkpoint whose layer 45 is quantized, but
++`DeepseekModelNextN.__init__` then unconditionally replaced that configuration
++with `None` before constructing `DeepseekV2DecoderLayer`. The failing-before
++test captured the decoder receiving `None`.
++
++The correction moves the legacy DeepSeek ModelOpt-FP4 exception to
++`DeepseekV3ForCausalLMNextN._resolve_nextn_quant_config`. This leaves the
++existing DeepSeek behavior unchanged, while the GLM-5.3 subclass can retain
++the quantization configuration when its NextN checkpoint layer is quantized.
++The existing GLM ignore-list behavior remains intact for checkpoints that
++declare `model.layers.45.*` unquantized.
++
++## Related work checked
++
++Upstream PR https://github.com/sgl-project/sglang/pull/37322 is open and covers
++the same central configuration loss, plus substantially broader exclusion-name
++remapping for DeepSeek and Bailing checkpoints. It is not present in this base.
++The narrow change here does not duplicate those unrelated remapping changes.
++
++## Validation and limitations
++
++Raw command output is retained in `raw/`. The focused regression failed before
++the source change (two failures: quantized GLM decoder configuration was lost,
++and the intended legacy DeepSeek resolution boundary was not centralized) and
++passes after it. The related multimodal NextN embedding tests also pass.
++
++The assigned device is AMD `gfx950`, while the report is for NVIDIA ModelOpt
++NVFP4 on two `sm_121` nodes. The 320B checkpoint weights and two-node NVIDIA
++topology were not available. Therefore no full checkpoint load, TP=2 server,
++GPU numerical execution, architecture qualification, or semantic generation
++claim is made. This is a source-level candidate verified by deterministic unit
++coverage, not a full model reproduction.
+diff --git a/reports/j-7bfd059ec3e9/raw/black.txt b/reports/j-7bfd059ec3e9/raw/black.txt
+new file mode 100644
+index 0000000..9e5d642
+--- /dev/null
++++ b/reports/j-7bfd059ec3e9/raw/black.txt
+@@ -0,0 +1 @@
++/tmp/amdpilot-repo-j-7bfd059ec3e9/venv/bin/python: No module named black
+diff --git a/reports/j-7bfd059ec3e9/raw/compileall.txt b/reports/j-7bfd059ec3e9/raw/compileall.txt
+new file mode 100644
+index 0000000..e69de29
+diff --git a/reports/j-7bfd059ec3e9/raw/gpu-inventory.txt b/reports/j-7bfd059ec3e9/raw/gpu-inventory.txt
+new file mode 100644
+index 0000000..554628b
+--- /dev/null
++++ b/reports/j-7bfd059ec3e9/raw/gpu-inventory.txt
+@@ -0,0 +1,3 @@
++  Marketing Name:          AMD EPYC 9575F 64-Core Processor
++  Marketing Name:          AMD EPYC 9575F 64-Core Processor
++  Name:                    gfx950
+diff --git a/reports/j-7bfd059ec3e9/raw/mirror-issue.json b/reports/j-7bfd059ec3e9/raw/mirror-issue.json
+new file mode 100644
+index 0000000..76c5a45
+--- /dev/null
++++ b/reports/j-7bfd059ec3e9/raw/mirror-issue.json
+@@ -0,0 +1 @@
++{"comments":[],"state":"OPEN","title":"Dogfood: [Bug] NEXTN/MTP speculative decoding fails to load MTP MoE weights under TP>1 for Glm5NextForConditionalGeneration (GLM-5.3-Flash)","updatedAt":"2026-09-12T07:32:33Z","url":"https://github.com/amdpilot-org/sglang/issues/1129"}
+diff --git a/reports/j-7bfd059ec3e9/raw/pytest-after.txt b/reports/j-7bfd059ec3e9/raw/pytest-after.txt
+new file mode 100644
+index 0000000..1669be0
+--- /dev/null
++++ b/reports/j-7bfd059ec3e9/raw/pytest-after.txt
+@@ -0,0 +1,21 @@
++...                                                                      [100%]
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++<frozen abc>:106
++  <frozen abc>:106: DeprecationWarning: MultiPlatformOp is deprecated; subclass sglang.kernels.fused_op.BaseFusedOp instead (RFC #29630).
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++3 passed, 18 warnings in 8.93s
+diff --git a/reports/j-7bfd059ec3e9/raw/pytest-before.txt b/reports/j-7bfd059ec3e9/raw/pytest-before.txt
+new file mode 100644
+index 0000000..f8ae3b7
+--- /dev/null
++++ b/reports/j-7bfd059ec3e9/raw/pytest-before.txt
+@@ -0,0 +1,85 @@
++F.F                                                                      [100%]
++=================================== FAILURES ===================================
++______ test_glm5_builds_quantized_nextn_layer_for_modelopt_fp4_checkpoint ______
++
++    def test_glm5_builds_quantized_nextn_layer_for_modelopt_fp4_checkpoint():
++        quant_config = _ModelOptFp4Config()
++        model = object.__new__(Glm5NextForConditionalGenerationNextN)
++
++        resolved = model._resolve_nextn_quant_config(_config(), quant_config)
++
++        config = SimpleNamespace(
++            vocab_size=128,
++            hidden_size=64,
++            rms_norm_eps=1e-5,
++            qk_rope_head_dim=0,
++        )
++
++        class _Decoder(nn.Module):
++            def __init__(self, quant_config):
++                super().__init__()
++                self.received_quant_config = quant_config
++
++        with (
++            patch(
++                "sglang.srt.models.deepseek_nextn.VocabParallelEmbedding",
++                side_effect=lambda *args, **kwargs: nn.Identity(),
++            ),
++            patch(
++                "sglang.srt.models.deepseek_nextn.RMSNorm",
++                side_effect=lambda *args, **kwargs: nn.Identity(),
++            ),
++            patch(
++                "sglang.srt.models.deepseek_nextn.DeepseekV2DecoderLayer",
++                side_effect=lambda *args, **kwargs: _Decoder(kwargs["quant_config"]),
++            ),
++            patch(
++                "sglang.srt.models.deepseek_nextn.get_embedding_tp_kwargs",
++                return_value={},
++            ),
++            patch("sglang.srt.models.deepseek_nextn._is_cuda", False),
++            patch("sglang.srt.models.deepseek_nextn._is_npu", False),
++        ):
++            nextn = DeepseekModelNextN(config, resolved)
++
++>       assert nextn.decoder.received_quant_config is quant_config
++E       assert None is <test_glm5_nextn_quant_config._ModelOptFp4Config object at 0x72aa84c99010>
++E        +  where None = _Decoder().received_quant_config
++E        +    where _Decoder() = DeepseekModelNextN(\n  (embed_tokens): Identity()\n  (enorm): Identity()\n  (hnorm): Identity()\n  (eh_proj): Linear(in_features=128, out_features=64, bias=False)\n  (decoder): _Decoder()\n  (shared_head): Module(\n    (norm): Identity()\n  )\n).decoder
++
++test/registered/unit/models/test_glm5_nextn_quant_config.py:68: AssertionError
++_____ test_deepseek_retains_legacy_unquantized_modelopt_fp4_nextn_behavior _____
++
++    def test_deepseek_retains_legacy_unquantized_modelopt_fp4_nextn_behavior():
++        quant_config = _ModelOptFp4Config()
++        model = object.__new__(DeepseekV3ForCausalLMNextN)
++
++        resolved = model._resolve_nextn_quant_config(_config(), quant_config)
++
++>       assert resolved is None
++E       assert <test_glm5_nextn_quant_config._ModelOptFp4Config object at 0x72aa84ce57c0> is None
++
++test/registered/unit/models/test_glm5_nextn_quant_config.py:87: AssertionError
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++<frozen abc>:106
++  <frozen abc>:106: DeprecationWarning: MultiPlatformOp is deprecated; subclass sglang.kernels.fused_op.BaseFusedOp instead (RFC #29630).
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++=========================== short test summary info ============================
++FAILED test/registered/unit/models/test_glm5_nextn_quant_config.py::test_glm5_builds_quantized_nextn_layer_for_modelopt_fp4_checkpoint
++FAILED test/registered/unit/models/test_glm5_nextn_quant_config.py::test_deepseek_retains_legacy_unquantized_modelopt_fp4_nextn_behavior
++2 failed, 1 passed, 18 warnings in 8.84s
+diff --git a/reports/j-7bfd059ec3e9/raw/pytest-related.txt b/reports/j-7bfd059ec3e9/raw/pytest-related.txt
+new file mode 100644
+index 0000000..de43cc0
+--- /dev/null
++++ b/reports/j-7bfd059ec3e9/raw/pytest-related.txt
+@@ -0,0 +1,21 @@
++.....                                                                    [100%]
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++<frozen abc>:106
++  <frozen abc>:106: DeprecationWarning: MultiPlatformOp is deprecated; subclass sglang.kernels.fused_op.BaseFusedOp instead (RFC #29630).
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++5 passed, 18 warnings in 8.99s
+diff --git a/reports/j-7bfd059ec3e9/raw/related-pr-search.txt b/reports/j-7bfd059ec3e9/raw/related-pr-search.txt
+new file mode 100644
+index 0000000..e44c84e
+--- /dev/null
++++ b/reports/j-7bfd059ec3e9/raw/related-pr-search.txt
+@@ -0,0 +1,20 @@
++37322	open	[Quant] Preserve ModelOpt FP4 quantization for NextN drafts	https://github.com/sgl-project/sglang/pull/37322
++36928	open	Fix TP decode poll collective ordering	https://github.com/sgl-project/sglang/pull/36928
++37378	closed	fix(modelopt_fp4): skip NVFP4 swiglu-fusion interleave for shared experts with swiglu_limit	https://github.com/sgl-project/sglang/pull/37378
++38080	open	[MegaMoE] Wire Qwen MoE blocks to DeepGEMM MegaMoE (MXFP4 and NVFP4 experts)	https://github.com/sgl-project/sglang/pull/38080
++38621	closed	[Model] Support GLM-5.3 Flash NVFP4 loading	https://github.com/sgl-project/sglang/pull/38621
++30967	open	[GDN] Add MTP cache mode for final-state recompute, with FlashInfer kernel integration and overlapped CUDA-graph state recovery	https://github.com/sgl-project/sglang/pull/30967
++36507	closed	GLM-5.3-Flash support	https://github.com/sgl-project/sglang/pull/36507
++33115	closed	[ModelOpt FP4] Support online MoE weight quantization	https://github.com/sgl-project/sglang/pull/33115
++36497	closed	Introduce Qwen 3.8 Flash Next	https://github.com/sgl-project/sglang/pull/36497
++38569	closed	[Qwen4] Load nvidia/Qwen3.8-Flash-Next-NVFP4 (ModelOpt MIXED_PRECISION)	https://github.com/sgl-project/sglang/pull/38569
++35545	closed	[Qwen3.5][MTP] Preserve online NVFP4 draft quantization for mixed checkpoints	https://github.com/sgl-project/sglang/pull/35545
++36976	closed	perf(attention): reuse TRTLLM MHA split metadata across layers	https://github.com/sgl-project/sglang/pull/36976
++33889	closed	moe: the shared-experts-fusion decision is a per-runner value the loader installs	https://github.com/sgl-project/sglang/pull/33889
++21861	closed	  [GDN] Remove FlashInfer GDN decode + no_buffer guard and default to FlashInfer on SM100+  	https://github.com/sgl-project/sglang/pull/21861
++29451	closed	[GDN] Integrate FlashInfer for MTP cache mode at final recovery stage	https://github.com/sgl-project/sglang/pull/29451
++27906	closed	[Model] Support Qwen3.6 ModelOpt mixed NVFP4	https://github.com/sgl-project/sglang/pull/27906
++29798	closed	fix: avoid DSA indexer CPU seq lens fallback	https://github.com/sgl-project/sglang/pull/29798
++31470	closed	[NVIDIA] Support flashinfer Mega Moe	https://github.com/sgl-project/sglang/pull/31470
++24870	closed	Support NextN = 2/4 in DSV32	https://github.com/sgl-project/sglang/pull/24870
++26928	closed	feat: SM120 (Blackwell Desktop) support for GLM-5.1 inference	https://github.com/sgl-project/sglang/pull/26928
+diff --git a/reports/j-7bfd059ec3e9/raw/ruff.txt b/reports/j-7bfd059ec3e9/raw/ruff.txt
+new file mode 100644
+index 0000000..8695b39
+--- /dev/null
++++ b/reports/j-7bfd059ec3e9/raw/ruff.txt
+@@ -0,0 +1 @@
++/tmp/amdpilot-repo-j-7bfd059ec3e9/venv/bin/python: No module named ruff
+diff --git a/reports/j-7bfd059ec3e9/raw/upstream-issue.json b/reports/j-7bfd059ec3e9/raw/upstream-issue.json
+new file mode 100644
+index 0000000..9b14590
+--- /dev/null
++++ b/reports/j-7bfd059ec3e9/raw/upstream-issue.json
+@@ -0,0 +1 @@
++{"comments":[{"id":"IC_kwDOLCAjRs8AAAABRA5q2w","author":{"login":"jahnclawdmonet"},"authorAssociation":"NONE","body":"The dimension in the traceback points at a different root than TP sharding. The mismatch is at dimension 1, which for `w13_weight` expert data (`[2 * intermediate_per_partition, hidden]`) is the hidden dim, not the TP-sharded output dim. 4096 is `hidden_size` unpacked; 2048 is the same dim NVFP4-packed at two values per byte. At TP=2 the sharded dim 0 agrees by coincidence (allocated `2*2048/2 = 2048` vs loaded shard `4096/2 = 2048`), so the first mismatch to surface is dim 1.\n\nThat arithmetic matches #36599: `DeepseekModelNextN.__init__` carries an unconditional override that nulls the quant config whenever it is `modelopt_fp4` (log line: `Overriding DeepseekV3ForCausalLMNextN quant config for modelopt_fp4 Deepseek model.`), so the draft's FusedMoE is built as unquantized BF16 modules expecting hidden 4096, while your checkpoint's MTP experts are FP4-packed at 2048. The target model is unaffected because the override lives only in the NextN path, which also explains \"identical command minus the speculative flags works\". State of this at the PR #36507 head, with the fix shape the existing resolver allows: https://github.com/sgl-project/sglang/issues/36599#issuecomment-5436422199\n\nA one-minute discriminator on the logs you already have, no rerun needed: grep the failing rank for `Overriding DeepseekV3ForCausalLMNextN quant config`. If it appears right before the draft load, this is #36599 in TP clothing, and the prediction is that it reproduces identically at TP=1 single node, since the dim-1 mismatch is TP-independent. That would take the sharding question out of this particular failure (your mirror-image shared-expert observation may still be worth its own audit). For what a single box can show: on sm_121 the override fires at TP=1 on the current per-model image with dummy weights; the shape crash itself needs real tensors, which do not fit on one 128 GB Spark.\n","createdAt":"2026-08-27T09:00:33Z","includesCreatedEdit":false,"isMinimized":false,"minimizedReason":"","reactionGroups":[],"url":"https://github.com/sgl-project/sglang/issues/36653#issuecomment-5436762843","viewerDidAuthor":false}],"state":"OPEN","title":"[Bug] NEXTN/MTP speculative decoding fails to load MTP MoE weights under TP>1 for Glm5NextForConditionalGeneration (GLM-5.3-Flash)","updatedAt":"2026-08-27T09:00:33Z","url":"https://github.com/sgl-project/sglang/issues/36653"}
+diff --git a/reports/j-7bfd059ec3e9/raw/upstream-pr-37322.json b/reports/j-7bfd059ec3e9/raw/upstream-pr-37322.json
+new file mode 100644
+index 0000000..cf5372b
+--- /dev/null
++++ b/reports/j-7bfd059ec3e9/raw/upstream-pr-37322.json
+@@ -0,0 +1 @@
++{"body":"## Motivation\n\nFixes #36599 and addresses the draft-load failure described in #36653. `DeepseekModelNextN` and `BailingMoEModelNextN` currently force `modelopt_fp4` quantization to `None`. That makes quantized GLM-5.3-Flash NextN/MTP weights load into BF16 modules and fail with a packed-versus-unpacked shape mismatch.\n\n## Modifications\n\n- Remove the blanket `modelopt_fp4` to `None` override from the DeepSeek and Bailing NextN paths while preserving the legacy GLM-4.x and GLM-OCR overrides.\n- Resolve ModelOpt FP4 MTP exclusions after loader name mapping, including raw and already-remapped wildcard/exact forms, the canonical legacy layer-0 layout, coarse FusedMoE prefixes, and Bailing hybrid runtime prefixes.\n- Retain ModelOpt FP4 for checkpoints with quantized MTP weights and exclude only explicitly unquantized MTP modules. This is the supported checkpoint contract.\n- Copy quantization configs before changing per-layer exclusions and normalize optional packed-module mappings.\n- Add coverage for mapper-before-resolver ordering, production wildcard spelling, exact parent-module matching, ModelOpt consumer behavior, Bailing hybrid prefixes, legacy layer-0 layouts, and configuration immutability.\n\n## Accuracy Tests\n\n```text\nCUDA_HOME=/usr PYTHONPATH=python:. uv run --with-editable ./python/ --with pytest pytest test/registered/unit/models/test_nextn_modelopt_quant.py test/registered/unit/layers/quantization/test_modelopt_nvfp4.py test/registered/unit/layers/quantization/test_modelopt_nvfp4_moe_scales.py -v\n```\n\nResult: `75 passed, 15 warnings, 30 subtests passed in 13.77s`.\n\nThe unit coverage exercises loader mapper ordering and the downstream ModelOpt `get_quant_method` decisions. No full ModelOpt FP4 checkpoint load, speculative-decoding run, or model-output accuracy run was performed locally.\n\n## Speed Tests and Profiling\n\nThis changes NextN module construction and checkpoint weight-loading precision selection; it does not add a kernel benchmark. No throughput benchmark or profiler run was performed.\n\n## Relationship to Other Work\n\n- #34906 derives the NextN rename mapper from checkpoint metadata and removes the static mapper used by this branch. If #34906 lands first, rebase and switch the Quark path to its mapper API.\n- #30565 changes the same NextN resolver regions and overlaps on copy-before-mutate behavior. Rebase and resolve the overlap after either change lands.\n- #36761 changes ModelOpt exclusion matching in the quantization layer. Coordinate its matcher semantics with this model-level mapping.\n- #36596, #36597, and #36598 are related GLM-5.3 bring-up issues but are not implemented by this PR.\n- Full GLM-5.3-Flash NVFP4 NextN validation also depends on the vision/model support in #36507.\n\nThe branch starts from an older `main` ancestor (`88cf5c9541`); the intervening upstream commits do not touch this PR's changed paths. The branch should be rebased after the overlapping PRs above land.\n\n## Checklist\n\n- [x] Format code according to the pre-commit format guidance.\n- [x] Add unit tests according to the unit-test guidance.\n- [ ] Update documentation according to the documentation guidance; no user-facing documentation change is needed for this internal loader behavior.\n- [ ] Provide full checkpoint accuracy and speed benchmark results; no full checkpoint or benchmark run was performed locally.\n- [x] Follow the SGLang code style guidance.\n\n<!-- pr-states:start -->\n---\n### CI States\n\nLatest PR Test (Base): <!-- slot:pr-test:start -->:x: [Run #33458470679](https://github.com/sgl-project/sglang/actions/runs/33458470679)<!-- slot:pr-test:end -->\nLatest PR Test (Extra): <!-- slot:pr-test-extra:start -->:x: [Run #33458470537](https://github.com/sgl-project/sglang/actions/runs/33458470537)<!-- slot:pr-test-extra:end -->\nLatest PR Test (AMD ROCm 7.2): <!-- slot:pr-test-amd-rocm720:start -->:x: [Run #33458470657](https://github.com/sgl-project/sglang/actions/runs/33458470657)<!-- slot:pr-test-amd-rocm720:end -->\n<!-- pr-states:end -->","comments":[{"id":"IC_kwDOLCAjRs8AAAABRxA-LA","author":{"login":"usr-bin-roygbiv"},"authorAssociation":"NONE","body":"/tag-and-rerun-ci","createdAt":"2026-09-01T01:26:29Z","includesCreatedEdit":false,"isMinimized":false,"minimizedReason":"","reactionGroups":[{"content":"THUMBS_UP","users":{"totalCount":1}}],"url":"https://github.com/sgl-project/sglang/pull/37322#issuecomment-5487214124","viewerDidAuthor":false},{"id":"IC_kwDOLCAjRs8AAAABRxT4mg","author":{"login":"usr-bin-roygbiv"},"authorAssociation":"NONE","body":"Hi @HaiShaw — could you add the `run-ci` label and rerun CI on this PR? I tried `/tag-and-rerun-ci`, but the author account can't add labels, so the gate stops before substantive tests run. Local unit tests and lint are passing. Thanks!","createdAt":"2026-09-01T01:50:38Z","includesCreatedEdit":false,"isMinimized":false,"minimizedReason":"","reactionGroups":[],"url":"https://github.com/sgl-project/sglang/pull/37322#issuecomment-5487523994","viewerDidAuthor":false}],"commits":[{"authoredDate":"2026-08-31T22:22:09Z","authors":[{"email":"roy@davai.fyi","id":"U_kgDOENFYoQ","login":"usr-bin-roygbiv","name":"usr-bin-roygbiv"}],"committedDate":"2026-09-01T00:10:12Z","messageBody":"","messageHeadline":"[Quant] Resolve ModelOpt FP4 per-layer quantization in NextN models","oid":"9536c31f550779a8558a3dc2b22177d94fa23347"},{"authoredDate":"2026-09-01T00:36:11Z","authors":[{"email":"roy@davai.fyi","id":"U_kgDOENFYoQ","login":"usr-bin-roygbiv","name":"usr-bin-roygbiv"}],"committedDate":"2026-09-01T00:36:11Z","messageBody":"… in NextN models","messageHeadline":"[Quant] Harden ModelOpt FP4 per-layer resolution and runtime prefixes…","oid":"9b13d98899bba7e3ada51c64bab44de29a13e2c2"},{"authoredDate":"2026-09-01T00:40:19Z","authors":[{"email":"roy@davai.fyi","id":"U_kgDOENFYoQ","login":"usr-bin-roygbiv","name":"usr-bin-roygbiv"}],"committedDate":"2026-09-01T00:40:19Z","messageBody":"","messageHeadline":"style: format Bailing NextN imports","oid":"7c504b16bf6752f8cbf7c0606d9909e143b59efe"}],"files":[{"path":"python/sglang/srt/layers/quantization/modelopt_quant.py","additions":1,"deletions":1,"changeType":"MODIFIED"},{"path":"python/sglang/srt/layers/quantization/utils.py","additions":3,"deletions":1,"changeType":"MODIFIED"},{"path":"python/sglang/srt/models/bailing_moe_nextn.py","additions":163,"deletions":14,"changeType":"MODIFIED"},{"path":"python/sglang/srt/models/deepseek_nextn.py","additions":133,"deletions":18,"changeType":"MODIFIED"},{"path":"python/sglang/srt/models/glm4_moe.py","additions":35,"deletions":35,"changeType":"MODIFIED"},{"path":"test/registered/unit/models/test_nextn_modelopt_quant.py","additions":1358,"deletions":0,"changeType":"ADDED"}],"headRefOid":"7c504b16bf6752f8cbf7c0606d9909e143b59efe","mergeable":"UNKNOWN","number":37322,"reviewDecision":"REVIEW_REQUIRED","reviews":[],"state":"OPEN","title":"[Quant] Preserve ModelOpt FP4 quantization for NextN drafts","url":"https://github.com/sgl-project/sglang/pull/37322"}
+diff --git a/reports/j-7bfd059ec3e9/raw/upstream-pr-37322.patch b/reports/j-7bfd059ec3e9/raw/upstream-pr-37322.patch
+new file mode 100644
+index 0000000..d38edb7
+--- /dev/null
++++ b/reports/j-7bfd059ec3e9/raw/upstream-pr-37322.patch
+@@ -0,0 +1,1955 @@
++diff --git a/python/sglang/srt/layers/quantization/modelopt_quant.py b/python/sglang/srt/layers/quantization/modelopt_quant.py
++index f8120da41c7f..36e1147d7dbe 100755
++--- a/python/sglang/srt/layers/quantization/modelopt_quant.py
+++++ b/python/sglang/srt/layers/quantization/modelopt_quant.py
++@@ -273,7 +273,7 @@ def __init__(
++         packed_modules_mapping: Optional[Dict[str, List[str]]],
++     ):
++         super().__init__()
++-        self.packed_modules_mapping = packed_modules_mapping
+++        self.packed_modules_mapping = packed_modules_mapping or {}
++         self.exclude_modules = exclude_modules or []
++         self.kv_cache_quant_algo = kv_cache_quant_algo
++         self.use_per_token_activation = False
++diff --git a/python/sglang/srt/layers/quantization/utils.py b/python/sglang/srt/layers/quantization/utils.py
++index c1e56460e6fa..249a29873ba5 100644
++--- a/python/sglang/srt/layers/quantization/utils.py
+++++ b/python/sglang/srt/layers/quantization/utils.py
++@@ -70,8 +70,10 @@ def _module_path_match(ignored: str, prefix: str) -> bool:
++ def is_layer_skipped(
++     prefix: str,
++     ignored_layers: List[str],
++-    fused_mapping: Mapping[str, List[str]] = MappingProxyType({}),
+++    fused_mapping: Optional[Mapping[str, List[str]]] = None,
++ ) -> bool:
+++    if fused_mapping is None:
+++        fused_mapping = MappingProxyType({})
++     # prefix: model.layers.0.self_attn.q_proj
++     # proj_name: q_proj
++     proj_name = prefix.split(".")[-1]
++diff --git a/python/sglang/srt/models/bailing_moe_nextn.py b/python/sglang/srt/models/bailing_moe_nextn.py
++index 49095eaaa00e..75366258f88d 100644
++--- a/python/sglang/srt/models/bailing_moe_nextn.py
+++++ b/python/sglang/srt/models/bailing_moe_nextn.py
++@@ -1,4 +1,3 @@
++-# coding=utf-8
++ # Copyright 2023 Antgroup and The HuggingFace Inc. team. All rights reserved.
++ #
++ # This code is based on EleutherAI's GPT-NeoX library and the GPT-NeoX
++@@ -19,8 +18,9 @@
++ # limitations under the License.
++ """SGLang BailingMoENextN model."""
++
+++import copy
++ import logging
++-from typing import Iterable, Optional, Tuple
+++from collections.abc import Iterable
++
++ import torch
++ from torch import nn
++@@ -67,7 +67,7 @@ class BailingMoEModelNextN(nn.Module):
++     def __init__(
++         self,
++         config: PretrainedConfig,
++-        quant_config: Optional[QuantizationConfig] = None,
+++        quant_config: QuantizationConfig | None = None,
++         prefix: str = "",
++         num_fused_shared_experts: int = 0,
++     ) -> None:
++@@ -79,12 +79,6 @@ def __init__(
++         self.vocab_size = config.vocab_size
++         config.for_nextn_model = True
++
++-        if quant_config is not None and quant_config.get_name() == "modelopt_fp4":
++-            logger.warning(
++-                "Overriding DeepseekV3ForCausalLMNextN quant config for modelopt_fp4 Deepseek model."
++-            )
++-            quant_config = None
++-
++         self.vocab_size = config.vocab_size
++
++         self.word_embeddings = VocabParallelEmbedding(
++@@ -97,12 +91,15 @@ def __init__(
++         self.enorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
++         self.hnorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
++
+++        nextn_layer_id = (
+++            0 if config.num_hidden_layers == 1 else config.num_hidden_layers
+++        )
++         self.eh_proj = ReplicatedLinear(
++             2 * config.hidden_size,
++             config.hidden_size,
++             bias=False,
++             quant_config=quant_config,
++-            prefix=add_prefix(f"layers.{config.num_hidden_layers}.eh_proj", prefix),
+++            prefix=add_prefix(f"layers.{nextn_layer_id}.eh_proj", prefix),
++         )
++
++         self.is_hybrid = (
++@@ -115,7 +112,7 @@ def __init__(
++                 "quant_config": quant_config,
++                 "layer_id": 0,
++                 "is_nextn": True,
++-                "prefix": add_prefix(f"layers.{config.num_hidden_layers}", prefix),
+++                "prefix": add_prefix(f"layers.{nextn_layer_id}", prefix),
++             }
++             if _is_bailing_moe_v3_config(config):
++                 decoder_layer_cls = BailingMoeV3DecoderLayer
++@@ -212,10 +209,160 @@ def shared_experts_fusion_disable_reason(cls, hf_config, quant_config):
++             expected_architecture="BailingMoeForCausalLMNextN",
++         )
++
+++    _NEXTN_SPEC_WEIGHT_NAMES = ("final_layernorm", "eh_proj", "enorm", "hnorm")
+++
+++    @classmethod
+++    def _is_mtp_module(cls, name: str, layer_prefix: str) -> bool:
+++        short_layer_prefix = f"layers.{layer_prefix.split('.')[-1]}"
+++        mtp_prefixes = (layer_prefix, short_layer_prefix, "model.decoder", "decoder")
+++        for pfx in mtp_prefixes:
+++            if (
+++                name == pfx
+++                or name == f"{pfx}*"
+++                or name == f"{pfx}.*"
+++                or name.startswith(f"{pfx}.")
+++            ):
+++                return True
+++        for spec in cls._NEXTN_SPEC_WEIGHT_NAMES:
+++            if (
+++                name == spec
+++                or name.startswith(f"{spec}.")
+++                or name == f"model.{spec}"
+++                or name.startswith(f"model.{spec}.")
+++            ):
+++                return True
+++        return False
+++
+++    @classmethod
+++    def _map_mtp_ckpt_name(cls, name: str, layer_prefix: str) -> str:
+++        is_spec = any(part in name for part in cls._NEXTN_SPEC_WEIGHT_NAMES)
+++        target_prefix = "model" if is_spec else "model.decoder"
+++        short_layer_prefix = f"layers.{layer_prefix.split('.')[-1]}"
+++        prefixes = (layer_prefix, short_layer_prefix, "model.decoder", "decoder")
+++
+++        for pfx in prefixes:
+++            if name.startswith(f"{pfx}."):
+++                remainder = name[len(pfx) + 1 :]
+++                return f"{target_prefix}.{remainder}"
+++            if name in (pfx, f"{pfx}*", f"{pfx}.*"):
+++                if is_spec:
+++                    return target_prefix
+++                return f"{target_prefix}.*" if name.endswith("*") else target_prefix
+++
+++        return name
+++
+++    def _resolve_nextn_quant_config(self, config, quant_config):
+++        if quant_config is None:
+++            return None
+++
+++        quant_name = (
+++            quant_config.get_name() if hasattr(quant_config, "get_name") else None
+++        )
+++
+++        nextn_layer_id = (
+++            0 if config.num_hidden_layers == 1 else config.num_hidden_layers
+++        )
+++
+++        if quant_name == "quark":
+++            from sglang.srt.layers.quantization.quark.utils import should_ignore_layer
+++
+++            ckpt_prefix = f"model.layers.{nextn_layer_id}"
+++            mapped_prefix = self.hf_to_sglang_mapper._map_name(ckpt_prefix)
+++            if should_ignore_layer(mapped_prefix, quant_config.exclude_layers):
+++                return None
+++            return quant_config
+++
+++        if quant_name == "modelopt_fp4" or (
+++            hasattr(quant_config, "exclude_modules")
+++            and isinstance(quant_config.exclude_modules, list)
+++        ):
+++            # Supported Checkpoint Contract:
+++            # 1. If an MTP draft layer/module is explicitly listed in `exclude_modules`
+++            #    (using checkpoint prefixes like `model.layers.<N>.*`, `layers.<N>.*`,
+++            #    `model.layers.<N>*`, or already-remapped runtime names like
+++            #    `model.decoder.*`, `model.decoder*`, `model.decoder`), the draft
+++            #    decoder modules (linear and/or FusedMoE) will be excluded from quantization.
+++            # 2. If no MTP layer/module exclusion is present in `exclude_modules`, the MTP
+++            #    draft layer is treated as quantized (ModelOpt FP4), retaining `quant_config`
+++            #    for models with quantized draft weights (e.g. GLM-5.3-Flash / GLM NextN).
+++            layer_prefix = f"model.layers.{nextn_layer_id}"
+++            short_layer_prefix = f"layers.{nextn_layer_id}"
+++            whole_layer_prefixes = (
+++                layer_prefix,
+++                short_layer_prefix,
+++                "model.decoder",
+++                "decoder",
+++            )
+++
+++            exclude_modules = quant_config.exclude_modules or []
+++            mtp_excluded = [
+++                name
+++                for name in exclude_modules
+++                if self._is_mtp_module(name, layer_prefix)
+++            ]
+++            if not mtp_excluded:
+++                return quant_config
+++
+++            names = set(exclude_modules)
+++            has_whole_mtp_excluded = False
+++            has_expert_excluded = False
+++
+++            for name in mtp_excluded:
+++                mapped = self._map_mtp_ckpt_name(name, layer_prefix)
+++                names.add(mapped)
+++
+++                for pfx in whole_layer_prefixes:
+++                    if name in (pfx, f"{pfx}*", f"{pfx}.*"):
+++                        has_whole_mtp_excluded = True
+++                        break
+++
+++                if (
+++                    ".mlp.experts" in name
+++                    or ".mlp.experts" in mapped
+++                    or ".experts" in name
+++                    or ".experts" in mapped
+++                ):
+++                    has_expert_excluded = True
+++
+++            if has_whole_mtp_excluded:
+++                names.add("model.decoder")
+++                names.add("model.decoder.*")
+++                names.add("model.decoder*")
+++                names.add("model.decoder.mlp.experts")
+++                names.add("decoder")
+++                names.add("decoder.*")
+++                names.add("decoder*")
+++                names.add(layer_prefix)
+++                names.add(f"{layer_prefix}.*")
+++                names.add(f"{layer_prefix}*")
+++                names.add(f"{layer_prefix}.experts")
+++                names.add(f"{layer_prefix}.mlp.experts")
+++                names.add(short_layer_prefix)
+++                names.add(f"{short_layer_prefix}.*")
+++                names.add(f"{short_layer_prefix}*")
+++                names.add(f"{short_layer_prefix}.experts")
+++                names.add(f"{short_layer_prefix}.mlp.experts")
+++                names.add(f"{layer_prefix}.eh_proj")
+++                names.add(f"{short_layer_prefix}.eh_proj")
+++                for spec in self._NEXTN_SPEC_WEIGHT_NAMES:
+++                    names.add(f"model.{spec}")
+++                    names.add(spec)
+++            elif has_expert_excluded:
+++                names.add("model.decoder.mlp.experts")
+++                names.add(f"{layer_prefix}.experts")
+++                names.add(f"{layer_prefix}.mlp.experts")
+++                names.add(f"{short_layer_prefix}.experts")
+++                names.add(f"{short_layer_prefix}.mlp.experts")
+++
+++            quant_config = copy.copy(quant_config)
+++            quant_config.exclude_modules = list(names)
+++            return quant_config
+++        return quant_config
+++
++     def __init__(
++         self,
++         config: PretrainedConfig,
++-        quant_config: Optional[QuantizationConfig] = None,
+++        quant_config: QuantizationConfig | None = None,
++         prefix: str = "",
++     ) -> None:
++         nn.Module.__init__(self)
++@@ -230,9 +377,11 @@ def __init__(
++             # Asystem has determine_num_fused_shared_experts but theta does not.
++             self.determine_num_fused_shared_experts("BailingMoeForCausalLMNextN")
++
+++        nextn_quant_config = self._resolve_nextn_quant_config(config, quant_config)
+++
++         self.model = BailingMoEModelNextN(
++             config,
++-            quant_config,
+++            nextn_quant_config,
++             prefix=add_prefix("model", prefix),
++             num_fused_shared_experts=self.num_fused_shared_experts,
++         )
++@@ -286,7 +435,7 @@ def set_embed_and_head(self, embed, head):
++         torch.cuda.empty_cache()
++         torch.cuda.synchronize()
++
++-    def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
+++    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]):
++         self.base_load_weights_func(self, weights, is_nextn=True)
++
++     def post_load_weights(self, is_nextn=True, weight_names=None):
++diff --git a/python/sglang/srt/models/deepseek_nextn.py b/python/sglang/srt/models/deepseek_nextn.py
++index bb03b82a62d0..69e15b7493c0 100644
++--- a/python/sglang/srt/models/deepseek_nextn.py
+++++ b/python/sglang/srt/models/deepseek_nextn.py
++@@ -14,10 +14,11 @@
++
++ """Inference-only DeepSeek NextN Speculative Decoding."""
++
+++import copy
++ import logging
++ import os
+++from collections.abc import Iterable
++ from contextlib import ExitStack
++-from typing import Iterable, Optional, Tuple
++
++ import torch
++ from safetensors.torch import load_file
++@@ -103,7 +104,7 @@ class DeepseekModelNextN(nn.Module):
++     def __init__(
++         self,
++         config: PretrainedConfig,
++-        quant_config: Optional[QuantizationConfig] = None,
+++        quant_config: QuantizationConfig | None = None,
++         prefix: str = "",
++     ) -> None:
++         super().__init__()
++@@ -116,12 +117,6 @@ def __init__(
++         else:
++             moe_quant_config_override = None
++
++-        if quant_config is not None and quant_config.get_name() == "modelopt_fp4":
++-            logger.warning(
++-                "Overriding DeepseekV3ForCausalLMNextN quant config for modelopt_fp4 Deepseek model."
++-            )
++-            quant_config = None
++-
++         self.vocab_size = config.vocab_size
++
++         self.embed_tokens = VocabParallelEmbedding(
++@@ -164,8 +159,10 @@ def __init__(
++         if _is_npu and (
++             get_spec().speculative_draft_model_path == get_model().model_path
++         ):
++-            layer_name = "layers." + str(config.num_hidden_layers)
++-
+++            nextn_layer_id = (
+++                0 if config.num_hidden_layers == 1 else config.num_hidden_layers
+++            )
+++            layer_name = f"layers.{nextn_layer_id}"
++         self.quant_config = quant_config
++         self.dsa_enable_prefill_cp = is_dsa_enable_prefill_cp()
++         self.mla_enable_prefill_cp = (
++@@ -321,22 +318,140 @@ class DeepseekV3ForCausalLMNextN(DeepseekV3ForCausalLM):
++         },
++     )
++
+++    _NEXTN_SPEC_WEIGHT_NAMES = ("shared_head.norm", "eh_proj", "enorm", "hnorm")
+++
+++    @classmethod
+++    def _is_mtp_module(cls, name: str, layer_prefix: str) -> bool:
+++        short_layer_prefix = f"layers.{layer_prefix.split('.')[-1]}"
+++        mtp_prefixes = (layer_prefix, short_layer_prefix, "model.decoder", "decoder")
+++        for pfx in mtp_prefixes:
+++            if (
+++                name == pfx
+++                or name == f"{pfx}*"
+++                or name == f"{pfx}.*"
+++                or name.startswith(f"{pfx}.")
+++            ):
+++                return True
+++        for spec in cls._NEXTN_SPEC_WEIGHT_NAMES:
+++            if (
+++                name == spec
+++                or name.startswith(f"{spec}.")
+++                or name == f"model.{spec}"
+++                or name.startswith(f"model.{spec}.")
+++            ):
+++                return True
+++        return False
+++
+++    @classmethod
+++    def _map_mtp_ckpt_name(cls, name: str, layer_prefix: str) -> str:
+++        is_spec = any(part in name for part in cls._NEXTN_SPEC_WEIGHT_NAMES)
+++        target_prefix = "model" if is_spec else "model.decoder"
+++        short_layer_prefix = f"layers.{layer_prefix.split('.')[-1]}"
+++        prefixes = (layer_prefix, short_layer_prefix, "model.decoder", "decoder")
+++
+++        for pfx in prefixes:
+++            if name.startswith(f"{pfx}."):
+++                remainder = name[len(pfx) + 1 :]
+++                return f"{target_prefix}.{remainder}"
+++            if name in (pfx, f"{pfx}*", f"{pfx}.*"):
+++                if is_spec:
+++                    return target_prefix
+++                return f"{target_prefix}.*" if name.endswith("*") else target_prefix
+++
+++        return name
+++
++     def _resolve_nextn_quant_config(self, config, quant_config):
++-        if quant_config is None or quant_config.get_name() != "quark":
+++        if quant_config is None:
+++            return None
+++
+++        quant_name = (
+++            quant_config.get_name() if hasattr(quant_config, "get_name") else None
+++        )
+++
+++        nextn_layer_id = (
+++            0 if config.num_hidden_layers == 1 else config.num_hidden_layers
+++        )
+++
+++        if quant_name == "quark":
+++            from sglang.srt.layers.quantization.quark.utils import should_ignore_layer
+++
+++            ckpt_prefix = f"model.layers.{nextn_layer_id}"
+++            mapped_prefix = self.hf_to_sglang_mapper._map_name(ckpt_prefix)
+++            if should_ignore_layer(mapped_prefix, quant_config.exclude_layers):
+++                return None
++             return quant_config
++
++-        from sglang.srt.layers.quantization.quark.utils import should_ignore_layer
+++        if quant_name == "modelopt_fp4" or (
+++            hasattr(quant_config, "exclude_modules")
+++            and isinstance(quant_config.exclude_modules, list)
+++        ):
+++            # Supported Checkpoint Contract:
+++            # 1. If an MTP draft layer/module is explicitly listed in `exclude_modules`
+++            #    (using checkpoint prefixes like `model.layers.<N>.*`, `layers.<N>.*`,
+++            #    `model.layers.<N>*`, or already-remapped runtime names like
+++            #    `model.decoder.*`, `model.decoder*`, `model.decoder`), the draft
+++            #    decoder modules (linear and/or FusedMoE) will be excluded from quantization.
+++            # 2. If no MTP layer/module exclusion is present in `exclude_modules`, the MTP
+++            #    draft layer is treated as quantized (ModelOpt FP4), retaining `quant_config`
+++            #    for models with quantized draft weights (e.g. GLM-5.3-Flash / GLM NextN).
+++            layer_prefix = f"model.layers.{nextn_layer_id}"
+++            short_layer_prefix = f"layers.{nextn_layer_id}"
+++            whole_layer_prefixes = (
+++                layer_prefix,
+++                short_layer_prefix,
+++                "model.decoder",
+++                "decoder",
+++            )
++
++-        ckpt_prefix = f"model.layers.{config.num_hidden_layers}"
++-        mapped_prefix = self.hf_to_sglang_mapper._map_name(ckpt_prefix)
++-        if should_ignore_layer(mapped_prefix, quant_config.exclude_layers):
++-            return None
+++            exclude_modules = quant_config.exclude_modules or []
+++            mtp_excluded = [
+++                name
+++                for name in exclude_modules
+++                if self._is_mtp_module(name, layer_prefix)
+++            ]
+++            if not mtp_excluded:
+++                return quant_config
+++
+++            names = set(exclude_modules)
+++            has_whole_mtp_excluded = False
+++            has_expert_excluded = False
+++
+++            for name in mtp_excluded:
+++                mapped = self._map_mtp_ckpt_name(name, layer_prefix)
+++                names.add(mapped)
+++
+++                for pfx in whole_layer_prefixes:
+++                    if name in (pfx, f"{pfx}*", f"{pfx}.*"):
+++                        has_whole_mtp_excluded = True
+++                        break
+++
+++                if (
+++                    ".mlp.experts" in name
+++                    or ".mlp.experts" in mapped
+++                    or ".experts" in name
+++                    or ".experts" in mapped
+++                ):
+++                    has_expert_excluded = True
+++
+++            if has_whole_mtp_excluded:
+++                names.add("model.decoder")
+++                names.add("model.decoder.*")
+++                names.add("model.decoder*")
+++                names.add("model.decoder.mlp.experts")
+++                for spec in self._NEXTN_SPEC_WEIGHT_NAMES:
+++                    names.add(f"model.{spec}")
+++            elif has_expert_excluded:
+++                names.add("model.decoder.mlp.experts")
+++
+++            quant_config = copy.copy(quant_config)
+++            quant_config.exclude_modules = list(names)
+++            return quant_config
++         return quant_config
++
++     def __init__(
++         self,
++         config: PretrainedConfig,
++-        quant_config: Optional[QuantizationConfig] = None,
+++        quant_config: QuantizationConfig | None = None,
++         prefix: str = "",
++     ) -> None:
++         nn.Module.__init__(self)
++@@ -404,7 +519,7 @@ def forward(
++             input_ids, hidden_states, self.lm_head, forward_batch
++         )
++
++-    def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
+++    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]):
++         super().load_weights(weights, is_nextn=True)
++
++     def post_load_weights(self, is_nextn=True, weight_names=None):
++diff --git a/python/sglang/srt/models/glm4_moe.py b/python/sglang/srt/models/glm4_moe.py
++index 7f7a6392ae19..6f1edee11b5d 100644
++--- a/python/sglang/srt/models/glm4_moe.py
+++++ b/python/sglang/srt/models/glm4_moe.py
++@@ -1452,22 +1452,19 @@ class GlmMoeDsaForCausalLMNextN(DeepseekV3ForCausalLMNextN):
++     # _resolve_nextn_quant_config below instead.
++     hf_to_sglang_mapper = WeightsMapper()
++
++-    _NEXTN_SPEC_WEIGHT_NAMES = ("shared_head.norm", "eh_proj", "enorm", "hnorm")
++-
++-    @classmethod
++-    def _map_mtp_ckpt_name(cls, name: str, layer_prefix: str) -> str:
++-        # Keep this mapping in sync with DeepseekV2WeightLoaderMixin's
++-        # NextN rule: MTP-specific weights live under model.*, while the
++-        # decoder block weights live under model.decoder.*.
++-        if any(part in name for part in cls._NEXTN_SPEC_WEIGHT_NAMES):
++-            return name.replace(layer_prefix, "model", 1)
++-        return name.replace(layer_prefix, "model.decoder", 1)
++-
++     def _resolve_nextn_quant_config(self, config, quant_config):
++-        if quant_config is None or quant_config.get_name() != "quark":
++-            return quant_config
+++        if quant_config is None:
+++            return None
+++        quant_name = (
+++            quant_config.get_name() if hasattr(quant_config, "get_name") else None
+++        )
+++        if quant_name != "quark":
+++            return super()._resolve_nextn_quant_config(config, quant_config)
++
++-        layer_prefix = f"model.layers.{config.num_hidden_layers}"
+++        nextn_layer_id = (
+++            0 if config.num_hidden_layers == 1 else config.num_hidden_layers
+++        )
+++        layer_prefix = f"model.layers.{nextn_layer_id}"
++
++         # Quark's per-module scheme selection (e.g. MTP self_attn in PTPC-FP8
++         # while MTP MoE is MXFP4) is keyed by "layer_quant_config" patterns
++@@ -1476,7 +1473,19 @@ def _resolve_nextn_quant_config(self, config, quant_config):
++         # keys need the same remap as exclude_layers below, or they silently
++         # fall back to the wrong (layer-type/global) scheme.
++         layer_quant_config = quant_config.quant_config.get("layer_quant_config")
+++        mtp_excluded = [
+++            name
+++            for name in quant_config.exclude_layers
+++            if name.startswith(layer_prefix + ".")
+++        ]
+++        if not layer_quant_config and not mtp_excluded:
+++            return quant_config
+++
+++        import copy
+++
+++        quant_config = copy.copy(quant_config)
++         if layer_quant_config:
+++            quant_config.quant_config = copy.copy(quant_config.quant_config)
++             quant_config.quant_config["layer_quant_config"] = {
++                 (
++                     self._map_mtp_ckpt_name(pattern, layer_prefix)
++@@ -1486,30 +1495,21 @@ def _resolve_nextn_quant_config(self, config, quant_config):
++                 for pattern, pattern_config in layer_quant_config.items()
++             }
++
++-        mtp_excluded = [
++-            name
++-            for name in quant_config.exclude_layers
++-            if name.startswith(layer_prefix + ".")
++-        ]
++-        if not mtp_excluded:
++-            return quant_config
+++        if mtp_excluded:
+++            names = set(quant_config.exclude_layers)
+++            for name in mtp_excluded:
+++                names.add(self._map_mtp_ckpt_name(name, layer_prefix))
++
++-        names = set(quant_config.exclude_layers)
++-        for name in mtp_excluded:
++-            names.add(self._map_mtp_ckpt_name(name, layer_prefix))
+++            # Fused routed experts are queried by the coarse module prefix
+++            # "model.decoder.mlp.experts". Expanded per-expert leaf excludes do not
+++            # match that prefix, so add the coarse prefix when any routed expert in
+++            # the MTP layer is excluded. This keeps only that fused MoE module bf16
+++            # while allowing the remaining draft modules to use their quant config.
+++            if any(".mlp.experts." in name for name in mtp_excluded):
+++                names.add("model.decoder.mlp.experts")
++
++-        # Fused routed experts are queried by the coarse module prefix
++-        # "model.decoder.mlp.experts". Expanded per-expert leaf excludes do not
++-        # match that prefix, so add the coarse prefix when any routed expert in
++-        # the MTP layer is excluded. This keeps only that fused MoE module bf16
++-        # while allowing the remaining draft modules to use their quant config.
++-        if any(".mlp.experts." in name for name in mtp_excluded):
++-            names.add("model.decoder.mlp.experts")
+++            quant_config.exclude_layers = list(names)
++
++-        import copy
++-
++-        quant_config = copy.copy(quant_config)
++-        quant_config.exclude_layers = list(names)
++         return quant_config
++
++
++diff --git a/test/registered/unit/models/test_nextn_modelopt_quant.py b/test/registered/unit/models/test_nextn_modelopt_quant.py
++new file mode 100644
++index 000000000000..0ecabc5ceb64
++--- /dev/null
+++++ b/test/registered/unit/models/test_nextn_modelopt_quant.py
++@@ -0,0 +1,1358 @@
+++"""
+++Unit tests for NextN ModelOpt FP4 quantization resolution and per-layer exclusions.
+++
+++Tests cover:
+++  1. DeepseekV3ForCausalLMNextN._resolve_nextn_quant_config properly resolves
+++     ModelOpt FP4 configs, remapping checkpoint MTP layer prefixes (e.g. model.layers.61
+++     or dynamic model.layers.<num_hidden_layers>) to runtime decoder prefixes without junk mappings.
+++  2. Unquantized/excluded MTP behavior is preserved when exclude_modules targets MTP,
+++     while quantized MTP is preserved when not excluded.
+++  3. Shared quant configs are not mutated unexpectedly.
+++  4. BailingMoeForCausalLMNextN resolves ModelOpt FP4 quant configs and handles MTP exclusions.
+++  5. DeepseekModelNextN and BailingMoEModelNextN retain ModelOpt FP4 quant_config
+++     without blanket overriding to None.
+++  6. Glm4MoeModelNextN, Glm4MoeLiteModelNextN, and GlmOcrModelNextN preserve legacy BF16-MTP
+++     by overriding modelopt_fp4 to None.
+++"""
+++
+++import importlib.abc
+++import importlib.machinery
+++import sys
+++from unittest.mock import MagicMock
+++
+++from sglang.test.test_utils import maybe_stub_sgl_kernel
+++
+++maybe_stub_sgl_kernel()
+++
+++for _pkg in ("deep_ep", "deep_gemm"):
+++    try:
+++        __import__(_pkg)
+++    except (ImportError, OSError, AssertionError):
+++        sys.modules.pop(_pkg, None)
+++
+++        class _GpuPkgLoader(importlib.abc.Loader):
+++            def create_module(self, spec):
+++                return None
+++
+++            def exec_module(self, module):
+++                module.__getattr__ = lambda name: MagicMock()
+++
+++        class _GpuPkgFinder(importlib.abc.MetaPathFinder):
+++            def __init__(self, pkg_name):
+++                self.pkg_name = pkg_name
+++
+++            def find_spec(self, fullname, path, target=None):
+++                if fullname == self.pkg_name or fullname.startswith(
+++                    f"{self.pkg_name}."
+++                ):
+++                    return importlib.machinery.ModuleSpec(
+++                        fullname,
+++                        _GpuPkgLoader(),
+++                        is_package=True,
+++                    )
+++                return None
+++
+++        sys.meta_path.insert(0, _GpuPkgFinder(_pkg))
+++import unittest
+++from types import SimpleNamespace
+++from unittest.mock import patch
+++
+++from sglang.srt.layers.linear import ReplicatedLinear
+++from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
+++from sglang.srt.layers.quantization.base_config import QuantizationConfig
+++from sglang.srt.layers.quantization.modelopt_quant import (
+++    ModelOptFp4Config,
+++    ModelOptFp4LinearMethod,
+++    ModelOptNvFp4FusedMoEMethod,
+++)
+++from sglang.srt.layers.quantization.unquant import UnquantizedLinearMethod
+++from sglang.srt.models.bailing_moe_nextn import (
+++    BailingMoeForCausalLMNextN,
+++    BailingMoEModelNextN,
+++)
+++from sglang.srt.models.deepseek_nextn import (
+++    DeepseekModelNextN,
+++    DeepseekV3ForCausalLMNextN,
+++)
+++from sglang.srt.models.glm4_moe import GlmMoeDsaForCausalLMNextN
+++from sglang.srt.models.glm4_moe_lite_nextn import Glm4MoeLiteModelNextN
+++from sglang.srt.models.glm4_moe_nextn import Glm4MoeModelNextN
+++from sglang.srt.models.glm_ocr_nextn import GlmOcrModelNextN
+++from sglang.srt.runtime_context import get_context, get_parallel
+++from sglang.test.ci.ci_register import register_cpu_ci
+++from sglang.test.test_utils import CustomTestCase
+++
+++register_cpu_ci(est_time=5, suite="base-a-test-cpu")
+++
+++
+++def _mock_linear():
+++    return object.__new__(ReplicatedLinear)
+++
+++
+++def _mock_fused_moe():
+++    return object.__new__(FusedMoE)
+++
+++
+++class _FakeQuarkConfig(QuantizationConfig):
+++    def __init__(self, exclude_layers=None, layer_quant_config=None):
+++        super().__init__()
+++        self.exclude_layers = exclude_layers or []
+++        self.quant_config = {}
+++        if layer_quant_config:
+++            self.quant_config["layer_quant_config"] = layer_quant_config
+++
+++    def get_name(self) -> str:
+++        return "quark"
+++
+++    def get_quant_method(self, layer, prefix=""):
+++        return None
+++
+++    def get_min_capability(self) -> int:
+++        return 0
+++
+++    @classmethod
+++    def get_config_filenames(cls):
+++        return []
+++
+++    @classmethod
+++    def from_config(cls, config):
+++        return cls()
+++
+++    def get_scaled_act_names(self):
+++        return []
+++
+++    def get_supported_act_dtypes(self):
+++        return []
+++
+++
+++class TestDeepseekNextNModelOptQuantResolution(CustomTestCase):
+++    def _make_model(self):
+++        return object.__new__(DeepseekV3ForCausalLMNextN)
+++
+++    def test_none_quant_config_returns_none(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        res = model._resolve_nextn_quant_config(config, None)
+++        self.assertIsNone(res)
+++
+++    def test_modelopt_fp4_not_excluded_returns_config(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["lm_head"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertEqual(res.get_name(), "modelopt_fp4")
+++        self.assertFalse(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertFalse(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertTrue(res.is_layer_excluded("lm_head"))
+++
+++    def test_modelopt_fp4_layer61_excluded_remaps_to_decoder(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.61.*", "lm_head"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.decoder.self_attn.kv_b_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertTrue(res.is_layer_excluded("lm_head"))
+++
+++    def test_modelopt_fp4_mtp_moe_only_excluded(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.61.mlp.experts.*"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertFalse(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++
+++    def test_modelopt_fp4_dynamic_layer_count_excluded(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=28)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.28.*"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++
+++    def test_modelopt_fp4_no_broad_prefix_matching(self):
+++        model = self._make_model()
+++        # Model has 6 hidden layers (MTP layer 6). Exclude module is for layer 60.
+++        config = SimpleNamespace(num_hidden_layers=6)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.60.*"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        # Layer 6 MTP should not be excluded by layer 60 exclude rule.
+++        self.assertFalse(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertFalse(res.is_layer_excluded("model.decoder.mlp.experts"))
+++
+++    def test_modelopt_fp4_nextn_specific_weights_mapping(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=[
+++                "model.layers.61.eh_proj",
+++                "model.layers.61.enorm",
+++                "model.layers.61.hnorm",
+++                "model.layers.61.shared_head.norm",
+++            ],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertIn("model.eh_proj", res.exclude_modules)
+++        self.assertIn("model.enorm", res.exclude_modules)
+++        self.assertIn("model.hnorm", res.exclude_modules)
+++        self.assertIn("model.shared_head.norm", res.exclude_modules)
+++        self.assertNotIn("model.decoder.eh_proj", res.exclude_modules)
+++
+++    def test_modelopt_fp4_short_prefix_mapping(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["layers.61.*"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++
+++    def test_modelopt_fp4_no_junk_prefix_mapping(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.61.self_attn.q_a_proj"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertIn("model.decoder.self_attn.q_a_proj", res.exclude_modules)
+++        for name in res.exclude_modules:
+++            self.assertFalse(
+++                name.startswith("model.model."),
+++                f"Found junk prefix mapping: {name}",
+++            )
+++
+++    def test_shared_quant_config_not_mutated(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        orig_exclude = ["model.layers.61.self_attn.q_a_proj"]
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=list(orig_exclude),
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNot(res, quant_cfg)
+++        self.assertEqual(quant_cfg.exclude_modules, orig_exclude)
+++
+++    def test_loader_mapper_before_resolver_whole_layer_excluded(self):
+++        """Simulate model_loader/loader.py applying hf_to_sglang_mapper before model init.
+++
+++        When exclude_modules=["model.layers.61.*", "lm_head"], the loader's
+++        apply_weight_name_mapper transforms "model.layers.61.*" to "model.decoder.*".
+++        The resolver must recognize "model.decoder.*", add coarse FusedMoE prefix
+++        "model.decoder.mlp.experts" and NextN spec weights, and exclude all draft layers.
+++        """
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.61.*", "lm_head"],
+++        )
+++
+++        # Step 1: loader applies hf_to_sglang_mapper
+++        quant_cfg.apply_weight_name_mapper(
+++            DeepseekV3ForCausalLMNextN.hf_to_sglang_mapper
+++        )
+++        self.assertIn("model.decoder.*", quant_cfg.exclude_modules)
+++
+++        # Step 2: model __init__ calls _resolve_nextn_quant_config
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        # Linear attention excluded
+++        self.assertTrue(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.decoder.self_attn.kv_b_proj"))
+++        # FusedMoE coarse prefix excluded
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        # NextN spec weights excluded
+++        self.assertTrue(res.is_layer_excluded("model.eh_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.enorm"))
+++        self.assertTrue(res.is_layer_excluded("model.hnorm"))
+++        self.assertTrue(res.is_layer_excluded("model.shared_head.norm"))
+++        # Base model excludes preserved
+++        self.assertTrue(res.is_layer_excluded("lm_head"))
+++
+++    def test_loader_mapper_before_resolver_exact_layer_excluded(self):
+++        """When exclude_modules has exact 'model.layers.61', mapper turns it into 'model.decoder'."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.61", "lm_head"],
+++        )
+++
+++        quant_cfg.apply_weight_name_mapper(
+++            DeepseekV3ForCausalLMNextN.hf_to_sglang_mapper
+++        )
+++        self.assertIn("model.decoder", quant_cfg.exclude_modules)
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertTrue(res.is_layer_excluded("model.eh_proj"))
+++
+++    def test_loader_mapper_before_resolver_moe_only_excluded(self):
+++        """When exclude_modules=["model.layers.61.mlp.experts.*"], mapper turns it into
+++        "model.decoder.mlp.experts.*". Resolver must add coarse "model.decoder.mlp.experts"
+++        so FusedMoE is unquantized while attention linear layers remain quantized.
+++        """
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.61.mlp.experts.*"],
+++        )
+++
+++        quant_cfg.apply_weight_name_mapper(
+++            DeepseekV3ForCausalLMNextN.hf_to_sglang_mapper
+++        )
+++        self.assertIn("model.decoder.mlp.experts.*", quant_cfg.exclude_modules)
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertFalse(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertFalse(res.is_layer_excluded("model.decoder.self_attn.kv_b_proj"))
+++        self.assertFalse(res.is_layer_excluded("model.eh_proj"))
+++
+++    def test_loader_mapper_before_resolver_single_expert_excluded(self):
+++        """When exclude_modules=["model.layers.61.mlp.experts.0"], mapper turns it into
+++        "model.decoder.mlp.experts.0". Resolver must add coarse "model.decoder.mlp.experts".
+++        """
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.61.mlp.experts.0"],
+++        )
+++
+++        quant_cfg.apply_weight_name_mapper(
+++            DeepseekV3ForCausalLMNextN.hf_to_sglang_mapper
+++        )
+++        self.assertIn("model.decoder.mlp.experts.0", quant_cfg.exclude_modules)
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertFalse(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++
+++    def test_loader_mapper_before_resolver_spec_weights_remapped(self):
+++        """When exclude_modules has NextN spec weights, mapper replaces 'model.layers.61' with 'model.decoder'.
+++        The resolver must remap 'model.decoder.eh_proj' -> 'model.eh_proj'."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=[
+++                "model.layers.61.eh_proj",
+++                "model.layers.61.enorm",
+++                "model.layers.61.hnorm",
+++                "model.layers.61.shared_head.norm",
+++            ],
+++        )
+++
+++        quant_cfg.apply_weight_name_mapper(
+++            DeepseekV3ForCausalLMNextN.hf_to_sglang_mapper
+++        )
+++        self.assertIn("model.decoder.eh_proj", quant_cfg.exclude_modules)
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.eh_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.enorm"))
+++        self.assertTrue(res.is_layer_excluded("model.hnorm"))
+++        self.assertTrue(res.is_layer_excluded("model.shared_head.norm"))
+++        self.assertFalse(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertFalse(res.is_layer_excluded("model.decoder.mlp.experts"))
+++
+++    def test_loader_mapper_before_resolver_already_mapped_runtime_names(self):
+++        """Direct runtime names like 'model.decoder.*' and 'model.decoder.mlp.experts.*'."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.decoder.*", "lm_head"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertTrue(res.is_layer_excluded("model.eh_proj"))
+++        self.assertTrue(res.is_layer_excluded("lm_head"))
+++
+++    def test_loader_mapper_before_resolver_no_mtp_exclusion_contract(self):
+++        """Checkpoint contract for the ambiguous case where no MTP exclusion is present:
+++        MTP draft weights are treated as quantized (retaining ModelOpt FP4).
+++        Checkpoints with unquantized MTP layers must explicitly declare MTP exclusions.
+++        """
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["lm_head"],
+++        )
+++
+++        quant_cfg.apply_weight_name_mapper(
+++            DeepseekV3ForCausalLMNextN.hf_to_sglang_mapper
+++        )
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertEqual(res.get_name(), "modelopt_fp4")
+++        self.assertFalse(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertFalse(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertFalse(res.is_layer_excluded("model.eh_proj"))
+++        self.assertTrue(res.is_layer_excluded("lm_head"))
+++
+++    def test_modelopt_fp4_wildcard_no_dot_before_mapper(self):
+++        """Production wildcard spelling 'model.layers.61*' before mapper."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.61*", "lm_head"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertTrue(res.is_layer_excluded("model.eh_proj"))
+++        self.assertIsInstance(
+++            res.get_quant_method(_mock_linear(), "model.decoder.self_attn.q_a_proj"),
+++            UnquantizedLinearMethod,
+++        )
+++        self.assertIsNone(
+++            res.get_quant_method(_mock_fused_moe(), "model.decoder.mlp.experts")
+++        )
+++
+++    def test_modelopt_fp4_wildcard_no_dot_after_mapper(self):
+++        """Production wildcard spelling 'model.layers.61*' after mapper transforms it into 'model.decoder*'."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.61*", "lm_head"],
+++        )
+++
+++        quant_cfg.apply_weight_name_mapper(
+++            DeepseekV3ForCausalLMNextN.hf_to_sglang_mapper
+++        )
+++        self.assertIn("model.decoder*", quant_cfg.exclude_modules)
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertTrue(res.is_layer_excluded("model.eh_proj"))
+++        self.assertIsInstance(
+++            res.get_quant_method(_mock_linear(), "model.decoder.self_attn.q_a_proj"),
+++            UnquantizedLinearMethod,
+++        )
+++        self.assertIsNone(
+++            res.get_quant_method(_mock_fused_moe(), "model.decoder.mlp.experts")
+++        )
+++
+++    def test_modelopt_fp4_legacy_layer0_num_hidden_layers_1(self):
+++        """Legacy checkpoint with num_hidden_layers == 1 uses canonical NextN layer index 0."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=1)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.0.*", "lm_head"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertTrue(res.is_layer_excluded("model.eh_proj"))
+++
+++    def test_quark_legacy_layer0_num_hidden_layers_1(self):
+++        """Quark exclusion with num_hidden_layers == 1 correctly targets layer 0."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=1)
+++        quark_cfg = _FakeQuarkConfig(exclude_layers=["model.layers.0"])
+++
+++        res = model._resolve_nextn_quant_config(config, quark_cfg)
+++        self.assertIsNone(res)
+++
+++    def test_modelopt_fp4_consumer_get_quant_method_semantics(self):
+++        """Verify get_quant_method consumer semantics directly on Linear and FusedMoE."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.61.*", "lm_head"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertIsInstance(
+++            res.get_quant_method(_mock_linear(), "model.decoder.self_attn.q_a_proj"),
+++            UnquantizedLinearMethod,
+++        )
+++        self.assertIsInstance(
+++            res.get_quant_method(_mock_linear(), "model.eh_proj"),
+++            UnquantizedLinearMethod,
+++        )
+++        self.assertIsNone(
+++            res.get_quant_method(_mock_fused_moe(), "model.decoder.mlp.experts")
+++        )
+++
+++    def test_quark_quant_config_excluded_returns_none(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        quark_cfg = _FakeQuarkConfig(exclude_layers=["model.decoder"])
+++
+++        res = model._resolve_nextn_quant_config(config, quark_cfg)
+++        self.assertIsNone(res)
+++
+++    def test_quark_quant_config_not_excluded_returns_config(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        quark_cfg = _FakeQuarkConfig(exclude_layers=["model.layers.0"])
+++
+++        res = model._resolve_nextn_quant_config(config, quark_cfg)
+++        self.assertIs(res, quark_cfg)
+++
+++    def test_unrelated_quant_config_passed_through(self):
+++        class _DummyQuantConfig(QuantizationConfig):
+++            def get_name(self):
+++                return "dummy"
+++
+++            def get_quant_method(self, layer, prefix=""):
+++                return None
+++
+++            def get_min_capability(self):
+++                return 0
+++
+++            @classmethod
+++            def get_config_filenames(cls):
+++                return []
+++
+++            @classmethod
+++            def from_config(cls, config):
+++                return cls()
+++
+++            def get_scaled_act_names(self):
+++                return []
+++
+++            def get_supported_act_dtypes(self):
+++                return []
+++
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=61)
+++        dummy_cfg = _DummyQuantConfig()
+++
+++        res = model._resolve_nextn_quant_config(config, dummy_cfg)
+++        self.assertIs(res, dummy_cfg)
+++
+++    def test_glm_moe_dsa_quark_shared_config_not_mutated(self):
+++        model = object.__new__(GlmMoeDsaForCausalLMNextN)
+++        config = SimpleNamespace(num_hidden_layers=46)
+++        quark_cfg = _FakeQuarkConfig(
+++            exclude_layers=["model.layers.46.mlp.experts.0"],
+++            layer_quant_config={
+++                "model.layers.46.self_attn.q_a_proj": {"scheme": "fp8"}
+++            },
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quark_cfg)
+++
+++        self.assertIsNot(res, quark_cfg)
+++        self.assertIn("model.decoder.mlp.experts.0", res.exclude_layers)
+++        self.assertIn("model.decoder.mlp.experts", res.exclude_layers)
+++        self.assertEqual(
+++            quark_cfg.exclude_layers,
+++            ["model.layers.46.mlp.experts.0"],
+++        )
+++        self.assertEqual(
+++            list(quark_cfg.quant_config["layer_quant_config"].keys()),
+++            ["model.layers.46.self_attn.q_a_proj"],
+++        )
+++        self.assertIn(
+++            "model.decoder.self_attn.q_a_proj",
+++            res.quant_config["layer_quant_config"],
+++        )
+++
+++
+++class TestBailingMoeNextNModelOptQuantResolution(CustomTestCase):
+++    def _make_model(self):
+++        return object.__new__(BailingMoeForCausalLMNextN)
+++
+++    def test_modelopt_fp4_not_excluded_returns_config(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=30)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["lm_head"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertEqual(res.get_name(), "modelopt_fp4")
+++        self.assertFalse(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertFalse(res.is_layer_excluded("model.decoder.mlp.experts"))
+++
+++    def test_modelopt_fp4_mtp_layer_excluded_remaps(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=30)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.30.*"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++
+++    def test_modelopt_fp4_mtp_moe_only_excluded(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=30)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.30.mlp.experts.*"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertFalse(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++
+++    def test_bailing_single_expert_excluded(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=30)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.30.mlp.experts.0"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertFalse(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++
+++    def test_bailing_exact_layer_excluded(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=30)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.30"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertTrue(res.is_layer_excluded("model.final_layernorm"))
+++        self.assertTrue(res.is_layer_excluded("model.eh_proj"))
+++
+++    def test_bailing_no_broad_prefix_matching(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=3)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.30.*"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertFalse(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertFalse(res.is_layer_excluded("model.decoder.mlp.experts"))
+++
+++    def test_bailing_nextn_specific_weights_mapping(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=30)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=[
+++                "model.layers.30.final_layernorm",
+++                "model.layers.30.eh_proj",
+++                "model.layers.30.enorm",
+++                "model.layers.30.hnorm",
+++            ],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertIn("model.final_layernorm", res.exclude_modules)
+++        self.assertIn("model.eh_proj", res.exclude_modules)
+++        self.assertIn("model.enorm", res.exclude_modules)
+++        self.assertIn("model.hnorm", res.exclude_modules)
+++        self.assertNotIn("model.decoder.final_layernorm", res.exclude_modules)
+++
+++    def test_bailing_shared_quant_config_not_mutated(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=30)
+++        orig_exclude = ["model.layers.30.self_attn.q_a_proj"]
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=list(orig_exclude),
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNot(res, quant_cfg)
+++        self.assertEqual(quant_cfg.exclude_modules, orig_exclude)
+++
+++    def test_bailing_no_mtp_exclusion_contract(self):
+++        """Bailing retains ModelOpt FP4 quant config when no MTP exclusion is present."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=30)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["lm_head"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertEqual(res.get_name(), "modelopt_fp4")
+++        self.assertFalse(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertFalse(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertFalse(res.is_layer_excluded("model.final_layernorm"))
+++        self.assertTrue(res.is_layer_excluded("lm_head"))
+++
+++    def test_bailing_wildcard_no_dot(self):
+++        """Production wildcard spelling 'model.layers.30*' and 'layers.30*'."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=30)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.30*", "lm_head"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertIsInstance(
+++            res.get_quant_method(_mock_linear(), "model.layers.30.eh_proj"),
+++            UnquantizedLinearMethod,
+++        )
+++        self.assertIsNone(
+++            res.get_quant_method(_mock_fused_moe(), "model.layers.30.experts")
+++        )
+++
+++    def test_bailing_legacy_layer0_num_hidden_layers_1(self):
+++        """Legacy Bailing config with num_hidden_layers == 1 uses canonical NextN layer index 0."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=1)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.0.*", "lm_head"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertTrue(res.is_layer_excluded("model.final_layernorm"))
+++        self.assertIsInstance(
+++            res.get_quant_method(_mock_linear(), "model.layers.0.eh_proj"),
+++            UnquantizedLinearMethod,
+++        )
+++        self.assertIsNone(
+++            res.get_quant_method(_mock_fused_moe(), "model.layers.0.experts")
+++        )
+++
+++    def test_bailing_quark_legacy_layer0_num_hidden_layers_1(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=1)
+++        quark_cfg = _FakeQuarkConfig(exclude_layers=["model.layers.0"])
+++
+++        res = model._resolve_nextn_quant_config(config, quark_cfg)
+++        self.assertIsNone(res)
+++
+++    def test_bailing_hybrid_runtime_prefixes_consumer_get_quant_method(self):
+++        """Bailing hybrid/V3 layout uses model.layers.<N> for decoder/FusedMoE and layers.<N> for eh_proj.
+++        Verify with ModelOptFp4Config get_quant_method consumers that all runtime forms are unquantized.
+++        """
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=30)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.30.*", "lm_head"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        # Bailing hybrid runtime linear layers (eh_proj, attention projections):
+++        self.assertIsInstance(
+++            res.get_quant_method(_mock_linear(), "model.layers.30.eh_proj"),
+++            UnquantizedLinearMethod,
+++        )
+++        self.assertIsInstance(
+++            res.get_quant_method(_mock_linear(), "layers.30.eh_proj"),
+++            UnquantizedLinearMethod,
+++        )
+++        self.assertIsInstance(
+++            res.get_quant_method(_mock_linear(), "model.layers.30.attention.q_b_proj"),
+++            UnquantizedLinearMethod,
+++        )
+++        self.assertIsInstance(
+++            res.get_quant_method(_mock_linear(), "layers.30.attention.q_b_proj"),
+++            UnquantizedLinearMethod,
+++        )
+++        # Bailing hybrid runtime FusedMoE layers (both model.layers.<N>.experts and model.layers.<N>.mlp.experts):
+++        self.assertIsNone(
+++            res.get_quant_method(_mock_fused_moe(), "model.layers.30.experts")
+++        )
+++        self.assertIsNone(
+++            res.get_quant_method(_mock_fused_moe(), "model.layers.30.mlp.experts")
+++        )
+++        self.assertIsNone(res.get_quant_method(_mock_fused_moe(), "layers.30.experts"))
+++        self.assertIsNone(
+++            res.get_quant_method(_mock_fused_moe(), "layers.30.mlp.experts")
+++        )
+++        # Standard decoder layout forms also retained:
+++        self.assertIsNone(
+++            res.get_quant_method(_mock_fused_moe(), "model.decoder.mlp.experts")
+++        )
+++        self.assertIsInstance(
+++            res.get_quant_method(_mock_linear(), "model.decoder.self_attn.q_a_proj"),
+++            UnquantizedLinearMethod,
+++        )
+++
+++    def test_bailing_hybrid_quantized_mtp_consumer_get_quant_method(self):
+++        """When MTP is not excluded, Bailing hybrid runtime layers retain ModelOpt FP4 methods."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=30)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["lm_head"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertIsInstance(
+++            res.get_quant_method(_mock_linear(), "model.layers.30.eh_proj"),
+++            ModelOptFp4LinearMethod,
+++        )
+++        self.assertIsInstance(
+++            res.get_quant_method(_mock_linear(), "model.layers.30.attention.q_b_proj"),
+++            ModelOptFp4LinearMethod,
+++        )
+++        self.assertIsInstance(
+++            res.get_quant_method(_mock_fused_moe(), "model.layers.30.experts"),
+++            ModelOptNvFp4FusedMoEMethod,
+++        )
+++        self.assertIsInstance(
+++            res.get_quant_method(_mock_fused_moe(), "model.decoder.mlp.experts"),
+++            ModelOptNvFp4FusedMoEMethod,
+++        )
+++
+++    def test_bailing_hybrid_moe_only_excluded_consumer_get_quant_method(self):
+++        """When only MTP MoE is excluded, FusedMoE is unquantized while attention remains quantized."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=30)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.30.mlp.experts.*"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertIsInstance(
+++            res.get_quant_method(_mock_linear(), "model.layers.30.attention.q_b_proj"),
+++            ModelOptFp4LinearMethod,
+++        )
+++        self.assertIsNone(
+++            res.get_quant_method(_mock_fused_moe(), "model.layers.30.experts")
+++        )
+++        self.assertIsNone(
+++            res.get_quant_method(_mock_fused_moe(), "model.layers.30.mlp.experts")
+++        )
+++        self.assertIsNone(
+++            res.get_quant_method(_mock_fused_moe(), "model.decoder.mlp.experts")
+++        )
+++
+++
+++class TestGlmMoeDsaNextNModelOptQuantResolution(CustomTestCase):
+++    def _make_model(self):
+++        return object.__new__(GlmMoeDsaForCausalLMNextN)
+++
+++    def test_glm_moe_dsa_modelopt_fp4_not_excluded_retains_quant_config(self):
+++        """GLM-5.3-Flash contract: quantized GLM NextN MTP weights retain ModelOpt FP4."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=46)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["lm_head"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertEqual(res.get_name(), "modelopt_fp4")
+++        self.assertFalse(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertFalse(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertFalse(res.is_layer_excluded("model.eh_proj"))
+++        self.assertTrue(res.is_layer_excluded("lm_head"))
+++
+++    def test_glm_moe_dsa_modelopt_fp4_mtp_layer_excluded_remaps(self):
+++        """When GLM MTP layer 46 is excluded, all draft decoder modules are unquantized."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=46)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.46.*", "lm_head"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertTrue(res.is_layer_excluded("model.eh_proj"))
+++        self.assertTrue(res.is_layer_excluded("lm_head"))
+++
+++    def test_glm_moe_dsa_modelopt_fp4_mtp_moe_only_excluded(self):
+++        """When only MTP MoE is excluded, FusedMoE is unquantized while attention remains quantized."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=46)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.46.mlp.experts.*"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertFalse(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++
+++    def test_glm_moe_dsa_modelopt_fp4_single_expert_excluded(self):
+++        """When single expert is excluded, FusedMoE coarse prefix is added."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=46)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.46.mlp.experts.0"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertFalse(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++
+++    def test_glm_moe_dsa_modelopt_fp4_exact_layer_excluded(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=46)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.46"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertTrue(res.is_layer_excluded("model.eh_proj"))
+++
+++    def test_glm_moe_dsa_modelopt_fp4_shared_quant_config_not_mutated(self):
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=46)
+++        orig_exclude = ["model.layers.46.mlp.experts.0"]
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=list(orig_exclude),
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNot(res, quant_cfg)
+++        self.assertEqual(quant_cfg.exclude_modules, orig_exclude)
+++
+++    def test_glm_moe_dsa_wildcard_no_dot(self):
+++        """Production wildcard spelling 'model.layers.46*'."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=46)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.46*", "lm_head"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertTrue(res.is_layer_excluded("model.eh_proj"))
+++        self.assertIsInstance(
+++            res.get_quant_method(_mock_linear(), "model.decoder.self_attn.q_a_proj"),
+++            UnquantizedLinearMethod,
+++        )
+++        self.assertIsNone(
+++            res.get_quant_method(_mock_fused_moe(), "model.decoder.mlp.experts")
+++        )
+++
+++    def test_glm_moe_dsa_legacy_layer0_num_hidden_layers_1(self):
+++        """Legacy GLM config with num_hidden_layers == 1 uses canonical NextN layer index 0."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=1)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.0.*", "lm_head"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertTrue(res.is_layer_excluded("model.decoder.self_attn.q_a_proj"))
+++        self.assertTrue(res.is_layer_excluded("model.decoder.mlp.experts"))
+++        self.assertTrue(res.is_layer_excluded("model.eh_proj"))
+++
+++    def test_glm_moe_dsa_quark_legacy_layer0_num_hidden_layers_1(self):
+++        """Quark resolution with num_hidden_layers == 1 correctly targets layer 0."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=1)
+++        quark_cfg = _FakeQuarkConfig(
+++            exclude_layers=["model.layers.0.mlp.experts.0"],
+++            layer_quant_config={"model.layers.0.self_attn.q_a_proj": {"scheme": "fp8"}},
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quark_cfg)
+++
+++        self.assertIsNot(res, quark_cfg)
+++        self.assertIn("model.decoder.mlp.experts.0", res.exclude_layers)
+++        self.assertIn("model.decoder.mlp.experts", res.exclude_layers)
+++        self.assertIn(
+++            "model.decoder.self_attn.q_a_proj",
+++            res.quant_config["layer_quant_config"],
+++        )
+++
+++    def test_glm_moe_dsa_consumer_get_quant_method_semantics(self):
+++        """Verify get_quant_method consumer semantics directly on Linear and FusedMoE."""
+++        model = self._make_model()
+++        config = SimpleNamespace(num_hidden_layers=46)
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++            exclude_modules=["model.layers.46.*", "lm_head"],
+++        )
+++
+++        res = model._resolve_nextn_quant_config(config, quant_cfg)
+++
+++        self.assertIsNotNone(res)
+++        self.assertIsInstance(
+++            res.get_quant_method(_mock_linear(), "model.decoder.self_attn.q_a_proj"),
+++            UnquantizedLinearMethod,
+++        )
+++        self.assertIsInstance(
+++            res.get_quant_method(_mock_linear(), "model.eh_proj"),
+++            UnquantizedLinearMethod,
+++        )
+++        self.assertIsNone(
+++            res.get_quant_method(_mock_fused_moe(), "model.decoder.mlp.experts")
+++        )
+++
+++
+++class TestNextNModelQuantConfigRetention(CustomTestCase):
+++    @patch(
+++        "sglang.srt.models.deepseek_nextn.is_mla_prefill_cp_enabled", return_value=False
+++    )
+++    @patch(
+++        "sglang.srt.models.deepseek_nextn.is_dsa_enable_prefill_cp", return_value=False
+++    )
+++    @patch("sglang.srt.models.deepseek_nextn.VocabParallelEmbedding")
+++    @patch("sglang.srt.models.deepseek_nextn.DeepseekV2DecoderLayer")
+++    @patch("sglang.srt.models.deepseek_nextn.RMSNorm")
+++    @patch("sglang.srt.models.deepseek_nextn.nn.Linear")
+++    def test_deepseek_model_nextn_retains_modelopt_fp4_config(
+++        self, mock_linear, mock_norm, mock_decoder, mock_embed, mock_dsa_cp, mock_mla_cp
+++    ):
+++        config = SimpleNamespace(
+++            vocab_size=1000,
+++            hidden_size=64,
+++            rms_norm_eps=1e-6,
+++            num_hidden_layers=61,
+++        )
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++        )
+++
+++        with (
+++            get_context().override_server_args(
+++                enable_dp_attention=False,
+++            ),
+++            get_parallel().override(
+++                tp_size=1,
+++                tp_rank=0,
+++                attn_tp_size=1,
+++                attn_tp_rank=0,
+++            ),
+++            patch(
+++                "sglang.srt.models.deepseek_nextn.enable_nextn_moe_bf16_cast_to_fp8",
+++                return_value=False,
+++            ),
+++        ):
+++            model = DeepseekModelNextN(config, quant_config=quant_cfg)
+++
+++        self.assertIsNotNone(
+++            model.quant_config, "DeepseekModelNextN should retain quant_config"
+++        )
+++        self.assertEqual(model.quant_config.get_name(), "modelopt_fp4")
+++        mock_decoder.assert_called_once()
+++        _, kwargs = mock_decoder.call_args
+++        self.assertEqual(kwargs.get("quant_config"), quant_cfg)
+++
+++    @patch("sglang.srt.models.bailing_moe_nextn.VocabParallelEmbedding")
+++    @patch("sglang.srt.models.bailing_moe_nextn.BailingMoEBlock")
+++    @patch("sglang.srt.models.bailing_moe_nextn.RMSNorm")
+++    @patch("sglang.srt.models.bailing_moe_nextn.ReplicatedLinear")
+++    def test_bailing_moe_model_nextn_retains_modelopt_fp4_config(
+++        self, mock_linear, mock_norm, mock_block, mock_embed
+++    ):
+++        config = SimpleNamespace(
+++            vocab_size=1000,
+++            hidden_size=64,
+++            rms_norm_eps=1e-6,
+++            num_hidden_layers=30,
+++            model_type="bailing_moe",
+++            use_kda=False,
+++        )
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++        )
+++
+++        with (
+++            get_context().override_server_args(
+++                enable_dp_attention=False,
+++            ),
+++            get_parallel().override(
+++                tp_size=1,
+++                tp_rank=0,
+++                attn_tp_size=1,
+++                attn_tp_rank=0,
+++            ),
+++        ):
+++            _ = BailingMoEModelNextN(config, quant_config=quant_cfg)
+++
+++        mock_block.assert_called_once()
+++        _, kwargs = mock_block.call_args
+++        self.assertEqual(kwargs.get("quant_config"), quant_cfg)
+++
+++
+++class TestLegacyGlm4NextNQuantRetention(CustomTestCase):
+++    @patch("sglang.srt.models.glm4_moe_nextn.VocabParallelEmbedding")
+++    @patch("sglang.srt.models.glm4_moe_nextn.Glm4MoeDecoderLayer")
+++    @patch("sglang.srt.models.glm4_moe_nextn.RMSNorm")
+++    @patch("sglang.srt.models.glm4_moe_nextn.nn.Linear")
+++    def test_glm4_moe_nextn_overrides_modelopt_fp4_to_none(
+++        self, mock_linear, mock_norm, mock_decoder, mock_embed
+++    ):
+++        config = SimpleNamespace(
+++            vocab_size=1000,
+++            hidden_size=64,
+++            rms_norm_eps=1e-6,
+++            num_hidden_layers=46,
+++        )
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++        )
+++        with (
+++            get_context().override_server_args(
+++                enable_dp_attention=False,
+++            ),
+++            get_parallel().override(
+++                tp_size=1,
+++                tp_rank=0,
+++                attn_tp_size=1,
+++                attn_tp_rank=0,
+++            ),
+++        ):
+++            _ = Glm4MoeModelNextN(config, quant_config=quant_cfg)
+++
+++        mock_decoder.assert_called_once()
+++        _, kwargs = mock_decoder.call_args
+++        self.assertIsNone(kwargs.get("quant_config"))
+++
+++    @patch("sglang.srt.models.glm4_moe_lite_nextn.VocabParallelEmbedding")
+++    @patch("sglang.srt.models.glm4_moe_lite_nextn.Glm4MoeLiteDecoderLayer")
+++    @patch("sglang.srt.models.glm4_moe_lite_nextn.RMSNorm")
+++    @patch("sglang.srt.models.glm4_moe_lite_nextn.nn.Linear")
+++    def test_glm4_moe_lite_nextn_overrides_modelopt_fp4_to_none(
+++        self, mock_linear, mock_norm, mock_decoder, mock_embed
+++    ):
+++        config = SimpleNamespace(
+++            vocab_size=1000,
+++            hidden_size=64,
+++            rms_norm_eps=1e-6,
+++            num_hidden_layers=46,
+++        )
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++        )
+++        with (
+++            get_context().override_server_args(
+++                enable_dp_attention=False,
+++            ),
+++            get_parallel().override(
+++                tp_size=1,
+++                tp_rank=0,
+++                attn_tp_size=1,
+++                attn_tp_rank=0,
+++            ),
+++        ):
+++            _ = Glm4MoeLiteModelNextN(config, quant_config=quant_cfg)
+++
+++        mock_decoder.assert_called_once()
+++        _, kwargs = mock_decoder.call_args
+++        self.assertIsNone(kwargs.get("quant_config"))
+++
+++    @patch("sglang.srt.models.glm_ocr_nextn.VocabParallelEmbedding")
+++    @patch("sglang.srt.models.glm_ocr_nextn.Glm4DecoderLayer")
+++    @patch("sglang.srt.models.glm_ocr_nextn.RMSNorm")
+++    @patch("sglang.srt.models.glm_ocr_nextn.nn.Linear")
+++    def test_glm_ocr_nextn_overrides_modelopt_fp4_to_none(
+++        self, mock_linear, mock_norm, mock_decoder, mock_embed
+++    ):
+++        config = SimpleNamespace(
+++            vocab_size=1000,
+++            hidden_size=64,
+++            rms_norm_eps=1e-6,
+++            num_hidden_layers=46,
+++        )
+++        quant_cfg = ModelOptFp4Config(
+++            is_checkpoint_nvfp4_serialized=True,
+++            group_size=16,
+++        )
+++        with (
+++            get_context().override_server_args(
+++                enable_dp_attention=False,
+++            ),
+++            get_parallel().override(
+++                tp_size=1,
+++                tp_rank=0,
+++                attn_tp_size=1,
+++                attn_tp_rank=0,
+++            ),
+++        ):
+++            _ = GlmOcrModelNextN(config, quant_config=quant_cfg)
+++
+++        mock_decoder.assert_called_once()
+++        _, kwargs = mock_decoder.call_args
+++        self.assertIsNone(kwargs.get("quant_config"))
+++
+++
+++if __name__ == "__main__":
+++    unittest.main()
+diff --git a/reports/j-7bfd059ec3e9/result.json b/reports/j-7bfd059ec3e9/result.json
+new file mode 100644
+index 0000000..054d078
+--- /dev/null
++++ b/reports/j-7bfd059ec3e9/result.json
+@@ -0,0 +1,39 @@
++{
++  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36653",
++  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
++  "outcome": "candidate_verified",
++  "summary": "Reproduced that GLM-5.3's checkpoint-aware NextN resolver retains modelopt_fp4 but DeepseekModelNextN unconditionally discards it before constructing the decoder. Moved the legacy DeepSeek exception into the base resolver so quantized GLM NextN layers retain FP4 while checkpoint-declared BF16 GLM layers and legacy DeepSeek behavior remain unquantized.",
++  "tests": [
++    {
++      "command": "/tmp/amdpilot-repo-j-7bfd059ec3e9/venv/bin/python -m pytest -q test/registered/unit/models/test_glm5_nextn_quant_config.py (before source fix)",
++      "exit_code": 1,
++      "what_was_measured": "Failing-before reproduction: the constructed NextN decoder received quant_config=None for a quantized GLM ModelOpt FP4 checkpoint; the legacy DeepSeek policy was also not represented by the resolver. One independent BF16-ignore boundary passed."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-7bfd059ec3e9/venv/bin/python -m pytest -q test/registered/unit/models/test_glm5_nextn_quant_config.py",
++      "exit_code": 0,
++      "what_was_measured": "Three passing cases: quantized GLM NextN reaches decoder construction with ModelOpt FP4, checkpoint-declared BF16 GLM NextN resolves to unquantized modules, and legacy DeepSeek ModelOpt FP4 NextN remains unquantized."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-7bfd059ec3e9/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_nextn_mm_embed.py test/registered/unit/models/test_glm5_nextn_quant_config.py",
++      "exit_code": 0,
++      "what_was_measured": "Five related NextN unit tests passed, including existing multimodal embedding behavior and the new quantization boundaries."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-7bfd059ec3e9/venv/bin/python -m compileall -q python/sglang/srt/models/deepseek_nextn.py python/sglang/srt/models/glm5_next_nextn.py test/registered/unit/models/test_glm5_nextn_quant_config.py",
++      "exit_code": 0,
++      "what_was_measured": "Changed Python source and regression test compile successfully."
++    }
++  ],
++  "gpu_execution": {
++    "value": false,
++    "evidence": "rocminfo identifies the assigned GPU as gfx950. The reported checkpoint uses NVIDIA ModelOpt NVFP4 and requires two sm_121 nodes; those weights and that topology were unavailable, so an unrelated AMD smoke was not treated as issue validation."
++  },
++  "native_rebuilt": false,
++  "remaining_limitations": [
++    "No access to LibertAIDAI/GLM-5.3-Flash-NVFP4 weights in a two-node NVIDIA sm_121 TP=2 environment.",
++    "No full server startup, weight-load, generation, semantic-accuracy, or distributed-workload validation was performed.",
++    "The open upstream PR https://github.com/sgl-project/sglang/pull/37322 contains broader generic exclusion-prefix remapping that is outside this issue-specific patch and remains under upstream review.",
++    "ruff and black were not installed in the prepared interpreter; git diff --check and compileall succeeded instead."
++  ]
++}
+diff --git a/test/registered/unit/models/test_glm5_nextn_quant_config.py b/test/registered/unit/models/test_glm5_nextn_quant_config.py
+new file mode 100644
+index 0000000..0644ac8
+--- /dev/null
++++ b/test/registered/unit/models/test_glm5_nextn_quant_config.py
+@@ -0,0 +1,87 @@
++from types import SimpleNamespace
++from unittest.mock import patch
++
++from torch import nn
++
++from sglang.srt.models.deepseek_nextn import (
++    DeepseekModelNextN,
++    DeepseekV3ForCausalLMNextN,
++)
++from sglang.srt.models.glm5_next_nextn import (
++    Glm5NextForConditionalGenerationNextN,
++)
++
++
++class _ModelOptFp4Config:
++    @staticmethod
++    def get_name():
++        return "modelopt_fp4"
++
++
++def _config(ignore=None):
++    return SimpleNamespace(
++        num_hidden_layers=45,
++        quantization_config={"ignore": ignore or []},
++    )
++
++
++def test_glm5_builds_quantized_nextn_layer_for_modelopt_fp4_checkpoint():
++    quant_config = _ModelOptFp4Config()
++    model = object.__new__(Glm5NextForConditionalGenerationNextN)
++
++    resolved = model._resolve_nextn_quant_config(_config(), quant_config)
++
++    config = SimpleNamespace(
++        vocab_size=128,
++        hidden_size=64,
++        rms_norm_eps=1e-5,
++        qk_rope_head_dim=0,
++    )
++
++    class _Decoder(nn.Module):
++        def __init__(self, quant_config):
++            super().__init__()
++            self.received_quant_config = quant_config
++
++    with (
++        patch(
++            "sglang.srt.models.deepseek_nextn.VocabParallelEmbedding",
++            side_effect=lambda *args, **kwargs: nn.Identity(),
++        ),
++        patch(
++            "sglang.srt.models.deepseek_nextn.RMSNorm",
++            side_effect=lambda *args, **kwargs: nn.Identity(),
++        ),
++        patch(
++            "sglang.srt.models.deepseek_nextn.DeepseekV2DecoderLayer",
++            side_effect=lambda *args, **kwargs: _Decoder(kwargs["quant_config"]),
++        ),
++        patch(
++            "sglang.srt.models.deepseek_nextn.get_embedding_tp_kwargs",
++            return_value={},
++        ),
++        patch("sglang.srt.models.deepseek_nextn._is_cuda", False),
++        patch("sglang.srt.models.deepseek_nextn._is_npu", False),
++    ):
++        nextn = DeepseekModelNextN(config, resolved)
++
++    assert nextn.decoder.received_quant_config is quant_config
++
++
++def test_glm5_drops_modelopt_fp4_for_checkpoint_declared_bf16_nextn_layer():
++    quant_config = _ModelOptFp4Config()
++    config = _config(ignore=["model.layers.45.*"])
++    model = object.__new__(Glm5NextForConditionalGenerationNextN)
++
++    resolved = model._resolve_nextn_quant_config(config, quant_config)
++
++    assert resolved is None
++
++
++def test_deepseek_retains_legacy_unquantized_modelopt_fp4_nextn_behavior():
++    quant_config = _ModelOptFp4Config()
++    model = object.__new__(DeepseekV3ForCausalLMNextN)
++
++    resolved = model._resolve_nextn_quant_config(_config(), quant_config)
++
++    assert resolved is None
