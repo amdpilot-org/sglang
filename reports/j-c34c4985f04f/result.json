@@ -1,0 +1,53 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31117",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2567",
+  "candidate_commit": "7666e8a3ae6ddc1fef450f226d5b14ea009034e0",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate correctly serializes eager per-communicator launches across streams and host threads, but is only a partial fix. CUDA graph replay bypasses the host guard, and both native implementations retain unbounded polling, so the original permanent-hang contract is not fully resolved.",
+  "tests": [
+    {
+      "command": "python reports/j-c34c4985f04f/check_host_thread_serialization.py /job/repo (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before source check: the base has no SingleStreamGuard covering legacy and V2 native enqueues."
+    },
+    {
+      "command": "python reports/j-c34c4985f04f/check_host_thread_serialization.py /job/repo (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate lock spans guard bookkeeping and both legacy/V2 native enqueue call sites."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python python -m pytest -q test/registered/unit/distributed/test_custom_all_reduce_stream_guard.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Six candidate regression tests passed, including stream changes, same-stream fast path, capture bypass, lock coverage, and both communicator call sites."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python python reports/j-c34c4985f04f/gpu_host_thread_probe.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "On one MI355X, two host threads and two streams produced ordered numeric result 2, matching CPU reference 2. This did not execute a custom all-reduce."
+    },
+    {
+      "command": "python reports/j-c34c4985f04f/check_contract.py /job/repo (exact candidate)",
+      "exit_code": 1,
+      "what_was_measured": "Independent adversarial contract check found capture explicitly bypasses the guard and both JIT and legacy native paths retain unbounded polling; therefore full resolution is false."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A real two-thread/two-stream guard-ordering probe ran on one AMD Instinct MI355X gfx950. It was not a collective, multi-GPU, CUDA, green-context, or graph-replay reproduction."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Two captured graphs containing all-reduces from the same communicator can be replayed concurrently on different streams; replay makes no Python guard call, and capture deliberately leaves the guard state unchanged.",
+    "The JIT custom-all-reduce polling loop remains unbounded, so a rendezvous collision or guard bypass can still hang permanently.",
+    "The legacy AOT custom-all-reduce barrier remains unbounded, so its eager host guard does not provide bounded failure for bypasses or protocol collisions."
+  ],
+  "remaining_limitations": [
+    "Only one AMD MI355X gfx950 GPU was assigned; the original issue requires two NVIDIA A100 CUDA GPUs with NVLink and green contexts.",
+    "The original multi-rank CUDA deadlock and concurrent CUDA graph replay were not executable in this environment.",
+    "No native source changed in the candidate, so a native rebuild was not applicable.",
+    "No model weights, full serving path, or distributed model workload were used."
+  ]
+}
