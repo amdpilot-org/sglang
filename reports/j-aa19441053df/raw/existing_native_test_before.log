@@ -1,0 +1,268 @@
+FF
+=================================== FAILURES ===================================
+_ test_tree_speculative_sampling_target_only[1-1-expected_predicts0-expected_accept_index0-expected_accept_token_num0] _
+
+threshold_single = 1, threshold_acc = 1
+expected_predicts = [3, -1, -1, 4, 5, 18, ...]
+expected_accept_index = [[0, 3, 4, 5], [6, 10, 11, -1]]
+expected_accept_token_num = [3, 2]
+
+    @pytest.mark.parametrize(
+        "threshold_single, threshold_acc, expected_predicts, expected_accept_index, expected_accept_token_num",
+        test_cases,
+    )
+    def test_tree_speculative_sampling_target_only(
+        threshold_single,
+        threshold_acc,
+        expected_predicts,
+        expected_accept_index,
+        expected_accept_token_num,
+    ):
+        """
+        Tests the tree_speculative_sampling_target_only function using Pytest parameterization.
+        """
+        device = "cuda"
+    
+        candidates = torch.tensor(
+            [
+                [0, 1, 2, 3, 4, 5],
+                [7, 8, 9, 10, 11, 12],
+            ],
+            dtype=torch.int64,
+            device=device,
+        )
+        retrive_index = torch.tensor(
+            [
+                [0, 1, 2, 3, 4, 5],
+                [6, 7, 8, 9, 10, 11],
+            ],
+            dtype=torch.int64,
+            device=device,
+        )
+        retrive_next_token = torch.tensor(
+            [
+                [1, 2, -1, 4, 5, -1],
+                [4, 2, 3, -1, 5, -1],
+            ],
+            dtype=torch.int64,
+            device=device,
+        )
+        retrive_next_sibling = torch.tensor(
+            [
+                [-1, 3, -1, -1, -1, -1],
+                [-1, -1, -1, -1, 1, -1],
+            ],
+            dtype=torch.int64,
+            device=device,
+        )
+    
+        target_logits = torch.full((2, 6, 20), 1, dtype=torch.float32, device=device)
+        target_logits[0, 0, 3] = 10
+        target_logits[0, 3, 4] = 10
+        target_logits[0, 4, 5] = 10
+        target_logits[1, 0, 11] = 10
+        target_logits[1, 4, 12] = 10
+    
+        for i in range(target_logits.shape[0]):
+            for j in range(target_logits.shape[1]):
+                if torch.max(target_logits[i, j]) < 10:
+                    target_logits[i, j, 18] = 10
+    
+        temperatures = torch.tensor([0.01, 0.01], dtype=torch.float32, device=device)
+        bs, num_draft_tokens = candidates.shape
+        num_spec_step = len(expected_accept_index[0])
+        predict_shape = (len(expected_predicts),)
+    
+        predicts = torch.full(predict_shape, -1, dtype=torch.int32, device=device)
+        accept_index = torch.full((bs, num_spec_step), -1, dtype=torch.int32, device=device)
+        accept_token_num = torch.full((bs,), 0, dtype=torch.int32, device=device)
+    
+        expanded_temperature = temperatures.unsqueeze(1).unsqueeze(1)
+        target_probs = F.softmax(target_logits / expanded_temperature, dim=-1)
+        draft_probs = torch.full_like(target_probs, 0, dtype=torch.float32, device=device)
+        coins = torch.rand(bs, num_draft_tokens, device=device, dtype=torch.float32)
+        coins_for_final_sampling = torch.rand(bs, device=device).to(torch.float32)
+    
+>       tree_speculative_sampling_target_only(
+            predicts=predicts,
+            accept_index=accept_index,
+            accept_token_num=accept_token_num,
+            candidates=candidates,
+            retrive_index=retrive_index,
+            retrive_next_token=retrive_next_token,
+            retrive_next_sibling=retrive_next_sibling,
+            uniform_samples=coins,
+            uniform_samples_for_final_sampling=coins_for_final_sampling,
+            target_probs=target_probs,
+            draft_probs=draft_probs,
+            threshold_single=threshold_single,
+            threshold_acc=threshold_acc,
+            deterministic=True,
+        )
+
+python/sglang/kernels/aot/tests/speculative/test_speculative_sampling.py:102: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/opt/venv/lib/python3.12/site-packages/sglang_kernel-0.4.6.post1-py3.12-linux-x86_64.egg/sgl_kernel/speculative.py:22: in tree_speculative_sampling_target_only
+    torch.ops.sgl_kernel.tree_speculative_sampling_target_only.default(
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <module 'torch.ops.sgl_kernel' from 'torch.ops'>
+op_name = 'tree_speculative_sampling_target_only'
+
+    def __getattr__(self, op_name: str) -> OpOverloadPacket:
+        if op_name in ("__origin__", "__self__"):
+            raise AttributeError(
+                f"Invalid attribute '{op_name}' for '_OpNamespace' '{self.name}'"
+            )
+    
+        # Get the op `my_namespace::my_op` if available. This will also check
+        # for overloads and raise an exception if there are more than one.
+        namespace_name = self.name
+        qualified_op_name = f"{namespace_name}::{op_name}"
+        module_name = self.__module__ + "." + namespace_name
+    
+        try:
+            op, overload_names = _get_packet(qualified_op_name, module_name)
+            if op is None:
+>               raise AttributeError(
+                    f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
+                )
+E               AttributeError: '_OpNamespace' 'sgl_kernel' object has no attribute 'tree_speculative_sampling_target_only'
+
+/opt/venv/lib/python3.12/site-packages/torch/_ops.py:1379: AttributeError
+_ test_tree_speculative_sampling_target_only[0-0-expected_predicts1-expected_accept_index1-expected_accept_token_num1] _
+
+threshold_single = 0, threshold_acc = 0
+expected_predicts = [1, 2, 18, -1, -1, -1, ...]
+expected_accept_index = [[0, 1, 2, -1], [6, 10, 11, -1]]
+expected_accept_token_num = [2, 2]
+
+    @pytest.mark.parametrize(
+        "threshold_single, threshold_acc, expected_predicts, expected_accept_index, expected_accept_token_num",
+        test_cases,
+    )
+    def test_tree_speculative_sampling_target_only(
+        threshold_single,
+        threshold_acc,
+        expected_predicts,
+        expected_accept_index,
+        expected_accept_token_num,
+    ):
+        """
+        Tests the tree_speculative_sampling_target_only function using Pytest parameterization.
+        """
+        device = "cuda"
+    
+        candidates = torch.tensor(
+            [
+                [0, 1, 2, 3, 4, 5],
+                [7, 8, 9, 10, 11, 12],
+            ],
+            dtype=torch.int64,
+            device=device,
+        )
+        retrive_index = torch.tensor(
+            [
+                [0, 1, 2, 3, 4, 5],
+                [6, 7, 8, 9, 10, 11],
+            ],
+            dtype=torch.int64,
+            device=device,
+        )
+        retrive_next_token = torch.tensor(
+            [
+                [1, 2, -1, 4, 5, -1],
+                [4, 2, 3, -1, 5, -1],
+            ],
+            dtype=torch.int64,
+            device=device,
+        )
+        retrive_next_sibling = torch.tensor(
+            [
+                [-1, 3, -1, -1, -1, -1],
+                [-1, -1, -1, -1, 1, -1],
+            ],
+            dtype=torch.int64,
+            device=device,
+        )
+    
+        target_logits = torch.full((2, 6, 20), 1, dtype=torch.float32, device=device)
+        target_logits[0, 0, 3] = 10
+        target_logits[0, 3, 4] = 10
+        target_logits[0, 4, 5] = 10
+        target_logits[1, 0, 11] = 10
+        target_logits[1, 4, 12] = 10
+    
+        for i in range(target_logits.shape[0]):
+            for j in range(target_logits.shape[1]):
+                if torch.max(target_logits[i, j]) < 10:
+                    target_logits[i, j, 18] = 10
+    
+        temperatures = torch.tensor([0.01, 0.01], dtype=torch.float32, device=device)
+        bs, num_draft_tokens = candidates.shape
+        num_spec_step = len(expected_accept_index[0])
+        predict_shape = (len(expected_predicts),)
+    
+        predicts = torch.full(predict_shape, -1, dtype=torch.int32, device=device)
+        accept_index = torch.full((bs, num_spec_step), -1, dtype=torch.int32, device=device)
+        accept_token_num = torch.full((bs,), 0, dtype=torch.int32, device=device)
+    
+        expanded_temperature = temperatures.unsqueeze(1).unsqueeze(1)
+        target_probs = F.softmax(target_logits / expanded_temperature, dim=-1)
+        draft_probs = torch.full_like(target_probs, 0, dtype=torch.float32, device=device)
+        coins = torch.rand(bs, num_draft_tokens, device=device, dtype=torch.float32)
+        coins_for_final_sampling = torch.rand(bs, device=device).to(torch.float32)
+    
+>       tree_speculative_sampling_target_only(
+            predicts=predicts,
+            accept_index=accept_index,
+            accept_token_num=accept_token_num,
+            candidates=candidates,
+            retrive_index=retrive_index,
+            retrive_next_token=retrive_next_token,
+            retrive_next_sibling=retrive_next_sibling,
+            uniform_samples=coins,
+            uniform_samples_for_final_sampling=coins_for_final_sampling,
+            target_probs=target_probs,
+            draft_probs=draft_probs,
+            threshold_single=threshold_single,
+            threshold_acc=threshold_acc,
+            deterministic=True,
+        )
+
+python/sglang/kernels/aot/tests/speculative/test_speculative_sampling.py:102: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/opt/venv/lib/python3.12/site-packages/sglang_kernel-0.4.6.post1-py3.12-linux-x86_64.egg/sgl_kernel/speculative.py:22: in tree_speculative_sampling_target_only
+    torch.ops.sgl_kernel.tree_speculative_sampling_target_only.default(
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <module 'torch.ops.sgl_kernel' from 'torch.ops'>
+op_name = 'tree_speculative_sampling_target_only'
+
+    def __getattr__(self, op_name: str) -> OpOverloadPacket:
+        if op_name in ("__origin__", "__self__"):
+            raise AttributeError(
+                f"Invalid attribute '{op_name}' for '_OpNamespace' '{self.name}'"
+            )
+    
+        # Get the op `my_namespace::my_op` if available. This will also check
+        # for overloads and raise an exception if there are more than one.
+        namespace_name = self.name
+        qualified_op_name = f"{namespace_name}::{op_name}"
+        module_name = self.__module__ + "." + namespace_name
+    
+        try:
+            op, overload_names = _get_packet(qualified_op_name, module_name)
+            if op is None:
+>               raise AttributeError(
+                    f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
+                )
+E               AttributeError: '_OpNamespace' 'sgl_kernel' object has no attribute 'tree_speculative_sampling_target_only'
+
+/opt/venv/lib/python3.12/site-packages/torch/_ops.py:1379: AttributeError
+=========================== short test summary info ============================
+FAILED python/sglang/kernels/aot/tests/speculative/test_speculative_sampling.py::test_tree_speculative_sampling_target_only[1-1-expected_predicts0-expected_accept_index0-expected_accept_token_num0]
+FAILED python/sglang/kernels/aot/tests/speculative/test_speculative_sampling.py::test_tree_speculative_sampling_target_only[0-0-expected_predicts1-expected_accept_index1-expected_accept_token_num1]
+2 failed in 1.05s
