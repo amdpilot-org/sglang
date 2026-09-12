@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37609",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independently verified candidate commit 1cccaca71af91d8a88bd2afe4d7dfa7b072e7635. The prepared base constructs Spark2_5MLP with GeluAndMul's tanh approximation and diverges from the checkpoint-declared exact GELU semantics. The candidate explicitly selects GeluAndMul(\"none\"); its focused regression fails on the base and passes on the candidate, and independent CPU and ROCm GPU numerical checks match the exact reference contract.",
+  "tests": [
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-12589add77d4/venv/bin/python < base reproduction script",
+      "exit_code": 0,
+      "what_was_measured": "On the prepared base, the actual mocked Spark2_5MLP selected approximate='tanh'. The issue's 20,001-point CPU grid had max absolute error 0.0004737377166748047 versus Transformers exact GELU. An aligned 20,000-value execution through the real ROCm fused GPU path had max absolute error 0.0005218982696533203 and 17,727 values outside rtol=1e-6/atol=1e-6. Raw logs: /job/review-evidence-j-12589add77d4/base-reproduction.txt and base-gpu-aligned.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-12589add77d4/venv/bin/python -m pytest -q /job/review-evidence-j-12589add77d4/test_spark2_5_candidate.py (prepared base)",
+      "exit_code": 1,
+      "what_was_measured": "The exact candidate regression was preserved outside the checkout and run unchanged on the base: both tests failed, including 3,165/4,106 GPU values outside tolerance and the explicit tanh-versus-none contract assertion. Raw log: /job/review-evidence-j-12589add77d4/base-candidate-regression.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-12589add77d4/venv/bin/python -m pytest -q test/srt/models/test_spark2_5.py (candidate 1cccaca71af91d8a88bd2afe4d7dfa7b072e7635)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's two focused tests passed against the candidate source, including actual Spark2_5MLP activation selection and fused GPU output parity with Transformers. Raw log: /job/review-evidence-j-12589add77d4/candidate-regression.txt."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-12589add77d4/venv/bin/python < independent adversarial script (candidate 1cccaca71af91d8a88bd2afe4d7dfa7b072e7635)",
+      "exit_code": 0,
+      "what_was_measured": "Verified the actual model selected exact GELU; the original CPU grid matched exactly; ROCm fused outputs matched Transformers bit-for-bit for float32, float16, and bfloat16 batched inputs containing zeros, signs, large magnitudes, random values, and varied multipliers. Results also agreed with an independently computed float64 erf formula within destination-dtype rounding, and NaN/Inf classifications matched. Raw log: /job/review-evidence-j-12589add77d4/candidate-adversarial.txt."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Real fused activation kernels ran on the single assigned AMD Instinct MI355X, reported ISA gfx950:sramecc+:xnack-, using PyTorch 2.11.0+rocm7.2 and HIP 7.2.26015."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": "No full Spark-X2.5 checkpoint or model weights were downloaded, so end-to-end logit parity was not measured; the original report claims activation-level parity only. GPU validation is limited to ROCm gfx950, not NVIDIA CUDA, NPU, XPU, or CPU AMX. The CPU native fallback was validated. The candidate changes no FlyDSL C++, sgl-kernel, or other native source, so no native rebuild was applicable; the loaded Python sources were /job/repo/python/sglang/srt/models/spark2_5.py and /job/repo/python/sglang/srt/layers/activation.py, while the unchanged native package came from /opt/venv/lib/python3.12/site-packages/sglang_kernel-0.4.6.post1-py3.12-linux-x86_64.egg/sgl_kernel. A separate odd-sized fused-input probe hit the existing kernel's 16-byte pointer-alignment requirement on both semantics; it is outside the reported exact-versus-tanh contract and does not counterexample the candidate fix."
+}
