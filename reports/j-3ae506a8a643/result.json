@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35537",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "095558b5a591b46e509d992f4645c923faf2c1e2",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "The recorded base reproduces the stale batch_is_full early return. At the exact candidate, both the candidate regression suite and independent adversarial checks pass: stale capacity is reconsidered, genuine zero capacity safely re-latches fullness, and an active chunk continuation still bypasses the ordinary slot gate. No functional counterexample was found.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-3ae506a8a643/venv/bin/python -m pytest -q /job/review-evidence-j-3ae506a8a643/candidate_test_on_base.py -k ChunkedPrefillBatchFullReset",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction on base: all three candidate regression/boundary tests failed because stale fullness returned before current admission logic."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3ae506a8a643/venv/bin/python -m pytest -q /job/review-evidence-j-3ae506a8a643/test_independent_batch_full.py",
+      "exit_code": 1,
+      "what_was_measured": "Independent base check: the starvation assertion failed, while true-zero-capacity and chunk-continuation safety cases passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3ae506a8a643/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunked_req_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate focused suite: 6 passed, including its stale-state and capacity boundary regressions."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3ae506a8a643/venv/bin/python -m pytest -q /job/review-evidence-j-3ae506a8a643/test_independent_batch_full.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate independent adversarial suite: 3 passed for stale hint reconsideration, real zero capacity, and chunk-continuation bypass."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 095558b5a591b46e509d992f4645c923faf2c1e2",
+      "exit_code": 2,
+      "what_was_measured": "Candidate artifact hygiene: trailing whitespace exists in captured pytest logs, contradicting the candidate report's diff-check claim; no scheduler source whitespace error was reported."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Candidate-retained run on one gfx950 used a qualified tiny random Llama and showed a waiting request admitted while earlier requests remained active. This review also confirmed ROCm 7.2, AMD Instinct MI355X, and gfx950 availability, but did not rerun serving.",
+  "native_rebuilt": false,
+  "remaining_limitations": "No native source changed, so no rebuild was applicable. Qwen3.8-27B-NVFP4 weights and its hybrid GDN/linear-attention and mamba-state behavior, NEXTN speculative decoding, FP8 KV cache, Docker/WSL2 environment, semantic accuracy, and the multi-minute production workload were unavailable. The retained tiny-Llama GPU trace validates only generic transport, scheduling, and engine execution, not those architecture-specific dimensions."
+}
