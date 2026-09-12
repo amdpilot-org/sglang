@@ -1,0 +1,63 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/3050",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "3516408f3178b64300fb78bc28064bed9c653931",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a partial documentation/test-only hardening. It correctly identifies that per-request TPOT times configured concurrency is not directly comparable with a recent engine decode window, but changes no metric behavior and inaccurately says TPOT/ITL cover the whole request lifetime. TPOT excludes TTFT, and ITL can omit the terminal tail and represent stream events rather than individual tokens.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-6b360501e3b7/venv/bin/python -m pytest -q /tmp/j-6b360501e3b7-review/test_serving_metric_scope.py (recorded base)",
+      "exit_code": 2,
+      "what_was_measured": "Candidate regression fails before the patch because the formatting helper is absent; this verifies patch presence only, not metric correctness."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6b360501e3b7/venv/bin/python /tmp/j-6b360501e3b7-review/run_issue_repro.py --fixture /tmp/amdpilot-repo-j-6b360501e3b7/review-runtime/tiny-random-llama --output /tmp/j-6b360501e3b7-review/base-serving (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "Real gfx950 serving path reproduced the mismatch: client whole-run output throughput 474.51 tok/s, mean/median TPOT 2.43/2.05 ms, measured concurrency 3.92, and steady engine windows 1954.67-1987.23 tok/s."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6b360501e3b7/venv/bin/python -m pytest -q test/registered/unit/benchmark/test_serving_metric_scope.py (candidate 3516408f)",
+      "exit_code": 0,
+      "what_was_measured": "Both candidate string-presence tests pass; they do not exercise calculate_metrics or validate the claimed lifetime scopes."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6b360501e3b7/venv/bin/python /tmp/j-6b360501e3b7-review/run_issue_repro.py --fixture /tmp/amdpilot-repo-j-6b360501e3b7/review-runtime/tiny-random-llama --output /tmp/j-6b360501e3b7-review/candidate-serving (candidate 3516408f)",
+      "exit_code": 0,
+      "what_was_measured": "Real gfx950 serving path displayed the new note but retained the mismatch: output throughput 1479.77 tok/s, mean/median TPOT 2.21/2.19 ms, measured concurrency 3.74, and steady engine windows 1823.38-1867.75 tok/s."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6b360501e3b7/venv/bin/python /tmp/j-6b360501e3b7-review/adversarial_metrics.py (candidate 3516408f)",
+      "exit_code": 0,
+      "what_was_measured": "Independent boundary case: 4.9 s latency with 4.0 s TTFT and 10 output tokens yields 100 ms TPOT, versus 490 ms per output token over the whole lifetime; ITLs sum to 0.8 s while post-TTFT time is 0.9 s. This contradicts the candidate's wording."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": {
+    "device": "AMD Instinct MI350X",
+    "architecture": "gfx950",
+    "torch": "2.11.0+rocm7.2",
+    "hip": "7.2.26015",
+    "source_path": "/job/repo/python/sglang/benchmark/serving.py",
+    "paths": [
+      "reports/j-6b360501e3b7/evidence/base/server.log",
+      "reports/j-6b360501e3b7/evidence/base/summary.json",
+      "reports/j-6b360501e3b7/evidence/candidate/server.log",
+      "reports/j-6b360501e3b7/evidence/candidate/summary.json",
+      "reports/j-6b360501e3b7/evidence/tests/import-paths.txt"
+    ]
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "TPOT is not over the whole request lifetime: it excludes TTFT by definition.",
+    "ITL samples are stream-event intervals and can omit the terminal response tail; they are not necessarily one sample per output token.",
+    "Whole-run output throughput and recent-window engine generation throughput remain different estimators and are not guaranteed to agree exactly."
+  ],
+  "remaining_limitations": [
+    "The original Qwen2.5-0.5B weights and NVIDIA H800/CUDA environment were unavailable.",
+    "The deterministic tiny random Llama fixture supports only 128-token context and four concurrent requests, not the reported 2048-input/256-output concurrency-16 workload.",
+    "The fixture validates transport, GPU engine execution, and metric plumbing only; it cannot establish cross-model, semantic, or cross-vendor performance equivalence.",
+    "No native sources changed in the candidate, so a native rebuild was not applicable."
+  ]
+}
