@@ -1,4 +1,5 @@
 import concurrent.futures
+import threading
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call
@@ -6,6 +7,9 @@ from unittest.mock import MagicMock, call
 import numpy as np
 
 from sglang.srt.disaggregation.mooncake.conn import MooncakeKVManager
+from sglang.srt.distributed.device_communicators.mooncake_transfer_engine import (
+    MooncakeTransferEngine,
+)
 from sglang.test.ci.ci_register import register_cpu_ci
 
 register_cpu_ci(est_time=1, suite="base-a-test-cpu")
@@ -127,6 +131,55 @@ class TestMooncakeTransferBatching(unittest.TestCase):
             ],
             any_order=True,
         )
+
+
+class TestMooncakeFailedSessionRecovery(unittest.TestCase):
+    @staticmethod
+    def _make_manager(failed_sessions, send_probe):
+        return SimpleNamespace(
+            engine=SimpleNamespace(send_probe=MagicMock(side_effect=send_probe)),
+            failed_sessions=set(failed_sessions),
+            session_failures={session_id: 1 for session_id in failed_sessions},
+            session_lock=threading.Lock(),
+        )
+
+    def test_successful_probe_unblacklists_session(self):
+        manager = self._make_manager(["decode:1234"], lambda _: 0)
+
+        MooncakeKVManager._run_one_probe_pass(manager)
+
+        self.assertNotIn("decode:1234", manager.failed_sessions)
+        self.assertNotIn("decode:1234", manager.session_failures)
+
+    def test_failed_probe_keeps_session_blacklisted(self):
+        manager = self._make_manager(["decode:1234"], lambda _: -1)
+
+        MooncakeKVManager._run_one_probe_pass(manager)
+
+        self.assertIn("decode:1234", manager.failed_sessions)
+        self.assertEqual(manager.session_failures["decode:1234"], 1)
+
+    def test_probe_exception_does_not_block_other_sessions(self):
+        def send_probe(session_id):
+            if session_id == "bad:1234":
+                raise RuntimeError("injected probe failure")
+            return 0
+
+        manager = self._make_manager(["bad:1234", "good:1234"], send_probe)
+
+        MooncakeKVManager._run_one_probe_pass(manager)
+
+        self.assertIn("bad:1234", manager.failed_sessions)
+        self.assertNotIn("good:1234", manager.failed_sessions)
+
+    def test_transfer_engine_forwards_probe_to_mooncake(self):
+        inner_engine = MagicMock()
+        inner_engine.send_probe.return_value = 0
+        engine = MooncakeTransferEngine.__new__(MooncakeTransferEngine)
+        engine.engine = inner_engine
+
+        self.assertEqual(engine.send_probe("decode:1234"), 0)
+        inner_engine.send_probe.assert_called_once_with("decode:1234")
 
 
 if __name__ == "__main__":
