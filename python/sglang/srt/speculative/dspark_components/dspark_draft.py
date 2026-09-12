@@ -363,8 +363,6 @@ class DraftBlockProposer:
             capture_hidden_mode=CaptureHiddenMode.NULL,
         )
         self._fill_dp_moe_sync_metadata(idle_batch, batch)
-        if self.draft_model_runner.lora_manager is not None:
-            self.draft_model_runner.lora_manager.reset_lora_batch()
         with torch.inference_mode():
             self.draft_model_runner.forward(idle_batch)
 
@@ -437,17 +435,8 @@ class DraftBlockProposer:
                 draft_num_tokens, device
             ),
             global_num_token_non_padded_cpu=draft_num_tokens,
-            lora_ids=(
-                [self.draft_model_runner.dspark_lora_id] * bs
-                if self.draft_model_runner.lora_manager is not None
-                else None
-            ),
         )
         self._fill_dp_moe_sync_metadata(draft_forward_batch, batch)
-        if self.draft_model_runner.lora_manager is not None:
-            self.draft_model_runner.lora_manager.prepare_lora_batch(
-                draft_forward_batch
-            )
         graph_runner = self.draft_model_runner.decode_cuda_graph_runner
         if (
             draft_sampler is not None
