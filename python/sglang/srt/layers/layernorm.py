@@ -180,6 +180,29 @@ if _is_cuda:
 logger = logging.getLogger(__name__)
 
 
+_FLOAT8_DTYPES = frozenset(
+    dtype
+    for dtype in (
+        getattr(torch, "float8_e4m3fn", None),
+        getattr(torch, "float8_e4m3fnuz", None),
+        getattr(torch, "float8_e5m2", None),
+        getattr(torch, "float8_e5m2fnuz", None),
+    )
+    if dtype is not None
+)
+
+
+def _rmsnorm_output_dtype(x: torch.Tensor, weight: torch.Tensor) -> torch.dtype:
+    """Choose the activation dtype produced by a native RMSNorm fallback.
+
+    Float8 inputs need a wider output at an unfused normalization boundary:
+    returning float8 makes the following MTP concat/add attempt unsupported
+    float8 promotion.  The norm weight follows the model activation dtype, so
+    it is the loss-minimizing target without changing ordinary dtype behavior.
+    """
+    return weight.dtype if x.dtype in _FLOAT8_DTYPES else x.dtype
+
+
 if _is_npu:
     import torch_npu
     from sgl_kernel_npu.norm.add_rmsnorm_bias import add_gemma_rms_norm
@@ -494,6 +517,8 @@ class RMSNorm(BaseFusedOp):
         post_residual_addition: Optional[torch.Tensor] = None,
         quant_linear: Optional[nn.Module] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        if x.dtype in _FLOAT8_DTYPES:
+            return self.forward_native(x, residual, post_residual_addition)
         if x.numel() == 0:
             if residual is not None:
                 if post_residual_addition is not None:
@@ -733,6 +758,8 @@ class RMSNorm(BaseFusedOp):
         post_residual_addition: Optional[torch.Tensor] = None,
         quant_linear: Optional[nn.Module] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        if x.dtype in _FLOAT8_DTYPES:
+            return self.forward_native(x, residual, post_residual_addition)
         # Fallback to native implementation if vllm is not available
         if not _has_vllm_rms_norm:
             return self.forward_native(x, residual, post_residual_addition)
@@ -799,7 +826,7 @@ class RMSNorm(BaseFusedOp):
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         if not x.is_contiguous():
             x = x.contiguous()
-        orig_dtype = self.override_orig_dtype or x.dtype
+        orig_dtype = self.override_orig_dtype or _rmsnorm_output_dtype(x, self.weight)
         x = x.to(torch.float32)
         if residual is not None:
             x = x + residual.to(torch.float32)
@@ -1116,14 +1143,14 @@ class GemmaRMSNorm(BaseFusedOp):
         residual: Optional[torch.Tensor] = None,
         post_residual_addition: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        orig_dtype = x.dtype
+        orig_dtype = _rmsnorm_output_dtype(x, self.weight)
+        x = x.float()
         if residual is not None:
             if post_residual_addition is not None:
                 residual = residual + post_residual_addition
-            x = x + residual
-            residual = x
+            x = x + residual.float()
+            residual = x.to(orig_dtype)
 
-        x = x.float()
         variance = x.pow(2).mean(dim=-1, keepdim=True)
         x = x * torch.rsqrt(variance + self.variance_epsilon)
         x = x * (1.0 + self.weight.float())
@@ -1136,6 +1163,8 @@ class GemmaRMSNorm(BaseFusedOp):
         residual: Optional[torch.Tensor] = None,
         post_residual_addition: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        if x.dtype in _FLOAT8_DTYPES:
+            return self.forward_native(x, residual, post_residual_addition)
         return self._forward_impl(x, residual, post_residual_addition)
 
     def forward_hip(
@@ -1144,6 +1173,8 @@ class GemmaRMSNorm(BaseFusedOp):
         residual: Optional[torch.Tensor] = None,
         post_residual_addition: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        if x.dtype in _FLOAT8_DTYPES:
+            return self.forward_native(x, residual, post_residual_addition)
         if _use_aiter and _has_rocm_triton_gemma_rms_norm:
             if residual is not None:
                 if post_residual_addition is not None:
