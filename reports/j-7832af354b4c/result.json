@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38574",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Reproduced the independent review against candidate e10d8adc527259f9bfd2a489675120226794f3fc. A dense BF16 MTP layer matched by a broad Linear W4A8 compressed-tensors target still raises during construction without an MTP ignore entry. Preserved the candidate's actionable error context and packed-layer safety boundary, and added the missing user documentation. No automatic dense fallback was added because checkpoint tensor names are unavailable when parameter storage is selected, so a prefix-only fallback could silently allocate incompatible dense storage for genuinely packed MTP weights.",
+  "tests": [
+    {
+      "command": "Base compressed_tensors.py loaded with importlib; construct ReplicatedLinear for mtp.layers.0.self_attn.qkv_proj using broad Linear W4A8 config and no ignore",
+      "exit_code": 1,
+      "what_was_measured": "The recorded base raises the generic NotImplementedError during actual ReplicatedLinear construction. Raw output: /job/raw/j-7832af354b4c/base-construction.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7832af354b4c/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_nextn.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate e10d8adc527259f9bfd2a489675120226794f3fc, all three candidate tests passed, while the dense no-ignore test explicitly confirmed construction still raises. Raw output: /job/raw/j-7832af354b4c/candidate-nextn.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7832af354b4c/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_nextn.py test/registered/unit/layers/quantization/test_compressed_tensors_mixed_precision.py test/registered/unit/layers/quantization/test_compressed_tensors_lm_head.py test/registered/unit/layers/quantization/test_compressed_tensors_kv_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "21 focused tests passed after consolidation, covering explicit ignore, dense MTP diagnostic context, packed-MTP pre-load safety, and adjacent compressed-tensors behavior. Raw output: /job/raw/j-7832af354b4c/passing-after.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7832af354b4c/venv/bin/python inline explicit-ignore BF16 GPU comparison",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X gfx950, explicit re:mtp\\..* ignore selected UnquantizedLinearMethod and BF16 GPU output matched an independent CPU FP32 matmul reference with max absolute error 0.0. Raw output: /job/raw/j-7832af354b4c/gpu-explicit-ignore.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI355X (gfx950), Torch 2.11.0+rocm7.2, HIP 7.2.26015; source imported from /job/repo/python/sglang. See /job/raw/j-7832af354b4c/gpu-explicit-ignore.txt.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Dense MTP weights still require an explicit quantization_config.ignore entry; this PR improves diagnosis and documents the safe configuration but does not claim to resolve no-ignore startup.",
+    "Actual packed MTP checkpoint loading was not exercised. The regression only proves that pre-load selection does not silently choose UnquantizedLinearMethod.",
+    "No full Qwen3-Next checkpoint or original 2x H100 NVL TP2/EP2 environment was available, so end-to-end server startup remains unverified.",
+    "No native source changed, so a native rebuild was not applicable."
+  ],
+  "source_paths": [
+    "/job/repo/python/sglang/srt/layers/quantization/compressed_tensors/compressed_tensors.py",
+    "/job/repo/test/registered/unit/layers/quantization/test_compressed_tensors_nextn.py",
+    "/job/repo/docs/docs/advanced_features/quantization.mdx"
+  ],
+  "native_paths": []
+}
