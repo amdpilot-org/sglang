@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31459",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the Model Gateway MCP tool_choice rewrite in both non-streaming and streaming Responses paths. The initial upstream request now preserves an explicit client choice, omitted choices still default to auto, and post-MCP resume requests explicitly use auto.",
+  "tests": [
+    {
+      "command": "cargo test --test api_tests api::responses_api_test::test_non_streaming_mcp_minimal_e2e_with_persistence -- --exact --nocapture (before source fix)",
+      "exit_code": 101,
+      "what_was_measured": "Captured two actual mock-upstream /v1/responses payloads; the initial payload was auto instead of the requested required value."
+    },
+    {
+      "command": "cargo test --test api_tests api::responses_api_test::test_streaming_with_mcp_tool_calls -- --exact --nocapture (before source fix)",
+      "exit_code": 101,
+      "what_was_measured": "Captured the streaming mock-upstream request sequence; the initial payload was auto instead of required, while MCP execution and the final assistant message completed."
+    },
+    {
+      "command": "cargo test --test api_tests api::responses_api_test::test_non_streaming_mcp_minimal_e2e_with_persistence -- --exact --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "The non-streaming upstream request sequence was required then auto; the follow-up contained function_call_output and the response contained the completed MCP call and final assistant message."
+    },
+    {
+      "command": "cargo test --test api_tests api::responses_api_test::test_streaming_with_mcp_tool_calls -- --exact --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "The streaming upstream request sequence was required then auto; the follow-up contained function_call_output and the SSE response contained the completed MCP call and final assistant message."
+    },
+    {
+      "command": "cargo test --lib initial_tool_choice -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Two boundary tests passed: explicit required/auto/none choices are preserved for initial requests, and an omitted choice defaults to auto."
+    },
+    {
+      "command": "cargo fmt -- --check && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Rust formatting and patch whitespace checks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is deterministic JSON routing in the Rust Model Gateway and was reproduced with its in-process mock OpenAI worker and mock MCP server; no model computation or GPU kernel is involved."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No real model weights or external MCP service were used; the deterministic fixture validates Model Gateway transport, MCP execution, request sequencing, and response assembly only.",
+    "No GPU execution was performed because this routing-only defect does not enter SGLang model execution.",
+    "An upstream candidate fix exists at https://github.com/sgl-project/sglang/pull/31469 and was open when reviewed."
+  ]
+}
