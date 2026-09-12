@@ -1071,6 +1071,16 @@ class DeepseekSparseAttnBackend(
         indexer_k_start_end, token_to_batch_idx = self._cal_indexer_k_start_end(
             forward_batch, bs_idx_cpu
         )
+        if forward_batch.forward_mode.is_draft_extend_v2():
+            # Metadata is planned before eager attention-TP/DP padding.  Draft-v2
+            # consumes these lengths row-wise in the top-k transform and the
+            # DeepGEMM schedule, so give synthetic physical rows an explicit
+            # zero-length entry.  The draft-v2 indexer does not consume
+            # indexer_k_start_end/token_to_batch_idx (and intentionally leaves
+            # them as None).
+            seqlens_expanded = pad_dsa_cache_seqlens(
+                forward_batch, seqlens_expanded
+            )
         # 1D, expanded seqlens (1D means cheap to compute, so always compute it)
         dsa_cache_seqlens_int32 = compute_dsa_seqlens(
             original_seq_lens=seqlens_expanded,
@@ -1144,6 +1154,86 @@ class DeepseekSparseAttnBackend(
             kpool_inputs=kpool_inputs,
         )
         self.forward_metadata = metadata
+
+    def validate_preplanned_metadata_extent(self, forward_batch: ForwardBatch) -> None:
+        """Accept post-plan DSA padding only when kernel-facing rows are covered."""
+        if not forward_batch.has_stale_forward_metadata_plan():
+            return
+        if not forward_batch.forward_mode.is_draft_extend_v2():
+            return super().validate_preplanned_metadata_extent(forward_batch)
+
+        physical_tokens = len(forward_batch.input_ids)
+        metadata = self.forward_metadata
+        dsa_rows = (
+            len(metadata.dsa_cache_seqlens_int32)
+            if metadata is not None and metadata.dsa_cache_seqlens_int32 is not None
+            else -1
+        )
+        dsa_offsets = (
+            len(metadata.dsa_cu_seqlens_k)
+            if metadata is not None and metadata.dsa_cu_seqlens_k is not None
+            else -1
+        )
+        query_offsets = (
+            len(metadata.dsa_cu_seqlens_q)
+            if metadata is not None and metadata.dsa_cu_seqlens_q is not None
+            else -1
+        )
+        expanded_rows = (
+            len(metadata.dsa_seqlens_expanded)
+            if metadata is not None and metadata.dsa_seqlens_expanded is not None
+            else -1
+        )
+        token_batch_rows = (
+            len(metadata.token_to_batch_idx)
+            if metadata is not None and metadata.token_to_batch_idx is not None
+            else -1
+        )
+        indexer_range_rows = (
+            tuple(len(rows) for rows in metadata.indexer_k_start_end)
+            if metadata is not None and metadata.indexer_k_start_end is not None
+            else (-1, -1)
+        )
+        topk_offset_rows = (
+            len(metadata.topk_indices_offset)
+            if metadata is not None and metadata.topk_indices_offset is not None
+            else None
+        )
+        schedule_rows = (
+            metadata.paged_mqa_ctx_lens_2d.shape[0]
+            if metadata is not None
+            and getattr(metadata, "paged_mqa_ctx_lens_2d", None) is not None
+            else None
+        )
+        kv_rows = (
+            len(forward_batch.out_cache_loc)
+            if forward_batch.out_cache_loc is not None
+            else -1
+        )
+        if (
+            dsa_rows != physical_tokens
+            or dsa_offsets != physical_tokens + 1
+            or query_offsets != physical_tokens + 1
+            or expanded_rows != physical_tokens
+            # These are prefill-only indexer inputs. Draft-v2 deliberately
+            # returns None from _cal_indexer_k_start_end().
+            or token_batch_rows != -1
+            or indexer_range_rows != (-1, -1)
+            or topk_offset_rows not in (None, physical_tokens)
+            or schedule_rows not in (None, physical_tokens)
+            or kv_rows != physical_tokens
+        ):
+            raise RuntimeError(
+                "DSA preplanned metadata does not cover the physical execution "
+                f"extent: physical_tokens={physical_tokens}, dsa_rows={dsa_rows}, "
+                f"dsa_offsets={dsa_offsets}, query_offsets={query_offsets}, "
+                f"expanded_rows={expanded_rows}, "
+                f"token_batch_rows={token_batch_rows}, "
+                f"indexer_range_rows={indexer_range_rows}, "
+                f"topk_offset_rows={topk_offset_rows}, "
+                f"schedule_rows={schedule_rows}, "
+                f"kv_rows={kv_rows}."
+            )
 
     def _cal_indexer_k_start_end(
         self,
@@ -3754,6 +3844,10 @@ class DeepseekSparseAttnMultiStepBackend:
     def init_forward_metadata(self, forward_batch: ForwardBatch):
         for i in range(self.speculative_num_steps - 1):
             self.attn_backends[i].init_forward_metadata(forward_batch)
+
+    def validate_preplanned_metadata_extent(self, forward_batch: ForwardBatch) -> None:
+        for backend in self.attn_backends:
+            backend.validate_preplanned_metadata_extent(forward_batch)
 
     def init_cuda_graph_state(self, max_bs: int, max_num_tokens: int):
         for i in range(self.speculative_num_steps - 1):

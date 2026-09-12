@@ -1,0 +1,24 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38580",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 3289's attention-TP padding prediction and eager fail-closed validation, independently reproduced review PR 3315's actual draft-v2 planner counterexample at exact commit 43c2db023064dfbfe823e0147be6b47d3fc06f2b, then made the planner zero-pad the expanded sequence lengths used by top-k and DeepGEMM scheduling while accepting the intentionally absent prefill-only indexer metadata.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-22a9afea56b4/venv/bin/python /tmp/j-22a9afea56b4-actual-planner.py while detached at 43c2db023064dfbfe823e0147be6b47d3fc06f2b",
+      "exit_code": 0,
+      "what_was_measured": "On the exact candidate, real planner helpers produced four padded DSA cache rows, three expanded rows, and no indexer ranges/token-to-batch map; the candidate validator rejected that state."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-22a9afea56b4/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_eager_metadata_extent.py test/registered/kernel/attention/test_dsa_padding_metadata.py test/registered/unit/model_executor/test_forward_metadata_plan_record.py",
+      "exit_code": 0,
+      "what_was_measured": "14 focused tests passed, including GPU three-to-four-row attention-TP padding and the corrected draft-v2 contract where expanded/schedule/KV extents cover four physical rows while prefill-only indexer fields remain absent."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Planner padding and the exact counterexample ran on AMD Instinct MI350X with ROCm 7.2.26015."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": "No DeepSeek DSA model weights or qualified end-to-end speculative DSA fixture were available. Therefore full model-level attention, indexer kernel, DeepGEMM schedule execution, top-k transform, and KV-write numerics remain unverified. The supplied tiny Llama fixture is a different architecture and was not used as substitute evidence. No C++ or FlyDSL source changed, so no native rebuild was applicable; CUDA-only and distributed variants were not exercised."
+}
