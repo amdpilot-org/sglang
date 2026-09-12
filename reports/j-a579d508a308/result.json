@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36822",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1181",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1145",
+  "candidate_commit": "803c48fc6fa1441b4e79ccd83de0bb207361947e",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes BF16 scale allocation and TP-dependent shapes, but GPTQ GROUP scale dispatch does not forward load_full_w2, so desc_act w2 scales are still sharded in the real loader path.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a579d508a308/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-a579d508a308/review-evidence/candidate_test.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Recorded base reproduced 4 failures and 1 pass for dtype, TP shape, and direct loader behavior."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a579d508a308/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_gptq_marlin_moe_loading.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate's submitted focused regression passed 5 tests."
+    },
+    {
+      "command": "independent Python assertion through FusedMoE._weight_loader_impl for GPTQ GROUP w2_scales, desc_act metadata, TP rank 1",
+      "exit_code": 1,
+      "what_was_measured": "Actual generic GROUP dispatch ignored load_full_w2, copied only the rank-1 half, and left half of the full destination uninitialized."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X gfx950 was visible, but the original failure requires CUDA Marlin and TP=2; no relevant GPU kernel was executed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "GPTQ GROUP w2_scales with desc_act=True and TP rank 1 still follows the sharded generic scale-loader branch because load_full_w2 is not forwarded there.",
+    "The candidate regression calls _load_w2 directly and therefore does not test the failing production dispatch through _weight_loader_impl."
+  ],
+  "remaining_limitations": [
+    "Only one AMD gfx950 GPU was available; the reported two-rank NVIDIA RTX 4090 CUDA workload was unsupported.",
+    "The reported model weights were unavailable, so serving-path NaN logits were not reproduced.",
+    "No native source changed and no native rebuild was applicable."
+  ]
+}
