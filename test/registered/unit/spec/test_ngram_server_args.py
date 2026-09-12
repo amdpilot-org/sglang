@@ -1,3 +1,5 @@
+import subprocess
+import sys
 import unittest
 
 from sglang.srt.arg_groups.validation_hook import validate_ngram_capacity
@@ -21,7 +23,7 @@ class TestNgramServerArgs(CustomTestCase):
             speculative_ngram_max_trie_depth=4,
         )
         with self.assertRaisesRegex(
-            AssertionError,
+            ValueError,
             "speculative_ngram_capacity must be greater than speculative_ngram_max_trie_depth",
         ):
             validate_ngram_capacity(args)
@@ -33,7 +35,7 @@ class TestNgramServerArgs(CustomTestCase):
             speculative_ngram_max_trie_depth=4,
         )
         with self.assertRaisesRegex(
-            AssertionError,
+            ValueError,
             "speculative_ngram_capacity must be greater than speculative_ngram_max_trie_depth",
         ):
             validate_ngram_capacity(args)
@@ -53,6 +55,33 @@ class TestNgramServerArgs(CustomTestCase):
             speculative_ngram_max_trie_depth=4,
         )
         validate_ngram_capacity(args)
+
+    def test_capacity_equal_to_max_depth_is_rejected_under_optimization(self):
+        code = """
+from sglang.srt.arg_groups.validation_hook import validate_ngram_capacity
+from sglang.srt.server_args import ServerArgs
+
+args = ServerArgs(
+    model_path="dummy",
+    served_model_name="dummy",
+    speculative_algorithm="NGRAM",
+    speculative_ngram_capacity=4,
+    speculative_ngram_max_trie_depth=4,
+)
+args.resolve_once()
+validate_ngram_capacity(args)
+"""
+        result = subprocess.run(
+            [sys.executable, "-O", "-c", code],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "speculative_ngram_capacity must be greater than "
+            "speculative_ngram_max_trie_depth",
+            result.stderr,
+        )
 
 
 if __name__ == "__main__":

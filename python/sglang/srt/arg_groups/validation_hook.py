@@ -31,15 +31,17 @@ def validate_ngram_capacity(server_args: Any) -> None:
         cfg.speculative_algorithm is not None
         and cfg.speculative_algorithm.upper() == "NGRAM"
     ):
-        assert (
-            cfg.speculative_ngram_capacity > cfg.speculative_ngram_max_trie_depth
-        ), (
-            "speculative_ngram_capacity must be greater than "
-            "speculative_ngram_max_trie_depth because the trie root also "
-            "occupies one node. Got "
-            f"capacity={cfg.speculative_ngram_capacity}, "
-            f"max_trie_depth={cfg.speculative_ngram_max_trie_depth}."
-        )
+        if (
+            cfg.speculative_ngram_capacity
+            <= cfg.speculative_ngram_max_trie_depth
+        ):
+            raise ValueError(
+                "speculative_ngram_capacity must be greater than "
+                "speculative_ngram_max_trie_depth because the trie root also "
+                "occupies one node. Got "
+                f"capacity={cfg.speculative_ngram_capacity}, "
+                f"max_trie_depth={cfg.speculative_ngram_max_trie_depth}."
+            )
 
 
 def check_server_args(server_args: Any):
