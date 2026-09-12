@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36678",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Added an opt-in return_request_metrics field to OpenAI-compatible chat and completion requests. Measured queue, first-token, generation, end-to-end, mean inter-token, and output-throughput values are returned under sglext.request_metrics without enabling global metrics. Default response shapes are unchanged, streaming emits one terminal extension chunk, and unavailable or undefined values are omitted instead of serialized as zero.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-8dcf6e0404bf/venv/bin/python - <<'PY' ... assert hasattr(ChatCompletionRequest(...), 'return_request_metrics') ... PY",
+      "exit_code": 1,
+      "what_was_measured": "Baseline reproduction: the checked-out request schema silently discarded the requested opt-in field. Raw output: /job/reproduction-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8dcf6e0404bf/venv/bin/python test/registered/unit/observability/test_req_time_stats.py -v",
+      "exit_code": 0,
+      "what_was_measured": "Nine timing tests, including exact derived latency/throughput values, omission for undefined single-token interval metrics, and per-request timing transport without global metrics. Raw output: /job/test-req-time-stats.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8dcf6e0404bf/venv/bin/python test/registered/unit/entrypoints/openai/test_serving_completions.py -v",
+      "exit_code": 0,
+      "what_was_measured": "Twenty-two completion serving tests covering opt-in isolation, serialization without zero placeholders, internal propagation, and final streaming sglext placement before [DONE]. Raw output: /job/test-serving-completions.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8dcf6e0404bf/venv/bin/python test/registered/unit/entrypoints/openai/test_serving_chat.py -v",
+      "exit_code": 0,
+      "what_was_measured": "One hundred thirty-six chat serving tests, including distinct per-choice request metrics and existing response/streaming compatibility. Raw output: /job/test-serving-chat.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8dcf6e0404bf/venv/bin/python - <<'PY' ... torch CPU/GPU comparison ... PY",
+      "exit_code": 0,
+      "what_was_measured": "One assigned AMD Instinct MI355X executed a 4096-element numerical check against an independent CPU result; max absolute error was 1.1920928955078125e-07 and allclose passed. This verifies the prepared Torch/ROCm GPU environment, not the HTTP feature itself. Raw output: /job/gpu-check.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No end-to-end model server was launched because the prepared environment did not provide a local model checkout or weight path; request schema, timing propagation/calculation, response construction, serialization, multi-choice isolation, and streaming ordering were validated directly.",
+    "GPU evidence is limited to the prepared-environment numerical check recorded in /job/gpu-check.txt: one AMD Instinct MI355X, max_abs_error 1.1920928955078125e-07 versus CPU, allclose true. It is not evidence for the HTTP response-path behavior.",
+    "The embedded Rust server is outside the requested scope.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable."
+  ]
+}
