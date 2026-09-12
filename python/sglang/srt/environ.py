@@ -2,6 +2,7 @@ import base64
 import functools
 import json
 import os
+import resource
 import warnings
 from contextlib import contextmanager
 from enum import IntEnum
@@ -40,6 +41,26 @@ def _default_cache_subdir(name: str) -> str:
 def _default_tree_cache_sanity_check() -> bool:
     """Enable the expensive tree-cache sanity check by default in CI."""
     return envs.SGLANG_IS_IN_CI.get()
+
+
+def _default_disaggregation_zmq_socket_cache_size() -> int:
+    """Bound the endpoint cache by the process's current descriptor budget."""
+    configured_default = 1024
+    descriptors_per_endpoint = 4
+    descriptor_reserve = 32
+    try:
+        soft_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if soft_limit == resource.RLIM_INFINITY:
+            return configured_default
+        open_descriptors = len(os.listdir("/proc/self/fd"))
+    except (OSError, ValueError):
+        return configured_default
+
+    available = max(0, soft_limit - open_descriptors - descriptor_reserve)
+    return max(
+        1,
+        min(configured_default, available // descriptors_per_endpoint),
+    )
 
 
 class EnvField:
@@ -681,6 +702,9 @@ class Envs:
     SGLANG_DISAGGREGATION_NIXL_BACKEND_PARAMS = EnvStr("{}")
     SGLANG_DISAGG_PREFILL_EARLY_SEND_CACHED_PREFIX = EnvBool(True)
     SGLANG_DISAGGREGATION_ZMQ_MAX_SOCKETS = EnvInt(16384)
+    SGLANG_DISAGGREGATION_ZMQ_SOCKET_CACHE_SIZE = EnvInt(
+        _default_disaggregation_zmq_socket_cache_size
+    )
     SGLANG_DISAGGREGATION_ALL_CP_RANKS_TRANSFER = EnvBool(False)
     SGLANG_DISAGGREGATION_FORCE_QUERY_PREFILL_DP_RANK = EnvBool(False)
     SGLANG_DISAGGREGATION_BOOTSTRAP_ENTRY_CLEANUP_INTERVAL = EnvInt(120)
