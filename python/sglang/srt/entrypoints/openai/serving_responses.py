@@ -666,7 +666,7 @@ class OpenAIServingResponses(OpenAIServingChat):
         status = "completed"
         if self.use_harmony:
             assert isinstance(context, HarmonyContext)
-            output = self._make_response_output_items_with_harmony(context)
+            output = self._make_response_output_items_with_harmony(context, request)
             # num_reasoning_tokens isn't wired through HarmonyContext yet; stays 0.
             num_prompt_tokens = context.num_prompt_tokens
             num_generated_tokens = context.num_output_tokens
@@ -854,7 +854,7 @@ class OpenAIServingResponses(OpenAIServingChat):
             content = final_output
 
         output_items = []
-        if reasoning_content:
+        if reasoning_content and request.include_reasoning:
             # Mirror the single parsed blob into ``summary`` when the caller opts
             # in via ``reasoning.summary``; full trace stays in ``content``.
             wants_summary = self._wants_reasoning_summary(request)
@@ -971,15 +971,24 @@ class OpenAIServingResponses(OpenAIServingChat):
     def _make_response_output_items_with_harmony(
         self,
         context: HarmonyContext,
+        request: ResponsesRequest,
     ):
         output_items = []
         num_init_messages = context.num_init_messages
         for msg in context.messages[num_init_messages:]:
-            output_items.extend(parse_output_message(msg))
+            output_items.extend(
+                item
+                for item in parse_output_message(msg)
+                if request.include_reasoning or item.type != "reasoning"
+            )
         # Handle the generation stopped in the middle (if any).
         last_items = parse_remaining_state(context.parser)
         if last_items:
-            output_items.extend(last_items)
+            output_items.extend(
+                item
+                for item in last_items
+                if request.include_reasoning or item.type != "reasoning"
+            )
         return output_items
 
     @staticmethod
@@ -1559,7 +1568,10 @@ class OpenAIServingResponses(OpenAIServingChat):
                     if previous_item.recipient is not None:
                         # Deal with tool call here
                         pass
-                    elif previous_item.channel == "analysis":
+                    elif (
+                        previous_item.channel == "analysis"
+                        and request.include_reasoning
+                    ):
                         reasoning_item = ResponseReasoningItem(
                             id=f"rs_{random_uuid()}",
                             type="reasoning",
@@ -1683,6 +1695,7 @@ class OpenAIServingResponses(OpenAIServingChat):
                 elif (
                     ctx.parser.current_channel == "analysis"
                     and ctx.parser.current_recipient is None
+                    and request.include_reasoning
                 ):
                     if not sent_output_item_added:
                         sent_output_item_added = True
@@ -2267,7 +2280,7 @@ class OpenAIServingResponses(OpenAIServingChat):
                 else:
                     reasoning_chunk = None
 
-                if reasoning_chunk:
+                if reasoning_chunk and request.include_reasoning:
                     if message_state["open"]:
                         for ev in _close_message_item():
                             yield ev

@@ -20,6 +20,27 @@ register_cpu_ci(est_time=10, suite="base-a-test-cpu")
 
 
 class NonHarmonyStreamTestCase(CustomTestCase):
+    def test_include_reasoning_false_suppresses_stream_events(self):
+        serving = make_serving()
+        serving.reasoning_parser = "deepseek-r1"
+        hidden = ResponsesRequest(
+            model="x", input="hi", stream=True, store=False, include_reasoning=False
+        )
+        shown = ResponsesRequest(
+            model="x", input="hi", stream=True, store=False, include_reasoning=True
+        )
+
+        hidden_events = StreamFixture(serving, hidden, require_reasoning=True).run(
+            [engine_chunk("<think>private</think>visible", 4, finish=True)]
+        )
+        shown_events = StreamFixture(serving, shown, require_reasoning=True).run(
+            [engine_chunk("<think>private</think>visible", 4, finish=True)]
+        )
+
+        self.assertNotIn("response.reasoning_text.delta", event_types(hidden_events))
+        self.assertIn("response.output_text.delta", event_types(hidden_events))
+        self.assertIn("response.reasoning_text.delta", event_types(shown_events))
+
     def test_reasoning_parser_uses_processed_reasoning_state(self):
         serving = make_serving()
         serving.reasoning_parser = "deepseek-r1"

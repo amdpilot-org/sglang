@@ -34,6 +34,7 @@ from sglang.srt.managers.io_struct import GenerateReqInput
 from sglang.srt.parser.code_completion_parser import (
     generate_completion_prompt_from_request,
 )
+from sglang.srt.parser.reasoning_parser import ReasoningParser
 from sglang.srt.runtime_context import get_serving
 from sglang.srt.utils.weight_versions import build_endpoint_weight_version_metadata
 from sglang.utils import convert_json_schema_to_str
@@ -55,6 +56,19 @@ class OpenAIServingCompletion(OpenAIServingBase):
     ):
         super().__init__(tokenizer_manager)
         self.template_manager = template_manager
+        self.reasoning_parser = self.tokenizer_manager.config_value("reasoning_parser")
+
+    def _strip_reasoning(self, request: CompletionRequest, text: str) -> str:
+        if request.include_reasoning or not self.reasoning_parser:
+            return text
+        parser = ReasoningParser(
+            model_type=self.reasoning_parser,
+            stream_reasoning=False,
+            force_reasoning=self.template_manager.force_reasoning,
+            tokenizer=self.tokenizer_manager.tokenizer,
+        )
+        _, visible_text = parser.parse_non_stream(text)
+        return visible_text
 
     def _request_id_prefix(self) -> str:
         return "cmpl-"
@@ -244,6 +258,7 @@ class OpenAIServingCompletion(OpenAIServingBase):
         spec_tokens_details = {}
 
         stream_started = False
+        reasoning_parsers = {}
         try:
             include_usage, continuous_usage_stats = should_include_usage(
                 request.stream_options,
@@ -276,12 +291,6 @@ class OpenAIServingCompletion(OpenAIServingBase):
 
                 is_first_chunk = index not in stream_offsets
                 offset = stream_offsets.get(index, 0)
-                # Handle echo for first chunk
-                if is_first_chunk:  # The first chunk
-                    if request.echo:
-                        echo_text = self._get_echo_text(request, index)
-                        text = echo_text + text
-
                 # Handle logprobs
                 logprobs = None
                 if request.logprobs is not None:
@@ -337,7 +346,8 @@ class OpenAIServingCompletion(OpenAIServingBase):
                     if is_first_chunk:
                         chunk_prompt_token_ids = content.get("prompt_token_ids")
 
-                # Generate delta
+                # Generate delta from the raw engine text before filtering so
+                # cumulative streaming offsets remain aligned with the engine.
                 if get_serving().incremental_streaming_output:
                     delta = text
                 else:
@@ -345,6 +355,23 @@ class OpenAIServingCompletion(OpenAIServingBase):
                 stream_offsets[index] = len(content["text"])
                 finish_reason = content["meta_info"].get("finish_reason", None)
                 finish_reason_type = finish_reason["type"] if finish_reason else None
+
+                if not request.include_reasoning and self.reasoning_parser:
+                    parser = reasoning_parsers.get(index)
+                    if parser is None:
+                        parser = reasoning_parsers[index] = ReasoningParser(
+                            model_type=self.reasoning_parser,
+                            stream_reasoning=True,
+                            force_reasoning=self.template_manager.force_reasoning,
+                            tokenizer=self.tokenizer_manager.tokenizer,
+                        )
+                    _, delta = parser.parse_stream_chunk(delta)
+                    if finish_reason_type is not None and finish_reason_type != "abort":
+                        _, end_text = parser.parse_stream_end()
+                        delta = (delta or "") + (end_text or "")
+
+                if is_first_chunk and request.echo:
+                    delta = self._get_echo_text(request, index) + delta
 
                 # Abort with an explicit error status_code is a system error
                 # (timeout, OOM, validation): emit a streaming error chunk.
@@ -565,7 +592,7 @@ class OpenAIServingCompletion(OpenAIServingBase):
             )
 
         for idx, ret_item in enumerate(ret):
-            text = ret_item["text"]
+            text = self._strip_reasoning(request, ret_item["text"])
 
             # Handle echo
             if echo:

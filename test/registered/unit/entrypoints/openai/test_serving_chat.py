@@ -313,6 +313,60 @@ class ServingChatTestCase(unittest.TestCase):
         self.fastapi_request = Mock(spec=Request)
         self.fastapi_request.headers = {}
 
+    def test_include_reasoning_false_chat_stream_and_non_stream_are_isolated(self):
+        self.chat.reasoning_parser = "deepseek-r1"
+        ret = [
+            {
+                "text": "<think>private</think>visible",
+                "meta_info": {
+                    "id": "chatcmpl-reasoning",
+                    "prompt_tokens": 2,
+                    "completion_tokens": 4,
+                    "cached_tokens": 0,
+                    "finish_reason": {"type": "stop", "matched": None},
+                    "weight_version": "default",
+                },
+            }
+        ]
+        hidden = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "hi"}],
+            include_reasoning=False,
+        )
+        shown = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "hi"}],
+            include_reasoning=True,
+        )
+
+        hidden_message = (
+            self.chat._build_chat_response(hidden, ret, 1).choices[0].message
+        )
+        shown_message = self.chat._build_chat_response(shown, ret, 1).choices[0].message
+        self.assertEqual(hidden_message.content, "visible")
+        self.assertIsNone(hidden_message.reasoning_content)
+        self.assertEqual(shown_message.reasoning_content, "private")
+
+        content = {**ret[0], "index": 0}
+        hidden_chunks = get_or_create_event_loop().run_until_complete(
+            self._collect_stream_content(content, None, hidden)
+        )
+        shown_chunks = get_or_create_event_loop().run_until_complete(
+            self._collect_stream_content(content, None, shown)
+        )
+        self.assertFalse(
+            any(
+                c["choices"][0]["delta"].get("reasoning_content")
+                for c in self._parse_chunks(hidden_chunks)
+            )
+        )
+        self.assertTrue(
+            any(
+                c["choices"][0]["delta"].get("reasoning_content")
+                for c in self._parse_chunks(shown_chunks)
+            )
+        )
+
     @staticmethod
     def _render_tool_results_in_call_order(messages, **kwargs):
         """Block-level tool_call_id association, like the GLM chat templates."""

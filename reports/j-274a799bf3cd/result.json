@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39103",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Added request-scoped include_reasoning support to Responses, chat-completion, and completion protocols. Reasoning parsers still split generated output so visible answer and tool-call content are preserved, while reasoning fields/events or legacy completion reasoning text are suppressed only when include_reasoning is false. Default and explicit true requests retain prior behavior.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-274a799bf3cd/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_completions.py::ServingCompletionTestCase::test_include_reasoning_false_filters_non_stream_and_is_request_local test/registered/unit/entrypoints/openai/test_serving_responses.py::IncludeReasoningTestCase::test_non_stream_suppresses_only_reasoning_and_is_request_local test/registered/unit/entrypoints/openai/test_serving_responses_stream.py::NonHarmonyStreamTestCase::test_include_reasoning_false_suppresses_stream_events",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression on the recorded base: completion leaked tagged reasoning, Responses non-stream returned a reasoning item, and Responses streaming emitted reasoning events. Raw output: reports/j-274a799bf3cd/raw/failing-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-274a799bf3cd/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_completions.py test/registered/unit/entrypoints/openai/test_serving_chat.py test/registered/unit/entrypoints/openai/test_serving_responses.py test/registered/unit/entrypoints/openai/test_serving_responses_stream.py",
+      "exit_code": 0,
+      "what_was_measured": "204 OpenAI serving tests plus 72 subtests passed, covering actual completion/chat/Responses builders and stream converters, false/true cross-request isolation, and preservation of tool-call output. Raw output: reports/j-274a799bf3cd/raw/unit-tests-final.txt"
+    },
+    {
+      "command": "pre-commit hooks: trailing-whitespace, end-of-file-fixer, check-ast, isort, ruff, ruff-format, codespell on all changed Python files",
+      "exit_code": 0,
+      "what_was_measured": "Changed files pass repository formatting, lint, syntax, import-order, and spelling checks. Raw output: reports/j-274a799bf3cd/raw/pre-commit-final.txt"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-274a799bf3cd/venv/bin/python (2x2 torch.matmul on cuda compared with an independently specified CPU tensor)",
+      "exit_code": 0,
+      "what_was_measured": "One visible AMD Instinct MI355X under Torch 2.11.0+rocm7.2/HIP 7.2.26015 produced [[19.0, 22.0], [43.0, 50.0]], exactly matching the CPU reference. Raw output: reports/j-274a799bf3cd/raw/gpu-check.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A one-GPU ROCm Torch numerical check ran on AMD Instinct MI355X and exactly matched the independent CPU reference; the API conversion regressions themselves are deterministic CPU tests."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No live language-model server was launched because the prepared environment did not provide model weights; behavior was verified at the actual post-generation response builders and streaming converters with parser-produced reasoning, visible text, and tool calls.",
+    "No native source changed, so a native rebuild was neither required nor performed."
+  ]
+}

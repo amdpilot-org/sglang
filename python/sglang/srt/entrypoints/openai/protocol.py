@@ -349,6 +349,7 @@ class CompletionRequest(BaseModel):
     temperature: float = 1.0
     top_p: float = 1.0
     user: Optional[str] = None
+    include_reasoning: bool = True
     return_hidden_states: Union[bool, Literal["last"]] = False
     return_routed_experts: bool = False
     routed_experts_start_len: int = 0
@@ -901,6 +902,7 @@ class ChatCompletionRequest(BaseModel):
         "models that expose a maximum-effort tier above 'high'; models that don't "
         "support it treat it the same as 'high'.",
     )
+    include_reasoning: bool = True
     task: Optional[
         Literal["action", "query", "authority", "domain", "title", "read_url"]
     ] = Field(
@@ -1617,6 +1619,7 @@ class ResponsesRequest(BaseModel):
     # handles replayed shapes that don't satisfy every openai TypedDict.
     input: Union[str, List[ResponseInputOutputItem], List[Dict[str, Any]]]
     instructions: Optional[str] = None
+    include_reasoning: bool = True
     max_output_tokens: Optional[int] = None
     max_tool_calls: Optional[int] = None
     metadata: Optional[Dict[str, Any]] = None
