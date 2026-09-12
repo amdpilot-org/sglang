@@ -433,6 +433,24 @@ class Cosmos3SamplingParams(SamplingParams):
                 )
             action_output = self.action_mode != "forward_dynamics"
 
+        if self.candidate_trajectory is not None:
+            from sglang.multimodal_gen.runtime.candidate_trajectory import (
+                CandidateTrajectorySpec,
+            )
+
+            candidate_spec = CandidateTrajectorySpec.from_value(
+                self.candidate_trajectory
+            )
+            if not action_output:
+                raise ValueError(
+                    "candidate_trajectory is supported only for Cosmos3 policy "
+                    "or inverse_dynamics action output"
+                )
+            if candidate_spec.reducer != "mean" and candidate_spec.count > 1:
+                raise ValueError("Cosmos3 supports only the 'mean' candidate reducer")
+            self.candidate_trajectory = candidate_spec
+            self.num_outputs_per_prompt = candidate_spec.count
+
         # Apply transfer per-hint defaults before the base resolves remaining
         # fields (e.g. flow_shift per mode), so an unset flow_shift can pick up
         # the hint's tuned shift.

@@ -2414,9 +2414,54 @@ class Cosmos3DecodingStage(PipelineStage):
         if batch.data_type == DataType.ACTION:
             if action_pred is None:
                 raise RuntimeError("Cosmos3 action request produced no action tensor")
-            payload_actions = (
-                action_pred[0] if action_pred.shape[0] == 1 else action_pred
+            candidate_spec = getattr(
+                batch.sampling_params, "candidate_trajectory", None
             )
+            candidate_payload = None
+            if candidate_spec is not None:
+                from sglang.multimodal_gen.runtime.candidate_trajectory import (
+                    CandidateTrajectorySpec,
+                    reduce_action_candidates,
+                )
+                from sglang.multimodal_gen.runtime.pipelines.cosmos3_pipeline import (
+                    Cosmos3Pipeline,
+                )
+
+                candidate_spec = CandidateTrajectorySpec.from_value(candidate_spec)
+                reduced_action = reduce_action_candidates(
+                    action_pred,
+                    candidate_spec,
+                    Cosmos3Pipeline.action_candidate_capability,
+                )
+                if candidate_spec.return_candidates:
+                    seeds = [int(batch.seed) + i for i in range(candidate_spec.count)]
+                    raw_candidates = batch.action_latents.float().cpu()
+                    if raw_action_dim is not None:
+                        raw_candidates = raw_candidates[:, :, :raw_action_dim]
+                    stats_path = getattr(
+                        batch.sampling_params, "action_stats_path", None
+                    )
+                    if stats_path is not None:
+                        method = getattr(
+                            batch.sampling_params,
+                            "action_normalization",
+                            "quantile",
+                        )
+                        raw_candidates = denormalize_action(
+                            raw_candidates, method, load_action_stats(stats_path)
+                        )
+                    candidate_payload = [
+                        {"candidate_id": i, "seed": seed, "actions": value.numpy()}
+                        for i, (seed, value) in enumerate(zip(seeds, raw_candidates))
+                    ]
+                # OutputBatch retains a batch axis for scheduler slicing, while
+                # the public logical action result does not expose one.
+                action_pred = reduced_action.unsqueeze(0)
+                payload_actions = reduced_action
+            else:
+                payload_actions = (
+                    action_pred[0] if action_pred.shape[0] == 1 else action_pred
+                )
             payload = {
                 "request_id": batch.request_id,
                 "actions": payload_actions.numpy(),
@@ -2428,6 +2473,16 @@ class Cosmos3DecodingStage(PipelineStage):
                     "num_frames": batch.num_frames,
                 },
             }
+            if candidate_spec is not None:
+                payload["candidate_group"] = {
+                    "request_id": batch.request_id,
+                    "candidate_ids": list(range(candidate_spec.count)),
+                    "reducer": candidate_spec.reducer,
+                    "seed_policy": candidate_spec.seed_policy,
+                    "physical_batch_size": candidate_spec.count,
+                }
+                if candidate_payload is not None:
+                    payload["candidates"] = candidate_payload
             return OutputBatch(
                 output=[payload],
                 action_pred=action_pred,

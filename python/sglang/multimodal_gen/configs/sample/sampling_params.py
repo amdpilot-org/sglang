@@ -221,6 +221,11 @@ class SamplingParams:
     the common API transport accept them.
     """
 
+    # Opt-in logical action-candidate contract. Pipelines without an explicit
+    # action adapter must reject this field rather than treating candidates as
+    # ordinary public media outputs.
+    candidate_trajectory: Any = None
+
     data_type: DataType = DataType.VIDEO
 
     request_id: str | None = field(default=None, metadata={"batch_sig_exclude": True})
