@@ -1,0 +1,125 @@
+author:	buffett0323
+association:	none
+edited:	false
+status:	none
+--
+Hi, I'd be happy to pick it up.
+On top of my head, `Qwen3_5GatedDeltaNet`'s custom packed weight loader ( `_get_split_sizes_for_param`) special-cases FP8 and per-tensor scales but has no branch for `AWQ PackedvLLMParameter`, whose  `qweight` / `qzeros`  pack multiple values per int32 along the output dim. I think my fix will focus on adding an AWQ/GPTQ pack-factor + group-aware branch to the split-size logic so pre-split boundaries align before delegating to the original loader.
+
+If that make sense for you, can I get an assign? I would appreciate your help for any clarification or guidance, thanks!
+--
+author:	notwitcheer
+association:	none
+edited:	false
+status:	none
+--
+That hypothesis fits the isolation table better than anything I had. Only `PackedvLLMParameter` packs several values per int32 along the output dim, which makes a misaligned split AWQ-specific. The loader hangs off `Qwen3_5GatedDeltaNet`, so it would be confined to GDN archs. vLLM resolves the split elsewhere and would not see it. Nothing in that story depends on dtype or on the radix cache. That accounts for every row, including the two controls I could not explain on my own: a non-GDN AWQ model clean on the same install, and the same artifact clean on vLLM 0.21.
+
+One correction to my issue body before you spend time on this, because it points your way rather than against you. I wrote that plain single-turn prompts answer fine. That came from a 2026-07-16 observation. A sharper probe on 2026-07-19 shows the single-turn control also degenerating once an MC few-shot system prompt is present: 512 tokens of delirium against a 512 cap, with only 1 of 9 probes answering at MC pace. Multi-turn mean was 435 completion tokens on the bf16 baseline, 290 all-fp16, 309 with radix cache off. So the failure is closer to total than my issue text implies. That sits better with misloaded weights than the prompt-dependent picture I originally described.
+
+What still needs explaining is that 1 probe in 9 lands correctly, and that bare prompts with no system prompt looked clean in July. Uniformly corrupt projection weights should take everything down. A partial misalignment fits: some split boundaries land correctly at this config's dimensions and others do not, leaving the model approximately right until the recurrent state accumulates enough error to diverge. That would be consistent with GDN specifically, since the linear-attention state carries error forward across the sequence. If your reading of the split logic shows some boundaries aligning by coincidence here, that is the confirmation.
+
+One test could settle it before you touch the loader: load the checkpoint under both engines and diff the GDN projection tensors directly. If the split is misaligned the tensors differ, and you never have to run inference to see it.
+
+On running things: I have the repro on an RTX 5090 32GB, single GPU, so tensor-parallel variants are out of reach, but any single-GPU ablation is available on request. Turnaround is around a day rather than same-day. The probe script with its verdict output is below.
+
+The assign is the maintainers' call rather than mine, but you have my support on it, and I will keep the issue updated with anything further I find.
+
+<details>
+<summary>t104 probe script (single-turn control + 6-shot multi-turn, VERDICT output)</summary>
+
+```python
+"""t104 probe — multi-turn few-shot degeneration check against a local sglang server.
+
+VERDICT vocabulary (from observed failure modes, 2026-07-16):
+  CLEAN                 single-turn and multi-turn both answer in MC pace (<=20 tok)
+  DEGENERATE-MULTITURN  single-turn fine, multi-turn few-shot rambles (mean >50 tok)
+  DEGENERATE-ALL        both ramble
+  NO-RESPONSE           server unreachable / died (check serve log for crash class)
+"""
+import json
+import sys
+import urllib.request
+
+BASE = "http://127.0.0.1:8000/v1/chat/completions"
+MODEL = sys.argv[1] if len(sys.argv) > 1 else "default"
+
+SHOTS = [
+    ("Which planet is known as the Red Planet?\nA. Venus\nB. Mars\nC. Jupiter\nD. Mercury", "B"),
+    ("What is the chemical symbol for gold?\nA. Au\nB. Ag\nC. Fe\nD. Pb", "A"),
+    ("How many sides does a hexagon have?\nA. 5\nB. 7\nC. 6\nD. 8", "C"),
+    ("Which ocean is the largest?\nA. Atlantic\nB. Indian\nC. Arctic\nD. Pacific", "D"),
+    ("What gas do plants absorb from the atmosphere?\nA. Oxygen\nB. Carbon dioxide\nC. Nitrogen\nD. Helium", "B"),
+    ("Who wrote Romeo and Juliet?\nA. Shakespeare\nB. Dickens\nC. Austen\nD. Tolstoy", "A"),
+]
+FINALS = [
+    "What is 2+2?\nA. 3\nB. 4\nC. 5\nD. 6",
+    "Which animal is a mammal?\nA. Shark\nB. Frog\nC. Whale\nD. Eagle",
+    "What is the capital of France?\nA. Berlin\nB. Madrid\nC. Rome\nD. Paris",
+    "How many days are in a week?\nA. 7\nB. 5\nC. 6\nD. 8",
+    "Which element has atomic number 1?\nA. Helium\nB. Hydrogen\nC. Lithium\nD. Carbon",
+    "What color results from mixing blue and yellow?\nA. Purple\nB. Orange\nC. Green\nD. Brown",
+    "Which continent is the Sahara in?\nA. Asia\nB. Africa\nC. Australia\nD. Europe",
+    "What is the boiling point of water at sea level in Celsius?\nA. 90\nB. 80\nC. 100\nD. 110",
+]
+SYSTEM = ("Answer the following multiple choice questions. "
+          "Respond with just the letter (A, B, C, or D). No explanation.")
+
+
+def ask(messages):
+    payload = {"model": MODEL, "messages": messages, "max_tokens": 512,
+               "temperature": 0,
+               "chat_template_kwargs": {"enable_thinking": False}}
+    req = urllib.request.Request(BASE, json.dumps(payload).encode(),
+                                 {"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=180) as r:
+        body = json.load(r)
+    msg = body["choices"][0]["message"]
+    text = (msg.get("content") or "").strip()
+    toks = (body.get("usage") or {}).get("completion_tokens")
+    if toks is None:
+        toks = len(text) // 4 + 1
+    return text, toks
+
+
+def main():
+    try:
+        st_text, st_toks = ask([{"role": "system", "content": SYSTEM},
+                                {"role": "user", "content": FINALS[0]}])
+        print(f"[single-turn] {st_toks} tok :: {st_text[:80]!r}")
+
+        mt_toks, samples = [], []
+        for q in FINALS:
+            messages = [{"role": "system", "content": SYSTEM}]
+            for shot_q, shot_a in SHOTS:
+                messages.append({"role": "user", "content": shot_q})
+                messages.append({"role": "assistant", "content": shot_a})
+            messages.append({"role": "user", "content": q})
+            text, toks = ask(messages)
+            mt_toks.append(toks)
+            samples.append(text)
+            print(f"[multi-turn]  {toks} tok :: {text[:80]!r}")
+
+        mt_mean = sum(mt_toks) / len(mt_toks)
+        print(f"[probe] single-turn={st_toks} tok, multi-turn mean={mt_mean:.1f} tok")
+        st_bad, mt_bad = st_toks > 20, mt_mean > 50
+        if mt_bad and st_bad:
+            print("VERDICT: DEGENERATE-ALL")
+        elif mt_bad:
+            print("VERDICT: DEGENERATE-MULTITURN")
+        elif st_bad:
+            print("VERDICT: DEGENERATE-SINGLETURN")
+        else:
+            print("VERDICT: CLEAN")
+    except Exception as e:
+        print(f"[probe] request failed: {type(e).__name__}: {e}")
+        print("VERDICT: NO-RESPONSE")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+</details>
+
+--
