@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19090",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3155",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3154",
+  "candidate_commit": "ea61cd6c46cc63d61262adac4ea33621c06019c5",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes the narrower missing DiffGenerator lifecycle client API and malformed-response AttributeError leak, but it does not verify or complete the original diffusion sleep/wake feature contract. Real diffusion generation/refit behavior and the requested timing comparison remain untested, and FSDP inference remains unsupported.",
+  "tests": [
+    {
+      "command": "At prepared base 358c163: HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-424497a0bebe/venv/bin/python -m pytest -q /job/review-evidence/j-424497a0bebe/test_diffusion_generator_lifecycle.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: 9 client lifecycle/error tests failed with AttributeError because release_memory_occupation, resume_memory_occupation, and update_weights_from_disk were absent; the controller-only GPU round trip passed."
+    },
+    {
+      "command": "At exact candidate ea61cd6: HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-424497a0bebe/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_diffusion_generator_lifecycle.py python/sglang/multimodal_gen/test/unit/test_diffusion_generator_shutdown.py python/sglang/multimodal_gen/test/unit/test_component_residency.py::test_snapshot_offload_sleep_uses_existing_host_storage python/sglang/multimodal_gen/test/unit/test_weight_snapshot.py::test_sleep_keeps_the_pin_lease_and_existing_pins_are_reused",
+      "exit_code": 0,
+      "what_was_measured": "15 focused tests passed, including candidate request construction and error normalization plus existing GPU residency/snapshot compatibility."
+    },
+    {
+      "command": "At exact candidate ea61cd6: HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-424497a0bebe/venv/bin/python /job/review-evidence/j-424497a0bebe/adversarial_review.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent malformed-response, broker-shaped response, explicit FSDP-unsupported, and MI350X controller numerical round-trip cases. The GPU output matched an independent CPU reference with max absolute error 7.152557373046875e-07."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 ea61cd6c46cc63d61262adac4ea33621c06019c5",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X, Torch 2.11.0+rocm7.2/HIP 7.2.26015. The independent GPU test validates the pre-existing MemoryOccupationController only; it does not validate the candidate DiffGenerator transport, a real diffusion architecture, disk refit, or distributed behavior.",
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "Not applicable: candidate changes only Python, tests, documentation, and reports; no C++, HIP, FlyDSL, or other native source changed.",
+  "remaining_counterexamples": [
+    "No real diffusion checkpoint was run through generation, sleep, wake, post-wake generation, and disk refit, so model-specific correctness and memory behavior remain unverified.",
+    "No end-to-end sleep+wake+refit versus kill-and-relaunch timing comparison was supplied or independently possible, despite being an explicit original-issue objective.",
+    "FSDP inference sleep/wake remains explicitly unsupported and independently raises RuntimeError: sleep/wake does not support FSDP inference.",
+    "The candidate's regression mocks sync_scheduler_client.forward; its GPU case exercises MemoryOccupationController code already present in the base, so the new DiffGenerator transport surface was not exercised end to end on GPU.",
+    "A broker-shaped plain dictionary error reply is converted to a lifecycle RuntimeError but loses the broker's original message and reports only that no status payload was returned."
+  ],
+  "remaining_limitations": [
+    "No qualifying diffusion model weights were present in the prepared private runtime.",
+    "The supplied tiny Llama fixture cannot qualify diffusion architecture, semantic output, memory behavior, disk refit, or timing and therefore was not used as substitute evidence.",
+    "Distributed diffusion and CUDA/NVIDIA behavior were not tested; the available architecture was a single AMD Instinct MI350X under ROCm 7.2.",
+    "No native rebuild was applicable because no native source changed."
+  ]
+}
