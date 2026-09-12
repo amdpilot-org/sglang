@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37111",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1412",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1378",
+  "candidate_commit": "485c25c09cd8300e7e11db595ebe1edbe475398b",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate independently fixes a real EagleDraftExtendInput metadata AttributeError and its focused regression passes, but it does not test or guard the original Qwen3.8-Flash-Next-NVFP4 eager/decode-graph semantic-corruption contracts. It is a partial fix, not a full original-issue resolution.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-cadd977ca53d/venv/bin/python < inline real EagleDraftExtendInput reproduction on base 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 1,
+      "what_was_measured": "The recorded base imports the real checkout classes and raises AttributeError because EagleDraftExtendInput has num_tokens_per_req but no draft_token_num."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cadd977ca53d/venv/bin/python -m pytest -q test/registered/kernel/qsa/test_qsa.py -k 'speculative_row_bound or cuda_graph_pads_dynamic_draft_extend_rows or cuda_graph_target_verify_ignores_capture_bucket_requests'",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit: 5 focused metadata regression and boundary tests passed; 37 deselected."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cadd977ca53d/venv/bin/python < inline independent canonical-width boundary cases",
+      "exit_code": 0,
+      "what_was_measured": "Real width 4, conflicting legacy/canonical attributes, zero width, width 1024, and no-speculation cases returned the expected row bound."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cadd977ca53d/venv/bin/python -m pytest -q test/registered/kernel/qsa/test_qsa.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit: 41 passed and the NVIDIA SM121-only case was skipped."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cadd977ca53d/venv/bin/python -m pytest -q test/registered/kernel/qsa/test_qsa.py -k 'weight_free_mqa_logits_matches_explicit_formula or triton_block_expansion_matches_torch_reference or graph_metadata_kernels_match_legacy_host_path'",
+      "exit_code": 0,
+      "what_was_measured": "Three GPU numerical/kernel-reference comparisons passed on the assigned AMD gfx950 GPU."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Torch 2.11.0+rocm7.2 exposed one AMD Instinct MI355X; the selected GPU numerical/kernel-reference tests passed. No NVIDIA or distributed execution occurred."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No passing 1,024-token Qwen3.8-Flash-Next-NVFP4 eager/decode-graph semantic comparison and no tested punctuation-loop fail-closed guard.",
+    "No passing approximately 25K-token four-marker eager/decode-graph comparison and no tested guard against marker loss or punctuation degeneration.",
+    "The exact 2x NVIDIA GB10 SM121 TP2/RoCEv2 configuration remains untested."
+  ],
+  "remaining_limitations": [
+    "The prepared host has one AMD Instinct MI355X gfx950 with ROCm 7.2, not NVIDIA SM121.",
+    "No second GB10 or TP2/RoCEv2 topology is available.",
+    "RadixArk/Qwen3.8-Flash-Next-NVFP4 weights are unavailable in the prepared private runtime.",
+    "The tiny Llama fixture cannot qualify the affected model architecture, CUDA graph semantics, or distributed workload.",
+    "No native rebuild was needed because candidate commit 485c25c09cd8300e7e11db595ebe1edbe475398b changes no native source."
+  ]
+}
