@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33740",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared base still made bench_serving poll /v1/models for SGLang readiness. In PD disaggregation that endpoint can succeed when only the decode worker is ready, so the benchmark begins its warmup before prefill initialization completes. The benchmark now polls the router's generation-capable /health_generate endpoint for SGLang generation backends, while preserving the prior endpoints for embeddings and non-SGLang backends. This matches the narrow approach in the still-open upstream PR https://github.com/sgl-project/sglang/pull/34396, which was inspected before implementation.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-51619e3ae255/venv/bin/python -m pytest -q test/registered/bench_fn/test_benchmark_datasets_api.py -k readiness",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before regression on the recorded base plus the new test: collection failed because the readiness URL selector did not exist; the production code directly selected /v1/models. Raw output: reports/j-51619e3ae255/raw/failing_before_readiness_test.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-51619e3ae255/venv/bin/python -m pytest -q test/registered/bench_fn/test_benchmark_datasets_api.py -k TestBenchmarkReadinessEndpoint",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression and boundary matrix: four SGLang generation backends select /health_generate; SGLang embedding, vLLM variants, TRT, and gserver retain their existing endpoints. Result: 2 passed, 10 subtests passed. Raw output: reports/j-51619e3ae255/raw/passing_after_readiness_test.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-51619e3ae255/venv/bin/python -m pytest -q test/registered/bench_fn/test_benchmark_datasets_api.py",
+      "exit_code": 0,
+      "what_was_measured": "Containing benchmark/dataset module regression suite. Result: 47 passed, 16 subtests passed. Raw output: reports/j-51619e3ae255/raw/full_benchmark_datasets_api.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU execution was used because the defect and correction are confined to the benchmark HTTP readiness endpoint selection; GPU numerical output would not add evidence for this control-plane behavior."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported GLM-5.2-FP8 weights and two H200x8-node environment were unavailable, so the original full-model, multi-node reproduction was not performed.",
+    "The assigned single gfx950 cannot qualify the reported CUDA H200 TP8 multi-node workload.",
+    "The regression deterministically validates the readiness URL decision and compatibility boundaries, not GLM-5.2 semantic accuracy or Mooncake distributed execution."
+  ]
+}
