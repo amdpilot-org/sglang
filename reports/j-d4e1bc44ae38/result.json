@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34631",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1877",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1872",
+  "candidate_commit": "b52daa1dd1564889b9eb2e59ef8c6bfcd7e32091",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate corrects the Muse answer-channel grammar boundary and removes the reported quadratic reasoning-history copies. However, its new history-slice calculation makes rollback(0) roll back every inner-grammar generation token while leaving wrapper state unchanged. This candidate-only state inconsistency requires a narrow correction and regression test.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d4e1bc44ae38/venv/bin/python /job/review-evidence-j-d4e1bc44ae38/review_probe.py (prepared base)",
+      "exit_code": 0,
+      "what_was_measured": "Imported the prepared source path and reproduced first grammar masking at position 6 versus answer-body position 11; the five Muse answer-header tokens were fed to the grammar."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d4e1bc44ae38/venv/bin/python /job/review-evidence-j-d4e1bc44ae38/review_probe.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "First grammar masking moved to answer-body position 11; only body tokens were accepted. A 2,000 reasoning + five header + 2,000 answer stream had 4,006 snapshots, zero nested history lists/copies, and rollback restored the reasoning state."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d4e1bc44ae38/venv/bin/python -m pytest -q test/registered/unit/constrained/test_reasoner_grammar_backend.py test/registered/unit/parser/test_reasoning_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "155 tests and 64 subtests passed at the exact candidate commit."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d4e1bc44ae38/venv/bin/python /job/review-evidence-j-d4e1bc44ae38/adversarial_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "Positive rollback depths matched clean replay across a repeated-channel deterministic case and 500 randomized cases, but rollback(0) emptied the inner grammar and was not a no-op."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d4e1bc44ae38/venv/bin/python /job/review-evidence-j-d4e1bc44ae38/rollback_zero_probe.py (base and candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Base preserved inner accepted tokens [20, 21] after rollback(0); candidate changed them to [] while tokens_after_end stayed 2."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d4e1bc44ae38/venv/bin/python -m compileall -q python/sglang/srt/constrained/reasoner_grammar_backend.py python/sglang/srt/environ.py python/sglang/srt/parser/reasoning_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "All candidate-changed Python source compiled successfully."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reproduced boundary, storage, and rollback defects are deterministic Python state-machine behavior and require no GPU kernel or model execution."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "At b52daa1dd1564889b9eb2e59ef8c6bfcd7e32091, ReasonerGrammarObject.rollback(0) evaluates self._state_history[-0:] as the entire history, rolls back every inner-grammar generation token, and leaves tokens_after_end unchanged."
+  ],
+  "remaining_limitations": [
+    "Muse Glimmer 30B NVFP4 weights were unavailable; production placeholder frequency, semantic output quality, and the full HTTP serving path were not reproduced.",
+    "GPT-OSS channel framing remains unverified.",
+    "No native source changed, so native rebuild validation was not applicable.",
+    "No GPU execution was performed because the reviewed behavior is CPU-side Python state management."
+  ]
+}
