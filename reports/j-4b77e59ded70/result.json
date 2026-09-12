@@ -1,0 +1,63 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38695",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "68287fe4f4bd226849b0c5cf8a494349496d1a90",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a substantive partial implementation: it adds a shared RouterGate and neutral bf16-to-fp32 helper, migrates the issue's specifically named precision-fix models plus the six prior-review counterexamples, preserves fp32 router outputs in the tested paths, and passes its focused tests. It does not satisfy the original repository-wide consolidation contract. Twenty model files still explicitly instantiate ReplicatedLinear for a gate/router, two additional model-local MoE gate classes remain outside RouterGate, and a representative untouched bf16 ReplicatedLinear returns bf16 logits. Independently, deterministic mode is not batch invariant on the assigned MI355X at a realistic 4096x128 router shape: the same token differs between batch sizes 1 and 8 by 3.62396240234375e-05, contradicting the shared layer's stated batch-invariant policy even though top-k did not flip in this sample.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4b77e59ded70/venv/bin/python /job/review-evidence-j-4b77e59ded70/test_router_gate_candidate.py (on base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: the shared sglang.srt.layers.moe.router_gate module does not exist on the recorded base."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4b77e59ded70/venv/bin/python -m pytest -q test/registered/unit/layers/test_router_gate.py (on candidate 68287fe4f4bd226849b0c5cf8a494349496d1a90)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 5 tests passed, covering CPU fp32 output/reference, fp32 mode, correction-bias naming, deterministic tiny-dispatch bypass, and the legacy helper alias."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4b77e59ded70/venv/bin/python /job/review-evidence-j-4b77e59ded70/adversarial_router_gate.py (on candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent MI355X GPU boundary cases M=1,8,9,16,17,32,64,65 returned fp32 with max absolute error 4.58e-05 to 8.20e-05 versus a CPU fp32 reference. A representative untouched bf16 ReplicatedLinear returned bf16. One hundred two-stream trials did not reproduce scratch corruption."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4b77e59ded70/venv/bin/python <deterministic batch-size adversarial script> (on candidate)",
+      "exit_code": 0,
+      "what_was_measured": "For one identical bf16 token and weight [128,4096], deterministic mode produced non-identical fp32 logits at M=1 and M=8 (max absolute delta 3.62396240234375e-05); top-8 indices remained equal for this sample."
+    },
+    {
+      "command": "source audit: rg -l 'self\\.(gate|router) = ReplicatedLinear\\(' python/sglang/srt/models/*.py plus local nn.Module gate scan (on candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Found 20 model files with explicit ReplicatedLinear gate/router construction and local Glm4MoeLiteGate and XllmMoEGate classes outside RouterGate."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4b77e59ded70/venv/bin/python -m compileall -q <changed candidate Python sources>",
+      "exit_code": 0,
+      "what_was_measured": "All changed candidate Python sources compiled successfully."
+    },
+    {
+      "command": "prepared-interpreter import audit for 14 migrated model modules",
+      "exit_code": 0,
+      "what_was_measured": "Imports resolved to /job/repo/python on the exact candidate checkout for Bailing variants, DeepSeek-v2, Kimi Linear, LLaDA2, GLM4-MoE, Hunyuan-v3, Laguna, Mimo-v2, MiniMax-M3, Nemotron-H, Sarvam-MoE, and Step3.5."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Executed on one AMD Instinct MI355X (gfx95, torch 2.11.0+rocm7.2); raw outputs are under reports/j-4b77e59ded70/raw/."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Deterministic RouterGate output is not batch invariant on MI355X for hidden size 4096 and 128 experts: the same token differs by 3.62396240234375e-05 between M=1 and M=8.",
+    "Twenty model files still explicitly construct a ReplicatedLinear gate/router, including Mixtral, Qwen2/3 MoE, Llama4, Grok, DeepSeek, and other MoE families; these bypass RouterGate's output-dtype and dispatch policy.",
+    "Glm4MoeLiteGate and XllmMoEGate remain model-local nn.Module gate implementations rather than RouterGate consumers.",
+    "A representative bf16 ReplicatedLinear used by remaining consumers returns bf16 logits, so the proposed every-model fp32-router-logit contract is false."
+  ],
+  "remaining_limitations": [
+    "No model weights were available, so full checkpoint loading, serving, semantic accuracy, accumulated long-CoT effects, and end-to-end performance were not tested.",
+    "The assigned device was AMD Instinct MI355X. NVIDIA CUDA tiny-GEMM, HPC-Ops, DeepGEMM, Intel AMX, NPU, XPU, distributed, and non-gfx95 paths remain unverified.",
+    "No native source changed in the candidate, repository-environment.json declares native=null, and imports resolved to candidate Python sources; therefore no native rebuild was applicable.",
+    "The concurrent-stream scratch test did not reproduce corruption in 100 trials; this does not prove safety on other scheduling patterns or architectures."
+  ]
+}
