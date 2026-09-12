@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36741",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/588",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/583",
+  "candidate_commit": "b26d4ce2502264cf0309d3e90df308b3038eec81",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review reproduced both reported defects on the prepared base: Anthropic output_config.effort=xhigh was rewritten to max, and a chat-template validation ValueError returned a generic HTTP 500 for streaming and non-streaming requests. At the exact candidate commit, xhigh is preserved and the validation failure returns HTTP 400 invalid_request_error with the accepted-set message in both modes. Independent adversarial TypeError and RuntimeError conversion failures remain HTTP 500, showing the new classification is limited to ValueError. The complete Anthropic serving unit suite passed.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-aea691ddf9de/venv/bin/python /job/review_probe.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before evidence: xhigh mapped to max; template-style ValueError produced generic HTTP 500 for stream=false and stream=true. TypeError and RuntimeError also produced 500. Raw output: /job/review-evidence-j-aea691ddf9de/base-probe.txt."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-aea691ddf9de/venv/bin/python /job/review_probe.py (candidate b26d4ce2502264cf0309d3e90df308b3038eec81)",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after and adversarial evidence: xhigh mapped to xhigh; template-style ValueError returned descriptive HTTP 400 in both modes; unrelated TypeError and RuntimeError remained generic HTTP 500. Raw output: /job/review-evidence-j-aea691ddf9de/candidate-probe.txt."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-aea691ddf9de/venv/bin/python -m pytest -q test/registered/unit/entrypoints/anthropic/test_serving.py -k 'output_config_effort or template_effort_validation'",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression tests: 2 passed, 60 deselected, and 7 effort-mapping subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-aea691ddf9de/venv/bin/python -m pytest -q test/registered/unit/entrypoints/anthropic/test_serving.py",
+      "exit_code": 0,
+      "what_was_measured": "Complete Anthropic serving unit suite: 62 passed and 7 subtests passed."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 b26d4ce2502264cf0309d3e90df308b3038eec81",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No model inference was run. The assigned device was detected as one AMD Instinct MI355X under torch 2.11.0+rocm7.2 (HIP 7.2.26015), whereas the source report used an RTX PRO 6000 Blackwell/CUDA 13.0.3 and RadixArk/Qwen3.8-Flash-Next-NVFP4. The verified behavior occurs before generation in Python request conversion/error classification."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": "No live RadixArk/Qwen3.8-Flash-Next-NVFP4 endpoint was available, so end-to-end model generation on the reporter's NVIDIA SM120 architecture was not repeated. The prepared checkout imported sglang, anthropic.serving, and anthropic.protocol from /job/repo/python. No C++, FlyDSL, LLVM, or other native source changed, so a native rebuild was not applicable. The review validates the original pre-generation contract with the actual checked-out implementation and independent stream/non-stream/adversarial probes, but makes no GPU numerical-output claim."
+}
