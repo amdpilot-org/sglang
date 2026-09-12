@@ -1303,6 +1303,49 @@ class TestLlama32Detector(unittest.TestCase):
         self.assertEqual(len(result.calls), 1)
         self.assertTrue(result.normal_text.strip().startswith("Some intro."))
 
+    def test_streaming_preserves_single_quoted_mapping_text_in_json_string(self):
+        text = (
+            '<|python_tag|>{"name":"get_weather","arguments":'
+            '{"city":"literal \'key\': value"}}'
+        )
+
+        result = self.detector.parse_streaming_increment(text, self.tools)
+
+        self.assertEqual(len(result.calls), 1)
+        self.assertEqual(result.calls[0].name, "get_weather")
+        self.assertEqual(result.calls[0].parameters, "")
+        result = self.detector.parse_streaming_increment("", self.tools)
+        self.assertEqual(
+            json.loads(result.calls[0].parameters),
+            {"city": "literal 'key': value"},
+        )
+
+    def test_streaming_preserves_single_quotes_after_colon_in_json_string(self):
+        text = (
+            '<|python_tag|>{"name":"get_weather","arguments":'
+            '{"city":"literal: \'value\' text"}}'
+        )
+
+        first = self.detector.parse_streaming_increment(text[:55], self.tools)
+        second = self.detector.parse_streaming_increment(text[55:], self.tools)
+        final = self.detector.parse_streaming_increment("", self.tools)
+
+        calls = first.calls + second.calls + final.calls
+        self.assertEqual([call.name for call in calls if call.name], ["get_weather"])
+        self.assertEqual(
+            json.loads("".join(call.parameters for call in calls)),
+            {"city": "literal: 'value' text"},
+        )
+
+    def test_streaming_still_converts_python_single_quoted_dict(self):
+        text = "<|python_tag|>{'name': 'get_weather', 'arguments': {'city': 'Paris'}}"
+
+        first = self.detector.parse_streaming_increment(text, self.tools)
+        second = self.detector.parse_streaming_increment("", self.tools)
+
+        self.assertEqual(first.calls[0].name, "get_weather")
+        self.assertEqual(json.loads(second.calls[0].parameters), {"city": "Paris"})
+
 
 class TestKimiK2Detector(unittest.TestCase):
     def setUp(self):

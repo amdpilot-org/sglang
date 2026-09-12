@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31915",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced and fixed the Llama32 streaming parser corruption described in the issue. Its Python-dict compatibility regexes rewrote single-quote patterns inside already-valid double-quoted JSON string values, leaving invalid JSON and dropping the tool call. Streaming conversion now operates only outside double-quoted strings, while retaining support for single-quoted Python dict output.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-75eca5b1f950/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py -k 'TestLlama32Detector'",
+      "exit_code": 0,
+      "what_was_measured": "10 focused Llama32 detector tests passed, including failing-before regressions for both reported quote patterns, a cross-chunk boundary, and a boundary case retaining Python single-quoted dict conversion."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-75eca5b1f950/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "The complete shared function-call detector test module passed: 246 tests and 4 subtests."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-75eca5b1f950/venv/bin/python -m pre_commit run --files python/sglang/srt/function_call/llama32_detector.py test/registered/unit/function_call/test_function_call_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository formatting, lint, safety, and CI-registration hooks passed for the changed source and tests."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is deterministic post-detokenization string parsing and was reproduced directly against Llama32Detector on CPU. No model weights or GPU execution were needed or claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No full model or HTTP serving reproduction was performed; this validates the actual detector implementation with fixed decoded model output only.",
+    "The issue reports independent defects in other detectors. This change intentionally fixes only the evidenced Llama32 JSON-string corruption.",
+    "The Python-dict fallback remains intentionally narrow and does not attempt to support every possible Python literal or escaped single-quoted string form."
+  ]
+}

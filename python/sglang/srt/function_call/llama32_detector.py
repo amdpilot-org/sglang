@@ -44,6 +44,40 @@ class Llama32Detector(BaseFormatDetector):
             pass
         return text
 
+    @staticmethod
+    def _convert_streaming_python_syntax(text: str) -> str:
+        """Convert single-quoted dict syntax without changing JSON strings."""
+        converted = []
+        outside_double_quote = []
+        in_double_quote = False
+        escaped = False
+
+        def flush_outside():
+            segment = "".join(outside_double_quote)
+            segment = re.sub(r"'([^']*)':", r'"\1":', segment)
+            segment = re.sub(r":\s*'([^']*)'", r': "\1"', segment)
+            converted.append(segment)
+            outside_double_quote.clear()
+
+        for char in text:
+            if in_double_quote:
+                converted.append(char)
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_double_quote = False
+            elif char == '"':
+                flush_outside()
+                converted.append(char)
+                in_double_quote = True
+            else:
+                outside_double_quote.append(char)
+
+        flush_outside()
+        return "".join(converted)
+
     def has_tool_call(self, text: str) -> bool:
         """Check if the text contains a Llama 3.2 format tool call."""
         # depending on the prompt format the Llama model may or may not
@@ -121,8 +155,7 @@ class Llama32Detector(BaseFormatDetector):
         converted_buffer = self._buffer
 
         # Convert Python dict syntax to JSON
-        converted_buffer = re.sub(r"'([^']*)':", r'"\1":', converted_buffer)
-        converted_buffer = re.sub(r":\s*'([^']*)'", r': "\1"', converted_buffer)
+        converted_buffer = self._convert_streaming_python_syntax(converted_buffer)
 
         # Temporarily replace buffer for parsing
         original_buffer = self._buffer
