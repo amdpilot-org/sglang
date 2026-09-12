@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31861",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 2420's DeepSeek FP32 router fallback and CPU TopK dtype guard, reproduced review PR 2492's Ernie4 BF16-logit counterexample at exact candidate commit 8929cfe77e5eb9ecc407ed9338da6b515d5376e4, and corrected the Ernie4 CPU gate to produce FP32 logits for BF16 or FP32 router weights.",
+  "tests": [
+    {
+      "command": "At exact candidate 8929cfe77e5eb9ecc407ed9338da6b515d5376e4: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3f13870e96ac/venv/bin/python < inline Ernie4 BF16 gate-to-CPU-TopK fixture",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before reproduction: Ernie4 produced torch.bfloat16 logits and the candidate CPU TopK guard raised ValueError before native dispatch. Raw output: reports/j-3f13870e96ac/evidence/failing-before-candidate-ernie.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3f13870e96ac/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_amx_router_logits.py",
+      "exit_code": 0,
+      "what_was_measured": "Seven focused DeepSeek/Ernie router dtype and CPU TopK boundary regressions passed after the correction."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3f13870e96ac/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_amx_router_logits.py test/registered/unit/models/test_longcat_flash_router_hpc_gemm.py",
+      "exit_code": 0,
+      "what_was_measured": "Eleven focused and adjacent FP32-router tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3f13870e96ac/venv/bin/python < inline GPU linear_bf16_fp32 reference fixture",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X, GPU output was FP32 and matched CPU FP32 F.linear with max absolute error 7.62939453125e-06."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "reports/j-3f13870e96ac/evidence/gpu-linear-reference.txt records one AMD Instinct MI355X and the independent numerical comparison.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The AMD EPYC 9575F host has no Intel AMX, so actual AMX execution and performance were not verified.",
+    "The optional specialized BF16 activation x FP32 router-weight AMX kernel remains absent; FP32 weights use the semantically correct but unaccelerated FP32 F.linear path.",
+    "No affected Ernie or other full-model weights were available, so no full-model or serving-path claim is made.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}

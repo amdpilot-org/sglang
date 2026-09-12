@@ -64,6 +64,11 @@ class MoEGate(nn.Module):
         )
 
     def forward(self, hidden_states):
+        if _is_cpu:
+            # CPU TopK requires unrounded FP32 router logits.  Casting after a
+            # BF16 linear cannot recover expert-ordering differences.
+            return F.linear(hidden_states.float(), self.weight.float(), None)
+
         logits = F.linear(hidden_states, self.weight, None)
         return logits
 

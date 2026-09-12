@@ -6,8 +6,10 @@ from unittest.mock import patch
 import torch
 
 import sglang.srt.models.deepseek_v2 as deepseek_v2
+import sglang.srt.models.ernie4 as ernie4
 from sglang.srt.layers.moe.topk import biased_grouped_topk_cpu
 from sglang.srt.models.deepseek_v2 import MoEGate
+from sglang.srt.models.ernie4 import MoEGate as Ernie4MoEGate
 from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import CustomTestCase
 
@@ -125,6 +127,65 @@ class TestDeepseekAmxRouterLogits(CustomTestCase):
 
         self.assertIs(actual, expected)
         self.assertIs(native_topk.call_args.args[1], gating_output)
+
+
+class TestErnie4CpuRouterLogits(CustomTestCase):
+    def _gate(self, dtype):
+        gate = Ernie4MoEGate.__new__(Ernie4MoEGate)
+        torch.nn.Module.__init__(gate)
+        gate.weight = torch.nn.Parameter(
+            torch.eye(2, dtype=dtype), requires_grad=False
+        )
+        return gate
+
+    def test_cpu_bf16_weight_emits_fp32_logits_accepted_by_topk(self):
+        gate = self._gate(torch.bfloat16)
+        hidden_states = torch.tensor([[1.001, 1.002]], dtype=torch.bfloat16)
+
+        with patch.object(ernie4, "_is_cpu", True):
+            logits = gate(hidden_states)
+
+        self.assertEqual(logits.dtype, torch.float32)
+        torch.testing.assert_close(
+            logits,
+            torch.nn.functional.linear(hidden_states.float(), gate.weight.float()),
+        )
+
+        expected = (
+            torch.ones((1, 1), dtype=torch.float32),
+            torch.ones((1, 1), dtype=torch.int32),
+        )
+        with patch.object(
+            torch.ops.sgl_kernel,
+            "biased_grouped_topk_cpu",
+            create=True,
+            return_value=expected,
+        ) as native_topk:
+            actual = biased_grouped_topk_cpu(
+                hidden_states,
+                logits,
+                torch.zeros(2, dtype=torch.float32),
+                topk=1,
+                renormalize=False,
+                num_expert_group=1,
+                topk_group=1,
+            )
+
+        self.assertIs(actual, expected)
+        native_topk.assert_called_once()
+
+    def test_cpu_fp32_weight_accepts_bf16_activations(self):
+        gate = self._gate(torch.float32)
+        hidden_states = torch.tensor([[1.001, 1.002]], dtype=torch.bfloat16)
+
+        with patch.object(ernie4, "_is_cpu", True):
+            logits = gate(hidden_states)
+
+        self.assertEqual(logits.dtype, torch.float32)
+        torch.testing.assert_close(
+            logits,
+            torch.nn.functional.linear(hidden_states.float(), gate.weight),
+        )
 
 
 if __name__ == "__main__":
