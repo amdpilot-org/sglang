@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38980",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3255",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3253",
+  "candidate_commit": "69a812d5542f78a804be6c48779e0298f2b4b3d3",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the independently reproduced wrong-device checks and prevents ignored invalid versions from reaching FA3, but it retains the public ver selector and rejects ver=2 instead of dispatching FA2 or removing the selector. Its pinned native SM8x correction could not be rebuilt or executed on the prepared ROCm-only host.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-baeb51f1c557/venv/bin/python /tmp/amdpilot-review-j-baeb51f1c557/base_contract.py",
+      "exit_code": 0,
+      "what_was_measured": "At the recorded base, kvcache ignored ver=2 without an architecture check; varlen ignored ver=2 and checked process-current device None rather than modeled input cuda:1."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-baeb51f1c557/venv/bin/python -m pytest -q python/sglang/kernels/aot/tests/test_flash_attn_public_contract.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression suite: 26 passed using the checked-out Python source and an instrumented native boundary."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-baeb51f1c557/venv/bin/python /tmp/amdpilot-review-j-baeb51f1c557/adversarial_contract.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate uses input cuda:1 for validation, retains ver in the public signature, and rejects ver=2 before backend dispatch."
+    },
+    {
+      "command": "sha256sum /tmp/amdpilot-review-j-baeb51f1c557/sgl-attn-149a549.tar.gz",
+      "exit_code": 0,
+      "what_was_measured": "Downloaded dependency archive hash matched the candidate CMake pin: 98cbb200b5057db2b4a40fdd80fb6eae65e784c751ce6d05a9b220f70b797879."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The only assigned device is exposed through torch 2.11.0+rocm7.2 (HIP 7.2); torch.version.cuda is None. No NVIDIA GPU, nvcc, cuobjdump, or CUDA flash_ops library was available."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "ver remains a public parameter on both wrappers, but ver=2 raises ValueError instead of dispatching the shipped FA2 implementation or being removed from the API.",
+    "The pinned native SM8x correction and SM86-cubin execution on SM89 were not independently rebuilt, inspected, or numerically executed in this ROCm-only environment."
+  ],
+  "remaining_limitations": [
+    "No NVIDIA GPU was assigned, so the original SM89 launch failure and candidate numerical correctness are unverified by this review.",
+    "No CUDA compiler or binary inspection tools were installed, so native code could not be rebuilt and cubin targets could not be independently inspected.",
+    "The pinned sgl-attn commit is from an open external PR; archive integrity and source provenance were verified, not its runtime claims."
+  ]
+}

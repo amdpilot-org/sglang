@@ -1,0 +1,70 @@
+Review target: https://github.com/amdpilot-org/sglang/pull/3253
+Exact candidate: 69a812d5542f78a804be6c48779e0298f2b4b3d3
+Recorded base: 358c163250ad3b1f62939b01ce1314a0a31a0365
+Prepared checkout matched the recorded base.
+
+Environment
+-----------
+Interpreter: /tmp/amdpilot-repo-j-baeb51f1c557/venv/bin/python
+Torch: 2.11.0+rocm7.2
+torch.version.cuda: None
+torch.version.hip: 7.2.26015
+torch.cuda.is_available(): True (ROCm device)
+NVIDIA GPU: unavailable
+nvcc: unavailable
+cuobjdump: unavailable
+Candidate CUDA native library in checkout/venv: unavailable
+
+Source/import boundary
+----------------------
+Both base and candidate were loaded directly from the checked-out source:
+  /job/repo/python/sglang/kernels/aot/python/sgl_kernel/flash_attn.py
+The tests replaced only torch.ops.sgl_kernel.fwd with a recording boundary. No
+installed sgl_kernel Python wrapper or old native wheel was used.
+
+Base reproduction
+-----------------
+Command:
+  /tmp/amdpilot-repo-j-baeb51f1c557/venv/bin/python /tmp/amdpilot-review-j-baeb51f1c557/base_contract.py
+Exit: 0
+Measured:
+  - flash_attn_with_kvcache(..., ver=2) reached the FA3 fwd boundary and never
+    called is_fa3_supported.
+  - flash_attn_varlen_func(..., ver=2) reached the same boundary and called
+    is_fa3_supported(None), not with the modeled input device cuda:1.
+
+Candidate regression
+--------------------
+Command:
+  /tmp/amdpilot-repo-j-baeb51f1c557/venv/bin/python -m pytest -q python/sglang/kernels/aot/tests/test_flash_attn_public_contract.py
+Exit: 0
+Result: 26 passed.
+
+Independent candidate adversarial check
+---------------------------------------
+Command:
+  /tmp/amdpilot-repo-j-baeb51f1c557/venv/bin/python /tmp/amdpilot-review-j-baeb51f1c557/adversarial_contract.py
+Exit: 0
+Measured:
+  - kvcache architecture validation received the modeled input device cuda:1.
+  - ver remains in the public signature.
+  - ver=2 raises ValueError before the native boundary; it does not dispatch FA2.
+
+Native dependency evidence
+--------------------------
+The candidate changes the sgl-attn pin from f89bc230... to exact commit
+149a54916c6a1b940f7ff1afd95f078349a9c471. The downloaded archive SHA256 was
+98cbb200b5057db2b4a40fdd80fb6eae65e784c751ce6d05a9b220f70b797879,
+matching CMakeLists.txt. Source PR https://github.com/sgl-project/sgl-flash-attn/pull/50
+describes a shared-memory and local-KV correction and reports external SM89
+testing, but it remains open. This review could inspect source/provenance only;
+it could not rebuild CUDA native code, inspect cubins, or run SM89 numerics.
+
+Conclusion
+----------
+The candidate is a meaningful partial fix: it corrects per-input-device checks,
+numeric CUDA-version comparison, invalid-version early rejection, and pins a
+plausible native SM8x correction. It does not fully meet the original public
+version-selection contract because it keeps ver as a selector while rejecting
+ver=2, rather than dispatching the shipped FA2 path or removing the selector.
+Native SM89 correctness is also unverified in this environment.
