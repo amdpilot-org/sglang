@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38854",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Qwen3.5 constructed the 96-wide TP-local in_proj_ba as GPTQ-Marlin even though Marlin repacking requires output width divisible by 64 and the reported checkpoint stores the two source weights as bf16. The model now disables GPTQ-Marlin only when this projection's TP-local output width violates that boundary, allowing the existing stacked bf16 loaders to consume in_proj_b.weight and in_proj_a.weight. Compatible widths and other quantizers remain unchanged.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-fc63755e706a/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen3_5_gptq_ba_projection.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: the baseline passed GPTQ-Marlin through for incompatible TP-local widths 96 and 48; 2 tests failed and 3 boundary controls passed. Raw log: reports/j-fc63755e706a/raw/regression-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fc63755e706a/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen3_5_packed_weight_loader.py test/registered/unit/models/test_qwen3_5_gptq_ba_projection.py test/registered/quant/test_is_layer_skipped.py",
+      "exit_code": 0,
+      "what_was_measured": "16 focused tests passed: incompatible and compatible Marlin widths, TP-local boundary behavior, unchanged FP8/unquantized behavior, stacked bf16 weight loading, and existing quantization skip behavior. Raw log: reports/j-fc63755e706a/raw/focused-tests.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-fc63755e706a/venv/bin/python < focused in_proj_ba GPU numerical script",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X gfx950, the real 96x128 MergedColumnParallelLinear selected UnquantizedLinearMethod, loaded separate bf16 b/a shards, produced shape (17, 96), and matched torch.nn.functional.linear with max absolute error 0.0. Raw log: reports/j-fc63755e706a/raw/gpu-numerical.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validation."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-fc63755e706a/raw/gpu-numerical.log identifies AMD Instinct MI355X and gfx950:sramecc+:xnack- and records the independent numerical comparison.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The complete 27B checkpoint weights were not downloaded and the full HTTP server was not launched; checkpoint config and safetensors index metadata were inspected directly instead.",
+    "The assigned GPU is AMD gfx950, while the reported production crash used NVIDIA Marlin. The exact NVIDIA gptq_marlin_repack failure was therefore not executed locally; its enforced 64-column boundary and the faulty 96-column construction were exercised deterministically.",
+    "The GPU fixture validates this projection's bf16 loading and numerical execution only, not full-model semantic accuracy or distributed execution.",
+    "No native source changed, so no native rebuild was applicable.",
+    "The prepared interpreter does not include the ruff module; formatting was checked with git diff --check and the focused Python tests."
+  ]
+}
