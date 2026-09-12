@@ -2127,6 +2127,9 @@ def describe_kv_events_publisher(server_args: Any) -> Optional[dict]:
             "topic": "",                      # ZMQ topic prefix on the
                                               # SUB filter (empty =
                                               # subscribe-all)
+            "replay_endpoint_host": "*",      # optional ROUTER replay
+            "replay_endpoint_port_base": 5558,# base TCP port; per-rank
+                                              # port = base + dp_rank
             "block_size": <kv_event_block_size>,  # subscribers MUST
                                               # hash prompts at this size
             "dp_size": <dp_size>,             # number of SUB sockets to
@@ -2208,6 +2211,11 @@ def describe_kv_events_publisher(server_args: Any) -> Optional[dict]:
         "block_size": kv_event_block_size_of(resolved),
         "dp_size": resolved.dp_size,
     }
+    if cfg.replay_endpoint:
+        resolved_replay = parse_advertisable_tcp(cfg.replay_endpoint)
+        if resolved_replay is not None:
+            descriptor["replay_endpoint_host"] = resolved_replay[0]
+            descriptor["replay_endpoint_port_base"] = resolved_replay[1]
     # Load range, from the same resolver SchedulerLoadPublisher binds
     # with (so the two can't drift). The decline reason is logged once at
     # startup, not here — this runs per /server_info request.

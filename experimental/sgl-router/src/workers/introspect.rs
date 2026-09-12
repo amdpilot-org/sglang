@@ -294,14 +294,14 @@ pub(crate) fn resolve_event_config(
     worker_url: &str,
     is_bigram: bool,
 ) -> EventConfig {
+    let worker_host = Url::parse(worker_url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned));
     let host = if matches!(
         block.endpoint_host.as_str(),
         "*" | "0.0.0.0" | "::" | "[::]"
     ) {
-        match Url::parse(worker_url)
-            .ok()
-            .and_then(|u| u.host_str().map(|s| s.to_owned()))
-        {
+        match worker_host.clone() {
             Some(h) => h,
             None => {
                 warn!(
@@ -314,10 +314,19 @@ pub(crate) fn resolve_event_config(
     } else {
         block.endpoint_host
     };
+    let replay_host = block.replay_endpoint_host.map(|reported| {
+        if matches!(reported.as_str(), "*" | "0.0.0.0" | "::" | "[::]") {
+            worker_host.unwrap_or(reported)
+        } else {
+            reported
+        }
+    });
     EventConfig {
         host,
         port_base: block.endpoint_port_base,
         topic: block.topic,
+        replay_host,
+        replay_port_base: block.replay_endpoint_port_base,
         load_port_base: block.load_endpoint_port_base,
         load_topic: block.load_topic,
         block_size: block.block_size,
@@ -376,6 +385,10 @@ pub(crate) struct KvEventsBlock {
     pub endpoint_port_base: u16,
     #[serde(default)]
     pub topic: String,
+    #[serde(default)]
+    pub replay_endpoint_host: Option<String>,
+    #[serde(default)]
+    pub replay_endpoint_port_base: Option<u16>,
     /// Base port of the dedicated load-snapshot socket range. Absent on
     /// workers that predate load publishing (`None` ⇒ no load subscriber).
     #[serde(default)]

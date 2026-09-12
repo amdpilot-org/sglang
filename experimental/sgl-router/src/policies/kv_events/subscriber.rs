@@ -60,6 +60,7 @@
 //! for one worker stalls only that worker's events, not others.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -67,7 +68,7 @@ use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
-use zeromq::{Socket, SocketRecv, SubSocket, ZmqMessage};
+use zeromq::{DealerSocket, Socket, SocketRecv, SocketSend, SubSocket, ZmqMessage};
 
 use super::discovery::EventConfig;
 use super::tree::KvWorkerId;
@@ -86,6 +87,56 @@ const RECV_ERROR_CEILING: u32 = 64;
 const CONNECT_MAX_ATTEMPTS: u32 = 5;
 const CONNECT_BACKOFF_BASE: Duration = Duration::from_millis(50);
 const CONNECT_BACKOFF_CAP: Duration = Duration::from_secs(2);
+const REPLAY_TIMEOUT: Duration = Duration::from_secs(2);
+static REPLAY_REQUESTS: AtomicU64 = AtomicU64::new(0);
+static REPLAY_GAPS: AtomicU64 = AtomicU64::new(0);
+static REPLAY_UNAVAILABLE: AtomicU64 = AtomicU64::new(0);
+static REPLAY_SUCCESSES: AtomicU64 = AtomicU64::new(0);
+static REPLAY_FAILURES: AtomicU64 = AtomicU64::new(0);
+static REPLAY_BATCHES: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn render_replay_metrics(out: &mut String) {
+    out.push_str("# HELP sgl_router_kv_event_gaps_total KV live-stream sequence gaps detected.\n");
+    out.push_str("# TYPE sgl_router_kv_event_gaps_total counter\n");
+    out.push_str(&format!(
+        "sgl_router_kv_event_gaps_total {}\n",
+        REPLAY_GAPS.load(Ordering::Relaxed)
+    ));
+    out.push_str("# HELP sgl_router_kv_replay_unavailable_total KV gaps seen on workers without an advertised replay endpoint.\n");
+    out.push_str("# TYPE sgl_router_kv_replay_unavailable_total counter\n");
+    out.push_str(&format!(
+        "sgl_router_kv_replay_unavailable_total {}\n",
+        REPLAY_UNAVAILABLE.load(Ordering::Relaxed)
+    ));
+    out.push_str("# HELP sgl_router_kv_replay_requests_total KV gap replay requests.\n");
+    out.push_str("# TYPE sgl_router_kv_replay_requests_total counter\n");
+    out.push_str(&format!(
+        "sgl_router_kv_replay_requests_total {}\n",
+        REPLAY_REQUESTS.load(Ordering::Relaxed)
+    ));
+    out.push_str("# HELP sgl_router_kv_replay_successes_total KV gap replays that covered the complete missing range.\n");
+    out.push_str("# TYPE sgl_router_kv_replay_successes_total counter\n");
+    out.push_str(&format!(
+        "sgl_router_kv_replay_successes_total {}\n",
+        REPLAY_SUCCESSES.load(Ordering::Relaxed)
+    ));
+    out.push_str(
+        "# HELP sgl_router_kv_replay_failures_total KV gap replays rejected or timed out.\n",
+    );
+    out.push_str("# TYPE sgl_router_kv_replay_failures_total counter\n");
+    out.push_str(&format!(
+        "sgl_router_kv_replay_failures_total {}\n",
+        REPLAY_FAILURES.load(Ordering::Relaxed)
+    ));
+    out.push_str(
+        "# HELP sgl_router_kv_replay_batches_total KV batches recovered through replay.\n",
+    );
+    out.push_str("# TYPE sgl_router_kv_replay_batches_total counter\n");
+    out.push_str(&format!(
+        "sgl_router_kv_replay_batches_total {}\n",
+        REPLAY_BATCHES.load(Ordering::Relaxed)
+    ));
+}
 
 /// Sentinel sequence number meaning "publisher is shutting down". Mirrors
 /// `ZmqEventPublisher.END_SEQ = (-1).to_bytes(8, 'big', signed=True)`.
@@ -263,10 +314,17 @@ impl KvEventSubscriberRegistry {
                 }
             };
             let endpoint = format!("tcp://{}:{}", cfg.host, port);
+            let replay_endpoint = match (&cfg.replay_host, cfg.replay_port_base) {
+                (Some(host), Some(base)) => u16::try_from(base as u32 + dp_rank)
+                    .ok()
+                    .map(|port| format!("tcp://{host}:{port}")),
+                _ => None,
+            };
             let cancel = CancellationToken::new();
             let join = spawn_subscriber_task(
                 id.clone(),
                 endpoint,
+                replay_endpoint,
                 topic.clone(),
                 self.kind,
                 self.inner.tx.clone(),
@@ -348,13 +406,14 @@ impl KvEventSubscriberRegistry {
 fn spawn_subscriber_task(
     id: KvWorkerId,
     endpoint: String,
+    replay_endpoint: Option<String>,
     topic: String,
     kind: SubKind,
     tx: mpsc::Sender<WorkerEvent>,
     cancel: CancellationToken,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        run_subscriber(id, endpoint, topic, kind, tx, cancel).await;
+        run_subscriber(id, endpoint, replay_endpoint, topic, kind, tx, cancel).await;
     })
 }
 
@@ -368,6 +427,7 @@ fn spawn_subscriber_task(
 async fn run_subscriber(
     id: KvWorkerId,
     endpoint: String,
+    replay_endpoint: Option<String>,
     topic: String,
     kind: SubKind,
     tx: mpsc::Sender<WorkerEvent>,
@@ -388,6 +448,7 @@ async fn run_subscriber(
     };
 
     let mut errors_in_a_row = 0u32;
+    let mut last_forwarded_seq: Option<i64> = None;
     loop {
         tokio::select! {
             biased;
@@ -404,7 +465,50 @@ async fn run_subscriber(
                     Ok(msg) => {
                         errors_in_a_row = 0;
                         if let Some(event) = decode_message(&id, msg, kind) {
-                            if tx.send(event).await.is_err() {
+                            let mut events = Vec::new();
+                            match event {
+                                WorkerEvent::Batch { worker, seq, batch }
+                                    if kind == SubKind::Kv =>
+                                {
+                                    if let Some(last) = last_forwarded_seq {
+                                        if seq <= last {
+                                            continue;
+                                        }
+                                        if seq > last.saturating_add(1) {
+                                            REPLAY_GAPS.fetch_add(1, Ordering::Relaxed);
+                                            if let Some(replay_endpoint) = replay_endpoint.as_deref() {
+                                                match replay_gap(&id, replay_endpoint, last + 1, seq).await {
+                                                    Ok(replayed) => events.extend(replayed),
+                                                    Err(e) => {
+                                                        warn!(
+                                                            worker_url = %id.url,
+                                                            dp_rank = id.dp_rank,
+                                                            last_seq = last,
+                                                            live_seq = seq,
+                                                            error = %e,
+                                                            "kv-events: gap replay failed; withholding non-contiguous live batch"
+                                                        );
+                                                        continue;
+                                                    }
+                                                }
+                                            } else {
+                                                REPLAY_UNAVAILABLE.fetch_add(1, Ordering::Relaxed);
+                                            }
+                                        }
+                                    }
+                                    events.push(WorkerEvent::Batch { worker, seq, batch });
+                                }
+                                WorkerEvent::PublisherReset { worker } => {
+                                    last_forwarded_seq = None;
+                                    events.push(WorkerEvent::PublisherReset { worker });
+                                }
+                                other => events.push(other),
+                            }
+                            for event in events {
+                                if let WorkerEvent::Batch { seq, .. } = &event {
+                                    last_forwarded_seq = Some(*seq);
+                                }
+                                if tx.send(event).await.is_err() {
                                 // The pump (or the entire index) is gone.
                                 // This is unexpected mid-stream; warn so
                                 // operators see it.
@@ -414,6 +518,7 @@ async fn run_subscriber(
                                     "downstream mpsc receiver dropped; exiting"
                                 );
                                 return;
+                                }
                             }
                         }
                     }
@@ -445,6 +550,84 @@ async fn run_subscriber(
             }
         }
     }
+}
+
+/// Request `[start_seq, live_seq)` from the Python publisher's ROUTER replay
+/// socket. The response must be strictly contiguous; a truncated replay buffer
+/// is rejected so the pump never advances a cursor over unknown state.
+async fn replay_gap(
+    id: &KvWorkerId,
+    endpoint: &str,
+    start_seq: i64,
+    live_seq: i64,
+) -> anyhow::Result<Vec<WorkerEvent>> {
+    REPLAY_REQUESTS.fetch_add(1, Ordering::Relaxed);
+    let operation = async {
+        let mut dealer = DealerSocket::new();
+        dealer.connect(endpoint).await?;
+        dealer
+            .send(
+                ZmqMessage::try_from(vec![
+                    bytes::Bytes::new(),
+                    bytes::Bytes::copy_from_slice(&start_seq.to_be_bytes()),
+                ])
+                .map_err(|_| anyhow::anyhow!("replay request cannot be empty"))?,
+            )
+            .await?;
+
+        let mut expected = start_seq;
+        let mut out = Vec::new();
+        loop {
+            let msg = dealer.recv().await?;
+            if msg.len() != 3 || !msg.get(0).is_some_and(|frame| frame.is_empty()) {
+                anyhow::bail!(
+                    "malformed replay response: expected empty delimiter + seq + payload"
+                );
+            }
+            let seq_frame: [u8; 8] = msg
+                .get(1)
+                .and_then(|frame| frame.as_ref().try_into().ok())
+                .ok_or_else(|| anyhow::anyhow!("malformed replay sequence frame"))?;
+            let seq = i64::from_be_bytes(seq_frame);
+            if seq == END_SEQ_SENTINEL {
+                break;
+            }
+            if seq >= live_seq {
+                continue;
+            }
+            if seq != expected {
+                anyhow::bail!("replay is not contiguous: expected seq {expected}, got {seq}");
+            }
+            let payload = msg.get(2).expect("three frames checked");
+            let batch = decode_event_batch(payload.as_ref())?;
+            out.push(WorkerEvent::Batch {
+                worker: id.clone(),
+                seq,
+                batch,
+            });
+            expected += 1;
+        }
+        if expected != live_seq {
+            anyhow::bail!(
+                "replay buffer did not cover gap: next expected seq {expected}, live seq {live_seq}"
+            );
+        }
+        Ok(out)
+    };
+    let result = match tokio::time::timeout(REPLAY_TIMEOUT, operation).await {
+        Ok(result) => result,
+        Err(_) => Err(anyhow::anyhow!("replay timed out after {REPLAY_TIMEOUT:?}")),
+    };
+    match &result {
+        Ok(batches) => {
+            REPLAY_SUCCESSES.fetch_add(1, Ordering::Relaxed);
+            REPLAY_BATCHES.fetch_add(batches.len() as u64, Ordering::Relaxed);
+        }
+        Err(_) => {
+            REPLAY_FAILURES.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    result
 }
 
 /// Open a `SubSocket`, connect to `endpoint`, and subscribe to the
@@ -578,6 +761,15 @@ fn decode_message(id: &KvWorkerId, msg: ZmqMessage, kind: SubKind) -> Option<Wor
             SubKind::Load => return None,
         }
     }
+    if seq < 0 {
+        warn!(
+            worker_url = %id.url,
+            dp_rank = id.dp_rank,
+            seq,
+            "dropping message with invalid negative sequence number"
+        );
+        return None;
+    }
 
     // Decode by kind: the cache topic carries `KvEventBatch`es, the load
     // topic carries bare `LoadStat` snapshots — two independent wire formats
@@ -663,7 +855,7 @@ mod tests {
 
     use bytes::Bytes;
     use tokio::time::timeout;
-    use zeromq::{Endpoint, PubSocket, Socket, SocketSend, ZmqMessage};
+    use zeromq::{Endpoint, PubSocket, RouterSocket, Socket, SocketRecv, SocketSend, ZmqMessage};
 
     use crate::policies::kv_events::wire::KvCacheEvent;
 
@@ -694,6 +886,8 @@ mod tests {
                 host: extract_host(worker_url).unwrap_or_else(|| "127.0.0.1".to_string()),
                 port_base,
                 topic: String::new(),
+                replay_host: None,
+                replay_port_base: None,
                 load_port_base: None,
                 load_topic: None,
                 block_size: 64,
@@ -1563,6 +1757,153 @@ mod tests {
         assert_eq!(seq_c, 3);
         assert_eq!(worker_c.url, worker_url);
 
+        registry.shutdown().await;
+    }
+
+    async fn make_router_bound() -> (RouterSocket, u16) {
+        let mut sock = RouterSocket::new();
+        let endpoint = sock.bind("tcp://127.0.0.1:0").await.unwrap();
+        let Endpoint::Tcp(_, port) = endpoint else {
+            panic!("unexpected replay endpoint: {endpoint:?}");
+        };
+        (sock, port)
+    }
+
+    /// Native ROUTER/DEALER coverage for the exact Python replay framing:
+    /// request `[empty, start_seq]`, replies `[empty, seq, payload]`, then
+    /// `[empty, -1, empty]`. A two-batch hole must emerge in order.
+    #[tokio::test]
+    async fn replay_gap_accepts_complete_contiguous_python_wire_sequence() {
+        let (mut router, port) = make_router_bound().await;
+        let server = tokio::spawn(async move {
+            let request = router.recv().await.unwrap();
+            assert_eq!(request.len(), 3); // identity + empty delimiter + start
+            assert!(request.get(1).unwrap().is_empty());
+            assert_eq!(request.get(2).unwrap().as_ref(), 2_i64.to_be_bytes());
+            let identity = request.get(0).unwrap().clone();
+            for seq in [2_i64, 3] {
+                let mut reply = ZmqMessage::from(identity.clone());
+                reply.push_back(Bytes::new());
+                reply.push_back(Bytes::copy_from_slice(&seq.to_be_bytes()));
+                reply.push_back(Bytes::from(helpers::encode_all_blocks_cleared_batch(
+                    seq as f64,
+                    Some(0),
+                )));
+                router.send(reply).await.unwrap();
+            }
+            let mut end = ZmqMessage::from(identity);
+            end.push_back(Bytes::new());
+            end.push_back(Bytes::copy_from_slice(&END_SEQ_SENTINEL.to_be_bytes()));
+            end.push_back(Bytes::new());
+            router.send(end).await.unwrap();
+        });
+
+        let id = KvWorkerId {
+            url: "http://worker".into(),
+            dp_rank: 0,
+        };
+        let replayed = replay_gap(&id, &format!("tcp://127.0.0.1:{port}"), 2, 4)
+            .await
+            .unwrap();
+        assert_eq!(
+            replayed
+                .iter()
+                .map(|event| match event {
+                    WorkerEvent::Batch { seq, .. } => *seq,
+                    _ => -99,
+                })
+                .collect::<Vec<_>>(),
+            vec![2, 3]
+        );
+        server.await.unwrap();
+    }
+
+    /// If the publisher's ring buffer has already evicted the first missing
+    /// sequence, do not return a suffix that would silently corrupt the tree.
+    #[tokio::test]
+    async fn replay_gap_rejects_truncated_buffer() {
+        let (mut router, port) = make_router_bound().await;
+        let server = tokio::spawn(async move {
+            let request = router.recv().await.unwrap();
+            let identity = request.get(0).unwrap().clone();
+            let mut reply = ZmqMessage::from(identity.clone());
+            reply.push_back(Bytes::new());
+            reply.push_back(Bytes::copy_from_slice(&3_i64.to_be_bytes()));
+            reply.push_back(Bytes::from(helpers::encode_all_blocks_cleared_batch(
+                3.0,
+                Some(0),
+            )));
+            router.send(reply).await.unwrap();
+            let mut end = ZmqMessage::from(identity);
+            end.push_back(Bytes::new());
+            end.push_back(Bytes::copy_from_slice(&END_SEQ_SENTINEL.to_be_bytes()));
+            end.push_back(Bytes::new());
+            router.send(end).await.unwrap();
+        });
+        let id = KvWorkerId {
+            url: "http://worker".into(),
+            dp_rank: 0,
+        };
+        let err = replay_gap(&id, &format!("tcp://127.0.0.1:{port}"), 2, 4)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("expected seq 2, got 3"), "{err}");
+        server.await.unwrap();
+    }
+
+    /// Near-E2E subscriber regression: the live PUB stream skips seq=2, the
+    /// subscriber discovers the hole after seq=3, obtains seq=2 from the
+    /// ROUTER socket, and forwards 1,2,3 to the pump channel in order.
+    #[tokio::test]
+    async fn subscriber_repairs_live_gap_before_forwarding_newer_batch() {
+        let (mut publisher, pub_port) = helpers::make_pub_bound().await;
+        let (mut router, replay_port) = make_router_bound().await;
+        let replay_server = tokio::spawn(async move {
+            let request = router.recv().await.unwrap();
+            let identity = request.get(0).unwrap().clone();
+            let mut reply = ZmqMessage::from(identity.clone());
+            reply.push_back(Bytes::new());
+            reply.push_back(Bytes::copy_from_slice(&2_i64.to_be_bytes()));
+            reply.push_back(Bytes::from(helpers::encode_all_blocks_cleared_batch(
+                2.0,
+                Some(0),
+            )));
+            router.send(reply).await.unwrap();
+            let mut end = ZmqMessage::from(identity);
+            end.push_back(Bytes::new());
+            end.push_back(Bytes::copy_from_slice(&END_SEQ_SENTINEL.to_be_bytes()));
+            end.push_back(Bytes::new());
+            router.send(end).await.unwrap();
+        });
+
+        let worker_url = "http://127.0.0.1:30000";
+        let mut cfg = helpers::cfg_for(worker_url, pub_port, 1);
+        cfg.replay_host = Some("127.0.0.1".into());
+        cfg.replay_port_base = Some(replay_port);
+        let (tx, mut rx) = mpsc::channel(8);
+        let registry = KvEventSubscriberRegistry::new(tx);
+        registry.add_worker(worker_url, &cfg).await;
+        helpers::settle().await;
+
+        for seq in [1_i64, 3] {
+            publisher
+                .send(helpers::build_multipart(
+                    seq,
+                    helpers::encode_all_blocks_cleared_batch(seq as f64, Some(0)),
+                ))
+                .await
+                .unwrap();
+        }
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            let event = timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .expect("subscriber stalled during replay")
+                .expect("subscriber channel closed");
+            seen.push(helpers::expect_batch(event).1);
+        }
+        assert_eq!(seen, vec![1, 2, 3]);
+        replay_server.await.unwrap();
         registry.shutdown().await;
     }
 }
