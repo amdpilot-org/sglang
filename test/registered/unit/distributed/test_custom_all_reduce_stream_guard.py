@@ -1,3 +1,5 @@
+import threading
+import time
 from unittest.mock import MagicMock, patch
 
 import torch
@@ -71,6 +73,34 @@ def test_capture_does_not_add_external_dependency(current_stream, event_cls, _):
     assert guard._last_raw_stream is None
 
 
+def test_launch_lock_covers_kernel_enqueue():
+    stream = MagicMock(cuda_stream=11)
+    guard = _guard_with_streams(stream, stream)
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    second_entered = threading.Event()
+
+    def issue(entered, release=None):
+        with guard.serialize():
+            entered.set()
+            if release is not None:
+                assert release.wait(timeout=2)
+
+    first = threading.Thread(target=issue, args=(first_entered, release_first))
+    second = threading.Thread(target=issue, args=(second_entered,))
+    first.start()
+    assert first_entered.wait(timeout=2)
+    second.start()
+    time.sleep(0.05)
+    assert not second_entered.is_set()
+    release_first.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert second_entered.is_set()
+
+
 def test_v2_communicator_guards_before_launch():
     comm = object.__new__(custom_all_reduce_v2.CustomAllReduceV2)
     comm.disabled = True
@@ -83,7 +113,7 @@ def test_v2_communicator_guards_before_launch():
     with patch.object(custom_all_reduce_v2, "custom_all_reduce") as launch:
         comm.custom_all_reduce(inp)
 
-    comm.stream_guard.maybe_serialize.assert_called_once_with()
+    comm.stream_guard.serialize.assert_called_once_with()
     launch.assert_called_once()
 
 
@@ -99,5 +129,5 @@ def test_legacy_communicator_guards_before_launch():
     with patch.object(custom_all_reduce.ops, "all_reduce_unreg") as launch:
         comm._all_reduce_impl(inp, registered=False)
 
-    comm.stream_guard.maybe_serialize.assert_called_once_with()
+    comm.stream_guard.serialize.assert_called_once_with()
     launch.assert_called_once()

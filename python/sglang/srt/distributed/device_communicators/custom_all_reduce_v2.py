@@ -367,25 +367,27 @@ class CustomAllReduceV2:
     # ------------------------------------------------------------------
 
     def custom_all_reduce(self, input: torch.Tensor) -> torch.Tensor:
-        self.stream_guard.maybe_serialize()
-        nbytes = input.numel() * input.element_size()
-        if self.override_algo is not None:
-            # TODO: enhance this override pattern
-            algo = self.override_algo
-            use_graph = self._can_use_graph() and not algo.is_push()
-            use_multicast = False
-        else:
-            config = self._pick_config(nbytes, self._can_use_graph())
-            assert config is not None, f"No config for {nbytes = }"
-            algo, use_graph, use_multicast = config
-        graph_params = self._allocate_graph_row(input, nbytes) if use_graph else None
-        return custom_all_reduce(
-            self.obj,
-            input,
-            algo=algo,
-            graph_params=graph_params,
-            use_multicast=use_multicast,
-        )
+        with self.stream_guard.serialize():
+            nbytes = input.numel() * input.element_size()
+            if self.override_algo is not None:
+                # TODO: enhance this override pattern
+                algo = self.override_algo
+                use_graph = self._can_use_graph() and not algo.is_push()
+                use_multicast = False
+            else:
+                config = self._pick_config(nbytes, self._can_use_graph())
+                assert config is not None, f"No config for {nbytes = }"
+                algo, use_graph, use_multicast = config
+            graph_params = (
+                self._allocate_graph_row(input, nbytes) if use_graph else None
+            )
+            return custom_all_reduce(
+                self.obj,
+                input,
+                algo=algo,
+                graph_params=graph_params,
+                use_multicast=use_multicast,
+            )
 
     def _allocate_graph_row(self, input: torch.Tensor, nbytes: int) -> torch.Tensor:
         index = self._graph_counter + len(self._graph_inputs)
