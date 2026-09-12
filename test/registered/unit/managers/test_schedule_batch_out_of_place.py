@@ -237,6 +237,52 @@ class TestMixWithRunningOutOfPlace(unittest.TestCase):
 
 
 class TestPrepareEncoderInfoExtendOutOfPlace(unittest.TestCase):
+    def test_atomic_encoder_chunks_produce_coherent_batch_metadata(self):
+        cases = (
+            (512, 1500, 1500),
+            (1024, 1500, 1500),
+            (1536, 1500, 1536),
+            (512, 256, 512),
+        )
+        for chunk_size, encoder_len, admitted_len in cases:
+            with self.subTest(chunk_size=chunk_size, encoder_len=encoder_len):
+                req = types.SimpleNamespace(
+                    rid="encoder",
+                    multimodal_inputs=types.SimpleNamespace(
+                        num_image_tokens=encoder_len
+                    ),
+                    prefix_indices=[],
+                    extend_range=Range(0, admitted_len),
+                    logprob_start_len=0,
+                )
+                batch = make_schedule_batch(
+                    1,
+                    reqs=[req],
+                    device="cpu",
+                    forward_mode=ForwardMode.EXTEND,
+                    out_cache_loc=torch.arange(admitted_len, dtype=torch.int64),
+                    prefix_lens=[0],
+                    extend_lens=[admitted_len],
+                    extend_num_tokens=admitted_len,
+                    extend_logprob_start_lens=[0],
+                    extend_input_logprob_token_ids=None,
+                )
+
+                batch.prepare_encoder_info_extend(
+                    input_ids=[array("q", range(admitted_len))],
+                    seq_lens=[admitted_len],
+                )
+
+                decoder_len = admitted_len - encoder_len
+                self.assertEqual(batch.encoder_lens_cpu, [encoder_len])
+                self.assertEqual(batch.encoder_cached, [False])
+                self.assertEqual(batch.extend_lens, [decoder_len])
+                self.assertEqual(batch.extend_num_tokens, decoder_len)
+                self.assertEqual(len(batch.out_cache_loc), decoder_len)
+                self.assertEqual(len(batch.encoder_out_cache_loc), encoder_len)
+                self.assertEqual(batch.seq_lens_cpu.tolist(), [decoder_len])
+                self.assertEqual(req.extend_range, Range(encoder_len, admitted_len))
+
     def test_prepare_encoder_info_extend_rebinds_lens_without_mutating_old_lists(self):
         """prepare_encoder_info_extend must strip encoder tokens via rebound lists; old list objects stay intact."""
         req_with_image = types.SimpleNamespace(

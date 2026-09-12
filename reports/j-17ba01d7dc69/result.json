@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38627",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/543",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the scheduler metadata corruption (a 1024-token chunk inside a 1500-token encoder produced extend_num_tokens=-476 and AssertionError: Expected 0, got -476). Prefill admission now treats an uncached encoder region as atomic for encoder-decoder models: it defers the request when earlier admissions consumed the chunk budget, or admits the whole encoder when the encoder itself exceeds an empty batch's configured chunk size. Decoder-only multimodal chunking is unchanged.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-17ba01d7dc69/venv/bin/python (standalone ScheduleBatch.prepare_encoder_info_extend reproduction with admitted_len=1024 and encoder_len=1500)",
+      "exit_code": 1,
+      "what_was_measured": "Before-fix reachable metadata failure: AssertionError: Expected 0, got -476. Raw output: /job/raw/j-17ba01d7dc69/reproduce-corrupt-metadata.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-17ba01d7dc69/venv/bin/python -m pytest -q test/registered/unit/managers/test_prefill_adder.py -k 'chunked_prefill_keeps_uncached_encoder_atomic or chunked_prefill_defers_encoder_when_batch_budget_is_partly_used'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression showed 512- and 1024-token chunks ending inside a 1500-token encoder and admission of such an encoder after prior batch work. Raw output: /job/raw/j-17ba01d7dc69/failing-before-valid.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-17ba01d7dc69/venv/bin/python -m pytest -q test/registered/unit/managers/test_prefill_adder.py test/registered/unit/managers/test_schedule_batch_out_of_place.py test/registered/unit/managers/test_scheduler_init_req_max_new_tokens.py",
+      "exit_code": 0,
+      "what_was_measured": "44 tests and 570 subtests passed, including encoder-aware admission across chunk sizes, encoder lengths, page sizes and alignment, unchanged decoder-only multimodal behavior, and coherent ScheduleBatch encoder/decoder cache metadata. Raw output: /job/raw/j-17ba01d7dc69/unit-final.txt"
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files python/sglang/srt/managers/schedule_policy.py python/sglang/srt/managers/scheduler.py test/registered/unit/managers/test_prefill_adder.py test/registered/unit/managers/test_schedule_batch_out_of_place.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, AST, secrets, CI registry, and related configured checks passed. Raw output: /job/raw/j-17ba01d7dc69/precommit-final.txt"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-17ba01d7dc69/venv/bin/python (GPU ScheduleBatch metadata matrix)",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X with torch 2.11.0+rocm7.2, four chunk/encoder cases produced exact independent Python-reference counts for extend_num_tokens, decoder cache entries, encoder cache entries, and decoder sequence length. Raw output: /job/raw/j-17ba01d7dc69/gpu-scheduler-metadata.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Actual ScheduleBatch tensor allocation, slicing, concatenation, synchronization, and CPU readback ran on the assigned AMD Instinct MI350X for chunk sizes 512, 1024, and 1536 and encoder lengths 256 and 1500; see /job/raw/j-17ba01d7dc69/gpu-scheduler-metadata.txt."
+  },
+  "native_rebuilt": false,
+  "source_paths": [
+    "/job/repo/python/sglang/srt/managers/schedule_policy.py",
+    "/job/repo/python/sglang/srt/managers/scheduler.py"
+  ],
+  "native_paths": [],
+  "remaining_limitations": "The focused reproduction and verification use the real admission and ScheduleBatch implementations but do not launch a full Whisper server or download model weights/audio. No native code changed, so no native rebuild was applicable. GPU verification covers scheduler metadata operations rather than end-to-end model output."
+}

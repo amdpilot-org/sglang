@@ -553,6 +553,7 @@ class PrefillAdder:
         dllm_config: Optional[DllmConfig] = None,
         waiting_queue_len: int = 0,
         prefill_tile_block_m: int = 64,
+        is_encoder_decoder: bool = False,
     ):
         self.page_size = page_size
         self.prefill_tile_block_m = prefill_tile_block_m
@@ -565,6 +566,7 @@ class PrefillAdder:
         self.rem_input_tokens = rem_input_tokens - num_mixed_decode_tokens
         self.rem_chunk_tokens = rem_chunk_tokens
         self.dllm_config = dllm_config
+        self.is_encoder_decoder = is_encoder_decoder
 
         if self.dllm_config is not None:
             self._init_dllm_meta(dllm_config)
@@ -871,6 +873,40 @@ class PrefillAdder:
 
     def ceil_paged_tokens(self, tokens: int) -> int:
         return -(-tokens // self.page_size) * self.page_size
+
+    def _fit_uncached_encoder_in_chunk(
+        self,
+        req: Req,
+        prefix_len: int,
+        chunk_len: int,
+        truncation_align_size: Optional[int] = None,
+    ) -> Optional[int]:
+        """Keep the encoder block atomic when choosing a prefill chunk."""
+        if not self.is_encoder_decoder:
+            return chunk_len
+
+        mm_inputs = getattr(req, "multimodal_inputs", None)
+        encoder_len = (
+            mm_inputs.num_image_tokens
+            if mm_inputs is not None and mm_inputs.num_image_tokens is not None
+            else 0
+        )
+        if prefix_len >= encoder_len or prefix_len + chunk_len >= encoder_len:
+            return chunk_len
+
+        # Do not let a later request make the current batch exceed its chunk
+        # budget. It will be reconsidered first in the next prefill batch.
+        if self.can_run_list:
+            return None
+
+        # An encoder larger than the configured chunk must still make progress.
+        # Round its atomic boundary to the allocator page, without extending
+        # beyond the request itself.
+        boundary = self.ceil_paged_tokens(encoder_len)
+        if truncation_align_size is not None:
+            boundary = -(-boundary // truncation_align_size) * truncation_align_size
+        remaining = len(req.full_untruncated_fill_ids) - prefix_len
+        return min(remaining, boundary - prefix_len)
 
     def budget_state(self):
         no_token = self.rem_total_tokens <= 0 or self.cur_rem_tokens <= 0
@@ -1243,6 +1279,9 @@ class PrefillAdder:
 
             # Chunked prefill
             trunc_len = self.rem_chunk_tokens
+            trunc_len = self._fit_uncached_encoder_in_chunk(req, 0, trunc_len)
+            if trunc_len is None:
+                return AddReqResult.OTHER
 
             if (tile_stop := self._check_prefill_tile_budget(trunc_len)) is not None:
                 return tile_stop
@@ -1471,6 +1510,15 @@ class PrefillAdder:
                 trunc_len = now_input_len - len(req.prefix_indices)
 
                 if trunc_len <= 0:
+                    return AddReqResult.OTHER
+
+                trunc_len = self._fit_uncached_encoder_in_chunk(
+                    req,
+                    len(req.prefix_indices),
+                    trunc_len,
+                    truncation_align_size,
+                )
+                if trunc_len is None:
                     return AddReqResult.OTHER
 
                 if (
