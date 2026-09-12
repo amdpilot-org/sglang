@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35054",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1510",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1472",
+  "candidate_commit": "9feec568e30191971b49749cfb479beb46c59b64",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduced the serial CFG timestep-0 double reset and CFG-parallel negative-rank cross-request leak. The exact candidate fixes both lifecycle failures and topology-aware skip-boundary accounting in focused and independent tests.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-2986ed831644/venv/bin/python (inline base state-machine reproduction)",
+      "exit_code": 0,
+      "what_was_measured": "On base, serial negative timestep-0 reset cnt from 1 to 0; a later negative-only request retained cnt=50, both stale negative tensors, and accumulator=7.0."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2986ed831644/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_teacache_cfg_lifecycle.py python/sglang/multimodal_gen/test/unit/test_sampling_params.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression and existing sampling parameter coverage: 46 passed, 23 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2986ed831644/venv/bin/python (independent adversarial lifecycle/topology/GPU script)",
+      "exit_code": 0,
+      "what_was_measured": "One reset per serial request; independent positive/negative CFG-parallel resets; stale GPU cache clearing; no noninitial reset; non-CFG topology; serial versus parallel boundary scaling."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2986ed831644/venv/bin/python -m compileall -q python/sglang/multimodal_gen/runtime/cache/teacache.py python/sglang/multimodal_gen/configs/sample/teacache.py python/sglang/multimodal_gen/runtime/models/dits/wanvideo.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python files compile successfully."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..9feec568e30191971b49749cfb479beb46c59b64",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the candidate diff."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X/gfx950 was used for GPU-resident stale TeaCache tensors and an independent numerical tensor check; ROCm 7.2, torch 2.11.0+rocm7.2."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No Wan model weights were available; no full diffusion generation or image-quality/semantic validation was performed.",
+    "Only one assigned GPU was available; no live multi-rank CFG-parallel workload was run.",
+    "No native source changed, so native rebuild validation was not applicable.",
+    "Standalone direct callers must initialize or patch global server arguments; production server startup does so."
+  ]
+}
