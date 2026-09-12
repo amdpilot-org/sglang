@@ -1,0 +1,64 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35324",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1499",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1465",
+  "candidate_commit": "1dd7ea6afbbe9cdac3c31585526b779869bb9e3b",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate adds test-only hardening around a recovery already present on the recorded base. All candidate tests pass on the base, so the diff is not a failing-before/passing-after fix. Existing eager-path recovery contains demonstrated all-NaN softmax rows, but the original rare CUDA/H100/TP=8 cause remains unverified and broader invalid multinomial inputs remain uncontained.",
+  "classification": "test-only hardening; original-issue resolution unverified",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-3e09cbbbc4d1/venv/bin/python -m pytest -q test/registered/unit/spec/test_dspark_draft_probability_recovery.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite at exact commit: 3 passed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-3e09cbbbc4d1/venv/bin/python -m pytest -q /job/review-evidence-j-3e09cbbbc4d1/candidate_test_on_base.py (recorded base checkout)",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate tests also pass unchanged on the recorded base: 3 passed, proving there is no failing-before regression in the candidate diff."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_DSPARK_FAST_SAMPLING=0 /tmp/amdpilot-repo-j-3e09cbbbc4d1/venv/bin/python /job/review-evidence-j-3e09cbbbc4d1/production_path_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "Real gfx950 execution through sample_draft_block's eager callback recovered an all-NaN softmax row and sampled token 0."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3e09cbbbc4d1/venv/bin/python /job/review-evidence-j-3e09cbbbc4d1/safe_gpu_recovery.py",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, all-minus-infinity and positive-infinity logit rows recovered to token-0 one-hot probabilities; a valid row matched a float64 CPU reference within 2.20e-08."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3e09cbbbc4d1/venv/bin/python /job/review-evidence-j-3e09cbbbc4d1/cpu_counterexamples.py",
+      "exit_code": 0,
+      "what_was_measured": "NaN outside column 0, positive infinity, negative probability, and zero-sum rows remained unchanged by recovery and each failed torch.multinomial."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3e09cbbbc4d1/venv/bin/python /job/review-evidence-j-3e09cbbbc4d1/adversarial_probability_recovery.py",
+      "exit_code": 134,
+      "what_was_measured": "An isolated gfx950 process reached HIP multinomial with an unrecovered invalid row and aborted with HSA_STATUS_ERROR_EXCEPTION / CUDA error: unspecified launch failure, reproducing the device-side failure class."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI355X gfx950 with PyTorch 2.11.0+rocm7.2 and HIP 7.2.26015. Safe recovery and actual eager sample_draft_block probes completed; an isolated invalid-input probe produced a device-side process abort."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A probability row with NaN outside column 0 is not recovered and fails torch.multinomial.",
+    "A probability row containing positive infinity is not recovered and fails torch.multinomial.",
+    "A probability row containing a negative value is not recovered and fails torch.multinomial.",
+    "A zero-sum probability row is not recovered and fails torch.multinomial.",
+    "The candidate tests pass on the recorded base, so the candidate supplies no failing-before/passing-after evidence.",
+    "The rare source of invalid probabilities in the original DeepSeek-V4 CUDA TP=8 workload remains unidentified."
+  ],
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 weights were unavailable.",
+    "The assigned environment had one AMD gfx950 GPU under ROCm, not eight NVIDIA H100 GPUs under CUDA.",
+    "TP=8, full HTTP serving, the fast DSPARK native sampling kernel, week-long production traffic, and semantic accuracy were not reproduced.",
+    "Direct malformed probability counterexamples test the multinomial boundary but are not normal outputs of the immediately preceding torch.softmax.",
+    "No native source changed in the candidate, so no native rebuild was applicable."
+  ]
+}
