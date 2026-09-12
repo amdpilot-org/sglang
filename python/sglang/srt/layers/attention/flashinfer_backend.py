@@ -150,6 +150,11 @@ class DecodeMetadata:
     decode_wrappers: List[BatchDecodeWithPagedKVCacheWrapper]
     # full->SWA translated out_cache_loc (SWA KV-store write target)
     swa_out_cache_loc: Optional[torch.Tensor] = None
+    cascade_wrappers: Optional[List[BatchPrefillWithPagedKVCacheWrapper]] = None
+
+    @property
+    def use_cascade(self) -> bool:
+        return self.cascade_wrappers is not None
 
 
 @dataclass
@@ -172,6 +177,39 @@ FULL_CG_PREFILL_WORKSPACE_MARGIN = 1.25
 # Use as a fast path to override the indptr in flashinfer's plan function
 # This is used to remove some host-to-device copy overhead.
 global_override_indptr_cpu = None
+
+
+CASCADE_MIN_BATCH_SIZE = 4
+CASCADE_MIN_PREFIX_LEN = 512
+CASCADE_HIGH_PREFIX_RATIO = 0.8
+CASCADE_MIN_PREFIX_RATIO = 0.5
+CASCADE_MIN_BATCH_SIZE_FOR_PARTIAL_PREFIX = 16
+
+
+def should_use_cascade_attention(
+    batch_size: int, common_prefix_len: int, average_seq_len: int
+) -> bool:
+    """Return whether shared-prefix cascade decode is likely profitable."""
+    if batch_size < CASCADE_MIN_BATCH_SIZE:
+        return False
+    if common_prefix_len < CASCADE_MIN_PREFIX_LEN or average_seq_len <= 0:
+        return False
+    common_ratio = common_prefix_len / average_seq_len
+    if common_ratio < CASCADE_MIN_PREFIX_RATIO:
+        return False
+    return not (
+        common_ratio < CASCADE_HIGH_PREFIX_RATIO
+        and batch_size < CASCADE_MIN_BATCH_SIZE_FOR_PARTIAL_PREFIX
+    )
+
+
+def common_prefix_length(rows: torch.Tensor) -> int:
+    """Length of the identical leading run across a two-dimensional tensor."""
+    if rows.ndim != 2:
+        raise ValueError(f"Expected a 2-D token table, got shape {tuple(rows.shape)}")
+    if rows.shape[0] == 0 or rows.shape[1] == 0:
+        return 0
+    return int(torch.cumprod(torch.all(rows == rows[:1], dim=0), dim=0).sum().item())
 
 
 def fast_prefill_plan(
@@ -510,12 +548,29 @@ class FlashInferAttnBackend(AttentionBackend):
                 )
             )
 
+        # Cascade decode is intentionally eager-only for now. A CUDA graph records
+        # one Python control-flow branch, while the common-prefix length and even
+        # whether a batch has a common prefix can change on every replay.
+        self.cascade_wrappers = None
+        if self.dispatch_reason is None and not self.decode_uses_dequant_workspace:
+            self.cascade_wrappers = [
+                BatchPrefillWithPagedKVCacheWrapper(
+                    self.workspace_buffer,
+                    "NHD",
+                    backend=self.prefill_backend,
+                )
+                for _ in range(2)
+            ]
+
         # Create indices updater
         if not skip_prefill:
             self.indices_updater_prefill = FlashInferIndicesUpdaterPrefill(
                 model_runner, self
             )  # for verify
         self.indices_updater_decode = FlashInferIndicesUpdaterDecode(model_runner, self)
+        self.indices_updater_cascade_decode = FlashInferIndicesUpdaterCascadeDecode(
+            model_runner, self
+        )
 
         # Other metadata
         self.forward_metadata: Union[PrefillMetadata, DecodeMetadata] = None
@@ -943,20 +998,57 @@ class FlashInferAttnBackend(AttentionBackend):
             )
 
         if forward_batch.forward_mode.is_decode_or_idle():
-            self.indices_updater_decode.update(
-                forward_batch.seq_lens,
-                forward_batch.seq_lens_cpu,
-                forward_batch.seq_lens_sum,
-                decode_wrappers=self.decode_wrappers,
-                encoder_lens=forward_batch.encoder_lens,
-                spec_info=forward_batch.spec_info,
-                fixed_split_size=self.decode_split_tile_size,
-                disable_split_kv=False,
-                req_pool_indices=forward_batch.req_pool_indices,
-            )
-            self.forward_metadata = DecodeMetadata(
-                self.decode_wrappers, swa_out_cache_loc=swa_out_cache_loc
-            )
+            common_prefix_len = 0
+            use_cascade = False
+            if (
+                forward_batch.forward_mode.is_decode()
+                and forward_batch.spec_info is None
+                and self.cascade_wrappers is not None
+                and forward_batch.batch_size >= CASCADE_MIN_BATCH_SIZE
+            ):
+                seq_lens_cpu = forward_batch.seq_lens_cpu
+                min_seq_len = int(
+                    min(seq_lens_cpu)
+                    if seq_lens_cpu is not None
+                    else forward_batch.seq_lens.min().item()
+                )
+                request_tokens = self.req_to_token_pool.req_to_token[
+                    forward_batch.req_pool_indices, :min_seq_len
+                ]
+                common_prefix_len = common_prefix_length(request_tokens)
+                average_seq_len = forward_batch.seq_lens_sum // forward_batch.batch_size
+                use_cascade = should_use_cascade_attention(
+                    forward_batch.batch_size, common_prefix_len, average_seq_len
+                )
+
+            if use_cascade:
+                self.indices_updater_cascade_decode.update(
+                    forward_batch.req_pool_indices,
+                    forward_batch.seq_lens,
+                    forward_batch.seq_lens_cpu,
+                    common_prefix_len,
+                    self.cascade_wrappers,
+                )
+                self.forward_metadata = DecodeMetadata(
+                    self.decode_wrappers,
+                    cascade_wrappers=self.cascade_wrappers,
+                    swa_out_cache_loc=swa_out_cache_loc,
+                )
+            else:
+                self.indices_updater_decode.update(
+                    forward_batch.seq_lens,
+                    forward_batch.seq_lens_cpu,
+                    forward_batch.seq_lens_sum,
+                    decode_wrappers=self.decode_wrappers,
+                    encoder_lens=forward_batch.encoder_lens,
+                    spec_info=forward_batch.spec_info,
+                    fixed_split_size=self.decode_split_tile_size,
+                    disable_split_kv=False,
+                    req_pool_indices=forward_batch.req_pool_indices,
+                )
+                self.forward_metadata = DecodeMetadata(
+                    self.decode_wrappers, swa_out_cache_loc=swa_out_cache_loc
+                )
         elif forward_batch.forward_mode.is_target_verify():
             self.indices_updater_prefill.update(
                 forward_batch.req_pool_indices,
@@ -1493,16 +1585,33 @@ class FlashInferAttnBackend(AttentionBackend):
         else:
             kv_cache = self.token_to_kv_pool.get_kv_buffer(layer.layer_id)
 
-        # Call the wrapped function
-        o = decode_wrapper.forward(
-            q.contiguous().view(-1, layer.tp_q_head_num, layer.head_dim),
-            kv_cache,
-            sm_scale=layer.scaling,
-            logits_soft_cap=layer.logit_cap,
-            # Must use _float to avoid device-to-host copy that breaks cuda graph capture.
-            k_scale=layer.k_scale_float,
-            v_scale=layer.v_scale_float,
-        )
+        q = q.contiguous().view(-1, layer.tp_q_head_num, layer.head_dim)
+        if self.forward_metadata.use_cascade:
+            shared_wrapper, unique_wrapper = self.forward_metadata.cascade_wrappers
+            common_kwargs = dict(
+                causal=False,
+                sm_scale=layer.scaling,
+                logits_soft_cap=layer.logit_cap,
+                k_scale=layer.k_scale_float,
+                v_scale=layer.v_scale_float,
+            )
+            shared_o, shared_lse = shared_wrapper.forward_return_lse(
+                q, kv_cache, **common_kwargs
+            )
+            unique_o, unique_lse = unique_wrapper.forward_return_lse(
+                q, kv_cache, **common_kwargs
+            )
+            o, _ = _safe_merge_state(shared_o, shared_lse, unique_o, unique_lse)
+        else:
+            o = decode_wrapper.forward(
+                q,
+                kv_cache,
+                sm_scale=layer.scaling,
+                logits_soft_cap=layer.logit_cap,
+                # Must use _float to avoid device-to-host copy that breaks cuda graph capture.
+                k_scale=layer.k_scale_float,
+                v_scale=layer.v_scale_float,
+            )
 
         return o.view(-1, layer.tp_q_head_num * layer.head_dim)
 
@@ -1516,6 +1625,102 @@ class FlashInferAttnBackend(AttentionBackend):
             return layer.is_cross_attention
 
         raise ValueError(f"Unknown dispatch reason: {self.dispatch_reason}")
+
+
+class FlashInferIndicesUpdaterCascadeDecode:
+    """Build the two page tables used by shared-prefix cascade decode."""
+
+    def __init__(self, model_runner: ModelRunner, attn_backend: FlashInferAttnBackend):
+        self.num_qo_heads = (
+            model_runner.model_config.get_max_num_attention_heads()
+            // get_parallel().attn_tp_size
+        )
+        self.num_kv_heads = model_runner.model_config.get_num_kv_heads(
+            get_parallel().attn_tp_size, get_parallel().attn_dcp_size
+        )
+        self.head_dim = model_runner.model_config.head_dim
+        self.data_type = attn_backend.flashinfer_kv_cache_dtype
+        self.q_data_type = model_runner.dtype
+        self.attn_backend = attn_backend
+
+    def update(
+        self,
+        req_pool_indices: torch.Tensor,
+        seq_lens: torch.Tensor,
+        seq_lens_cpu: Optional[torch.Tensor],
+        common_prefix_len: int,
+        wrappers: List[BatchPrefillWithPagedKVCacheWrapper],
+    ) -> None:
+        bs = len(seq_lens)
+        device = req_pool_indices.device
+        suffix_lens = seq_lens - common_prefix_len
+        if seq_lens_cpu is None:
+            suffix_total = int(suffix_lens.sum().item())
+        elif isinstance(seq_lens_cpu, torch.Tensor):
+            suffix_total = int(seq_lens_cpu.sum()) - common_prefix_len * bs
+        else:
+            suffix_total = sum(seq_lens_cpu) - common_prefix_len * bs
+
+        shared_qo_indptr = torch.tensor([0, bs], dtype=torch.int32, device=device)
+        shared_kv_indptr = torch.tensor(
+            [0, common_prefix_len], dtype=torch.int32, device=device
+        )
+        shared_indices = torch.empty(
+            common_prefix_len, dtype=torch.int32, device=device
+        )
+        self.attn_backend.kv_index_translator.fill_packed_read_stream(
+            req_pool_indices=req_pool_indices[:1],
+            seq_lens=seq_lens.new_tensor([common_prefix_len]),
+            indptr=shared_kv_indptr,
+            total_tokens=common_prefix_len,
+            out=shared_indices,
+            kv_start_idx=None,
+            sliding_window=False,
+        )
+
+        unique_qo_indptr = torch.arange(bs + 1, dtype=torch.int32, device=device)
+        unique_kv_indptr = torch.zeros(bs + 1, dtype=torch.int32, device=device)
+        unique_kv_indptr[1:] = torch.cumsum(suffix_lens, dim=0)
+        unique_indices = torch.empty(suffix_total, dtype=torch.int32, device=device)
+        self.attn_backend.kv_index_translator.fill_packed_read_stream(
+            req_pool_indices=req_pool_indices,
+            seq_lens=suffix_lens,
+            indptr=unique_kv_indptr,
+            total_tokens=suffix_total,
+            out=unique_indices,
+            kv_start_idx=torch.full_like(seq_lens, common_prefix_len),
+            sliding_window=False,
+        )
+
+        for wrapper, qo_indptr, kv_indptr, indices, count in (
+            (
+                wrappers[0],
+                shared_qo_indptr,
+                shared_kv_indptr,
+                shared_indices,
+                1,
+            ),
+            (
+                wrappers[1],
+                unique_qo_indptr,
+                unique_kv_indptr,
+                unique_indices,
+                bs,
+            ),
+        ):
+            wrapper.begin_forward(
+                qo_indptr,
+                kv_indptr,
+                indices,
+                torch.ones(count, dtype=torch.int32, device=device),
+                self.num_qo_heads,
+                self.num_kv_heads,
+                self.head_dim,
+                1,
+                q_data_type=self.q_data_type,
+                kv_data_type=self.data_type,
+                non_blocking=True,
+            )
 
 
 class FlashInferIndicesUpdaterDecode:
