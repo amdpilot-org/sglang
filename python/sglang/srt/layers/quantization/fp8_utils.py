@@ -54,6 +54,12 @@ from sglang.srt.utils.custom_op import register_custom_op
 
 logger = logging.getLogger(__name__)
 
+# Bound the largest dense dequantization staged while converting checkpoint
+# block-FP8 shared experts to MXFP4.  The dequantizer uses FP32 scale and
+# multiply intermediates in addition to its BF16 result, so bounding elements
+# is more useful than bounding just the output allocation.
+_FP8_TO_MXFP4_CHUNK_ELEMENTS = 16 * 1024 * 1024
+
 _is_hip = is_hip()
 _is_cuda = is_cuda()
 _is_xpu = is_xpu()
@@ -1509,22 +1515,58 @@ def quantize_block_fp8_weight_to_mxfp4(
     weight_block_size: List[int],
     mxfp4_block_size: int = 32,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    fp8_weight_dequant = block_quant_dequant(
-        fp8_weight,
-        fp8_scale.to(torch.float32),
-        weight_block_size,
-        torch.bfloat16,
+    block_n, _ = weight_block_size
+    rows, cols = fp8_weight.shape[-2:]
+    if cols % mxfp4_block_size != 0:
+        raise ValueError(
+            f"MXFP4 conversion requires K divisible by {mxfp4_block_size}, got {cols}."
+        )
+
+    # Keep chunks aligned to FP8 scale rows. This both makes scale slicing exact
+    # and prevents block_quant_dequant's full-size FP32 scale expansion from
+    # coexisting with another full-size FP32 multiply result. Leading expert
+    # dimensions are flattened because MXFP4 quantization is row-local.
+    row_blocks_per_chunk = max(
+        1, _FP8_TO_MXFP4_CHUNK_ELEMENTS // max(block_n * cols, 1)
     )
-    fp4_weight, fp4_scale = _MXFP4QuantizedData.quantize(
-        fp8_weight_dequant, block_size=mxfp4_block_size
+    rows_per_chunk = row_blocks_per_chunk * block_n
+    flat_weight = fp8_weight.reshape(-1, rows, cols)
+    flat_scale = fp8_scale.reshape(
+        flat_weight.shape[0], fp8_scale.shape[-2], fp8_scale.shape[-1]
     )
-    fp4_weight = fp4_weight.quantized_data
-    fp4_weight = fp4_weight.contiguous().view(torch.int8)
-    fp4_scale = fp4_scale.view(
-        *fp8_weight_dequant.shape[:-1],
-        fp8_weight_dequant.shape[-1] // mxfp4_block_size,
+    packed_batches = []
+    scale_batches = []
+    for batch_idx in range(flat_weight.shape[0]):
+        packed_chunks = []
+        scale_chunks = []
+        for row_start in range(0, rows, rows_per_chunk):
+            row_end = min(row_start + rows_per_chunk, rows)
+            scale_start = row_start // block_n
+            scale_end = (row_end + block_n - 1) // block_n
+            dequant = block_quant_dequant(
+                flat_weight[batch_idx, row_start:row_end],
+                flat_scale[batch_idx, scale_start:scale_end].to(torch.float32),
+                weight_block_size,
+                torch.bfloat16,
+            )
+            packed, scales = _MXFP4QuantizedData.quantize(
+                dequant, block_size=mxfp4_block_size
+            )
+            packed_chunks.append(packed.quantized_data.contiguous().view(torch.int8))
+            scale_chunks.append(
+                scales.view(row_end - row_start, cols // mxfp4_block_size)
+                .contiguous()
+                .view(torch.float8_e8m0fnu)
+            )
+        packed_batches.append(torch.cat(packed_chunks, dim=0))
+        scale_batches.append(torch.cat(scale_chunks, dim=0))
+
+    output_prefix = fp8_weight.shape[:-2]
+    fp4_weight = torch.stack(packed_batches).reshape(*output_prefix, rows, cols // 2)
+    fp4_scale = torch.stack(scale_batches).reshape(
+        *output_prefix, rows, cols // mxfp4_block_size
     )
-    return fp4_weight, fp4_scale.contiguous().view(torch.float8_e8m0fnu)
+    return fp4_weight, fp4_scale
 
 
 def requant_weight_ue8m0_inplace(weight, weight_scale_inv, weight_block_size):
