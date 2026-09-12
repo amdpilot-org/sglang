@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38773",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/778",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/748",
+  "candidate_commit": "8eb340a9601aa6951737cbe31c5cb0c2a64074c8",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The prepared base invokes the instrumented external FlashInfer boundary for a valid zero-token MXFP4 MoE activation and fails there. The exact candidate skips only that boundary after routing/dispatch, preserves empty output shape, BF16 dtype, device, symmetric allocation, and padding trim behavior, rejects the previously reported malformed routing and hidden widths, and preserves the nonempty boundary call. This is a source-level full fix of the reported wrapper contract, not merely test hardening. Actual H20 FlashInfer CUTLASS and four-rank DP-attention/TBO execution remain unavailable in this ROCm environment.",
+  "tests": [
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1c50f53dfd3f/venv/bin/python -m pytest -vv /tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py (base 358c163)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction through the real MoeRunner with AMD GPU tensors and an instrumented external kernel boundary. The valid empty case reached the boundary and raised; malformed empty shapes were not rejected as required. Six tests failed."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1c50f53dfd3f/venv/bin/python -m pytest -vv test/registered/moe/test_mxfp4_empty_input.py (candidate 8eb340a)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate-authored regression on one AMD Instinct MI355X: valid empty boundary suppression, symmetric allocation, output contract, nonempty control, token mismatch, routing widths 0/1/3, and hidden width 15. Six tests passed."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python:/tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests /tmp/amdpilot-repo-j-1c50f53dfd3f/venv/bin/python -m pytest -vv /tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_independent_adversarial.py (candidate 8eb340a)",
+      "exit_code": 0,
+      "what_was_measured": "Independent GPU adversarial coverage: padded empty output trims to [0,16] and remains contiguous BF16 on-device without a kernel call; nonempty [2,16] reaches the boundary with [2,2] routing; rank-3 hidden/ids/weights and ids/weights shape disagreement reject before the boundary. Six tests passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Tests allocated and operated on real torch CUDA-API tensors backed by one AMD Instinct MI355X (gfx950) under PyTorch 2.11.0+rocm7.2. Only the unavailable FlashInfer CUTLASS boundary was instrumented."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_reason": "The candidate changes only Python and tests; repository-environment.json supplies no native target, and no native source or compiled extension changed.",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Actual NVIDIA H20/SM90 FlashInfer CUTLASS kernel execution was not possible on the assigned AMD Instinct MI355X ROCm GPU.",
+    "The four-rank DeepSeek-V4-Flash DP-attention plus two-batch-overlap serving reproduction, distributed collective behavior, and real model weights were unavailable and remain end-to-end unverified.",
+    "The independent validation establishes the SGLang wrapper contract at the external kernel boundary; it does not qualify FlashInfer CUDA binaries or DeepSeek-V4 numerical semantics."
+  ],
+  "source_import_path": "/job/repo/python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py",
+  "python": "/tmp/amdpilot-repo-j-1c50f53dfd3f/venv/bin/python"
+}

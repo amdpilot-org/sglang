@@ -1,0 +1,335 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0 -- /tmp/amdpilot-repo-j-1c50f53dfd3f/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests
+plugins: hypothesis-6.155.0, anyio-4.15.1
+collecting ... collected 6 items
+
+../../tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py::test_flashinfer_mxfp4_empty_input_stops_at_external_kernel_boundary FAILED [ 16%]
+../../tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py::test_flashinfer_mxfp4_does_not_accept_malformed_empty_routing FAILED [ 33%]
+../../tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py::test_flashinfer_mxfp4_rejects_wrong_empty_routing_width[0] FAILED [ 50%]
+../../tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py::test_flashinfer_mxfp4_rejects_wrong_empty_routing_width[1] FAILED [ 66%]
+../../tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py::test_flashinfer_mxfp4_rejects_wrong_empty_routing_width[3] FAILED [ 83%]
+../../tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py::test_flashinfer_mxfp4_rejects_wrong_empty_hidden_width FAILED [100%]
+
+=================================== FAILURES ===================================
+_____ test_flashinfer_mxfp4_empty_input_stops_at_external_kernel_boundary ______
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fb4d26bbb90>
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires one GPU")
+    def test_flashinfer_mxfp4_empty_input_stops_at_external_kernel_boundary(monkeypatch):
+        import sglang.srt.layers.moe.moe_runner.flashinfer_cutlass as module
+
+        calls = []
+        symmetric_allocations = []
+
+        def instrumented_kernel(**kwargs):
+            calls.append(kwargs)
+            if kwargs["input"].shape[0] == 0:
+                raise RuntimeError("external kernel requires nonempty input")
+            kwargs["output"].fill_(3)
+            return (kwargs["output"],)
+
+        @contextmanager
+        def instrumented_symmetric_memory(*args, **kwargs):
+            symmetric_allocations.append((args, kwargs))
+            yield
+
+        monkeypatch.setattr(
+            module,
+            "_flashinfer_cutlass_fused_moe",
+            lambda: (instrumented_kernel, _ActivationType),
+        )
+        monkeypatch.setattr(module, "use_symmetric_memory", instrumented_symmetric_memory)
+        monkeypatch.setattr(module, "get_tp_group", lambda: object())
+        monkeypatch.setattr(module, "is_allocation_symmetric", lambda: False)
+        monkeypatch.setattr(
+            module.envs.SGLANG_FLASHINFER_MOE_FUSED_FINALIZE, "get", lambda: False
+        )
+
+        device = torch.device("cuda")
+        runner, quant_info = _runner_and_quant_info(device)
+
+        dispatch = _dispatch(0, device)
+>       empty = runner.run(dispatch, quant_info).hidden_states
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py:101:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+python/sglang/srt/layers/moe/moe_runner/runner.py:191: in run
+    return self.fused_func(dispatch_output, quant_info, self.config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py:321: in fused_experts_none_to_flashinfer_mxfp4
+    return _fused_experts_flashinfer_mxfp4_cutlass(
+python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py:438: in _fused_experts_flashinfer_mxfp4_cutlass
+    flashinfer_cutlass_fused_moe(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+kwargs = {'activation_type': <_ActivationType.Swiglu: 0>, 'ep_rank': 0, 'ep_size': 1, 'fc1_expert_biases': None, ...}
+
+    def instrumented_kernel(**kwargs):
+        calls.append(kwargs)
+        if kwargs["input"].shape[0] == 0:
+>           raise RuntimeError("external kernel requires nonempty input")
+E           RuntimeError: external kernel requires nonempty input
+
+/tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py:76: RuntimeError
+________ test_flashinfer_mxfp4_does_not_accept_malformed_empty_routing _________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fb4d2544b60>
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires one GPU")
+    def test_flashinfer_mxfp4_does_not_accept_malformed_empty_routing(monkeypatch):
+        import sglang.srt.layers.moe.moe_runner.flashinfer_cutlass as module
+
+        monkeypatch.setattr(
+            module,
+            "_flashinfer_cutlass_fused_moe",
+            lambda: (
+                lambda **kwargs: (_ for _ in ()).throw(AssertionError()),
+                _ActivationType,
+            ),
+        )
+        monkeypatch.setattr(
+            module,
+            "use_symmetric_memory",
+            lambda *a, **kw: __import__("contextlib").nullcontext(),
+        )
+        monkeypatch.setattr(module, "get_tp_group", lambda: object())
+        monkeypatch.setattr(module, "is_allocation_symmetric", lambda: False)
+
+        device = torch.device("cuda")
+        runner, quant_info = _runner_and_quant_info(device)
+        with pytest.raises(ValueError, match="token dimension"):
+>           runner.run(_dispatch(0, device, topk_tokens=1), quant_info)
+
+/tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py:136:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+python/sglang/srt/layers/moe/moe_runner/runner.py:191: in run
+    return self.fused_func(dispatch_output, quant_info, self.config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py:321: in fused_experts_none_to_flashinfer_mxfp4
+    return _fused_experts_flashinfer_mxfp4_cutlass(
+python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py:438: in _fused_experts_flashinfer_mxfp4_cutlass
+    flashinfer_cutlass_fused_moe(
+/tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py:121: in <lambda>
+    lambda **kwargs: (_ for _ in ()).throw(AssertionError()),
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+.0 = <tuple_iterator object at 0x7fb4d2544c10>
+
+>           lambda **kwargs: (_ for _ in ()).throw(AssertionError()),
+            _ActivationType,
+        ),
+    )
+E   AssertionError
+
+/tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py:121: AssertionError
+__________ test_flashinfer_mxfp4_rejects_wrong_empty_routing_width[0] __________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fb4d2545910>
+top_k = 0
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires one GPU")
+    @pytest.mark.parametrize("top_k", [0, 1, 3])
+    def test_flashinfer_mxfp4_rejects_wrong_empty_routing_width(monkeypatch, top_k):
+        import sglang.srt.layers.moe.moe_runner.flashinfer_cutlass as module
+
+        monkeypatch.setattr(
+            module,
+            "_flashinfer_cutlass_fused_moe",
+            lambda: (
+                lambda **kwargs: (_ for _ in ()).throw(AssertionError()),
+                _ActivationType,
+            ),
+        )
+
+        device = torch.device("cuda")
+        runner, quant_info = _runner_and_quant_info(device)
+        with pytest.raises(ValueError, match="configured top_k 2"):
+>           runner.run(_dispatch(0, device, top_k=top_k), quant_info)
+
+/tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py:156:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+python/sglang/srt/layers/moe/moe_runner/runner.py:191: in run
+    return self.fused_func(dispatch_output, quant_info, self.config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py:321: in fused_experts_none_to_flashinfer_mxfp4
+    return _fused_experts_flashinfer_mxfp4_cutlass(
+python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py:435: in _fused_experts_flashinfer_mxfp4_cutlass
+    with use_symmetric_memory(get_tp_group(), disabled=not is_allocation_symmetric()):
+                              ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def get_tp_group() -> GroupCoordinator:
+        if _ENABLE_PDMUX_P_TP:
+            assert _PDMUX_PREFILL_TP_GROUP is not None, (
+                "tensor model parallel group for PD-Multiplexing Prefill is not initialized"
+            )
+            return _PDMUX_PREFILL_TP_GROUP
+>       assert _TP is not None, "tensor model parallel group is not initialized"
+               ^^^^^^^^^^^^^^^
+E       AssertionError: tensor model parallel group is not initialized
+
+python/sglang/srt/distributed/parallel_state.py:2115: AssertionError
+__________ test_flashinfer_mxfp4_rejects_wrong_empty_routing_width[1] __________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fb4d2547230>
+top_k = 1
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires one GPU")
+    @pytest.mark.parametrize("top_k", [0, 1, 3])
+    def test_flashinfer_mxfp4_rejects_wrong_empty_routing_width(monkeypatch, top_k):
+        import sglang.srt.layers.moe.moe_runner.flashinfer_cutlass as module
+
+        monkeypatch.setattr(
+            module,
+            "_flashinfer_cutlass_fused_moe",
+            lambda: (
+                lambda **kwargs: (_ for _ in ()).throw(AssertionError()),
+                _ActivationType,
+            ),
+        )
+
+        device = torch.device("cuda")
+        runner, quant_info = _runner_and_quant_info(device)
+        with pytest.raises(ValueError, match="configured top_k 2"):
+>           runner.run(_dispatch(0, device, top_k=top_k), quant_info)
+
+/tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py:156:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+python/sglang/srt/layers/moe/moe_runner/runner.py:191: in run
+    return self.fused_func(dispatch_output, quant_info, self.config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py:321: in fused_experts_none_to_flashinfer_mxfp4
+    return _fused_experts_flashinfer_mxfp4_cutlass(
+python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py:435: in _fused_experts_flashinfer_mxfp4_cutlass
+    with use_symmetric_memory(get_tp_group(), disabled=not is_allocation_symmetric()):
+                              ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def get_tp_group() -> GroupCoordinator:
+        if _ENABLE_PDMUX_P_TP:
+            assert _PDMUX_PREFILL_TP_GROUP is not None, (
+                "tensor model parallel group for PD-Multiplexing Prefill is not initialized"
+            )
+            return _PDMUX_PREFILL_TP_GROUP
+>       assert _TP is not None, "tensor model parallel group is not initialized"
+               ^^^^^^^^^^^^^^^
+E       AssertionError: tensor model parallel group is not initialized
+
+python/sglang/srt/distributed/parallel_state.py:2115: AssertionError
+__________ test_flashinfer_mxfp4_rejects_wrong_empty_routing_width[3] __________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fb4d2545550>
+top_k = 3
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires one GPU")
+    @pytest.mark.parametrize("top_k", [0, 1, 3])
+    def test_flashinfer_mxfp4_rejects_wrong_empty_routing_width(monkeypatch, top_k):
+        import sglang.srt.layers.moe.moe_runner.flashinfer_cutlass as module
+
+        monkeypatch.setattr(
+            module,
+            "_flashinfer_cutlass_fused_moe",
+            lambda: (
+                lambda **kwargs: (_ for _ in ()).throw(AssertionError()),
+                _ActivationType,
+            ),
+        )
+
+        device = torch.device("cuda")
+        runner, quant_info = _runner_and_quant_info(device)
+        with pytest.raises(ValueError, match="configured top_k 2"):
+>           runner.run(_dispatch(0, device, top_k=top_k), quant_info)
+
+/tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py:156:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+python/sglang/srt/layers/moe/moe_runner/runner.py:191: in run
+    return self.fused_func(dispatch_output, quant_info, self.config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py:321: in fused_experts_none_to_flashinfer_mxfp4
+    return _fused_experts_flashinfer_mxfp4_cutlass(
+python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py:435: in _fused_experts_flashinfer_mxfp4_cutlass
+    with use_symmetric_memory(get_tp_group(), disabled=not is_allocation_symmetric()):
+                              ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def get_tp_group() -> GroupCoordinator:
+        if _ENABLE_PDMUX_P_TP:
+            assert _PDMUX_PREFILL_TP_GROUP is not None, (
+                "tensor model parallel group for PD-Multiplexing Prefill is not initialized"
+            )
+            return _PDMUX_PREFILL_TP_GROUP
+>       assert _TP is not None, "tensor model parallel group is not initialized"
+               ^^^^^^^^^^^^^^^
+E       AssertionError: tensor model parallel group is not initialized
+
+python/sglang/srt/distributed/parallel_state.py:2115: AssertionError
+____________ test_flashinfer_mxfp4_rejects_wrong_empty_hidden_width ____________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fb4d2545220>
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires one GPU")
+    def test_flashinfer_mxfp4_rejects_wrong_empty_hidden_width(monkeypatch):
+        import sglang.srt.layers.moe.moe_runner.flashinfer_cutlass as module
+
+        monkeypatch.setattr(
+            module,
+            "_flashinfer_cutlass_fused_moe",
+            lambda: (
+                lambda **kwargs: (_ for _ in ()).throw(AssertionError()),
+                _ActivationType,
+            ),
+        )
+
+        device = torch.device("cuda")
+        runner, quant_info = _runner_and_quant_info(device)
+        with pytest.raises(ValueError, match="configured hidden_size 16"):
+>           runner.run(_dispatch(0, device, hidden_size=15), quant_info)
+
+/tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py:175:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+python/sglang/srt/layers/moe/moe_runner/runner.py:191: in run
+    return self.fused_func(dispatch_output, quant_info, self.config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py:321: in fused_experts_none_to_flashinfer_mxfp4
+    return _fused_experts_flashinfer_mxfp4_cutlass(
+python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py:435: in _fused_experts_flashinfer_mxfp4_cutlass
+    with use_symmetric_memory(get_tp_group(), disabled=not is_allocation_symmetric()):
+                              ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def get_tp_group() -> GroupCoordinator:
+        if _ENABLE_PDMUX_P_TP:
+            assert _PDMUX_PREFILL_TP_GROUP is not None, (
+                "tensor model parallel group for PD-Multiplexing Prefill is not initialized"
+            )
+            return _PDMUX_PREFILL_TP_GROUP
+>       assert _TP is not None, "tensor model parallel group is not initialized"
+               ^^^^^^^^^^^^^^^
+E       AssertionError: tensor model parallel group is not initialized
+
+python/sglang/srt/distributed/parallel_state.py:2115: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../../tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py::test_flashinfer_mxfp4_empty_input_stops_at_external_kernel_boundary - RuntimeError: external kernel requires nonempty input
+FAILED ../../tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py::test_flashinfer_mxfp4_does_not_accept_malformed_empty_routing - AssertionError
+FAILED ../../tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py::test_flashinfer_mxfp4_rejects_wrong_empty_routing_width[0] - AssertionError: tensor model parallel group is not initialized
+FAILED ../../tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py::test_flashinfer_mxfp4_rejects_wrong_empty_routing_width[1] - AssertionError: tensor model parallel group is not initialized
+FAILED ../../tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py::test_flashinfer_mxfp4_rejects_wrong_empty_routing_width[3] - AssertionError: tensor model parallel group is not initialized
+FAILED ../../tmp/amdpilot-repo-j-1c50f53dfd3f/review-tests/test_mxfp4_empty_input.py::test_flashinfer_mxfp4_rejects_wrong_empty_hidden_width - AssertionError: tensor model parallel group is not initialized
+======================= 6 failed, 16 warnings in 19.09s ========================
