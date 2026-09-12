@@ -47,7 +47,6 @@ __global__ void TreeSpeculativeSamplingTargetOnly(
     DType* uniform_samples,
     DType* uniform_samples_for_final_sampling,
     DType* target_probs,
-    DType* draft_probs,
     uint32_t batch_size,
     uint32_t num_speculative_tokens,
     uint32_t num_draft_tokens,
@@ -68,9 +67,11 @@ __global__ void TreeSpeculativeSamplingTargetOnly(
   accept_index[bx * num_speculative_tokens] = last_accepted_retrive_idx;
   uint32_t num_accepted_tokens = 0;
   IdType2 cur_index = 0;
+  IdType2 rejected_chain_start = -1;
 
   for (uint32_t j = 1; j < num_speculative_tokens; ++j) {
     cur_index = retrive_next_token[bx * num_draft_tokens + cur_index];
+    rejected_chain_start = cur_index;
     while (cur_index != -1) {
       IdType2 draft_index = retrive_index[bx * num_draft_tokens + cur_index];
       IdType2 draft_token_id = candidates[bx * num_draft_tokens + cur_index];
@@ -86,10 +87,9 @@ __global__ void TreeSpeculativeSamplingTargetOnly(
         ++num_accepted_tokens;
         accept_index[bx * num_speculative_tokens + num_accepted_tokens] = draft_index;
         last_accepted_retrive_idx = draft_index;
+        rejected_chain_start = -1;
         break;
       } else {
-        // FIXME: leverage draft probs
-        draft_probs[cur_prob_offset + draft_token_id] = target_probs[cur_prob_offset + draft_token_id];
         cur_index = retrive_next_sibling[bx * num_draft_tokens + cur_index];
       }
     }
@@ -100,23 +100,26 @@ __global__ void TreeSpeculativeSamplingTargetOnly(
   // we need a different coin for the final sampling
   coin = uniform_samples_for_final_sampling[bx];
 
-  // sample from relu(target_probs - draft_probs)
+  // Sample from target_probs after masking the rejected siblings at the final
+  // tree state. For topk=1 this is one id comparison and, unlike the old
+  // implementation, does not require a dense [batch, drafts, vocab] scratch.
   DType sum_relu_q_minus_p(0);
-  vec_t<DType, VEC_SIZE> q_vec, p_vec;
+  vec_t<DType, VEC_SIZE> q_vec;
   DType relu_q_minus_p[VEC_SIZE];
   for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
     q_vec.fill(DType(0));
-    p_vec.fill(DType(0));
     if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
       q_vec.load(target_probs + cur_prob_offset + i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE);
-      if (num_accepted_tokens != num_speculative_tokens - 1) {
-        // there is no draft_probs for the bonus token
-        p_vec.load(draft_probs + cur_prob_offset + i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE);
-      }
     }
 #pragma unroll
     for (uint32_t j = 0; j < VEC_SIZE; ++j) {
-      relu_q_minus_p[j] = max(q_vec[j] - p_vec[j], DType(0));
+      IdType2 token_id = i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE + j;
+      bool rejected = false;
+      for (IdType2 node = rejected_chain_start; node != -1;
+           node = retrive_next_sibling[bx * num_draft_tokens + node]) {
+        rejected |= candidates[bx * num_draft_tokens + node] == token_id;
+      }
+      relu_q_minus_p[j] = rejected ? DType(0) : q_vec[j];
     }
     sum_relu_q_minus_p += BlockReduce<DType, BLOCK_THREADS, REDUCE_ALGORITHM>(temp_storage.block_prim.reduce)
                               .Sum<VEC_SIZE>(relu_q_minus_p);
@@ -135,19 +138,20 @@ __global__ void TreeSpeculativeSamplingTargetOnly(
   DType aggregate_relu_q_minus_p(0);
   for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
     q_vec.fill(DType(0));
-    p_vec.fill(DType(0));
     if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
       q_vec.load(target_probs + cur_prob_offset + i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE);
-      if (num_accepted_tokens != num_speculative_tokens - 1) {
-        // there is no draft_probs for the bonus token
-        p_vec.load(draft_probs + cur_prob_offset + i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE);
-      }
     }
 
     vec_t<DType, VEC_SIZE> relu_q_minus_p_vec;
 #pragma unroll
     for (uint32_t j = 0; j < VEC_SIZE; ++j) {
-      relu_q_minus_p_vec[j] = max(q_vec[j] - p_vec[j], DType(0));
+      IdType2 token_id = i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE + j;
+      bool rejected = false;
+      for (IdType2 node = rejected_chain_start; node != -1;
+           node = retrive_next_sibling[bx * num_draft_tokens + node]) {
+        rejected |= candidates[bx * num_draft_tokens + node] == token_id;
+      }
+      relu_q_minus_p_vec[j] = rejected ? DType(0) : q_vec[j];
     }
 
     DeviceSamplingFromProb<VEC_SIZE, BLOCK_THREADS, SCAN_ALGORITHM, REDUCE_ALGORITHM, DETERMINISTIC>(
@@ -185,7 +189,6 @@ cudaError_t TreeSpeculativeSamplingTargetOnly(
     DType* uniform_samples,
     DType* uniform_samples_for_final_sampling,
     DType* target_probs,
-    DType* draft_probs,
     uint32_t batch_size,
     uint32_t num_speculative_tokens,
     uint32_t num_draft_tokens,
@@ -212,7 +215,6 @@ cudaError_t TreeSpeculativeSamplingTargetOnly(
       &uniform_samples,
       &uniform_samples_for_final_sampling,
       &target_probs,
-      &draft_probs,
       &batch_size,
       &num_speculative_tokens,
       &num_draft_tokens,
