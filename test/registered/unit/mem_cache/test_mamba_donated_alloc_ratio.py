@@ -160,6 +160,14 @@ class TestMambaRatioEnvGate(unittest.TestCase):
             r(extra_buffer=True, lazy=False, disable_overlap=False), 4
         )  # overlap
 
+    def test_decode_lock_skip_is_enabled_by_default(self):
+        """The safe eviction path must protect default launches from pinning one
+        redundant cached Mamba state per decoding request.  Operators can still
+        set the environment variable to 0 as a rollback escape hatch."""
+        from sglang.srt.environ import envs
+
+        self.assertTrue(envs.SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK.default)
+
 
 class _RecordingComp:
     """Fake tree component: records the dec params it is asked to release with."""
