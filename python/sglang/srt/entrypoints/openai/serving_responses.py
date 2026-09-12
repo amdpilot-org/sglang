@@ -103,13 +103,26 @@ def _build_output_text_logprobs(meta_info: dict) -> list[Logprob]:
         zip(decoded.tokens, decoded.token_logprobs)
     ):
         top_entry = top_lists[index] if index < len(top_lists) else None
+        raw_top_entry = (
+            decoded.top_logprobs_raw[index]
+            if index < len(decoded.top_logprobs_raw)
+            else None
+        )
+        candidates = (
+            (
+                (token_text, token_logprob)
+                for token_logprob, _, token_text in raw_top_entry
+            )
+            if raw_top_entry is not None
+            else (top_entry or {}).items()
+        )
         top_logprobs = [
             LogprobTopLogprob(
                 token=top_token,
                 logprob=top_logprob,
                 bytes=list(top_token.encode("utf-8")),
             )
-            for top_token, top_logprob in (top_entry or {}).items()
+            for top_token, top_logprob in candidates
         ]
         logprobs.append(
             Logprob(

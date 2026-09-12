@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32290",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the decoded-text dictionary collision: three candidates became two and the lower-ranked duplicate overwrote the higher-ranked score. Chat Completions and Responses now consume an excluded, ordered raw-candidate field that preserves every candidate, while the legacy Completions dictionary remains wire-compatible and retains the first (best-ranked) duplicate.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-7c3ec2d6e068/venv/bin/python reports/j-7c3ec2d6e068/reproduce_before.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction on the recorded base: candidate_count=2 and replacement_logprob=-2.5 instead of three candidates with the higher-ranked -0.5 entry retained. Raw output: reports/j-7c3ec2d6e068/reproduce_before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7c3ec2d6e068/venv/bin/python reports/j-7c3ec2d6e068/reproduce_after.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after Chat response conversion: candidate_count=3 in source order with both replacement-character candidates and scores -0.5 and -2.5. Raw output: reports/j-7c3ec2d6e068/reproduce_after.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7c3ec2d6e068/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_duplicate_top_logprobs.py test/registered/unit/entrypoints/openai/test_serving_responses.py test/registered/unit/entrypoints/openai/test_serving_chat.py test/registered/unit/entrypoints/openai/test_serving_completions.py",
+      "exit_code": 0,
+      "what_was_measured": "193 tests passed and 72 subtests passed, covering duplicate preservation in Chat and Responses, ordered unique candidates, missing top-logprob positions, legacy LogProbs fallback, and adjacent endpoint behavior. Raw output: reports/j-7c3ec2d6e068/pytest.log"
+    },
+    {
+      "command": "git diff --check && /tmp/amdpilot-repo-j-7c3ec2d6e068/venv/bin/python -m py_compile python/sglang/srt/entrypoints/openai/protocol.py python/sglang/srt/entrypoints/openai/utils.py python/sglang/srt/entrypoints/openai/serving_chat.py python/sglang/srt/entrypoints/openai/serving_responses.py test/registered/unit/entrypoints/openai/test_duplicate_top_logprobs.py",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity and Python syntax for every changed source and regression file."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reproduced defect and corrected code are CPU-only OpenAI response shaping. No model engine or GPU kernel was executed, so no gfx950 or model-level claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original DeepSeek-V4-Flash-FP8 TP4 workload on four NVIDIA H200 GPUs was not reproduced; those weights and that multi-GPU CUDA hardware are unavailable, and the assigned single gfx950 cannot qualify it.",
+    "Original tokenizer bytes are still not carried through the internal tuple, so byte-fallback candidates continue to expose the UTF-8 encoding of decoded U+FFFD. This adjacent representation issue is explicitly outside the collision fix.",
+    "The legacy Completions API represents top_logprobs as a decoded-text-keyed JSON object and therefore cannot expose duplicate decoded strings; it now deterministically retains the first/best-ranked candidate.",
+    "The prepared interpreter does not include ruff or black; formatting modules could not be run. git diff --check, py_compile, and focused unit suites passed."
+  ]
+}
