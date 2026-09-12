@@ -1,0 +1,36 @@
+BASE REPRODUCTION (actual forward_absorb_rocm_core)
+base_commit=358c163250ad3b1f62939b01ce1314a0a31a0365
+batch=1 exception=ValueError: not enough values to unpack (expected 2, got 1)
+batch=1 backend kwargs contained q_rope and k_rope; return_lse absent
+batch=2 exception after silent tensor-row unpack=RuntimeError: derived parallel width 'attn_dcp_size' is not available
+batch=2 backend kwargs contained q_rope and k_rope; return_lse absent
+batch=3 exception=ValueError: too many values to unpack (expected 2)
+batch=3 backend kwargs contained q_rope and k_rope; return_lse absent
+
+CANDIDATE REGRESSION
+commit=997071da4e91329b0f518b8b2374531348ee6cd6
+command=/tmp/amdpilot-repo-j-5d179cc16475/venv/bin/python -m pytest -q test/registered/unit/models/test_forward_mla_rocm_dcp_return.py
+result=7 passed, 4 subtests passed, exit 0
+
+INDEPENDENT CANDIDATE MATRIX (actual forward_absorb_rocm_core)
+tensor batch=1: explicit RuntimeError, return_lse=True
+tensor batch=2: explicit RuntimeError, return_lse=True
+tensor batch=3: explicit RuntimeError, return_lse=True
+valid tuple batch=1: success, output shape (1,8), identical LSE object at collective, return_lse=True
+valid tuple batch=3: success, output shape (3,8), identical LSE object at collective, return_lse=True
+tuple (output,None): explicit RuntimeError before collective
+list [output,lse]: explicit RuntimeError before collective
+
+GPU NUMERICAL CHECKS
+command=/tmp/amdpilot-repo-j-5d179cc16475/venv/bin/python -m pytest -q test/registered/kernels/test_dcp_lse_combine.py::TestLSECombineTritonVsCPU::test_n2_base_e test/registered/kernels/test_dcp_lse_combine.py::TestLSECombineTritonVsCPU::test_n2_base_2 test/registered/kernels/test_dcp_lse_combine.py::TestLSECombineTritonVsCPU::test_n2_large_batch test/registered/kernels/test_dcp_lse_combine.py::TestLSECombineTritonVsCPU::test_n4_large_head_dim
+result=4 passed, exit 0
+gpu=AMD Instinct MI355X
+arch=gfx950:sramecc+:xnack-
+torch=2.11.0+rocm7.2
+hip=7.2.26015
+
+IMPORT PATHS
+sglang=/job/repo/python/sglang/__init__.py
+forward_mla_rocm=/job/repo/python/sglang/srt/models/deepseek_common/attention_forward_methods/forward_mla_rocm.py
+aiter_native=/tmp/amdpilot-repo-j-5d179cc16475/cache/aiter/module_aiter_core.so
+native_rebuilt=false (no native source changed)

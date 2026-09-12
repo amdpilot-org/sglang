@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38709",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/669",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/666",
+  "candidate_commit": "997071da4e91329b0f518b8b2374531348ee6cd6",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The prepared base reproduces the ROCm DCP decode return-shape defect in the actual forward_absorb_rocm_core implementation. The exact candidate requests return_lse=True, validates the returned container before LSE use, and passes both its regression and independent adversarial implementation-boundary cases. Real single-GPU DCP LSE combine kernels matched independent CPU references. The reported 8-rank MI300X deployment remains unavailable, but no counterexample to the original return-contract fix was found.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-5d179cc16475/venv/bin/python - <<'PY' ... actual forward_absorb_rocm_core base reproduction for tensor batches 1, 2, and 3 ... PY",
+      "exit_code": 0,
+      "what_was_measured": "On base: batch 1 raised ValueError: not enough values to unpack; batch 2 silently unpacked two tensor rows and reached later DCP configuration; batch 3 raised ValueError: too many values to unpack. Backend kwargs lacked return_lse in all cases."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5d179cc16475/venv/bin/python -m pytest -q test/registered/unit/models/test_forward_mla_rocm_dcp_return.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression: 7 tests passed plus 4 parameterized subtests, covering batch one/larger, tensor-only and tuple returns, absent LSE, return_lse request, and LSE identity at the collective boundary."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5d179cc16475/venv/bin/python - <<'PY' ... independent actual-forward adversarial matrix ... PY",
+      "exit_code": 0,
+      "what_was_measured": "On the exact candidate, tensor-only results for batches 1, 2, and 3 all failed immediately with the explicit ROCm DCP contract RuntimeError and return_lse=True was observed. Valid tuples for batches 1 and 3 succeeded and passed the identical LSE tensor to dcp_a2a_lse_reduce. Tuple-with-None and list containers failed before collective use."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5d179cc16475/venv/bin/python -m pytest -q test/registered/kernels/test_dcp_lse_combine.py::TestLSECombineTritonVsCPU::test_n2_base_e test/registered/kernels/test_dcp_lse_combine.py::TestLSECombineTritonVsCPU::test_n2_base_2 test/registered/kernels/test_dcp_lse_combine.py::TestLSECombineTritonVsCPU::test_n2_large_batch test/registered/kernels/test_dcp_lse_combine.py::TestLSECombineTritonVsCPU::test_n4_large_head_dim",
+      "exit_code": 0,
+      "what_was_measured": "Four real GPU Triton correction/combine cases passed against independent CPU references, covering natural-log and base-2 LSE, larger batch, and larger head dimension."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X, gfx950:sramecc+:xnack-, ROCm 7.2.26015, torch 2.11.0+rocm7.2. Four selected DCP LSE Triton-vs-CPU numerical tests executed and passed."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_reason": "Candidate changes only Python source, a Python test, and its own report; no C++, FlyDSL, or native source changed.",
+  "source_import_paths": {
+    "sglang": "/job/repo/python/sglang/__init__.py",
+    "reviewed_module": "/job/repo/python/sglang/srt/models/deepseek_common/attention_forward_methods/forward_mla_rocm.py",
+    "aiter_native_module": "/tmp/amdpilot-repo-j-5d179cc16475/cache/aiter/module_aiter_core.so"
+  },
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Only one assigned GPU was available; real multi-rank DCP collectives and transport were not executed.",
+    "The reported 8x MI300X/gfx942 GLM-5.3 deployment was unavailable; the assigned GPU was MI355X/gfx950.",
+    "Model weights and the full server reproduction were unavailable and were not claimed as tested.",
+    "The candidate PR body references mirror issue 597 instead of the reviewed mirror issue 669; this is documentation metadata and does not alter the code verdict."
+  ]
+}
