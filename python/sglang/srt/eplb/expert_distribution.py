@@ -164,6 +164,9 @@ class _ExpertDistributionRecorderReal(ExpertDistributionRecorder):
 
         self._recording = False
         self._disable_all = False
+        self._is_current_stream_capturing = getattr(
+            torch.get_device_module(), "is_current_stream_capturing", lambda: False
+        )
         self._current_forward_pass_id = Withable()
         self._current_layer_idx = Withable()
         self._current_debug_name = Withable()
@@ -207,14 +210,16 @@ class _ExpertDistributionRecorderReal(ExpertDistributionRecorder):
             self._disable_all = previous_disable_all
 
     def _on_forward_pass_start(self, forward_batch: ForwardBatch):
-        if not self._recording:
+        # Draft graph capture can enter ModelRunner.forward. Keep its per-layer
+        # hooks capturable, but do not capture pass-boundary reset/bookkeeping.
+        if not self._recording or self._is_current_stream_capturing():
             return
         for gatherer_key, gatherer in self._single_pass_gatherers.items():
             gatherer.reset()
             gatherer.on_forward_pass_start(forward_batch)
 
     def _on_forward_pass_end(self, forward_pass_id: int, outputs: Dict[str, Any]):
-        if not self._recording:
+        if not self._recording or self._is_current_stream_capturing():
             return
         for gatherer_key, gatherer in self._single_pass_gatherers.items():
             single_pass_data = gatherer.collect()
@@ -251,9 +256,7 @@ class _ExpertDistributionRecorderReal(ExpertDistributionRecorder):
     def _on_hook(self, hook_name: str, **kwargs):
         if self._disable_all:
             return
-        if not (
-            self._recording or torch.get_device_module().is_current_stream_capturing()
-        ):
+        if not (self._recording or self._is_current_stream_capturing()):
             return
         gatherer = self._single_pass_gatherers[
             self._accumulator.get_single_pass_gatherer_key(
