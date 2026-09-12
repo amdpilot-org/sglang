@@ -37,6 +37,7 @@ from unittest import mock
 
 import sglang.srt.connector as connector_module
 from sglang.srt.arg_groups.model_path_hook import (
+    handle_load_format,
     handle_modelscope_paths,
     resolve_hf_gguf_model_path,
 )
@@ -60,6 +61,7 @@ _MINI_CONFIG = {
 _GGUF_REFERENCE = "owner/repo"
 _MODELSCOPE_REPO = "org/model"
 _REMOTE_URL = "redis://host:6379/mini-llama"
+_OBJECT_STORE_URI = "s3://bucket/model"
 
 
 class _ModelSourceCase(CustomTestCase):
@@ -320,6 +322,65 @@ class TestTheRemoteConnectorArm(_ModelSourceCase):
         self.assertEqual(server_args.model_path, _REMOTE_URL)
         self.assertEqual(config.model_path, pulled)
         self.assertIs(model_config_of(server_args), config)
+
+
+class TestDraftObjectStoreLoadFormat(_ModelSourceCase):
+    def _resolve(self, draft_load_format):
+        server_args = ServerArgs(
+            model_path=_OBJECT_STORE_URI,
+            load_format="auto",
+            speculative_draft_model_path="s3://bucket/draft",
+            speculative_draft_load_format=draft_load_format,
+            device="cuda",
+        )
+        with mock.patch(
+            "sglang.srt.arg_groups.model_path_hook.is_mistral_native_format",
+            return_value=False,
+        ):
+            handle_load_format(server_args)
+        return resolving_view(server_args)
+
+    def test_an_explicit_auto_draft_uses_the_object_store_loader(self):
+        from sglang.srt.model_loader.loader import LoadConfig, get_model_loader
+
+        view = self._resolve("auto")
+
+        self.assertEqual(view.load_format, "runai_streamer")
+        self.assertEqual(view.speculative_draft_load_format, "runai_streamer")
+        self.assertEqual(
+            type(
+                get_model_loader(
+                    LoadConfig(load_format=view.speculative_draft_load_format)
+                )
+            ).__name__,
+            "RunaiModelStreamerLoader",
+        )
+
+    def test_an_unspecified_draft_keeps_the_existing_inference(self):
+        self.assertEqual(
+            self._resolve(None).speculative_draft_load_format, "runai_streamer"
+        )
+
+    def test_an_explicit_non_auto_draft_format_is_unchanged(self):
+        self.assertEqual(self._resolve("dummy").speculative_draft_load_format, "dummy")
+
+    def test_auto_is_not_rewritten_for_a_non_object_store_draft(self):
+        server_args = ServerArgs(
+            model_path=_OBJECT_STORE_URI,
+            load_format="auto",
+            speculative_draft_model_path="owner/draft",
+            speculative_draft_load_format="auto",
+            device="cuda",
+        )
+        with mock.patch(
+            "sglang.srt.arg_groups.model_path_hook.is_mistral_native_format",
+            return_value=False,
+        ):
+            handle_load_format(server_args)
+
+        self.assertEqual(
+            resolving_view(server_args).speculative_draft_load_format, "auto"
+        )
 
 
 if __name__ == "__main__":
