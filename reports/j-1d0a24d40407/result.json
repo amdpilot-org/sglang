@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32942",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1997",
+  "candidate_commit": "cc72c0ec94a5617dde397bced1b939e284b473c8",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the unified deterministic extend attention xAI-temperature mismatch. The exact candidate changes the affected Triton kernel to the logarithmic strict-greater-than rule used by regular extend and decode attention, and passes its regression plus independent GPU boundary references on gfx950.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1d0a24d40407/venv/bin/python -m pytest /job/review-evidence-j-1d0a24d40407/candidate_test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention_unified_xai_temperature_reference -q",
+      "revision": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 1,
+      "what_was_measured": "Candidate's exact regression against the prepared base; reproduced per-position differences up to 0.9590050578117371."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-1d0a24d40407/triton-review-candidate /tmp/amdpilot-repo-j-1d0a24d40407/venv/bin/python -m pytest test/registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention_unified_xai_temperature_reference -q",
+      "revision": "cc72c0ec94a5617dde397bced1b939e284b473c8",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression validating below-threshold, threshold, and above-threshold output against a logarithmically scaled numerical reference."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-1d0a24d40407/triton-review-candidate /tmp/amdpilot-repo-j-1d0a24d40407/venv/bin/python /job/review-evidence-j-1d0a24d40407/adversarial_xai_reference.py",
+      "revision": "cc72c0ec94a5617dde397bced1b939e284b473c8",
+      "exit_code": 0,
+      "what_was_measured": "Independent fixed-seed GPU references for thresholds 2, 3, 4, and 8; head dimensions 32 and 64; positions below, equal to, and above the boundary. Maximum discrepancy was 5.364418029785156e-07."
+    },
+    {
+      "command": "fixed-seed direct invocation of _test_extend_attention_unified_vs_regular_once(2, 512, 32, 8, 128, xai_temperature_len=4)",
+      "revision": "cc72c0ec94a5617dde397bced1b939e284b473c8",
+      "exit_code": 0,
+      "what_was_measured": "Issue-specific unified versus regular Triton kernel parity on gfx950."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-1d0a24d40407/triton-review-candidate /tmp/amdpilot-repo-j-1d0a24d40407/venv/bin/python -m pytest test/registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention_unified_vs_regular -q",
+      "revision": "cc72c0ec94a5617dde397bced1b939e284b473c8",
+      "exit_code": 1,
+      "what_was_measured": "Full candidate parity matrix: issue-specific xAI case passed; unrelated temperature-disabled D=80 stochastic subcase failed the existing AMD tolerance with max diff 0.1669921875."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X (gfx950, reported capability 9.5) executed the base and candidate Triton kernels under ROCm 7.2."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "CUDA-specific execution was not available; the candidate was GPU-verified on ROCm gfx950.",
+    "No Grok weights or full serving/model-semantic validation were available.",
+    "The full parity matrix retains an unrelated stochastic temperature-disabled D=80 gfx950 tolerance failure.",
+    "No native rebuild was applicable because the candidate changes only Python Triton JIT source and Python tests."
+  ]
+}
