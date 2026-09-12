@@ -1,0 +1,275 @@
+.FF                                                                   [100%]
+=================================== FAILURES ===================================
+_ TestTritonCacheKeyHygiene.test_masked_set_matches_torch_for_boundary_shapes (n=1, h=1, d=1) _
+
+self = <test_triton_cache_key_hygiene.TestTritonCacheKeyHygiene testMethod=test_masked_set_matches_torch_for_boundary_shapes>
+
+    @unittest.skipUnless(torch.cuda.is_available(), "requires a GPU")
+    def test_masked_set_matches_torch_for_boundary_shapes(self):
+        device = torch.device("cuda")
+        cases = (
+            (1, 1, 1, [True]),
+            (3, 2, 65, [True, False, True]),
+            (65, 3, 47, [i % 3 == 0 for i in range(65)]),
+        )
+        for n, h, d, mask_values in cases:
+            with self.subTest(n=n, h=h, d=d):
+                k = torch.randn(n, h, d, device=device)
+                v = torch.randn(n, h, d, device=device)
+                loc = torch.randperm(n, device=device, dtype=torch.int64)
+                mask = torch.tensor(mask_values, device=device, dtype=torch.bool)
+                k_buffer = torch.full((n, h, d), float("nan"), device=device)
+                v_buffer = torch.full((n, h, d), float("nan"), device=device)
+
+>               masked_set_kv_buffer_kernel[(n,)](
+                    k,
+                    v,
+                    k_buffer,
+                    v_buffer,
+                    loc,
+                    mask,
+                    h,
+                    d,
+                    128,
+                    k.stride(0),
+                    k.stride(1),
+                    v.stride(0),
+                    v.stride(1),
+                )
+
+test/registered/kernels/test_triton_cache_key_hygiene.py:61:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py:370: in <lambda>
+    return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = JITFunction(sglang.srt.mem_cache.memory_pool:masked_set_kv_buffer_kernel)
+grid = (1,), warmup = False
+args = (tensor([[[0.6917]]], device='cuda:0'), tensor([[[0.4453]]], device='cuda:0'), tensor([[[nan]]], device='cuda:0'), tensor([[[nan]]], device='cuda:0'), tensor([0], device='cuda:0'), tensor([True], device='cuda:0'), ...)
+kwargs = {'debug': False, 'instrumentation_mode': ''}, device = 0, stream = 0
+kernel_cache = {}, kernel_key_cache = {}
+target = GPUTarget(backend='hip', arch='gfx950', warp_size=64)
+backend = <triton.backends.amd.compiler.HIPBackend object at 0x7fc0471c5ac0>
+binder = <function dynamic_func at 0x7fc046ffcc20>
+
+    def run(self, *args, grid, warmup, **kwargs):
+        kwargs["debug"] = kwargs.get("debug", self.debug) or knobs.runtime.debug
+        kwargs["instrumentation_mode"] = knobs.compilation.instrumentation_mode
+
+        # parse options
+        device = driver.active.get_current_device()
+        stream = driver.active.get_current_stream(device)
+
+        # Execute pre run hooks with args and kwargs
+        for hook in self.pre_run_hooks:
+            hook(*args, **kwargs)
+
+        kernel_cache, kernel_key_cache, target, backend, binder = self.device_caches[device]
+        # specialization is list[tuple[str, Any]], where first element of tuple is
+        # the type and the second parameter is the 'specialization' value.
+>       bound_args, specialization, options = binder(*args, **kwargs)
+                                              ^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: dynamic_func() missing 1 required positional argument: 'v_stride_H'
+
+/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py:735: TypeError
+_ TestTritonCacheKeyHygiene.test_masked_set_matches_torch_for_boundary_shapes (n=3, h=2, d=65) _
+
+self = <test_triton_cache_key_hygiene.TestTritonCacheKeyHygiene testMethod=test_masked_set_matches_torch_for_boundary_shapes>
+
+    @unittest.skipUnless(torch.cuda.is_available(), "requires a GPU")
+    def test_masked_set_matches_torch_for_boundary_shapes(self):
+        device = torch.device("cuda")
+        cases = (
+            (1, 1, 1, [True]),
+            (3, 2, 65, [True, False, True]),
+            (65, 3, 47, [i % 3 == 0 for i in range(65)]),
+        )
+        for n, h, d, mask_values in cases:
+            with self.subTest(n=n, h=h, d=d):
+                k = torch.randn(n, h, d, device=device)
+                v = torch.randn(n, h, d, device=device)
+                loc = torch.randperm(n, device=device, dtype=torch.int64)
+                mask = torch.tensor(mask_values, device=device, dtype=torch.bool)
+                k_buffer = torch.full((n, h, d), float("nan"), device=device)
+                v_buffer = torch.full((n, h, d), float("nan"), device=device)
+
+>               masked_set_kv_buffer_kernel[(n,)](
+                    k,
+                    v,
+                    k_buffer,
+                    v_buffer,
+                    loc,
+                    mask,
+                    h,
+                    d,
+                    128,
+                    k.stride(0),
+                    k.stride(1),
+                    v.stride(0),
+                    v.stride(1),
+                )
+
+test/registered/kernels/test_triton_cache_key_hygiene.py:61:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py:370: in <lambda>
+    return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = JITFunction(sglang.srt.mem_cache.memory_pool:masked_set_kv_buffer_kernel)
+grid = (3,), warmup = False
+args = (tensor([[[-1.1165,  0.3070,  1.0666, -0.9161, -0.7685, -0.0465,  0.4266,
+           0.3975,  1.0643,  1.0226,  1.0990...n]]],
+       device='cuda:0'), tensor([0, 1, 2], device='cuda:0'), tensor([ True, False,  True], device='cuda:0'), ...)
+kwargs = {'debug': False, 'instrumentation_mode': ''}, device = 0, stream = 0
+kernel_cache = {}, kernel_key_cache = {}
+target = GPUTarget(backend='hip', arch='gfx950', warp_size=64)
+backend = <triton.backends.amd.compiler.HIPBackend object at 0x7fc0471c5ac0>
+binder = <function dynamic_func at 0x7fc046ffcc20>
+
+    def run(self, *args, grid, warmup, **kwargs):
+        kwargs["debug"] = kwargs.get("debug", self.debug) or knobs.runtime.debug
+        kwargs["instrumentation_mode"] = knobs.compilation.instrumentation_mode
+
+        # parse options
+        device = driver.active.get_current_device()
+        stream = driver.active.get_current_stream(device)
+
+        # Execute pre run hooks with args and kwargs
+        for hook in self.pre_run_hooks:
+            hook(*args, **kwargs)
+
+        kernel_cache, kernel_key_cache, target, backend, binder = self.device_caches[device]
+        # specialization is list[tuple[str, Any]], where first element of tuple is
+        # the type and the second parameter is the 'specialization' value.
+>       bound_args, specialization, options = binder(*args, **kwargs)
+                                              ^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: dynamic_func() missing 1 required positional argument: 'v_stride_H'
+
+/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py:735: TypeError
+_ TestTritonCacheKeyHygiene.test_masked_set_matches_torch_for_boundary_shapes (n=65, h=3, d=47) _
+
+self = <test_triton_cache_key_hygiene.TestTritonCacheKeyHygiene testMethod=test_masked_set_matches_torch_for_boundary_shapes>
+
+    @unittest.skipUnless(torch.cuda.is_available(), "requires a GPU")
+    def test_masked_set_matches_torch_for_boundary_shapes(self):
+        device = torch.device("cuda")
+        cases = (
+            (1, 1, 1, [True]),
+            (3, 2, 65, [True, False, True]),
+            (65, 3, 47, [i % 3 == 0 for i in range(65)]),
+        )
+        for n, h, d, mask_values in cases:
+            with self.subTest(n=n, h=h, d=d):
+                k = torch.randn(n, h, d, device=device)
+                v = torch.randn(n, h, d, device=device)
+                loc = torch.randperm(n, device=device, dtype=torch.int64)
+                mask = torch.tensor(mask_values, device=device, dtype=torch.bool)
+                k_buffer = torch.full((n, h, d), float("nan"), device=device)
+                v_buffer = torch.full((n, h, d), float("nan"), device=device)
+
+>               masked_set_kv_buffer_kernel[(n,)](
+                    k,
+                    v,
+                    k_buffer,
+                    v_buffer,
+                    loc,
+                    mask,
+                    h,
+                    d,
+                    128,
+                    k.stride(0),
+                    k.stride(1),
+                    v.stride(0),
+                    v.stride(1),
+                )
+
+test/registered/kernels/test_triton_cache_key_hygiene.py:61:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py:370: in <lambda>
+    return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = JITFunction(sglang.srt.mem_cache.memory_pool:masked_set_kv_buffer_kernel)
+grid = (65,), warmup = False
+args = (tensor([[[ 0.8473, -0.3250,  0.3711,  ..., -0.8229, -0.5967,  0.0476],
+         [ 0.5226,  0.6680,  0.5521,  ..., -0....se, False,  True, False, False,  True, False, False,
+         True, False, False,  True, False], device='cuda:0'), ...)
+kwargs = {'debug': False, 'instrumentation_mode': ''}, device = 0, stream = 0
+kernel_cache = {}, kernel_key_cache = {}
+target = GPUTarget(backend='hip', arch='gfx950', warp_size=64)
+backend = <triton.backends.amd.compiler.HIPBackend object at 0x7fc0471c5ac0>
+binder = <function dynamic_func at 0x7fc046ffcc20>
+
+    def run(self, *args, grid, warmup, **kwargs):
+        kwargs["debug"] = kwargs.get("debug", self.debug) or knobs.runtime.debug
+        kwargs["instrumentation_mode"] = knobs.compilation.instrumentation_mode
+
+        # parse options
+        device = driver.active.get_current_device()
+        stream = driver.active.get_current_stream(device)
+
+        # Execute pre run hooks with args and kwargs
+        for hook in self.pre_run_hooks:
+            hook(*args, **kwargs)
+
+        kernel_cache, kernel_key_cache, target, backend, binder = self.device_caches[device]
+        # specialization is list[tuple[str, Any]], where first element of tuple is
+        # the type and the second parameter is the 'specialization' value.
+>       bound_args, specialization, options = binder(*args, **kwargs)
+                                              ^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: dynamic_func() missing 1 required positional argument: 'v_stride_H'
+
+/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py:735: TypeError
+___ TestTritonCacheKeyHygiene.test_masked_set_write_count_is_not_specialized ___
+
+self = <test_triton_cache_key_hygiene.TestTritonCacheKeyHygiene testMethod=test_masked_set_write_count_is_not_specialized>
+
+    def test_masked_set_write_count_is_not_specialized(self):
+        params = {param.name: param for param in masked_set_kv_buffer_kernel.params}
+>       self.assertNotIn("N", params)
+E       AssertionError: 'N' unexpectedly found in {'k_ptr': <triton.runtime.jit.KernelParam object at 0x7fc0470fac30>, 'v_ptr': <triton.runtime.jit.KernelParam object at 0x7fc0470faa50>, 'k_buffer_ptr': <triton.runtime.jit.KernelParam object at 0x7fc0470fa9c0>, 'v_buffer_ptr': <triton.runtime.jit.KernelParam object at 0x7fc0470faab0>, 'loc_ptr': <triton.runtime.jit.KernelParam object at 0x7fc0470faa80>, 'mask_ptr': <triton.runtime.jit.KernelParam object at 0x7fc0470faae0>, 'N': <triton.runtime.jit.KernelParam object at 0x7fc0470fb6e0>, 'H': <triton.runtime.jit.KernelParam object at 0x7fc0470fb710>, 'D': <triton.runtime.jit.KernelParam object at 0x7fc0470fb740>, 'CHUNK': <triton.runtime.jit.KernelParam object at 0x7fc0470fb770>, 'k_stride_B': <triton.runtime.jit.KernelParam object at 0x7fc0470fb7a0>, 'k_stride_H': <triton.runtime.jit.KernelParam object at 0x7fc0470fb7d0>, 'v_stride_B': <triton.runtime.jit.KernelParam object at 0x7fc0470fb800>, 'v_stride_H': <triton.runtime.jit.KernelParam object at 0x7fc0470fb830>}
+
+test/registered/kernels/test_triton_cache_key_hygiene.py:21: AssertionError
+___ TestTritonCacheKeyHygiene.test_xpu_chunk_kernel_has_no_unused_nt_bucket ____
+
+self = <test_triton_cache_key_hygiene.TestTritonCacheKeyHygiene testMethod=test_xpu_chunk_kernel_has_no_unused_nt_bucket>
+
+    def test_xpu_chunk_kernel_has_no_unused_nt_bucket(self):
+        tree = ast.parse(XPU_CHUNK_DELTA_H.read_text(encoding="utf-8"))
+        kernel = next(
+            node
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name
+            == "chunk_gated_delta_rule_fwd_kernel_h_blockdim64_k_loop"
+        )
+>       self.assertNotIn("NT_BUCKET", {arg.arg for arg in kernel.args.args})
+E       AssertionError: 'NT_BUCKET' unexpectedly found in {'h', 'BV', 'NT_BUCKET', 'cu_seqlens', 'V', 'IS_VARLEN', 'INPLACE_UPDATE', 'Hg', 'USE_GK', 'USE_G', 'K', 'T', 'H', 'w', 'k', 'initial_state', 'SAVE_NEW_VALUE', 'USE_INITIAL_STATE', 'BT', 'gk', 'g', 'chunk_offsets', 'initial_state_indices', 'USE_EXP2', 'v_new', 'v'}
+
+test/registered/kernels/test_triton_cache_key_hygiene.py:32: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SUBFAILED(n=1, h=1, d=1) test/registered/kernels/test_triton_cache_key_hygiene.py::TestTritonCacheKeyHygiene::test_masked_set_matches_torch_for_boundary_shapes
+SUBFAILED(n=3, h=2, d=65) test/registered/kernels/test_triton_cache_key_hygiene.py::TestTritonCacheKeyHygiene::test_masked_set_matches_torch_for_boundary_shapes
+SUBFAILED(n=65, h=3, d=47) test/registered/kernels/test_triton_cache_key_hygiene.py::TestTritonCacheKeyHygiene::test_masked_set_matches_torch_for_boundary_shapes
+FAILED test/registered/kernels/test_triton_cache_key_hygiene.py::TestTritonCacheKeyHygiene::test_masked_set_write_count_is_not_specialized
+FAILED test/registered/kernels/test_triton_cache_key_hygiene.py::TestTritonCacheKeyHygiene::test_xpu_chunk_kernel_has_no_unused_nt_bucket
+5 failed, 1 passed, 17 warnings in 12.87s
