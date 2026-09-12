@@ -176,6 +176,47 @@ class TestUndeclaredArgumentTypes(CustomTestCase):
                 streamed = _streamed(parser, list(CASES[parser]))
                 self.assertEqual(streamed[0][2], {"get_weather": 123})
 
+    def test_glm_json_literals_survive_streaming(self):
+        for parser in ("glm", "glm45", "glm47"):
+            separator = "\n" if parser != "glm47" else ""
+            for literal, expected in (("null", None), ('"abc"', "abc")):
+                with self.subTest(parser=parser, literal=literal):
+                    text = (
+                        f"<tool_call>get_weather{separator}"
+                        f"<arg_key>undeclared</arg_key>{separator}"
+                        f"<arg_value>{literal}</arg_value>{separator}"
+                        "</tool_call>"
+                    )
+                    self.assertEqual(
+                        _streamed(parser, [text]), _oneshot(parser, text)
+                    )
+                    self.assertEqual(
+                        _streamed(parser, list(text)), _oneshot(parser, text)
+                    )
+                    for cut in range(1, len(text)):
+                        with self.subTest(parser=parser, literal=literal, cut=cut):
+                            self.assertEqual(
+                                _streamed(parser, [text[:cut], text[cut:]]),
+                                _oneshot(parser, text),
+                            )
+
+
+class TestMistralMultipleCalls(CustomTestCase):
+    def test_three_calls_are_drained_from_one_increment(self):
+        text = (
+            '[TOOL_CALLS] [{"name": "get_weather", "arguments": {}}, '
+            '{"name": "get_weather", "arguments": {"n": 2}}, '
+            '{"name": "get_weather", "arguments": {}}]'
+        )
+        expected = _oneshot("mistral", text)
+        self.assertEqual(_streamed("mistral", [text]), expected)
+        self.assertEqual(_streamed("mistral", list(text)), expected)
+        for cut in range(1, len(text)):
+            with self.subTest(cut=cut):
+                self.assertEqual(
+                    _streamed("mistral", [text[:cut], text[cut:]]), expected
+                )
+
 
 if __name__ == "__main__":
     import unittest

@@ -197,7 +197,29 @@ class MistralDetector(BaseFormatDetector):
 
         # Canonical format delegates to the BaseFormatDetector JSON streaming logic.
         if self.bot_token in current_text or mid_sequence:
-            return super().parse_streaming_increment(new_text="", tools=tools)
+            # The base parser emits a name and its arguments in separate passes.
+            # Drain every complete call already present in this increment so a
+            # whole multi-call array does not depend on an arbitrary number of
+            # later empty flushes.
+            calls: List[ToolCallItem] = []
+            normal_text = ""
+            while True:
+                before = (
+                    self._buffer,
+                    self.current_tool_id,
+                    self.current_tool_name_sent,
+                )
+                result = super().parse_streaming_increment(new_text="", tools=tools)
+                calls.extend(result.calls)
+                normal_text += result.normal_text
+                after = (
+                    self._buffer,
+                    self.current_tool_id,
+                    self.current_tool_name_sent,
+                )
+                if after == before:
+                    break
+            return StreamingParseResult(normal_text=normal_text, calls=calls)
 
         # Otherwise, keep buffering.
         return StreamingParseResult()

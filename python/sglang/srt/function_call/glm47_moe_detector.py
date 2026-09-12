@@ -428,9 +428,18 @@ class Glm47MoeDetector(BaseFormatDetector):
                             json_output += '"'
                     else:
                         # Value was never started (empty or complete in one chunk)
-                        json_output += self._format_value_complete(
-                            self._current_value, value_type
-                        )
+                        if self._cached_value_type is None:
+                            # An undeclared value is inferred from its complete
+                            # JSON literal. Preserve null and decode quoted
+                            # strings just as the one-shot parser does.
+                            parsed_value, _ = parse_arguments(self._current_value)
+                            json_output += json.dumps(
+                                parsed_value, ensure_ascii=False
+                            )
+                        else:
+                            json_output += self._format_value_complete(
+                                self._current_value, value_type
+                            )
 
                     self._xml_tag_buffer = ""
                     self._stream_state = StreamState.BETWEEN
