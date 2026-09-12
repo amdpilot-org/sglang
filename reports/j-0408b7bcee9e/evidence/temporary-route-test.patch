@@ -1,0 +1,93 @@
+diff --git a/rust/sglang-server/src/api_server/common.rs b/rust/sglang-server/src/api_server/common.rs
+index 9c5c5a1..256e977 100644
+--- a/rust/sglang-server/src/api_server/common.rs
++++ b/rust/sglang-server/src/api_server/common.rs
+@@ -239,6 +239,88 @@ fn parse_advertisable_tcp(endpoint: &str) -> Option<(&str, u16)> {
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++    use axum::{body::Body, http::Request};
++    use tower::ServiceExt;
++
++    async fn route_value(server_args: ServerArgs) -> serde_json::Value {
++        let (tok_manager_tx, tok_manager_rx) = flume::unbounded();
++        let senders = crate::tokenizer_manager::wiring::Senders {
++            tok_manager_tx,
++            abort_tx: flume::unbounded().0,
++            tokenizer_tx: flume::unbounded().0,
++            detokenizer_tx: vec![],
++        };
++        let state = Arc::new(super::super::app::AppState {
++            senders,
++            response_buf: 8,
++            server_args: Arc::new(server_args),
++            chat_formatter: None,
++            response_activity: Default::default(),
++            startup_readiness: Default::default(),
++        });
++        let responder = tokio::spawn(async move {
++            let event = tok_manager_rx.recv_async().await.unwrap();
++            let crate::tokenizer_manager::wiring::TmEvent::Intake(request) = event else {
++                panic!("expected intake")
++            };
++            assert!(matches!(request.kind, RequestKind::Control(_)));
++            let mut msgpack = Vec::new();
++            rmpv::encode::write_value(
++                &mut msgpack,
++                &rmpv::Value::Map(vec![(
++                    rmpv::Value::from("internal_state"),
++                    rmpv::Value::Map(vec![
++                        (rmpv::Value::from("api_key"), rmpv::Value::from("HTTP_API_SECRET_CANARY")),
++                        (rmpv::Value::from("last_gen_throughput"), rmpv::Value::from(3.5)),
++                    ]),
++                )]),
++            ).unwrap();
++            let crate::message::response::ResponseSink::Local(tx) = request.sink else {
++                panic!("expected local sink")
++            };
++            tx.send(ResponseItem::Control(msgpack.into())).await.unwrap();
++        });
++        let response = routes()
++            .with_state(state)
++            .oneshot(Request::builder().uri("/server_info").body(Body::empty()).unwrap())
++            .await
++            .unwrap();
++        assert_eq!(response.status(), StatusCode::OK);
++        let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024).await.unwrap();
++        responder.await.unwrap();
++        let text = String::from_utf8(bytes.to_vec()).unwrap();
++        assert!(!text.contains("HTTP_API_SECRET_CANARY"));
++        serde_json::from_str(&text).unwrap()
++    }
++
++    #[tokio::test]
++    async fn server_info_route_exercises_typed_kv_contract() {
++        let cases = [
++            (Some(r#"{"publisher":"zmq","endpoint":"tcp://host:5557","topic":"kv"}"#), Some(64), Some(serde_json::json!({"publisher":"zmq","endpoint_host":"host","endpoint_port_base":5557,"topic":"kv","block_size":64,"dp_size":2}))),
++            (Some(r#"{"publisher":"zmq","endpoint":"tcp://[2001:db8::5]:5557","topic":"v6"}"#), Some(128), Some(serde_json::json!({"publisher":"zmq","endpoint_host":"[2001:db8::5]","endpoint_port_base":5557,"topic":"v6","block_size":128,"dp_size":2}))),
++            (None, Some(64), None),
++            (Some("not-json"), Some(64), None),
++            (Some(r#"{"publisher":"null"}"#), Some(64), None),
++            (Some(r#"{"publisher":"zmq","endpoint":"ipc:///tmp/x"}"#), Some(64), None),
++            (Some(r#"{"publisher":"zmq","endpoint":"tcp://host"}"#), Some(64), None),
++            (Some(r#"{"publisher":"zmq","endpoint":"tcp://host:0"}"#), Some(64), None),
++            (Some(r#"{"publisher":"zmq","endpoint":"tcp://host:65536"}"#), Some(64), None),
++            (Some(r#"{"publisher":"zmq","endpoint":"tcp://[not-ipv6]:5557"}"#), Some(64), None),
++            (Some(r#"{"publisher":"zmq","endpoint":"tcp://host:5557"}"#), None, None),
++            (Some(r#"{"publisher":"zmq","endpoint":"tcp://host:5557"}"#), Some(0), None),
++            (Some(r#"{"publisher":"zmq","endpoint":"tcp://host:5557"}"#), Some(-1), None),
++        ];
++        for (raw, page_size, expected) in cases {
++            let value = route_value(ServerArgs {
++                kv_events_config: raw.map(str::to_string),
++                page_size,
++                dp_size: 2,
++                ..Default::default()
++            }).await;
++            assert_eq!(value["kv_events"], expected.unwrap_or(serde_json::Value::Null), "raw={raw:?}, page_size={page_size:?}");
++            assert_eq!(value["internal_states"][0]["last_gen_throughput"], 3.5);
++        }
++    }
+ 
+     /// The scheduler's `internal_state` embeds the full server-args dump (incl.
+     /// `api_key`/`admin_api_key`). `/server_info` must surface only the allowlisted

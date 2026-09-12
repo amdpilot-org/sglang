@@ -1,0 +1,467 @@
+diff --git a/python/sglang/srt/rust_server/config.py b/python/sglang/srt/rust_server/config.py
+index 7eccfd8..3426192 100644
+--- a/python/sglang/srt/rust_server/config.py
++++ b/python/sglang/srt/rust_server/config.py
+@@ -94,6 +94,9 @@ def _build_server_args(scheduler: Scheduler) -> ServerArgs:
+         # can serve them statically (no scheduler round-trip).
+         version=__version__,
+         max_total_num_tokens=scheduler.max_total_num_tokens,
++        kv_events_config=sa.kv_events_config,
++        page_size=sa.page_size,
++        dp_size=sa.dp_size,
+     )
+ 
+ 
+diff --git a/reports/j-7f9988b47f0a/python-server-info-tests.log b/reports/j-7f9988b47f0a/python-server-info-tests.log
+new file mode 100644
+index 0000000..c1845c4
+--- /dev/null
++++ b/reports/j-7f9988b47f0a/python-server-info-tests.log
+@@ -0,0 +1,3 @@
++.............................                                [100%]
++29 passed, 17 warnings, 12 subtests passed in 12.53s
++pytest_exit_code=0
+diff --git a/reports/j-7f9988b47f0a/result.json b/reports/j-7f9988b47f0a/result.json
+new file mode 100644
+index 0000000..150dfdf
+--- /dev/null
++++ b/reports/j-7f9988b47f0a/result.json
+@@ -0,0 +1,36 @@
++{
++  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33055",
++  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
++  "outcome": "environment_blocked",
++  "summary": "Implemented the additive Rust /server_info.kv_events discovery descriptor from typed ServerArgs, including safe JSON/TCP endpoint and port validation, null fallback behavior, and preservation of the existing allowlist/redaction boundary. Python route parity passes, but the prepared environment contains no cargo or rustc executable, so the Rust crate and its serialization tests could not be compiled or executed.",
++  "tests": [
++    {
++      "command": "git show 358c163250ad3b1f62939b01ce1314a0a31a0365:rust/sglang-server/src/api_server/common.rs | sed -n '/let response = serde_json::json!({/,/});/p' | grep -q '\"kv_events\"'",
++      "exit_code": 1,
++      "what_was_measured": "Failing-before regression: the checked-out base Rust /server_info serializer did not contain the kv_events field. Raw extracted serializer is retained in reports/j-7f9988b47f0a/rust-server-info-before.txt."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-7f9988b47f0a/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_server_info.py",
++      "exit_code": 0,
++      "what_was_measured": "The real Python /server_info handler contract, including enabled, disabled, malformed JSON, non-TCP and malformed TCP endpoints, port bounds, page-size rejection, IPv6, and existing-field preservation: 29 tests and 12 subtests passed."
++    },
++    {
++      "command": "CARGO_HOME=/tmp/amdpilot-repo-j-7f9988b47f0a/cargo-home CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-7f9988b47f0a/cargo-target cargo test -p sglang-server api_server::common::tests --manifest-path rust/Cargo.toml",
++      "exit_code": 127,
++      "what_was_measured": "Attempted the focused Rust serialization/redaction regression suite from the prepared repository with private cache paths; the shell reported cargo: command not found before compilation."
++    },
++    {
++      "command": "git diff --check",
++      "exit_code": 0,
++      "what_was_measured": "Patch whitespace integrity."
++    }
++  ],
++  "gpu_execution": false,
++  "native_rebuilt": false,
++  "remaining_limitations": [
++    "Rust 1.92 is pinned by rust/rust-toolchain.toml, but neither cargo nor rustc is installed or discoverable in the prepared environment; therefore the Rust tests, crate build, and live Rust HTTP route remain unverified.",
++    "No GPU was used because this is an HTTP metadata serialization contract with no model-kernel execution; the frozen Torch/ROCm stack was unchanged.",
++    "KV-event publishing itself is intentionally out of scope and was not implemented or exercised.",
++    "The deterministic tiny-Llama fixture was not used because it cannot validate an uncompiled Rust metadata serializer and no model execution is involved."
++  ]
++}
+diff --git a/reports/j-7f9988b47f0a/rust-build.log b/reports/j-7f9988b47f0a/rust-build.log
+new file mode 100644
+index 0000000..f1d7ed1
+--- /dev/null
++++ b/reports/j-7f9988b47f0a/rust-build.log
+@@ -0,0 +1,2 @@
++/bin/bash: line 2: cargo: command not found
++cargo_exit_code=127
+diff --git a/reports/j-7f9988b47f0a/rust-server-info-before.txt b/reports/j-7f9988b47f0a/rust-server-info-before.txt
+new file mode 100644
+index 0000000..c1cb378
+--- /dev/null
++++ b/reports/j-7f9988b47f0a/rust-server-info-before.txt
+@@ -0,0 +1,9 @@
++let response = serde_json::json!({
++    "model_path": server_args.model_path,
++    "served_model_name": server_args.served_model_name,
++    "tokenizer_path": server_args.tokenizer_path,
++    "max_context_length": server_args.model_config.context_len,
++    "max_total_num_tokens": server_args.max_total_num_tokens,
++    "version": server_args.version,
++    "internal_states": [serde_json::Value::Object(state_out)],
++});
+diff --git a/reports/j-e4438b826eaf/evidence/counterexample-before.txt b/reports/j-e4438b826eaf/evidence/counterexample-before.txt
+new file mode 100644
+index 0000000..20b9c3f
+--- /dev/null
++++ b/reports/j-e4438b826eaf/evidence/counterexample-before.txt
+@@ -0,0 +1,14 @@
++Exact candidate: c5812a14220bf0d4ebe1cf98cd2c63b818c98aa8
++Command:
++PATH=/job/.cargo/bin:$PATH CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-e4438b826eaf/cargo-target cargo test -p sglang-server bracketed_non_ipv6_host_is_not_advertisable --manifest-path rust/Cargo.toml
++
++Result: exit 101
++
++running 1 test
++test api_server::common::tests::bracketed_non_ipv6_host_is_not_advertisable ... FAILED
++
++assertion `left == right` failed
++  left: Some(("[not-ipv6]", 5557))
++ right: None
++
++test result: FAILED. 0 passed; 1 failed; 0 ignored; 267 filtered out
+diff --git a/reports/j-e4438b826eaf/evidence/focused-tests-after.txt b/reports/j-e4438b826eaf/evidence/focused-tests-after.txt
+new file mode 100644
+index 0000000..4b9ec24
+--- /dev/null
++++ b/reports/j-e4438b826eaf/evidence/focused-tests-after.txt
+@@ -0,0 +1,24 @@
++Command:
++PATH=/job/.cargo/bin:$PATH CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-e4438b826eaf/cargo-target cargo test -p sglang-server api_server::common::tests --manifest-path rust/Cargo.toml
++
++Result: exit 0
++
++running 5 tests
++test api_server::common::tests::bracketed_ipv6_endpoint_is_advertisable ... ok
++test api_server::common::tests::bracketed_non_ipv6_host_is_not_advertisable ... ok
++test api_server::common::tests::shape_server_info_excludes_secrets_and_dump ... ok
++test api_server::common::tests::shape_server_info_advertises_valid_kv_events_without_raw_config ... ok
++test api_server::common::tests::unsafe_kv_events_configurations_serialize_as_null ... ok
++
++test result: ok. 5 passed; 0 failed; 0 ignored; 263 filtered out
++
++Command:
++/tmp/amdpilot-repo-j-e4438b826eaf/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_server_info.py
++
++Result: exit 0
++29 passed, 17 warnings, 12 subtests passed in 27.77s
++
++Python reference probe:
++tcp://[not-ipv6]:5557 -> None
++tcp://[2001:db8::5]:5557 -> ('[2001:db8::5]', 5557)
++tcp://[::]:5557 -> ('[::]', 5557)
+diff --git a/reports/j-e4438b826eaf/evidence/native-rebuild.txt b/reports/j-e4438b826eaf/evidence/native-rebuild.txt
+new file mode 100644
+index 0000000..e2c5060
+--- /dev/null
++++ b/reports/j-e4438b826eaf/evidence/native-rebuild.txt
+@@ -0,0 +1,17 @@
++Toolchain:
++rustc 1.92.0 (ded5c06cf 2025-12-08)
++
++Command:
++PATH=/job/.cargo/bin:$PATH PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e4438b826eaf/venv/bin/python <forced load_rust_extension probe using mode='force' and cache_dir=Path('/tmp/amdpilot-repo-j-e4438b826eaf/rust-extension-cache-final')>
++
++Result: exit 0
++Finished `release` profile [optimized] target(s) in 1m 38s
++native_extension=/tmp/amdpilot-repo-j-e4438b826eaf/rust-extension-cache-final/artifacts/sglang-server/2af13072eba92fdb45d82d0e0a4b8458dafe61c76492f529b8459761ef8aef4a/_server.cpython-312-x86_64-linux-gnu.so
++
++The compile output identified source crates at:
++/job/repo/rust/sglang-mm
++/job/repo/rust/sglang-server
++
++Formatting:
++cd /job/repo/rust && PATH=/job/.cargo/bin:$PATH cargo fmt --all -- --check
++Result: exit 0 after applying rustfmt.
+diff --git a/reports/j-e4438b826eaf/result.json b/reports/j-e4438b826eaf/result.json
+new file mode 100644
+index 0000000..29bb134
+--- /dev/null
++++ b/reports/j-e4438b826eaf/result.json
+@@ -0,0 +1,45 @@
++{
++  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33055",
++  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
++  "outcome": "fixed",
++  "summary": "Preserved candidate https://github.com/amdpilot-org/sglang/pull/3414 at c5812a14220bf0d4ebe1cf98cd2c63b818c98aa8 and corrected the concrete counterexample independently reported by https://github.com/amdpilot-org/sglang/pull/3433. Rust now validates bracketed endpoint contents as an actual IPv6 address before advertising /server_info.kv_events, so tcp://[not-ipv6]:5557 produces null like Python while valid bracketed IPv6 remains supported. The candidate's typed ServerArgs plumbing, additive field, allowlist, redaction, malformed-config handling, and secret-canary coverage remain intact.",
++  "tests": [
++    {
++      "command": "PATH=/job/.cargo/bin:$PATH CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-e4438b826eaf/cargo-target cargo test -p sglang-server bracketed_non_ipv6_host_is_not_advertisable --manifest-path rust/Cargo.toml (before parser correction)",
++      "exit_code": 101,
++      "what_was_measured": "Independent failing-before reproduction on the exact candidate implementation: Rust returned Some((\"[not-ipv6]\", 5557)) where Python returns None."
++    },
++    {
++      "command": "PATH=/job/.cargo/bin:$PATH CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-e4438b826eaf/cargo-target cargo test -p sglang-server api_server::common::tests --manifest-path rust/Cargo.toml",
++      "exit_code": 0,
++      "what_was_measured": "Passing-after Rust serializer contract: 5 focused tests cover the counterexample, valid IPv6, valid metadata, malformed/disabled configurations, page sizes, port bounds, allowlisting, and secret canaries."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-e4438b826eaf/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_server_info.py",
++      "exit_code": 0,
++      "what_was_measured": "Real Python /server_info route contract: 29 tests and 12 subtests passed, including endpoint, port, page-size, IPv6, field-preservation, and malformed configuration behavior."
++    },
++    {
++      "command": "Python parse_advertisable_tcp reference probe for tcp://[not-ipv6]:5557, tcp://[2001:db8::5]:5557, and tcp://[::]:5557",
++      "exit_code": 0,
++      "what_was_measured": "Python returned None for the malformed bracketed hostname and accepted both concrete and wildcard bracketed IPv6 endpoints."
++    },
++    {
++      "command": "load_rust_extension('sglang.srt.rust_extensions._server', mode='force', cache_dir=Path('/tmp/amdpilot-repo-j-e4438b826eaf/rust-extension-cache-final'))",
++      "exit_code": 0,
++      "what_was_measured": "Forced a release native rebuild from /job/repo/rust using rustc 1.92.0 and imported the resulting extension from the private runtime cache."
++    },
++    {
++      "command": "cd /job/repo/rust && PATH=/job/.cargo/bin:$PATH cargo fmt --all -- --check && git diff --check",
++      "exit_code": 0,
++      "what_was_measured": "Rust formatting and patch whitespace validation."
++    }
++  ],
++  "gpu_execution": false,
++  "gpu_evidence": "No GPU execution was performed because this correction is CPU-only endpoint parsing and JSON metadata serialization. Torch 2.11.0+rocm7.2 and HIP 7.2 were left unchanged; model weights or architecture execution cannot add evidence for this parser defect.",
++  "native_rebuilt": true,
++  "remaining_limitations": [
++    "The corrected Rust serializer and freshly rebuilt PyO3 native extension were exercised, but a live model-backed Axum server was not launched. The deterministic tiny-Llama fixture would add transport/engine smoke coverage but is not needed to establish this endpoint-parser correction.",
++    "KV-event publishing remains intentionally out of scope and was not exercised."
++  ]
++}
+diff --git a/rust/sglang-server/src/api_server/common.rs b/rust/sglang-server/src/api_server/common.rs
+index 5e6012c..9c5c5a1 100644
+--- a/rust/sglang-server/src/api_server/common.rs
++++ b/rust/sglang-server/src/api_server/common.rs
+@@ -12,7 +12,8 @@ use axum::{
+     response::{IntoResponse, Response},
+     routing::get,
+ };
+-use std::sync::Arc;
++use serde::Deserialize;
++use std::{net::Ipv6Addr, sync::Arc};
+ 
+ use super::app::AppState;
+ use super::guard::AbortGuard;
+@@ -107,7 +108,6 @@ async fn model_info(State(state): State<Arc<AppState>>) -> Response {
+ /// curated [`ServerArgs`] accessors), never the raw server-args dump (embeds
+ /// `api_key`/`admin_api_key`; see [`shape_server_info`]).
+ ///
+-/// TODO(server_info): Python also includes `kv_events`; add once plumbed.
+ async fn server_info(State(state): State<Arc<AppState>>) -> Response {
+     let bytes = match await_control_result(
+         &state,
+@@ -172,11 +172,70 @@ fn shape_server_info(msgpack: &[u8], server_args: &ServerArgs) -> Result<Vec<u8>
+         "max_context_length": server_args.model_config.context_len,
+         "max_total_num_tokens": server_args.max_total_num_tokens,
+         "version": server_args.version,
++        "kv_events": describe_kv_events_publisher(server_args),
+         "internal_states": [serde_json::Value::Object(state_out)],
+     });
+     serde_json::to_vec(&response).map_err(|e| e.to_string())
+ }
+ 
++#[derive(Deserialize)]
++struct KvEventsConfig {
++    #[serde(default = "null_publisher")]
++    publisher: String,
++    #[serde(default = "default_kv_endpoint")]
++    endpoint: String,
++    #[serde(default)]
++    topic: String,
++}
++
++fn null_publisher() -> String {
++    "null".to_string()
++}
++
++fn default_kv_endpoint() -> String {
++    "tcp://*:5557".to_string()
++}
++
++fn describe_kv_events_publisher(server_args: &ServerArgs) -> Option<serde_json::Value> {
++    let raw = server_args.kv_events_config.as_deref()?;
++    let block_size = server_args.page_size.filter(|size| *size > 0)?;
++    let cfg: KvEventsConfig = serde_json::from_str(raw).ok()?;
++    if cfg.publisher == "null" {
++        return None;
++    }
++    let (host, port) = parse_advertisable_tcp(&cfg.endpoint)?;
++    Some(serde_json::json!({
++        "publisher": cfg.publisher,
++        "endpoint_host": host,
++        "endpoint_port_base": port,
++        "topic": cfg.topic,
++        "block_size": block_size,
++        "dp_size": server_args.dp_size,
++    }))
++}
++
++fn parse_advertisable_tcp(endpoint: &str) -> Option<(&str, u16)> {
++    let address = endpoint.strip_prefix("tcp://")?;
++    let (host, port_text) = if let Some(bracketed) = address.strip_prefix('[') {
++        let close = bracketed.find(']')?;
++        bracketed[..close].parse::<Ipv6Addr>().ok()?;
++        let host = &address[..close + 2];
++        let port = address.get(close + 2..)?.strip_prefix(':')?;
++        (host, port)
++    } else {
++        let (host, port) = address.rsplit_once(':')?;
++        if host.contains(':') {
++            return None;
++        }
++        (host, port)
++    };
++    if host.is_empty() {
++        return None;
++    }
++    let port = port_text.parse::<u16>().ok()?;
++    (port != 0).then_some((host, port))
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+@@ -239,5 +298,105 @@ mod tests {
+         assert!(state0.get("api_key").is_none());
+         // Curated top-level config comes from typed accessors, not the dump.
+         assert_eq!(v["model_path"], "/m");
++        assert!(v["kv_events"].is_null());
++    }
++
++    fn msgpack_with_secret_canaries() -> Vec<u8> {
++        let internal = rmpv::Value::Map(vec![
++            (
++                rmpv::Value::from("api_key"),
++                rmpv::Value::from("API_SECRET_CANARY"),
++            ),
++            (
++                rmpv::Value::from("kv_events_config"),
++                rmpv::Value::from("RAW_CONFIG_CANARY"),
++            ),
++            (
++                rmpv::Value::from("last_gen_throughput"),
++                rmpv::Value::from(2.5),
++            ),
++        ]);
++        let outer = rmpv::Value::Map(vec![(rmpv::Value::from("internal_state"), internal)]);
++        let mut msgpack = Vec::new();
++        rmpv::encode::write_value(&mut msgpack, &outer).unwrap();
++        msgpack
++    }
++
++    #[test]
++    fn shape_server_info_advertises_valid_kv_events_without_raw_config() {
++        let raw = r#"{"publisher":"zmq","endpoint":"tcp://*:5557","topic":"kv","secret":"CONFIG_SECRET_CANARY"}"#;
++        let sa = ServerArgs {
++            kv_events_config: Some(raw.into()),
++            page_size: Some(64),
++            dp_size: 2,
++            ..Default::default()
++        };
++        let out = shape_server_info(&msgpack_with_secret_canaries(), &sa).unwrap();
++        let text = String::from_utf8(out.clone()).unwrap();
++        assert!(!text.contains("RAW_CONFIG_CANARY"));
++        assert!(!text.contains("CONFIG_SECRET_CANARY"));
++        assert!(!text.contains("API_SECRET_CANARY"));
++        let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
++        assert_eq!(value["internal_states"][0]["last_gen_throughput"], 2.5);
++        assert_eq!(
++            value["kv_events"],
++            serde_json::json!({
++                "publisher": "zmq",
++                "endpoint_host": "*",
++                "endpoint_port_base": 5557,
++                "topic": "kv",
++                "block_size": 64,
++                "dp_size": 2,
++            })
++        );
++        assert!(value.get("kv_events_config").is_none());
++    }
++
++    #[test]
++    fn unsafe_kv_events_configurations_serialize_as_null() {
++        let invalid = [
++            None,
++            Some("not-json"),
++            Some(r#"{"publisher":"null"}"#),
++            Some(r#"{"publisher":"zmq","endpoint":"inproc://kv"}"#),
++            Some(r#"{"publisher":"zmq","endpoint":"tcp://host"}"#),
++            Some(r#"{"publisher":"zmq","endpoint":"tcp://host:nope"}"#),
++            Some(r#"{"publisher":"zmq","endpoint":"tcp://host:0"}"#),
++            Some(r#"{"publisher":"zmq","endpoint":"tcp://host:65536"}"#),
++            Some(r#"{"publisher":"zmq","endpoint":"tcp://2001:db8::1:5557"}"#),
++        ];
++        for raw in invalid {
++            let sa = ServerArgs {
++                kv_events_config: raw.map(str::to_string),
++                page_size: Some(64),
++                ..Default::default()
++            };
++            let out = shape_server_info(&msgpack_with_secret_canaries(), &sa).unwrap();
++            let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
++            assert!(value["kv_events"].is_null(), "raw={raw:?}");
++        }
++        for page_size in [None, Some(0), Some(-1)] {
++            let sa = ServerArgs {
++                kv_events_config: Some(r#"{"publisher":"zmq","endpoint":"tcp://*:5557"}"#.into()),
++                page_size,
++                ..Default::default()
++            };
++            let out = shape_server_info(&msgpack_with_secret_canaries(), &sa).unwrap();
++            let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
++            assert!(value["kv_events"].is_null(), "page_size={page_size:?}");
++        }
++    }
++
++    #[test]
++    fn bracketed_ipv6_endpoint_is_advertisable() {
++        assert_eq!(
++            parse_advertisable_tcp("tcp://[2001:db8::5]:5557"),
++            Some(("[2001:db8::5]", 5557))
++        );
++    }
++
++    #[test]
++    fn bracketed_non_ipv6_host_is_not_advertisable() {
++        assert_eq!(parse_advertisable_tcp("tcp://[not-ipv6]:5557"), None);
+     }
+ }
+diff --git a/rust/sglang-server/src/message/config.rs b/rust/sglang-server/src/message/config.rs
+index 8ecdf48..36b1b60 100644
+--- a/rust/sglang-server/src/message/config.rs
++++ b/rust/sglang-server/src/message/config.rs
+@@ -151,6 +151,11 @@ pub struct ServerArgs {
+     /// and the scheduler-derived KV token capacity, reported by `/server_info`.
+     pub version: String,
+     pub max_total_num_tokens: u64,
++    /// KV-event publisher discovery metadata used only by `/server_info`.
++    /// The raw config is never serialized by the Rust HTTP server.
++    pub kv_events_config: Option<String>,
++    pub page_size: Option<i64>,
++    pub dp_size: usize,
+ }
+ 
+ #[pyo3::pymethods]
+@@ -185,6 +190,9 @@ impl ServerArgs {
+         num_reserved_tokens,
+         version,
+         max_total_num_tokens,
++        kv_events_config,
++        page_size,
++        dp_size,
+     ))]
+     // The parameter list IS the schema; one keyword per field, all required.
+     #[allow(clippy::too_many_arguments)]
+@@ -217,6 +225,9 @@ impl ServerArgs {
+         num_reserved_tokens: u64,
+         version: String,
+         max_total_num_tokens: u64,
++        kv_events_config: Option<String>,
++        page_size: Option<i64>,
++        dp_size: usize,
+     ) -> Self {
+         Self {
+             model_path,
+@@ -247,6 +258,9 @@ impl ServerArgs {
+             num_reserved_tokens,
+             version,
+             max_total_num_tokens,
++            kv_events_config,
++            page_size,
++            dp_size,
+         }
+     }
+ }
+@@ -285,6 +299,9 @@ impl Default for ServerArgs {
+             num_reserved_tokens: 0,
+             version: String::new(),
+             max_total_num_tokens: 0,
++            kv_events_config: None,
++            page_size: None,
++            dp_size: 1,
+         }
+     }
+ }
