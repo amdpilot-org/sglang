@@ -1709,6 +1709,7 @@ class Qwen3_5ForCausalLM(nn.Module):
             self.norm = PPMissingLayer()
 
         self.layers_to_capture = []
+        self._capture_after_last_layer = False
 
     def _build_embed_tokens(self, config: Qwen3_5TextConfig) -> nn.Module:
         """Embedding sharding hook for models reusing this backbone."""
@@ -1734,9 +1735,32 @@ class Qwen3_5ForCausalLM(nn.Module):
         prepare_qwen35_flashinfer_fusion(self, model_runner)
 
     def set_dflash_layers_to_capture(self, layers_to_capture: list[int]):
-        self.layers_to_capture = layers_to_capture
+        for layer_id in layers_to_capture:
+            if not 0 <= layer_id < len(self.layers):
+                if layer_id != len(self.layers):
+                    raise ValueError(
+                        f"capture layer id must be in [0, {len(self.layers)}], "
+                        f"got {layer_id}"
+                    )
+
+        for layer in self.layers:
+            if hasattr(layer, "_is_layer_to_capture"):
+                delattr(layer, "_is_layer_to_capture")
+
+        self.layers_to_capture = list(layers_to_capture)
+        self._capture_after_last_layer = len(self.layers) in layers_to_capture
         for layer_id in self.layers_to_capture:
+            if layer_id == len(self.layers):
+                continue
             setattr(self.layers[layer_id], "_is_layer_to_capture", True)
+
+    def _capture_final_decoder_output(
+        self,
+        final_decoder_output: torch.Tensor,
+        aux_hidden_states: list[torch.Tensor],
+    ) -> None:
+        if self._capture_after_last_layer:
+            aux_hidden_states.append(final_decoder_output)
 
     @property
     def start_layer(self) -> int:
@@ -1831,8 +1855,10 @@ class Qwen3_5ForCausalLM(nn.Module):
         if is_deferred_finalize:
             if residual is None or self.flashinfer_mnnvl_cutedsl_fusion is None:
                 raise RuntimeError("invalid final deferred MoE handoff")
-            hidden_states, _ = self.flashinfer_mnnvl_cutedsl_fusion.finalize(
-                hidden_states, residual, self.norm.gemma_weight
+            hidden_states, final_decoder_output = (
+                self.flashinfer_mnnvl_cutedsl_fusion.finalize(
+                    hidden_states, residual, self.norm.gemma_weight
+                )
             )
         elif hidden_states.shape[0] != 0:
             if trace_final_norm:
@@ -1852,13 +1878,14 @@ class Qwen3_5ForCausalLM(nn.Module):
                     flush=True,
                 )
             if residual is None:
+                final_decoder_output = hidden_states
                 hidden_states = (
                     self.norm.forward_native(hidden_states)
                     if use_native_final_norm
                     else self.norm(hidden_states)
                 )
             else:
-                hidden_states, _ = (
+                hidden_states, final_decoder_output = (
                     self.norm.forward_native(hidden_states, residual)
                     if use_native_final_norm
                     else self.norm(hidden_states, residual)
@@ -1873,6 +1900,12 @@ class Qwen3_5ForCausalLM(nn.Module):
                     "SGLANG_TRACE_QWEN35_FINAL_NORM stage=post_sync_returned",
                     flush=True,
                 )
+        else:
+            final_decoder_output = (
+                hidden_states + residual if residual is not None else hidden_states
+            )
+
+        self._capture_final_decoder_output(final_decoder_output, aux_hidden_states)
 
         if len(aux_hidden_states) == 0:
             return hidden_states

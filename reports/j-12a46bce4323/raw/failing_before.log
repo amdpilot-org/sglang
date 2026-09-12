@@ -1,0 +1,301 @@
+F.F                                                                    [100%]
+=================================== FAILURES ===================================
+_ TestQwen3_5DFlashCapture.test_backbone_reconfiguration_clears_old_layer_flags _
+
+self = <test_qwen3_5_dflash_capture.TestQwen3_5DFlashCapture testMethod=test_backbone_reconfiguration_clears_old_layer_flags>
+
+    def test_backbone_reconfiguration_clears_old_layer_flags(self):
+        model = Qwen3_5ForCausalLM.__new__(Qwen3_5ForCausalLM)
+        torch.nn.Module.__init__(model)
+        model.layers = torch.nn.ModuleList([torch.nn.Identity() for _ in range(3)])
+
+        model.set_dflash_layers_to_capture([1])
+        model.set_dflash_layers_to_capture([2])
+
+>       self.assertFalse(hasattr(model.layers[1], "_is_layer_to_capture"))
+E       AssertionError: True is not false
+
+test/registered/unit/models/test_qwen3_5_dflash_capture.py:61: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x761a1e5d7e20>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7623049fdb20>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestQwen3_5DFlashCapture.test_backbone_reconfiguration_clears_old_layer_flags
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/models/test_qwen3_5_dflash_capture.py", line 61, in test_backbone_reconfiguration_clears_old_layer_flags
+    self.assertFalse(hasattr(model.layers[1], "_is_layer_to_capture"))
+  File "/usr/lib/python3.12/unittest/case.py", line 721, in assertFalse
+    raise self.failureException(msg)
+AssertionError: True is not false
+_ TestQwen3_5DFlashCapture.test_qwen2_and_qwen3_capture_terminal_position (model='Qwen2Model') _
+
+self = <test_qwen3_5_dflash_capture.TestQwen3_5DFlashCapture testMethod=test_qwen2_and_qwen3_capture_terminal_position>
+
+    def test_qwen2_and_qwen3_capture_terminal_position(self):
+        class AddOneLayer(torch.nn.Module):
+            def forward(self, positions, hidden_states, forward_batch, residual):
+                return hidden_states + 1, residual
+
+        for model_cls in (Qwen2Model, Qwen3Model):
+            with self.subTest(model=model_cls.__name__):
+                model = model_cls.__new__(model_cls)
+                torch.nn.Module.__init__(model)
+                model.pp_group = SimpleNamespace(
+                    is_first_rank=True, is_last_rank=True
+                )
+                model.layers = torch.nn.ModuleList([AddOneLayer() for _ in range(3)])
+                model.start_layer = 0
+                model.end_layer = 3
+                model.layers_to_capture = [3]
+                model.norm = torch.nn.Identity()
+
+>               output, captured = model(
+                ^^^^^^^^^^^^^^^^
+                    input_ids=torch.tensor([0]),
+                    positions=torch.tensor([0]),
+                    forward_batch=SimpleNamespace(),
+                    input_embeds=torch.tensor([[0.0]]),
+                )
+E               ValueError: not enough values to unpack (expected 2, got 1)
+
+test/registered/unit/models/test_qwen3_5_dflash_capture.py:140: ValueError
+_ TestQwen3_5DFlashCapture.test_qwen2_and_qwen3_capture_terminal_position (model='Qwen3Model') _
+
+self = <test_qwen3_5_dflash_capture.TestQwen3_5DFlashCapture testMethod=test_qwen2_and_qwen3_capture_terminal_position>
+
+    def test_qwen2_and_qwen3_capture_terminal_position(self):
+        class AddOneLayer(torch.nn.Module):
+            def forward(self, positions, hidden_states, forward_batch, residual):
+                return hidden_states + 1, residual
+
+        for model_cls in (Qwen2Model, Qwen3Model):
+            with self.subTest(model=model_cls.__name__):
+                model = model_cls.__new__(model_cls)
+                torch.nn.Module.__init__(model)
+                model.pp_group = SimpleNamespace(
+                    is_first_rank=True, is_last_rank=True
+                )
+                model.layers = torch.nn.ModuleList([AddOneLayer() for _ in range(3)])
+                model.start_layer = 0
+                model.end_layer = 3
+                model.layers_to_capture = [3]
+                model.norm = torch.nn.Identity()
+
+>               output, captured = model(
+                ^^^^^^^^^^^^^^^^
+                    input_ids=torch.tensor([0]),
+                    positions=torch.tensor([0]),
+                    forward_batch=SimpleNamespace(),
+                    input_embeds=torch.tensor([[0.0]]),
+                )
+E               ValueError: not enough values to unpack (expected 2, got 1)
+
+test/registered/unit/models/test_qwen3_5_dflash_capture.py:140: ValueError
+_ TestQwen3_5DFlashCapture.test_terminal_capture_accepts_deferred_finalize_output _
+
+self = <test_qwen3_5_dflash_capture.TestQwen3_5DFlashCapture testMethod=test_terminal_capture_accepts_deferred_finalize_output>
+
+    def test_terminal_capture_accepts_deferred_finalize_output(self):
+        class FakeFusion:
+            def finalize(self, handoff, residual, gamma):
+                self.handoff = handoff
+                return torch.tensor([[1.0, 2.0]]), torch.tensor([[11.0, 22.0]])
+
+        model = Qwen3_5ForCausalLM.__new__(Qwen3_5ForCausalLM)
+        torch.nn.Module.__init__(model)
+        model.pp_group = SimpleNamespace(is_first_rank=False, is_last_rank=True)
+        model.layers = torch.nn.ModuleList()
+        model._start_layer = 0
+        model._end_layer = 0
+        model._capture_after_last_layer = True
+        model.flashinfer_mnnvl_cutedsl_fusion = FakeFusion()
+        model.norm = SimpleNamespace(gemma_weight=torch.tensor([1.0, 1.0]))
+        handoff = Qwen35MoeFinalizeHandoff(
+            routed_output=torch.empty(0),
+            expert_weights=torch.empty(0),
+            permuted_indices=torch.empty(0, dtype=torch.int32),
+            gated_shared_output=torch.empty(0),
+            m=1,
+        )
+
+>       output, captured = model(
+            input_ids=torch.tensor([0]),
+            positions=torch.tensor([0]),
+            forward_batch=SimpleNamespace(),
+            pp_proxy_tensors={
+                "hidden_states": handoff,
+                "residual": torch.tensor([[10.0, 20.0]]),
+            },
+        )
+
+test/registered/unit/models/test_qwen3_5_dflash_capture.py:108:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py:1779: in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py:1790: in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/torch/utils/_contextlib.py:124: in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/models/qwen3_5.py:1841: in forward
+    self._capture_final_decoder_output(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = Qwen3_5ForCausalLM(
+  (layers): ModuleList()
+)
+hidden_states = Qwen35MoeFinalizeHandoff(routed_output=tensor([]), expert_weights=tensor([]), permuted_indices=tensor([], dtype=torch.int32), gated_shared_output=tensor([]), m=1)
+residual = tensor([[10., 20.]]), aux_hidden_states = []
+
+    def _capture_final_decoder_output(
+        self,
+        hidden_states: torch.Tensor,
+        residual: Optional[torch.Tensor],
+        aux_hidden_states: list[torch.Tensor],
+    ) -> None:
+        if self._capture_after_last_layer:
+            aux_hidden_states.append(
+>               hidden_states + residual if residual is not None else hidden_states
+                ^^^^^^^^^^^^^^^^^^^^^^^^
+            )
+E           TypeError: unsupported operand type(s) for +: 'Qwen35MoeFinalizeHandoff' and 'Tensor'
+
+python/sglang/srt/models/qwen3_5.py:1759: TypeError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x761a3728cd60>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7623049fdb20>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestQwen3_5DFlashCapture.test_terminal_capture_accepts_deferred_finalize_output
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/models/test_qwen3_5_dflash_capture.py", line 108, in test_terminal_capture_accepts_deferred_finalize_output
+    output, captured = model(
+                       ^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/models/qwen3_5.py", line 1841, in forward
+    self._capture_final_decoder_output(
+  File "/job/repo/python/sglang/srt/models/qwen3_5.py", line 1759, in _capture_final_decoder_output
+    hidden_states + residual if residual is not None else hidden_states
+    ~~~~~~~~~~~~~~^~~~~~~~~~
+TypeError: unsupported operand type(s) for +: 'Qwen35MoeFinalizeHandoff' and 'Tensor'
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/models/test_qwen3_5_dflash_capture.py::TestQwen3_5DFlashCapture::test_backbone_reconfiguration_clears_old_layer_flags
+SUBFAILED(model='Qwen2Model') test/registered/unit/models/test_qwen3_5_dflash_capture.py::TestQwen3_5DFlashCapture::test_qwen2_and_qwen3_capture_terminal_position
+SUBFAILED(model='Qwen3Model') test/registered/unit/models/test_qwen3_5_dflash_capture.py::TestQwen3_5DFlashCapture::test_qwen2_and_qwen3_capture_terminal_position
+FAILED test/registered/unit/models/test_qwen3_5_dflash_capture.py::TestQwen3_5DFlashCapture::test_terminal_capture_accepts_deferred_finalize_output
+4 failed, 1 passed, 5 deselected, 17 warnings in 9.49s
