@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34631",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1548",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that Muse Glimmer guided decoding applied the grammar at token position 6, five tokens before the model-written answer channel header ended at position 11. Added detector opt-in metadata and a rollback-safe channel-header state so Muse resumes constraints at the answer body; unchanged detectors still resume immediately after their reasoning terminator.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ccd93ff09a48/venv/bin/python < inline issue reproduction",
+      "exit_code": 0,
+      "what_was_measured": "Recorded-base behavior first constrained position 6; fixed Muse behavior first constrained position 11, matching the answer body boundary. Raw output is in reports/j-ccd93ff09a48/reproduction.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ccd93ff09a48/venv/bin/python -m pytest -q test/registered/unit/constrained/test_reasoner_grammar_backend.py test/registered/unit/parser/test_reasoning_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "153 tests and 64 subtests passed, including the reported Muse stream plus independent second-reasoning-channel, fail-safe, rollback/copy, and non-channel boundary cases."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/environ.py python/sglang/srt/parser/reasoning_parser.py python/sglang/srt/constrained/reasoner_grammar_backend.py test/registered/unit/constrained/test_reasoner_grammar_backend.py",
+      "exit_code": 0,
+      "what_was_measured": "All repository formatting, lint, spelling, syntax, and applicable registration checks passed for changed source and tests."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The defect is a deterministic token-state boundary reproduced without tensor execution. Muse Glimmer 30B weights were not available, so no model-quality or full serving reproduction was claimed; the assigned gfx950 was not relevant to this off-server state-machine validation.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Muse Glimmer 30B NVFP4 weights were unavailable, so the reported production placeholder rate and semantic output quality were not independently measured.",
+    "No claim is made for GPT-OSS or another channel-framed architecture; only Muse opts into the new boundary metadata.",
+    "This change is Python-only and does not require or validate a native FlyDSL rebuild."
+  ],
+  "evidence_paths": [
+    "reports/j-ccd93ff09a48/reproduction.txt",
+    "python/sglang/srt/constrained/reasoner_grammar_backend.py",
+    "python/sglang/srt/parser/reasoning_parser.py",
+    "test/registered/unit/constrained/test_reasoner_grammar_backend.py"
+  ]
+}

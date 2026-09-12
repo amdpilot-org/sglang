@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34631",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1816",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1611",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/1701",
+  "candidate_commit": "5478c5bd3941700593977490de41c1e4d177e9cf",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved the candidate's Muse channel-boundary correction and replaced per-token copies of the complete reasoning match history with scalar history-length snapshots over one shared linear history. The exact review counterexample fell from 4,002,000 copied history slots (32,144,000 bytes of nested list storage) to zero nested lists; rollback across the reasoning boundary and a repeated reasoning channel remains covered.",
+  "tests": [
+    {
+      "command": "Exact-candidate inline Python measurement at 5478c5bd3941700593977490de41c1e4d177e9cf using PYTHONPATH=/job/repo/python and /tmp/amdpilot-repo-j-74e55f101744/venv/bin/python",
+      "exit_code": 0,
+      "what_was_measured": "A 2,000-token reasoning prefix, terminator, and 2,000 answer tokens produced 4,001 snapshots containing 4,002,000 copied reasoning-history slots and 32,144,000 bytes of nested list storage."
+    },
+    {
+      "command": "Post-fix inline Python measurement using PYTHONPATH=/job/repo/python and /tmp/amdpilot-repo-j-74e55f101744/venv/bin/python",
+      "exit_code": 0,
+      "what_was_measured": "The same stream produced 4,001 scalar snapshots with zero nested lists, 416,104 bytes of tuple storage, and one 2,001-slot/16,184-byte shared history; rolling back 2,001 tokens restored the 2,000-token reasoning state and rolled back all inner-grammar answer tokens."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-74e55f101744/venv/bin/python -m pytest -q test/registered/unit/constrained/test_reasoner_grammar_backend.py test/registered/unit/parser/test_reasoning_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "155 tests and 64 subtests passed, including the original Muse answer-body arming boundary, the 2,000+2,000 linear-storage regression, copy/rollback, fail-safe, legacy detectors, and rollback across a second reasoning channel."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-74e55f101744/venv/bin/python -m compileall -q python/sglang/srt/constrained/reasoner_grammar_backend.py python/sglang/srt/environ.py python/sglang/srt/parser/reasoning_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python source compiled successfully."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "The working diff had no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The concrete review counterexample is CPU-side Python state storage; no GPU kernel or model inference was needed or used."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Muse Glimmer 30B NVFP4 weights were unavailable, so the production placeholder rate, semantic answer quality, and a full HTTP serving run were not reproduced.",
+    "GPT-OSS channel framing remains unverified.",
+    "The deterministic state-machine tests validate the guided-decoding boundary and rollback bookkeeping, not model-architecture behavior."
+  ]
+}
