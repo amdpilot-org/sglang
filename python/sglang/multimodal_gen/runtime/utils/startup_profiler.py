@@ -6,6 +6,7 @@ time. Disabled by default (SGLANG_DIFFUSION_STARTUP_PROFILE=0): the context
 manager is then a plain pass-through with no timing or bookkeeping overhead.
 """
 
+import os
 import time
 from contextlib import contextmanager
 from typing import Iterator
@@ -72,12 +73,17 @@ class StartupProfiler:
 
 
 _profiler: StartupProfiler | None = None
+_profiler_pid: int | None = None
 
 
 def get_startup_profiler() -> StartupProfiler:
-    global _profiler
-    if _profiler is None:
+    global _profiler, _profiler_pid
+    pid = os.getpid()
+    # Diffusion workers are normally forked. Never inherit the parent's open
+    # phase stack or completed measurements into the child process.
+    if _profiler is None or _profiler_pid != pid:
         _profiler = StartupProfiler(enabled=envs.SGLANG_DIFFUSION_STARTUP_PROFILE)
+        _profiler_pid = pid
     return _profiler
 
 

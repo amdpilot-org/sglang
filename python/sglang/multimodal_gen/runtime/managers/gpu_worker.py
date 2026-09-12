@@ -352,7 +352,6 @@ class GPUWorker(GPUWorkerPostTrainingMixin):
         """Initialize the device and load the model."""
         with startup_phase("init_device_and_model"):
             self._init_device_and_model()
-        log_startup_summary()
 
     def _init_device_and_model(self) -> None:
         with startup_phase("set_device"):
@@ -1598,14 +1597,16 @@ def run_scheduler_process(
     from sglang.multimodal_gen.runtime.managers.scheduler import Scheduler
 
     try:
-        scheduler = Scheduler(
-            server_args,
-            gpu_id=rank,
-            port_args=port_args,
-            task_pipes_to_slaves=task_pipes_to_slaves,
-            result_pipes_from_slaves=result_pipes_from_slaves,
-            local_rank=local_rank,
-        )
+        with startup_phase("init_scheduler"):
+            scheduler = Scheduler(
+                server_args,
+                gpu_id=rank,
+                port_args=port_args,
+                task_pipes_to_slaves=task_pipes_to_slaves,
+                result_pipes_from_slaves=result_pipes_from_slaves,
+                local_rank=local_rank,
+            )
+        log_startup_summary()
         logger.info(f"Worker {rank}: Scheduler loop started.")
         pipe_writer.send(
             {

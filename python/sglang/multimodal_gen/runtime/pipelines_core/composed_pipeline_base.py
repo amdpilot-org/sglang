@@ -429,7 +429,8 @@ class ComposedPipelineBase(ABC):
         If provided, loaded_modules will be used instead of loading from config/pretrained weights.
         """
 
-        model_index = self._load_config()
+        with startup_phase("load_config"):
+            model_index = self._load_config()
         logger.info("Loading pipeline modules from config: %s", model_index)
 
         # remove keys that are not pipeline modules
