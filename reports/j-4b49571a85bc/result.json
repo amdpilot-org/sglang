@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33501",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared source already contains the MiniMax-H3 CLI fix from merged upstream PR #33275. The exact reported command accepts --model-variant fl2va and reaches worker startup; no additional source correction is justified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-4b49571a85bc/venv/bin/python parser boundary fixture (see raw/parser_boundaries.txt)",
+      "exit_code": 0,
+      "what_was_measured": "The full reported argument vector dispatches to the diffusion backend and preserves model_variant=fl2va, num_gpus=8, and ulysses_degree=8. Independent equals-form ref2va/hybrid values are accepted, while a missing value is rejected with argparse status 2."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4b49571a85bc/venv/bin/python -c 'from sglang.cli.main import main; main()' serve --model-type diffusion --model-path MiniMaxAI/MiniMax-H3 --num-gpus 8 --ulysses-degree 8 --performance-mode speed --host 0.0.0.0 --port 30010 --model-variant fl2va",
+      "exit_code": 0,
+      "what_was_measured": "The actual checkout accepted model_variant=fl2va, emitted normalized server_args, and entered eight-worker startup instead of producing the reported unrecognized-argument error. Worker ranks 1-7 then failed with invalid device ordinal because only one GPU was assigned. The launcher returned zero after shutdown; raw/exact_cli.txt contains the authoritative failure evidence."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4b49571a85bc/venv/bin/python -m pytest --collect-only -q python/sglang/multimodal_gen/test/unit/test_server_args.py",
+      "exit_code": 0,
+      "what_was_measured": "The prepared environment imports the current server-argument test module and collects 197 tests; this is collection evidence only, not model execution."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One assigned AMD Instinct MI355X gfx950 was visible. The exact eight-GPU command reached device initialization but failed on unavailable ranks before weights, inference, or a numerical GPU workload executed. See raw/gpu_inventory.txt and raw/exact_cli.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one gfx950 GPU was assigned, so the reported eight-GPU Ulysses deployment could not be reproduced.",
+    "MiniMax-H3 weights were unavailable; model loading, generation, and semantic or numerical correctness were not tested.",
+    "The successful check is specifically for CLI dispatch and parsing, which is the failure reported by the issue; it is not a full serving validation."
+  ]
+}
