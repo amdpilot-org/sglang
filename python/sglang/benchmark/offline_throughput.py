@@ -9,6 +9,9 @@ python -m sglang.benchmark.offline_throughput --model-path meta-llama/Meta-Llama
 ## Random dataset with default args
 python -m sglang.benchmark.offline_throughput --model-path meta-llama/Meta-Llama-3.1-8B-Instruct --dataset-name random --random-input 1024 --random-output 1024
 
+## Embedding model with an OpenAI-compatible JSONL dataset
+python -m sglang.benchmark.offline_throughput --model-path Qwen/Qwen3-Embedding-0.6B --is-embedding --dataset-name embedding --dataset-path requests.jsonl --num-prompts 1000
+
 ## Random dataset with profiling args
 SGLANG_TORCH_PROFILER_DIR=/tmp python -m sglang.benchmark.offline_throughput --model-path meta-llama/Meta-Llama-3.1-8B-Instruct --dataset-name random --random-input 128 --random-output 128 --num-prompts 4 --max-running-requests 4 --profile-steps 3 --profile --profile-activities "CPU" "XPU"
 """
@@ -75,7 +78,7 @@ class BenchArgs:
             "--dataset-name",
             type=str,
             default="sharegpt",
-            choices=["sharegpt", "random", "generated-shared-prefix"],
+            choices=["sharegpt", "embedding", "random", "generated-shared-prefix"],
             help="Name of the dataset to benchmark on.",
         )
         parser.add_argument(
@@ -234,6 +237,7 @@ def throughput_test_once(
     profile_steps=None,
     return_logprob: bool = False,
     logprob_start_len: int = -1,
+    is_embedding: bool = False,
 ):
     measurement_results = {
         "backend": backend_name,
@@ -273,12 +277,45 @@ def throughput_test_once(
             known_files = set(os.listdir(dir))
 
     st = time.perf_counter()
-    gen_out = backend.generate(
-        prompt=prompt,
-        sampling_params=sampling_params,
-        return_logprob=return_logprob,
-        logprob_start_len=logprob_start_len,
-    )
+    if is_embedding:
+        if any(not isinstance(item, str) for item in prompt):
+            raise ValueError(
+                "Offline embedding benchmarking requires one string input per "
+                "JSONL record; use bench_serving for input arrays"
+            )
+        unsupported_fields = sorted(
+            {
+                key
+                for row in reqs
+                for key in row.extra_request_body
+                if key != "dimensions"
+            }
+        )
+        if unsupported_fields:
+            raise ValueError(
+                "Offline embedding benchmarking does not support per-request "
+                f"fields {unsupported_fields}; use bench_serving for OpenAI payloads"
+            )
+        dimensions = {row.extra_request_body.get("dimensions") for row in reqs}
+        if len(dimensions) > 1:
+            raise ValueError(
+                "Offline embedding requests must use one common dimensions value"
+            )
+        encode_kwargs = {}
+        if dimensions != {None} and backend_name == "runtime":
+            raise ValueError(
+                "The runtime backend does not support embedding dimensions"
+            )
+        if dimensions != {None}:
+            encode_kwargs["dimensions"] = dimensions.pop()
+        gen_out = backend.encode(prompt=prompt, **encode_kwargs)
+    else:
+        gen_out = backend.generate(
+            prompt=prompt,
+            sampling_params=sampling_params,
+            return_logprob=return_logprob,
+            logprob_start_len=logprob_start_len,
+        )
     latency = time.perf_counter() - st
 
     if profile:
@@ -302,8 +339,8 @@ def throughput_test_once(
     server_info = backend.get_server_info()
 
     measurement_results["total_latency"] = latency
-    measurement_results["total_output_tokens"] = sum(
-        o["meta_info"]["completion_tokens"] for o in gen_out
+    measurement_results["total_output_tokens"] = (
+        0 if is_embedding else sum(o["meta_info"]["completion_tokens"] for o in gen_out)
     )
     measurement_results["request_throughput"] = (
         measurement_results["successful_requests"] / latency
@@ -322,9 +359,11 @@ def throughput_test_once(
     if inspect.isawaitable(server_info):
         server_info = asyncio.run(server_info)
 
-    measurement_results["last_gen_throughput"] = server_info["internal_states"][0][
-        "last_gen_throughput"
-    ]
+    measurement_results["last_gen_throughput"] = (
+        None
+        if is_embedding
+        else server_info["internal_states"][0]["last_gen_throughput"]
+    )
 
     return measurement_results
 
@@ -408,6 +447,9 @@ def _create_ray_engine_backend(server_args: ServerArgs):
         def generate(self, **kwargs):
             return ray.get(actor.call.remote("generate", **kwargs))
 
+        def encode(self, **kwargs):
+            return ray.get(actor.call.remote("encode", **kwargs))
+
         def get_server_info(self, **kwargs):
             return ray.get(actor.call.remote("get_server_info", **kwargs))
 
@@ -466,14 +508,20 @@ def throughput_test(
     # Read dataset
     input_requests = get_dataset(bench_args, tokenizer)
 
-    warmup_requests = sample_random_requests(
-        input_len=256,
-        output_len=16,
-        num_prompts=min(bench_args.num_prompts, 16),
-        range_ratio=1.0,
-        tokenizer=tokenizer,
-        dataset_path=bench_args.dataset_path,
-    )
+    if bench_args.dataset_name == "embedding" and not cfg.is_embedding:
+        raise ValueError("The embedding dataset requires an embedding model")
+
+    if cfg.is_embedding:
+        warmup_requests = input_requests[: min(bench_args.num_prompts, 16)]
+    else:
+        warmup_requests = sample_random_requests(
+            input_len=256,
+            output_len=16,
+            num_prompts=min(bench_args.num_prompts, 16),
+            range_ratio=1.0,
+            tokenizer=tokenizer,
+            dataset_path=bench_args.dataset_path,
+        )
 
     # Warm up
     if not bench_args.skip_warmup:
@@ -487,6 +535,7 @@ def throughput_test(
             profile=False,
             return_logprob=bench_args.return_logprob,
             logprob_start_len=bench_args.logprob_start_len,
+            is_embedding=cfg.is_embedding,
         )
         time.sleep(0.5)
 
@@ -502,6 +551,7 @@ def throughput_test(
         profile_steps=bench_args.profile_steps,
         return_logprob=bench_args.return_logprob,
         logprob_start_len=bench_args.logprob_start_len,
+        is_embedding=cfg.is_embedding,
     )
     backend.shutdown()
 
@@ -516,14 +566,18 @@ def throughput_test(
     print("{:<40} {:<10}".format("Successful requests:", result["successful_requests"]))
     print("{:<40} {:<10.2f}".format("Benchmark duration (s):", result["total_latency"]))
     print("{:<40} {:<10}".format("Total input tokens:", result["total_input_tokens"]))
-    print(
-        "{:<40} {:<10}".format("Total generated tokens:", result["total_output_tokens"])
-    )
-    print(
-        "{:<40} {:<10.2f}".format(
-            "Last generation throughput (tok/s):", result["last_gen_throughput"]
+    if not cfg.is_embedding:
+        print(
+            "{:<40} {:<10}".format(
+                "Total generated tokens:", result["total_output_tokens"]
+            )
         )
-    )
+        print(
+            "{:<40} {:<10.2f}".format(
+                "Last generation throughput (tok/s):",
+                result["last_gen_throughput"],
+            )
+        )
     print(
         "{:<40} {:<10.2f}".format(
             "Request throughput (req/s):", result["request_throughput"]
@@ -534,16 +588,17 @@ def throughput_test(
             "Input token throughput (tok/s):", result["input_throughput"]
         )
     )
-    print(
-        "{:<40} {:<10.2f}".format(
-            "Output token throughput (tok/s):", result["output_throughput"]
+    if not cfg.is_embedding:
+        print(
+            "{:<40} {:<10.2f}".format(
+                "Output token throughput (tok/s):", result["output_throughput"]
+            )
         )
-    )
-    print(
-        "{:<40} {:<10.2f}".format(
-            "Total token throughput (tok/s):", result["total_throughput"]
+        print(
+            "{:<40} {:<10.2f}".format(
+                "Total token throughput (tok/s):", result["total_throughput"]
+            )
         )
-    )
     print("=" * 50)
 
     return result
