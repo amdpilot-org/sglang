@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36010",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "reproduced",
+  "summary": "Current main still passes missing CPU metadata from speculative extend into the FlashInfer FP4 dequant workspace. A focused regression reproduced the resulting NoneType failures. This change adds a narrow boundary check that replaces them with an actionable RuntimeError; it does not claim to make NVFP4 speculative decoding graph-safe. Upstream PRs #36038 and #36045 remain the existing architecture-specific full-fix candidates.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-f4f0d0a6ae8e/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_fp4_dequant_workspace_metadata.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before run against the original implementation reproduced unhandled None metadata failures; raw output is reports/j-f4f0d0a6ae8e/failing-before.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f4f0d0a6ae8e/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_fp4_dequant_workspace_metadata.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression: 2 tests passed, including three subtests independently omitting request indices, prefix lengths, and extend lengths, plus an empty valid metadata boundary. Raw output is reports/j-f4f0d0a6ae8e/passing-after.log."
+    },
+    {
+      "command": "git diff --check && /tmp/amdpilot-repo-j-f4f0d0a6ae8e/venv/bin/python -m compileall -q python/sglang/srt/mem_cache/memory_pool.py test/registered/unit/mem_cache/test_fp4_dequant_workspace_metadata.py",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace and Python bytecode compilation."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned single GPU is AMD Instinct MI350X/gfx950 with torch 2.11.0+rocm7.2. The reported path requires NVIDIA SM120, CUDA FlashInfer/TRTLLM NVFP4 support, and the Qwen3.8-27B-NVFP4 weights. Hardware inventory is retained in reports/j-f4f0d0a6ae8e/gpu-environment.log; no unrelated GPU smoke is counted as issue validation."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original RTX 5090/SM120 full-model eager and CUDA Graph serving reproductions were not run because this job provides gfx950 ROCm hardware and not the reported model weights.",
+    "The defensive check improves failure diagnosis only; it does not supply the graph-safe FP4 speculative attention path needed to solve the serving bug.",
+    "Upstream PR https://github.com/sgl-project/sglang/pull/36038 routes speculative phases through TRTLLM MHA native FP4 decode, while https://github.com/sgl-project/sglang/pull/36045 implements a GPU-resident FlashInfer workspace. Both are open and neither is present in the recorded base.",
+    "Ruff was not installed in the prepared interpreter; compileall and git diff --check passed."
+  ]
+}
