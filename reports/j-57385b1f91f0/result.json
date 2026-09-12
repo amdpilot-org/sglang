@@ -1,0 +1,61 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35333",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2945",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2913",
+  "candidate_commit": "ced86c26b014a23c5160fd5660d8d39a9981ddb2",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate verifies and fixes the parent review's NaN promotion and tensor terminal-state defects, and adds useful schema/resolver/trajectory primitives. It remains a partial framework: production callers never load or resolve a manifest and never pass resolved_plan to DenoisingStage, so uncovered requests are not forced eager.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-57385b1f91f0/venv/bin/python -c 'from sglang.multimodal_gen.runtime.utils.compile_trajectory import CompilePlanResolver' (at base)",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced absence of the requested feature at the recorded base via ModuleNotFoundError."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-57385b1f91f0/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_compile_trajectory_gate.py python/sglang/multimodal_gen/test/unit/test_regional_torch_compile.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression suite: 20 passed."
+    },
+    {
+      "command": "independent parent-counterexample script at b9fdebd698e93283f02acc4095f1fcda71233f4e",
+      "exit_code": 0,
+      "what_was_measured": "NaN checkpoint and output metrics both passed; equal tensor-valued terminal mappings raised RuntimeError."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-57385b1f91f0/venv/bin/python /job/evidence-j-57385b1f91f0/adversarial_candidate.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate rejects both NaN cases and handles tensor terminal mappings; unsupported threshold metric name raises KeyError rather than rejecting cleanly."
+    },
+    {
+      "command": "rg -n '_maybe_torch_compile\\(' python/sglang/multimodal_gen --glob '!**/test/**' and symbol audit for CompilePlanResolver/CompiledPlanManifest",
+      "exit_code": 0,
+      "what_was_measured": "All production compile callers omit resolved_plan; resolver/manifest construction and request workload-signature derivation have no production consumer."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TORCHINDUCTOR_CACHE_DIR=/tmp/amdpilot-repo-j-57385b1f91f0/inductor-review-cache /tmp/amdpilot-repo-j-57385b1f91f0/venv/bin/python reports/j-ca997a4b410d/gpu_trajectory_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "Real ROCm Inductor execution on MI350X/gfx950: four-step toy trajectory parity, reset/short-history, and intentional perturbation rejection; max absolute error 1.1920928955078125e-07."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X (gfx950), Torch 2.11.0+rocm7.2. Candidate toy trajectory compiled and executed with Inductor. This is not production-model semantic evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No production server/configuration/request path constructs CompilePlanResolver, derives CompileWorkloadSignature, loads a manifest, or passes resolved_plan to DenoisingStage; uncovered production requests therefore are not forced eager.",
+    "All real _maybe_torch_compile call sites omit resolved_plan, so the new safety branch is reachable only through direct tests or hypothetical future callers.",
+    "A gate declaring an unsupported tensor metric name raises KeyError rather than producing a fail-closed rejected promotion.",
+    "No real diffusion or stateful world-model trajectory qualifies history regimes, cache on/off, CFG serial/parallel, reset isolation, mutation/alias metadata, or semantic output metrics."
+  ],
+  "remaining_limitations": [
+    "No production diffusion/world-model weights were available.",
+    "The GPU validation used a deterministic Linear/tanh toy, not a supported production architecture or public/task-level semantic metric.",
+    "Only one AMD Instinct MI350X gfx950 GPU was exercised; distributed behavior was not tested.",
+    "No native files changed and repository-environment.json declares native=null, so native rebuilding was not applicable.",
+    "Torch emitted non-fatal Dynamo metrics serialization errors during compilation."
+  ]
+}
