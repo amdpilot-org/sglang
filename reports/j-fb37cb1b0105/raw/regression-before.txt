@@ -1,0 +1,126 @@
+..FFF                                                                    [100%]
+=================================== FAILURES ===================================
+_ test_streaming_unknown_tool_preserves_parallel_calls[detector0-[{"name": "rm_rf", "parameters": {"path": "/"}},{"name": "get_weather", "parameters": {"city": "Tokyo"}},{"name": "get_time", "parameters": {"tz": "JST"}}]] _
+
+detector = <sglang.srt.function_call.json_array_parser.JsonArrayParser object at 0x7ff62d2100e0>
+wire = '[{"name": "rm_rf", "parameters": {"path": "/"}},{"name": "get_weather", "parameters": {"city": "Tokyo"}},{"name": "get_time", "parameters": {"tz": "JST"}}]'
+caplog = <_pytest.logging.LogCaptureFixture object at 0x7ff62d210d70>
+
+    @pytest.mark.parametrize(
+        ("detector", "wire"),
+        [
+            (
+                JsonArrayParser(),
+                "["
+                + ",".join(
+                    call.replace('"arguments"', '"parameters"')
+                    for call in (UNKNOWN_CALL, WEATHER_CALL, TIME_CALL)
+                )
+                + "]",
+            ),
+            (
+                Qwen25Detector(),
+                "".join(
+                    f"<tool_call>\n{call}\n</tool_call>\n"
+                    for call in (WEATHER_CALL, UNKNOWN_CALL, TIME_CALL)
+                ),
+            ),
+        ],
+    )
+    def test_streaming_unknown_tool_preserves_parallel_calls(detector, wire, caplog):
+        with caplog.at_level(
+            logging.WARNING, logger="sglang.srt.function_call.base_format_detector"
+        ):
+            calls = _collect_streamed_calls(detector, wire)
+    
+>       assert calls == {
+            0: {"name": "get_weather", "arguments": '{"city": "Tokyo"}'},
+            1: {"name": "get_time", "arguments": '{"tz": "JST"}'},
+        }
+E       assert {} == {0: {'argumen...: 'get_time'}}
+E         
+E         Right contains 2 more items:
+E         {0: {'arguments': '{"city": "Tokyo"}', 'name': 'get_weather'},
+E          1: {'arguments': '{"tz": "JST"}', 'name': 'get_time'}}
+E         Use -v to get more diff
+
+test/registered/unit/function_call/test_unknown_tool_name.py:134: AssertionError
+_ test_streaming_unknown_tool_preserves_parallel_calls[detector1-<tool_call>\n{"name": "get_weather", "arguments": {"city": "Tokyo"}}\n</tool_call>\n<tool_call>\n{"name": "rm_rf", "arguments": {"path": "/"}}\n</tool_call>\n<tool_call>\n{"name": "get_time", "arguments": {"tz": "JST"}}\n</tool_call>\n] _
+
+detector = <sglang.srt.function_call.qwen25_detector.Qwen25Detector object at 0x7ff62d156480>
+wire = '<tool_call>\n{"name": "get_weather", "arguments": {"city": "Tokyo"}}\n</tool_call>\n<tool_call>\n{"name": "rm_rf", "arguments": {"path": "/"}}\n</tool_call>\n<tool_call>\n{"name": "get_time", "arguments": {"tz": "JST"}}\n</tool_call>\n'
+caplog = <_pytest.logging.LogCaptureFixture object at 0x7ff62d224230>
+
+    @pytest.mark.parametrize(
+        ("detector", "wire"),
+        [
+            (
+                JsonArrayParser(),
+                "["
+                + ",".join(
+                    call.replace('"arguments"', '"parameters"')
+                    for call in (UNKNOWN_CALL, WEATHER_CALL, TIME_CALL)
+                )
+                + "]",
+            ),
+            (
+                Qwen25Detector(),
+                "".join(
+                    f"<tool_call>\n{call}\n</tool_call>\n"
+                    for call in (WEATHER_CALL, UNKNOWN_CALL, TIME_CALL)
+                ),
+            ),
+        ],
+    )
+    def test_streaming_unknown_tool_preserves_parallel_calls(detector, wire, caplog):
+        with caplog.at_level(
+            logging.WARNING, logger="sglang.srt.function_call.base_format_detector"
+        ):
+            calls = _collect_streamed_calls(detector, wire)
+    
+>       assert calls == {
+            0: {"name": "get_weather", "arguments": '{"city": "Tokyo"}'},
+            1: {"name": "get_time", "arguments": '{"tz": "JST"}'},
+        }
+E       assert {0: {'argumen...: 'get_time'}} == {0: {'argumen...: 'get_time'}}
+E         
+E         Differing items:
+E         {0: {'arguments': '{"city": "Tokyo"}{"tz": "JST"}', 'name': 'get_time'}} != {0: {'arguments': '{"city": "Tokyo"}', 'name': 'get_weather'}}
+E         Right contains 1 more item:
+E         {1: {'arguments': '{"tz": "JST"}', 'name': 'get_time'}}
+E         Use -v to get more diff
+
+test/registered/unit/function_call/test_unknown_tool_name.py:134: AssertionError
+__________ test_streaming_unknown_tool_last_preserves_completed_state __________
+
+    def test_streaming_unknown_tool_last_preserves_completed_state():
+        detector = JsonArrayParser()
+        wire = "[" + ",".join(
+            call.replace('"arguments"', '"parameters"')
+            for call in (WEATHER_CALL, UNKNOWN_CALL)
+        ) + "]"
+    
+        calls = _collect_streamed_calls(detector, [wire, "", ""])
+    
+        assert calls == {
+            0: {"name": "get_weather", "arguments": '{"city": "Tokyo"}'}
+        }
+>       assert detector.streamed_args_for_tool == ['{"city": "Tokyo"}']
+E       assert [] == ['{"city": "Tokyo"}']
+E         
+E         Right contains one more item: '{"city": "Tokyo"}'
+E         Use -v to get more diff
+
+test/registered/unit/function_call/test_unknown_tool_name.py:155: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/function_call/test_unknown_tool_name.py::test_streaming_unknown_tool_preserves_parallel_calls[detector0-[{"name": "rm_rf", "parameters": {"path": "/"}},{"name": "get_weather", "parameters": {"city": "Tokyo"}},{"name": "get_time", "parameters": {"tz": "JST"}}]]
+FAILED test/registered/unit/function_call/test_unknown_tool_name.py::test_streaming_unknown_tool_preserves_parallel_calls[detector1-<tool_call>\n{"name": "get_weather", "arguments": {"city": "Tokyo"}}\n</tool_call>\n<tool_call>\n{"name": "rm_rf", "arguments": {"path": "/"}}\n</tool_call>\n<tool_call>\n{"name": "get_time", "arguments": {"tz": "JST"}}\n</tool_call>\n]
+FAILED test/registered/unit/function_call/test_unknown_tool_name.py::test_streaming_unknown_tool_last_preserves_completed_state
+3 failed, 2 passed, 1 warning in 5.14s
