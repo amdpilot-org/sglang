@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33142",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared main already contains the stable-public-API rewrite from merged upstream PR #36349. The historical issue revision reproduces the reported FlyDSL 0.3.2 import failure, while the current wheel-only import succeeds and all 22 registered numerical and boundary regressions pass on the assigned gfx950 GPU. No duplicate source change was justified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-2f93e5f9c583/venv/bin/python /tmp/j-2f93e5f9c583-old.ornU85/fused_residual_norm.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction using the exact fused_residual_norm.py from issue revision 2573190b9377debd135417f25b0c4185b0a3c48a; failed with the reported missing flydsl.expr.buffer_ops ImportError before GPU execution."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2f93e5f9c583/venv/bin/python -c \"import sglang.kernels.ops.diffusion.norm.fused_residual_norm_flydsl as m; print('IMPORT_OK', m.__file__, m.FLYDSL_NORM_MIN_ALIGNED_DIM)\"",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after import of the current replacement from the installed FlyDSL 0.3.2 wheel; reported minimum aligned dimension 5120."
+    },
+    {
+      "command": "CUDA_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-2f93e5f9c583/venv/bin/python -m pytest -q test/registered/kernels/ops/diffusion/test_norm_flydsl.py",
+      "exit_code": 0,
+      "what_was_measured": "All 22 registered tests passed on one gfx950. GPU results were compared with independent fp32 PyTorch references across norm kinds, fused/non-fused paths, gate and affine specializations, broadcast/per-row/4D layouts, D=10240 multi-tile execution, cache reuse, and wheel-only import."
+    },
+    {
+      "command": "git diff --numstat 1fb85053e74c3263c79457a14f589002e3cb8c31 HEAD -- python/sglang/kernels/ops/diffusion/norm/fused_residual_norm_flydsl.py test/registered/kernels/ops/diffusion/test_norm_flydsl.py",
+      "exit_code": 0,
+      "what_was_measured": "Empty diff confirms the current implementation and regression file exactly match merged fix PR #36349's merge commit."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "22/22 registered tests passed on the sole visible AMD Instinct MI350X, gcnArchName gfx950:sramecc+:xnack-, using ROCm 7.2 and FlyDSL 0.3.2; see evidence/full-gpu-tests.log and evidence/environment.log."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No diffusion model weights were available or required, so no full model/server or semantic-quality run was performed.",
+    "Validation used one assigned gfx950 GPU only; gfx942 and multi-GPU behavior were not tested.",
+    "The historical kernel cannot reach numerical GPU execution with FlyDSL 0.3.2 because the reproduced import failure occurs first.",
+    "No native C++ source was changed, so a native rebuild was not applicable."
+  ]
+}
