@@ -80,13 +80,15 @@ def adaptive_enc_mask(x_len, chunk_start_idx, left_window=0, right_window=0):
     end_pad = torch.nn.functional.pad(
         chunk_start_idx, (0, 1), value=x_len
     )  # append x_len to the end, so it becomes [0,18,36,48, x_len]
-    seq_range = torch.arange(0, x_len).unsqueeze(-1)  # seq_range size: [x_len, 1]
-    idx = ((seq_range < end_pad) & (seq_range >= start_pad)).nonzero()[
-        :, 1
-    ]  # idx size: [x_len]
+    seq_range = torch.arange(0, x_len)
+    # chunk_start_idx is sorted and contains the first position of every chunk.
+    # Inserting each position to the right of equal boundaries directly gives the
+    # same ascending chunk indices as nonzero() on the interval mask, without
+    # materializing an [x_len, num_chunks + 1] temporary.
+    idx = torch.bucketize(seq_range, chunk_start_idx, right=True)
     # boundary = end_pad[idx]  # boundary size: [x_len]
-    seq_range_expand = (
-        torch.arange(0, x_len).unsqueeze(0).expand(x_len, -1)
+    seq_range_expand = seq_range.unsqueeze(0).expand(
+        x_len, -1
     )  # seq_range_expand size [x_len, x_len]
     idx_left = idx - left_window
     idx_left[idx_left < 0] = 0
