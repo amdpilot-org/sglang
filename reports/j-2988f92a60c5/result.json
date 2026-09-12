@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38069",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/711",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/704",
+  "candidate_commit": "1edb037e7b5a9177d9f059f08cdf1b1f35f2db2f",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "The prepared base reproduces the missing public API field while preserving the legacy 2.2.2.2 sentinel. At the exact candidate commit, focused CPU tests and independent adversarial checks pass, including sentinel compatibility, mixed-batch isolation, chunked-prefill ownership, and release-path insertion suppression. However, the required GPU end-to-end radix and HiCache write-through validation could not start because the regression test uses the gated meta-llama/Llama-3.2-1B-Instruct model and the environment received HTTP 401 before model execution. The candidate is therefore not fully verified against the original issue contract.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-2988f92a60c5/venv/bin/python <base reproduction script>",
+      "exit_code": 1,
+      "what_was_measured": "On base, a normal Req had skip=false, bootstrap_host=2.2.2.2 had skip=true, and GenerateReqInput(skip_cache_insert=true) failed with TypeError. This reproduces the missing public field and confirms the legacy sentinel baseline."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-2988f92a60c5/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_skip_radix_cache_insert.py test/registered/unit/managers/test_io_struct.py test/registered/unit/entrypoints/openai/test_serving_chat.py test/registered/unit/entrypoints/openai/test_serving_completions.py test/registered/unit/entrypoints/test_http_server_warmup.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and request-plumbing coverage: 213 passed and 78 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-2988f92a60c5/venv/bin/python /job/review-evidence-j-2988f92a60c5/adversarial_review.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent checks for explicit false plus legacy sentinel, explicit true/false isolation, mixed batch parallel expansion, and release_kv_cache forwarding is_insert=false while cleanup completes."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-2988f92a60c5/venv/bin/python -m pytest -q -s test/registered/e2e/mem_cache/test_skip_cache_insert.py",
+      "exit_code": 1,
+      "what_was_measured": "Attempted the candidate's real GPU radix and HiCache write-through regression. Server startup failed before GPU model execution because Hugging Face returned 401 for gated meta-llama/Llama-3.2-1B-Instruct; all five tests errored in setup."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X (gfx950) was detected by torch, but the model server failed during gated model configuration download before inference or cache operations ran."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Unverified on an actual model server: an opt-out request can read an existing cached prefix without publishing its newly allocated KV.",
+    "Unverified on an actual model server: an identical follow-up after an opt-out request receives no reusable device-cache insertion.",
+    "Unverified on HiCache write_through: an opt-out request leaves no reusable host-tier entry.",
+    "Unverified end to end for chunked prefill and mixed per-item batches because the candidate E2E server never started."
+  ],
+  "remaining_limitations": [
+    "The prepared environment had no accessible copy or credentials for meta-llama/Llama-3.2-1B-Instruct, the model hard-coded by the candidate E2E test.",
+    "No native source changed between base and candidate; repository-environment.json records native=null, so no native rebuild was applicable.",
+    "CPU/source tests exercise cache control flow with mocks but cannot substitute for device and HiCache tier measurements."
+  ],
+  "evidence_directory": "/job/review-evidence-j-2988f92a60c5"
+}
