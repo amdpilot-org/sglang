@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34092",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "DeepSeek V4 config loading now accepts the Transformers >=4.57 compress_rates and rope_parameters names, preserves the legacy aliases used by SGLang, rejects conflicting duplicate aliases, and remains compatible with legacy config.json files. The pinned Transformers 5.12.1 stack previously rejected compress_rates during AutoConfig construction before reaching the originally reported missing-attribute crash; the post-change end-to-end ModelConfig reproduction succeeds.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-9d51d02baf78/venv/bin/python -m pytest -q test/registered/unit/configs/test_model_config.py",
+      "exit_code": 0,
+      "what_was_measured": "12 unit tests passed, including new-schema, legacy-schema, equal dual-alias, conflicting-alias, custom/remote-config fallback, indexer-count, and existing model-config regression coverage."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9d51d02baf78/venv/bin/python - <<'PY' # construct ModelConfig from the retained local Transformers >=4.57-style config fixture",
+      "exit_code": 0,
+      "what_was_measured": "The actual ModelConfig path loaded compress_rates=[0,4,128,0], exposed compress_ratios, normalized rope_parameters/rope_scaling, and initialized attention scaling. The same command failed before the change with StrictDataclassFieldValidationError for compress_rates."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-9d51d02baf78/pre-commit /opt/venv/bin/pre-commit run --files python/sglang/srt/configs/model_config.py python/sglang/srt/utils/hf_transformers/common.py python/sglang/srt/utils/hf_transformers/config.py test/registered/unit/configs/test_model_config.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, syntax, secret, and registered-test metadata checks passed for every changed Python file."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The assigned AMD Instinct MI350X was visible through torch 2.11.0+rocm7.2, but this change is limited to CPU-side JSON/config parsing and performs no tensor or kernel computation. A GPU numerical run would not exercise the changed code.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No DeepSeek V4 model weights were provided, so full engine startup, weight loading, and serving were not executed. The retained ModelConfig reproduction exercises the reported config-loading failure but does not qualify DeepSeek V4 semantic accuracy or distributed execution.",
+    "The pinned environment contains Transformers 5.12.1, not exactly 4.57.x. Both are on the new-name side of the reported schema transition; exact 4.57.x execution was not performed because the pinned software stack was preserved.",
+    "No native library was changed or rebuilt; native compilation is not applicable to this Python-only configuration compatibility fix."
+  ],
+  "evidence_paths": [
+    "reports/j-9d51d02baf78/reproduce-before.log",
+    "reports/j-9d51d02baf78/reproduce-after.log",
+    "reports/j-9d51d02baf78/pytest-model-config.log",
+    "reports/j-9d51d02baf78/pre-commit.log",
+    "reports/j-9d51d02baf78/environment.log",
+    "/tmp/amdpilot-repo-j-9d51d02baf78/deepseek-v4-new-schema/config.json"
+  ],
+  "source_paths": [
+    "python/sglang/srt/utils/hf_transformers/common.py",
+    "python/sglang/srt/utils/hf_transformers/config.py",
+    "python/sglang/srt/configs/model_config.py"
+  ],
+  "native_paths": []
+}

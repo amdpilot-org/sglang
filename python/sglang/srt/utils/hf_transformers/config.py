@@ -74,6 +74,21 @@ def _try_load_longcat_config(model, revision: Optional[str], **kwargs):
     )
 
 
+def _try_load_deepseek_v4_config(model, revision: Optional[str], **kwargs):
+    """Load DSv4 with SGLang's compatibility class.
+
+    Transformers 5 includes its own ``DeepseekV4Config``, so registering our
+    class with ``AutoConfig`` cannot replace it. Inspecting the raw config here
+    also supports transformers releases where V4 is not built in.
+    """
+    config_dict, _ = PretrainedConfig.get_config_dict(
+        model, revision=revision, **kwargs
+    )
+    if config_dict.get("model_type") != "deepseek_v4":
+        return None
+    return _CONFIG_REGISTRY["deepseek_v4"].from_dict(config_dict)
+
+
 @register_model_config_parser("hf")
 class HfModelConfigParser(ModelConfigParserBase):
     def parse(
@@ -83,7 +98,9 @@ class HfModelConfigParser(ModelConfigParserBase):
         revision: Optional[str] = None,
         **kwargs,
     ):
-        config = _try_load_longcat_config(model, revision, **kwargs)
+        config = _try_load_deepseek_v4_config(model, revision, **kwargs)
+        if config is None:
+            config = _try_load_longcat_config(model, revision, **kwargs)
         if config is None:
             config = AutoConfig.from_pretrained(
                 model,
