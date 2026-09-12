@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33199",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review of exact candidate commit 8d70020a737b6a506a1038d2d6ae32d5b600e310 reproduced the original DeepSeek-V4 EAGLE/DSPARK default-ordering failure on the recorded base and verified that the candidate makes only the model-provided 256 default yield to the speculative 48 default while preserving explicit operator values.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-86272b36bf79/venv/bin/python - (independent model-hook then EAGLE/DSPARK handler reproduction on base)",
+      "exit_code": 0,
+      "what_was_measured": "At base 358c163250ad3b1f62939b01ce1314a0a31a0365, omitted EAGLE and DSPARK max_running_requests both resolved to the incorrect 256; explicit 96 remained 96. Source imported from /job/repo/python/sglang."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-86272b36bf79/venv/bin/python -m pytest -q test/registered/unit/server_args/test_deepseek_v4_speculative_max_running_requests.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, its regression covered omitted EAGLE and DSPARK input, explicit 96, and non-speculative DeepSeek-V4; 3 tests and 2 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-86272b36bf79/venv/bin/python -m pytest -q test/registered/unit/server_args/test_resolution_declarations.py test/registered/unit/server_args/test_record_holds_the_raw_input.py test/registered/unit/server_args/test_deepseek_v4_speculative_max_running_requests.py",
+      "exit_code": 0,
+      "what_was_measured": "Resolution declaration invariants, the real ServerArgs raw-input snapshot contract, and the candidate regression passed together: 20 tests and 25 subtests."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-86272b36bf79/venv/bin/python - (independent adversarial matrix at candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "For EAGLE and DSPARK, omitted input produced the declaration chain 256 then 48; explicit values 1, 48, 96, and 256 were preserved without speculative overwrite. The documented no-snapshot fixture fallback remained 256."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..8d70020a737b6a506a1038d2d6ae32d5b600e310",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "rocminfo exposed gfx950, but the reported contract is deterministic argument resolution before engine or GPU execution; no GPU kernel or model-serving result was used as proof."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "DeepSeek-V4 weights were unavailable, so no full model-serving or multi-GPU run was attempted or claimed.",
+    "The candidate regression constructs the relevant handler sequence directly; independent raw-input invariant tests verify the production pipeline snapshot on which the fix relies.",
+    "No native source changed, so native rebuild validation was not applicable."
+  ]
+}
