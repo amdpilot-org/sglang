@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37393",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "PR 1035's tests pass unchanged on the prepared base and add no runtime correction. A real two-process Gloo fixture reproduces both reported unequal-row all-reduce contracts, while an added boundary proves SGLANG_SPEC_TP_SYNC=off leaves divergent speculative state unchanged. The existing DSpark synchronization remains a plausible mitigation, but no evidence identifies it as the cause of the two production sequences or justifies a further speculative source change.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e2908ac805b9/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-e2908ac805b9/evidence/test_spec_tp_sync_candidate.py",
+      "exit_code": 0,
+      "what_was_measured": "The exact five candidate tests passed on the unmodified recorded base, proving the candidate is not failing-before/passing-after."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e2908ac805b9/venv/bin/python -m pytest -q test/registered/unit/spec/test_spec_tp_sync.py",
+      "exit_code": 0,
+      "what_was_measured": "The retained candidate tests plus the explicit SGLANG_SPEC_TP_SYNC=off boundary passed; the GPU parameter exercised a device tensor on gfx950."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e2908ac805b9/venv/bin/python /tmp/amdpilot-repo-j-e2908ac805b9/evidence/reproduce_unequal_allreduce.py",
+      "exit_code": 1,
+      "what_was_measured": "Expected failure: real two-process Gloo all-reduce with rank shapes (628,7168) and (1140,7168) reproduced the original 4,501,504 versus 8,171,520 numel contract and failed with a received-size mismatch/SIGABRT."
+    },
+    {
+      "command": "ROWS=6098,9682 /tmp/amdpilot-repo-j-e2908ac805b9/venv/bin/python /tmp/amdpilot-repo-j-e2908ac805b9/evidence/reproduce_unequal_allreduce.py",
+      "exit_code": 1,
+      "what_was_measured": "Expected failure: real two-process Gloo all-reduce with rank shapes (6098,7168) and (9682,7168) reproduced the original 43,710,464 versus 69,400,576 numel contract and failed with a received-size mismatch/SIGABRT."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The retained CUDA-alike parameter ran on the assigned AMD Instinct MI355X gfx950 with PyTorch 2.11.0+rocm7.2. It validates only same-device tensor overwrite behavior, not a multi-GPU collective."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The unequal-row contract was reproduced with two CPU Gloo ranks, not eight NVIDIA B300 ranks or NCCL 2.28.3.",
+    "Kimi-K3 and DSpark weights were unavailable, so the full multimodal chunked-prefill serving path was not executed.",
+    "No evidence connects either production collective sequence number to rank-local sampling rather than another scheduler, multimodal, batching, or sequence-length divergence.",
+    "The retained AST test covers one target-prefill call site and does not prove every DSpark or scheduler transition preserves identical TP batch membership.",
+    "SGLANG_SPEC_TP_SYNC=off intentionally disables speculative-decision broadcasts and provides no divergence detection.",
+    "No runtime source change was made because the available evidence does not justify one."
+  ]
+}
