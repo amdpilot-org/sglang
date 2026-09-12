@@ -1,0 +1,64 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38574",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/781",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/752",
+  "candidate_commit": "8a5abc997a9d05264d4349a9d62fd0fc7d4ee630",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate improves the construction error and adds regression/documentation hardening, but dense MTP weights under a broad Linear W4A8 target still fail without an explicit ignore. Two documented plain-star ignore examples do not match in the actual exact/suffix/regex matcher.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-587efa294695/venv/bin/python /job/raw/j-587efa294695/repro_nextn.py (base)",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced generic dense no-ignore construction failure and successful explicit-regex BF16 fallback on the prepared base."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-587efa294695/venv/bin/python /job/raw/j-587efa294695/repro_nextn.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the candidate retains the startup failure but adds layer prefix, matched target, format, W4/A8 details, and ignore guidance."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_nextn.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression tests: 3 passed."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_{kv_cache,lm_head,mixed_precision,nextn}.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate-relevant compressed-tensors suite: 21 passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 python /job/raw/j-587efa294695/adversarial_nextn.py",
+      "exit_code": 0,
+      "what_was_measured": "Validated documented ignore variants, identical dense/packed pre-load construction behavior, and explicit-ignore GPU BF16 output against CPU FP32."
+    },
+    {
+      "command": "python -m pytest -q <five compressed-tensors unit files including WNA16 MoE>",
+      "exit_code": 1,
+      "what_was_measured": "27 passed and six unrelated ROCm-sensitive WNA16 backend-selection assertions failed; retained as an environment/suite limitation."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 8a5abc997a9d05264d4349a9d62fd0fc7d4ee630",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X gfx950; explicit-ignore BF16 ReplicatedLinear executed on GPU with max_abs 0.03134560585021973 versus CPU FP32 reference."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Dense mtp.layers.0.self_attn.qkv_proj.weight with broad Linear W4A8 target and no MTP ignore still raises during construction, so the original NEXTN startup failure remains.",
+    "The documented plain entries mtp.* and model.mtp.* do not match MTP children because non-re: ignores are exact or dotted-suffix matches, not globs.",
+    "Actual packed MTP checkpoint loading remains unverified; construction fails before either dense or packed checkpoint tensor names can be inspected."
+  ],
+  "remaining_limitations": [
+    "No Qwen3-Next weights or end-to-end NEXTN server startup test was available.",
+    "The original 2x H100 NVL TP2/EP2 architecture was unavailable; GPU execution used one AMD Instinct MI350X gfx950.",
+    "No native source changed, so native rebuild was not applicable.",
+    "Six unrelated WNA16 backend-selection assertions failed in a broader ROCm test run; candidate-relevant tests passed 21/21."
+  ]
+}
