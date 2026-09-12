@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38788",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the scripted-runtime request-ID reuse race as a duplicate-ID rejection followed by a 60-second receive timeout. Applied and locally validated the current upstream candidate design: propagate HTTP/SSE failures, add a yield-driven bounded request-ID retry, scope scheduler state and batch history to per-submission request epochs, preserve old/new Req identity, make repeated aborts idempotent, and add registered deterministic regressions for finish reuse, abort reuse, and retry-budget exhaustion.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-ac2be45a1013/venv/bin/python -m pytest -sv test/manual/chunked_prefill/test_scripted_multi_req.py::TestMultiReqBasic::test_rid_reuse_after_finish",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction on the recorded base. The server emitted 'Duplicate request ID detected: reuse-rid' and the script failed with 'no request with rid reuse-rid arrived ... within 60.0s'. The repository retry wrapper repeated the failure; the run was interrupted after the defect was conclusively reproduced. Raw output: /job/artifacts/j-ac2be45a1013/repro_before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ac2be45a1013/venv/bin/python -m pytest -q test/registered/unit/scripted_runtime/test_background_http_poster.py test/registered/unit/scripted_runtime/test_tokenizer_recv_proxy.py test/registered/unit/scripted_runtime/test_request_epochs.py test/registered/unit/scripted_runtime/test_request_lifecycle.py",
+      "exit_code": 0,
+      "what_was_measured": "67 focused unit tests and 57 subtests passed, covering HTTP/SSE error propagation, receive waiting, request epoch identity, bounded retry, and lifecycle behavior. Raw output: /job/artifacts/j-ac2be45a1013/unit_after.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-ac2be45a1013/venv/bin/python -m pytest -sv test/registered/scripted_runtime/test_scripted_runtime_core.py -k 'rid_reuse_after_finish_preserves_each_request or double_abort_then_reuse_rid or rid_retry_budget_preserves_original_request'",
+      "exit_code": 0,
+      "what_was_measured": "3 deterministic GPU-backed regressions passed in 104.76s. They verify distinct old/new Req objects and output lengths, response association, abort cleanup, and a bounded two-scheduler-step retry failure that leaves the original request progressing. Raw output: /job/artifacts/j-ac2be45a1013/core_regression_after.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-ac2be45a1013/venv/bin/python -m pytest -sv test/manual/chunked_prefill/test_scripted_multi_req.py::TestMultiReqBasic::test_rid_reuse_after_finish test/manual/chunked_prefill/test_scripted_abort.py::TestAbortBasic::test_abort_then_resubmit_same_rid_same_step test/manual/chunked_prefill/test_scripted_abort.py::TestAbortBasic::test_double_abort_idempotent",
+      "exit_code": 0,
+      "what_was_measured": "All 3 originally reported manual failures passed in 201.06s on one GPU, including resource restoration assertions. Raw output: /job/artifacts/j-ac2be45a1013/manual_reported_after.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-ac2be45a1013/venv/bin/python - (CPU/GPU float32 matrix-product comparison)",
+      "exit_code": 0,
+      "what_was_measured": "Independent numerical reference on AMD Instinct MI355X with torch 2.11.0+rocm7.2 and HIP 7.2.26015; CPU and GPU results matched exactly with max_abs_error=0.0. Raw output: /job/artifacts/j-ac2be45a1013/gpu_numerical_check.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the patch. Ruff was unavailable in the prepared interpreter, but the upstream candidate's lint check was successful."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The focused registered and manual scripted-runtime tests loaded Qwen/Qwen3-0.6B and executed scheduler batches with HIP_VISIBLE_DEVICES=0/ROCR_VISIBLE_DEVICES=0. An independent numerical check identified device 0 as AMD Instinct MI355X and matched a CPU reference exactly."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No native rebuild was needed because all changes are Python scripted-runtime harness and test code.",
+    "The full repository test suite was not run; validation was limited to focused unit tests, deterministic registered GPU regressions, and all three originally reported manual cases.",
+    "The prepared environment does not include the ruff module, so local ruff execution was unavailable; git diff --check passed and the inspected upstream candidate reports a successful lint check."
+  ]
+}
