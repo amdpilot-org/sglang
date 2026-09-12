@@ -1,5 +1,6 @@
 import json
 import unittest
+from unittest.mock import patch
 
 from sglang.srt.entrypoints.openai.protocol import Function, Tool
 from sglang.srt.function_call.kimik2_detector import (
@@ -210,12 +211,14 @@ class TestKimiK2DetectorStreaming(unittest.TestCase):
     """Streaming incremental parsing tests for KimiK2Detector."""
 
     def test_streaming_trailing_literal_left_angle_is_not_dropped(self):
-        """A final literal '<' must remain in normal_text instead of being buffered away."""
+        """A literal '<' is delayed only until the next byte disambiguates it."""
         detector = KimiK2FuncDetector()
 
         result = detector.parse_streaming_increment("normal text <", [])
+        followup = detector.parse_streaming_increment("not-a-marker", [])
 
-        self.assertEqual(result.normal_text, "normal text <")
+        self.assertEqual(result.normal_text, "normal text ")
+        self.assertEqual(followup.normal_text, "<not-a-marker")
         self.assertEqual(detector._buffer, "")
 
     def setUp(self):
@@ -327,6 +330,74 @@ class TestKimiK2DetectorStreaming(unittest.TestCase):
         self.assertEqual(len(tool_calls), 2)
         self.assertEqual(json.loads(tool_calls[0]["parameters"]), json.loads(first_args))
         self.assertEqual(json.loads(tool_calls[1]["parameters"]), json.loads(second_args))
+
+    def test_streaming_complete_wire_format_one_character_at_a_time(self):
+        detector = KimiK2FuncDetector()
+        wire = (
+            "prefix<|tool_calls_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:39"
+            '<|tool_call_argument_begin|>{"path": "/tmp/a"}'
+            "<|tool_call_end|><|tool_calls_section_end|>"
+        )
+
+        tool_calls, normal_text = _collect_streaming_tool_calls(
+            detector, list(wire), self.tools
+        )
+
+        self.assertEqual(normal_text, "prefix")
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(tool_calls[0]["name"], "ReadFile")
+        self.assertEqual(json.loads(tool_calls[0]["parameters"]), {"path": "/tmp/a"})
+
+    def test_streaming_singular_thinking_section_markers_are_stripped(self):
+        detector = KimiK2FuncDetector()
+        wire = (
+            "prefix<|tool_call_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:0"
+            '<|tool_call_argument_begin|>{"path": "/tmp/a"}'
+            "<|tool_call_end|><|tool_call_section_end|>"
+        )
+
+        tool_calls, normal_text = _collect_streaming_tool_calls(
+            detector, list(wire), self.tools
+        )
+
+        self.assertEqual(normal_text, "prefix")
+        self.assertEqual(len(tool_calls), 1)
+
+    def test_streaming_unclosed_section_is_bounded_and_released(self):
+        with patch.dict("os.environ", {"SGLANG_KIMI_PARSER_SECTION_MAX": "128"}):
+            detector = KimiK2FuncDetector()
+        wire = (
+            "<|tool_calls_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:0"
+            "<|tool_call_argument_begin|>" + "x" * 256
+        )
+
+        result = detector.parse_streaming_increment(wire, self.tools)
+
+        self.assertEqual(detector._buffer, "")
+        self.assertEqual(result.normal_text, "functions.ReadFile:0" + "x" * 256)
+        self.assertEqual(result.calls, [])
+
+    def test_explicit_reset_isolates_reused_detector(self):
+        detector = KimiK2FuncDetector()
+        wire = (
+            "<|tool_calls_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:0"
+            '<|tool_call_argument_begin|>{"path": "/tmp/a"}'
+            "<|tool_call_end|><|tool_calls_section_end|>"
+        )
+        _collect_streaming_tool_calls(detector, [wire], self.tools)
+        self.assertEqual(detector.current_tool_id, 1)
+
+        detector.reset()
+
+        self.assertEqual(detector.current_tool_id, -1)
+        self.assertEqual(detector.prev_tool_call_arr, [])
+        self.assertEqual(detector.streamed_args_for_tool, [])
+        tool_calls, _ = _collect_streaming_tool_calls(detector, [wire], self.tools)
+        self.assertEqual(tool_calls[0]["name"], "ReadFile")
 
     def test_streaming_state_reset_after_completion(self):
         """Buffer and state reset after tool call completes."""
