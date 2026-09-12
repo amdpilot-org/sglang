@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32493",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that the shared OpenAI serving prompt router selected text solely because the checkpoint was multimodal, even when a text-only request already had prompt token IDs. Updated the shared router used by chat completions and responses to reuse usable IDs for text-only requests while retaining text routing for actual image/video/audio payloads and empty IDs, the raw-string fallback, and token-first encoder behavior.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-1d2be600c7d4/venv/bin/python test/registered/unit/entrypoints/openai/test_serving_chat.py EnginePromptRoutingTestCase -v (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "The untouched source routed a multimodal-capable text-only request with prompt_ids [11, 12, 13] as text; the regression failed with ('text', 'rendered prompt') instead of ('input_ids', [11, 12, 13]). The independent media, empty-ID, and token-first boundaries passed; the string fallback ordering also failed before the fix. Raw log: reports/j-1d2be600c7d4/raw/failing-before-engine-prompt.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1d2be600c7d4/venv/bin/python test/registered/unit/entrypoints/openai/test_serving_chat.py -v",
+      "exit_code": 0,
+      "what_was_measured": "140 chat serving tests passed, including text-only ID reuse plus image, video, audio, empty-ID, string-ID, and Inkling token-first boundaries. Raw log: reports/j-1d2be600c7d4/raw/passing-after-serving-chat-full.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1d2be600c7d4/venv/bin/python test/registered/unit/entrypoints/openai/test_serving_responses.py -v",
+      "exit_code": 0,
+      "what_was_measured": "36 responses serving tests passed, including endpoint-level verification that a text-only request on a multimodal-capable checkpoint forwards [7, 8, 9] rather than the rendered string, while actual media remains on the text path. Raw log: reports/j-1d2be600c7d4/raw/passing-after-serving-responses-full.log"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/entrypoints/openai/serving_chat.py test/registered/unit/entrypoints/openai/test_serving_chat.py test/registered/unit/entrypoints/openai/test_serving_responses.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, secrets, and registered-test checks passed. Raw log: reports/j-1d2be600c7d4/raw/pre-commit.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reproduced defect and correction are in CPU-side OpenAI request prompt selection. No Qwen3.5-122B weights or equivalent multimodal checkpoint were available; an unrelated GPU smoke would not validate the eliminated host tokenization path."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No full Qwen3.5-122B, TP4, 100k-262k context, or production traffic replay was performed, so the reported TTFT percentages were not independently reproduced.",
+    "No model weights were used. Tests deterministically validate routing and preservation of prompt IDs, not model semantics or end-to-end latency.",
+    "The assigned single gfx950 GPU was not used because this correction is before engine/GPU execution and the reported model requires a different multi-GPU setup."
+  ],
+  "source_paths": [
+    "python/sglang/srt/entrypoints/openai/serving_chat.py",
+    "python/sglang/srt/entrypoints/openai/serving_responses.py",
+    "test/registered/unit/entrypoints/openai/test_serving_chat.py",
+    "test/registered/unit/entrypoints/openai/test_serving_responses.py"
+  ],
+  "native_paths": []
+}

@@ -527,6 +527,28 @@ class FullResponseUsageTestCase(CustomTestCase):
 
 
 class MultimodalRequestTestCase(CustomTestCase):
+    def test_multimodal_capable_text_only_request_routes_through_prompt_ids(self):
+        serving = make_serving(is_multimodal=True)
+        serving._process_messages = Mock(
+            return_value=MessageProcessingResult(
+                prompt="rendered text-only prompt",
+                prompt_ids=[7, 8, 9],
+                image_data=None,
+                audio_data=None,
+                video_data=None,
+                modalities=[],
+                stop=[],
+            )
+        )
+        request = ResponsesRequest(model="x", input="hello", store=False)
+
+        _, request_prompts, engine_prompts, _ = asyncio.run(
+            serving._make_request(request, None, serving.tokenizer_manager.tokenizer)
+        )
+
+        self.assertEqual(request_prompts, [[7, 8, 9]])
+        self.assertEqual(engine_prompts, [[7, 8, 9]])
+
     def test_text_only_create_responses_rejects_media_before_generation(self):
         serving = make_serving()
         serving._process_messages = Mock()

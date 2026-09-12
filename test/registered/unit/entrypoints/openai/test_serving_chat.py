@@ -57,6 +57,64 @@ register_cpu_ci(est_time=13, suite="base-a-test-cpu")
 _ALL_CHAT_ENCODING_SPECS = ("dsv4", "dsv32", "inkling", "kimi_k3")
 
 
+class EnginePromptRoutingTestCase(unittest.TestCase):
+    def setUp(self):
+        self.serving = OpenAIServingChat.__new__(OpenAIServingChat)
+        self.serving.chat_encoding_spec = None
+
+    @staticmethod
+    def _processed(*, prompt_ids, image=None, video=None, audio=None):
+        return MessageProcessingResult(
+            prompt="rendered prompt",
+            prompt_ids=prompt_ids,
+            image_data=image,
+            video_data=video,
+            audio_data=audio,
+            modalities=[],
+            stop=[],
+        )
+
+    def test_multimodal_capable_text_only_request_keeps_prompt_ids(self):
+        result = self.serving._engine_prompt(
+            self._processed(prompt_ids=[11, 12, 13]), is_multimodal=True
+        )
+
+        self.assertEqual(result, ("input_ids", [11, 12, 13]))
+
+    def test_multimodal_request_with_each_media_type_keeps_text_path(self):
+        for field in ("image", "video", "audio"):
+            with self.subTest(field=field):
+                result = self.serving._engine_prompt(
+                    self._processed(prompt_ids=[11, 12, 13], **{field: ["media"]}),
+                    is_multimodal=True,
+                )
+                self.assertEqual(result, ("text", "rendered prompt"))
+
+    def test_multimodal_request_without_usable_ids_keeps_text_path(self):
+        result = self.serving._engine_prompt(
+            self._processed(prompt_ids=[]), is_multimodal=True
+        )
+
+        self.assertEqual(result, ("text", "rendered prompt"))
+
+    def test_string_prompt_ids_keep_text_fallback(self):
+        result = self.serving._engine_prompt(
+            self._processed(prompt_ids="raw prompt"), is_multimodal=True
+        )
+
+        self.assertEqual(result, ("text", "raw prompt"))
+
+    def test_token_first_media_request_keeps_prompt_ids(self):
+        self.serving.chat_encoding_spec = "inkling"
+
+        result = self.serving._engine_prompt(
+            self._processed(prompt_ids=[11, 12, 13], image=["media"]),
+            is_multimodal=True,
+        )
+
+        self.assertEqual(result, ("input_ids", [11, 12, 13]))
+
+
 def _spec_result(index):
     return {
         "text": f"choice-{index}",
