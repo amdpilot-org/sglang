@@ -1,0 +1,60 @@
+Base: 358c163250ad3b1f62939b01ce1314a0a31a0365
+Prepared Python: /tmp/amdpilot-repo-j-73e280aba895/venv/bin/python
+
+Source-level reproduction before the fix:
+
+  /tmp/amdpilot-repo-j-73e280aba895/venv/bin/python -m pytest -q test/registered/unit/layers/test_dsv4_paged_topk_dispatch.py
+
+Exit code: 2
+Relevant output:
+
+  ImportError: cannot import name 'topk_transform_paged_v2_with_optional_raw'
+
+The checked-out implementation allocated c4_sparse_raw_indices for prefill in
+DSV4AttnMetadata.init_flashmla_related(), then required raw_indices is None in
+C4IndexerBackendMixin.run_topk_transform() before selecting v2. Therefore the
+reported sparse paged-prefill state deterministically selected v1.
+
+Focused regression after the fix (single assigned GPU exposed):
+
+  ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-73e280aba895/venv/bin/python -m pytest -q test/registered/unit/layers/test_dsv4_paged_topk_dispatch.py
+
+Exit code: 0
+Output: 3 passed
+
+Device probe:
+
+  {"available": true, "device_count": 1, "name": "AMD Instinct MI355X", "capability": [9, 5], "torch": "2.11.0+rocm7.2", "hip": "7.2.26015"}
+
+Existing v2 JIT kernel checks on the assigned GPU:
+
+  ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-73e280aba895/venv/bin/python -m pytest -q 'test/registered/kernels/ops/attention/test_topk_v2.py::test_topk_v2[8-4096-1024-perm]' 'test/registered/kernels/ops/attention/test_topk_v2.py::test_topk_v2_output_indices[8-4096-1024]'
+
+Exit code: 0
+Output: 2 passed
+
+32K combined-output numerical check on the assigned GPU:
+
+  batch=2, seq=32768, k=512
+  raw_topk_multiset_match=true
+  paged_topk_multiset_match=true
+
+The references were torch.topk for logical selections and an independent
+torch.gather page-table transform for physical indices.
+
+Known unrelated/pre-existing focused failure:
+
+  test_dsa_indexer.py::TestDSAIndexer::test_topk_v2_respects_topk_backend
+
+On ROCm this had one passing and one failing subtest because
+dsa_drop_wide_page_table was false while the test expected true. The failure is
+outside the changed dispatch/helper and was retained as a limitation rather
+than treated as evidence for or against this candidate.
+
+Hardware/model limitation:
+
+The original report requires four NVIDIA GB300 GPUs, CUDA 13, and
+DeepSeek-V4-Pro weights. This environment provides one AMD gfx950 GPU and no
+DeepSeek-V4-Pro weights, so the full serving crash and its absence after the
+change were not reproduced. The GPU evidence here qualifies v2 kernel
+execution, 32K top-k selection, and raw-to-paged translation only.

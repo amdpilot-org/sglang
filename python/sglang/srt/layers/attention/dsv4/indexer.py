@@ -379,6 +379,47 @@ def topk_transform_pytorch_vectorized(
     )
 
 
+def topk_transform_paged_v2_with_optional_raw(
+    scores: torch.Tensor,
+    seq_lens: torch.Tensor,
+    page_tables: torch.Tensor,
+    out_page_indices: torch.Tensor,
+    page_size: int,
+    metadata: torch.Tensor,
+    out_raw_indices: Optional[torch.Tensor] = None,
+) -> None:
+    """Run paged top-k v2 while optionally retaining logical token indices."""
+    if out_raw_indices is None:
+        topk_transform_paged_v2(
+            scores,
+            seq_lens,
+            page_tables,
+            out_page_indices,
+            page_size,
+            metadata,
+        )
+        return
+
+    # V2 has one output and can produce either transformed or raw indices.
+    # Sparse prefill needs both, so let v2 select the raw indices and apply the
+    # page-table transform separately instead of falling back to v1.
+    topk_transform_paged_v2(
+        scores,
+        seq_lens,
+        None,
+        out_raw_indices,
+        page_size,
+        metadata,
+    )
+    valid = out_raw_indices >= 0
+    logical_pages = torch.div(
+        out_raw_indices.clamp_min(0), page_size, rounding_mode="floor"
+    )
+    physical_pages = torch.gather(page_tables, 1, logical_pages.long())
+    page_indices = physical_pages * page_size + out_raw_indices.remainder(page_size)
+    out_page_indices.copy_(torch.where(valid, page_indices, -1).to(torch.int32))
+
+
 def topk_transform_flashinfer_unfused(
     scores: torch.Tensor,
     seq_lens: torch.Tensor,
@@ -868,8 +909,8 @@ class C4IndexerBackendMixin:
                     indexer_metadata.compressed_page_size,
                     row_raw_indices,
                 )
-            elif self.dsa_topk_backend.should_use_topk_v2() and raw_indices is None:
-                topk_transform_paged_v2(
+            elif self.dsa_topk_backend.should_use_topk_v2():
+                topk_transform_paged_v2_with_optional_raw(
                     logits,
                     c4_seq_lens[rows],
                     page_table[rows],
@@ -882,6 +923,7 @@ class C4IndexerBackendMixin:
                         if rows == all_rows or not is_hip()
                         else plan_topk_v2(c4_seq_lens[rows])
                     ),
+                    row_raw_indices,
                 )
             else:
                 topk_transform_paged(

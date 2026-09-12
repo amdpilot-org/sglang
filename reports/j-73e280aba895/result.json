@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37892",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the paged-prefill dispatch defect in the prepared source: prefill allocates required raw indices, while the v2 branch required that buffer to be absent, making v1 unavoidable. The candidate routes all enabled sgl-kernel paged top-k calls through v2; when sparse prefill needs raw indices, v2 writes them and a separate page-table transform produces the physical indices. Focused regressions and a 32K numerical check passed on gfx950, but the original four-GB300 DeepSeek-V4-Pro serving crash could not be reproduced in this environment.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-73e280aba895/venv/bin/python -m pytest -q test/registered/unit/layers/test_dsv4_paged_topk_dispatch.py (before implementation)",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before regression: the required v2 raw-plus-paged dispatch helper was absent; source inspection also showed prefill raw allocation combined with the raw_indices-is-None v2 guard."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-73e280aba895/venv/bin/python -m pytest -q test/registered/unit/layers/test_dsv4_paged_topk_dispatch.py",
+      "exit_code": 0,
+      "what_was_measured": "Three regression/boundary cases: v2 is used while raw indices are retained, physical page translation preserves invalid -1 entries and crosses page boundaries, page_size=1 works, and the no-raw path retains the fused v2 page transform. The primary case ran tensor operations on the assigned GPU."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-73e280aba895/venv/bin/python -m pytest -q 'test/registered/kernels/ops/attention/test_topk_v2.py::test_topk_v2[8-4096-1024-perm]' 'test/registered/kernels/ops/attention/test_topk_v2.py::test_topk_v2_output_indices[8-4096-1024]'",
+      "exit_code": 0,
+      "what_was_measured": "Actual repository v2 JIT kernel matched independent references on gfx950 for permuted paged output and raw output modes (2 passed)."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-73e280aba895/venv/bin/python <32K combined-output numerical script recorded in reproduction.txt>",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X, batch=2, seq=32768, k=512: v2 raw selected-index multisets matched torch.topk and derived physical-index multisets matched an independent torch.gather page-table reference."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-73e280aba895/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_dsa_indexer.py::TestDSAIndexer::test_topk_v2_respects_topk_backend",
+      "exit_code": 1,
+      "what_was_measured": "One pre-existing ROCm-specific subtest mismatch: dsa_drop_wide_page_table was false while the test expected true; one subtest passed. This does not exercise the changed helper."
+    },
+    {
+      "command": "git diff --check && /tmp/amdpilot-repo-j-73e280aba895/venv/bin/python -m compileall -q python/sglang/srt/layers/attention/dsv4/indexer.py test/registered/unit/layers/test_dsv4_paged_topk_dispatch.py",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace and Python bytecode compilation. Ruff was unavailable in the prepared interpreter."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Single assigned AMD Instinct MI355X (gfx950), PyTorch 2.11.0+rocm7.2 / HIP 7.2.26015. Actual v2 JIT paged/raw tests passed and the 32K combined-output check matched independent torch references."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No NVIDIA GB300/CUDA 13 hardware and no DeepSeek-V4-Pro weights were available; the original four-GPU TP/DP/EP serving crash was not reproduced before or after this candidate.",
+    "The assigned gfx950 run validates kernel execution and index transformation only, not DeepSeek-V4-Pro semantics, FP4 model execution, DP attention, hierarchical cache, speculative decoding, or multi-GPU behavior.",
+    "The raw-plus-paged v2 path adds a separate PyTorch page-table transform because the v2 kernel exposes one output; end-to-end performance on the reported GB300 workload remains unmeasured.",
+    "A pre-existing ROCm failure in test_topk_v2_respects_topk_backend remains recorded in reproduction.txt.",
+    "No native library was changed or rebuilt."
+  ]
+}
