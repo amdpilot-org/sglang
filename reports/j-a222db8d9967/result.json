@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31224",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "2cf88b31bfc935a8f47b2f33332950c3a3b57be4",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the false fallback warning for baked per-layer FP8 KV scales. At the exact candidate commit, diagnostics follow provenance recorded by the real BaseKVCacheMethod post-load contract: fully loaded baked scales do not warn, absent and partially missing layer calibration still warn, valid single-scale checkpoints remain calibrated, and runtime scale fields contain the expected values. Independent ROCm validation and the compressed-tensors selection tests passed.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a222db8d9967/venv/bin/python -m pytest -q /job/review-evidence-j-a222db8d9967/test_candidate.py (at base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: 3 failures and 1 pass. Baked checkpoint scales still emitted the false fallback warning; partial calibration lacked the truthful layer count; legacy external scales were not published to runtime float fields. Raw output: reports/j-a222db8d9967/raw/base-candidate-test.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a222db8d9967/venv/bin/python -m pytest -q test/registered/unit/model_executor/model_runner_components/test_load_kv_cache_scales.py (at candidate 2cf88b31bfc935a8f47b2f33332950c3a3b57be4)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: legacy external, baked per-layer including exact 1.0, absent, and partially missing cases all passed. Raw output: reports/j-a222db8d9967/raw/candidate-regression.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a222db8d9967/venv/bin/python -m pytest -q test/registered/unit/model_executor/model_runner_components/test_load_kv_cache_scales.py test/registered/unit/layers/quantization/test_compressed_tensors_kv_cache.py (at candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Eight tests passed, combining candidate diagnostics/runtime-value coverage with existing compressed-tensors KV-cache method selection coverage. Raw output: reports/j-a222db8d9967/raw/candidate-combined.txt"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-a222db8d9967/venv/bin/python /job/review-evidence-j-a222db8d9967/adversarial_candidate.py (at candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent real RadixAttention/BaseKVCacheMethod contract on AMD Instinct MI350X: loaded/missing count 2/1; baked values 0.03125/0.015625; valid single-tensor scale duplicated to 0.0625/0.0625; missing values fell back to 1.0/1.0; external values published as 0.125/0.25; partial warning reported 1 of 3 layers. Raw output: reports/j-a222db8d9967/raw/candidate-adversarial-rocm.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a222db8d9967/venv/bin/python -c '<print imported module paths>' (at candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed sglang, kv_cache.py, and load_model_utils.py imported from /job/repo rather than an installed sglang wheel; Torch imported from the prepared venv. Raw output: reports/j-a222db8d9967/raw/import-paths.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One assigned AMD Instinct MI350X, Torch 2.11.0+rocm7.2, HIP 7.2.26015; exact values and warning are retained in candidate-adversarial-rocm.txt.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No GB10/sm121 hardware was available or claimed; that source experiment remains historical evidence only.",
+    "No full model-weight HTTP serving or distributed workload was run. The review validates the real device-independent loader/attention-layer contract, compressed-tensors method selection, and supported ROCm execution, but not model semantic accuracy.",
+    "The candidate changes only Python and tests. repository-environment.json reports native=null, so no native rebuild was required or applicable.",
+    "The prepared checkout exactly matched the requested recorded base; no base discrepancy was observed."
+  ]
+}
