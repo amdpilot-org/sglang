@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36830",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Ported the previously SM90-validated TileLang raw-FP8 KV plumbing from upstream PR #36904 onto current main. CUDA SM89+ now accepts fp8_e4m3 only when both DSA backends are TileLang, selects the raw MLA layout, uses the raw fused-quant writer, dispatches the existing FP8 partial kernel, and disables the scaled-layout MHA one-shot path. Mixed backends, pre-SM89 GPUs, and DCP remain rejected.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-96c9dd61980f/venv/bin/python -m pytest -q test/registered/unit/test_dsa_tilelang_fp8_validation.py",
+      "exit_code": 0,
+      "what_was_measured": "10 validation and layout regressions passed, including SM90 acceptance and mixed-backend, pre-SM89, DCP, HIP, BF16, non-TileLang, raw-layout, and scaled-layout boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-96c9dd61980f/venv/bin/python -m pytest -q test/registered/attention/test_dsa_tilelang_fp8_kv_cuda.py test/registered/unit/test_dsa_tilelang_fp8_validation.py",
+      "exit_code": 0,
+      "what_was_measured": "10 CPU regressions passed; the two CUDA SM89+ numerical tests were collected and skipped on the assigned ROCm host. They cover one-hot exactness, an FP32 reference tolerance, and a scrambled-index negative control."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-96c9dd61980f/venv/bin/python -m pytest -q test/registered/unit/test_dsa_tilelang_fp8_validation.py test/registered/unit/test_model_overrides.py -k 'tilelang or dsa_split_backend_resolution'",
+      "exit_code": 0,
+      "what_was_measured": "9 selected tests plus 6 subtests passed against the current backend-resolution pipeline."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-96c9dd61980f/venv/bin/python -m compileall -q python/sglang/srt/arg_groups/overrides.py python/sglang/srt/mem_cache/kv_cache_configurator.py python/sglang/srt/mem_cache/memory_pool.py python/sglang/srt/layers/attention/dsa_backend.py python/sglang/kernels/ops/attention/dsa/tilelang_kernel.py",
+      "exit_code": 0,
+      "what_was_measured": "All modified Python implementation modules compiled successfully."
+    },
+    {
+      "command": "ROCM_PATH=/opt/rocm PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-96c9dd61980f/venv/bin/python < one-hot TileLang FP8 probe",
+      "exit_code": 1,
+      "what_was_measured": "The assigned AMD Instinct MI355X (gfx950, HIP 7.2) was detected, but the prepared TileLang/TVM compiler failed during layout inference with an internal divide-by-zero before kernel launch."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "A real gfx950 compilation attempt was made, but no GPU kernel executed because TileLang/TVM failed before launch. The issue's CUDA SM90 path cannot run on the assigned ROCm GPU.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No CUDA SM90 GPU or GLM-5.3-Flash weights were available, so the current-tree patch was not exercised end to end on the reported 8xH20 workload.",
+    "The implementation is based on upstream PR #36904, whose same raw-layout approach was independently reported successful on 8xH20/SM90, but that PR closed without merging.",
+    "The assigned gfx950 numerical probe was blocked by a prepared TileLang/TVM compiler internal error before launch; no ROCm numerical result is claimed.",
+    "No full-model, semantic-accuracy, speculative-decoding, multi-GPU, or multi-node claim is made."
+  ]
+}
