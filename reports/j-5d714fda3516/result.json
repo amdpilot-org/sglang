@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35096",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the flat DeepSeek-V4 RoPE kernel reading and writing padded columns when rope_dim is not a power of two, then fixed it by passing the real width as a constexpr, clamping padded-lane load addresses, and masking padded-lane stores. Power-of-two kernels retain their direct addressing path.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5d714fda3516/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_rope_flat.py",
+      "exit_code": 1,
+      "what_was_measured": "Before the source fix: 5 failed and 10 passed. The independent PyTorch reference detected wrong values for non-power-of-two widths, and sentinel-backed views detected 16, 256, and 512 overwritten elements past rope_dim for widths 6, 96, and 192. Power-of-two controls 64 and 128 passed. Raw output: reports/j-5d714fda3516/raw/pytest-before.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5d714fda3516/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_rope_flat.py",
+      "exit_code": 0,
+      "what_was_measured": "After the source fix: all 15 GPU regression and boundary cases passed against an independent PyTorch complex-rotation reference and sentinel-backed storage. Raw output: reports/j-5d714fda3516/raw/pytest-after.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "The patch contains no whitespace errors."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5d714fda3516/venv/bin/python -m ruff check ...; /tmp/amdpilot-repo-j-5d714fda3516/venv/bin/python -m black --check ...",
+      "exit_code": 1,
+      "what_was_measured": "Formatting tools were attempted but are not installed in the prepared interpreter (No module named ruff/black). Raw output: reports/j-5d714fda3516/raw/ruff.log and reports/j-5d714fda3516/raw/black.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "All focused tests executed Triton kernels on the single assigned AMD Instinct MI350X, gfx950:sramecc+:xnack-, using torch 2.11.0+rocm7.2 and HIP 7.2.26015. Raw environment output: reports/j-5d714fda3516/raw/environment.log"
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Validation used the assigned AMD gfx950 GPU, not the NVIDIA B200 environment from the original report; CUDA compute-sanitizer evidence was therefore not reproduced.",
+    "No full model or distributed workload was run. The affected path is an opt-in kernel path and current DeepSeek-V4 uses a power-of-two rotary width; focused kernel execution is the relevant reproduction.",
+    "The prepared interpreter does not include ruff or black, so those checks could not run; git diff --check passed."
+  ]
+}
