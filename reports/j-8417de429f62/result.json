@@ -1,0 +1,76 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32728",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2842",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2811",
+  "candidate_commit": "6defd7302cdafae7e4c1ce9ad4a2c232e986e7a4",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduced the original failure by forwarding live KV batches with sequence numbers 1 and 3 while sequence 2 was absent. At the exact candidate commit, the Rust subscriber detected that gap, requested the missing range over the Python-compatible DEALER/ROUTER wire format, and forwarded 1, 2, 3 in order. Discovery advertises and resolves the optional replay endpoint, incomplete or non-contiguous replay is rejected without advancing over unknown state, compatibility with workers lacking replay metadata is retained, replay metrics are exported, and the native router rebuilt successfully. This is a functional original-issue fix, not test-only hardening.",
+  "tests": [
+    {
+      "command": "cargo test --manifest-path experimental/sgl-router/Cargo.toml --lib review_reproduces_unrepaired_live_sequence_gap -- --nocapture (temporary review-only test on base)",
+      "exit_code": 0,
+      "what_was_measured": "Real ZMQ PUB/SUB execution on base forwarded (1, 3), demonstrating that the router advanced past missing sequence 2. Raw log: /job/review-evidence-j-8417de429f62/base-gap-reproduction.log"
+    },
+    {
+      "command": "cargo test --manifest-path experimental/sgl-router/Cargo.toml --lib subscriber_repairs_live_gap_before_forwarding_newer_batch -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Candidate near-E2E native PUB plus ROUTER/DEALER path repaired a 1-to-3 live gap and delivered 1, 2, 3 in order."
+    },
+    {
+      "command": "cargo test --manifest-path experimental/sgl-router/Cargo.toml --lib replay_gap_accepts_complete_contiguous_python_wire_sequence -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Exact multipart request/reply framing compatible with Python ZmqEventPublisher and complete contiguous replay acceptance."
+    },
+    {
+      "command": "cargo test --manifest-path experimental/sgl-router/Cargo.toml --lib replay_gap_rejects_truncated_buffer -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "A replay ring missing the earliest requested sequence was rejected rather than partially applied."
+    },
+    {
+      "command": "cargo test --manifest-path experimental/sgl-router/Cargo.toml --lib review_adversarial_rejects_out_of_order_replay -- --nocapture (temporary independent review-only test)",
+      "exit_code": 0,
+      "what_was_measured": "An adversarial 2,4,3 replay for requested range [2,5) was rejected at expected 3/got 4. Raw log: /job/review-evidence-j-8417de429f62/independent-out-of-order.log"
+    },
+    {
+      "command": "cargo test --manifest-path experimental/sgl-router/Cargo.toml --lib",
+      "exit_code": 0,
+      "what_was_measured": "All 548 Rust library tests passed on the exact candidate."
+    },
+    {
+      "command": "cargo test --manifest-path experimental/sgl-router/Cargo.toml --test component kv_events -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "All six selected KV component tests passed."
+    },
+    {
+      "command": "cargo build --manifest-path experimental/sgl-router/Cargo.toml --bin sgl-router",
+      "exit_code": 0,
+      "what_was_measured": "Fresh x86-64 native router binary linked from the candidate source in the private cargo target directory."
+    },
+    {
+      "command": "PYTHONPATH=$PWD/python /tmp/amdpilot-repo-j-8417de429f62/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_server_info.py",
+      "exit_code": 0,
+      "what_was_measured": "29 tests and 12 subtests passed, including /server_info replay endpoint advertisement."
+    },
+    {
+      "command": "PYTHONPATH=$PWD/python /tmp/amdpilot-repo-j-8417de429f62/venv/bin/python -m pytest -q test/registered/unit/server_args/test_server_args.py -k TestDcpKvEventContract",
+      "exit_code": 0,
+      "what_was_measured": "Three descriptor contract tests passed, including optional replay metadata and omission compatibility."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The changed contract is CPU/network sequencing in Python and Rust ZMQ code; it has no GPU kernel or numerical output. No model weights or GPU execution were needed or used."
+  },
+  "native_rebuilt": true,
+  "native_rebuild_evidence": "Rust 1.90.0 rebuilt /tmp/amdpilot-repo-j-8417de429f62/cargo-target/debug/sgl-router as an x86-64 ELF executable from candidate commit 6defd7302cdafae7e4c1ce9ad4a2c232e986e7a4.",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No production model-serving process or intentionally saturated real HWM workload was run; deterministic native socket tests injected the same observable sequence gaps directly.",
+    "The candidate cannot reconstruct a gap after the Python replay ring has evicted its earliest missing batch; it correctly withholds the newer live batch and records failure instead of claiming recovery.",
+    "Validation architecture was x86_64 Linux. GPU execution was not applicable to this Rust/Python transport feature.",
+    "The prepared image initially lacked Cargo/rustc; repository-pinned Rust 1.90.0 was installed under the job-private runtime before rebuilding."
+  ]
+}
