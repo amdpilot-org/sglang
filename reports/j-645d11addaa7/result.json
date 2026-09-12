@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38253",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Changed GLM-5.3 qkvbfg fusion eligibility from a global quant_config check to per-projection quant-method resolution, while preserving the attention-TP constraint and keeping the synthetic fused projection unquantized.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-645d11addaa7/venv/bin/python reports/j-645d11addaa7/reproduce_before.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction of the exact base gate: all six GLM-5.3 attention prefixes resolved to UnquantizedLinearMethod, but the global quant_config check still returned false and disabled fusion."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-645d11addaa7/venv/bin/python -m pytest -q test/registered/unit/models/test_glm5_next_qkvbfg_fusion.py test/registered/quant/test_is_layer_skipped.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after fusion decision for FP8 experts with unquantized attention, rejection of partially quantized projections, preservation of the TP-layout guard, and existing prefix-matching boundaries; 7 tests passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-645d11addaa7/venv/bin/python < gfx950 fused-linear numerical fixture",
+      "exit_code": 0,
+      "what_was_measured": "Actual BF16 fused linear primitives on AMD Instinct MI350X gfx950 versus independent torch.nn.functional.linear and torch.bmm references; maximum absolute error 0.0 for both stages."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-645d11addaa7/venv/bin/python -m pre_commit run --files python/sglang/srt/layers/quantization/utils.py python/sglang/srt/models/glm5_next.py test/registered/unit/models/test_glm5_next_qkvbfg_fusion.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, static file checks, and registered-test metadata checks for changed files."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-645d11addaa7/raw/gfx950-fused-linear-numerical.txt records execution on AMD Instinct MI350X gfx950 with exact agreement to PyTorch references."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The official GLM-5.3-Flash weights were unavailable, so full-model serving and semantic accuracy were not tested.",
+    "Only one gfx950 GPU was assigned, so the reported TP8 deployment and multi-GPU performance were not reproduced.",
+    "The GPU fixture validates the fused linear primitives and shapes, not the complete model architecture or end-to-end generation."
+  ]
+}
