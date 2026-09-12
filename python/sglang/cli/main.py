@@ -1,4 +1,8 @@
 import argparse
+import os
+import time
+
+_CLI_IMPORT_BEGIN_S = time.perf_counter()
 
 from sglang.cli.utils import get_git_commit_hash
 from sglang.version import __version__
@@ -39,6 +43,11 @@ def main():
 
         serve(args, extra_argv)
     elif args.subcommand == "generate":
+        if os.getenv("SGLANG_DIFFUSION_STARTUP_PROFILE", "0").lower() in (
+            "1",
+            "true",
+        ):
+            os.environ["SGLANG_DIFFUSION_STARTUP_BEGIN"] = str(_CLI_IMPORT_BEGIN_S)
         from sglang.cli.generate import generate
 
         generate(args, extra_argv)

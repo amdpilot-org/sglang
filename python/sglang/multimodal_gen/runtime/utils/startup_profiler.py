@@ -51,6 +51,47 @@ class StartupProfiler:
         node.duration_ms = duration_ms
         self._stack[-1].children.append(node)
 
+    def snapshot(self) -> list[dict]:
+        """Return a pickle-safe copy suitable for transfer from a worker."""
+
+        def encode(node: _Phase) -> dict:
+            return {
+                "name": node.name,
+                "duration_ms": node.duration_ms,
+                "children": [encode(child) for child in node.children],
+            }
+
+        return [encode(node) for node in self._root.children]
+
+    def record_snapshot(
+        self, name: str, duration_ms: float, children: list[dict]
+    ) -> None:
+        """Attach another process's timings beneath one local phase."""
+        if not self.enabled:
+            return
+
+        def decode(data: dict) -> _Phase:
+            node = _Phase(data["name"])
+            node.duration_ms = data["duration_ms"]
+            node.children = [decode(child) for child in data["children"]]
+            return node
+
+        node = _Phase(name)
+        node.duration_ms = duration_ms
+        node.children = [decode(child) for child in children]
+        self._stack[-1].children.append(node)
+
+    def group_root_children_since(
+        self, start_index: int, name: str, duration_ms: float
+    ) -> None:
+        """Group completed root phases into an explicitly measured parent."""
+        if not self.enabled:
+            return
+        node = _Phase(name)
+        node.duration_ms = duration_ms
+        node.children = self._root.children[start_index:]
+        self._root.children[start_index:] = [node]
+
     @contextmanager
     def phase(self, name: str) -> Iterator[None]:
         if not self.enabled:

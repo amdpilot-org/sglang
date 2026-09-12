@@ -97,7 +97,7 @@ from sglang.multimodal_gen.runtime.utils.perf_logger import (
 from sglang.multimodal_gen.runtime.utils.process import kill_itself_when_parent_died
 from sglang.multimodal_gen.runtime.utils.profiler import maybe_record_function
 from sglang.multimodal_gen.runtime.utils.startup_profiler import (
-    log_startup_summary,
+    get_startup_profiler,
     startup_phase,
 )
 from sglang.multimodal_gen.runtime.utils.trace_wrapper import (
@@ -1613,11 +1613,16 @@ def run_scheduler_process(
                 result_pipes_from_slaves=result_pipes_from_slaves,
                 local_rank=local_rank,
             )
-        log_startup_summary()
         logger.info(f"Worker {rank}: Scheduler loop started.")
         pipe_writer.send(
             {
                 "status": "ready",
+                "startup_profile": profiler.snapshot(),
+                "startup_duration_ms": (
+                    (time.perf_counter() - startup_begin_s) * 1000
+                    if startup_begin_s is not None
+                    else 0.0
+                ),
             }
         )
         scheduler.event_loop()

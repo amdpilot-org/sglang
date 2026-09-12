@@ -1,4 +1,6 @@
+import os
 import time
+import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -100,6 +102,22 @@ def test_record_adds_previously_measured_phase():
     assert profiler.render() == "imports: 1234.50ms (100.0%)"
 
 
+def test_snapshot_can_be_grouped_into_parent_process_tree():
+    worker = StartupProfiler(enabled=True)
+    worker.record("worker_process_start_and_imports", 20.0)
+    with worker.phase("init_scheduler"):
+        pass
+
+    parent = StartupProfiler(enabled=True)
+    parent.record_snapshot("worker_0", 30.0, worker.snapshot())
+    parent.group_root_children_since(0, "launch_server.total", 40.0)
+
+    summary = parent.render()
+    assert "launch_server.total.worker_0:" in summary
+    assert "launch_server.total.worker_0.worker_process_start_and_imports:" in summary
+    assert "launch_server.total.worker_0.init_scheduler:" in summary
+
+
 def test_log_startup_summary_only_logs_once():
     profiler = StartupProfiler(enabled=True)
     profiler.record("startup", 1.0)
@@ -120,7 +138,17 @@ def test_launch_server_profiles_process_start_and_ready_wait():
 
     class Reader:
         def recv(self):
-            return {"status": "ready"}
+            return {
+                "status": "ready",
+                "startup_duration_ms": 3.0,
+                "startup_profile": [
+                    {
+                        "name": "init_scheduler",
+                        "duration_ms": 2.0,
+                        "children": [],
+                    }
+                ],
+            }
 
         def close(self):
             pass
@@ -150,8 +178,101 @@ def test_launch_server_profiles_process_start_and_ready_wait():
     assert len(processes) == 1
     assert processes[0].args[-1] is not None
     summary = profiler.render()
-    assert "launch_server.prepare_processes:" in summary
-    assert "launch_server.start_worker_0:" in summary
-    assert "launch_server.wait_for_workers_ready:" in summary
+    assert "launch_server.total.launch_server.prepare_processes.task_pipes:" in summary
+    assert "launch_server.total.launch_server.prepare_processes.result_pipes:" in summary
+    assert "launch_server.total.launch_server.prepare_processes.construct_worker_0:" in summary
+    assert "launch_server.total.launch_server.prepare_processes.parent_pipe_cleanup:" in summary
+    assert "launch_server.total.launch_server.start_worker_0:" in summary
+    assert "launch_server.total.launch_server.wait_for_workers_ready:" in summary
+    assert "launch_server.total.worker_0.init_scheduler:" in summary
     assert "launch_server.total:" in summary
     log_summary.assert_called_once()
+
+
+def test_real_worker_entry_returns_profile_when_profiling_disabled():
+    from sglang.multimodal_gen.runtime.managers import gpu_worker
+
+    class PipeWriter:
+        def __init__(self):
+            self.messages = []
+
+        def send(self, message):
+            self.messages.append(message)
+
+    class Scheduler:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def event_loop(self):
+            pass
+
+    writer = PipeWriter()
+    scheduler_module = SimpleNamespace(Scheduler=Scheduler)
+    with (
+        patch.object(gpu_worker, "kill_itself_when_parent_died"),
+        patch.object(gpu_worker, "configure_logger"),
+        patch.object(gpu_worker, "globally_suppress_loggers"),
+        patch.object(gpu_worker, "init_diffusion_tracing"),
+        patch.object(gpu_worker.current_platform, "is_cuda", return_value=False),
+        patch.object(gpu_worker.current_platform, "is_musa", return_value=False),
+        patch.object(
+            gpu_worker.PortArgs, "from_server_args", return_value=SimpleNamespace()
+        ),
+        patch.dict(
+            sys.modules,
+            {"sglang.multimodal_gen.runtime.managers.scheduler": scheduler_module},
+        ),
+        patch.object(gpu_worker.torch.cuda, "is_initialized", return_value=False),
+        patch.object(
+            gpu_worker.torch.distributed, "is_available", return_value=False
+        ),
+        patch.object(startup_profiler.envs, "SGLANG_DIFFUSION_STARTUP_PROFILE", False),
+        patch.object(startup_profiler, "_profiler", None),
+    ):
+        gpu_worker.run_scheduler_process(
+            0,
+            0,
+            1,
+            SimpleNamespace(),
+            writer,
+            None,
+            None,
+            [],
+            [],
+        )
+
+    assert writer.messages == [
+        {"status": "ready", "startup_profile": [], "startup_duration_ms": 0.0}
+    ]
+
+
+def test_cli_clock_precedes_generate_module_import(monkeypatch):
+    import sglang.cli.main as cli_main
+
+    class Parser:
+        def add_subparsers(self, **kwargs):
+            return self
+
+        def add_parser(self, *args, **kwargs):
+            return self
+
+        def set_defaults(self, **kwargs):
+            pass
+
+        def parse_known_args(self):
+            return SimpleNamespace(subcommand="generate"), []
+
+    observed = {}
+
+    def generate(args, extra_argv):
+        observed["begin"] = os.environ["SGLANG_DIFFUSION_STARTUP_BEGIN"]
+
+    monkeypatch.setenv("SGLANG_DIFFUSION_STARTUP_PROFILE", "1")
+    monkeypatch.delenv("SGLANG_DIFFUSION_STARTUP_BEGIN", raising=False)
+    monkeypatch.setattr(cli_main, "_CLI_IMPORT_BEGIN_S", 123.5)
+    monkeypatch.setattr(cli_main.argparse, "ArgumentParser", Parser)
+    monkeypatch.setitem(sys.modules, "sglang.cli.generate", SimpleNamespace(generate=generate))
+
+    cli_main.main()
+
+    assert observed["begin"] == "123.5"
