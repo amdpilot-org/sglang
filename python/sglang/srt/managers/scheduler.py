@@ -3999,7 +3999,10 @@ class Scheduler(
             for req in can_run_list:
                 if req is not retained_chunked_req:
                     self._add_request_to_queue(req)
-            running_batch.batch_is_full = True
+            # A full flag is useful backpressure while decode work can release
+            # capacity. With no running work it would permanently gate the
+            # requeued request at the next pass's initial guard.
+            running_batch.batch_is_full = not running_batch.is_empty()
             return None, running_batch
 
         if self.tp_worker.model_runner.prefill_aware_swa:

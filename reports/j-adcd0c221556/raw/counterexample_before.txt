@@ -1,0 +1,117 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0 -- /tmp/amdpilot-repo-j-adcd0c221556/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /job/repo/test
+configfile: pytest.ini
+plugins: hypothesis-6.155.0, anyio-4.15.1
+collecting ... collected 1 item
+
+test/registered/unit/managers/test_prefill_alloc_oom_requeue.py::TestSchedulerPrefillOOM::test_empty_running_batch_retries_requeued_request FAILED [100%]
+
+=================================== FAILURES ===================================
+__ TestSchedulerPrefillOOM.test_empty_running_batch_retries_requeued_request ___
+
+self = <test_prefill_alloc_oom_requeue.TestSchedulerPrefillOOM testMethod=test_empty_running_batch_retries_requeued_request>
+
+    def test_empty_running_batch_retries_requeued_request(self):
+        req = MagicMock(name="admitted_req")
+        scheduler = _scheduler(req)
+        adder = MagicMock(
+            can_run_list=[req], preempt_list=[], new_chunked_req=None
+        )
+        adder.add_one_req.return_value = AddReqResult.CONTINUE
+        batch = MagicMock()
+        batch.prepare_for_extend.side_effect = KVCacheOOMError("injected")
+        batch_cls = MagicMock()
+        batch_cls.init_new.return_value = batch
+        running_batch = MagicMock(reqs=[], batch_is_full=False)
+        running_batch.is_empty.return_value = True
+    
+        with patch.object(scheduler_mod, "PrefillAdder", return_value=adder), patch.object(
+            scheduler_mod, "ScheduleBatch", batch_cls
+        ):
+            Scheduler._get_new_batch_prefill_raw(scheduler, None, running_batch)
+            Scheduler._get_new_batch_prefill_raw(scheduler, None, running_batch)
+    
+>       self.assertEqual(batch.prepare_for_extend.call_count, 2)
+E       AssertionError: 1 != 2
+
+test/registered/unit/managers/test_prefill_alloc_oom_requeue.py:215: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7ee3c0edcae0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7eeca7893600>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/managers/test_prefill_alloc_oom_requeue.py", line 215, in test_empty_running_batch_retries_requeued_request
+    self.assertEqual(batch.prepare_for_extend.call_count, 2)
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 878, in _baseAssertEqual
+    raise self.failureException(msg)
+AssertionError: 1 != 2
+------------------------------ Captured log call -------------------------------
+WARNING  sglang.srt.managers.scheduler:scheduler.py:3986 Prefill allocation missed after admission for 1 request(s); restoring scheduler ownership. injected
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/managers/test_prefill_alloc_oom_requeue.py::TestSchedulerPrefillOOM::test_empty_running_batch_retries_requeued_request - Exception: retry() exceed maximum number of retries.
+======================= 1 failed, 17 warnings in 19.84s ========================

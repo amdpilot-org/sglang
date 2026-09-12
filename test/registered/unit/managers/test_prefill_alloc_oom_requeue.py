@@ -178,6 +178,7 @@ class TestSchedulerPrefillOOM(CustomTestCase):
         batch_cls = MagicMock()
         batch_cls.init_new.return_value = batch
         running_batch = MagicMock(reqs=[], batch_is_full=False)
+        running_batch.is_empty.return_value = True
 
         with patch.object(scheduler_mod, "PrefillAdder", return_value=adder), patch.object(
             scheduler_mod, "ScheduleBatch", batch_cls
@@ -190,7 +191,52 @@ class TestSchedulerPrefillOOM(CustomTestCase):
         self.assertIsNone(result)
         self.assertIs(returned_running, running_batch)
         self.assertIn(req, scheduler.waiting_queue)
+        self.assertFalse(running_batch.batch_is_full)
+
+    def test_empty_running_batch_retries_requeued_request(self):
+        req = MagicMock(name="admitted_req")
+        scheduler = _scheduler(req)
+        adder = MagicMock(
+            can_run_list=[req], preempt_list=[], new_chunked_req=None
+        )
+        adder.add_one_req.return_value = AddReqResult.CONTINUE
+        batch = MagicMock()
+        batch.prepare_for_extend.side_effect = KVCacheOOMError("injected")
+        batch_cls = MagicMock()
+        batch_cls.init_new.return_value = batch
+        running_batch = MagicMock(reqs=[], batch_is_full=False)
+        running_batch.is_empty.return_value = True
+
+        with patch.object(scheduler_mod, "PrefillAdder", return_value=adder), patch.object(
+            scheduler_mod, "ScheduleBatch", batch_cls
+        ):
+            Scheduler._get_new_batch_prefill_raw(scheduler, None, running_batch)
+            Scheduler._get_new_batch_prefill_raw(scheduler, None, running_batch)
+
+        self.assertEqual(batch.prepare_for_extend.call_count, 2)
+        self.assertEqual(scheduler.waiting_queue, [req])
+
+    def test_nonempty_running_batch_keeps_allocation_backpressure(self):
+        req = MagicMock(name="admitted_req")
+        scheduler = _scheduler(req)
+        adder = MagicMock(
+            can_run_list=[req], preempt_list=[], new_chunked_req=None
+        )
+        adder.add_one_req.return_value = AddReqResult.CONTINUE
+        batch = MagicMock()
+        batch.prepare_for_extend.side_effect = KVCacheOOMError("injected")
+        batch_cls = MagicMock()
+        batch_cls.init_new.return_value = batch
+        running_batch = MagicMock(reqs=[MagicMock(name="decode_req")])
+        running_batch.is_empty.return_value = False
+
+        with patch.object(scheduler_mod, "PrefillAdder", return_value=adder), patch.object(
+            scheduler_mod, "ScheduleBatch", batch_cls
+        ):
+            Scheduler._get_new_batch_prefill_raw(scheduler, None, running_batch)
+
         self.assertTrue(running_batch.batch_is_full)
+        self.assertEqual(scheduler.waiting_queue, [req])
 
     def test_existing_chunked_req_is_not_duplicated_in_waiting_queue(self):
         req = MagicMock(name="active_chunked_req")
@@ -205,6 +251,7 @@ class TestSchedulerPrefillOOM(CustomTestCase):
         batch_cls = MagicMock()
         batch_cls.init_new.return_value = batch
         running_batch = MagicMock(reqs=[], batch_is_full=False)
+        running_batch.is_empty.return_value = True
 
         with patch.object(scheduler_mod, "PrefillAdder", return_value=adder), patch.object(
             scheduler_mod, "ScheduleBatch", batch_cls
@@ -218,7 +265,7 @@ class TestSchedulerPrefillOOM(CustomTestCase):
         self.assertIs(scheduler.chunked_req, req)
         self.assertEqual(req.inflight_middle_chunks, 0)
         self.assertNotIn(req, scheduler.waiting_queue)
-        self.assertTrue(running_batch.batch_is_full)
+        self.assertFalse(running_batch.batch_is_full)
 
     def test_existing_chunked_req_does_not_block_other_requeues(self):
         chunked_req = MagicMock(name="active_chunked_req")
