@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36943",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "unsupported_architecture",
+  "summary": "The checked-out and current upstream implementations still call ncclCommWindowRegister synchronously without a timeout, but the reported multi-rank NVIDIA NCCL deadlock cannot execute on the assigned single AMD gfx950 ROCm environment. No unvalidated behavioral fix was made.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a2b6b23fe154/venv/bin/python reports/j-a2b6b23fe154/probe_gpu.py",
+      "exit_code": 0,
+      "what_was_measured": "PyTorch runtime identity and an actual elementwise GPU result on the assigned gfx950; CUDA is absent and HIP is 7.2."
+    },
+    {
+      "command": "rg -n 'ncclCommWindowRegister|nccl_allocator_register_segments_with_comm|g_comm_registration_index|g_segments =' python/sglang/srt/distributed/device_communicators/pynccl_allocator.py",
+      "exit_code": 0,
+      "what_was_measured": "The issue-specific synchronous registration and global reset paths remain in the recorded base."
+    },
+    {
+      "command": "cmp python/sglang/srt/distributed/device_communicators/pynccl_allocator.py reports/j-a2b6b23fe154/upstream-main-pynccl_allocator.py",
+      "exit_code": 0,
+      "what_was_measured": "The allocator file at current upstream main was byte-identical to the prepared base during investigation."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "probe_gpu.py executed tensor arithmetic on AMD Instinct MI350X gfx950. This only validates the assigned GPU/runtime and is not a reproduction of CUDA/NCCL symmetric registration."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one AMD gfx950 GPU was assigned; the issue requires multi-rank NVIDIA CUDA/NCCL execution.",
+    "ROCm PyTorch reports torch.version.cuda as null and cannot execute the embedded CUDA/NCCL allocator path.",
+    "NCCL 2.29.7, B200 hardware, GLM-5.3-Flash weights, and the reported TP4/EP4 traffic fixture were unavailable.",
+    "No timeout, logging-only, pre-sizing, or registration-coordination candidate was presented as fixed without affected-platform validation."
+  ]
+}
