@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36764",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "At exact commit c8db9fb4e34369abffa08047daaa9418e610761a, the candidate removes the three layer-producing COPY instructions quantified by the original issue and couples each consumer to the correct BuildKit bind mount. The regression fails on the recorded base (which is the candidate's direct parent), passes on the candidate, and an independent instruction-boundary check confirms the production change rather than relying on PR prose.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-d5c41254d4f6/venv/bin/python -m pytest -q test/registered/unit/tools/test_docker_transient_build_mounts.py (candidate test temporarily placed on base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction on recorded base: the detector found all three reported transient COPY destinations removed by later RUN instructions; 1 failed and 2 boundary tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d5c41254d4f6/venv/bin/python -m pytest -q test/registered/unit/tools/test_docker_transient_build_mounts.py test/registered/unit/tools/test_docker_build_metadata_args.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate commit: 10 tests passed, covering the candidate layer regression and existing final-stage Docker metadata behavior."
+    },
+    {
+      "command": "independent Python logical-Dockerfile-instruction contract check",
+      "exit_code": 0,
+      "what_was_measured": "For each of the three paths, no COPY destination remains and one RUN contains the exact bind mount plus consumer; retained flashinfer and gateway binary artifacts still use COPY."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Candidate whitespace validation."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect concerns Docker build layers only; no GPU numerical or serving behavior is part of the original contract."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The analogous unmeasured copy-then-delete paths remain in docker/Dockerfile.cu134 for hpc-ops, local_src, and gateway_wheels.",
+    "The analogous unmeasured /tmp/local_src path remains in docker/rocm.Dockerfile.",
+    "The reporter's unmeasured dist pattern in docker/gateway.Dockerfile remains outside the candidate."
+  ],
+  "remaining_limitations": [
+    "Docker, Podman, and buildctl are unavailable, so no full image build or independent compressed-layer byte measurement was performed.",
+    "The acceptance conclusion verifies the checked-out source-level layer contract for the three measured primary-Dockerfile paths; it does not claim that a new registry image has already been published.",
+    "No Python or native code changed, so import-path confirmation and a native rebuild are not applicable.",
+    "GPU architecture and model weights are not relevant to this packaging defect; no GPU was used."
+  ]
+}
