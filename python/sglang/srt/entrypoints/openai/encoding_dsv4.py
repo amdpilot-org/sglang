@@ -481,6 +481,20 @@ def render_message(
 # ============================================================
 
 
+def validate_system_message_order(messages: List[Dict[str, Any]]) -> None:
+    """Reject system messages after the conversation has started."""
+    seen_non_system = False
+    for index, message in enumerate(messages):
+        if message.get("role") == "system":
+            if seen_non_system:
+                raise ValueError(
+                    "DeepSeek-V4 only supports system messages at the beginning "
+                    f"of a conversation (found one at index {index})."
+                )
+        else:
+            seen_non_system = True
+
+
 def merge_tool_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Merge tool messages into the preceding user message using content_blocks format.
@@ -635,6 +649,8 @@ def encode_messages(
         The encoded prompt string.
     """
     context = context if context else []
+
+    validate_system_message_order(context + messages)
 
     # Preprocess: merge tool messages and sort tool results
     messages = merge_tool_messages(messages)
