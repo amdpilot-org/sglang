@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/29562",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "02a233ac466039ac4804f719a37382309f3afa37",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a verified narrow fix for the reported 3072-versus-6144 mixed-precision shared-expert load mismatch. It is not a full fix for serving GLM-5.2-NVFP4 on SM120 because the separate DSA dependency/backend architecture gap remains.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ba33103216ea/venv/bin/python <base fusion-gate reproduction>",
+      "exit_code": 1,
+      "what_was_measured": "On the recorded base, the published shared-expert exclusion matched, routed experts remained included, and the loader gate incorrectly returned no disable reason."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ba33103216ea/venv/bin/python -m pytest -q test/registered/unit/models/test_shared_experts_fusion_gates.py -k TestGlmMoeGate",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression and neighboring GLM fusion-gate behavior: 4 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ba33103216ea/venv/bin/python -m pytest -q test/registered/unit/models/test_glm5_next_modelopt.py",
+      "exit_code": 0,
+      "what_was_measured": "Existing GLM-5 NextN ModelOpt behavior: 3 passed, 2 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ba33103216ea/venv/bin/python <independent six-case fusion-gate matrix>",
+      "exit_code": 0,
+      "what_was_measured": "Reported wildcard, single sparse layer, dense-layer boundary, both-excluded, uniform-FP4, and forced-fusion cases all produced the required decisions."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ba33103216ea/venv/bin/python -m py_compile python/sglang/srt/models/glm4_moe.py test/registered/unit/models/test_shared_experts_fusion_gates.py && git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..02a233ac466039ac4804f719a37382309f3afa37",
+      "exit_code": 0,
+      "what_was_measured": "Python syntax and patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The relevant tests exercise the pre-construction loader decision and require no GPU kernel. The available device was one AMD Instinct MI355X gfx950, not the required eight NVIDIA SM120 GPUs."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "After bypassing the loader mismatch, the reported SM120 serving configuration can still fail in released FlashInfer/DeepGEMM DSA paths with an unsupported-architecture error.",
+    "TP=8 full-model loading and generation with nvidia/GLM-5.2-NVFP4 were not independently exercised because the required SM120 hardware and weights were unavailable."
+  ],
+  "remaining_limitations": [
+    "Prepared hardware was a single AMD Instinct MI355X gfx950 with ROCm 7.2, not eight RTX PRO 6000 SM120 GPUs with CUDA 13.",
+    "GLM-5.2-NVFP4 weights were unavailable.",
+    "No NVIDIA NVFP4, DSA, CUDA graph, full serving, or multi-node path was validated.",
+    "No native source changed in the candidate, so a native rebuild was not applicable."
+  ]
+}
