@@ -21,7 +21,10 @@ def _request(rid, session, *, holds_mamba=False):
         weight_version_events=[],
         finished_reason=None,
         beam_group=None,
-        time_stats=SimpleNamespace(trace_ctx=MagicMock()),
+        priority=None,
+        time_stats=SimpleNamespace(
+            trace_ctx=MagicMock(), wait_queue_entry_time=0.0
+        ),
     )
 
 
@@ -42,7 +45,56 @@ def _scheduler(waiting_queue):
     scheduler.ps = SimpleNamespace(pp_size=1)
     scheduler.running_batch = None
     scheduler.last_batch = None
+    scheduler.max_queued_requests = None
+    scheduler.enable_priority_scheduling = False
+    scheduler.schedule_low_priority_values_first = True
     return scheduler
+
+
+@patch(
+    "sglang.srt.managers.scheduler.get_serving",
+    return_value=SimpleNamespace(weight_version="v0"),
+)
+def test_queue_limit_rejection_reopens_new_streaming_session(_):
+    session = SimpleNamespace(streaming=True, _inflight=True, abort_req=MagicMock())
+    queued = _request("already-queued", None)
+    incoming = _request("incoming", session)
+    scheduler = _scheduler([queued])
+    scheduler.max_queued_requests = 1
+
+    assert scheduler._abort_on_queued_limit(incoming) is True
+
+    session.abort_req.assert_called_once_with()
+    assert scheduler.waiting_queue == [queued]
+
+
+@patch(
+    "sglang.srt.managers.scheduler.get_serving",
+    return_value=SimpleNamespace(weight_version="v0"),
+)
+@patch("sglang.srt.managers.scheduler.release_kv_cache")
+def test_priority_queue_limit_eviction_cleans_streaming_mamba_request(
+    release_kv_cache,
+    _,
+):
+    session = SimpleNamespace(streaming=True, _inflight=True, abort_req=MagicMock())
+    evicted = _request("evicted", session, holds_mamba=True)
+    evicted.priority = 10
+    evicted.time_stats.wait_queue_entry_time = 1.0
+    incoming = _request("incoming", None)
+    incoming.priority = 1
+    scheduler = _scheduler([evicted])
+    scheduler.max_queued_requests = 1
+    scheduler.enable_priority_scheduling = True
+
+    assert scheduler._abort_on_queued_limit(incoming) is False
+
+    assert scheduler.waiting_queue == []
+    assert isinstance(evicted.finished_reason, FINISH_ABORT)
+    session.abort_req.assert_called_once_with()
+    release_kv_cache.assert_called_once_with(
+        evicted, scheduler.tree_cache, is_insert=False
+    )
 
 
 @patch(

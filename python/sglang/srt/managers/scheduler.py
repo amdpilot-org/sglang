@@ -3214,6 +3214,22 @@ class Scheduler(
         ):
             self.tree_cache.release_aborted_request(rid)
 
+    def _abort_queued_streaming_session(
+        self, req: Req, finished_reason: Optional[dict] = None
+    ) -> None:
+        """Finalize a streaming request removed before its first model step."""
+        session = getattr(req, "session", None)
+        if session is None or not session.streaming:
+            return
+
+        reason = finished_reason or {}
+        req.finished_reason = FINISH_ABORT(
+            reason.get("message") or "Abort in waiting queue",
+            status_code=reason.get("status_code"),
+            err_type=reason.get("err_type"),
+        )
+        session.abort_req()
+
     def _abort_on_queued_limit(self, recv_req: Req) -> bool:
         """Abort an incoming or existing request if the waiting queue is full. Returns True if the incoming request is aborted."""
         if (
@@ -3246,14 +3262,22 @@ class Scheduler(
                 req_to_abort = candidate_req
                 message = "The request is aborted by a higher priority request."
 
+        finished_reason = {
+            "type": "abort",
+            "status_code": HTTPStatus.SERVICE_UNAVAILABLE,
+            "message": message,
+        }
+        self._abort_queued_streaming_session(req_to_abort, finished_reason)
+        if (
+            req_to_abort is not recv_req
+            and getattr(getattr(req_to_abort, "kv", None), "holds_mamba", False)
+        ):
+            release_kv_cache(req_to_abort, self.tree_cache, is_insert=False)
+
         self.ipc_channels.send_to_tokenizer.send_output(
             _make_abort_req(
                 req_to_abort,
-                finished_reason={
-                    "type": "abort",
-                    "status_code": HTTPStatus.SERVICE_UNAVAILABLE,
-                    "message": message,
-                },
+                finished_reason=finished_reason,
             ),
             req_to_abort,
         )
@@ -5202,22 +5226,10 @@ class Scheduler(
             req = self.waiting_queue.pop(i)
             self._release_aborted_request(req.rid)
             self.beam_coordinator.retire_group(req)
-            if req.session is not None and req.session.streaming:
-                # create_req marks a streaming session inflight before the req
-                # reaches this queue. Since this path removes the req without a
-                # model step, no normal finish callback will clear that state.
-                # Mark the req too: Mamba requests can already own a restored
-                # session slot, and release_kv_cache must take its abort branch
-                # instead of committing this never-executed turn.
-                reason = recv_req.finished_reason or {}
-                req.finished_reason = FINISH_ABORT(
-                    recv_req.abort_message
-                    or reason.get("message")
-                    or "Abort in waiting queue",
-                    status_code=reason.get("status_code"),
-                    err_type=reason.get("err_type"),
-                )
-                req.session.abort_req()
+            reason = recv_req.finished_reason or {}
+            if recv_req.abort_message and not reason.get("message"):
+                reason = {**reason, "message": recv_req.abort_message}
+            self._abort_queued_streaming_session(req, reason)
             # Without the initiator's reason the tokenizer falls back to a
             # generic abort message.
             self.ipc_channels.send_to_tokenizer.send_output(

@@ -1,0 +1,91 @@
+FF...                                                                    [100%]
+=================================== FAILURES ===================================
+___________ test_queue_limit_rejection_reopens_new_streaming_session ___________
+
+_ = <MagicMock name='get_serving' id='126740865482624'>
+
+    @patch(
+        "sglang.srt.managers.scheduler.get_serving",
+        return_value=SimpleNamespace(weight_version="v0"),
+    )
+    def test_queue_limit_rejection_reopens_new_streaming_session(_):
+        session = SimpleNamespace(streaming=True, _inflight=True, abort_req=MagicMock())
+        queued = _request("already-queued", None)
+        incoming = _request("incoming", session)
+        scheduler = _scheduler([queued])
+        scheduler.max_queued_requests = 1
+    
+        assert scheduler._abort_on_queued_limit(incoming) is True
+    
+>       session.abort_req.assert_called_once_with()
+
+test/registered/unit/managers/test_scheduler_streaming_session_queue_abort.py:67: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock id='126740862057504'>, args = (), kwargs = {}
+msg = "Expected 'mock' to be called once. Called 0 times."
+
+    def assert_called_once_with(self, /, *args, **kwargs):
+        """assert that the mock was called exactly once and that that call was
+        with the specified arguments."""
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to be called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'mock' to be called once. Called 0 times.
+
+/usr/lib/python3.12/unittest/mock.py:955: AssertionError
+______ test_priority_queue_limit_eviction_cleans_streaming_mamba_request _______
+
+release_kv_cache = <MagicMock name='release_kv_cache' id='126740793388896'>
+_ = <MagicMock name='get_serving' id='126740793392976'>
+
+    @patch(
+        "sglang.srt.managers.scheduler.get_serving",
+        return_value=SimpleNamespace(weight_version="v0"),
+    )
+    @patch("sglang.srt.managers.scheduler.release_kv_cache")
+    def test_priority_queue_limit_eviction_cleans_streaming_mamba_request(
+        release_kv_cache, _,
+    ):
+        session = SimpleNamespace(streaming=True, _inflight=True, abort_req=MagicMock())
+        evicted = _request("evicted", session, holds_mamba=True)
+        evicted.priority = 10
+        evicted.time_stats.wait_queue_entry_time = 1.0
+        incoming = _request("incoming", None)
+        incoming.priority = 1
+        scheduler = _scheduler([evicted])
+        scheduler.max_queued_requests = 1
+        scheduler.enable_priority_scheduling = True
+    
+        assert scheduler._abort_on_queued_limit(incoming) is False
+    
+        assert scheduler.waiting_queue == []
+>       assert isinstance(evicted.finished_reason, FINISH_ABORT)
+E       AssertionError: assert False
+E        +  where False = isinstance(None, FINISH_ABORT)
+E        +    where None = namespace(rid='evicted', session=namespace(streaming=True, _inflight=True, abort_req=<MagicMock id='126740793387456'>)...m_group=None, priority=10, time_stats=namespace(trace_ctx=<MagicMock id='126740793613424'>, wait_queue_entry_time=1.0)).finished_reason
+
+test/registered/unit/managers/test_scheduler_streaming_session_queue_abort.py:92: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/managers/test_scheduler_streaming_session_queue_abort.py::test_queue_limit_rejection_reopens_new_streaming_session
+FAILED test/registered/unit/managers/test_scheduler_streaming_session_queue_abort.py::test_priority_queue_limit_eviction_cleans_streaming_mamba_request
+2 failed, 3 passed, 17 warnings in 9.02s
