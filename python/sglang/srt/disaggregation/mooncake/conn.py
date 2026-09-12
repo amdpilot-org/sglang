@@ -225,6 +225,7 @@ class MooncakeKVManager(StagingManagerMixin, CommonKVManager):
         self.enable_trace = get_observability().enable_trace
         if self.disaggregation_mode == DisaggregationMode.PREFILL:
             self.session_failures = defaultdict(int)
+            self.session_generations = defaultdict(int)
             self.failed_sessions = set()
             self.session_lock = threading.Lock()
             self.start_prefill_thread()
@@ -2217,11 +2218,7 @@ class MooncakeKVManager(StagingManagerMixin, CommonKVManager):
                         )
                         self._init_dcp_pack_buffers_once(decode_kv_args.dst_dcp_size)
                     self.decode_kv_args_table[mooncake_session_id] = decode_kv_args
-                    with self.session_lock:
-                        if mooncake_session_id in self.failed_sessions:
-                            self.failed_sessions.remove(mooncake_session_id)
-                        if mooncake_session_id in self.session_failures:
-                            del self.session_failures[mooncake_session_id]
+                    self._mark_session_registered(mooncake_session_id)
                     logger.debug(
                         f"Register KVArgs from {mooncake_session_id} successfully"
                     )
@@ -2387,13 +2384,22 @@ class MooncakeKVManager(StagingManagerMixin, CommonKVManager):
             if bootstrap_room not in self.request_status:
                 self.addr_to_rooms_tracker[bootstrap_addr].discard(bootstrap_room)
 
+    def _mark_session_registered(self, session_id: str) -> None:
+        with self.session_lock:
+            self.session_generations[session_id] += 1
+            self.failed_sessions.discard(session_id)
+            self.session_failures.pop(session_id, None)
+
     def _run_one_probe_pass(self) -> None:
         with self.session_lock:
             snapshot = {
-                session_id: self.session_failures.get(session_id, 0)
+                session_id: (
+                    self.session_generations[session_id],
+                    self.session_failures.get(session_id, 0),
+                )
                 for session_id in self.failed_sessions
             }
-        for session_id, failure_count in snapshot.items():
+        for session_id, (generation, failure_count) in snapshot.items():
             send_probe = getattr(self.engine, "send_probe", None)
             if send_probe is None:
                 rc = -1
@@ -2407,6 +2413,7 @@ class MooncakeKVManager(StagingManagerMixin, CommonKVManager):
                 with self.session_lock:
                     can_recover = (
                         session_id in self.failed_sessions
+                        and self.session_generations[session_id] == generation
                         and self.session_failures.get(session_id, 0) == failure_count
                     )
                     if can_recover:

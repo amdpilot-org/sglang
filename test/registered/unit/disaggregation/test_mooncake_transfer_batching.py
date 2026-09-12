@@ -142,6 +142,7 @@ class TestMooncakeFailedSessionRecovery(unittest.TestCase):
             engine=SimpleNamespace(send_probe=MagicMock(side_effect=send_probe)),
             failed_sessions=set(failed_sessions),
             session_failures={session_id: 1 for session_id in failed_sessions},
+            session_generations={session_id: 0 for session_id in failed_sessions},
             session_lock=threading.Lock(),
         )
 
@@ -150,6 +151,15 @@ class TestMooncakeFailedSessionRecovery(unittest.TestCase):
 
         MooncakeKVManager._run_one_probe_pass(manager)
 
+        self.assertNotIn("decode:1234", manager.failed_sessions)
+        self.assertNotIn("decode:1234", manager.session_failures)
+
+    def test_registration_starts_a_new_session_generation(self):
+        manager = self._make_manager(["decode:1234"], lambda _: 0)
+
+        MooncakeKVManager._mark_session_registered(manager, "decode:1234")
+
+        self.assertEqual(manager.session_generations["decode:1234"], 1)
         self.assertNotIn("decode:1234", manager.failed_sessions)
         self.assertNotIn("decode:1234", manager.session_failures)
 
@@ -186,6 +196,34 @@ class TestMooncakeFailedSessionRecovery(unittest.TestCase):
         self.assertFalse(probe_thread.is_alive())
         self.assertIn("decode:1234", manager.failed_sessions)
         self.assertEqual(manager.session_failures["decode:1234"], 2)
+
+    def test_stale_probe_does_not_clear_reregistered_failure_generation(self):
+        probe_started = threading.Event()
+        finish_probe = threading.Event()
+
+        def send_probe(_):
+            probe_started.set()
+            self.assertTrue(finish_probe.wait(timeout=5))
+            return 0
+
+        manager = self._make_manager(["decode:1234"], send_probe)
+        probe_thread = threading.Thread(
+            target=MooncakeKVManager._run_one_probe_pass, args=(manager,)
+        )
+        probe_thread.start()
+        self.assertTrue(probe_started.wait(timeout=5))
+
+        MooncakeKVManager._mark_session_registered(manager, "decode:1234")
+        with manager.session_lock:
+            manager.session_failures["decode:1234"] = 1
+            manager.failed_sessions.add("decode:1234")
+
+        finish_probe.set()
+        probe_thread.join(timeout=5)
+
+        self.assertFalse(probe_thread.is_alive())
+        self.assertIn("decode:1234", manager.failed_sessions)
+        self.assertEqual(manager.session_failures["decode:1234"], 1)
 
     def test_failed_probe_keeps_session_blacklisted(self):
         manager = self._make_manager(["decode:1234"], lambda _: -1)
