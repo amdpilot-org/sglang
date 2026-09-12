@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38408",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the independent review against candidate f7d3ecf: its bounded MXFP4 registered-test supervisor and advisory-lock regressions are valid, a live _build_lock owner remains intentionally unbounded, and the self-test bypasses the real JIT path. Preserved the candidate unchanged and corrected provenance for the new delivery.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ee0283431cdb/venv/bin/python -m pytest -q test/registered/kernels/test_jit_cache.py::test_mxfp4_registered_test_retries_a_stalled_worker_attempt",
+      "exit_code": 0,
+      "what_was_measured": "On exact candidate f7d3ecf, an injected first-worker stall was bounded, its process group was killed, and a second fresh-cache self-test worker succeeded; 1 passed in 34.15s."
+    },
+    {
+      "command": "timeout 2s /tmp/amdpilot-repo-j-ee0283431cdb/venv/bin/python /tmp/amdpilot-repo-j-ee0283431cdb/live_holder.py",
+      "exit_code": 124,
+      "what_was_measured": "On exact candidate f7d3ecf, a contender remained blocked while another live process owned _build_lock."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 SGLANG_JIT_CACHE_DIR=<private> TORCH_EXTENSIONS_DIR=<private> SGLANG_MXFP4_TEST_TIMEOUT_SECONDS=90 /tmp/amdpilot-repo-j-ee0283431cdb/venv/bin/python test/registered/expert_pack/test_expert_pack_mxfp4.py",
+      "exit_code": 1,
+      "what_was_measured": "The actual registered worker reached hipcc for gfx950 and failed on missing NVIDIA header cuda_bf16.h; 4 tests ran, no MXFP4 kernel executed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ee0283431cdb/venv/bin/python -m pytest -q test/registered/kernels/test_jit_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "Post-integration JIT-cache regression suite: 45 passed in 38.59s."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ee0283431cdb/venv/bin/python -m ruff check ... && /tmp/amdpilot-repo-j-ee0283431cdb/venv/bin/python -m ruff format --check ...",
+      "exit_code": 1,
+      "what_was_measured": "Environment limitation: the prepared interpreter does not contain the ruff module; no source formatting failure was observed. Preserved candidate evidence records its prior successful ruff run."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned AMD Instinct MI350X gfx950 reached the real MXFP4 JIT hipcc command with --offload-arch=gfx950:sramecc+:xnack-, but compilation stopped at missing cuda_bf16.h before any kernel execution."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The intermittent NVIDIA H200 stall was not statistically reproduced because only AMD gfx950 was assigned.",
+    "No MXFP4 GPU numerical execution occurred because the CUDA-specific source cannot compile in the ROCm environment.",
+    "The production _build_lock intentionally remains unbounded while its owner is alive; only the registered MXFP4 test process is supervised.",
+    "The deterministic supervisor regression validates supervisor mechanics and deliberately exits before the MXFP4 JIT/kernel path.",
+    "Ruff was unavailable in the prepared interpreter; the preserved exact candidate includes its earlier passing ruff evidence."
+  ]
+}
