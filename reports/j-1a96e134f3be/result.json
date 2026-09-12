@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32200",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Implemented the complete proposed NCCL one-sided RMA surface: ctypes bindings and strict NCCL >= 2.30/full-symbol capability gating, registered-window handle retention, and an NcclRmaCommunicator all-rank ring warm-up. Added compatibility fixes for mixed/partial libraries, checked NCCL return codes, retained wait-descriptor storage, separated warm-up source and destination slots, and made the embedded allocator link against RCCL on ROCm. The prepared one-GPU AMD node verified the rebuilt native allocator and its numerical behavior, but cannot execute the two-rank NCCL RMA protocol.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-1a96e134f3be/venv/bin/python -m pytest -q test/registered/distributed/test_pynccl_rma.py",
+      "exit_code": 0,
+      "what_was_measured": "15 compatibility/ABI/adversarial tests passed; two real two-GPU RMA tests skipped because only one GPU is assigned. Raw output: /tmp/amdpilot-repo-j-1a96e134f3be/logs/test_pynccl_rma.log"
+    },
+    {
+      "command": "TMPDIR=/tmp/amdpilot-repo-j-1a96e134f3be/build TORCH_EXTENSIONS_DIR=/tmp/amdpilot-repo-j-1a96e134f3be/build/extensions python <native allocator rebuild probe>",
+      "exit_code": 0,
+      "what_was_measured": "Recompiled and loaded /tmp/amdpilot-repo-j-1a96e134f3be/build/symm_allocator/nccl_allocator.so against pinned RCCL; verified nccl_allocator_get_windows_for_comm and nccl_allocator_clear_windows_for_comm exports. Raw output: /tmp/amdpilot-repo-j-1a96e134f3be/logs/native_allocator_rebuild_rccl.log"
+    },
+    {
+      "command": "TMPDIR=/tmp/amdpilot-repo-j-1a96e134f3be/build python <symmetric allocator GPU numerical probe>",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X, a tensor allocated from the rebuilt NCCL/RCCL memory pool matched an independent CPU arange-square-plus-three reference exactly (max_abs_diff=0.0), and pool membership was confirmed. Raw output: /tmp/amdpilot-repo-j-1a96e134f3be/logs/gpu_allocator_numerical.log"
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files <five changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, static checks, codespell, and registered-test taxonomy all passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1a96e134f3be/venv/bin/python <RCCL capability probe>",
+      "exit_code": 0,
+      "what_was_measured": "Pinned RCCL is 2.27.7 and lacks ncclPutSignal, ncclSignal, ncclWaitSignal, ncclWinGetUserPtr, and ncclGetPeerDevicePointer; has_rma correctly remained false. Raw output: /tmp/amdpilot-repo-j-1a96e134f3be/logs/rccl_capability.log"
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "The assigned node has one AMD GPU, so the required two-rank handle exchange and ring put_signal/wait_signal protocol could not run.",
+    "Pinned RCCL 2.27.7 lacks all five requested RMA symbols, so neither the successful RMA path nor a runtime NULL-window-handle fallback was independently exercised.",
+    "NVIDIA NCCL >= 2.30, NVLink hardware, PCIe-only NVIDIA hardware, and vGPU paths are unavailable in this environment.",
+    "NcclRmaCommunicator provides and validates the requested primitive/warm-up abstraction but is not wired into an SGLang TP/EP production collective path; the source proposal did not request replacing an existing collective."
+  ]
+}
