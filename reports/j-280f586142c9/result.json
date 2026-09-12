@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37712",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1333",
+  "candidate_commit": "f487356650d0657f192b8544b04da645f810ed6b",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate eliminates cross-request logits amplification and prevents the reviewed 40-byte allocation from exceeding a 4-byte budget, but an atomic request-local row larger than the budget raises RuntimeError instead of completing safely. This is a validated partial allocation fix, not a full fix for the original all-ranks availability failure, and the reported B300/CUDA serving workload was unavailable.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-280f586142c9/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_dsa_kpool_mqa_logits_chunking.py test/registered/unit/layers/attention/test_dsa_kpool_grouped_chunking.py (candidate tests checked out over recorded base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: 8 failed and 1 passed. The base made one 240-byte cross-request logits output against a 24-byte budget and lacked request grouping and the atomic-row guard."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-280f586142c9/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_dsa_mqa_logits_chunking.py test/registered/unit/layers/attention/test_dsa_kpool_mqa_logits_chunking.py test/registered/unit/layers/attention/test_dsa_kpool_grouped_chunking.py (at exact candidate f487356650d0657f192b8544b04da645f810ed6b)",
+      "exit_code": 0,
+      "what_was_measured": "12 passed on one gfx950 GPU with real FP8 and metadata tensors; DeepGEMM and top-k were mocked to measure call shapes, budgets, and mapping orchestration."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-280f586142c9/venv/bin/python -m pytest -q /job/review-evidence-j-280f586142c9/independent_budget_test.py (at exact candidate f487356650d0657f192b8544b04da645f810ed6b)",
+      "exit_code": 0,
+      "what_was_measured": "4 independent adversarial cases: 40-byte row under a 4-byte budget is rejected before the kernel, while budgets 40, 41, and 79 bytes admit exactly one 40-byte atomic row without exceeding the budget."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI355X, gfx950:sramecc+:xnack-, PyTorch 2.11.0+rocm7.2, HIP 7.2.26015. Source imports resolved under /job/repo/python. GPU tensors were real; DeepGEMM and fused top-k were mocked.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "If one request's group.k_rows * 4 exceeds logits_budget_bytes, the candidate raises RuntimeError on the DSA path. It prevents an over-budget allocation but does not produce top-k output or demonstrate that TP workers survive, so the original all-ranks availability contract remains unresolved for this boundary.",
+    "The early num_q * num_k < 8000000 return bypasses memory-budget inspection. A sub-threshold fp32 logits allocation can still be attempted regardless of currently free memory; this was source-inspected but not claimed as a reproduction of the reported 73.65 GiB case."
+  ],
+  "remaining_limitations": [
+    "No four-B300 CUDA TP=4/EP=4 system was available; testing used one AMD gfx950 GPU.",
+    "No GLM-5.3-Flash or RadixArk model weights were available.",
+    "Hierarchical-cache, DFLASH, multi-request 300K-1M context serving traffic, and worker survival were not reproduced.",
+    "DeepGEMM and fused top-k were mocked, so NVIDIA kernel allocation behavior and end-to-end numerical correctness remain unverified.",
+    "No native files changed, so a native rebuild was not applicable."
+  ]
+}
