@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 def get_layer_id(weight_name):
     # example weight name: model.layers.10.self_attn.qkv_proj.weight
-    match = re.search(r"layers\.(\d+)\.", weight_name)
+    match = re.search(r"(?:^|\.)(?:layers|deepstack_merger_list)\.(\d+)\.", weight_name)
     if match:
         return int(match.group(1))
     return None

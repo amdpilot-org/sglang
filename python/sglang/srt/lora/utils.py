@@ -361,6 +361,7 @@ ROW_PARALLELISM_LINEAR_LORA_NAMES = [
     "down_proj",
     "down_proj_moe",
     "down_proj_shared_moe",
+    "linear_fc2",
     "wo_ud",
 ]
 DSA_INDEXER_LORA_NAMES = frozenset(
@@ -407,6 +408,8 @@ _KNOWN_LORA_TARGET_MODULES = frozenset(
         "down_proj",
         "fc1_latent_proj",
         "fc2_latent_proj",
+        "linear_fc1",
+        "linear_fc2",
         "embed_tokens",
         "lm_head",
         "fused_qkv_a_proj_with_mqa",

@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32572",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced both independent-review counterexamples at candidate commit 6f9ba912ed5a5a9ff2434f7505e86326bff8c20d, preserved its Qwen3-VL fixes, added MOSS-VL concatenating-merger LoRA dimensions, and bounded indexed-layer parsing to path segments.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-b78e5d0f5402/venv/bin/python reports/j-b78e5d0f5402 candidate counterexample fixture",
+      "exit_code": 0,
+      "what_was_measured": "At the unmodified candidate, both MOSS linear_fc dimension requests failed and the notdeepstack_merger_list namespace returned layer 4. Raw output: reports/j-b78e5d0f5402/raw/candidate_counterexamples.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b78e5d0f5402/venv/bin/python -m pytest -q test/registered/unit/lora/test_qwen3_vl_lora_targets.py test/registered/unit/lora/test_moss_vl_lora_targets.py test/registered/unit/lora/test_laguna_hidden_dim_unit.py",
+      "exit_code": 0,
+      "what_was_measured": "23 tests passed for Qwen3-VL and MOSS-VL dimensions, normalization, sharding metadata, valid/malformed indices, namespace boundaries, and existing model-specific fallback behavior."
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files python/sglang/srt/layers/utils/common.py python/sglang/srt/lora/utils.py python/sglang/srt/models/qwen3_vl.py python/sglang/srt/models/moss_vl.py test/registered/unit/lora/test_qwen3_vl_lora_targets.py test/registered/unit/lora/test_moss_vl_lora_targets.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository formatting, lint, safety, and CI-registration hooks passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-b78e5d0f5402/venv/bin/python reports/j-efa2c48ba8e1/gpu_linear_fc_reference.py",
+      "exit_code": 0,
+      "what_was_measured": "BF16 rank-32 Qwen projection arithmetic at 4608x4608 and 4608x4096 ran on AMD Instinct MI355X gfx950 and was compared with CPU FP32 references."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-b78e5d0f5402/raw/gpu_linear_fc_reference.log records execution on AMD Instinct MI355X, gfx950:sramecc+:xnack-. This is projection arithmetic evidence only."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Qwen3-VL-8B/EditScore and MOSS-VL model/adapter weights were unavailable, so full model loading and HTTP serving were not verified.",
+    "The available GPU was ROCm gfx950 rather than the report's H100/CUDA platform.",
+    "The GPU fixture validates Qwen projection shapes and arithmetic only; it does not qualify MOSS-VL architecture execution or semantic multimodal output.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
