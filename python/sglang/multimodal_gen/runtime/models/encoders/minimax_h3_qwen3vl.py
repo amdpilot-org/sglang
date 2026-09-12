@@ -410,6 +410,21 @@ class MiniMaxH3Qwen3VLEncoder(TextEncoder):
                 )
             weight_loader = getattr(param, "weight_loader", default_weight_loader)
             try:
+                # llama.cpp's MiniMax H3 GGUF conversion folds the Conv3D output
+                # and input-channel axes into one leading axis.  GGUF's dimension
+                # reversal therefore exposes [out * in, depth, height, width],
+                # while PyTorch requires [out, in, depth, height, width].  Limit
+                # restoration to this known floating-point patch embedding shape;
+                # packed quantized storage must retain its byte layout.
+                if (
+                    param_name == "model.visual.patch_embed.proj.weight"
+                    and loaded_weight.ndim == 4
+                    and param.ndim == 5
+                    and loaded_weight.is_floating_point()
+                    and loaded_weight.shape[0] == param.shape[0] * param.shape[1]
+                    and tuple(loaded_weight.shape[1:]) == tuple(param.shape[2:])
+                ):
+                    loaded_weight = loaded_weight.reshape(param.shape)
                 can_keep_checkpoint_tensor = bool(
                     getattr(self, "_keep_checkpoint_mapping", False)
                     and weight_loader is default_weight_loader
