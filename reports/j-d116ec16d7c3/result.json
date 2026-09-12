@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30609",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared source already contained the validated Mooncake index-batching implementation from sgl-project/sglang#32758, but its default remained 0 (disabled). Therefore the original command, which does not set SGLANG_MOONCAKE_MAX_TRANSFER_BATCH_INDICES, still used one unbounded synchronous all-layer transfer. Changed the default to the issue-specific validated value of 1024 while retaining explicit 0 as the legacy escape hatch, and added a regression for the real default.",
+  "tests": [
+    {
+      "command": "git show 358c163250ad3b1f62939b01ce1314a0a31a0365:python/sglang/srt/environ.py | rg -n 'SGLANG_MOONCAKE_MAX_TRANSFER_BATCH_INDICES = EnvInt\\(1024\\)'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before check: the recorded base did not enable the validated 1024-index bound by default."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d116ec16d7c3/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_mooncake_transfer_batching.py",
+      "exit_code": 0,
+      "what_was_measured": "6 tests and 3 subtests passed: configured default, ordered long-transfer slicing, exact/under-boundary legacy fast path, explicit 0 behavior, failure short-circuiting, device-page indices, and unchanged custom-memory-pool behavior."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d116ec16d7c3/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_receiver_connection_pool.py test/registered/unit/disaggregation/test_nixl_sender_failure_cleanup.py test/registered/unit/disaggregation/test_decode_queue_cleanup.py test/registered/unit/disaggregation/test_deferred_decode_kv_release.py test/registered/unit/disaggregation/test_nixl_deferred_kv_release.py",
+      "exit_code": 0,
+      "what_was_measured": "40 related disaggregation status, timeout, failure-cleanup, queue-cleanup, and deferred-release tests passed."
+    },
+    {
+      "command": "environment default/override assertions using the prepared interpreter",
+      "exit_code": 0,
+      "what_was_measured": "Observed default=1024, explicit disabled value=0, and explicit override=2048."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned device was inspected as one AMD Instinct MI355X (gfx950) with Torch 2.11.0+rocm7.2. The corrected behavior is CPU-side construction and submission of Mooncake address batches; no relevant Mooncake multi-node transport fixture, GLM-5.2 weights, NVIDIA H100s, or the reported 2-node prefill/4-node decode topology were available. No unrelated GPU smoke is claimed as validation."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original intermittent deployment was not reproduced end-to-end because GLM-5.2 weights, NVIDIA H100 hardware, Mooncake/RDMA peers, and the reported multi-node topology were unavailable.",
+    "The issue-specific upstream validation used GLM-5.2-NVFP4 on separate 4x L20D prefill and decode nodes with an approximately 800K-token workload; this task independently verified the prepared implementation and its batching boundaries, not that full deployment.",
+    "The source issue reports GLM-5.2 with DSA/HiCache/HiSparse and a different topology, so model-architecture semantics and distributed behavior remain unverified here.",
+    "No native code changed, so no native rebuild was applicable."
+  ]
+}
