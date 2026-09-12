@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34482",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the issue-specific missing enable_tiling/disable_tiling API on SGLang's Sana AutoencoderDC wrapper. Added narrow lazy forwarding methods matching the installed diffusers AutoencoderDC API, plus regression and boundary coverage. A tiny real AutoencoderDC decode exercised the wrapper on one gfx950-class GPU and matched independent CPU results. The full Sana model and the reported 8 GB NVIDIA OOM were not reproduced because the model weights and matching hardware were unavailable.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-fe67bdd065a2/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_autoencoder_dc_tiling.py (before implementation)",
+      "exit_code": 1,
+      "what_was_measured": "All three regression cases failed with AttributeError because AutoencoderDC exposed neither enable_tiling nor disable_tiling; raw output: reports/j-fe67bdd065a2/failing-before.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-fe67bdd065a2/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_autoencoder_dc_tiling.py",
+      "exit_code": 0,
+      "what_was_measured": "Three forwarding boundaries passed: explicit tile parameters, lazy enable initialization, and lazy disable initialization; raw output: reports/j-fe67bdd065a2/passing-after.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-fe67bdd065a2/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_autoencoder_dc_tiling.py python/sglang/multimodal_gen/test/unit/test_decoding_stage_parallelism.py",
+      "exit_code": 0,
+      "what_was_measured": "12 focused wrapper and decoding-stage tests passed; raw output: reports/j-fe67bdd065a2/focused-suite.txt"
+    },
+    {
+      "command": "PYTHONPATH=python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-fe67bdd065a2/venv/bin/python /tmp/amdpilot-repo-j-fe67bdd065a2/gpu_autoencoder_dc_check.py",
+      "exit_code": 0,
+      "what_was_measured": "One AMD Instinct MI350X (gfx950) ran tiny real diffusers AutoencoderDC untiled and tiled decodes through the SGLang wrapper. Each GPU result matched its independent CPU execution with max absolute error 6.556510925292969e-07; raw output: reports/j-fe67bdd065a2/gpu-numerical.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validation passed."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "HIP_VISIBLE_DEVICES=0 exposed exactly one AMD Instinct MI350X. The wrapper enabled tiled decoding on a real tiny diffusers AutoencoderDC, disabled it afterward, and produced a [1, 3, 16, 16] result matching CPU within 6.56e-7; see reports/j-fe67bdd065a2/gpu-numerical.txt.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Efficient-Large-Model/Sana_600M_512px_diffusers weights were not available, so no full model generation or semantic image-quality claim is made.",
+    "The assigned gfx950-class MI350X is not the reported 8 GB RTX 4070 Laptop GPU, so the original CUDA OOM reduction was not reproduced or quantified.",
+    "SanaPipelineConfig.vae_tiling remains false by default; this patch only makes an explicit --vae-tiling request effective and does not resolve the issue's policy question.",
+    "No native code changed, so no native rebuild was applicable.",
+    "The prepared interpreter does not contain the ruff module; git diff --check and focused pytest coverage were used instead."
+  ]
+}
