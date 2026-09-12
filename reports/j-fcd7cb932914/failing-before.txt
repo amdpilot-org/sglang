@@ -1,0 +1,63 @@
+FF.                                                                      [100%]
+=================================== FAILURES ===================================
+_ TestReplaySSMPingPongCursor.test_allocated_tracking_slots_clear_recycled_cursors _
+
+self = <test_replayssm_ping_pong_cursor.TestReplaySSMPingPongCursor testMethod=test_allocated_tracking_slots_clear_recycled_cursors>
+
+    def test_allocated_tracking_slots_clear_recycled_cursors(self):
+        pool = self._pool()
+        req = _request()
+    
+        pool._alloc_ping_pong_buffer(req)
+    
+        self.assertEqual(req.kv.mamba_ping_pong_track_buffer.tolist(), [3, 4])
+>       self.assertEqual(pool.mamba_pool.replayssm_write_pos[[3, 4]].tolist(), [0, 0])
+E       AssertionError: Lists differ: [5, 7] != [0, 0]
+E       
+E       First differing element 0:
+E       5
+E       0
+E       
+E       - [5, 7]
+E       + [0, 0]
+
+test/registered/unit/mem_cache/test_replayssm_ping_pong_cursor.py:56: AssertionError
+_ TestReplaySSMPingPongCursor.test_donation_replacement_clears_recycled_cursor _
+
+self = <test_replayssm_ping_pong_cursor.TestReplaySSMPingPongCursor testMethod=test_donation_replacement_clears_recycled_cursor>
+
+    def test_donation_replacement_clears_recycled_cursor(self):
+        pool = self._pool(slots=(3, 4))
+        req = _request()
+        req.kv.mamba_ping_pong_track_buffer = torch.tensor([3, 4], dtype=torch.int64)
+        req.kv.mamba_next_track_idx = 1
+        req.kv.mamba_last_track_idx = 0
+    
+        donated = pool.donate_mamba_ping_pong_slot(req, torch.tensor([5]))
+    
+        self.assertEqual(donated.item(), 3)
+        self.assertEqual(req.kv.mamba_ping_pong_track_buffer.tolist(), [5, 4])
+>       self.assertEqual(pool.mamba_pool.replayssm_write_pos[5].item(), 0)
+E       AssertionError: 9 != 0
+
+test/registered/unit/mem_cache/test_replayssm_ping_pong_cursor.py:69: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/mem_cache/test_replayssm_ping_pong_cursor.py::TestReplaySSMPingPongCursor::test_allocated_tracking_slots_clear_recycled_cursors
+FAILED test/registered/unit/mem_cache/test_replayssm_ping_pong_cursor.py::TestReplaySSMPingPongCursor::test_donation_replacement_clears_recycled_cursor
+2 failed, 1 passed, 17 warnings in 8.19s

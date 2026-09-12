@@ -1590,6 +1590,12 @@ class HybridReqToTokenPool(ReqToTokenPool):
             "Not enough space for mamba ping pong idx, "
             "try to increase --mamba-full-memory-ratio."
         )
+        # A recycled ReplaySSM slot may carry its previous owner's ring cursor.
+        # Ping-pong slots hold complete checkpoints, so they must enter the
+        # buffer with no pending ring entries, just like a newly assigned live
+        # decode slot in alloc().
+        if self.mamba_pool.replayssm_write_pos is not None:
+            self.mamba_pool.replayssm_write_pos[slots] = 0
         buf = torch.full(
             (self.mamba_ping_pong_track_buffer_size,),
             -1,
@@ -1613,6 +1619,13 @@ class HybridReqToTokenPool(ReqToTokenPool):
         set_mamba_track_indices_from_reqs reads correct slot indices.
         """
         req.kv.mamba_ping_pong_track_buffer[idx] = value
+        # This is the single install point for donation replacements and lazy
+        # on-demand ping-pong slots. Avoid comparing a device tensor on the host:
+        # only clear callers pass the host-side -1 sentinel.
+        write_pos_buf = self.mamba_pool.replayssm_write_pos
+        if write_pos_buf is not None:
+            if isinstance(value, torch.Tensor) or value >= 0:
+                write_pos_buf[value] = 0
         self.req_index_to_mamba_ping_pong_track_buffer_mapping[req.kv.req_pool_idx] = (
             req.kv.mamba_ping_pong_track_buffer
         )
