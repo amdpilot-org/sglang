@@ -75,7 +75,7 @@ from sglang.srt.entrypoints.sidecar import (
     start_sidecar,
 )
 from sglang.srt.environ import envs
-from sglang.srt.layers.cp.base import is_cp_enabled, is_interleave
+from sglang.srt.layers.cp.base import get_cp_strategy, is_cp_enabled, is_interleave
 from sglang.srt.layers.moe.utils import (
     FlashinferA2ADispatchType,
     get_flashinfer_a2a_dispatch_type,
@@ -1116,6 +1116,19 @@ class TestContextParallelServerArgs(CustomTestCase):
         with self.assertRaisesRegex(ValueError, "--cp-strategy"):
             handle_context_parallelism(server_args)
 
+    def test_prefill_cp_min_tokens_cli(self):
+        args = self.parser.parse_args(
+            ["--model", "dummy", "--prefill-cp-min-tokens", "8192"]
+        )
+
+        self.assertEqual(resolution_result(args, "prefill_cp_min_tokens"), 8192)
+
+    def test_prefill_cp_min_tokens_must_be_non_negative(self):
+        server_args = self._new_cp_args(prefill_cp_min_tokens=-1)
+
+        with self.assertRaisesRegex(ValueError, "must be non-negative"):
+            handle_context_parallelism(server_args)
+
     @override_platform(is_hip=False, is_npu=False)
     def test_deepseek_v32_prefill_cp_rejects_zigzag(self):
         server_args = self._new_cp_args(
@@ -1145,10 +1158,12 @@ class TestContextParallelServerArgs(CustomTestCase):
             with self.subTest(option=option), self.assertRaises(SystemExit):
                 self.parser.parse_args(["--model", "dummy", option, *values])
 
+    @override_platform(is_hip=False, is_npu=False)
     def test_context_parallel_handler_initializes_cp_strategy(self):
         server_args = self._new_cp_args(
             enable_prefill_cp=True,
             cp_strategy="interleave",
+            prefill_cp_min_tokens=8192,
             attn_cp_size=2,
             tp_size=2,
         )
@@ -1157,6 +1172,7 @@ class TestContextParallelServerArgs(CustomTestCase):
 
         self.assertTrue(is_cp_enabled())
         self.assertTrue(is_interleave())
+        self.assertEqual(get_cp_strategy().min_tokens, 8192)
 
 
 class TestFlashinferA2ADispatchType(CustomTestCase):

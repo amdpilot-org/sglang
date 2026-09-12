@@ -66,6 +66,11 @@ def handle_context_parallelism(server_args: Any):
         raise ValueError(
             "--cp-strategy must be set when --enable-prefill-cp is enabled."
         )
+    if cfg.prefill_cp_min_tokens < 0:
+        raise ValueError(
+            "--prefill-cp-min-tokens must be non-negative, but got "
+            f"{cfg.prefill_cp_min_tokens}."
+        )
 
     view = resolved_view(server_args)
     if view.attn_cp_size > 1:
@@ -111,6 +116,7 @@ def handle_context_parallelism(server_args: Any):
         enable_prefill_cp=bool(cfg.enable_prefill_cp),
         cp_size=cfg.attn_cp_size,
         cp_strategy=cfg.cp_strategy,
+        min_tokens=cfg.prefill_cp_min_tokens,
     )
 
 
