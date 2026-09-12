@@ -1,0 +1,213 @@
+diff --git a/reports/j-7f1482351624/check_mamba_debug_assert_gpu.py b/reports/j-7f1482351624/check_mamba_debug_assert_gpu.py
+new file mode 100644
+index 000000000..089a3e121
+--- /dev/null
++++ b/reports/j-7f1482351624/check_mamba_debug_assert_gpu.py
+@@ -0,0 +1,53 @@
++"""Exercise the actual Mamba donation method with a device-resident slot."""
++
++from types import SimpleNamespace
++
++import torch
++
++from sglang.srt.mem_cache import memory_pool
++
++
++class Pool:
++    get_mamba_ping_pong_keep_idx = staticmethod(lambda req: 0)
++
++    @staticmethod
++    def set_mamba_ping_pong_slot(req, idx, value):
++        req.kv.mamba_ping_pong_track_buffer[idx] = value
++
++
++def run(debug: bool):
++    req = SimpleNamespace(
++        rid="gpu-regression",
++        kv=SimpleNamespace(
++            mamba_ping_pong_track_buffer=torch.tensor([-1, 7], device="cuda"),
++            mamba_next_track_idx=0,
++        ),
++    )
++    new_slot = torch.tensor([11], device="cuda")
++    memory_pool._MAMBA_DEBUG_ASSERTS = debug
++    outcome = "returned"
++    with torch.profiler.profile(
++        activities=[
++            torch.profiler.ProfilerActivity.CPU,
++            torch.profiler.ProfilerActivity.CUDA,
++        ]
++    ) as profile:
++        try:
++            memory_pool.HybridReqToTokenPool.donate_mamba_ping_pong_slot(
++                Pool(), req, new_slot
++            )
++        except AssertionError:
++            outcome = "asserted"
++    scalar_ops = sum(
++        event.count
++        for event in profile.key_averages()
++        if "local_scalar_dense" in event.key
++    )
++    return outcome, scalar_ops, req.kv.mamba_ping_pong_track_buffer.tolist()
++
++
++if __name__ == "__main__":
++    print(f"device={torch.cuda.get_device_name(0)}")
++    print(f"architecture={torch.cuda.get_device_properties(0).gcnArchName}")
++    print(f"debug_off={run(False)}")
++    print(f"debug_on={run(True)}")
+diff --git a/reports/j-7f1482351624/result.json b/reports/j-7f1482351624/result.json
+new file mode 100644
+index 000000000..a85d225c4
+--- /dev/null
++++ b/reports/j-7f1482351624/result.json
+@@ -0,0 +1,34 @@
++{
++  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31970",
++  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
++  "outcome": "candidate_verified",
++  "summary": "The recorded base already contains the exact main-branch fix merged by upstream PR 31982: both reported Tensor.item() invariants are gated by SGLANG_MAMBA_DEBUG_ASSERTS, which is off by default. Added regression coverage for both source locations and environment-value boundaries. On the assigned gfx950, the actual HybridReqToTokenPool donation method produced zero local-scalar profiler operations with debug disabled and one with debug enabled, where the invalid-slot assertion fired.",
++  "tests": [
++    {
++      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7f1482351624/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_debug_asserts.py (with the two gates temporarily replaced by unconditional branches)",
++      "exit_code": 1,
++      "what_was_measured": "Failing-before regression: the test rejected scalar reads not nested beneath _MAMBA_DEBUG_ASSERTS. Raw output: /tmp/amdpilot-repo-j-7f1482351624/failing-before.log"
++    },
++    {
++      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7f1482351624/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_debug_asserts.py",
++      "exit_code": 0,
++      "what_was_measured": "Both reported item() calls are structurally guarded; the flag is false for unset, 0, and true, and true only for 1. Two tests passed. Raw output: /tmp/amdpilot-repo-j-7f1482351624/evidence/passing-after.log"
++    },
++    {
++      "command": "ROCR_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7f1482351624/venv/bin/python reports/j-7f1482351624/check_mamba_debug_assert_gpu.py",
++      "exit_code": 0,
++      "what_was_measured": "On AMD Instinct MI350X gfx950, the actual HybridReqToTokenPool donation method returned with zero local_scalar_dense profiler events when debug was off; with debug on it emitted one local_scalar_dense event and asserted on the -1 slot. Raw output: /tmp/amdpilot-repo-j-7f1482351624/evidence/gpu-check.log"
++    }
++  ],
++  "gpu_execution": {
++    "value": true,
++    "evidence": "Single assigned AMD Instinct MI350X, architecture gfx950:sramecc+:xnack-. Device tensors exercised the actual donation method; debug_off=('returned', 0, [11, 7]), debug_on=('asserted', 1, [-1, 7])."
++  },
++  "native_rebuilt": false,
++  "remaining_limitations": [
++    "No Mamba or hybrid-SSM model weights were provided, so no full serving-path, sustained-load, throughput, detokenizer-heartbeat, or semantic-accuracy reproduction was performed.",
++    "The GPU fixture validates the reported synchronization primitive in one actual donation method, not the complete scheduler or mamba_radix_cache.cache_finished_req serving path.",
++    "No native sources changed and no native rebuild was applicable.",
++    "Source paths inspected: /job/repo/python/sglang/srt/mem_cache/mamba_radix_cache.py and /job/repo/python/sglang/srt/mem_cache/memory_pool.py."
++  ]
++}
+diff --git a/test/registered/unit/mem_cache/test_mamba_debug_asserts.py b/test/registered/unit/mem_cache/test_mamba_debug_asserts.py
+new file mode 100644
+index 000000000..2b3cb6a2f
+--- /dev/null
++++ b/test/registered/unit/mem_cache/test_mamba_debug_asserts.py
+@@ -0,0 +1,108 @@
++"""Regression tests for synchronization-free Mamba slot donation."""
++
++import ast
++import os
++import unittest
++from pathlib import Path
++from unittest.mock import patch
++
++from sglang.test.ci.ci_register import register_cpu_ci
++from sglang.test.test_utils import CustomTestCase
++
++register_cpu_ci(est_time=2, suite="base-a-test-cpu")
++
++
++_REPO_ROOT = Path(__file__).resolve().parents[4]
++_SOURCES = (
++    _REPO_ROOT / "python/sglang/srt/mem_cache/mamba_radix_cache.py",
++    _REPO_ROOT / "python/sglang/srt/mem_cache/memory_pool.py",
++)
++
++
++def _parse(path: Path) -> ast.Module:
++    return ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
++
++
++def _debug_flag_assignment(tree: ast.Module) -> ast.Assign:
++    matches = [
++        node
++        for node in tree.body
++        if isinstance(node, ast.Assign)
++        and any(
++            isinstance(target, ast.Name) and target.id == "_MAMBA_DEBUG_ASSERTS"
++            for target in node.targets
++        )
++    ]
++    if len(matches) != 1:
++        raise AssertionError(
++            f"expected one _MAMBA_DEBUG_ASSERTS assignment, found {len(matches)}"
++        )
++    return matches[0]
++
++
++class TestMambaDebugAsserts(CustomTestCase):
++    def test_flag_is_off_by_default_and_only_one_enables_it(self):
++        """Production defaults and non-canonical values must stay sync-free."""
++        for source in _SOURCES:
++            assignment = _debug_flag_assignment(_parse(source))
++            code = compile(
++                ast.fix_missing_locations(ast.Module(body=[assignment], type_ignores=[])),
++                str(source),
++                "exec",
++            )
++            for value, expected in ((None, False), ("0", False), ("true", False), ("1", True)):
++                env = {} if value is None else {"SGLANG_MAMBA_DEBUG_ASSERTS": value}
++                namespace = {"os": os}
++                with patch.dict(os.environ, env, clear=True):
++                    exec(code, namespace)
++                self.assertIs(namespace["_MAMBA_DEBUG_ASSERTS"], expected)
++
++    def test_scalar_reads_are_nested_under_debug_gate(self):
++        """Neither reported ``Tensor.item`` may execute on the default path."""
++        expected = {
++            "mamba_radix_cache.py": "src_active",
++            "memory_pool.py": "mamba_value_donated",
++        }
++        for source in _SOURCES:
++            tree = _parse(source)
++            guarded_item_receivers = []
++            unguarded_item_receivers = []
++
++            class Visitor(ast.NodeVisitor):
++                def __init__(self):
++                    self.debug_gate_depth = 0
++
++                def visit_If(self, node: ast.If):
++                    is_debug_gate = (
++                        isinstance(node.test, ast.Name)
++                        and node.test.id == "_MAMBA_DEBUG_ASSERTS"
++                    )
++                    self.debug_gate_depth += is_debug_gate
++                    for child in node.body:
++                        self.visit(child)
++                    self.debug_gate_depth -= is_debug_gate
++                    for child in node.orelse:
++                        self.visit(child)
++
++                def visit_Call(self, node: ast.Call):
++                    if (
++                        isinstance(node.func, ast.Attribute)
++                        and node.func.attr == "item"
++                        and isinstance(node.func.value, ast.Name)
++                        and node.func.value.id == expected[source.name]
++                    ):
++                        target = (
++                            guarded_item_receivers
++                            if self.debug_gate_depth
++                            else unguarded_item_receivers
++                        )
++                        target.append(node.func.value.id)
++                    self.generic_visit(node)
++
++            Visitor().visit(tree)
++            self.assertEqual(guarded_item_receivers, [expected[source.name]])
++            self.assertEqual(unguarded_item_receivers, [])
++
++
++if __name__ == "__main__":
++    unittest.main()

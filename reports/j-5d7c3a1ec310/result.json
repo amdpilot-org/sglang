@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31970",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "fc7f4447bf3957533ad13f882953b2f7b5cda0b8",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate is test-only hardening: it changes no production source. The recorded base already contains the production fix merged upstream in PR 31982, with both reported Tensor.item() calls gated by SGLANG_MAMBA_DEBUG_ASSERTS and disabled unless the value is exactly 1. The candidate regression passed, failed against the actual upstream pre-fix parent, and its GPU probe measured zero local_scalar_dense operations with debugging off versus one with debugging on in the actual HybridReqToTokenPool donation method. Independent structural and environment-boundary checks passed. Therefore the cumulative base plus candidate fully resolves the issue's source-level hot-path contract, while full hybrid-Mamba serving/load impact remains unverified due to absent weights.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5d7c3a1ec310/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_debug_asserts.py (at fc7f4447bf3957533ad13f882953b2f7b5cda0b8)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression at the exact requested commit; two tests passed. Evidence: reports/j-5d7c3a1ec310/evidence/candidate-regression.log"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5d7c3a1ec310/venv/bin/python reports/j-7f1482351624/check_mamba_debug_assert_gpu.py (at fc7f4447bf3957533ad13f882953b2f7b5cda0b8)",
+      "exit_code": 0,
+      "what_was_measured": "Actual HybridReqToTokenPool.donate_mamba_ping_pong_slot on gfx950: debug_off returned with zero local_scalar_dense profiler events; debug_on produced one event and asserted on an invalid slot. Evidence: reports/j-5d7c3a1ec310/evidence/candidate-gpu.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5d7c3a1ec310/venv/bin/python /job/independent_adversarial.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent AST parent-walk verified both target item() calls are beneath the exact gate; unset, empty, 00, 01, spaced true, and uppercase TRUE stayed disabled, while only 1 enabled both modules. Evidence: reports/j-5d7c3a1ec310/evidence/independent-adversarial.log"
+    },
+    {
+      "command": "Candidate scalar-read regression redirected to source files from upstream pre-fix parent 0eae9423d86ddf0c820dd47c97b97fb779467b91",
+      "exit_code": 1,
+      "what_was_measured": "The candidate regression rejected the real historical unguarded src_active.item() path, establishing failing-before sensitivity. Both historical unguarded source locations are recorded in historical-prefix-source.log. Evidence: reports/j-5d7c3a1ec310/evidence/historical-prefix-candidate-test.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X, gfx950:sramecc+:xnack-, ROCm 7.2 / torch 2.11.0+rocm7.2. The repository modules imported from /job/repo/python. Candidate probe result: debug_off=('returned', 0, [11, 7]); debug_on=('asserted', 1, [-1, 7])."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The mandated recorded base and image-prepared checkout are the same commit and already contain the production fix, so the original failure cannot honestly be reproduced on that base. Historical failing-before evidence uses the actual upstream pre-fix parent 0eae9423d86ddf0c820dd47c97b97fb779467b91 instead.",
+    "No hybrid-SSM/Mamba model weights were provided. Full serving-path sustained load, scheduler starvation, detokenizer heartbeat, throughput, and model-semantic behavior were not reproduced.",
+    "Dynamic GPU profiling exercised the actual memory_pool donation method. The mamba_radix_cache cache_finished_req location was independently verified structurally but was not executed end-to-end with a real request/cache/model fixture.",
+    "No native files changed between the base and candidate, repository-environment.json declares no separate native artifact, and no native rebuild was applicable.",
+    "The candidate itself is test-only hardening; the production correction is inherited from the recorded base rather than introduced by fc7f4447bf3957533ad13f882953b2f7b5cda0b8."
+  ],
+  "source_paths": [
+    "/job/repo/python/sglang/srt/mem_cache/mamba_radix_cache.py",
+    "/job/repo/python/sglang/srt/mem_cache/memory_pool.py"
+  ]
+}
