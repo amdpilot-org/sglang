@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36653",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1225",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1189",
+  "candidate_commit": "2cbfa20830d030560f04d9841dd75c2d2e7a42ea",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The recorded base reproducibly discards GLM5 NextN's resolved modelopt_fp4 configuration before decoder construction. The exact candidate preserves it for quantized GLM NextN layers while retaining checkpoint-declared BF16 GLM behavior and legacy unquantized DeepSeek behavior. This verifies the source-level correction, but the original two-node NVIDIA checkpoint load remains unavailable and unverified.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-93bcd4134769/venv/bin/python -m pytest -q /job/review-evidence-j-93bcd4134769/candidate-test.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before constructor/configuration reproduction: quantized GLM ModelOpt FP4 was stripped before decoder construction; 2 failed and the BF16-ignore boundary passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-93bcd4134769/venv/bin/python -m pytest -q test/registered/unit/models/test_glm5_nextn_quant_config.py (candidate 2cbfa20830d030560f04d9841dd75c2d2e7a42ea)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: quantized GLM handoff, BF16 ignore-list behavior, and legacy DeepSeek ModelOpt policy; 3 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-93bcd4134769/venv/bin/python /job/review-evidence-j-93bcd4134769/adversarial_nextn.py (candidate 2cbfa20830d030560f04d9841dd75c2d2e7a42ea)",
+      "exit_code": 0,
+      "what_was_measured": "Independent resolver and real constructor-handoff boundaries for unrelated ignores, dict-like config, exact BF16 exclusion, None, non-ModelOpt, and ModelOpt FP4."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-93bcd4134769/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_nextn_mm_embed.py test/registered/unit/models/test_glm5_nextn_quant_config.py (candidate 2cbfa20830d030560f04d9841dd75c2d2e7a42ea)",
+      "exit_code": 0,
+      "what_was_measured": "Five related NextN unit tests passed."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 2cbfa20830d030560f04d9841dd75c2d2e7a42ea",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The available GPU is one AMD Instinct MI350X gfx950 under ROCm 7.2. The issue requires ModelOpt NVFP4 on two NVIDIA sm_121 nodes; no unrelated AMD execution was counted as issue validation."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The original TP=2/two-node launch must still be run with LibertAIDAI/GLM-5.3-Flash-NVFP4 on NVIDIA sm_121 and show complete MTP weight loading on both ranks plus successful generation.",
+    "A full BF16 upstream-checkpoint NEXTN load was not tested.",
+    "A full TP=1 GLM-5.3-Flash-NVFP4 NEXTN load was not tested."
+  ],
+  "remaining_limitations": [
+    "The 320B checkpoint and two-node NVIDIA GB10 sm_121 environment were unavailable.",
+    "No end-to-end server startup, distributed weight load, generation correctness, semantic accuracy, or performance test was possible.",
+    "The available AMD gfx950 cannot execute NVIDIA ModelOpt NVFP4 kernels and does not qualify the reported architecture.",
+    "No native files changed, so a native rebuild was not applicable."
+  ]
+}
