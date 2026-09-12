@@ -7,8 +7,8 @@ must prove the put/wait round-trip.
 
 Run::
 
-    pytest test/registered/unit/distributed/test_pynccl_rma.py -q
-    python test/registered/unit/distributed/test_pynccl_rma.py --num-gpu 2
+    pytest test/registered/distributed/test_pynccl_rma.py -q
+    python test/registered/distributed/test_pynccl_rma.py --num-gpu 2
 """
 
 from __future__ import annotations
@@ -53,6 +53,37 @@ def test_rma_functions_have_argtypes():
         assert len(f.argtypes) > 0, f"{f.name} has empty argtypes"
 
 
+def test_optional_function_discovery_does_not_mutate_base_table(monkeypatch):
+    class _Fn:
+        def __call__(self, *args):
+            return 0
+
+    class _Lib:
+        pass
+
+    base_names = [f.name for f in W.NCCLLibrary.exported_functions]
+
+    def make_lib(rma_names):
+        lib = _Lib()
+        for name in base_names:
+            setattr(lib, name, _Fn())
+        for name in rma_names:
+            setattr(lib, name, _Fn())
+        return lib
+
+    all_rma = {f.name for f in W.NCCLLibrary.exported_functions_rma}
+    libs = {"full": make_lib(all_rma), "partial": make_lib({"ncclPutSignal"})}
+    monkeypatch.setattr(W.ctypes, "CDLL", lambda path: libs[path])
+    W.NCCLLibrary.path_to_library_cache.clear()
+    W.NCCLLibrary.path_to_dict_mapping.clear()
+
+    assert W.NCCLLibrary("full").has_rma is True
+    assert W.NCCLLibrary("partial").has_rma is False
+    assert [f.name for f in W.NCCLLibrary.exported_functions] == base_names
+    W.NCCLLibrary.path_to_library_cache.clear()
+    W.NCCLLibrary.path_to_dict_mapping.clear()
+
+
 def test_window_flag_matches_nccl_source():
     assert NCCL_WIN_COLL_SYMMETRIC == 0x01
 
@@ -85,11 +116,17 @@ def test_wait_signal_desc_layout_matches_nccl():
 
 def test_make_wait_descs_writes_each_peer_into_its_slot():
     """A peer/op_cnt column swap would wait on the wrong rank."""
-    descs_ptr, n = PyNcclCommunicator.make_wait_descs([(1, 3), (0, 1)])
-    assert n == 2
-    arr = (W.ncclWaitSignalDesc_t * 2).from_address(descs_ptr)
+    arr = PyNcclCommunicator.make_wait_descs([(1, 3), (0, 1)])
+    assert len(arr) == 2
     assert (arr[0].peer, arr[0].op_cnt) == (1, 3)
     assert (arr[1].peer, arr[1].op_cnt) == (0, 1)
+
+
+def test_make_wait_descs_keeps_storage_alive_after_allocator_churn():
+    arr = PyNcclCommunicator.make_wait_descs([(7, 11)])
+    for _ in range(1000):
+        ctypes.create_string_buffer(16)
+    assert (arr[0].peer, arr[0].op_cnt) == (7, 11)
 
 
 def test_make_nccl_config_header_matches_initializer():
