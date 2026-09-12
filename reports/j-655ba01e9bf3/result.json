@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33714",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the remaining hybrid-Mamba extra_buffer chunk-boundary failure on the prepared ROCm checkout: a prefix inserted during chunked prefill stayed unbacked when the final extend produced no new Mamba checkpoint. The fix makes finish-time component preparation fall back to the already committed cache_protected_len, causing the existing non-chunked insert walk to perform the deferred write-through without inserting or overwriting KV. Tests cover immediate write-through, selective threshold semantics, write-back compatibility, and the broader Mamba/unified-radix suites.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-655ba01e9bf3/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_radix_hicache_chunk_finalize.py (before fix)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression on GPU: the completed chunk-boundary node remained backuped=False. Raw output: reports/j-655ba01e9bf3/raw/failing-before.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-655ba01e9bf3/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_radix_hicache_chunk_finalize.py",
+      "exit_code": 0,
+      "what_was_measured": "Three GPU-backed lifecycle tests: chunked finalization writes through, write_through_selective counts one completed request touch and backs up at threshold two, and write_back remains non-eager. Raw output: reports/j-655ba01e9bf3/raw/passing-after-focused.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-655ba01e9bf3/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_unittest.py test/registered/unit/mem_cache/test_unified_radix_hicache_chunk_finalize.py",
+      "exit_code": 0,
+      "what_was_measured": "19 Mamba and new regression tests passed on the assigned AMD GPU. Raw output: reports/j-655ba01e9bf3/raw/mamba-regression-suite.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-655ba01e9bf3/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py",
+      "exit_code": 0,
+      "what_was_measured": "Full unified radix-cache regression module: 1210 passed, 1362 skipped, 58 subtests passed. Raw output: reports/j-655ba01e9bf3/raw/unified-radix-regression.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-655ba01e9bf3/venv/bin/python -m pre_commit run --files python/sglang/srt/mem_cache/unified_cache/components/mamba_component.py test/registered/unit/mem_cache/test_unified_radix_hicache_chunk_finalize.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, security, and registered-test validation hooks passed. Raw output: reports/j-655ba01e9bf3/raw/pre-commit-final.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-655ba01e9bf3/venv/bin/python test/registered/unit/mem_cache/test_unified_radix_hicache_chunk_finalize.py -v",
+      "exit_code": 0,
+      "what_was_measured": "The registered CI file entrypoint actually executes all three tests. Raw output: reports/j-655ba01e9bf3/raw/registered-entrypoint.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Tests allocated and transferred real cache tensors on one AMD Instinct MI355X using Torch 2.11.0+rocm7.2 / HIP 7.2.26015. A separate GPU-vs-CPU arithmetic sanity check matched 120.0 == 120; this sanity check is not claimed as feature evidence. Raw output: reports/j-655ba01e9bf3/raw/gpu-environment.txt"
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported 256K hybrid-KDA production model and its weights were unavailable, so that exact architecture/context length was not run.",
+    "No two-server MooncakeStore deployment was available; cross-instance storage reload was not measured. The regression instead verifies the same native HiCache backup state transition and controller path with real GPU pools.",
+    "Independent model-output numerical comparison is not applicable because the change only alters cache finalization bookkeeping and transfer scheduling; no kernel or model forward computation changed.",
+    "No native code changed, repository-environment.json declares native=null, and therefore no native rebuild was required or performed.",
+    "Current main already re-walks completed chunked prefixes for ordinary attention models. The verified remaining defect and fix are specific to hybrid-Mamba extra_buffer final chunks that create no new checkpoint. ReplaySSM/no_buffer behavior is unchanged."
+  ]
+}
