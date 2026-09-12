@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37755",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "PR 971 is test-only hardening for fused-QKV logic already present on the recorded base. All six candidate tests pass unchanged on that base, so they do not reproduce or discriminate the original ModelSlim/Ascend accuracy failure. Independent synthetic layout checks passed, but the private checkpoint and reported Ascend topology were unavailable; the claim that the original issue is corrected remains unverified.",
+  "tests": [
+    {
+      "command": "SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK=0 /tmp/amdpilot-repo-j-4b5ca5633170/venv/bin/python -m pytest -q /job/candidate-test.py (at recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate test content passed 6/6 before applying the candidate, demonstrating test-only hardening rather than a failing-before/passing-after regression."
+    },
+    {
+      "command": "SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK=0 /tmp/amdpilot-repo-j-4b5ca5633170/venv/bin/python -m pytest -q test/registered/unit/models/test_mimo_v2_fused_qkv_weights.py (at 2e9ee6b921a55734331216fef05ff3390b9073ca)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's six synthetic unit cases passed at the exact reviewed commit."
+    },
+    {
+      "command": "SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-4b5ca5633170/venv/bin/python /job/adversarial_mimo_review.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent mapping across runtime TP 1/2/4/8 and all ranks, plus non-uniform block-scale association on CPU and AMD Instinct MI355X gfx950; all passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The independent non-uniform scale fixture executed on AMD Instinct MI355X, gfx950:sramecc+:xnack-, and recovered [1,1,3.000000238,3.000000238,2,4,2,4] against [1,1,3,3,2,4,2,4]. This validates only synthetic tensor arithmetic, not Ascend execution or model accuracy."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The candidate's complete regression suite passes on the recorded base commit, despite the original issue remaining open; it therefore cannot demonstrate that the candidate fixes the reported failure.",
+    "No test loads the reported MiMo-V2.5-Pro-W8A8 ModelSlim checkpoint or independently confirms its real tensor names, shapes, ordering, and scale metadata.",
+    "No test measures generated-token or semantic accuracy on MiMo-V2.5-Pro-W8A8.",
+    "No test executes the Ascend/CANN load and serving path or the reported two-node TP32/DP4 topology."
+  ],
+  "remaining_limitations": [
+    "The private reported checkpoint was unavailable.",
+    "Ascend 910 hardware and CANN 9.1 were unavailable.",
+    "Only one AMD Instinct MI355X gfx950 GPU was assigned; no multi-node or 64-device reproduction was possible.",
+    "The candidate changed no production/native source; no native rebuild was applicable.",
+    "The prepared checkout exactly matched the recorded base commit."
+  ]
+}
