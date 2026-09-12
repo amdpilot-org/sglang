@@ -2,6 +2,7 @@ import asyncio
 import io
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -21,6 +22,13 @@ logger = logging.getLogger(__name__)
 # boundary jitter (" ," vs ",") doesn't leak into deltas. Covers both
 # ASCII punctuation and the CJK / fullwidth equivalents.
 _PUNCT_WS_RE = re.compile(r"\s+([,.;:!?，。！？；：、])")
+
+
+def _is_punctuation_only(text: str) -> bool:
+    """Return whether a non-empty suffix consists entirely of punctuation."""
+    return bool(text) and all(
+        unicodedata.category(char).startswith("P") for char in text
+    )
 
 
 @dataclass
@@ -53,22 +61,38 @@ class StreamingASRState:
 
     def _record_emit(self, delta: str) -> str:
         if delta:
-            self.emitted_text = (
-                f"{self.emitted_text} {delta}".strip() if self.emitted_text else delta
+            separator = (
+                " "
+                if needs_space(self.emitted_text, delta)
+                and not _is_punctuation_only(delta)
+                else ""
             )
+            self.emitted_text = f"{self.emitted_text}{separator}{delta}".strip()
         return delta
 
     def update(self, new_transcript: str) -> str:
         old_confirmed = self.confirmed_text
         words = new_transcript.split()
         if len(words) > self.unfixed_token_num:
-            self.confirmed_text = " ".join(words[: -self.unfixed_token_num])
+            new_confirmed = " ".join(words[: -self.unfixed_token_num])
         else:
-            self.confirmed_text = ""
+            new_confirmed = ""
         self.full_transcript = new_transcript
         self.chunk_index += 1
-        if self.confirmed_text.startswith(old_confirmed):
-            return self._record_emit(self.confirmed_text[len(old_confirmed) :].strip())
+        rollback_suffix = old_confirmed[len(new_confirmed) :]
+        is_prefix_rollback = old_confirmed.startswith(new_confirmed) and (
+            not needs_space(new_confirmed, rollback_suffix)
+            or _is_punctuation_only(rollback_suffix)
+        )
+        if is_prefix_rollback:
+            return ""
+        self.confirmed_text = new_confirmed
+        suffix = self.confirmed_text[len(old_confirmed) :]
+        is_append_only = self.confirmed_text.startswith(old_confirmed) and (
+            not needs_space(old_confirmed, suffix) or _is_punctuation_only(suffix)
+        )
+        if is_append_only:
+            return self._record_emit(suffix.strip())
         # Model revised earlier text, use word level common prefix to avoid
         # re-emitting already-sent content and cutting mid-word.
         old_words = old_confirmed.split()
