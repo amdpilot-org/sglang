@@ -1134,6 +1134,18 @@ class TRTLLMHAAttnBackend(FlashInferAttnBackend):
         else:
             has_swa = self._swa_kv_pool is not None
             metadata.page_table = torch.empty(
+                (batch_size, self.max_num_pages), dtype=torch.int32, device=device
+            )
+            metadata.swa_page_table = (
+                torch.empty(
+                    (batch_size, self.max_num_pages), dtype=torch.int32, device=device
+                )
+                if has_swa
+                else None
+            )
+            self._fill_page_table_device(
+                metadata, forward_batch.req_pool_indices, metadata.cache_seqlens_int32
+            )
         self._maybe_build_cp_zigzag_page_tables(metadata, forward_batch)
 
         if self._needs_encoder_only_expand(forward_batch.forward_mode, metadata):

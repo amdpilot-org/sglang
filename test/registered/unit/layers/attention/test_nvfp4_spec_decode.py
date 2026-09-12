@@ -270,6 +270,7 @@ class TestTRTLLMMHANVFP4SpecExtend(CustomTestCase):
                 with patch(
                     "sglang.srt.layers.attention.trtllm_mha_backend.is_cp_v2_active",
                     return_value=False,
+                    create=True,
                 ):
                     output = backend.forward_extend(q, k, v, layer, batch)
 
@@ -310,6 +311,7 @@ class TestTRTLLMMHANVFP4SpecExtend(CustomTestCase):
         with patch(
             "sglang.srt.layers.attention.trtllm_mha_backend.is_cp_v2_active",
             return_value=False,
+            create=True,
         ):
             output = backend.forward_extend(q, q, q, layer, batch)
 
@@ -360,6 +362,7 @@ class TestTRTLLMMHANVFP4SpecExtend(CustomTestCase):
             patch(
                 "sglang.srt.layers.attention.trtllm_mha_backend.is_cp_v2_active",
                 return_value=False,
+                create=True,
             ),
             patch(
                 "sglang.srt.layers.attention.trtllm_mha_backend.flashinfer",
@@ -416,6 +419,7 @@ class TestTRTLLMMHANVFP4SpecExtend(CustomTestCase):
             patch(
                 "sglang.srt.layers.attention.trtllm_mha_backend.is_cp_v2_active",
                 return_value=False,
+                create=True,
             ),
             patch(
                 "sglang.srt.layers.attention.trtllm_mha_backend.flashinfer",

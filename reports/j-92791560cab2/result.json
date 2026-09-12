@@ -1,0 +1,31 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36010",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1371",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1288",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/1340",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that the exact candidate only translates the first GPU-only speculative FP4 workspace failure into RuntimeError. Ported the graph-safe native TRTLLM MHA FP4 route for target verify and draft extend, including external draft backend resolution, packed KV scales, and fixed/ragged XQA masks, while retaining the candidate's actionable workspace guard.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/tmp/j92791560-candidate/python /tmp/amdpilot-repo-j-92791560cab2/venv/bin/python -c '<direct _prepare_dequant_extend_workspace call with extend_prefix_lens_cpu=None>'",
+      "exit_code": 1,
+      "what_was_measured": "Exact candidate still terminates with RuntimeError instead of completing speculative target verification; raw log: reports/j-92791560cab2/candidate-target-verify-failure.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-92791560cab2/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_nvfp4_spec_decode.py",
+      "exit_code": 0,
+      "what_was_measured": "18 tests and 16 subtests passed: configuration resolution, hybrid routing, stale workspace guard, TARGET_VERIFY, DRAFT_EXTEND_V2, legacy external draft extend, packed FP4 KV/scales, and fixed/ragged XQA masks. Host-side mocks, not numerical CUDA execution."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned gfx950 ROCm device cannot execute the issue's SM120 CUDA FlashInfer/TRTLLM NVFP4 path; no unrelated AMD smoke is counted."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No RTX 5090/SM120 CUDA device or Qwen3.8-27B-NVFP4 weights were available for a local full-model serving or CUDA graph replay.",
+    "The focused regressions verify control flow, arguments, and masks with mocks; they do not independently establish numerical NVFP4 attention output on this host.",
+    "No native source was changed, so a native rebuild was not applicable."
+  ]
+}
