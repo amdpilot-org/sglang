@@ -1,0 +1,135 @@
+FF.FFF..                                                                 [100%]
+=================================== FAILURES ===================================
+_ TestTokenizerManagerWeightUpdates.test_cancellation_keeps_ownership_until_response_is_drained _
+
+self = <candidate_test.TestTokenizerManagerWeightUpdates testMethod=test_cancellation_keeps_ownership_until_response_is_drained>
+
+    async def test_cancellation_keeps_ownership_until_response_is_drained(self):
+        manager, scheduler = _manager()
+        first = asyncio.create_task(manager.update_weights_from_disk(_request("first")))
+        await scheduler.wait_for_requests(1)
+        first.cancel()
+        await asyncio.sleep(0)
+
+        second = asyncio.create_task(manager.update_weights_from_disk(_request("second")))
+        try:
+            await asyncio.sleep(0)
+>           self.assertEqual(
+                len(scheduler.requests),
+                1,
+                "a cancelled update released ownership before its response arrived",
+            )
+E           AssertionError: 2 != 1 : a cancelled update released ownership before its response arrived
+
+../review-evidence-j-275f05e568eb/candidate_test.py:124: AssertionError
+_ TestTokenizerManagerWeightUpdates.test_cancelled_successful_update_still_publishes_weight_version _
+
+self = <candidate_test.TestTokenizerManagerWeightUpdates testMethod=test_cancelled_successful_update_still_publishes_weight_version>
+
+    async def test_cancelled_successful_update_still_publishes_weight_version(self):
+        manager, scheduler = _manager()
+        published_versions = []
+        manager._update_weight_version_if_provided = published_versions.append
+        request = UpdateWeightFromDiskReqInput(
+            model_path="model",
+            load_format="dummy",
+            weight_version="version-1",
+        )
+        update = asyncio.create_task(manager.update_weights_from_disk(request))
+        await scheduler.wait_for_requests(1)
+
+        update.cancel()
+        await asyncio.sleep(0)
+>       scheduler.complete("complete")
+
+../review-evidence-j-275f05e568eb/candidate_test.py:178:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+../review-evidence-j-275f05e568eb/candidate_test.py:36: in complete
+    self.manager._handle_update_weights_from_disk_req_output(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sglang.srt.managers.tokenizer_manager.TokenizerManager object at 0x75ea4e4feed0>
+recv_obj = UpdateWeightFromDiskReqOutput(rid=None, http_worker_ipc=None, success=True, message='complete', num_paused_requests=0)
+
+    def _handle_update_weights_from_disk_req_output(self, recv_obj):
+        if self.model_update_expected_workers == 1:
+>           self.model_update_result.set_result(recv_obj)
+E           asyncio.exceptions.InvalidStateError: invalid state
+
+python/sglang/srt/managers/tokenizer_manager.py:3382: InvalidStateError
+_ TestTokenizerManagerWeightUpdates.test_paused_concurrent_updates_each_receive_own_completion _
+
+self = <candidate_test.TestTokenizerManagerWeightUpdates testMethod=test_paused_concurrent_updates_each_receive_own_completion>
+
+    async def test_paused_concurrent_updates_each_receive_own_completion(self):
+        manager, scheduler = _manager()
+        first = asyncio.create_task(manager.update_weights_from_disk(_request("first")))
+        second = asyncio.create_task(manager.update_weights_from_disk(_request("second")))
+
+        try:
+            await scheduler.wait_for_requests(1)
+            scheduler.complete("first complete")
+
+            done, _ = await asyncio.wait({first}, timeout=0.1)
+>           self.assertIn(first, done, "the first update lost its completion")
+E           AssertionError: <Task pending name='Task-22' coro=<TokenizerManager.update_weights_from_disk() running at /job/repo/python/sglang/srt/managers/tokenizer_manager.py:2082> wait_for=<Future pending cb=[Task.task_wakeup()] created at /job/repo/python/sglang/srt/managers/tokenizer_manager.py:2139> created at /usr/lib/python3.12/asyncio/tasks.py:420> not found in set() : the first update lost its completion
+
+../review-evidence-j-275f05e568eb/candidate_test.py:99: AssertionError
+_ TestTokenizerManagerWeightUpdates.test_paused_update_blocks_resume_until_completion _
+
+self = <candidate_test.TestTokenizerManagerWeightUpdates testMethod=test_paused_update_blocks_resume_until_completion>
+
+    async def test_paused_update_blocks_resume_until_completion(self):
+        manager, scheduler = _manager()
+        update = asyncio.create_task(manager.update_weights_from_disk(_request("model")))
+        await scheduler.wait_for_requests(1)
+
+        async def resume():
+            async with manager.is_pause_cond:
+                manager.is_pause = False
+
+        resume_task = asyncio.create_task(resume())
+        await asyncio.sleep(0)
+>       self.assertFalse(resume_task.done())
+E       AssertionError: True is not false
+
+../review-evidence-j-275f05e568eb/candidate_test.py:80: AssertionError
+_ TestTokenizerManagerWeightUpdates.test_repeated_cancellation_cannot_interrupt_response_drain _
+
+self = <candidate_test.TestTokenizerManagerWeightUpdates testMethod=test_repeated_cancellation_cannot_interrupt_response_drain>
+
+    async def test_repeated_cancellation_cannot_interrupt_response_drain(self):
+        manager, scheduler = _manager()
+        update = asyncio.create_task(manager.update_weights_from_disk(_request("model")))
+        await scheduler.wait_for_requests(1)
+
+        update.cancel()
+        await asyncio.sleep(0)
+        update.cancel()
+        await asyncio.sleep(0)
+>       self.assertFalse(
+            update.done(),
+            "repeated cancellation released ownership before the response",
+        )
+E       AssertionError: True is not false : repeated cancellation released ownership before the response
+
+../review-evidence-j-275f05e568eb/candidate_test.py:155: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../review-evidence-j-275f05e568eb/candidate_test.py::TestTokenizerManagerWeightUpdates::test_cancellation_keeps_ownership_until_response_is_drained
+FAILED ../review-evidence-j-275f05e568eb/candidate_test.py::TestTokenizerManagerWeightUpdates::test_cancelled_successful_update_still_publishes_weight_version
+FAILED ../review-evidence-j-275f05e568eb/candidate_test.py::TestTokenizerManagerWeightUpdates::test_paused_concurrent_updates_each_receive_own_completion
+FAILED ../review-evidence-j-275f05e568eb/candidate_test.py::TestTokenizerManagerWeightUpdates::test_paused_update_blocks_resume_until_completion
+FAILED ../review-evidence-j-275f05e568eb/candidate_test.py::TestTokenizerManagerWeightUpdates::test_repeated_cancellation_cannot_interrupt_response_drain
+5 failed, 3 passed, 16 warnings in 9.07s
+pytest_exit=1
