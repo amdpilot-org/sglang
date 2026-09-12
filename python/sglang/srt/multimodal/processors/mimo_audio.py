@@ -163,6 +163,12 @@ class MiMoAudioPipeline:
         return math.ceil(n / self.audio_group_size)
 
     def preprocess_audio(self, audio):
+        with common.observe_media_load(
+            getattr(self, "metrics_collector", None), "audio"
+        ):
+            return self._preprocess_audio(audio)
+
+    def _preprocess_audio(self, audio):
         """Load audio source → log-mel spectrogram + token length.
 
         Input: filename string, bytes, or tuple of (waveform, original_sr).

@@ -20,7 +20,7 @@ from sglang.srt.multimodal.processors.base_processor import (
 from sglang.srt.multimodal.processors.base_processor import (
     MultimodalSpecialTokens,
 )
-from sglang.srt.utils.common import download_remote_media
+from sglang.srt.utils.common import download_remote_media, observe_media_load
 
 
 class MossVLImageProcessor(SGLangBaseProcessor):
@@ -458,6 +458,12 @@ class MossVLImageProcessor(SGLangBaseProcessor):
         return temp_path, temp_path
 
     def _normalize_single_video_input(
+        self, video_input: Union[str, Dict]
+    ) -> Tuple[Union[str, Dict], List[str]]:
+        with observe_media_load(self.metrics_collector, "video"):
+            return self._normalize_single_video_input_impl(video_input)
+
+    def _normalize_single_video_input_impl(
         self, video_input: Union[str, Dict]
     ) -> Tuple[Union[str, Dict], List[str]]:
         temp_paths: List[str] = []

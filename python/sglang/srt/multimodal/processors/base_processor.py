@@ -6,6 +6,7 @@ import multiprocessing as mp
 import os
 import re
 import threading
+import time
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import (
@@ -58,6 +59,7 @@ from sglang.srt.utils import (
     load_image,
     load_video,
     logger,
+    observe_media_load,
     smart_to_rgb,
 )
 
@@ -951,6 +953,7 @@ class BaseMultimodalProcessor(ABC):
         frame_count_limit=None,
         audio_sample_rate: Optional[int] = None,
         discard_alpha_channel=True,
+        metrics_collector=None,
     ):
         """
         Load a single multimodal data.
@@ -959,26 +962,27 @@ class BaseMultimodalProcessor(ABC):
 
         Class method that can be pickled for multiprocessing
         """
-        if cls._is_preprocessed_input(data):
-            return data
         try:
-            if modality == Modality.IMAGE:
-                img, _ = load_image(data, cls.gpu_image_decode)
-                if isinstance(img, torch.Tensor):
-                    return img  # JPEG already decoded on GPU by nvJPEG
-                # PIL decodes lazily; do it here in the io worker so the decode
-                # doesn't run later on the event-loop thread.
-                if discard_alpha_channel:
-                    if cls.smart_rgb_conversion:
-                        return smart_to_rgb(img)
-                    if img.mode != "RGB":
-                        return img.convert("RGB")
-                img.load()
-                return img
-            elif modality == Modality.VIDEO:
-                return load_video(data, frame_count_limit)
-            elif modality == Modality.AUDIO:
-                return load_audio(data, audio_sample_rate)
+            with observe_media_load(metrics_collector, modality.name.lower()):
+                if cls._is_preprocessed_input(data):
+                    return data
+                if modality == Modality.IMAGE:
+                    img, _ = load_image(data, cls.gpu_image_decode)
+                    if isinstance(img, torch.Tensor):
+                        return img  # JPEG already decoded on GPU by nvJPEG
+                    # PIL decodes lazily; do it here in the io worker so the decode
+                    # doesn't run later on the event-loop thread.
+                    if discard_alpha_channel:
+                        if cls.smart_rgb_conversion:
+                            return smart_to_rgb(img)
+                        if img.mode != "RGB":
+                            return img.convert("RGB")
+                    img.load()
+                    return img
+                elif modality == Modality.VIDEO:
+                    return load_video(data, frame_count_limit)
+                elif modality == Modality.AUDIO:
+                    return load_audio(data, audio_sample_rate)
 
         except CLIENT_MEDIA_EXCEPTIONS as e:
             data_str = str(data)
@@ -1070,6 +1074,7 @@ class BaseMultimodalProcessor(ABC):
                 None,  # frame_count_limit: no consider for fast path
                 audio_sample_rate,
                 discard_alpha_channel,
+                getattr(self, "metrics_collector", None),
             )
             futures.append((modality, idx, future))
 
@@ -1130,6 +1135,7 @@ class BaseMultimodalProcessor(ABC):
                         frame_count_limit,
                         audio_sample_rate,
                         discard_alpha_channel,
+                        getattr(self, "metrics_collector", None),
                     )
                 )
                 task_info.append((modality, data, frame_count_limit))
@@ -1212,6 +1218,22 @@ class BaseMultimodalProcessor(ABC):
         return is_precomputed, images, videos, audios
 
     async def load_mm_data(
+        self,
+        *args,
+        **kwargs,
+    ) -> BaseMultiModalProcessorOutput:
+        return await self._observe_mm_load_data(self._load_mm_data(*args, **kwargs))
+
+    async def _observe_mm_load_data(self, awaitable):
+        started_at = time.perf_counter()
+        try:
+            return await awaitable
+        finally:
+            metrics_collector = getattr(self, "metrics_collector", None)
+            if metrics_collector is not None:
+                metrics_collector.observe_mm_load_data(time.perf_counter() - started_at)
+
+    async def _load_mm_data(
         self,
         prompt: str,
         multimodal_tokens: MultimodalSpecialTokens,
@@ -1661,7 +1683,7 @@ class BaseMultimodalProcessor(ABC):
         """
         if processor is not None:
             kwargs["processor"] = processor
-        ret = self.process_mm_data(
+        ret = self._call_process_mm_data(
             input_text=input_text,
             images=images,
             audios=audios,
@@ -1673,6 +1695,23 @@ class BaseMultimodalProcessor(ABC):
         collected_items = self.collect_mm_items_from_processor_output(ret)
 
         return collected_items, input_ids, ret
+
+    def _call_process_mm_data(self, **kwargs) -> dict:
+        """Time the shared dispatch so subclass overrides cannot bypass metrics."""
+        with self._observe_mm_processor():
+            return self.process_mm_data(**kwargs)
+
+    @contextmanager
+    def _observe_mm_processor(self):
+        processor_started_at = time.perf_counter()
+        try:
+            yield
+        finally:
+            metrics_collector = getattr(self, "metrics_collector", None)
+            if metrics_collector is not None:
+                metrics_collector.observe_mm_processor(
+                    time.perf_counter() - processor_started_at
+                )
 
     @staticmethod
     def _ensure_input_ids_is_tensor(input_ids) -> Optional[torch.Tensor]:

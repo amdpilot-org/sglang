@@ -1593,7 +1593,73 @@ def _assert_media_url_allowed(url: str) -> None:
         )
 
 
+@dataclass(frozen=True)
+class MediaDownloadTiming:
+    seconds: float
+    size_bytes: Optional[int]
+
+
+_media_download_capture = threading.local()
+
+
+@contextmanager
+def capture_media_download_timings():
+    """Capture downloads in this thread without conflating non-URL media."""
+    previous = getattr(_media_download_capture, "timings", None)
+    timings = []
+    _media_download_capture.timings = timings
+    try:
+        yield timings
+    finally:
+        _media_download_capture.timings = previous
+
+
+@contextmanager
+def observe_media_load(metrics_collector, modality: str):
+    """Observe one complete media load, including any guarded downloads."""
+    started_at = time.perf_counter()
+    download_timings = []
+    try:
+        with capture_media_download_timings() as download_timings:
+            yield
+    finally:
+        if metrics_collector is not None:
+            successful_sizes = [
+                timing.size_bytes
+                for timing in download_timings
+                if timing.size_bytes is not None
+            ]
+            metrics_collector.observe_mm_media_load(
+                modality=modality,
+                load_seconds=time.perf_counter() - started_at,
+                download_seconds=(
+                    sum(timing.seconds for timing in download_timings)
+                    if download_timings
+                    else None
+                ),
+                download_bytes=(sum(successful_sizes) if successful_sizes else None),
+            )
+
+
 def download_remote_media(url: str, timeout: float) -> bytes:
+    started_at = time.perf_counter()
+    size_bytes = None
+    try:
+        result = _download_remote_media(url, timeout)
+        size_bytes = len(result)
+        return result
+    finally:
+        timings = getattr(_media_download_capture, "timings", None)
+        if timings is not None:
+            timings.append(
+                MediaDownloadTiming(
+                    seconds=time.perf_counter() - started_at,
+                    size_bytes=size_bytes,
+                )
+            )
+
+
+def _download_remote_media(url: str, timeout: float) -> bytes:
     """Download one HTTP(S) media object under the configured URL policy.
 
     Redirects are followed manually so every destination is validated before
