@@ -1,0 +1,53 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/18891",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "e866f0bc4107875d64c299bef69e78d94e3507a2",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the prior buffer omission and empty-selection false success, but fails to compare checkpoints for production-style diffusion parameters whose loaders require BasevLLMParameter subclass methods. A normal update succeeds and the comparison raises AttributeError because the expected-value scratch object is a plain torch.nn.Parameter.",
+  "tests": [
+    {
+      "command": "At prepared base 358c163250ad3b1f62939b01ce1314a0a31a0365: search runtime sources and import compare_module_weights_with_disk",
+      "exit_code": 0,
+      "what_was_measured": "The compare endpoint/function is absent on the recorded base, reproducing the original missing feature."
+    },
+    {
+      "command": "At parent candidate fe932bb414defb11ff95d456848455b5b2c3fd99: ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ab5f56374ce2/venv/bin/python /job/review-evidence-j-ab5f56374ce2/adversarial_review.py",
+      "exit_code": 0,
+      "what_was_measured": "Independently reproduced both prior-review false successes: a mismatched checkpoint-present running_mean returned match=true and module_names=[] returned success=true with no modules."
+    },
+    {
+      "command": "At candidate e866f0bc4107875d64c299bef69e78d94e3507a2: ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ab5f56374ce2/venv/bin/python /job/review-evidence-j-ab5f56374ce2/adversarial_review.py",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI355X, matching parameter+buffer state matched, a live buffer sign change was detected, runtime-only/unknown state was excluded, and an empty module selection was rejected."
+    },
+    {
+      "command": "At candidate e866f0bc4107875d64c299bef69e78d94e3507a2: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ab5f56374ce2/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_disk_server_checksum.py python/sglang/multimodal_gen/test/unit/test_layerwise_offload.py -k 'disk_server_checksum or mapped_weights_are_visible_to_checksums or explicit_empty_module_selection'",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression coverage and selected offload coverage: 6 passed, 149 deselected."
+    },
+    {
+      "command": "At candidate e866f0bc4107875d64c299bef69e78d94e3507a2: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ab5f56374ce2/venv/bin/python /job/review-evidence-j-ab5f56374ce2/parameter_subclass_review.py",
+      "exit_code": 0,
+      "what_was_measured": "A checkpoint loaded successfully through a real BasevLLMParameter-style loader, then compare_module_weights_with_disk failed with AttributeError because its plain Parameter scratch lacks load_column_parallel_weight."
+    },
+    {
+      "command": "At candidate e866f0bc4107875d64c299bef69e78d94e3507a2: python -m compileall -q changed Python package paths; git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources compiled and the candidate diff had no whitespace errors."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI355X using torch 2.11.0+rocm7.2 and HIP 7.2.26015; an independent GPU-resident parameter+buffer comparison matched before mutation and detected the mutated buffer afterward.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A checkpoint can load successfully into a BasevLLMParameter using a production-style loader that calls param.load_column_parallel_weight, while compare_module_weights_with_disk raises AttributeError because _make_checksum_scratch returns a plain torch.nn.Parameter without the subclass method."
+  ],
+  "remaining_limitations": [
+    "FLUX.2-klein and Qwen-Image weights were unavailable, so model-specific VAE/text-encoder end-to-end and HTTP serving validation remain unverified.",
+    "Only one GPU was assigned; multi-rank TP/SP/DTensor behavior was not exercised.",
+    "No native source changed, so no native rebuild was applicable.",
+    "The deterministic tiny Llama fixture cannot qualify diffusion VAE/text-encoder architecture or semantics and was not used."
+  ]
+}
