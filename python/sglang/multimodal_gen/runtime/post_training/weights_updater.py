@@ -52,10 +52,12 @@ from sglang.multimodal_gen.runtime.loader.utils import (
     get_param_names_mapping,
 )
 from sglang.multimodal_gen.runtime.loader.weight_utils import (
+    compute_weights_checksum,
     safetensors_weights_iterator,
 )
 from sglang.multimodal_gen.runtime.managers.memory_managers.layerwise_offload import (
     is_layerwise_offloaded_module,
+    iter_materialized_weights,
 )
 from sglang.multimodal_gen.runtime.managers.memory_managers.weight_snapshot import (
     restore_weight_snapshot,
@@ -344,6 +346,89 @@ def load_weights_into_model(
                         f"model={param.shape}, loaded={loaded_weight.shape}"
                     )
                 param.data.copy_(loaded_weight.to(param.dtype))
+
+
+def _local_parameter_tensor(param: torch.Tensor) -> torch.Tensor:
+    if isinstance(param, DTensor):
+        return param.to_local()
+    if isinstance(getattr(param, "data", None), DTensor):
+        return param.data.to_local()
+    return param
+
+
+def _make_checksum_scratch(param: torch.Tensor) -> torch.nn.Parameter:
+    """Make a CPU parameter accepted by the original parameter's weight loader."""
+    local = _local_parameter_tensor(param)
+    scratch = torch.nn.Parameter(
+        torch.zeros(local.shape, dtype=local.dtype, device="cpu"),
+        requires_grad=False,
+    )
+    # Parallel-linear loaders keep shard metadata on the Parameter object.
+    scratch.__dict__.update(getattr(param, "__dict__", {}))
+    return scratch
+
+
+def compare_module_weights_with_disk(
+    module: torch.nn.Module, weights_dir: str
+) -> dict[str, Any]:
+    """Compare checkpoint tensors with live tensors in model-parameter space.
+
+    Checkpoint names are passed through the exact same name mapping and custom
+    ``weight_loader`` callbacks as a real update. This makes the comparison
+    valid for renamed and fused QKV/gate-up parameters without architecture-
+    specific checksum rules. Only parameters represented by the checkpoint are
+    included, so runtime-only parameters and buffers cannot create false
+    mismatches.
+    """
+    model_params = dict(module.named_parameters())
+    expected: dict[str, torch.nn.Parameter] = {}
+
+    for name, loaded_weight, shard_id in _iter_module_weight_updates(
+        module, _get_weights_iter(weights_dir), model_params
+    ):
+        param = model_params[name]
+        weight_loader = getattr(param, "weight_loader", None)
+        if callable(weight_loader):
+            scratch = expected.get(name)
+            if scratch is None:
+                scratch = _make_checksum_scratch(param)
+                expected[name] = scratch
+            value = loaded_weight.to(device="cpu", dtype=scratch.dtype)
+            if shard_id is None:
+                weight_loader(scratch, value)
+            else:
+                weight_loader(scratch, value, shard_id)
+        else:
+            local = _local_parameter_tensor(param)
+            if tuple(local.shape) != tuple(loaded_weight.shape):
+                raise ValueError(
+                    f"Cannot compare {name}: server shape {tuple(local.shape)} "
+                    f"does not match disk shape {tuple(loaded_weight.shape)}"
+                )
+            scratch = _make_checksum_scratch(param)
+            scratch.data.copy_(loaded_weight.to(dtype=scratch.dtype, device="cpu"))
+            expected[name] = scratch
+
+    if not expected:
+        raise ValueError(
+            f"No checkpoint parameters matched module {type(module).__name__}"
+        )
+
+    materialized = dict(iter_materialized_weights(module))
+    missing_live = sorted(set(expected) - set(materialized))
+    if missing_live:
+        raise ValueError(f"Loaded parameters are not materialized: {missing_live}")
+
+    expected_checksum = compute_weights_checksum(expected.items())
+    server_checksum = compute_weights_checksum(
+        (name, materialized[name]) for name in expected
+    )
+    return {
+        "match": server_checksum == expected_checksum,
+        "server_checksum": server_checksum,
+        "disk_checksum": expected_checksum,
+        "parameter_count": len(expected),
+    }
 
 
 class WeightsUpdater:

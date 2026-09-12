@@ -26,18 +26,10 @@ encoder are still the same.
 To strictly verify the correctness of the refit API, we compare the checksum in
 SHA-256 on the disk and the server.
 
-NOTE and TODO: In the refit a specific module test, we update the transformer
-module and keep other modules the same. As described above, the vae's weights
-are perturbed. If we add vae as a target module in the future, ideally speaking,
-we should assert that the refitted vae's checksum is the same as directly
-computed from the perturbed vae weights in the disk. However, since there is
-complex weight-name remapping and QKV merge during model loading, it is not easy
-to compare the server-disk checksum for vae and text encoder directly. Therefore,
-if the target module is vae, we only verify that the refitted vae's checksum is
-different from the base model's vae's checksum.
-
-It should be good issue to solve for the community to adds comparison the server-disk
-checksum for vae and text encoder in this test.
+The comparison endpoint replays each module's real parameter-name mapping and
+custom weight loaders into CPU scratch tensors. This makes disk checksums directly
+comparable with live transformer, VAE, and text-encoder parameters even when the
+loader renames parameters or fuses Q/K/V and gate/up shards.
 
 =============================================================================
 
@@ -344,6 +336,25 @@ class _UpdateWeightsApiMixin:
             f"  server: {server_cs}"
         )
 
+    def _assert_server_matches_disk(
+        self,
+        base_url: str,
+        model_path: str,
+        module_names: list[str] | None = None,
+    ) -> None:
+        payload = {"model_path": model_path}
+        if module_names is not None:
+            payload["module_names"] = module_names
+        response = requests.post(
+            f"{base_url}/compare_weights_with_disk",
+            json=payload,
+            timeout=_CHECKSUM_TIMEOUT_SECONDS,
+        )
+        result = response.json()
+        assert response.status_code == 200 and result.get("success"), result
+        for name, comparison in result["modules"].items():
+            assert comparison["match"], f"Disk/server mismatch for {name}: {comparison}"
+
 
 class TestUpdateWeightsFromDisk(_UpdateWeightsApiMixin):
     @pytest.fixture(
@@ -432,7 +443,7 @@ class TestUpdateWeightsFromDisk(_UpdateWeightsApiMixin):
         assert status_code == 200
         assert result.get("success", False), f"Update failed: {result.get('message')}"
 
-        self._assert_server_matches_model(base_url, perturbed_model_dir)
+        self._assert_server_matches_disk(base_url, perturbed_model_dir)
 
     def test_update_weights_specific_modules(self, diffusion_server_no_offload):
         ctx, default_model, perturbed_model_dir, _ = diffusion_server_no_offload
@@ -475,6 +486,10 @@ class TestUpdateWeightsFromDisk(_UpdateWeightsApiMixin):
                 f"  before: {before_checksums.get(name)}\n"
                 f"  after:  {cs}"
             )
+
+        self._assert_server_matches_disk(
+            base_url, perturbed_model_dir, module_names=target_modules
+        )
 
     def test_update_weights_rejects_invalid_requests(self, diffusion_server_no_offload):
         ctx, _, perturbed_model_dir, _ = diffusion_server_no_offload

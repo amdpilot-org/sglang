@@ -44,3 +44,13 @@ class SchedulerPostTrainingMixin:
         req = reqs[0]
         checksums = self.worker.get_weights_checksum(module_names=req.module_names)
         return OutputBatch(output=checksums)
+
+    def _handle_compare_weights_with_disk(self, reqs: List[Any]) -> OutputBatch:
+        req = reqs[0]
+        result = self.worker.compare_weights_with_disk(
+            model_path=req.model_path, module_names=req.module_names
+        )
+        return OutputBatch(
+            output=result,
+            error=None if result["success"] else result["message"],
+        )
