@@ -1,0 +1,29 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38210",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the sync and async trace-context loss across an uninitialized pickle relay. Fixed it by preserving the serialized wire state in relay-only processes so an initialized scheduler or detokenizer can reconstruct the live context. Rejected the open upstream PR's router-initialization approach after a real gfx950 serving run showed that initializing OpenTelemetry before process creation risks inherited set-once providers and missing exporter threads after fork.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-5f01ee817cc7/venv/bin/python - <<'PY' ... two-hop sync/async pickle reproduction ... PY",
+      "exit_code": 0,
+      "what_was_measured": "Before the change, both initialized destinations received tracing_enable=False after an uninitialized relay; raw output is /tmp/amdpilot-repo-j-5f01ee817cc7/evidence/failing-before.txt. After the change, both received tracing_enable=True; raw output is /tmp/amdpilot-repo-j-5f01ee817cc7/evidence/passing-after.txt."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-5f01ee817cc7/venv/bin/python -m pytest -q test/registered/unit/observability/test_trace.py test/registered/unit/managers/test_multi_tokenizer_mixin.py",
+      "exit_code": 0,
+      "what_was_measured": "58 focused unit tests passed, including sync and async two-hop relay regressions and an independently disabled-context boundary. Raw output: /tmp/amdpilot-repo-j-5f01ee817cc7/evidence/unit-final.txt."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 ROCR_VISIBLE_DEVICES=0 ... run_trace_probe.py with --tokenizer-worker-num 2 --detokenizer-worker-num 2",
+      "exit_code": 1,
+      "what_was_measured": "The qualified deterministic tiny Llama executed HTTP generation and real GPU prefill/decode on gfx950. This probe tested and rejected the upstream router-initialization candidate: scheduler spans were not retained by the collector, consistent with OpenTelemetry provider/exporter state being inherited across fork. Logs: /tmp/amdpilot-repo-j-5f01ee817cc7/evidence/sync-after/server.log and async-after/server.log."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI355X gfx950 identification is in /tmp/amdpilot-repo-j-5f01ee817cc7/evidence/gpu.txt. Server logs record successful model load, Triton compilation, GPU prefill batches, decode, and HTTP 200 generation with the exact multi-worker topology."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": "The final serialization-preserving fix is verified against the exact failing pickle boundary and focused tests, but was not re-run through a successfully retained end-to-end OTLP collector capture after the earlier router-initialization candidate was rejected. The tiny random Llama validates transport and engine execution only; it does not validate semantic accuracy, another architecture, or a distributed workload."
+}

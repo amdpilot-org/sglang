@@ -929,6 +929,8 @@ class TraceReqContextAsync:
         return copied
 
     def __getstate__(self) -> Dict[str, Any]:
+        if hasattr(self, "_relay_state"):
+            return self._relay_state
         if not self.tracing_enable:
             return {"tracing_enable": False}
 
@@ -972,7 +974,9 @@ class TraceReqContextAsync:
             return
 
         if not is_async_tracing_available():
-            self.tracing_enable = False
+            # Preserve contexts across router processes that have no exporter
+            # of their own; the initialized destination will rebuild it.
+            self._relay_state = state
             return
 
         self.rid = state["rid"]

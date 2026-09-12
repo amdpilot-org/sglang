@@ -404,6 +404,8 @@ class TraceReqContext:
         return thread_context
 
     def __getstate__(self) -> Optional[Dict[str, Any]]:
+        if hasattr(self, "_relay_state"):
+            return self._relay_state
         if not self.tracing_enable:
             return {"tracing_enable": False}
 
@@ -446,7 +448,11 @@ class TraceReqContext:
     def __setstate__(self, state: Dict[str, Any]):
         self.__dict__.update(state)
         if not opentelemetry_initialized:
-            self.tracing_enable = False
+            # Some IPC processes only deserialize and immediately reserialize
+            # requests. Preserve the wire state so a downstream initialized
+            # process can reconstruct the context instead of disabling it.
+            self._relay_state = state
+            return
         if not self.tracing_enable:
             return
 
