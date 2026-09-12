@@ -41,6 +41,15 @@ class StartupProfiler:
         self.enabled = enabled
         self._root = _Phase("root")
         self._stack: list[_Phase] = [self._root]
+        self._summary_logged = False
+
+    def record(self, name: str, duration_ms: float) -> None:
+        """Append an already measured phase to the current parent."""
+        if not self.enabled:
+            return
+        node = _Phase(name)
+        node.duration_ms = duration_ms
+        self._stack[-1].children.append(node)
 
     @contextmanager
     def phase(self, name: str) -> Iterator[None]:
@@ -96,8 +105,13 @@ def log_startup_summary() -> None:
     """Log the breakdown once. Every rank runs the same startup path, so only
     rank 0 reports -- otherwise an 8-GPU launch prints eight identical trees."""
     profiler = get_startup_profiler()
-    if not profiler.enabled or not get_is_main_process():
+    if (
+        not profiler.enabled
+        or profiler._summary_logged
+        or not get_is_main_process()
+    ):
         return
     summary = profiler.render()
     if summary:
+        profiler._summary_logged = True
         logger.info("[Startup Profile]\n%s", summary)

@@ -6,6 +6,8 @@ import os
 import sys
 import time
 
+_MODULE_IMPORT_BEGIN_S = time.perf_counter()
+
 import uvicorn
 
 from sglang.multimodal_gen.runtime.disaggregation.orchestrator import (
@@ -23,6 +25,11 @@ from sglang.multimodal_gen.runtime.server_args import (
 )
 from sglang.multimodal_gen.runtime.utils.common import is_port_available
 from sglang.multimodal_gen.runtime.utils.logging_utils import configure_logger, logger
+from sglang.multimodal_gen.runtime.utils.startup_profiler import (
+    get_startup_profiler,
+    log_startup_summary,
+    startup_phase,
+)
 from sglang.multimodal_gen.runtime.utils.process import (
     kill_itself_when_parent_died,
     kill_process_tree,
@@ -134,6 +141,21 @@ def launch_server(server_args: ServerArgs, launch_http_server: bool = True):
     Args:
         launch_http_server: False for offline local mode
     """
+    profiler = get_startup_profiler()
+    launch_begin_s = time.perf_counter() if profiler.enabled else 0.0
+    if profiler.enabled:
+        cli_begin = os.environ.pop("SGLANG_DIFFUSION_STARTUP_BEGIN", None)
+        if cli_begin is not None:
+            profiler.record(
+                "cli_and_import_preparation",
+                (launch_begin_s - float(cli_begin)) * 1000,
+            )
+        else:
+            profiler.record(
+                "launch_module_imports",
+                (launch_begin_s - _MODULE_IMPORT_BEGIN_S) * 1000,
+            )
+
     configure_logger(server_args)
 
     # Start a new server with multiple worker processes
@@ -150,13 +172,14 @@ def launch_server(server_args: ServerArgs, launch_http_server: bool = True):
     rank_offset = node_rank * local_num_gpus
     processes = []
 
-    # Pipes for master to talk to slaves (local to this node)
-    task_pipes_to_slaves_w = []
-    task_pipes_to_slaves_r = []
-    for _ in range(local_num_gpus - 1):
-        r, w = mp.Pipe(duplex=False)
-        task_pipes_to_slaves_r.append(r)
-        task_pipes_to_slaves_w.append(w)
+    with startup_phase("launch_server.prepare_processes"):
+        # Pipes for master to talk to slaves (local to this node)
+        task_pipes_to_slaves_w = []
+        task_pipes_to_slaves_r = []
+        for _ in range(local_num_gpus - 1):
+            r, w = mp.Pipe(duplex=False)
+            task_pipes_to_slaves_r.append(r)
+            task_pipes_to_slaves_w.append(w)
 
     # Pipes for slaves to talk to master (local to this node)
     result_pipes_from_slaves_w = []
@@ -174,6 +197,7 @@ def launch_server(server_args: ServerArgs, launch_http_server: bool = True):
     for i in range(local_num_gpus):
         rank = rank_offset + i
         reader, writer = mp.Pipe(duplex=False)
+        worker_startup_begin_s = time.perf_counter() if profiler.enabled else None
         scheduler_pipe_writers.append(writer)
         if i == 0:  # This node's local pipe master
             process = mp.Process(
@@ -188,6 +212,7 @@ def launch_server(server_args: ServerArgs, launch_http_server: bool = True):
                     None,  # No result pipe to write to master
                     task_pipes_to_slaves_w,
                     result_pipes_from_slaves_r,
+                    worker_startup_begin_s,
                 ),
                 name=f"sglang-diffusionWorker-{rank}",
                 daemon=True,
@@ -205,12 +230,14 @@ def launch_server(server_args: ServerArgs, launch_http_server: bool = True):
                     None,  # No result pipe to write to master
                     task_pipes_to_slaves_r[i - 1],
                     result_pipes_from_slaves_w[i - 1],
+                    worker_startup_begin_s,
                 ),
                 name=f"sglang-diffusionWorker-{rank}",
                 daemon=True,
             )
         scheduler_pipe_readers.append(reader)
-        process.start()
+        with startup_phase(f"launch_server.start_worker_{rank}"):
+            process.start()
         processes.append(process)
 
     # Wait for all workers to be ready
@@ -228,24 +255,31 @@ def launch_server(server_args: ServerArgs, launch_http_server: bool = True):
     for p in result_pipes_from_slaves_r:
         p.close()
 
-    for i, reader in enumerate(scheduler_pipe_readers):
-        try:
-            data = reader.recv()
-        except EOFError:
-            logger.error(
-                f"Rank {rank_offset + i} scheduler is dead. Please check if "
-                "there are relevant logs."
-            )
-            processes[i].join()
-            logger.error(f"Exit code: {processes[i].exitcode}")
-            raise
+    with startup_phase("launch_server.wait_for_workers_ready"):
+        for i, reader in enumerate(scheduler_pipe_readers):
+            try:
+                data = reader.recv()
+            except EOFError:
+                logger.error(
+                    f"Rank {rank_offset + i} scheduler is dead. Please check if "
+                    "there are relevant logs."
+                )
+                processes[i].join()
+                logger.error(f"Exit code: {processes[i].exitcode}")
+                raise
 
-        if data["status"] != "ready":
-            raise RuntimeError(
-                "Initialization failed. Please see the error messages above."
-            )
-        scheduler_infos.append(data)
-        reader.close()
+            if data["status"] != "ready":
+                raise RuntimeError(
+                    "Initialization failed. Please see the error messages above."
+                )
+            scheduler_infos.append(data)
+            reader.close()
+
+    if profiler.enabled:
+        profiler.record(
+            "launch_server.total", (time.perf_counter() - launch_begin_s) * 1000
+        )
+    log_startup_summary()
 
     logger.debug("All workers are ready")
 

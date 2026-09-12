@@ -1573,6 +1573,7 @@ def run_scheduler_process(
     task_pipes_to_slaves: list[mp.connection.Connection] | None = None,
     # For rank 0 worker only: pipes to receive results from slaves
     result_pipes_from_slaves: list[mp.connection.Connection] | None = None,
+    startup_begin_s: float | None = None,
 ) -> None:
     """
     The entry point for the worker process.
@@ -1597,6 +1598,12 @@ def run_scheduler_process(
     from sglang.multimodal_gen.runtime.managers.scheduler import Scheduler
 
     try:
+        profiler = get_startup_profiler()
+        if startup_begin_s is not None:
+            profiler.record(
+                "worker_process_start_and_imports",
+                (time.perf_counter() - startup_begin_s) * 1000,
+            )
         with startup_phase("init_scheduler"):
             scheduler = Scheduler(
                 server_args,
