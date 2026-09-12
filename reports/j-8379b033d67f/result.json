@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35785",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "unsupported_architecture",
+  "summary": "The reported AITER warning was reproduced with system Triton 3.4.0 and disappears at AITER's documented 3.6.0 boundary. Current supported ROCm 7.2 Docker flavors pin Triton 3.7.0. The report's gfx1150 architecture has no build stage or support mapping in current source. A distinct gfx1151 Strix Halo image is already present from merged upstream PR 33939; it pins its ROCm/PyTorch base, disables AITER runtime dispatch, and documents Triton attention. No source correction for gfx1150 is justified without target hardware/support evidence.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-8379b033d67f/venv/bin/python reports/j-8379b033d67f/check_issue.py --aiter-source /tmp/amdpilot-repo-j-8379b033d67f/aiter/aiter/ops/triton/gluon/__init__.py",
+      "exit_code": 0,
+      "what_was_measured": "Executed the exact warning guard from AITER c16d44b93a528b2a4bfd6d8d3409116d465872a9 with synthetic Triton versions. It reproduced the warning at 3.4.0, produced no warning at the independent 3.6.0 boundary or the current 3.7.0 pin, verified gfx1150 is absent rather than aliased, and verified the separate gfx1151 Docker safeguards. Raw output: reports/j-8379b033d67f/check_issue.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8379b033d67f/venv/bin/python reports/j-8379b033d67f/gpu_check.py",
+      "exit_code": 0,
+      "what_was_measured": "On the single assigned AMD Instinct MI355X gfx950 GPU, a 4x4 float32 matrix multiplication exactly matched an independently computed CPU reference. This only establishes working gfx950 ROCm execution, not gfx1150/gfx1151 or serving support. Raw output: reports/j-8379b033d67f/gpu_check.log"
+    },
+    {
+      "command": "gh pr view 33939 --repo sgl-project/sglang --json state,mergedAt,url,headRefOid; rg -n <issue-specific Docker markers> docker/rocm.Dockerfile docker/rocm-gfx1151.Dockerfile",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed upstream PR 33939 was merged at commit 08e820075b5cc5a755849463bf6efa5d347c7f83 and confirmed the current Docker source's Triton 3.7 pin, dedicated gfx1151 target, Triton-attention documentation, and disabled AITER dispatch. Raw output: reports/j-8379b033d67f/source_evidence.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-8379b033d67f/gpu_check.log records one assigned gfx950 device and an exact GPU-versus-CPU matrix result. The issue's gfx1150 architecture was not available."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The assigned GPU is gfx950, not the reported gfx1150; no gfx1150 hardware validation was possible.",
+    "No model weights were supplied, so the reported full serving launch was not reproduced.",
+    "Docker and Podman executables are absent, so the full image could not be rebuilt in this environment.",
+    "The existing gfx1151 image and its upstream validation do not establish support for gfx1150, and the architecture names must not be treated as interchangeable.",
+    "The deterministic AITER fixture validates the version-warning branch only; it does not validate semantic model accuracy or a distributed workload."
+  ]
+}
