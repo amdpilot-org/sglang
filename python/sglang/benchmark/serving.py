@@ -1056,11 +1056,13 @@ class BenchmarkMetrics:
 def format_metric_scope_note() -> str:
     """Explain why client latency metrics and scheduler rates can differ."""
     return (
-        "Metric scope: TPOT/ITL are per-request client-side latencies over the "
-        "whole request lifetime. The engine log's generation throughput is an "
-        "aggregate token rate over a recent reporting window, so it is not "
-        "directly comparable; use Output token throughput for the whole-run "
-        "aggregate rate."
+        "Metric scope: TPOT is per-request client-side decode latency after the "
+        "first token. ITL measures intervals between nonempty stream events, "
+        "which need not map one-to-one to output tokens and may omit the terminal "
+        "response tail. The engine log's generation throughput is an aggregate "
+        "token rate over a recent reporting window, so it is not directly "
+        "comparable. Output token throughput is a whole-run client-side aggregate "
+        "with a different estimator and is not expected to match exactly."
     )
 
 
