@@ -19,6 +19,7 @@ import PIL.Image
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from diffusers.utils.torch_utils import randn_tensor
 
 from sglang.multimodal_gen.configs.sample.sampling_params import DataType
 from sglang.multimodal_gen.runtime.distributed import get_local_torch_device
@@ -712,10 +713,10 @@ class Cosmos3LatentPreparationStage(PipelineStage):
         height_latent = batch.height // vae_scale_factor_spatial
         width_latent = batch.width // vae_scale_factor_spatial
 
-        if batch.preprocessed_image is not None:
-            batch_dim = int(batch.preprocessed_image.shape[0])
-        else:
-            batch_dim = 1
+        # Conditioning stays one item per prompt, while candidate trajectories
+        # are samples of that shared condition. Use the effective sample batch;
+        # the condition assignment below broadcasts a single encoded image.
+        batch_dim = int(batch.batch_size)
 
         shape = (
             batch_dim,
@@ -744,7 +745,16 @@ class Cosmos3LatentPreparationStage(PipelineStage):
             # The rollout SDE step draws its variance noise from this generator.
             batch.generator = generator
 
-        noise = torch.randn(shape, generator=generator, device=device, dtype=dtype)
+        if isinstance(generator, list) and len(generator) != batch_dim:
+            raise ValueError(
+                "You have passed a list of generators of length "
+                f"{len(generator)}, but requested an effective batch size of "
+                f"{batch_dim}."
+            )
+
+        noise = randn_tensor(
+            shape, generator=generator, device=device, dtype=dtype
+        )
 
         uses_visual_latents = batch.data_type in (DataType.VIDEO, DataType.ACTION)
         has_image_cond = batch.preprocessed_image is not None and uses_visual_latents
@@ -818,8 +828,12 @@ class Cosmos3LatentPreparationStage(PipelineStage):
                 )
             sound_latent_fps = self.transformer.sound_latent_fps
             sound_latent_frames = max(1, round(sound_duration * sound_latent_fps))
-            sound_shape = (1, self.transformer.sound_dim, sound_latent_frames)
-            batch.audio_latents = torch.randn(
+            sound_shape = (
+                batch_dim,
+                self.transformer.sound_dim,
+                sound_latent_frames,
+            )
+            batch.audio_latents = randn_tensor(
                 sound_shape, generator=generator, device=device, dtype=dtype
             )
             self.log_info(f"Prepared sound latents with shape {sound_shape}")
@@ -957,10 +971,8 @@ class Cosmos3LatentPreparationStage(PipelineStage):
         if mode == ACTION_MODE_FORWARD_DYNAMICS:
             condition_mask[:] = 1.0
 
-        noise = torch.randn(
-            batch_dim,
-            action_chunk_size,
-            action_dim,
+        noise = randn_tensor(
+            (batch_dim, action_chunk_size, action_dim),
             generator=generator,
             device=device,
             dtype=dtype,
