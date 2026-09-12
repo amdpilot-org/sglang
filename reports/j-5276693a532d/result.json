@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/1763",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3281",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3285",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "7c1ffa54523e3c943470f2407757fce78fbe3bb9",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate adds an experimental SageAttention adapter and its focused mocked regressions pass, but it does not fully resolve the original feature request. Independent review reproduced a decode correctness counterexample: the admitted sage decode path calls causal attention with q_len=1 and kv_len>1, so the query is treated as position zero rather than the final cache position and produces a wrong result. The real pinned SageAttention extension could not be built or executed on the assigned AMD ROCm GPU. Consequently quantized accuracy, supported NVIDIA architectures, native installation, end-to-end serving, and the approximately 2x performance motivation remain unverified. The reported missing comma in pinned SageAttention is real, but SUPPORTED_ARCHS has no load sites and therefore was not shown to reject SM120; SM120 remains unverified rather than disproven by that declaration.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-5276693a532d/venv/bin/python base import/registry assertion at 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: the prepared base has neither a sage attention-backend choice nor a sage registry entry."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5276693a532d/venv/bin/python -m pytest -q test/registered/unit/layers/test_sage_attention_backend.py test/registered/unit/server_args/test_server_args.py -k sage",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 7c1ffa54523e3c943470f2407757fce78fbe3bb9, 10 focused tests passed on the prepared environment. The numerical cases injected PyTorch SDPA in place of sageattn and did not import or execute the quantized native extension."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5276693a532d/venv/bin/python /tmp/amdpilot-repo-j-5276693a532d/review-evidence/adversarial_decode.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial decode reproduction at the exact candidate: the adapter called its kernel with q_len=1, kv_len=3, is_causal=True. A deterministic reference showed candidate semantics [1, 0, ...] versus correct last-token full-cache attention [1.6895, 0.3108, ...]."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5276693a532d/venv/bin/python AST audit of SageAttention setup.py at d9704247a5139ab4c03bf7fc6b35cc0e2cbb5ea4",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the missing comma evaluates SUPPORTED_ARCHS to include 10.012.0 and omit 12.0. Source inspection also confirmed the declaration has no load sites, so this alone does not reject an SM120 build; active SM120 setup and dispatcher branches exist."
+    },
+    {
+      "command": "candidate import-path and environment probe",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed sglang and SageAttentionBackend imported from /job/repo/python at the exact candidate, using Torch 2.11.0+rocm7.2. The assigned device is AMD Instinct MI350X gfx950; nvidia-smi and nvcc are unavailable."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The candidate's FP16/BF16 mocked adapter tests executed PyTorch SDPA on the assigned AMD Instinct MI350X. No SageAttention CUDA kernel executed, so this is not native SageAttention GPU evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The candidate admits sage for combined or decode backend selection, but autoregressive decode passes is_causal=True with q_len=1 and kv_len>1. This is outside the pinned sageattn causal contract and deterministically yields position-zero masking rather than last-token attention when modeled with SDPA semantics.",
+    "No supported NVIDIA GPU or CUDA toolkit was available, so pinned SageAttention was not built, imported, or executed and no INT8 Q/K result was compared with an independent numerical reference.",
+    "The candidate's numerical tests substitute full-precision PyTorch SDPA for sageattn; they validate adapter layout and GQA expansion only, not quantized accuracy.",
+    "No end-to-end serving, model-quality, long-context, throughput, latency, or memory result establishes the original approximately 2x speed motivation or same-accuracy claim.",
+    "Dense paged-KV gathering and materialized GQA/MQA expansion remain unmeasured and may erase kernel gains, especially for decode or non-recommended configurations.",
+    "SM120, SM80, SM86, SM89, and SM90 native build/runtime behavior remains unverified on this AMD-only environment."
+  ],
+  "remaining_limitations": [
+    "Architecture limitation: only AMD Instinct MI350X gfx950 with ROCm 7.2 was available; SageAttention is NVIDIA CUDA-only.",
+    "No nvcc or nvidia-smi was present, so no actual compiler/ISA evidence or native rebuild could be produced.",
+    "No model weights were used. A transport-only tiny-model smoke on a different attention backend would not qualify SageAttention correctness, model quality, or performance and was therefore not treated as proof.",
+    "The candidate was reviewed without modification and the checkout was returned to amdpilot/j-5276693a532d before this report was committed."
+  ]
+}
