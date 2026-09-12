@@ -107,6 +107,309 @@ class ServingCompletionTestCase(unittest.TestCase):
         self.assertEqual(internal.cache_salt, "tenant-a")
         self.assertEqual(internal.extra_key, "classification")
 
+    def test_request_metrics_opt_in_propagates_to_internal_request(self):
+        req = CompletionRequest(
+            model="x", prompt="Hi", max_tokens=1, return_request_metrics=True
+        )
+        internal, _ = self.sc._convert_to_internal_request(req)
+        self.assertTrue(internal.return_request_metrics)
+
+    def test_request_metrics_are_opt_in_and_omit_unmeasured_values(self):
+        ret = [
+            {
+                "text": "answer",
+                "meta_info": {
+                    "id": "cmpl-metrics",
+                    "prompt_tokens": 2,
+                    "completion_tokens": 3,
+                    "cached_tokens": 0,
+                    "finish_reason": {"type": "stop"},
+                    "weight_version": "default",
+                    "queue_time": 0.25,
+                    "time_to_first_token": 0.5,
+                    "generation_time": 1.0,
+                    "e2e_latency": 1.5,
+                    "mean_inter_token_latency": 0.5,
+                    "output_token_throughput": 2.0,
+                },
+            }
+        ]
+        disabled = CompletionRequest(model="x", prompt="Hi", max_tokens=3)
+        disabled_response = self.sc._build_completion_response(disabled, ret, 123)
+        self.assertNotIn("sglext", disabled_response.model_dump())
+
+        ret[0]["meta_info"]["queue_time"] = 0.0
+        enabled = disabled.model_copy(update={"return_request_metrics": True})
+        response = self.sc._build_completion_response(enabled, ret, 123)
+        metrics = response.model_dump()["sglext"]["request_metrics"]
+        self.assertNotIn("queue_time", metrics)
+        self.assertEqual(metrics["time_to_first_token"], 0.5)
+        self.assertEqual(metrics["output_token_throughput"], 2.0)
+
+    def test_streaming_request_metrics_use_final_extension_chunk(self):
+        async def generate():
+            yield {
+                "text": "answer",
+                "index": 0,
+                "meta_info": {
+                    "id": "cmpl-stream-metrics",
+                    "prompt_tokens": 2,
+                    "completion_tokens": 3,
+                    "cached_tokens": 0,
+                    "finish_reason": {"type": "stop"},
+                    "time_to_first_token": 0.5,
+                    "e2e_latency": 1.5,
+                },
+            }
+
+        self.sc.tokenizer_manager.generate_request = Mock(return_value=generate())
+        req = CompletionRequest(
+            model="x",
+            prompt="Hi",
+            max_tokens=3,
+            stream=True,
+            return_request_metrics=True,
+        )
+        internal, _ = self.sc._convert_to_internal_request(req)
+
+        async def collect():
+            return [
+                chunk
+                async for chunk in self.sc._generate_completion_stream(
+                    internal, req, self.fastapi_request
+                )
+            ]
+
+        chunks = get_or_create_event_loop().run_until_complete(collect())
+        parsed = [
+            json.loads(chunk[len("data: ") :])
+            for chunk in chunks
+            if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]"
+        ]
+        metric_chunks = [item for item in parsed if "sglext" in item]
+        self.assertEqual(len(metric_chunks), 1)
+        self.assertEqual(metric_chunks[0]["choices"], [])
+        self.assertEqual(
+            metric_chunks[0]["sglext"]["request_metrics"]["e2e_latency"], 1.5
+        )
+        self.assertEqual(chunks[-1], "data: [DONE]\n\n")
+
+    def test_batched_prompt_metrics_preserve_all_choices_non_streaming(self):
+        ret = [
+            {
+                "text": f"answer-{index}",
+                "meta_info": {
+                    "id": "cmpl-batch-metrics",
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "cached_tokens": 0,
+                    "finish_reason": {"type": "stop"},
+                    "weight_version": "default",
+                    "e2e_latency": latency,
+                },
+            }
+            for index, latency in enumerate((1.25, 2.5))
+        ]
+        self.sc.tokenizer_manager.generate_request = Mock(
+            return_value=self._async_generator(ret)
+        )
+        req = CompletionRequest(
+            model="x",
+            prompt=["first", "second"],
+            max_tokens=1,
+            n=1,
+            return_request_metrics=True,
+        )
+        internal, _ = self.sc._convert_to_internal_request(req)
+
+        response = get_or_create_event_loop().run_until_complete(
+            self.sc._handle_non_streaming_request(
+                internal, req, self.fastapi_request
+            )
+        )
+        serialized = json.loads(response.model_dump_json(exclude_none=True))
+
+        self.assertEqual(len(serialized["choices"]), 2)
+        self.assertEqual(
+            serialized["sglext"]["request_metrics"],
+            [{"e2e_latency": 1.25}, {"e2e_latency": 2.5}],
+        )
+
+    def test_batched_prompt_metrics_preserve_unmeasured_choice_position(self):
+        ret = [
+            {
+                "text": f"answer-{index}",
+                "meta_info": {
+                    "id": "cmpl-partial-metrics",
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "cached_tokens": 0,
+                    "finish_reason": {"type": "stop"},
+                    "weight_version": "default",
+                    **({"e2e_latency": 2.5} if index == 1 else {}),
+                },
+            }
+            for index in range(2)
+        ]
+        req = CompletionRequest(
+            model="x",
+            prompt=["first", "second"],
+            max_tokens=1,
+            n=1,
+            return_request_metrics=True,
+        )
+
+        serialized = json.loads(
+            self.sc._build_completion_response(req, ret, 123).model_dump_json(
+                exclude_none=True
+            )
+        )
+
+        self.assertEqual(len(serialized["choices"]), 2)
+        self.assertEqual(
+            serialized["sglext"]["request_metrics"],
+            [None, {"e2e_latency": 2.5}],
+        )
+
+    def test_batched_prompt_metrics_cardinality_multiplies_by_n(self):
+        ret = [
+            {
+                "text": f"answer-{index}",
+                "meta_info": {
+                    "id": "cmpl-batch-n-metrics",
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "cached_tokens": 0,
+                    "finish_reason": {"type": "stop"},
+                    "weight_version": "default",
+                    "e2e_latency": float(index + 1),
+                },
+            }
+            for index in range(4)
+        ]
+        req = CompletionRequest(
+            model="x",
+            prompt=["first", "second"],
+            max_tokens=1,
+            n=2,
+            return_request_metrics=True,
+        )
+
+        serialized = json.loads(
+            self.sc._build_completion_response(req, ret, 123).model_dump_json(
+                exclude_none=True
+            )
+        )
+
+        self.assertEqual(len(serialized["choices"]), 4)
+        self.assertEqual(
+            serialized["sglext"]["request_metrics"],
+            [{"e2e_latency": value} for value in (1.0, 2.0, 3.0, 4.0)],
+        )
+
+    def test_batched_prompt_metrics_preserve_all_choices_streaming(self):
+        outputs = [
+            {
+                "text": f"answer-{index}",
+                "index": index,
+                "meta_info": {
+                    "id": "cmpl-stream-batch-metrics",
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "cached_tokens": 0,
+                    "finish_reason": {"type": "stop"},
+                    "e2e_latency": latency,
+                },
+            }
+            for index, latency in enumerate((1.25, 2.5))
+        ]
+        self.sc.tokenizer_manager.generate_request = Mock(
+            return_value=self._async_generator(*outputs)
+        )
+        req = CompletionRequest(
+            model="x",
+            prompt=["first", "second"],
+            max_tokens=1,
+            n=1,
+            stream=True,
+            return_request_metrics=True,
+        )
+        internal, _ = self.sc._convert_to_internal_request(req)
+
+        async def collect():
+            return [
+                chunk
+                async for chunk in self.sc._generate_completion_stream(
+                    internal, req, self.fastapi_request
+                )
+            ]
+
+        chunks = get_or_create_event_loop().run_until_complete(collect())
+        parsed = [
+            json.loads(chunk[len("data: ") :])
+            for chunk in chunks
+            if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]"
+        ]
+        metric_chunk = next(item for item in parsed if "sglext" in item)
+        self.assertEqual(
+            metric_chunk["sglext"]["request_metrics"],
+            [{"e2e_latency": 1.25}, {"e2e_latency": 2.5}],
+        )
+
+    def test_streaming_metrics_preserve_unmeasured_choice_position(self):
+        outputs = [
+            {
+                "text": f"answer-{index}",
+                "index": index,
+                "meta_info": {
+                    "id": "cmpl-stream-partial-metrics",
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "cached_tokens": 0,
+                    "finish_reason": {"type": "stop"},
+                    **({"e2e_latency": 2.5} if index == 1 else {}),
+                },
+            }
+            for index in range(2)
+        ]
+        self.sc.tokenizer_manager.generate_request = Mock(
+            return_value=self._async_generator(*outputs)
+        )
+        req = CompletionRequest(
+            model="x",
+            prompt=["first", "second"],
+            max_tokens=1,
+            n=1,
+            stream=True,
+            return_request_metrics=True,
+        )
+        internal, _ = self.sc._convert_to_internal_request(req)
+
+        async def collect():
+            return [
+                chunk
+                async for chunk in self.sc._generate_completion_stream(
+                    internal, req, self.fastapi_request
+                )
+            ]
+
+        chunks = get_or_create_event_loop().run_until_complete(collect())
+        parsed = [
+            json.loads(chunk[len("data: ") :])
+            for chunk in chunks
+            if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]"
+        ]
+        metric_chunk = next(item for item in parsed if "sglext" in item)
+        self.assertEqual(
+            metric_chunk["sglext"]["request_metrics"],
+            [None, {"e2e_latency": 2.5}],
+        )
+
+    @staticmethod
+    async def _async_generator(*items):
+        for item in items:
+            yield item
+
     def test_single_request_rejects_batched_cache_salt(self):
         req = CompletionRequest(
             model="x",

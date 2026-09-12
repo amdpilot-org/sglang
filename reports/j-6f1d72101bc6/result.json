@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36678",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/695",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/656",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/686",
+  "candidate_commit": "0e629c84c3f909e5e94c58dc341714b4a4d986b3",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the independent review counterexample at the exact candidate: filtering unmeasured choices compacted a two-choice metrics list to one element and lost positional association. Preserved the candidate's opt-in timing feature and multi-prompt fixes, then retained null placeholders for unmeasured choices whenever at least one choice has measured metrics. Normal and streaming completion and chat serializers now preserve choice cardinality without inventing zero values; all-unmeasured and opt-out responses remain omitted.",
+  "tests": [
+    {
+      "command": "At exact candidate 0e629c84c3f909e5e94c58dc341714b4a4d986b3, run the new preserve_unmeasured_choice_position regressions in completion and chat tests",
+      "exit_code": 1,
+      "what_was_measured": "Normal completion, streaming completion, and normal chat each serialized two choices with only one metrics element, [{\"e2e_latency\": 2.5}], losing the index of the measured choice."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6f1d72101bc6/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_completions.py test/registered/unit/entrypoints/openai/test_serving_chat.py test/registered/unit/observability/test_req_time_stats.py",
+      "exit_code": 0,
+      "what_was_measured": "174 tests and 70 subtests passed across completion, chat, and request timing behavior, including opt-in isolation, omission of unavailable fields, multi-choice cardinality, and normal and streaming serialization."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6f1d72101bc6/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py -k 'streaming_request_metrics_preserve_unmeasured_choice_position'",
+      "exit_code": 0,
+      "what_was_measured": "Streaming chat SSE and normal chat serialization both retained [null, {\"e2e_latency\": 2.5}] for two choices."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6f1d72101bc6/venv/bin/python -m compileall -q python/sglang/srt/entrypoints/openai/protocol.py python/sglang/srt/entrypoints/openai/serving_chat.py python/sglang/srt/entrypoints/openai/serving_completions.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python modules compiled and the complete patch passed whitespace validation."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is deterministic Python response association and serialization. No model weights path was supplied, so no live model-backed request was run; an unrelated GPU numerical smoke would not establish this behavior."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No model weights path was supplied, so a live model-backed HTTP server was not launched. Actual Python OpenAI handler and JSON/SSE serialization paths were exercised with deterministic tokenizer-manager outputs.",
+    "No native source changed and repository-environment.json declares native=null, so a native rebuild was not applicable.",
+    "The embedded Rust server remains outside the original issue's stated initial scope."
+  ]
+}
