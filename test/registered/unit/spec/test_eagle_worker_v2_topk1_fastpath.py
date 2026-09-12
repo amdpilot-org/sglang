@@ -169,7 +169,7 @@ class TestEagleWorkerV2BackendFallback(CustomTestCase):
         override.install()
         self.addCleanup(override.restore)
 
-    def test_missing_seed_cuda_graph_fallback(self):
+    def test_dsa_seed_cuda_graph_fallback(self):
         graph_result = (
             [],
             torch.zeros((1, 1), dtype=torch.long, device=DEVICE),
@@ -185,14 +185,25 @@ class TestEagleWorkerV2BackendFallback(CustomTestCase):
             torch.zeros((2,), dtype=torch.long, device=DEVICE),
         )
 
-        for seed_enabled, seed_present, expect_graph in (
-            (True, False, False),
-            (True, True, True),
-            (False, False, True),
+        for seed_enabled, seed_present, disagg_mode, attn_dp_size, expect_graph in (
+            # Missing seeds retain the existing eager recomputation fallback.
+            (True, False, "null", 1, False),
+            # A valid seed normally permits graph replay.
+            (True, True, "null", 1, True),
+            # PD+DP must make one rank-independent choice.  Both the request
+            # rank and idle ranks take eager regardless of seed availability.
+            (True, False, "decode", 8, False),
+            (True, True, "decode", 8, False),
+            # PD decode without DP does not need the synchronized fallback.
+            (True, True, "decode", 1, True),
+            # Models without DSA seed sharing retain graph replay.
+            (False, False, "decode", 8, True),
         ):
             with self.subTest(
                 seed_enabled=seed_enabled,
                 seed_present=seed_present,
+                disagg_mode=disagg_mode,
+                attn_dp_size=attn_dp_size,
             ):
                 worker = object.__new__(EagleDraftWorker)
                 worker.req_to_token_pool = None
@@ -240,6 +251,14 @@ class TestEagleWorkerV2BackendFallback(CustomTestCase):
                     patch(
                         "sglang.srt.speculative.eagle_worker_v2.prepare_for_draft",
                         return_value=(forward_batch, True),
+                    ),
+                    patch(
+                        "sglang.srt.speculative.eagle_worker_v2.get_disagg",
+                        return_value=SimpleNamespace(disaggregation_mode=disagg_mode),
+                    ),
+                    patch(
+                        "sglang.srt.speculative.eagle_worker_v2.get_parallel",
+                        return_value=SimpleNamespace(attn_dp_size=attn_dp_size),
                     ),
                 ):
                     worker.draft(batch)
