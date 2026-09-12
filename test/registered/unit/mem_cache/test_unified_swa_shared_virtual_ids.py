@@ -89,12 +89,17 @@ class TestSharedVirtualIdSpace(unittest.TestCase):
         alloc = _build(32, 32, full_layers=1, swa_layers=1, page_size=4)
         row = alloc.alloc(8)[:7]
         segments = [(row[:5], 0), (row[5:], 5)]
+        completed = set()
 
-        free_kv_row_segments(alloc, segments, swa_evicted_seqlen=0)
+        free_kv_row_segments(
+            alloc, segments, swa_evicted_seqlen=0, completed_frees=completed
+        )
         full_after_first = alloc.full_available_size()
         swa_after_first = alloc.swa_available_size()
 
-        free_kv_row_segments(alloc, segments, swa_evicted_seqlen=0)
+        free_kv_row_segments(
+            alloc, segments, swa_evicted_seqlen=0, completed_frees=completed
+        )
         self.assertEqual(alloc.full_available_size(), full_after_first)
         self.assertEqual(alloc.swa_available_size(), swa_after_first)
         self.assertEqual(alloc.verify_byte_accounting(), [])

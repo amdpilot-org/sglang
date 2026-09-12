@@ -1124,12 +1124,17 @@ class TestFreeKvRow(CustomTestCase):
         indices = _swa_alloc(allocator, 8)
         allocator.free_swa(indices[:4])
         segments = [(indices[:5], 0), (indices[5:], 5)]
+        completed = set()
 
-        free_kv_row_segments(allocator, segments, swa_evicted_seqlen=4)
+        free_kv_row_segments(
+            allocator, segments, swa_evicted_seqlen=4, completed_frees=completed
+        )
         full_after_first = allocator.full_available_size()
         swa_after_first = allocator.swa_available_size()
 
-        free_kv_row_segments(allocator, segments, swa_evicted_seqlen=4)
+        free_kv_row_segments(
+            allocator, segments, swa_evicted_seqlen=4, completed_frees=completed
+        )
         self.assertEqual(allocator.full_available_size(), full_after_first)
         self.assertEqual(allocator.swa_available_size(), swa_after_first)
         self.assertEqual(allocator.verify_byte_accounting(), [])

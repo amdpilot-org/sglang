@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38981",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/776",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/723",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/746",
+  "candidate_commit": "f2e1f3240e87f0cb0baf46fbef533db34c434a71",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved the candidate's touching-segment coalescing, independently reproduced its A/B/A retry failure, and moved completed-cleanup tracking from the shared allocator to request-scoped KV state. Interleaved cleanup can no longer overwrite another request's retry record, while failed frees are still retryable because fingerprints are recorded only after success.",
+  "tests": [
+    {
+      "command": "git switch --detach f2e1f3240e87f0cb0baf46fbef533db34c434a71 && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9aa64642c30c/venv/bin/python /job/raw/j-9aa64642c30c/interleaved_retry_probe.py",
+      "exit_code": 1,
+      "what_was_measured": "Against the exact candidate (using its allocator-scoped retry API), actual free_kv_row_segments cleanup produced page-count deltas (2, 1, 2) for A, B, A instead of (2, 1, 0). Raw output: /job/raw/j-9aa64642c30c/candidate_interleaved_retry.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9aa64642c30c/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_paged_free_segment.py test/registered/unit/mem_cache/test_swa_unittest.py test/registered/unit/mem_cache/test_unified_swa_shared_virtual_ids.py",
+      "exit_code": 0,
+      "what_was_measured": "55 tests and 41 subtests passed, covering touching abort ranges, paged and hybrid SWA cleanup, immediate retries, the new interleaved A/B/A regression, accounting, and synchronization-debug checks. Raw output: /job/raw/j-9aa64642c30c/after_focused_tests.log."
+    },
+    {
+      "command": "PROBE_DEVICE=cuda:0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9aa64642c30c/venv/bin/python /job/raw/j-9aa64642c30c/interleaved_retry_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "The actual paged allocator and free_kv_row_segments path on the assigned GPU produced deltas (2, 1, 0) for A, B, A. Raw output: /job/raw/j-9aa64642c30c/after_interleaved_retry_gpu.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9aa64642c30c/venv/bin/python <independent int64 GPU reference check>",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X with torch 2.11.0+rocm7.2, sum(i^2, i=1..4096) was 22914881536, exactly equal to 4096*4097*8193/6. Raw output: /job/raw/j-9aa64642c30c/gpu_evidence.log."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "The corrected interleaved allocator probe ran on cuda:0 backed by one AMD Instinct MI355X and returned (2, 1, 0); an independent int64 numerical reference also matched exactly.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported deployment uses eight NVIDIA B300 GPUs (SM103), Kimi-K3, and DSpark weights; the prepared environment provides one AMD Instinct MI355X under ROCm 7.2 and no model weights. The full multi-rank serving abort replay therefore remains unverified.",
+    "Validation covers the real Python free_kv_row_segments and allocator paths, including GPU allocator execution. No native source changed and repository-environment.json declares native=null and wheel=null, so no native rebuild was applicable."
+  ]
+}

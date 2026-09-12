@@ -216,13 +216,40 @@ class TestFreeSegments(unittest.TestCase):
         alloc = _make_allocator()
         row = _make_kv_row(alloc, 7)
         segments = [(row[:5], 0), (row[5:], 5)]
+        completed = set()
         before = len(alloc.free_pages)
 
-        free_kv_row_segments(alloc, segments, swa_evicted_seqlen=0)
+        free_kv_row_segments(
+            alloc, segments, swa_evicted_seqlen=0, completed_frees=completed
+        )
         self.assertEqual(len(alloc.free_pages), before + 2)
 
-        free_kv_row_segments(alloc, segments, swa_evicted_seqlen=0)
+        free_kv_row_segments(
+            alloc, segments, swa_evicted_seqlen=0, completed_frees=completed
+        )
         self.assertEqual(len(alloc.free_pages), before + 2)
+
+    def test_kv_row_cleanup_retry_survives_interleaved_request(self):
+        alloc = _make_allocator()
+        row_a = _make_kv_row(alloc, 7)
+        row_b = _make_kv_row(alloc, 3)
+        segments_a = [(row_a[:5], 0), (row_a[5:], 5)]
+        segments_b = [(row_b, 0)]
+        completed_a, completed_b = set(), set()
+        before = len(alloc.free_pages)
+
+        free_kv_row_segments(
+            alloc, segments_a, swa_evicted_seqlen=0, completed_frees=completed_a
+        )
+        self.assertEqual(len(alloc.free_pages), before + 2)
+        free_kv_row_segments(
+            alloc, segments_b, swa_evicted_seqlen=0, completed_frees=completed_b
+        )
+        self.assertEqual(len(alloc.free_pages), before + 3)
+        free_kv_row_segments(
+            alloc, segments_a, swa_evicted_seqlen=0, completed_frees=completed_a
+        )
+        self.assertEqual(len(alloc.free_pages), before + 3)
 
 
 class _RecordingBaseAllocator(BaseTokenToKVPoolAllocator):

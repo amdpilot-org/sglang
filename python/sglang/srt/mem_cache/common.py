@@ -134,14 +134,16 @@ def free_kv_row_segments(
     segments: list[tuple[torch.Tensor, int]],
     *,
     swa_evicted_seqlen: int,
+    completed_frees: set[tuple] | None = None,
 ) -> None:
     """Free ascending disjoint ``(kv_indices, start_pos)`` segments of one
     request's kv row, split at the SWA eviction floor.
 
-    An identical consecutive call is a cleanup retry and is a no-op. The
-    fingerprint is recorded only after a successful free, so allocator errors
-    remain retryable. Tensor addresses distinguish different request rows
-    without reading device data or synchronizing the scheduler stream.
+    When request-scoped ``completed_frees`` is provided, an identical retry is
+    a no-op even if cleanup of another request used the allocator in between.
+    The fingerprint is recorded only after a successful free, so allocator
+    errors remain retryable. Tensor addresses distinguish different request
+    rows without reading device data or synchronizing the scheduler stream.
     """
 
     retry_fingerprint = (
@@ -156,7 +158,7 @@ def free_kv_row_segments(
             for kv_indices, start_pos in segments
         ),
     )
-    if getattr(allocator, "_last_kv_row_free", None) == retry_fingerprint:
+    if completed_frees is not None and retry_fingerprint in completed_frees:
         return
 
     swa_dead: list[tuple[torch.Tensor, int]] = []
@@ -182,7 +184,8 @@ def free_kv_row_segments(
         allocator.free_full_segments(swa_dead)
     if swa_alive:
         allocator.free_segments(swa_alive)
-    allocator._last_kv_row_free = retry_fingerprint
+    if completed_frees is not None:
+        completed_frees.add(retry_fingerprint)
 
 
 def maybe_cache_unfinished_req(req: Req, tree_cache: BasePrefixCache, **kwargs):
