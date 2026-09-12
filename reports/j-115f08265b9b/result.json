@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36533",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The checked-out adapter delegated directly to torch_memory_saver and did not expose pip's CUDA runtime directory to the exec-time loader. Upstream PR https://github.com/sgl-project/sglang/pull/36643 is an open related candidate, not present in the recorded base; it independently reports full CUDA 13/Qwen validation. This narrower port temporarily prepends a matching, existing pip libcudart directory while scheduler subprocesses start. A synthetic ELF fixture reproduced exit 127 without that loader path and succeeded with it.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-115f08265b9b/venv/bin/python -m pytest -q test/registered/unit/utils/test_torch_memory_saver_adapter.py",
+      "exit_code": 0,
+      "what_was_measured": "3 regression/boundary cases: CUDA 13 pip runtime discovery and temporary path injection, no CUDA runtime, and mismatched CUDA major. Before the source correction all 3 tests failed because the implementation had no discovery/path handling; after it they passed."
+    },
+    {
+      "command": "gcc synthetic libcudart.so.13 and preload_hook.so; inspect with readelf; exec prepared Python with LD_PRELOAD before/after setting LD_LIBRARY_PATH",
+      "exit_code": 0,
+      "what_was_measured": "The hook had NEEDED libcudart.so.13 and no RPATH/RUNPATH. Child exec exited 127 without the runtime directory and 0 with it. Raw output and sources are under reports/j-115f08265b9b/loader-fixture/."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-115f08265b9b/venv/bin/python (gfx950 tensor arithmetic check)",
+      "exit_code": 0,
+      "what_was_measured": "One assigned AMD Instinct MI355X gfx950 executed [1,2,3]^2+1 and exactly matched [2,5,10]. This checks the prepared GPU environment only."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-115f08265b9b/gpu-output.txt records exact numerical output on the assigned MI355X gfx950."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The assigned host is ROCm/gfx950, not CUDA 13; the exact NVIDIA loader stack could not be exercised.",
+    "torch_memory_saver is not installed in the prepared interpreter, so its real cu13 preload hook could not be launched.",
+    "No Qwen weights were available and no full SGLang model-serving reproduction was claimed.",
+    "The candidate is verified at the loader and adapter-contract levels, not as a full CUDA 13 serving-path fix."
+  ]
+}
