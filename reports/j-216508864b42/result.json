@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35148",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1724",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1691",
+  "candidate_commit": "fac8ec3773db9c151b20afd6cff8133a9f64bea2",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate genuinely fixes the issue-shaped non-streaming HTTP null case and the prior gRPC non-prefill state bug, but remains a partial fix: an empty-string reasoning_content is treated as already parsed and raw Qwen3 reasoning remains in content.",
+  "tests": [
+    {
+      "command": "source inspection at prepared base 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "The actual HTTP route_chat implementation directly proxied /v1/chat/completions without invoking a reasoning parser, reproducing the reported failure mechanism. Numbered source retained at /job/review-evidence-j-216508864b42/base-http-source-numbered.txt."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-216508864b42/cargo-target /job/.cargo/bin/cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib qwen3_prefill_reasoning -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate fac8ec3773, both non-streaming and streaming Qwen3 prefill parser regressions passed. Raw output: /job/review-evidence-j-216508864b42/candidate-qwen3-regression.log."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-216508864b42/cargo-target /job/.cargo/bin/cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib http_chat_response -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Candidate helper tests passed for the issue-shaped null reasoning field and preservation of non-empty worker reasoning: 2 passed. Raw output: /job/review-evidence-j-216508864b42/candidate-http-tests.log."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-216508864b42/cargo-target /job/.cargo/bin/cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib test_reasoning_parser_start_follows_thinking_toggle -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "The candidate correctly avoids marking reasoning started when think_in_prefill=false. Raw output: /job/review-evidence-j-216508864b42/candidate-toggle-test.log."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-216508864b42/cargo-target /job/.cargo/bin/cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib review_http_ -- --nocapture (temporary independent tests)",
+      "exit_code": 101,
+      "what_was_measured": "Explicit start-tag parsing passed, but reasoning_content empty string was incorrectly preserved and raw content was not split. Raw output and exact removed test patch: /job/review-evidence-j-216508864b42/candidate-adversarial-http.log and adversarial-tests.patch."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No Qwen3.8 weights or NVIDIA L40S were available. The defect is in CPU-side Rust response parsing; no GPU inference claim is made."
+  },
+  "native_rebuilt": true,
+  "remaining_counterexamples": [
+    "On the HTTP worker path, a response with content='work</think>answer' and reasoning_content='' is left unchanged instead of producing reasoning_content='work' and content='answer'.",
+    "HTTP streaming remains passthrough and is not fixed or verified by this candidate."
+  ],
+  "remaining_limitations": [
+    "Qwen/Qwen3.8-27B-FP8 weights and the reporter's NVIDIA L40S/CUDA environment were unavailable; full-model semantic and architecture-specific behavior was not tested.",
+    "The prepared environment reports torch 2.11.0+rocm7.2 and HIP 7.2. The Rust gateway tests were CPU-only.",
+    "The issue-shaped HTTP null case was validated at the payload parser level, not with a live Qwen3.8 worker deployment."
+  ]
+}
