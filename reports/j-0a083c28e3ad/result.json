@@ -1,0 +1,59 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35148",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1546",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1508",
+  "candidate_commit": "ac23f039ebd7e7dcbc44a11226265c82b1e95f18",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes deterministic prefilled-Qwen3 parsing in the gRPC response path, but it does not touch the HTTP connection-mode router selected by the original reproduction's http:// worker URL. Its tests manually initialize the upgraded parser rather than exercising gateway routing/response processing. It also initializes reasoning from a thinking toggle without requiring think_in_prefill, which misclassifies a tag-free response as reasoning in an independent boundary test.",
+  "tests": [
+    {
+      "command": "cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib review_reproduces_qwen3_prefilled_reasoning_failure -- --nocapture (temporary review test on base)",
+      "exit_code": 101,
+      "what_was_measured": "Reproduced the original output shape on base: reasoning_text was empty instead of 'Compute 17 * 23. '. Evidence: /job/review-evidence-j-0a083c28e3ad/failing-before.log"
+    },
+    {
+      "command": "cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib qwen3_prefill_reasoning -- --nocapture (candidate ac23f039)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate parser-level regressions passed: 2 passed, 0 failed. Evidence: /job/review-evidence-j-0a083c28e3ad/candidate-regression.log"
+    },
+    {
+      "command": "cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib review_non_prefilled -- --nocapture (temporary independent tests on candidate)",
+      "exit_code": 101,
+      "what_was_measured": "A generated <think> block still parsed correctly, but a tag-free 'plain answer' was classified entirely as reasoning after candidate-style DefaultOn initialization: 1 passed, 1 failed. Evidence: /job/review-evidence-j-0a083c28e3ad/adversarial-non-prefill.log"
+    },
+    {
+      "command": "cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib (candidate ac23f039)",
+      "exit_code": 0,
+      "what_was_measured": "Full gateway library suite passed: 396 passed, 0 failed. Evidence: /job/review-evidence-j-0a083c28e3ad/candidate-full-lib.log"
+    },
+    {
+      "command": "cargo fmt --manifest-path sgl-model-gateway/Cargo.toml --all -- --check (candidate ac23f039)",
+      "exit_code": 0,
+      "what_was_measured": "Formatting passed with only warnings that configured import grouping requires nightly. Evidence: /job/review-evidence-j-0a083c28e3ad/candidate-fmt.log"
+    },
+    {
+      "command": "source inspection of CliArgs::determine_connection_mode, RouterFactory, and routers/http/router.rs at candidate ac23f039",
+      "exit_code": 0,
+      "what_was_measured": "The original http://worker URL selects ConnectionMode::Http; the HTTP router forwards responses and has no reasoning-parser call. All candidate functional changes are confined to routers/grpc/."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The verified failures are deterministic CPU-side Rust routing/parser behavior. The assigned gfx950 GPU was not used; Qwen3.8-27B-FP8 weights and the reporter's NVIDIA L40S environment were unavailable."
+  },
+  "native_rebuilt": true,
+  "native_rebuild_evidence": "The exact candidate Rust sources and reasoning-parser v1.3.0 were compiled with rustc 1.90.0 into /tmp/amdpilot-repo-j-0a083c28e3ad/target-candidate/debug/deps/ and the resulting smg library test binary ran. Cargo resolution evidence is in candidate-cargo-tree.log and artifact hashes in candidate-artifacts.sha256.",
+  "remaining_counterexamples": [
+    "The original reproduction uses --worker-urls http://worker:8000, selecting ConnectionMode::Http. The candidate changes only the gRPC router, so reasoning_content remains whatever the worker returned (null when worker-side parsing is disabled).",
+    "When thinking is enabled but the tokenizer reports think_in_prefill=false, candidate initialization still marks the parser as already reasoning. A tag-free response such as 'plain answer' is then moved wholly into reasoning_content instead of content."
+  ],
+  "remaining_limitations": [
+    "No Qwen/Qwen3.8-27B-FP8 weights were available, so no full-model HTTP or gRPC serving reproduction was run.",
+    "The prepared architecture is AMD gfx950 with ROCm 7.2, not the reporter's NVIDIA L40S CUDA environment.",
+    "The deterministic tiny Llama fixture was not used because it cannot qualify Qwen3.8 chat-template behavior and the decisive HTTP routing gap is source-level.",
+    "No GPU execution was performed; model inference quality and model-specific emitted token sequences remain unverified."
+  ]
+}
