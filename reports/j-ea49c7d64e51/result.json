@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36302",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The base JIT implementation reproduced the reported source-level ABI mismatch: it resolved cudaMemcpyBatchAsync from the loaded runtime with dlsym but selected the 8- versus 9-argument function type from compile-time CUDA_VERSION. The correction now queries the loaded CUDA runtime and dispatches through the matching CUDA 12.8 or CUDA 13 signature, mirroring the existing AOT implementation. A host C++ regression compiled with CUDA_VERSION=12080 independently exercised both runtime boundaries (12999 and 13000).",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ea49c7d64e51/venv/bin/python -m pytest -q test/registered/unit/kernels/test_jit_cuda_memcpy_batch_compat.py",
+      "exit_code": 0,
+      "what_was_measured": "A C++ harness compiled with the CUDA 12.8 macro dispatched a simulated CUDA 13 runtime to the 8-argument ABI and a pre-13 runtime to the 9-argument ABI, including the failIdx sentinel. 1 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ea49c7d64e51/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_staged_write_back_dispatch.py",
+      "exit_code": 0,
+      "what_was_measured": "Existing HiCache host-pool and staged write-back dispatch behavior. 16 passed, 1 skipped."
+    },
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-ea49c7d64e51/jit-cache TORCHINDUCTOR_CACHE_DIR=/tmp/amdpilot-repo-j-ea49c7d64e51/torch-cache /tmp/amdpilot-repo-j-ea49c7d64e51/venv/bin/python -m pytest -q test/registered/kernels/ops/kvcache/test_hicache_page_first_write_back.py",
+      "exit_code": 0,
+      "what_was_measured": "Real JIT page-first staged MHA and MLA device-host round trips on the assigned AMD Instinct MI355X gfx950 GPU, with independent tensor equality checks across 12 cases."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The 12-case page-first staged write-back suite ran on AMD Instinct MI355X gfx950 under torch 2.11.0+rocm7.2; raw output: /tmp/amdpilot-repo-j-ea49c7d64e51/test-artifacts/gfx950-staged-write-back.txt. This validates only the unaffected ROCm JIT path, not CUDA ABI selection."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The assigned machine has ROCm 7.2 and one gfx950 GPU, not CUDA 12.8 headers plus a CUDA 13 libcudart. The original SIGSEGV, full 27B AWQ model, TP2 serving path, NVIDIA ISA, and real mixed-toolchain CUDA execution could not be reproduced here.",
+    "The new ABI regression uses typed simulated entry points in a native C++ harness. It verifies the exact argument-count boundary without invoking NVIDIA libcudart.",
+    "No model weights or multi-node workload were used."
+  ]
+}
