@@ -1,0 +1,32 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36058",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "summary": "No SGLang source defect was established. FlashInfer 0.6.17 (reported) and 0.6.18 (pinned by this checkout) already search CUDA_HOME/lib64/stubs before linking -lcuda. A deterministic host-link matrix reproduced the error when no unversioned libcuda.so was visible, showed that libcuda.so.1 alone is insufficient, and passed with either the standard toolkit stub or an explicit directory containing unversioned libcuda.so. The original NVIDIA T4/CUDA server path cannot run on the assigned ROCm gfx950 host.",
+  "tests": [
+    {
+      "command": "reports/j-1f9e4eaae313/reproduce_linker_matrix.sh /tmp/amdpilot-repo-j-1f9e4eaae313",
+      "exit_code": 0,
+      "what_was_measured": "Host linker behavior using FlashInfer's exact default CUDA library search ordering: missing library and versioned-only cases failed with cannot find -lcuda; toolkit-stub and explicit-system-search cases linked successfully."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1f9e4eaae313/venv/bin/python (Torch device inventory snippet) && rocm-smi --showproductname --showuniqueid",
+      "exit_code": 0,
+      "what_was_measured": "The only assigned accelerator is AMD Instinct MI355X/gfx950 under ROCm 7.2; torch.version.cuda is None, proving the NVIDIA CUDA/T4 prerequisite is unavailable."
+    },
+    {
+      "command": "python -m pip download --no-deps flashinfer-python==0.6.17 and ==0.6.18; inspect flashinfer/jit/cpp_ext.py",
+      "exit_code": 0,
+      "what_was_measured": "Both exact wheel implementations emit -L$cuda_home/lib64 and -L$cuda_home/lib64/stubs before -lcuda."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "No relevant GPU execution was possible: the assigned GPU is AMD gfx950 and Torch is ROCm-only (torch.version.cuda=None), while the issue requires NVIDIA T4 sm_75 and CUDA/FlashInfer. Inventory is retained in gpu-inventory.log.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reporter's NVIDIA T4, CUDA 12.8/12.9 layout, and model weights were unavailable.",
+    "The original SGLang HTTP server launch and FlashInfer CUDA kernel compilation were not executed.",
+    "The deterministic fixture validates host linker lookup only; it does not validate model architecture, semantic accuracy, GPU kernel execution, or distributed serving.",
+    "The report does not reveal which Kaggle path, if any, contains an unversioned libcuda.so, so no host-specific FLASHINFER_EXTRA_LDFLAGS value can be verified."
+  ]
+}
