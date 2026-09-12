@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34740",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1598",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1564",
+  "candidate_commit": "5e007ae4fb75b5b0b68c0c37a7ffe913239ca402",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is a verified partial fix for the production detokenizer's response-length-dependent U+FFFD stall under fixed-size decode events. It is not a full original-issue fix: the simulated-acceptance path still hardcodes token id 100, and the defensive bound counts events rather than limiting the retained token window itself.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-1736a88be7d8/venv/bin/python -m pytest -q /job/review-evidence/j-1736a88be7d8/test_detokenizer_incremental_window.py (base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "Original failure on recorded base: repeated U+FFFD-producing byte tokens never committed text; 1 failed and 2 boundary cases passed. Raw output: /job/review-evidence/j-1736a88be7d8/base-regression.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1736a88be7d8/venv/bin/python -m pytest -q test/registered/unit/managers/test_detokenizer_incremental_window.py test/registered/unit/managers/test_trim_matched_stop.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and neighboring stop-trimming coverage passed: 11 tests. Raw output: /job/review-evidence/j-1736a88be7d8/candidate-tests.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-1736a88be7d8/venv/bin/python < focused generate_simulated_accept_index fixture (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "The actual fixed-token GPU path still produced predict_unique=[100] on gfx950, proving Defect A remains. Raw output: /job/review-evidence/j-1736a88be7d8/candidate-gpu.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1736a88be7d8/venv/bin/python < independent detokenizer adversarial fixture (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "One- and four-token events and empty decodes had response-length-independent live windows; 4096-token events retained roughly 53k-57k tokens, showing the bound is event-based rather than a token-tail cap. Raw output: /job/review-evidence/j-1736a88be7d8/candidate-adversarial.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI355X, gfx950:sramecc+:xnack-, executed the real candidate generate_simulated_accept_index path with Torch 2.11.0+rocm7.2 and synchronized before results were read."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Defect A is unchanged: fixed-token simulated acceptance still executes predict.fill_(100), so tokenizers where id 100 decodes to U+FFFD still manufacture the triggering stream.",
+    "The candidate limits consecutive stalled decode events, not retained tokens. An event containing 4096 invalid byte tokens left a live decode window above 53,000 tokens; therefore it is not a strict small-tail bound regardless of chunk size.",
+    "The exact DeepSeek-V4-Pro tokenizer, full serving semantics, and the reported eight-GPU workload remain unverified because weights and topology were unavailable."
+  ],
+  "remaining_limitations": [
+    "DeepSeek-V4-Pro weights and the reported eight-GPU TP/DP/EAGLE deployment were unavailable, so throughput, TTFT, response semantics, and distributed serving behavior were not reproduced.",
+    "The deterministic byte-fallback tokenizer validates the real DetokenizerManager control flow but not the DeepSeek-V4-Pro vocabulary or model architecture.",
+    "The single gfx950 GPU fixture validates simulated-acceptance tensor execution only; it is not a model-serving reproduction.",
+    "No native source changed, repository-environment.json declared native=null, and therefore there was no native library to rebuild."
+  ]
+}
