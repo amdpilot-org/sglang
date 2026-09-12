@@ -1,0 +1,107 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+__ TestCompressPlanRaggedReduction.test_warp_extrema_have_one_writer_per_slot __
+
+self = <test_deepseek_v4_compress_plan_ragged.TestCompressPlanRaggedReduction testMethod=test_warp_extrema_have_one_writer_per_slot>
+
+    def test_warp_extrema_have_one_writer_per_slot(self):
+        """Do not reintroduce unsynchronized scratch initialization.
+
+        Every warp writes its own extrema slot immediately before the block-wide
+        barrier.  An earlier warp-0 initialization loop races those writes and was
+        the root cause of the compact-capture failure.
+        """
+        source = (
+            Path(__file__).parents[5]
+            / "python/sglang/kernels/jit/csrc/deepseek_v4/c_plan.cuh"
+        ).read_text()
+        kernel = source.split("void plan_compress_prefill_kernel0", 1)[1].split(
+            "__global__ void plan_compress_prefill_kernel_1", 1
+        )[0]
+        reduction = kernel.split("// === Stage B:", 1)[1].split(
+            "const auto num_q", 1
+        )[0]
+        self.assertEqual(reduction.count("warp_max["), 2)
+        self.assertEqual(reduction.count("warp_min["), 2)
+        before_reduction = kernel.split("// === Stage B:", 1)[0]
+>       self.assertNotIn("warp_max[tx] =", before_reduction)
+E       AssertionError: 'warp_max[tx] =' unexpectedly found in '(const Prefill0Params params) {\n  using namespace device;\n  const auto tx = threadIdx.x;\n  const auto block_size = kMaxPrefillBatchSize;\n  constexpr auto kNumWarps = kMaxPrefillBatchSize / kWarpThreads;\n  const auto cr = params.compress_ratio;\n  const auto sps = params.swa_page_size;\n  const bool is_overlap = (cr == 4);\n  const int32_t window_size = cr * (is_overlap ? 2 : 1);\n\n  alignas(128) __shared__ uint32_t counter_c;\n  alignas(128) __shared__ uint32_t counter_w;\n  __shared__ int32_t s_seq_len[kMaxPrefillBatchSize];\n  __shared__ int32_t s_prefix_len[kMaxPrefillBatchSize];\n  __shared__ uint32_t warp_max[kNumWarps];\n  __shared__ uint32_t warp_min[kNumWarps];\n  __shared__ uint32_t s_max_extend;\n  __shared__ uint32_t s_min_extend;\n\n  const auto lane_id = tx % kWarpThreads;\n  const auto warp_id = tx / kWarpThreads;\n\n  // === Stage A: load per-batch fields, init shared scratch ===\n  int32_t seq_len = 0, extend_len = 0, prefix_len = 0;\n  if (tx < params.batch_size) {\n    seq_len = static_cast<int32_t>(params.seq_lens_ptr[tx]);\n    extend_len = static_cast<int32_t>(params.extend_lens_ptr[tx]);\n    prefix_len = seq_len - extend_len;\n    s_seq_len[tx] = seq_len;\n    s_prefix_len[tx] = prefix_len;\n  }\n  if (tx == 0) {\n    counter_c = 0;\n    counter_w = 0;\n  }\n  if (tx < kNumWarps) {\n    warp_max[tx] = 0;\n    warp_min[tx] = 0xFFFFFFFFu;\n  }\n\n  '
+
+test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py:52: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f5d1c91c2c0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f65fc1258a0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestCompressPlanRaggedReduction.test_warp_extrema_have_one_writer_per_slot
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py", line 52, in test_warp_extrema_have_one_writer_per_slot
+    self.assertNotIn("warp_max[tx] =", before_reduction)
+  File "/usr/lib/python3.12/unittest/case.py", line 1159, in assertNotIn
+    self.fail(self._formatMessage(msg, standardMsg))
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: 'warp_max[tx] =' unexpectedly found in '(const Prefill0Params params) {\n  using namespace device;\n  const auto tx = threadIdx.x;\n  const auto block_size = kMaxPrefillBatchSize;\n  constexpr auto kNumWarps = kMaxPrefillBatchSize / kWarpThreads;\n  const auto cr = params.compress_ratio;\n  const auto sps = params.swa_page_size;\n  const bool is_overlap = (cr == 4);\n  const int32_t window_size = cr * (is_overlap ? 2 : 1);\n\n  alignas(128) __shared__ uint32_t counter_c;\n  alignas(128) __shared__ uint32_t counter_w;\n  __shared__ int32_t s_seq_len[kMaxPrefillBatchSize];\n  __shared__ int32_t s_prefix_len[kMaxPrefillBatchSize];\n  __shared__ uint32_t warp_max[kNumWarps];\n  __shared__ uint32_t warp_min[kNumWarps];\n  __shared__ uint32_t s_max_extend;\n  __shared__ uint32_t s_min_extend;\n\n  const auto lane_id = tx % kWarpThreads;\n  const auto warp_id = tx / kWarpThreads;\n\n  // === Stage A: load per-batch fields, init shared scratch ===\n  int32_t seq_len = 0, extend_len = 0, prefix_len = 0;\n  if (tx < params.batch_size) {\n    seq_len = static_cast<int32_t>(params.seq_lens_ptr[tx]);\n    extend_len = static_cast<int32_t>(params.extend_lens_ptr[tx]);\n    prefix_len = seq_len - extend_len;\n    s_seq_len[tx] = seq_len;\n    s_prefix_len[tx] = prefix_len;\n  }\n  if (tx == 0) {\n    counter_c = 0;\n    counter_w = 0;\n  }\n  if (tx < kNumWarps) {\n    warp_max[tx] = 0;\n    warp_min[tx] = 0xFFFFFFFFu;\n  }\n\n  '
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py::TestCompressPlanRaggedReduction::test_warp_extrema_have_one_writer_per_slot
+1 failed, 17 warnings in 11.74s
