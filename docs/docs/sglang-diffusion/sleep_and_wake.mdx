@@ -1,0 +1,37 @@
+---
+title: Sleep, wake, and refit
+---
+
+SGLang Diffusion can temporarily move active model weights from GPU memory to
+CPU memory without stopping the server. This coarse-grained lifecycle is useful
+when rollout and training share a GPU.
+
+With the Python API:
+
+```python
+generator.release_memory_occupation()
+
+# Run the colocated workload while generation is blocked.
+
+generator.resume_memory_occupation()
+generator.update_weights_from_disk("/path/to/refit/checkpoint")
+```
+
+With the HTTP API:
+
+```bash
+curl -X POST http://127.0.0.1:30000/release_memory_occupation
+curl -X POST http://127.0.0.1:30000/resume_memory_occupation
+curl -X POST http://127.0.0.1:30000/update_weights_from_disk \
+  -H 'Content-Type: application/json' \
+  -d '{"model_path":"/path/to/refit/checkpoint"}'
+```
+
+Generation and weight updates are rejected while the engine is sleeping. Wake
+the engine before refitting or generating. Repeated sleep and wake calls are
+idempotent.
+
+The current implementation moves active modules to host memory and restores
+them to their original devices. It does not preserve memory for another process
+through virtual-address reservation, and it does not support FSDP inference.
+Layerwise-offloaded modules remain managed by their existing offload policy.
