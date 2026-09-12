@@ -532,6 +532,7 @@ class AddReqResult(Enum):
     CONTINUE = auto()  # Continue to add requests
     NO_TOKEN = auto()  # No token left
     OTHER = auto()  # Other reasons to stop adding requests
+    REJECT = auto()  # Request can never fit; reject it and continue
 
 
 class PrefillAdder:
@@ -576,6 +577,7 @@ class PrefillAdder:
 
         self.req_states = None
         self.can_run_list = []
+        self.rejected_reqs = []
         self.preempt_list = []
         self.new_chunked_req = None
         self.log_hit_tokens = 0
@@ -833,6 +835,17 @@ class PrefillAdder:
             return 0
         return cap // self.page_size * self.page_size
 
+    def _swa_pool_chunk_cap(
+        self, max_new_tokens: int, swa_host_hit_length: int = 0
+    ) -> int:
+        """Largest chunk possible after all transient SWA pressure drains."""
+        cap = int(self.token_to_kv_pool_allocator.size_swa) - self._swa_reserved_tokens(
+            0, max_new_tokens, swa_host_hit_length
+        )
+        if cap <= 0:
+            return 0
+        return cap // self.page_size * self.page_size
+
     def _swa_req_never_fits(
         self, extend_input_len: int, max_new_tokens: int, swa_host_hit_length: int = 0
     ) -> bool:
@@ -853,6 +866,21 @@ class PrefillAdder:
             )
             >= capacity
         )
+
+    def _reject_swa_req(self, req: Req, max_new_tokens: int) -> AddReqResult:
+        capacity = self.token_to_kv_pool_allocator.size_swa
+        reserved = self._swa_reserved_tokens(
+            0, max_new_tokens, req.swa_host_hit_length
+        )
+        self.rejected_reqs.append(
+            (
+                req,
+                "Request cannot fit in the sliding-window KV cache: "
+                f"capacity={capacity} tokens, reserved_headroom={reserved} tokens, "
+                f"page_size={self.page_size}.",
+            )
+        )
+        return AddReqResult.REJECT
 
     def _mamba_gap_budget_for_req(self, req: Req) -> int:
         """Shared-gap reservation (full-token-equivalents) for a request's new
@@ -1324,7 +1352,16 @@ class PrefillAdder:
                 swa_cap = self._swa_chunk_cap(
                     self._swa_new_tokens(req), req.swa_host_hit_length
                 )
-                if self.rem_chunk_tokens is None or swa_cap <= 0:
+                if swa_cap <= 0:
+                    if (
+                        self._swa_pool_chunk_cap(
+                            self._swa_new_tokens(req), req.swa_host_hit_length
+                        )
+                        <= 0
+                    ):
+                        return self._reject_swa_req(req, self._swa_new_tokens(req))
+                    return AddReqResult.NO_TOKEN
+                if self.rem_chunk_tokens is None:
                     return AddReqResult.NO_TOKEN
                 chunk_tokens_limit = min(self.rem_chunk_tokens, swa_cap)
 
@@ -1364,7 +1401,18 @@ class PrefillAdder:
                     swa_cap = self._swa_chunk_cap(
                         self._swa_new_tokens(req), req.swa_host_hit_length
                     )
-                    if self.rem_chunk_tokens is None or swa_cap <= 0:
+                    if swa_cap <= 0:
+                        if (
+                            self._swa_pool_chunk_cap(
+                                self._swa_new_tokens(req), req.swa_host_hit_length
+                            )
+                            <= 0
+                        ):
+                            return self._reject_swa_req(
+                                req, self._swa_new_tokens(req)
+                            )
+                        return AddReqResult.NO_TOKEN
+                    if self.rem_chunk_tokens is None:
                         return AddReqResult.NO_TOKEN
                     chunk_tokens_limit = min(self.rem_chunk_tokens, swa_cap)
 

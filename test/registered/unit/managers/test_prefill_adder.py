@@ -1021,6 +1021,71 @@ class TestPrefillAdder(CustomTestCase):
         )
         busy_req.set_extend_range.assert_not_called()
 
+    def test_intrinsically_oversized_swa_req_with_zero_chunk_cap_is_rejected(self):
+        adder, req = self._build_dsv4_issue_req(
+            prompt_len=2_000, rem_swa=512, size_swa=512
+        )
+
+        self.assertIs(
+            adder.add_one_req(req, has_chunked_req=False, truncation_align_size=None),
+            AddReqResult.REJECT,
+        )
+
+        req.set_extend_range.assert_not_called()
+        self.assertEqual([item[0] for item in adder.rejected_reqs], [req])
+        self.assertIn("capacity=512 tokens", adder.rejected_reqs[0][1])
+
+    def test_intrinsically_oversized_swa_req_rejects_below_one_page_cap(self):
+        # 1,023 free tokens leave 510 after decode/page headroom: positive, but
+        # still less than one 512-token page and therefore not a usable chunk.
+        adder, req = self._build_dsv4_issue_req(
+            prompt_len=2_000, rem_swa=1_023, size_swa=1_023
+        )
+
+        self.assertTrue(adder._swa_req_never_fits(2_048, 1))
+        self.assertEqual(adder._swa_chunk_cap(1), 0)
+        self.assertIs(
+            adder.add_one_req(req, has_chunked_req=False, truncation_align_size=None),
+            AddReqResult.REJECT,
+        )
+
+    def test_zero_chunk_cap_under_transient_pressure_still_defers(self):
+        adder, req = self._build_dsv4_issue_req(
+            prompt_len=8_000, rem_swa=512, size_swa=4_096
+        )
+
+        self.assertTrue(adder._swa_req_never_fits(8_192, 1))
+        self.assertEqual(adder._swa_chunk_cap(1), 0)
+        self.assertEqual(adder._swa_pool_chunk_cap(1), 3_072)
+        self.assertIs(
+            adder.add_one_req(req, has_chunked_req=False, truncation_align_size=None),
+            AddReqResult.NO_TOKEN,
+        )
+        self.assertEqual(adder.rejected_reqs, [])
+
+    def test_rejected_swa_head_does_not_block_runnable_tail(self):
+        adder, head = self._build_dsv4_issue_req(
+            prompt_len=2_000, rem_swa=4_096, size_swa=4_096
+        )
+        # A page-rounded host load-back alone exceeds the pool, leaving no
+        # possible extend chunk even though an ordinary short request can fit.
+        head.swa_host_hit_length = 4_096
+
+        _, tail = self._build_dsv4_issue_req(
+            prompt_len=128, rem_swa=4_096, size_swa=4_096
+        )
+
+        self.assertIs(
+            adder.add_one_req(head, has_chunked_req=False, truncation_align_size=None),
+            AddReqResult.REJECT,
+        )
+        self.assertIs(
+            adder.add_one_req(tail, has_chunked_req=False, truncation_align_size=None),
+            AddReqResult.CONTINUE,
+        )
+        self.assertEqual([item[0] for item in adder.rejected_reqs], [head])
+        self.assertEqual(adder.can_run_list, [tail])
+
 
 if __name__ == "__main__":
     unittest.main()
