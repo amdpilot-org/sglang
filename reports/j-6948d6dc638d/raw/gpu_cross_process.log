@@ -1,0 +1,236 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+___ TestCudaIpcTransport.test_pooled_tensor_reconstructs_in_spawned_process ____
+
+self = <test_cuda_ipc_transport.TestCudaIpcTransport testMethod=test_pooled_tensor_reconstructs_in_spawned_process>
+
+    def test_pooled_tensor_reconstructs_in_spawned_process(self):
+        """Consumer releases the pool mapping before the producer tears down."""
+        ctx = mp.get_context("spawn")
+        proxy_queue = ctx.Queue()
+        producer_results = ctx.Queue()
+        consumer_done = ctx.Event()
+        producer = ctx.Process(
+            target=_produce_pooled_tensor,
+            args=(proxy_queue, consumer_done, producer_results),
+        )
+        producer.start()
+        proxy = reconstructed = None
+        producer_result = None
+        try:
+            try:
+>               proxy, expected = proxy_queue.get(timeout=60)
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/registered/unit/multimodal/test_cuda_ipc_transport.py:99: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <multiprocessing.queues.Queue object at 0x7efb6dc3d9a0>, block = True
+timeout = 59.99999587982893
+
+    def get(self, block=True, timeout=None):
+        if self._closed:
+            raise ValueError(f"Queue {self!r} is closed")
+        if block and timeout is None:
+            with self._rlock:
+                res = self._recv_bytes()
+            self._sem.release()
+        else:
+            if block:
+                deadline = time.monotonic() + timeout
+            if not self._rlock.acquire(block, timeout):
+                raise Empty
+            try:
+                if block:
+                    timeout = deadline - time.monotonic()
+                    if not self._poll(timeout):
+>                       raise Empty
+E                       _queue.Empty
+
+/usr/lib/python3.12/multiprocessing/queues.py:114: Empty
+
+During handling of the above exception, another exception occurred:
+
+self = <test_cuda_ipc_transport.TestCudaIpcTransport testMethod=test_pooled_tensor_reconstructs_in_spawned_process>
+
+    def test_pooled_tensor_reconstructs_in_spawned_process(self):
+        """Consumer releases the pool mapping before the producer tears down."""
+        ctx = mp.get_context("spawn")
+        proxy_queue = ctx.Queue()
+        producer_results = ctx.Queue()
+        consumer_done = ctx.Event()
+        producer = ctx.Process(
+            target=_produce_pooled_tensor,
+            args=(proxy_queue, consumer_done, producer_results),
+        )
+        producer.start()
+        proxy = reconstructed = None
+        producer_result = None
+        try:
+            try:
+                proxy, expected = proxy_queue.get(timeout=60)
+            except queue.Empty:
+                producer_result = producer_results.get(timeout=5)
+                _status, payload = producer_result
+>               self.fail(
+                    f"CUDA IPC producer failed before sending its proxy: {payload}"
+                )
+E               AssertionError: CUDA IPC producer failed before sending its proxy: ModuleNotFoundError("No module named 'cuda'")
+
+test/registered/unit/multimodal/test_cuda_ipc_transport.py:103: AssertionError
+
+During handling of the above exception, another exception occurred:
+
+self = <test_cuda_ipc_transport.TestCudaIpcTransport testMethod=test_pooled_tensor_reconstructs_in_spawned_process>
+
+    def test_pooled_tensor_reconstructs_in_spawned_process(self):
+        """Consumer releases the pool mapping before the producer tears down."""
+        ctx = mp.get_context("spawn")
+        proxy_queue = ctx.Queue()
+        producer_results = ctx.Queue()
+        consumer_done = ctx.Event()
+        producer = ctx.Process(
+            target=_produce_pooled_tensor,
+            args=(proxy_queue, consumer_done, producer_results),
+        )
+        producer.start()
+        proxy = reconstructed = None
+        producer_result = None
+        try:
+            try:
+                proxy, expected = proxy_queue.get(timeout=60)
+            except queue.Empty:
+                producer_result = producer_results.get(timeout=5)
+                _status, payload = producer_result
+                self.fail(
+                    f"CUDA IPC producer failed before sending its proxy: {payload}"
+                )
+    
+            reconstructed = proxy.reconstruct_on_target_device(0)
+            torch.cuda.synchronize()
+            self.assertEqual(reconstructed.cpu().tolist(), expected)
+        finally:
+            # The scheduler retains this cache for its lifetime. The test's
+            # consumer exits quickly, so it must close the mapping before the
+            # producer destroys the shared allocation.
+            del reconstructed, proxy
+            _pool_handle_cache_clear()
+            gc.collect()
+            torch.cuda.ipc_collect()
+            consumer_done.set()
+            producer.join(timeout=60)
+            try:
+                if producer_result is None:
+                    producer_result = producer_results.get(timeout=5)
+                status, payload = producer_result
+>               self.assertEqual(status, "ok", payload)
+E               AssertionError: 'error' != 'ok'
+E               - error
+E               + ok
+E                : ModuleNotFoundError("No module named 'cuda'")
+
+test/registered/unit/multimodal/test_cuda_ipc_transport.py:124: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7efb6d1b2d40>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f0450e26840>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestCudaIpcTransport.test_pooled_tensor_reconstructs_in_spawned_process
+----------------------------- Captured stderr call -----------------------------
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-6948d6dc638d/cache/aiter/module_aiter_core.so
+[W912 10:55:13.131706929 CudaIPCTypes.cpp:16] Producer process has been terminated before all shared CUDA tensors released. See Note [Sharing CUDA tensors]
+Traceback (most recent call last):
+  File "/job/repo/test/registered/unit/multimodal/test_cuda_ipc_transport.py", line 99, in test_pooled_tensor_reconstructs_in_spawned_process
+    proxy, expected = proxy_queue.get(timeout=60)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 114, in get
+    raise Empty
+_queue.Empty
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/job/repo/test/registered/unit/multimodal/test_cuda_ipc_transport.py", line 103, in test_pooled_tensor_reconstructs_in_spawned_process
+    self.fail(
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: CUDA IPC producer failed before sending its proxy: ModuleNotFoundError("No module named 'cuda'")
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/multimodal/test_cuda_ipc_transport.py", line 124, in test_pooled_tensor_reconstructs_in_spawned_process
+    self.assertEqual(status, "ok", payload)
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1251, in assertMultiLineEqual
+    self.fail(self._formatMessage(msg, standardMsg))
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: 'error' != 'ok'
+- error
++ ok
+ : ModuleNotFoundError("No module named 'cuda'")
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/multimodal/test_cuda_ipc_transport.py::TestCudaIpcTransport::test_pooled_tensor_reconstructs_in_spawned_process
+1 failed, 17 warnings in 86.56s (0:01:26)
