@@ -486,6 +486,8 @@ class ModelOptFp8Config(ModelOptQuantConfig):
             # Fall back to nested format (hf_quant_config.json - will be deprecated)
             try:
                 quantization_section = cls.get_from_keys(config, ["quantization"])
+                if quantization_section is None:
+                    raise ValueError("The 'quantization' section is null.")
                 quant_method = quantization_section.get("quant_algo")
                 kv_cache_quant_method = quantization_section.get("kv_cache_quant_algo")
                 exclude_modules = quantization_section.get("exclude_modules")

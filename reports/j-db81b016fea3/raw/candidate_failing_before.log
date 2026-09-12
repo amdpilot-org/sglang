@@ -1,0 +1,101 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+__________ test_muse_glimmer_null_text_config_matches_missing_section __________
+
+    def test_muse_glimmer_null_text_config_matches_missing_section():
+        config = {"model_type": "muse_glimmer"}
+
+>       assert muse_glimmer_config_kwargs_from_hf(
+            {**config, "text_config": None}
+        ) == muse_glimmer_config_kwargs_from_hf(config)
+
+test/registered/unit/configs/test_null_optional_config_sections.py:10:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+config_dict = {'model_type': 'muse_glimmer', 'text_config': None}
+
+    def muse_glimmer_config_kwargs_from_hf(config_dict: Dict[str, Any]) -> Dict[str, Any]:
+        if "text_config" not in config_dict:
+            return config_dict
+
+        text = config_dict["text_config"]
+        kwargs = {k: v for k, v in config_dict.items() if k not in _HF_NESTED_KEYS}
+>       kwargs.update({k: v for k, v in text.items() if k not in _HF_TEXT_KEYS_TRANSLATED})
+                                        ^^^^^^^^^^
+E       AttributeError: 'NoneType' object has no attribute 'items'
+
+python/sglang/srt/configs/muse_glimmer.py:183: AttributeError
+_________ test_modelopt_fp8_null_quantization_matches_missing_section __________
+
+    def test_modelopt_fp8_null_quantization_matches_missing_section():
+        expected_message = "Cannot find 'quant_algo'"
+
+        with pytest.raises(ValueError, match=expected_message):
+            ModelOptFp8Config.from_config({})
+        with pytest.raises(ValueError, match=expected_message):
+>           ModelOptFp8Config.from_config({"quantization": None})
+
+test/registered/unit/configs/test_null_optional_config_sections.py:21:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+cls = <class 'sglang.srt.layers.quantization.modelopt_quant.ModelOptFp8Config'>
+config = {'quantization': None}
+
+    @classmethod
+    def from_config(cls, config: Dict[str, Any]) -> ModelOptFp8Config:
+        # Handle two different config formats:
+        # 1. hf_quant_config.json format: {"quantization": {"quant_algo": "FP8", ...}}
+        # 2. config.json quantization_config format: {"quant_algo": "FP8", ...}
+        # In future modelopt will deprecate hf_quant_config.json, and only keep config.json.
+        # For legacy reasons, we keep hf_quant_config.json for now.
+
+        # Initialize variables
+        kv_cache_quant_method = None
+        exclude_modules = None
+
+        # Try flat format first (config.json quantization_config - preferred format)
+        quant_method = config.get("quant_algo")
+        if quant_method is not None:
+            # Flat format (config.json quantization_config)
+            # Derive kv_cache quant from kv_cache_scheme dict
+            kv_cache_scheme = config.get("kv_cache_scheme")
+            if isinstance(kv_cache_scheme, dict):
+                if (
+                    kv_cache_scheme.get("type") == "float"
+                    and kv_cache_scheme.get("num_bits") == 8
+                ):
+                    kv_cache_quant_method = "FP8"
+            else:
+                kv_cache_quant_method = config.get("kv_cache_quant_algo")
+
+            # Map 'ignore' field to 'exclude_modules'
+            exclude_modules = config.get("ignore")
+        else:
+            # Fall back to nested format (hf_quant_config.json - will be deprecated)
+            try:
+                quantization_section = cls.get_from_keys(config, ["quantization"])
+>               quant_method = quantization_section.get("quant_algo")
+                               ^^^^^^^^^^^^^^^^^^^^^^^^
+E               AttributeError: 'NoneType' object has no attribute 'get'
+
+python/sglang/srt/layers/quantization/modelopt_quant.py:489: AttributeError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/configs/test_null_optional_config_sections.py::test_muse_glimmer_null_text_config_matches_missing_section
+FAILED test/registered/unit/configs/test_null_optional_config_sections.py::test_modelopt_fp8_null_quantization_matches_missing_section
+2 failed, 17 warnings in 12.37s
