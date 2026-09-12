@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36333",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared main checkout already contains upstream PR #35255's lifecycle fix. Current code preserves dispatched request state, sends a deduplicated scheduler abort on handler cancellation, and retries the chunked-prefill transition race. No production source change was justified. A real killed streaming client drained from one running request to zero in 0.103 seconds with zero deleted-state error lines.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-c220307f6dec/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py test/registered/unit/managers/test_scheduler_chunked_abort_race.py",
+      "exit_code": 0,
+      "what_was_measured": "Complete related unit modules: 28 tests and 3 subtests passed, covering request-state cleanup, abort behavior, and deferred chunked-prefill aborts. Raw output: reports/j-c220307f6dec/raw/unit_tests.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c220307f6dec/venv/bin/python -m pytest -vv test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py::TestReleaseReqStatesOnFailure test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py::TestGenerateRequestCleanupOnDispatchFailure test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py::TestDisconnectAfterDispatchAbortsRequest test/registered/unit/managers/test_scheduler_chunked_abort_race.py",
+      "exit_code": 0,
+      "what_was_measured": "Thirteen named issue-specific and independent boundary tests passed, including cancel-after-dispatch, undispatched single/batch cleanup, parallel sampling, abort dispatch failure, and chunked-slot transitions. Raw output: reports/j-c220307f6dec/raw/focused_regressions.log"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-c220307f6dec/venv/bin/python reports/j-c220307f6dec/run_disconnect_probe.py /tmp/amdpilot-repo-j-c220307f6dec/tiny-random-llama reports/j-c220307f6dec/raw/http_disconnect",
+      "exit_code": 0,
+      "what_was_measured": "Actual SGLang HTTP streaming disconnect and engine execution: curl was SIGKILLed after 4248 response bytes; /get_load changed from one running request at 0.001 s to zero at 0.103 s; deleted-state error count was zero. Raw metadata and logs are under reports/j-c220307f6dec/raw/http_disconnect/."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X was visible as gfx950:sramecc+:xnack-. The final HTTP probe launched SGLang with the Triton attention backend on that GPU and executed generation before killing the client; see raw/http_disconnect/server.log and run-metadata.json."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The tiny random Llama fixture validates transport and engine execution only, not semantic accuracy or another model architecture.",
+    "GLM-5.3, Qwen, DeepSeek, DSPARK/speculative decoding, TP=2, and multi-node behavior were not tested because the corresponding weights/topology were unavailable.",
+    "The final owned server needed SIGKILL after a 30-second graceful-shutdown timeout; descendants were reaped and the process group was gone. This occurred after issue-specific evidence collection.",
+    "The original broken revision was not substituted for the actual prepared checkout; therefore the production symptom was not reproduced on current main, which already contains the fix."
+  ]
+}
