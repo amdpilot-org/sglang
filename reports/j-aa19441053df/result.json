@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35771",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source retained the inclusive target-only acceptance predicate. The patch requires positive target mass and uses a strict half-open CDF comparison, with native-kernel regression cases for zero mass, threshold-zero, interior boundaries, and both RNG endpoints. Two open upstream PRs independently contain the same correction. Source checks pass, but this gfx950 ROCm environment's installed sgl_kernel does not register the target-only AOT operator, so the modified native kernel could not be rebuilt or executed here.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-aa19441053df/venv/bin/python /tmp/repro_j_aa19441053df.py",
+      "exit_code": 1,
+      "what_was_measured": "Attempted the issue's synthetic DFlash path on the assigned AMD Instinct MI350X; it stopped before sampler execution with RuntimeError: DFLASH non-greedy verification is unavailable on this build/device."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-aa19441053df/venv/bin/python -m pytest -q python/sglang/kernels/aot/tests/speculative/test_speculative_sampling.py -s",
+      "exit_code": 1,
+      "what_was_measured": "Confirmed the installed ROCm sgl_kernel lacks torch.ops.sgl_kernel.tree_speculative_sampling_target_only; both pre-existing native tests fail at operator lookup before GPU kernel launch."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-aa19441053df/venv/bin/python -m pytest --collect-only -q python/sglang/kernels/aot/tests/speculative/test_speculative_sampling.py",
+      "exit_code": 0,
+      "what_was_measured": "Collected all seven focused tests, including five independent CDF boundary scenarios."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/kernels/aot/csrc/speculative/speculative_sampling.cuh python/sglang/kernels/aot/tests/speculative/test_speculative_sampling.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, syntax, lint, and policy checks passed for the changed native source and regression test."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validation passed."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "torch.cuda identified one AMD Instinct MI350X (gfx950), and the DFlash setup allocated GPU tensors, but DFlash rejected non-greedy verification on this build and the installed sgl_kernel 0.4.6.post1 did not register the target-only operator. Therefore no issue-specific native kernel execution is claimed.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The CUDA-oriented AOT sgl_kernel build has no prepared ROCm native rebuild path in this checkout, and its CMake project requires CUDA; the modified native library was not built on gfx950.",
+    "DFlash and EAGLE/MTP caller-level behavior was not executed because the shared target-only native operator is unavailable on this ROCm installation.",
+    "No full model, model weights, semantic-accuracy workload, or distributed workload was run or claimed."
+  ]
+}
