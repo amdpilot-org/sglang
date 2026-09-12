@@ -28,13 +28,32 @@ def _valid_rows(plan: torch.Tensor, words_per_row: int) -> list[tuple[int, ...]]
     )
 
 
-class TestCompressPlanRaggedReduction(CustomTestCase):
-    def test_warp_extrema_have_one_writer_per_slot(self):
-        """Do not reintroduce unsynchronized scratch initialization.
+def _assert_warp_extrema_synchronized(test: unittest.TestCase, kernel: str) -> None:
+    """Accept no initialization, or initialization ordered before reduction."""
+    reduction = kernel.split("// === Stage B:", 1)[1].split(
+        "const auto num_q", 1
+    )[0]
+    test.assertEqual(reduction.count("warp_max["), 2)
+    test.assertEqual(reduction.count("warp_min["), 2)
 
-        Every warp writes its own extrema slot immediately before the block-wide
-        barrier.  An earlier warp-0 initialization loop races those writes and was
-        the root cause of the compact-capture failure.
+    before_reduction = kernel.split("// === Stage B:", 1)[0]
+    init_positions = [
+        before_reduction.find("warp_max[tx] ="),
+        before_reduction.find("warp_min[tx] ="),
+    ]
+    if any(position >= 0 for position in init_positions):
+        test.assertTrue(all(position >= 0 for position in init_positions))
+        barrier = before_reduction.rfind("__syncthreads();")
+        test.assertGreater(barrier, max(init_positions))
+
+
+class TestCompressPlanRaggedReduction(CustomTestCase):
+    def test_warp_extrema_initialization_is_synchronized(self):
+        """Reject only unsynchronized scratch initialization.
+
+        The current implementation needs no initialization because every warp
+        writes its own slot.  Initialization is also correct when a block barrier
+        orders it before those per-warp writes, as in the initial upstream fix.
         """
         source = (
             Path(__file__).parents[5]
@@ -43,14 +62,31 @@ class TestCompressPlanRaggedReduction(CustomTestCase):
         kernel = source.split("void plan_compress_prefill_kernel0", 1)[1].split(
             "__global__ void plan_compress_prefill_kernel_1", 1
         )[0]
-        reduction = kernel.split("// === Stage B:", 1)[1].split(
-            "const auto num_q", 1
+        _assert_warp_extrema_synchronized(self, kernel)
+
+    def test_barrier_based_initialization_boundary(self):
+        source = (
+            Path(__file__).parents[5]
+            / "python/sglang/kernels/jit/csrc/deepseek_v4/c_plan.cuh"
+        ).read_text()
+        kernel = source.split("void plan_compress_prefill_kernel0", 1)[1].split(
+            "__global__ void plan_compress_prefill_kernel_1", 1
         )[0]
-        self.assertEqual(reduction.count("warp_max["), 2)
-        self.assertEqual(reduction.count("warp_min["), 2)
-        before_reduction = kernel.split("// === Stage B:", 1)[0]
-        self.assertNotIn("warp_max[tx] =", before_reduction)
-        self.assertNotIn("warp_min[tx] =", before_reduction)
+        stage_b = "// === Stage B:"
+        initialization = """if (tx < kNumWarps) {
+    warp_max[tx] = 0;
+    warp_min[tx] = 0xFFFFFFFFu;
+  }
+  """
+
+        safe_kernel = kernel.replace(
+            stage_b, initialization + "__syncthreads();\n  " + stage_b
+        )
+        _assert_warp_extrema_synchronized(self, safe_kernel)
+
+        racy_kernel = kernel.replace(stage_b, initialization + stage_b)
+        with self.assertRaises(AssertionError):
+            _assert_warp_extrema_synchronized(self, racy_kernel)
 
     def _assert_gpu_matches_cpu(self, extend_lens: list[int]) -> None:
         bs = len(extend_lens)

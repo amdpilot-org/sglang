@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32470",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 2129's real GPU ragged-plan coverage, corrected its over-restrictive source invariant to accept both valid upstream implementations while rejecting the racy no-barrier form, and removed trailing whitespace that made the exact candidate fail git diff --check.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3d3285e94fc9/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py::TestCompressPlanRaggedReduction::test_warp_extrema_have_one_writer_per_slot (candidate test with the initial upstream init-plus-barrier implementation restored)",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced the review's false rejection against the exact candidate test. Raw output: reports/j-3d3285e94fc9/evidence/candidate-false-rejection.log"
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..61a5235257fc808054bc3fe0061f763b49c5293f",
+      "exit_code": 2,
+      "what_was_measured": "Reproduced five trailing-whitespace errors in the exact candidate. Raw output: reports/j-3d3285e94fc9/evidence/candidate-diff-check.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_JIT_KERNEL_CACHE_DIR=/tmp/amdpilot-repo-j-3d3285e94fc9/cache-correction /tmp/amdpilot-repo-j-3d3285e94fc9/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py -vv",
+      "exit_code": 0,
+      "what_was_measured": "5 tests passed with 9 subtests. The source regression accepted current and init-plus-barrier implementations and rejected the racy boundary; the actual JIT GPU planner matched the independent CPU plan and preserved ragged-ID bounds for the issue shape and boundary controls. Raw output: reports/j-3d3285e94fc9/evidence/passing-after.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Consolidated patch whitespace validation. Raw output: reports/j-3d3285e94fc9/evidence/passing-diff-check.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI350X gfx950 with PyTorch 2.11.0+rocm7.2 and HIP 7.2.26015 executed the real plan_compress_prefill_kernel0 JIT planner. Environment and JIT path are retained under reports/j-3d3285e94fc9/evidence/.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original CUDA/H20 TP=2 DeepSeek-V4-Flash-DSpark graph-capture reproduction was not run: the environment provides one AMD gfx950 GPU and no reported model weights.",
+    "The GPU run qualifies planner metadata and bounds on HIP, not CUDA scheduling behavior, a full model, CUDA graph capture, semantic accuracy, or a distributed serving workload.",
+    "No monolithic native rebuild is configured (repository-environment.json native is null); the exercised JIT extension was compiled from the checked-out source for gfx950."
+  ]
+}
