@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37059",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared main checkout still omitted use_dp_attention_reduce when MiMo's audio encoder constructed VisionAttention. A focused failing-before/passing-after regression verifies that AudioEncoderAttention now follows the runtime DP-attention setting, selecting the attention-TP reduction path only when DP attention is enabled. Upstream PR https://github.com/sgl-project/sglang/pull/37060 independently contains the same source correction but was still open and absent from the prepared base.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-e70937ad1879/venv/bin/python -m pytest -q test/srt/models/test_mimo_audio_dp_attention.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Both DP-attention boundary cases failed because mimo_audio had no is_dp_attention_enabled wiring; raw output: reports/j-e70937ad1879/regression-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e70937ad1879/venv/bin/python -m pytest -q test/srt/models/test_mimo_audio_dp_attention.py (after source fix)",
+      "exit_code": 0,
+      "what_was_measured": "The VisionAttention constructor receives use_dp_attention_reduce=False when DP attention is disabled and True when enabled; 2 tests passed. Raw output: reports/j-e70937ad1879/regression-after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e70937ad1879/venv/bin/python -m compileall -q python/sglang/srt/models/mimo_audio.py test/srt/models/test_mimo_audio_dp_attention.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python files compile and the patch has no whitespace errors."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e70937ad1879/venv/bin/python <single-device torch GPU probe>",
+      "exit_code": 0,
+      "what_was_measured": "Torch executed a 4x4 matmul on the assigned AMD Instinct MI355X (gfx950-class) GPU and matched the independent CPU result within 4.76837158203125e-07; raw output: reports/j-e70937ad1879/gpu-environment.txt. This does not exercise distributed MiMo serving."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One ROCm device was visible (AMD Instinct MI355X, torch 2.11.0+rocm7.2, HIP 7.2.26015) and executed the retained numerical probe in reports/j-e70937ad1879/gpu-environment.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The assigned environment has one gfx950-class GPU, not the reported 8xH200 topology, so the full TP=8/DP=2 collective hang and recovery after an audio request were not reproduced.",
+    "MiMo-V2.5 weights were not available locally; no claim is made about full-model audio semantics, FP8 behavior, CUDA/NCCL, or HTTP serving.",
+    "The regression validates the issue-specific collective-routing decision at construction time; it does not execute a multi-rank attention-TP collective.",
+    "No native code changed, so no native rebuild was applicable."
+  ]
+}
