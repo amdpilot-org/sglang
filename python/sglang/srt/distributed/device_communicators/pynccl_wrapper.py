@@ -90,7 +90,7 @@ NCCL_CONFIG_VERSION = 23000  # NCCL_VERSION(2, 30, 0)
 
 
 class ncclConfig_t(ctypes.Structure):
-    """Mirror of ``ncclConfig_t`` (``ncclConfig_v22800``) from nccl.h.in.
+    """Mirror of ``ncclConfig_t`` from NCCL 2.30's ``nccl.h.in``.
 
     Fields are append-only across NCCL versions, and NCCL only copies
     ``min(config.size, sizeof(its own struct))`` bytes, so declaring the full
@@ -120,6 +120,7 @@ class ncclConfig_t(ctypes.Structure):
         ("graphUsageMode", ctypes.c_int),
         ("numRmaCtx", ctypes.c_int),
         ("maxP2pPeers", ctypes.c_int),
+        ("graphStreamOrdering", ctypes.c_int),
     ]
 
     @classmethod
@@ -149,39 +150,6 @@ class ncclUniqueId(ctypes.Structure):
 
 # NCCL symmetric-memory window registration flags (from nccl.h.in).
 NCCL_WIN_COLL_SYMMETRIC = 0x01
-
-# ncclConfig_t mirrors NCCL_CONFIG_INITIALIZER at v2.30.7-1: 21 fields
-# including the trailing graphStreamOrdering (nccl4py's config_dtype omits
-# the last field; a 20-field binding makes ncclCommInitRankConfig reject the
-# config). magic/version must be set by the caller, tunables left UNDEF.
-NCCL_CONFIG_UNDEF_INT = -2147483648  # INT_MIN
-NCCL_API_MAGIC = 0xCAFEBEEF
-
-
-class ncclConfig_t(ctypes.Structure):
-    _fields_ = [
-        ("size", ctypes.c_size_t),
-        ("magic", ctypes.c_uint),
-        ("version", ctypes.c_uint),
-        ("blocking", ctypes.c_int),
-        ("cgaClusterSize", ctypes.c_int),
-        ("minCTAs", ctypes.c_int),
-        ("maxCTAs", ctypes.c_int),
-        ("netName", ctypes.c_void_p),
-        ("splitShare", ctypes.c_int),
-        ("trafficClass", ctypes.c_int),
-        ("commName", ctypes.c_void_p),
-        ("collnetEnable", ctypes.c_int),
-        ("CTAPolicy", ctypes.c_int),
-        ("shrinkShare", ctypes.c_int),
-        ("nvlsCTAs", ctypes.c_int),
-        ("nChannelsPerNetPeer", ctypes.c_int),
-        ("nvlinkCentricSched", ctypes.c_int),
-        ("graphUsageMode", ctypes.c_int),
-        ("numRmaCtx", ctypes.c_int),
-        ("maxP2pPeers", ctypes.c_int),
-        ("graphStreamOrdering", ctypes.c_int),
-    ]
 
 
 # ncclWaitSignalDesc_t: one descriptor per peer (nccl4py nccl.pyx:781-799).

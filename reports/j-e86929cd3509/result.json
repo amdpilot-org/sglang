@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32200",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR https://github.com/amdpilot-org/sglang/pull/2814 at a919f1c5af0c12fe6d9c94af9f70633b3780996f and corrected the blocking compatibility regression independently reported by review PR https://github.com/amdpilot-org/sglang/pull/2865. The candidate declared ncclConfig_t twice, so the second 21-field NCCL 2.30 definition shadowed the established create() initializer used by NCCLLibrary.ncclCommInitRankConfig and symmetric-memory PyNcclCommunicator construction. The correction consolidates the definitions into one 21-field structure that retains create(), adds direct regression coverage for both call sites, and moves the candidate test into the current registered-test taxonomy. The requested RMA bindings, allocator window-handle exposure, and warm-up abstraction remain intact.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-e86929cd3509/venv/bin/python -m pytest -q test/registered/distributed/test_pynccl_rma.py (exact candidate a919f1c5)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's submitted suite passed 15 tests and skipped two hardware tests while omitting both established ncclConfig_t.create() call sites. Evidence: /tmp/amdpilot-repo-j-e86929cd3509/evidence/candidate-focused-before.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e86929cd3509/venv/bin/python <ncclConfig_t.create probe> (exact candidate a919f1c5)",
+      "exit_code": 1,
+      "what_was_measured": "Independently reproduced AttributeError because the candidate's effective ncclConfig_t had no create attribute. Evidence: /tmp/amdpilot-repo-j-e86929cd3509/evidence/candidate-config-before.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_NCCL_SO_PATH=/opt/rocm-7.2.4/lib/librccl.so /tmp/amdpilot-repo-j-e86929cd3509/venv/bin/python <default configured-init probe> (exact candidate a919f1c5)",
+      "exit_code": 1,
+      "what_was_measured": "Loaded real RCCL 2.27.7, obtained a unique ID, and independently reproduced AttributeError in NCCLLibrary.ncclCommInitRankConfig before communicator creation. Evidence: /tmp/amdpilot-repo-j-e86929cd3509/evidence/candidate-real-config-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e86929cd3509/venv/bin/python -m pytest -q test/registered/e2e/distributed/test_pynccl_rma.py",
+      "exit_code": 0,
+      "what_was_measured": "18 tests passed, including direct regressions for NCCLLibrary's default configured-init path and symmetric-memory PyNcclCommunicator construction; two real two-GPU RMA tests skipped because only one GPU was assigned. Evidence: /tmp/amdpilot-repo-j-e86929cd3509/evidence/focused-final.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_NCCL_SO_PATH=/opt/rocm-7.2.4/lib/librccl.so /tmp/amdpilot-repo-j-e86929cd3509/venv/bin/python <create/destroy configured communicator probe>",
+      "exit_code": 0,
+      "what_was_measured": "The corrected default-config path loaded RCCL 2.27.7 and successfully created and destroyed a rank-1 communicator. Evidence: /tmp/amdpilot-repo-j-e86929cd3509/evidence/real-config-after.log"
+    },
+    {
+      "command": "TMPDIR=/tmp/amdpilot-repo-j-e86929cd3509/build-tmp TORCH_EXTENSIONS_DIR=/tmp/amdpilot-repo-j-e86929cd3509/torch-extensions PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e86929cd3509/venv/bin/python <native allocator rebuild and GPU reference probe>",
+      "exit_code": 0,
+      "what_was_measured": "Freshly rebuilt the embedded allocator, linked it with -lrccl, confirmed nccl_allocator_register_segments_with_comm, nccl_allocator_get_windows_for_comm, and nccl_allocator_clear_windows_for_comm exports, and exactly matched a 1024-element GPU arange allocation to an independent CPU reference on AMD Instinct MI355X (max absolute error 0). Evidence: /tmp/amdpilot-repo-j-e86929cd3509/evidence/native-rebuild-gpu-after.log"
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files <changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "Formatting, lint, registered-test taxonomy, and repository policy hooks passed. Evidence: /tmp/amdpilot-repo-j-e86929cd3509/evidence/precommit-final.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A freshly rebuilt native allocator performed a real allocation on one assigned AMD Instinct MI355X and matched an independent CPU tensor exactly. No RMA primitive executed because only one GPU was assigned and RCCL 2.27.7 lacks the NCCL 2.30 RMA symbols."
+  },
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "The environment exposes one AMD GPU, so the two-rank window-handle exchange and ring put_signal/wait_signal handshake could not execute.",
+    "Pinned RCCL 2.27.7 exports ncclCommInitRankConfig, ncclMemAlloc, ncclMemFree, and window registration, but not ncclPutSignal, ncclSignal, ncclWaitSignal, ncclWinGetUserPtr, or ncclGetPeerDevicePointer. Successful NCCL >= 2.30 RMA, NVLink, PCIe-only NULL-window, and vGPU behavior remain unverified.",
+    "The CUDA-runtime-specific warm-up path could not be evaluated on this ROCm-only node because capability gating prevents entry and no NVIDIA runtime or hardware was available.",
+    "The production TP/EP serving path does not yet consume NcclRmaCommunicator; this contribution implements the requested primitive and warm-up layer but does not demonstrate serving-performance impact."
+  ]
+}
