@@ -1,0 +1,60 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34092",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2801",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2771",
+  "candidate_commit": "192a5253d3268bf9199d6854344eb01b10577510",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "delivery_main_commit": "bd45cd50ca900dd821f829ca9adfbf9aa3336bda",
+  "outcome": "candidate_rejected",
+  "recommendation": "reject",
+  "fully_resolves_original": false,
+  "summary": "The candidate passes tests built around an invalid list-valued compress_rates fixture, but Transformers 4.57+ represents compress_rates as a dictionary keyed by layer type and supplies a parallel layer_types list. A config serialized by the pinned Transformers DeepseekV4Config reproduces the original AttributeError on the base and fails even earlier on the candidate because it is forced through an incompatible V3-derived class. The candidate neither reconstructs per-layer ratios nor correctly qualifies nested modern rope_parameters.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python AITER_JIT_DIR=/tmp/amdpilot-repo-j-8ecc316c50bf/cache/aiter /tmp/amdpilot-repo-j-8ecc316c50bf/venv/bin/python /job/review_generated_config.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "A real config serialized by Transformers 5.12.1 DeepseekV4Config loaded, then reproduced the original missing compress_ratios AttributeError during ModelConfig construction; the script catches and records the expected failure. It also independently derived expected per-layer ratios [128, 4, 128, 4]."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python AITER_JIT_DIR=/tmp/amdpilot-repo-j-8ecc316c50bf/cache/aiter /tmp/amdpilot-repo-j-8ecc316c50bf/venv/bin/python -m pytest -q test/registered/unit/configs/test_model_config.py (candidate 192a5253d3268bf9199d6854344eb01b10577510)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 12 tests and 4 subtests passed. Its DeepSeek V4 cases use list-valued compress_rates and therefore do not exercise the reported normalized schema."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python AITER_JIT_DIR=/tmp/amdpilot-repo-j-8ecc316c50bf/cache/aiter /tmp/amdpilot-repo-j-8ecc316c50bf/venv/bin/python /job/review_generated_config.py (candidate 192a5253d3268bf9199d6854344eb01b10577510)",
+      "exit_code": 1,
+      "what_was_measured": "Independent adversarial regression using the installed Transformers class's own serialized V4 schema. Candidate failed in get_config with StrictDataclassClassValidationError because its V3-derived compatibility class rejects generated V4 hash_moe mlp_layer_types."
+    },
+    {
+      "command": "Independent cases via /job/review_case.py at candidate commit: new, legacy, equal_both, conflicting aliases, missing fields, and empty rates",
+      "exit_code": 1,
+      "what_was_measured": "Conflict cases were rejected as intended and loader-only aliases worked for the artificial schema. Minimal ModelConfig cases lacked unrelated required V4 fields and were not treated as candidate defects; their raw output is retained only as exploratory evidence."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Torch 2.11.0+rocm7.2 reported one AMD Instinct MI350X. The changed and failing paths are deterministic CPU JSON/config parsing. No DeepSeek V4 weights were available, and GPU execution would not repair or independently validate the schema conversion."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "The candidate diff contains only Python sources, Python tests, and report artifacts; repository-environment.json has native=null and wheel=null. No native rebuild applies.",
+  "remaining_counterexamples": [
+    "A Transformers 4.57+ generated config with dictionary compress_rates and layer_types is rejected by the candidate's forced V3-derived parser.",
+    "The candidate aliases a compress_rates dictionary directly to compress_ratios, but DeepseekV4Attention indexes compress_ratios by integer layer_id.",
+    "get_num_indexer_layers iterates dictionary keys and returns zero instead of counting layer_types whose mapped compression rate is 4.",
+    "Modern nested rope_parameters with main and compress sections is treated as though it were a flat legacy rope_scaling dictionary; model accuracy and the correct active RoPE subsection remain unverified."
+  ],
+  "remaining_limitations": [
+    "No DeepSeek V4 weights were available, so full engine startup, checkpoint loading, semantic accuracy, and distributed serving were not tested.",
+    "Assigned hardware was AMD Instinct MI350X; the linked reproduction used NVIDIA A100. The decisive parser failure is architecture-independent.",
+    "Pinned Transformers is 5.12.1, not exactly 4.57.1, though it exposes the same normalized dictionary-plus-layer-types contract described by the linked issue.",
+    "No native code changed and no native rebuild was applicable."
+  ],
+  "evidence_paths": {
+    "base": "/job/review-evidence/base",
+    "candidate": "/job/review-evidence/candidate",
+    "source": "/job/repo/python/sglang",
+    "python": "/tmp/amdpilot-repo-j-8ecc316c50bf/venv/bin/python",
+    "transformers": "/opt/venv/lib/python3.12/site-packages/transformers",
+    "torch": "/opt/venv/lib/python3.12/site-packages/torch"
+  }
+}
