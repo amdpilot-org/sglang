@@ -102,16 +102,23 @@ class DecodeStagingHandler:
         # room -> chunk_idx -> [(page_start, num_pages, writer_id)] fan-in
         # arrivals; handler-owned so room teardown can purge them.
         self._writer_counts: dict = {}
+        # The scheduler and the transport's decode thread concurrently mutate
+        # all of the state above, as well as the staging fields stored on each
+        # DecodeRequest.  CPython's GIL used to make the individual container
+        # operations appear serialized, but free-threaded Python provides no
+        # such protection.  Keep each lifecycle transition atomic, including
+        # teardown versus an in-flight arrival/scatter.
+        self._state_lock = threading.RLock()
 
     def register_wm_subscriber(self, receiver, session_id: str) -> None:
         """Register a prefill's bootstrap connection for watermark broadcasts."""
         if receiver is None or not receiver.bootstrap_infos:
             return
         key = tuple(str(bi) for bi in receiver.bootstrap_infos)
-        if key in self._wm_subscribers:
-            return
-
-        self._wm_subscribers[key] = (receiver, session_id)
+        with self._state_lock:
+            if key in self._wm_subscribers:
+                return
+            self._wm_subscribers[key] = (receiver, session_id)
         # Watermark state is per prefill session. Send the current value so a
         # new session's first allocation cannot wait on a missed update.
         self._send_watermark(
@@ -169,37 +176,40 @@ class DecodeStagingHandler:
 
     def register_decode_req(self, room: int, decode_req: DecodeRequest) -> None:
         # Called once per room from pop_preallocated, before send_metadata.
-        decode_req._staging_all_success = False
-        decode_req._staging_success_ts = 0.0
-        decode_req._staging_failed = False
-        decode_req._staging_scatter_done = False
-        decode_req._chunk_events = []
-        self._room_to_decode_req[room] = decode_req
-        self._room_to_receiver[room] = decode_req.kv_receiver
-        # Scatter offsets shift suffix-relative page_start by the decode prefix,
-        # exact only when the prefix is page-aligned. Fail just this request on a
-        # mismatch instead of raising, which would kill the prefill scheduler.
-        page_size = self.kv_buffer_info["page_size"]
-        if decode_req.req.kv.cache_protected_len % page_size != 0:
-            logger.error(
-                "[STAGING] decode prefix length %s is not page-aligned "
-                "(page_size=%s); failing room=%s (staging scatter offsets "
-                "would be wrong).",
-                decode_req.req.kv.cache_protected_len,
-                page_size,
-                room,
-            )
-            decode_req._staging_failed = True
+        with self._state_lock:
+            decode_req._staging_all_success = False
+            decode_req._staging_success_ts = 0.0
+            decode_req._staging_failed = False
+            decode_req._staging_scatter_done = False
+            decode_req._chunk_events = []
+            self._room_to_decode_req[room] = decode_req
+            self._room_to_receiver[room] = decode_req.kv_receiver
+            # Scatter offsets shift suffix-relative page_start by the decode
+            # prefix, exact only when the prefix is page-aligned. Fail just
+            # this request on a mismatch instead of raising, which would kill
+            # the prefill scheduler.
+            page_size = self.kv_buffer_info["page_size"]
+            if decode_req.req.kv.cache_protected_len % page_size != 0:
+                logger.error(
+                    "[STAGING] decode prefix length %s is not page-aligned "
+                    "(page_size=%s); failing room=%s (staging scatter offsets "
+                    "would be wrong).",
+                    decode_req.req.kv.cache_protected_len,
+                    page_size,
+                    room,
+                )
+                decode_req._staging_failed = True
 
     def unregister_decode_req(self, room: int) -> None:
-        # Pop before release_room so no new arrival can start consuming the slots.
-        decode_req = self._room_to_decode_req.pop(room, None)
-        receiver = self._room_to_receiver.pop(room, None)
-        self._writer_counts.pop(room, None)
-        if decode_req is not None:
-            self.release_room(room, decode_req, receiver)
-        self.kv_manager._staging_ctx.room_receivers.pop(room, None)
-        self.kv_manager._staging_ctx.room_bootstrap.pop(room, None)
+        with self._state_lock:
+            # Pop before release_room so no new arrival can start consuming the slots.
+            decode_req = self._room_to_decode_req.pop(room, None)
+            receiver = self._room_to_receiver.pop(room, None)
+            self._writer_counts.pop(room, None)
+            if decode_req is not None:
+                self.release_room(room, decode_req, receiver)
+            self.kv_manager._staging_ctx.room_receivers.pop(room, None)
+            self.kv_manager._staging_ctx.room_bootstrap.pop(room, None)
 
     def release_room(self, room: int, decode_req: DecodeRequest, receiver) -> None:
         """Free outstanding staging allocations of a room; no-op after a
@@ -208,27 +218,28 @@ class DecodeStagingHandler:
         # event is not yet in _chunk_events (submit_chunk_scatter records it
         # after launching the kernel), so no scatter reads a freed staging slot
         # or writes into KV-pool pages the failure path frees for reuse.
-        stream = self.staging_allocator._scatter_stream
-        if stream is not None:
-            stream.synchronize()
-        chunk_infos = receiver.chunk_staging_infos if receiver is not None else []
-        unscattered_allocs = []
-        for chunk_idx, info in enumerate(chunk_infos):
-            if info[0] >= 0:
-                unscattered_allocs.append((chunk_idx, info[0]))
-                chunk_infos[chunk_idx] = (-1, -1, 0, -1, 0)
-        for chunk_idx, alloc_id in unscattered_allocs:
-            logger.warning(
-                "[STAGING] releasing unscattered staging allocation "
-                "room=%s chunk=%s alloc_id=%s",
-                room,
-                chunk_idx,
-                alloc_id,
-            )
-            self._free_and_send_watermark(alloc_id, decode_req)
-        for _event, alloc_id in decode_req._chunk_events:
-            self._free_and_send_watermark(alloc_id, decode_req)
-        decode_req._chunk_events.clear()
+        with self._state_lock:
+            stream = self.staging_allocator._scatter_stream
+            if stream is not None:
+                stream.synchronize()
+            chunk_infos = receiver.chunk_staging_infos if receiver is not None else []
+            unscattered_allocs = []
+            for chunk_idx, info in enumerate(chunk_infos):
+                if info[0] >= 0:
+                    unscattered_allocs.append((chunk_idx, info[0]))
+                    chunk_infos[chunk_idx] = (-1, -1, 0, -1, 0)
+            for chunk_idx, alloc_id in unscattered_allocs:
+                logger.warning(
+                    "[STAGING] releasing unscattered staging allocation "
+                    "room=%s chunk=%s alloc_id=%s",
+                    room,
+                    chunk_idx,
+                    alloc_id,
+                )
+                self._free_and_send_watermark(alloc_id, decode_req)
+            for _event, alloc_id in decode_req._chunk_events:
+                self._free_and_send_watermark(alloc_id, decode_req)
+            decode_req._chunk_events.clear()
 
     # ------------------------------------------------------------------
     # Scatter submission: called from decode_thread (background)
@@ -242,6 +253,14 @@ class DecodeStagingHandler:
         Called from decode_thread.  Records a CUDA event on decode_req so
         the main thread can later check completion and free the allocation.
         """
+        with self._state_lock:
+            return self._submit_chunk_scatter_locked(
+                room, chunk_idx, page_start, num_pages
+            )
+
+    def _submit_chunk_scatter_locked(
+        self, room: int, chunk_idx: int, page_start: int, num_pages: int
+    ) -> bool:
         decode_req = self._room_to_decode_req.get(room)
         if decode_req is None:
             logger.warning(
@@ -281,7 +300,8 @@ class DecodeStagingHandler:
 
     def is_staging_room(self, room: int) -> bool:
         """Check if a room is registered for staging scatter."""
-        return room in self._room_to_decode_req
+        with self._state_lock:
+            return room in self._room_to_decode_req
 
     def handle_chunk_arrived(
         self,
@@ -298,28 +318,35 @@ class DecodeStagingHandler:
         """
         # Read from the stash, not decode_req.kv_receiver: a concurrent teardown
         # nulls the latter before unregister removes the room.
-        receiver = self._room_to_receiver.get(room)
-        if receiver is None:
-            logger.warning(
-                "Staging chunk arrived for unregistered room=%s chunk=%d, skipping",
-                room,
-                chunk_idx,
-            )
+        with self._state_lock:
+            receiver = self._room_to_receiver.get(room)
+            if receiver is None:
+                logger.warning(
+                    "Staging chunk arrived for unregistered room=%s chunk=%d, skipping",
+                    room,
+                    chunk_idx,
+                )
+                return False
+            room_counts = self._writer_counts.setdefault(room, {})
+            arrivals = room_counts.setdefault(chunk_idx, [])
+            arrivals.append((page_start, num_pages, writer_id))
+            num_writers = self.num_writers_for(receiver)
+            if len(arrivals) >= num_writers:
+                submitted = self._submit_chunk_scatter_locked(
+                    room, chunk_idx, page_start, num_pages
+                )
+                room_counts.pop(chunk_idx, None)
+                return submitted
             return False
-        room_counts = self._writer_counts.setdefault(room, {})
-        arrivals = room_counts.setdefault(chunk_idx, [])
-        arrivals.append((page_start, num_pages, writer_id))
-        num_writers = self.num_writers_for(receiver)
-        if len(arrivals) >= num_writers:
-            self.submit_chunk_scatter(room, chunk_idx, page_start, num_pages)
-            del room_counts[chunk_idx]
-            return True
-        return False
 
     def submit_last_scatter_async(self, room: int) -> bool:
         """Record all-ranks Success. Scatter is fully arrival-driven (every
         chunk, including the last); advance_scatter completes the room once
         no allocation is still waiting for its arrival."""
+        with self._state_lock:
+            return self._submit_last_scatter_locked(room)
+
+    def _submit_last_scatter_locked(self, room: int) -> bool:
         decode_req = self._room_to_decode_req.get(room)
         if decode_req is None:
             logger.warning(
@@ -342,11 +369,13 @@ class DecodeStagingHandler:
 
     def is_done(self, decode_req: DecodeRequest) -> bool:
         """Return True if staging scatter is complete for this request."""
-        return decode_req._staging_scatter_done and not decode_req._chunk_events
+        with self._state_lock:
+            return decode_req._staging_scatter_done and not decode_req._chunk_events
 
     def is_failed(self, decode_req: DecodeRequest) -> bool:
         """Return True if staging completion timed out for this request."""
-        return decode_req._staging_failed
+        with self._state_lock:
+            return decode_req._staging_failed
 
     def advance_scatter(self, decode_req: DecodeRequest) -> None:
         """Poll scatter events, free completed allocations, detect completion.
@@ -356,6 +385,10 @@ class DecodeStagingHandler:
         keeps it open while a CHUNK_READY is still in flight after Success.
         Rooms incomplete past the disaggregation waiting timeout are failed.
         """
+        with self._state_lock:
+            self._advance_scatter_locked(decode_req)
+
+    def _advance_scatter_locked(self, decode_req: DecodeRequest) -> None:
         chunk_events = decode_req._chunk_events
         if chunk_events:
             for i in range(len(chunk_events) - 1, -1, -1):

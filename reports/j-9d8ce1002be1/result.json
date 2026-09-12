@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/22889",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Implemented and tested one concrete Phase 4 prerequisite for free-threaded Python: DecodeStagingHandler no longer relies on the GIL to serialize request registration, chunk arrival/scatter publication, completion polling, and teardown. A handler-owned reentrant lock makes these lifecycle transitions atomic and prevents teardown from freeing a staging allocation between GPU scatter submission and completion-event publication. This is not complete Python 3.14t support.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9d8ce1002be1/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_disaggregation_wire.py -k 'StagingWatermark or DecodeStagingFreeThreading'",
+      "exit_code": 0,
+      "what_was_measured": "Focused compatibility and adversarial synchronization tests: 4 passed. The regression forces teardown to race a paused scatter between launch and event publication, verifies teardown blocks, and verifies exactly-once allocation release. A concurrent eight-thread duplicate teardown test also verifies exactly-once release."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9d8ce1002be1/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_disaggregation_wire.py",
+      "exit_code": 0,
+      "what_was_measured": "Full affected unit file: 39 tests passed with 12 subtests; raw output retained at reports/j-9d8ce1002be1/test_disaggregation_wire.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9d8ce1002be1/venv/bin/python -m compileall -q python/sglang/srt/disaggregation/common/staging_handler.py test/registered/unit/disaggregation/test_disaggregation_wire.py",
+      "exit_code": 0,
+      "what_was_measured": "Both changed Python files compile under the pinned prepared interpreter."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9d8ce1002be1/venv/bin/python - <<'PY' ... sysconfig and torch environment probe ... PY",
+      "exit_code": 0,
+      "what_was_measured": "The prepared interpreter is CPython 3.12.3, SOABI cpython-312-x86_64-linux-gnu, Py_GIL_DISABLED=None; Torch is 2.11.0+rocm7.2, HIP 7.2, and one GPU is visible. This proves the environment cannot directly qualify cp314t behavior."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9d8ce1002be1/venv/bin/python -m ruff check python/sglang/srt/disaggregation/common/staging_handler.py test/registered/unit/disaggregation/test_disaggregation_wire.py",
+      "exit_code": 1,
+      "what_was_measured": "Lint could not run because ruff is not installed in the pinned prepared environment (No module named ruff); the environment was not modified."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validation."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "torch.cuda.is_available() returned true and device_count returned 1 for the assigned ROCm GPU, but the changed behavior is host-side locking and the regression uses mocked scatter/event boundaries. No GPU numerical claim is made, so an unrelated numerical smoke was not run.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The required Python 3.14t interpreter is unavailable: the prepared interpreter is CPython 3.12.3 with Py_GIL_DISABLED=None and a cp312 ABI. Installation, import, runtime, and wheel tags under cp314t remain unverified.",
+    "Phase 0 regular Python 3.14 installation support and Phase 1 dependency readiness remain unverified in this pinned environment.",
+    "Phase 2 sgl-kernel free-threading support, stable-ABI policy, Py_GIL_DISABLED audit, cp314t build, and native tests are not implemented or verified. No native component changed, and repository-environment.json provides no native rebuild target.",
+    "Phase 3 audits of cpp_radix_tree, ngram_corpus_ffi, hf3fs_utils, and multimodal CUDA extensions remain open.",
+    "Phase 4 is only partially addressed: DecodeStagingHandler lifecycle state is synchronized, but the broader TokenizerManager, CacheController, KVEvents, threaded weight loading, registries, callbacks, other disaggregation backends, and other shared Python state still require no-GIL audits and stress tests.",
+    "Phase 5 cp314t CI/wheel publication and Phase 6 performance validation are not implemented.",
+    "The original request targets Linux x86-64 CPU and CUDA. This node provides ROCm rather than CUDA, so CUDA extension builds and CUDA serving paths remain unavailable and unverified.",
+    "No model or serving-path test was run because this synchronization change is isolated to disaggregated KV staging and the tiny Llama fixture cannot qualify a distributed staging workload or free-threaded interpreter behavior."
+  ]
+}

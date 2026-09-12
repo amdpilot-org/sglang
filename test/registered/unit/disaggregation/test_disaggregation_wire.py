@@ -310,12 +310,113 @@ class TestStagingWatermark(unittest.TestCase):
         handler.staging_allocator = Mock()
         handler.staging_allocator.get_watermark.return_value = (3, 0)
         handler._wm_subscribers = {}
+        handler._state_lock = threading.RLock()
 
         handler.register_wm_subscriber(receiver, "session-new")
 
         sock.send_multipart.assert_called_once_with(
             [b"WATERMARK", b"3", b"0", b"session-new"]
         )
+
+
+class TestDecodeStagingFreeThreading(unittest.TestCase):
+    def _handler(self):
+        handler = object.__new__(DecodeStagingHandler)
+        handler._state_lock = threading.RLock()
+        handler._room_to_decode_req = {}
+        handler._room_to_receiver = {}
+        handler._writer_counts = {}
+        handler._wm_subscribers = {}
+        handler.decode_tp = 1
+        handler.tp_rank = 0
+        handler.staging_allocator = SimpleNamespace(
+            _scatter_stream=Mock(),
+            free=Mock(),
+            get_watermark=Mock(return_value=(0, 0)),
+        )
+        handler.kv_manager = SimpleNamespace(
+            pp_size=1,
+            _staging_ctx=SimpleNamespace(room_receivers={}, room_bootstrap={}),
+        )
+        return handler
+
+    @patch("sglang.srt.disaggregation.common.staging_handler.torch.cuda.Event")
+    def test_teardown_waits_for_scatter_event_publication(self, event_cls):
+        """Teardown must not free a slot between kernel launch and event publish.
+
+        This forced interleaving is safe under both GIL and free-threaded Python;
+        without the handler lock, unregister finishes while _scatter_region is
+        paused and the allocation is subsequently published after being freed.
+        """
+        handler = self._handler()
+        scatter_started = threading.Event()
+        allow_scatter_to_finish = threading.Event()
+        teardown_finished = threading.Event()
+        receiver = SimpleNamespace(
+            chunk_staging_infos=[(17, 128, 0, 0, 0)],
+            prefill_info=SimpleNamespace(attn_tp_size=1, pp_size=1),
+        )
+        request = SimpleNamespace(
+            kv_receiver=receiver,
+            req=SimpleNamespace(
+                bootstrap_room=7,
+                kv=SimpleNamespace(cache_protected_len=0),
+            ),
+            _chunk_events=[],
+        )
+        handler._room_to_decode_req[7] = request
+        handler._room_to_receiver[7] = receiver
+
+        def blocked_scatter(*_args):
+            scatter_started.set()
+            self.assertTrue(allow_scatter_to_finish.wait(timeout=5))
+            return True
+
+        handler._scatter_region = blocked_scatter
+        event_cls.return_value = Mock()
+
+        scatter_thread = threading.Thread(
+            target=handler.handle_chunk_arrived,
+            args=(7, 0, 0, 1, "writer-0"),
+        )
+        teardown_thread = threading.Thread(
+            target=lambda: (
+                handler.unregister_decode_req(7),
+                teardown_finished.set(),
+            )
+        )
+        scatter_thread.start()
+        self.assertTrue(scatter_started.wait(timeout=5))
+        teardown_thread.start()
+        self.assertFalse(teardown_finished.wait(timeout=0.1))
+
+        allow_scatter_to_finish.set()
+        scatter_thread.join(timeout=5)
+        teardown_thread.join(timeout=5)
+
+        self.assertFalse(scatter_thread.is_alive())
+        self.assertFalse(teardown_thread.is_alive())
+        self.assertEqual(receiver.chunk_staging_infos[0], (-1, -1, 0, -1, 0))
+        handler.staging_allocator.free.assert_called_once_with(17)
+
+    def test_concurrent_duplicate_teardown_frees_allocation_once(self):
+        handler = self._handler()
+        receiver = SimpleNamespace(chunk_staging_infos=[(23, 64, 0, 0, 0)])
+        request = SimpleNamespace(_chunk_events=[])
+        handler._room_to_decode_req[9] = request
+        handler._room_to_receiver[9] = receiver
+
+        threads = [
+            threading.Thread(target=handler.unregister_decode_req, args=(9,))
+            for _ in range(8)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        handler.staging_allocator.free.assert_called_once_with(23)
 
 
 class TestMooncakePPStaging(unittest.TestCase):
