@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38819",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2961",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2927",
+  "candidate_commit": "88a6a9ea6e4ad7751e24a119317e4c8d3c8505c2",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a valid partial runtime correction for DeepSeek-V4.1 C2 pending-row geometry: it transfers one endpoint-local FP32 row at odd committed boundaries and none at even boundaries, including unequal ring capacities and request slots. It does not verify or complete the original end-to-end PD + DSpark feature contract.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-1257d67e0bf0/venv/bin/python inline recorded-base C2 contract probe",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before reproduction at base 358c163: legal R=2/N=101 raised ValueError; R=8/N=101 returned five rows; R=8/N=102 returned six rows instead of no payload. The imported sglang source was /job/repo/python/sglang/__init__.py."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1257d67e0bf0/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_disaggregation_wire.py test/registered/unit/disaggregation/test_nixl_backend_basic.py test/registered/unit/disaggregation/test_mooncake_transfer_batching.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 88a6a9e, 93 focused wire/Mooncake/NIXL tests and 17 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1257d67e0bf0/venv/bin/python inline independent mapping and GPU copy probe",
+      "exit_code": 0,
+      "what_was_measured": "104,000 mappings across distinct endpoint request slots, rings 2/4/8/16/32, and N=0..259 matched the independent formula; invalid rings were rejected. On AMD Instinct MI350X, exactly one 4096-byte FP32 row copied from source index 2 to destination index 28 and adjacent rows remained unchanged."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Torch 2.11.0+rocm7.2/HIP 7.2.26015 on AMD Instinct MI350X executed the independent row-copy check. This validates C2 row geometry/device copying only, not DSpark or generation."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "No C/C++/CUDA/HIP/header/Cython or other native source differs between the recorded base and candidate; no native rebuild was applicable. The loaded aiter core was the prepared runtime artifact under /tmp/amdpilot-repo-j-1257d67e0bf0/cache/aiter/module_aiter_core.so.",
+  "remaining_counterexamples": [
+    "No end-to-end DeepSeek-V4.1 PD + DSpark generation was run with Mooncake or NIXL.",
+    "Streaming and concurrent request behavior remain unverified.",
+    "Chunked prefill and prefix-cache restoration, including odd prefix hits and separation of H from N, remain unverified; decode radix cache remains explicitly incompatible with speculative decoding.",
+    "First draft/verify, partial and full rejection, accepted-token commit, C2 reuse, and Engram-history updates remain unverified end to end.",
+    "Cancellation, stale-write prevention, transfer-before-execution/source-release ordering, and request-slot reuse remain unverified.",
+    "Generation parity against non-disaggregated DeepSeek-V4.1, actual speculative acceptance, and throughput remain unmeasured.",
+    "The prepared ROCm/HIP platform cannot execute DSpark because _handle_dspark accepts only device strings beginning with cuda or npu.",
+    "No DeepSeek-V4.1 target/draft weights or real multi-process/cross-node Mooncake/NIXL topology were available."
+  ],
+  "remaining_limitations": [
+    "GPU evidence is limited to row selection and copy correctness on ROCm; it does not qualify the CUDA/NPU-only DSpark execution path.",
+    "The deterministic tiny Llama fixture cannot validate DeepSeek-V4.1 architecture state, DSpark speculative semantics, or distributed Mooncake/NIXL transport, so it was not presented as original-issue evidence.",
+    "Candidate PR base bd45cd50ca900dd821f829ca9adfbf9aa3336bda differs from the campaign's recorded comparison base 358c163250ad3b1f62939b01ce1314a0a31a0365; this review used the required recorded base for failing-before evidence."
+  ]
+}
