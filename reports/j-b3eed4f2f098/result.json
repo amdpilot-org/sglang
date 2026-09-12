@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31568",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Removed the dead N constexpr and unreachable bounds check from masked_set_kv_buffer_kernel, and removed the unused NT_BUCKET constexpr from the XPU FLA kernel signature, autotune key, and launch. Added regression coverage for both cache-key inputs and GPU numerical coverage for masked KV writes.",
+  "tests": [
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-b3eed4f2f098/venv/bin/python -m pytest -q test/registered/kernels/test_triton_cache_key_hygiene.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "The new regression failed because N remained a Triton constexpr and NT_BUCKET remained in the XPU kernel signature; raw output is reports/j-b3eed4f2f098/failing-before.log. The numerical subtest intentionally used the corrected call contract and therefore also failed before the source change."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-b3eed4f2f098/venv/bin/python -m pytest -q test/registered/kernels/test_triton_cache_key_hygiene.py",
+      "exit_code": 0,
+      "what_was_measured": "Three tests and three GPU subtests passed. The tests verify absence of N from the live Triton signature, absence of NT_BUCKET from the XPU signature/autotune key/launch, and exact agreement with a Torch reference for N=1, N=3 with masked rows, and N=65 with H*D crossing the 128-element chunk boundary. Raw output is reports/j-b3eed4f2f098/passing-after-final.log."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-b3eed4f2f098/pre-commit /opt/venv/bin/pre-commit run --files python/sglang/srt/mem_cache/memory_pool.py python/sglang/srt/hardware_backend/xpu/kernels/fla/chunk_delta_h.py test/registered/kernels/test_triton_cache_key_hygiene.py",
+      "exit_code": 0,
+      "what_was_measured": "All repository pre-commit checks applicable to the changed files passed, including AST validation, isort, ruff, formatting, codespell, and registered-test CI validation."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The numerical regression executed on the assigned single AMD Instinct MI350X, gfx950:sramecc+:xnack-, with Torch 2.11.0+rocm7.2 and HIP 7.2.26015. Device output is retained in reports/j-b3eed4f2f098/gpu-evidence.log."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No XPU hardware was assigned, so the XPU FLA kernel was not executed. Its change is limited to the statically proven unused NT_BUCKET signature, autotune-key, and launch entries and is covered by an AST regression.",
+    "This issue concerns Triton specialization inputs rather than serving behavior; no model weights, HTTP server, full-model inference, or distributed workload was used or claimed.",
+    "No native C++ or FlyDSL source changed, so a native rebuild was not applicable."
+  ]
+}

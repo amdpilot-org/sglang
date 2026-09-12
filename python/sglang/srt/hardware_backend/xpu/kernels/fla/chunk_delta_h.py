@@ -27,7 +27,7 @@ CHUNK_SIZE = 64
 #   Phase 2: update h = gate * h + k^T @ v_gated, save to scratch (initial_state)
 @triton.autotune(
     configs=[triton.Config({"BV": 64}, num_warps=8, num_stages=2)],
-    key=["H", "K", "V", "BT", "USE_GK", "USE_INITIAL_STATE", "NT_BUCKET"],
+    key=["H", "K", "V", "BT", "USE_GK", "USE_INITIAL_STATE"],
     **autotune_cache_kwargs,
 )
 @triton.jit(do_not_specialize=["T"])
@@ -56,7 +56,6 @@ def chunk_gated_delta_rule_fwd_kernel_h_blockdim64_k_loop(
     INPLACE_UPDATE: tl.constexpr,
     SAVE_NEW_VALUE: tl.constexpr,
     IS_VARLEN: tl.constexpr,
-    NT_BUCKET: tl.constexpr,  # this arg is kept to align with the triton kernel for CUDA
     USE_EXP2: tl.constexpr,
 ):
     i_v, i_nh = tl.program_id(0), tl.program_id(1)
@@ -301,7 +300,6 @@ def chunk_gated_delta_rule_fwd_h(
         INPLACE_UPDATE=True,
         SAVE_NEW_VALUE=v_new is not None,
         IS_VARLEN=cu_seqlens is not None,
-        NT_BUCKET=(0 if NT <= 32 else (1 if NT <= 128 else 2)),
         USE_EXP2=use_exp2,
     )
     return h, v_new
