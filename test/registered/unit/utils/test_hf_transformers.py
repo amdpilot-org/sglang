@@ -14,6 +14,7 @@ from transformers import PretrainedConfig
 from transformers.image_processing_utils import BaseImageProcessor
 
 import sglang.srt.utils.hf_transformers.processor as processor_utils
+from sglang.srt.configs.minimax_vl import MiniMaxVLBaseConfig
 from sglang.srt.utils import hf_transformers_patches
 from sglang.srt.utils.hf_transformers.common import (
     _is_deepseek_ocr2_model,
@@ -483,6 +484,28 @@ class TestGetHfTextConfig(unittest.TestCase):
         cfg.architectures = ["LlamaForCausalLM"]
         result = get_hf_text_config(cfg)
         self.assertIs(result, cfg)
+
+    def test_null_text_config_is_treated_as_missing(self):
+        cfg = MiniMaxVLBaseConfig()
+        self.assertIsNone(cfg.text_config)
+
+        result = get_hf_text_config(cfg)
+
+        self.assertIs(result, cfg)
+
+    def test_null_higher_priority_config_falls_through(self):
+        text_cfg = PretrainedConfig()
+        text_cfg.num_attention_heads = 32
+        cfg = PretrainedConfig()
+        cfg.architectures = ["SomeModel"]
+        cfg.thinker_config = None
+        cfg.llm_config = None
+        cfg.language_config = None
+        cfg.text_config = text_cfg
+
+        result = get_hf_text_config(cfg)
+
+        self.assertIs(result, text_cfg)
 
     def test_returns_text_config_for_multimodal(self):
         text_cfg = PretrainedConfig()

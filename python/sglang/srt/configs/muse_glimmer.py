@@ -175,8 +175,8 @@ _HF_VISION_KEYS_TRANSLATED = frozenset({"layer_types", "model_type", "rope_param
 
 
 def muse_glimmer_config_kwargs_from_hf(config_dict: Dict[str, Any]) -> Dict[str, Any]:
-    if "text_config" not in config_dict:
-        return config_dict
+    if config_dict.get("text_config") is None:
+        return {k: v for k, v in config_dict.items() if k != "text_config"}
 
     text = config_dict["text_config"]
     kwargs = {k: v for k, v in config_dict.items() if k not in _HF_NESTED_KEYS}
