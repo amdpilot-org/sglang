@@ -75,6 +75,7 @@ from sglang.srt.entrypoints.openai.utils import (
     process_hidden_states_for_response,
     process_hidden_states_from_ret,
     process_routed_experts_from_ret,
+    process_request_metrics_from_ret,
     process_spec_tokens_details_from_ret,
     should_include_usage,
     spec_tokens_details_from_meta_info,
@@ -1158,6 +1159,7 @@ class OpenAIServingChat(OpenAIServingBase):
             top_logprobs_num=request.top_logprobs or 0,
             return_sampling_mask=request.return_sampling_mask,
             stream=request.stream,
+            return_request_metrics=request.return_request_metrics,
             return_text_in_logprobs=True,
             modalities=processed_messages.modalities,
             lora_path=lora_path,
@@ -1699,6 +1701,7 @@ class OpenAIServingChat(OpenAIServingBase):
         routed_experts = {}
         cached_tokens_details = {}
         spec_tokens_details = {}
+        request_metrics = {}
         image_tokens = {}
         audio_tokens = {}
         video_tokens = {}
@@ -1744,6 +1747,10 @@ class OpenAIServingChat(OpenAIServingBase):
                 if request.return_spec_tokens_details:
                     spec_tokens_details[index] = spec_tokens_details_from_meta_info(
                         content["meta_info"]
+                    )
+                if request.return_request_metrics:
+                    request_metrics[index] = process_request_metrics_from_ret(
+                        content, request
                     )
                 image_tokens[index] = content["meta_info"].get("image_tokens", 0)
                 audio_tokens[index] = content["meta_info"].get("audio_tokens", 0)
@@ -1911,6 +1918,16 @@ class OpenAIServingChat(OpenAIServingBase):
                         spec_details if request.n > 1 else spec_details[0]
                     )
 
+            sglext_request_metrics = None
+            if request.return_request_metrics and request_metrics:
+                metrics = [
+                    request_metrics[index]
+                    for index in sorted(request_metrics)
+                    if request_metrics[index] is not None
+                ]
+                if metrics:
+                    sglext_request_metrics = metrics if request.n > 1 else metrics[0]
+
             # Omit token ids after an error abort.
             sglext_input_ids = None
             if return_input_ids and input_ids and not error_aborted:
@@ -1926,6 +1943,7 @@ class OpenAIServingChat(OpenAIServingBase):
                 routed_experts=sglext_routed,
                 cached_tokens_details=sglext_cached_tokens_details,
                 spec_tokens_details=sglext_spec_tokens_details,
+                request_metrics=sglext_request_metrics,
                 input_ids=sglext_input_ids,
                 output_ids=sglext_output_ids,
             )
@@ -2073,6 +2091,14 @@ class OpenAIServingChat(OpenAIServingBase):
             if request.n > 1
             else (spec_details[0] if spec_details else None)
         )
+        metrics = [
+            metric
+            for metric in (
+                process_request_metrics_from_ret(item, request) for item in ret
+            )
+            if metric is not None
+        ]
+        request_metrics = metrics if request.n > 1 else (metrics[0] if metrics else None)
         input_ids = None
         if self._should_return_input_ids(request) and "prompt_token_ids" in ret[0]:
             input_ids = list(ret[0]["prompt_token_ids"])
@@ -2084,6 +2110,7 @@ class OpenAIServingChat(OpenAIServingBase):
             routed_experts
             or cached_tokens_details
             or spec_tokens_details
+            or request_metrics
             or input_ids is not None
             or output_ids is not None
         ):
@@ -2091,6 +2118,7 @@ class OpenAIServingChat(OpenAIServingBase):
                 routed_experts=routed_experts,
                 cached_tokens_details=cached_tokens_details,
                 spec_tokens_details=spec_tokens_details,
+                request_metrics=request_metrics,
                 input_ids=input_ids,
                 output_ids=output_ids,
             )
