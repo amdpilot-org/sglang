@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/1763",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 3122 at 155d433aa15aa7105cc619decaf00a22c86ecee6 and corrected its concrete SM100 counterexample by rejecting SageAttention during argument admission and defensively in backend construction; documented the pinned dependency limitation.",
+  "tests": [
+    {
+      "command": "candidate source with correction source hunks reversed: pytest -q test/registered/unit/layers/test_sage_attention_backend.py -k sm100",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before constructor regression against the exact candidate; SM100 was not rejected."
+    },
+    {
+      "command": "candidate source with correction source hunks reversed: pytest -q test/registered/unit/server_args/test_server_args.py -k SageAttentionAdmission",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before combined and split-backend admission regressions against the exact candidate."
+    },
+    {
+      "command": "pytest -q test/registered/unit/layers/test_sage_attention_backend.py test/registered/unit/server_args/test_server_args.py -k 'sage or SageAttentionAdmission'",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after focused backend, input validation, SM100 admission, and constructor behavior: 10 passed."
+    },
+    {
+      "command": "pytest -q test/registered/unit/layers/test_sage_attention_backend.py test/registered/unit/server_args/test_resolution_is_reproducible.py",
+      "exit_code": 0,
+      "what_was_measured": "Preserved candidate regression suite plus correction: 18 passed and 18 subtests passed; FP16/BF16 adapter reference ran on AMD MI355X."
+    },
+    {
+      "command": "inspect SageAttention d9704247a5139ab4c03bf7fc6b35cc0e2cbb5ea4 setup.py and sageattention/core.py",
+      "exit_code": 0,
+      "what_was_measured": "Source evidence that setup recognizes SM100 while the public sageattn dispatcher lacks an sm100 branch and raises Unsupported CUDA architecture."
+    },
+    {
+      "command": "pre-commit run --files <all changed source, tests, docs, and report files>",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, safety, and registered-test taxonomy hooks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI355X, Torch 2.11.0+rocm7.2; candidate adapter FP16/BF16 tests executed against PyTorch SDPA. No SageAttention CUDA kernel executed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No NVIDIA GPU was available; the pinned SageAttention extension was not built or imported and its INT8 Q/K kernel was not executed.",
+    "No independent numerical comparison used quantized SageAttention output; PyTorch SDPA only validates SGLang tensor layout, scaling, causal behavior, and GQA expansion.",
+    "No model serving, perplexity or task-quality, long-context, throughput, latency, or memory measurement was performed.",
+    "Dense paged-KV gathering and materialized GQA/MQA expansion remain unbenchmarked and may offset kernel gains, particularly during decode.",
+    "Support on the dispatcher's other listed CUDA architectures remains unverified in this environment."
+  ]
+}

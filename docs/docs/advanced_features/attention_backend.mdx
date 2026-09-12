@@ -593,6 +593,38 @@ python3 -m sglang.launch_server \
   --trust-remote-code
 ```
 
+- SageAttention (experimental, NVIDIA CUDA only)
+
+Install SageAttention before starting SGLang:
+
+```bash Command
+pip install --force-reinstall \
+  git+https://github.com/thu-ml/SageAttention.git@d9704247a5139ab4c03bf7fc6b35cc0e2cbb5ea4 \
+  --no-build-isolation
+```
+
+Use SageAttention for prefill while retaining a paged decode backend:
+
+```bash Command
+python3 -m sglang.launch_server \
+  --model meta-llama/Meta-Llama-3.1-8B-Instruct \
+  --prefill-attention-backend sage \
+  --decode-attention-backend fa3
+```
+
+The `sage` backend quantizes Q/K through SageAttention after gathering each
+request's paged KV cache into dense tensors. It is opt-in and disables CUDA
+graphs. It supports FP16/BF16, head dimensions 64 and 128, causal or unmasked
+attention, and GQA/MQA through KV-head expansion. Sliding-window and arbitrary
+attention masks are rejected. The upstream extension does not support ROCm.
+The pinned revision's public `sageattn` dispatcher also does not support SM100
+(for example, NVIDIA B100 or B200), even though its build script recognizes
+that architecture; SGLang rejects this configuration during argument
+resolution.
+Benchmark your model and context distribution: dense KV gathering and GQA
+expansion can offset the kernel speedup, particularly during decode. This
+integration does not change model weights or the KV-cache dtype.
+
 - FlashMLA
 ```bash Command
 python3 -m sglang.launch_server \

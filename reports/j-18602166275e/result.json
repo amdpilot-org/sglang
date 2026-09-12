@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/1763",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Added an experimental, opt-in autoregressive SageAttention backend. It reuses SGLang's paged-KV gather and cache-write behavior, invokes SageAttention's INT8 Q/K dense kernel, supports FP16/BF16 head dimensions 64/128 and GQA/MQA expansion, rejects unsupported masks and ROCm, disables CUDA graphs, and documents a split prefill/decode deployment. Adapter and configuration behavior are verified; the native NVIDIA SageAttention kernel and claimed performance/accuracy improvement are not verified on the assigned AMD hardware.",
+  "tests": [
+    {
+      "command": "git show 358c163250ad3b1f62939b01ce1314a0a31a0365:python/sglang/srt/arg_groups/choices.py | rg -n 'sage|ATTENTION_BACKEND_CHOICES'",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the prepared base exposed no Sage autoregressive attention backend; only the attention choice-list declarations matched. Raw output: reports/j-18602166275e/base_backend_search.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-18602166275e/venv/bin/python -m pytest -q test/registered/unit/layers/test_sage_attention_backend.py test/registered/unit/server_args/test_resolution_is_reproducible.py",
+      "exit_code": 0,
+      "what_was_measured": "17 tests and 18 subtests passed. The new tests exercised FP16 and BF16 GPU tensors against an independently computed torch.scaled_dot_product_attention reference, causal scaling, HND layout, GQA expansion, invalid GQA, unsupported dtype/head size/masks, and fail-closed ROCm admission. The resolution suite checked existing explicit-backend compatibility. Raw output: reports/j-18602166275e/pytest.log"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/layers/attention/torch_native_backend.py python/sglang/srt/layers/attention/sage_attention_backend.py python/sglang/srt/layers/attention/attention_registry.py python/sglang/srt/arg_groups/choices.py python/sglang/srt/arg_groups/attention_hook.py test/registered/unit/layers/test_sage_attention_backend.py docs/docs/advanced_features/attention_backend.mdx",
+      "exit_code": 0,
+      "what_was_measured": "All repository formatting, lint, spelling, safety, and registered-test validation hooks passed. Raw output: reports/j-18602166275e/precommit.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "The numerical adapter tests ran on the assigned AMD Instinct MI355X gfx950 with Torch 2.11.0+rocm7.2. GPU identity and stack are retained in reports/j-18602166275e/gpu_environment.txt. The Sage callable was replaced by an independent SDPA reference because upstream SageAttention has no ROCm extension; this validates SGLang adapter tensor semantics, not native quantized kernel numerics.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The assigned GPU is AMD Instinct MI355X (gfx950). Upstream SageAttention is an NVIDIA CUDA extension, so its native INT8 Q/K kernel was not built or executed.",
+    "No NVIDIA Ampere, Ada, Hopper, or Blackwell path was available; CUDA architecture compatibility and native extension installation remain unverified.",
+    "No independent numerical comparison of the real quantized SageAttention output against FP16/BF16 attention was possible without supported NVIDIA hardware.",
+    "No model weights or supported CUDA device were available for end-to-end serving, perplexity, task accuracy, long-context quality, tokens-per-second, latency, or memory benchmarks. The reported approximately 2x speedup is not claimed by this contribution.",
+    "The backend gathers paged KV into dense per-request tensors and expands KV heads for GQA/MQA. Those costs can erase kernel gains, especially during decode; the documented split configuration keeps decode on FA3, but production performance remains unqualified.",
+    "CUDA graphs, sliding-window attention, arbitrary masks, head dimensions other than 64/128, FP8 KV cache, MLA, distributed workloads, speculative decoding, and encoder-decoder model behavior were not qualified.",
+    "The deterministic tiny Llama fixture was not run because it is hosted in a separate prepared PR artifact and, on this ROCm-only node, cannot execute or qualify the SageAttention CUDA kernel. A transport-only startup using a different backend would not verify this feature."
+  ]
+}

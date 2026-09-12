@@ -1,0 +1,26 @@
+Candidate under test: https://github.com/amdpilot-org/sglang/pull/3122
+Exact commit: 155d433aa15aa7105cc619decaf00a22c86ecee6
+
+The correction's source hunks were reversed while retaining its regression
+tests, so these tests exercised the exact candidate implementation.
+
+Command:
+PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-34b50045c618/venv/bin/python -m pytest -q test/registered/unit/layers/test_sage_attention_backend.py -k sm100
+
+Exit code: 1
+Result: 1 failed, 7 deselected. The candidate module had no get_platform
+admission check, so the defensive constructor regression failed before it
+could reject SM100.
+
+Command:
+PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-34b50045c618/venv/bin/python -m pytest -q test/registered/unit/server_args/test_server_args.py -k SageAttentionAdmission
+
+Exit code: 1
+Result: 2 failed. Both combined `sage` and split `sage` prefill proceeded past
+the missing SM100 admission check. They subsequently reached CUDA-graph
+configuration in the deliberately minimal test fixture, demonstrating that
+the requested backend had not been rejected.
+
+Full raw pytest output is retained outside the worktree at:
+/tmp/amdpilot-repo-j-34b50045c618/evidence/failing-before-backend.txt
+/tmp/amdpilot-repo-j-34b50045c618/evidence/failing-before-admission.txt
