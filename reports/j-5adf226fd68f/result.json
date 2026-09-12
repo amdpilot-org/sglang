@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35201",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1785",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1748",
+  "candidate_commit": "6bd589c04122574293c44fa322dd765f43133bfe",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "Independent review verified that the candidate bounds the DSV4 paged and non-paged fp32 logits allocation by query-row chunking. For the issue rectangle, the graph-safe plan changes from an unsafe whole 1,526,726,656-byte allocation to 1,440-row chunks under a 536,870,912-byte cap. Eager planning additionally honors live free memory, schedule and Top-K metadata use identical chunk boundaries, and a sub-row budget raises an explicit error. No source counterexample remained. The exact H100 TP4 full-model workload remains an environment limitation rather than claimed execution evidence.",
+  "tests": [
+    {
+      "command": "Base source inspection plus independent issue arithmetic on 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "The base paged and non-paged paths each issue one full logits call. The issue shape is 4096 * align(92992, 256) * 4 = 1,526,726,656 bytes (1.421875 GiB), exceeding the reported 1.17 GiB free memory."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5adf226fd68f/venv/bin/python reports/j-6b0d5811aab0/graph_budget_regression.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 6bd589c, graph_budget=536870912, issue_allocation=1526726656, rows_per_chunk=1440; each planned allocation is below the issue-reported free memory."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5adf226fd68f/venv/bin/python -m pytest -q test/registered/unit/layers/test_dsv4_indexer_chunk.py test/registered/unit/layers/test_dsv4_nonpaged_indexer.py",
+      "exit_code": 0,
+      "what_was_measured": "21 tests and 29 subtests passed for budget arithmetic, graph modes, aligned-row boundaries, paged schedule/Top-K chunk agreement, non-paged execution, and chunked Top-K equivalence."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5adf226fd68f/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_dsa_mqa_logits_chunking.py",
+      "exit_code": 0,
+      "what_was_measured": "3 shared DSA budget tests passed, checking that moving the common budget helpers did not regress the sibling implementation."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-5adf226fd68f/venv/bin/python /job/review-evidence-j-5adf226fd68f/adversarial_review.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent graph/eager and low-live-memory boundary cases passed. On AMD Instinct MI350X, ragged Top-K output matched exactly between unchunked execution and chunk sizes 1, 3, 7, 16, 36, 37, and 100."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5adf226fd68f/venv/bin/python -m compileall -q <four changed Python modules> && git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..6bd589c04122574293c44fa322dd765f43133bfe",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python modules compiled and the candidate diff had no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X (gfx950) executed an independent deterministic row-chunked versus unchunked Top-K comparison with exact equality. This was not the CUDA/H100 model-serving reproduction."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 weights were unavailable.",
+    "The environment provides one AMD Instinct MI350X with ROCm 7.2, not the reported four-H100 CUDA 12.9 TP4 topology.",
+    "The exact 800K-token serving reproduction and CUDA DeepGEMM execution remain unverified.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
