@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33415",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "f06c14a3339a03ed7b89f0a8737344fee0c7c080",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "The exact candidate fixes the OLMo-2 eager/non-capture QK-normalization bypass by using normal RMSNorm dispatch. The base failure was reproduced, the candidate regression passed, and independent MI350X tests validated real AITER kernels and ROCm graph replay against FP64 references. Full-model and H200 performance were unavailable and are not claimed.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-fbc23fdf2716/venv/bin/python /tmp/amdpilot-repo-j-fbc23fdf2716/review-evidence/qk_adversarial.py at recorded base",
+      "exit_code": 0,
+      "what_was_measured": "Actual Olmo2Attention eager branch used forward_native twice and bypassed public backend dispatch across three dtypes, three token counts, and packed-QKV views; outputs matched an independent FP64 formula."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fbc23fdf2716/venv/bin/python -m pytest -q test/registered/unit/models/test_olmo2_qk_norm.py at candidate",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: eager dispatch and capture-only alternate-stream behavior; 2 tests passed."
+    },
+    {
+      "command": "SGLANG_USE_AITER=1 /tmp/amdpilot-repo-j-fbc23fdf2716/venv/bin/python /tmp/amdpilot-repo-j-fbc23fdf2716/review-evidence/qk_adversarial.py at candidate",
+      "exit_code": 0,
+      "what_was_measured": "Actual OLMo-2 method selected real forward_aiter RMSNorm and matched an independent FP64 reference for BF16, FP16, FP32, contiguous and noncontiguous packed-QKV layouts."
+    },
+    {
+      "command": "SGLANG_USE_AITER=1 /tmp/amdpilot-repo-j-fbc23fdf2716/venv/bin/python /tmp/amdpilot-repo-j-fbc23fdf2716/review-evidence/qk_graph.py at candidate",
+      "exit_code": 0,
+      "what_was_measured": "Real ROCm graph capture and replay of the alternate-stream branch; replay output after changed static inputs matched independent references exactly."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fbc23fdf2716/venv/bin/python -m compileall -q python/sglang/srt/models/olmo2.py test/registered/unit/models/test_olmo2_qk_norm.py && git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 f06c14a3339a03ed7b89f0a8737344fee0c7c080",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python syntax and whitespace."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "One assigned AMD Instinct MI350X (gfx950), Torch 2.11.0+rocm7.2/HIP 7.2.26015. AITER module_rmsnorm.so was built/loaded from the private runtime cache; numerical and ROCm graph tests executed on GPU.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No OLMo-2 weights were available, so full-model serving, semantic accuracy, and end-to-end prefill/decode timing were not run.",
+    "No NVIDIA H200 was assigned; upstream H200 timing was not reproduced.",
+    "Tensor-parallel execution was not run.",
+    "The unrelated CUDA FA3 illegal-address failure was out of scope and unavailable on AMD.",
+    "No SGLang/FlyDSL native source changed, so a repository native rebuild was not applicable."
+  ]
+}
