@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38622",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/568",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/565",
+  "candidate_commit": "fb6a8ee6a1a819b268d486385d93817275b77458",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "Partial fix. The exact candidate fixes the three reported examples on an AMD MI350X: oversized linear state output/state match an independent PyTorch reference, circular cursor=2 output/state match, and width 5 raises ValueError. However, the original circular-buffer contract still fails when seqlen exceeds state_len: output matches, but the in-place state does not reflect sequential wrapped writes. The candidate tests omit this case.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-bbf0d73b4564/venv/bin/python /job/evidence/j-bbf0d73b4564/independent_cases.py (base 358c1632)",
+      "exit_code": 0,
+      "what_was_measured": "Independent torch.nn.functional.conv1d plus gather/scatter oracle on GPU. Reproduced oversized-linear output/state corruption, circular state corruption, and silent width-5 wrong output."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bbf0d73b4564/venv/bin/python /job/evidence/j-bbf0d73b4564/independent_cases.py (candidate fb6a8ee6)",
+      "exit_code": 0,
+      "what_was_measured": "Exact reported cases pass/reject as expected. Adversarial circular width=4,state_len=5,seqlen=12,cursor=4 has output max abs error 4.76837158203125e-07 but state max abs error 3.974637508392334 and state_equal=false."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bbf0d73b4564/venv/bin/python -m pytest -q test/registered/layers/mamba/test_causal_conv1d.py -k 'state_layouts or rejects_unsupported_width or (test_causal_conv1d_update and not batch_gather)'",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and nearby update tests: 17 passed, 234 deselected."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X, gfx950:sramecc+:xnack-, executed real Triton kernels with torch 2.11.0+rocm7.2 and Triton 3.7.0."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    {
+      "case": "Circular update with more input tokens than circular state slots",
+      "parameters": "batch=1, dim=32, width=4, state_len=5, seqlen=12, cache_seqlens=[4], float32",
+      "observed": "Candidate output matches the independent convolution oracle, but mutated conv_state does not match sequential scatter semantics (max abs error 3.974637508392334).",
+      "contract": "Circular updates must write each token at (cache_seqlens + token_index) % state_len; after multiple wraps, the last write to each slot must win."
+    }
+  ],
+  "remaining_limitations": [
+    "The source report used NVIDIA RTX 4090, CUDA 12.8, Python 3.10, PyTorch 2.10, and Triton 3.6; this prepared environment instead provided AMD MI350X gfx950, ROCm 7.2, Python 3.12, PyTorch 2.11.0+rocm7.2, and Triton 3.7.0. CUDA/NVIDIA behavior remains unverified.",
+    "No native C++ or FlyDSL files changed in the candidate, repository-environment.json declared native=null and wheel=null, so no native rebuild was applicable.",
+    "The imported SGLang source was /job/repo/python/sglang/kernels/ops/mamba/causal_conv1d_triton.py. Triton imported from /opt/venv/lib/python3.12/site-packages/triton/__init__.py."
+  ]
+}
