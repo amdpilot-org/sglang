@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32669",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared source admitted DeepSeek-V4 non-EP TBO when attention TP was greater than one, although _forward_layers_tbo builds variable-length metadata and gathers input IDs over the full TP group. Added a narrow _can_run_tbo gate that falls back to the synchronous path for non-EP attention-TP>1 while retaining non-EP attention-TP1 and EP TBO.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-6c7e921f8b18/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v4_tbo_gate.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "The affected non-EP attn_tp_size=4, attn_dp_size=4 topology incorrectly returned True from DeepseekV4Model._can_run_tbo; the independent attention-TP1 and EP boundary cases passed. Raw output: reports/j-6c7e921f8b18/raw/pytest_tbo_gate_before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6c7e921f8b18/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v4_tbo_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "All three TBO eligibility cases passed after the source fix. Raw output: reports/j-6c7e921f8b18/raw/pytest_tbo_gate_after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6c7e921f8b18/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v4_tbo_gate.py test/registered/unit/models/test_deepseek_v4_rope_policy.py",
+      "exit_code": 0,
+      "what_was_measured": "Five DeepSeek-V4 unit tests passed, including the new gate regression and existing RoPE policy coverage. Raw output: reports/j-6c7e921f8b18/raw/pytest_deepseek_v4_units.txt"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-6c7e921f8b18/venv/bin/python <single-device FP32 matmul check>",
+      "exit_code": 0,
+      "what_was_measured": "Executed FP32 matrix multiplication on AMD Instinct MI355X gfx950 and compared against an independently computed CPU result; maximum absolute error was 7.62939453e-06. Raw output: reports/j-6c7e921f8b18/raw/gpu_sanity.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Single assigned AMD Instinct MI355X reported gcn_arch gfx950:sramecc+:xnack- and passed the CPU-referenced FP32 matrix multiplication check. This was a device sanity check, not the distributed DeepSeek-V4 reproduction."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported TP16/DP4 or TP16/DP2 workload requires two hosts and 16 GPUs; only one assigned gfx950 GPU was available.",
+    "DeepSeek-V4-Pro-NVFP4 weights were not available, so no full-model numerical A/B was performed.",
+    "The regression reproduces the incorrect actual _can_run_tbo strategy selection in the checked-out implementation and verifies fallback selection; it does not execute the full multi-rank collective corruption.",
+    "No native code was changed or rebuilt."
+  ]
+}

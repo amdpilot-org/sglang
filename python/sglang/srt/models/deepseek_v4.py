@@ -2968,6 +2968,12 @@ class DeepseekV4Model(nn.Module):
             and forward_batch.global_forward_mode.is_extend_without_speculative()
             and path_ok
             and self.pp_group.world_size == 1
+            # The non-EP TBO gather/combine metadata is TP-wide, so it is only
+            # coherent when each DP shard contains one attention rank.
+            and (
+                not get_moe_a2a_backend().is_none()
+                or get_parallel().attn_tp_size == 1
+            )
         )
 
     def _forward_layers_tbo(
