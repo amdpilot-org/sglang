@@ -38,6 +38,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def resolve_draft_redundant_experts(
+    num_logical_experts: int, configured_redundant_experts: int, ep_size: int
+) -> int:
+    """Preserve configured replicas and add the minimum EP alignment padding."""
+    if ep_size <= 0:
+        raise ValueError(f"ep_size must be positive, got {ep_size}")
+    physical_experts = num_logical_experts + configured_redundant_experts
+    return configured_redundant_experts + (-physical_experts) % ep_size
+
+
 def _prefer_same_node_experts() -> bool:
     from sglang.srt.elastic_ep.elastic_ep import elastic_expanded_world_enabled
 

@@ -550,6 +550,7 @@ class MoeFlags(_FlagGroupBase):
     # Draft construction/execution uses a separate one-sided A2A workspace from
     # the target model's concurrently live CUDA graphs.
     speculative_context: bool = False
+    speculative_ep_num_redundant_experts: int | None = None
 
 
 class DpFlags(_FlagGroupBase):
@@ -611,6 +612,8 @@ class Resources(_FlagGroupBase):
     # (owning accessors live in sglang.srt.eplb).
     expert_distribution_recorder: Any = None
     expert_location_metadata: Any = None
+    speculative_expert_distribution_recorder: Any = None
+    speculative_expert_location_metadata: Any = None
     # LPLB: layer_id -> solver.
     lplb_solvers: dict = msgspec.field(default_factory=dict)
     # Named side streams (see RuntimeContext.get_stream): name -> stream.

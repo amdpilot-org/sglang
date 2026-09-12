@@ -706,6 +706,65 @@ class TestResources(_IsolatedServerArgs):
         reset_context()
         self.assertIsNone(get_global_expert_location_metadata())
 
+    def test_speculative_moe_context_isolates_eplb_resources(self):
+        from sglang.srt.layers.moe.utils import (
+            speculative_moe_a2a_backend_context,
+        )
+        from sglang.srt.runtime_context import get_resources
+
+        reset_context()
+        publish(ServerArgs(model_path="dummy"), role="test")
+        resources = get_resources()
+        resources.expert_location_metadata = "target-metadata"
+        resources.expert_distribution_recorder = "target-recorder"
+        target_redundancy = get_exec().moe.ep_num_redundant_experts
+
+        with speculative_moe_a2a_backend_context():
+            self.assertIsNone(resources.expert_location_metadata)
+            self.assertIsNone(resources.expert_distribution_recorder)
+            resources.expert_location_metadata = "draft-metadata"
+            resources.expert_distribution_recorder = "draft-recorder"
+            get_exec().moe._set("ep_num_redundant_experts", 32)
+
+        self.assertEqual(resources.expert_location_metadata, "target-metadata")
+        self.assertEqual(resources.expert_distribution_recorder, "target-recorder")
+        self.assertEqual(get_exec().moe.ep_num_redundant_experts, target_redundancy)
+        self.assertEqual(
+            resources.speculative_expert_location_metadata, "draft-metadata"
+        )
+        self.assertEqual(
+            resources.speculative_expert_distribution_recorder, "draft-recorder"
+        )
+
+        with speculative_moe_a2a_backend_context():
+            self.assertEqual(resources.expert_location_metadata, "draft-metadata")
+            self.assertEqual(resources.expert_distribution_recorder, "draft-recorder")
+            self.assertEqual(get_exec().moe.ep_num_redundant_experts, 32)
+
+        with self.assertRaisesRegex(RuntimeError, "draft failure"):
+            with speculative_moe_a2a_backend_context():
+                resources.expert_location_metadata = "updated-draft-metadata"
+                raise RuntimeError("draft failure")
+        self.assertEqual(resources.expert_location_metadata, "target-metadata")
+        self.assertEqual(
+            resources.speculative_expert_location_metadata,
+            "updated-draft-metadata",
+        )
+
+    def test_draft_eplb_redundancy_aligns_independently(self):
+        from sglang.srt.eplb.expert_location import resolve_draft_redundant_experts
+
+        # The motivating DeepSeek target is already aligned, while its MTP
+        # draft needs 32 private physical slots at both requested EP sizes.
+        self.assertEqual(resolve_draft_redundant_experts(288, 0, 72), 0)
+        self.assertEqual(resolve_draft_redundant_experts(256, 0, 72), 32)
+        self.assertEqual(resolve_draft_redundant_experts(256, 0, 144), 32)
+        # User-requested redundancy is a lower bound, not discarded.
+        self.assertEqual(resolve_draft_redundant_experts(256, 5, 72), 32)
+        self.assertEqual(resolve_draft_redundant_experts(256, 40, 72), 104)
+        with self.assertRaisesRegex(ValueError, "ep_size must be positive"):
+            resolve_draft_redundant_experts(256, 0, 0)
+
 
 class TestNamedStreams(_IsolatedServerArgs):
     """ctx.get_stream(name): keyed get-or-create (the persistent-buffer

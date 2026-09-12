@@ -648,6 +648,7 @@ class ModelRunner:
             )
 
     def initialize(self):
+        self.maybe_pad_draft_eplb_experts()
         self.init_memory_saver_adapter()
         self.maybe_init_remote_instance_transfer_engine()
         self.maybe_init_expert_location_metadata()
@@ -690,6 +691,39 @@ class ModelRunner:
         self.maybe_enable_batch_invariant_mode()
         self.configure_kv_cache_dtype()
 
+    def maybe_pad_draft_eplb_experts(self):
+        """Give a draft its own EP-divisible physical-expert count.
+
+        Target and draft runners share the CLI configuration but can have
+        different logical expert counts.  The speculative MoE context makes
+        this effective redundancy draft-local and restores the target value.
+        """
+        if not (self.is_draft_worker and get_exec().moe.enable_eplb):
+            return
+
+        from sglang.srt.eplb.expert_location import (
+            ModelConfigForExpertLocation,
+            resolve_draft_redundant_experts,
+        )
+
+        config = ModelConfigForExpertLocation.from_model_config(self.model_config)
+        if config is None:
+            return
+        configured = get_exec().moe.ep_num_redundant_experts
+        effective = resolve_draft_redundant_experts(
+            config.num_logical_experts, configured, self.ps.moe_ep_size
+        )
+        padding = effective - configured
+        get_exec().moe._set("ep_num_redundant_experts", effective)
+        if padding:
+            logger.info(
+                "Added %d draft-only redundant expert slots so %d logical "
+                "experts are divisible across EP size %d.",
+                padding,
+                config.num_logical_experts,
+                self.ps.moe_ep_size,
+            )
+
     def init_memory_saver_adapter(self):
         self.memory_saver_adapter = TorchMemorySaverAdapter.create(
             enable=get_exec().features.enable_memory_saver
@@ -700,8 +734,6 @@ class ModelRunner:
             self.remote_instance_weight_transporter.init_engine()
 
     def maybe_init_expert_location_metadata(self):
-        if self.is_draft_worker:
-            return
         expert_rank = self.ps.moe_ep_rank + (
             get_parallel().ep_join_rank_offset
             if get_exec().moe.is_ep_scale_joiner
@@ -739,7 +771,7 @@ class ModelRunner:
                 get_expert_backup_client=lambda: self.expert_backup_client,
                 get_weight_updater=lambda: self.weight_updater,
             )
-            if get_exec().moe.enable_eplb and (not self.is_draft_worker)
+            if get_exec().moe.enable_eplb
             else None
         )
 

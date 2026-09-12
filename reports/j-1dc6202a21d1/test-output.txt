@@ -1,0 +1,40 @@
+Environment
+Python: /tmp/amdpilot-repo-j-1dc6202a21d1/venv/bin/python
+Torch: 2.11.0+rocm7.2
+HIP: 7.2.26015
+GPU: AMD Instinct MI350X (one visible device)
+
+Baseline reproduction: git show BASE:python/sglang/srt/model_executor/model_runner.py
+Exit code: 0
+Result: recorded base lines 702-704 returned immediately for every draft in
+maybe_init_expert_location_metadata; lines 742-743 also excluded every draft
+from EPLBManager construction. This directly reproduced the implementation
+gate reported by the issue before the exclusions were removed.
+
+Command: python -m pytest test/registered/unit/test_runtime_context.py -q
+Exit code: 0
+Result: 97 passed, 140 subtests passed. Verified runtime-context compatibility,
+target/draft EPLB resource isolation, exception-safe restoration, and the
+DeepSeek 256/288 expert alignment cases for EP sizes 72 and 144.
+
+Command: python -m pytest test/registered/unit/eplb test/registered/ep/test_eplb_no_a2a.py -q
+Exit code: 0
+Result: 35 tests passed. Verified existing EPLB algorithms and no-A2A behavior.
+
+Command: python reports/j-1dc6202a21d1/gpu_eplb_mapping_check.py
+Exit code: 0
+Result: PASS device=AMD Instinct MI350X logical=256 physical=288 ep_size=72
+samples=4096 exact_match=true. GPU gathers through both original and duplicate
+physical slots exactly matched an independent NumPy logical-expert reference.
+
+Command: python -m pre_commit run --files <all changed Python files>
+Exit code: 0
+Result: all applicable formatting, lint, syntax, security, and repository
+policy hooks passed.
+
+Unavailable validation
+The allocation exposes one GPU and no DeepSeek model weights. A real 72- or
+144-rank DeepSeek target plus MTP draft serving run, cross-rank migration, and
+end-to-end semantic accuracy were therefore not executed. The qualified tiny
+Llama fixture is dense and cannot qualify this MoE architecture or distributed
+EPLB behavior, so it was not used as substitute evidence.

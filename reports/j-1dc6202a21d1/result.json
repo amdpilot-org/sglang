@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/7893",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Enabled independent EPLB state for speculative draft runners. Draft model construction and execution now use draft-local expert-location metadata, distribution recording, dynamic rebalancing, and an independently padded redundant-expert count. For the reported DeepSeek case, a 256-expert draft is padded to 288 physical slots at EP size 72 or 144 without changing the already aligned 288-expert target.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-1dc6202a21d1/venv/bin/python -m pytest test/registered/unit/test_runtime_context.py -q",
+      "exit_code": 0,
+      "what_was_measured": "97 runtime-context tests and 140 subtests, including target/draft EPLB isolation, exception-safe restoration, explicit-redundancy compatibility, and 256/288-expert alignment at EP 72/144."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1dc6202a21d1/venv/bin/python -m pytest test/registered/unit/eplb test/registered/ep/test_eplb_no_a2a.py -q",
+      "exit_code": 0,
+      "what_was_measured": "35 existing EPLB algorithm and no-A2A regression tests."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1dc6202a21d1/venv/bin/python reports/j-1dc6202a21d1/gpu_eplb_mapping_check.py",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X, 4096 routes through a 256-logical/288-physical draft mapping, including duplicate physical slots, exactly matched an independent NumPy reference."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1dc6202a21d1/venv/bin/python -m pre_commit run --files python/sglang/srt/runtime_context.py python/sglang/srt/layers/moe/utils.py python/sglang/srt/eplb/expert_location.py python/sglang/srt/model_executor/model_runner.py test/registered/unit/test_runtime_context.py reports/j-1dc6202a21d1/gpu_eplb_mapping_check.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository formatting, lint, syntax, security, and policy hooks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X executed exact GPU gathers for 4096 routes across the padded draft mapping; output matched an independent NumPy reference bit-for-bit. Raw details are in reports/j-1dc6202a21d1/test-output.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one GPU was allocated, so the requested 72- and 144-rank distributed DeepSeek/MTP serving configurations and cross-rank EPLB migrations were not executable.",
+    "DeepSeek target and MTP model weights were unavailable, so end-to-end model semantic accuracy was not measured.",
+    "The deterministic tiny Llama fixture is dense and cannot validate MoE EPLB, MTP architecture behavior, or distributed execution; it was intentionally not presented as evidence.",
+    "No native C++ or FlyDSL source changed, so a native rebuild was not applicable."
+  ]
+}
