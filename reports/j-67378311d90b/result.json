@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38319",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The recorded base already contains the demonstrated lifetime fix: grouped allocator frees clone tensor views when ownership transfers to the allocator. A new page-size-64 regression uses the real RadixCache and PagedTokenToKVPoolAllocator and reproduces the C++ radix ordering (insert, defer duplicate request-table view, rebind row, end free group). Disabling the ownership clone deterministically frees the radix-owned page instead of the duplicate request page; the checked-in implementation preserves the radix page. No additional production-code change was needed.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-67378311d90b/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_radix_cache_unit.py::TestRadixCache::test_cache_unfinished_req_deferred_paged_free_owns_original_indices (with BaseTokenToKVPoolAllocator._copy_for_free_group temporarily returning the input view)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before ownership regression: the original request page was absent from the free list because the deferred view had been rebound to the radix page. Raw output: reports/j-67378311d90b/raw/paged_ownership_before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-67378311d90b/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_radix_cache_unit.py::TestRadixCache::test_cache_unfinished_req_deferred_free_owns_original_indices test/registered/unit/mem_cache/test_radix_cache_unit.py::TestRadixCache::test_cache_unfinished_req_deferred_paged_free_owns_original_indices",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after ownership census for both token and page allocators: duplicate request storage is freed, canonical radix storage remains owned, request-table and radix lookup both retain canonical indices. Raw output: reports/j-67378311d90b/raw/ownership_regressions.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-67378311d90b/venv/bin/python - <<'PY' ... real PagedTokenToKVPoolAllocator GPU ownership/data check ... PY",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X (gfx950), page size 64: request_page_freed=true, tree_page_freed=false, and an independent float16 reference read through rebound radix indices had max_abs_error=0.0. Raw output: reports/j-67378311d90b/raw/gpu_paged_ownership.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-67378311d90b/raw/gpu_paged_ownership.log records AMD Instinct MI350X, gfx950:sramecc+:xnack-, correct page ownership, and max_abs_error 0.0."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported RadixArk/Qwen3.8-Flash-Next-NVFP4 model, QSA KDA kernel, EAGLE speculative decode, NVFP4 KV cache, SM121/DGX Spark hardware, and token 248319 serving failure were not available and were not reproduced.",
+    "The new regression validates the concrete allocator/view lifetime defect and page-size-64 radix ownership ordering, not end-to-end model logits or the report's claim that this is the only possible cause of the observed impossible-token loop.",
+    "The Python RadixCache free_segment path materializes page representatives and did not alias under the temporary pre-fix semantics; the failing ordering applies to direct deferred request-table views such as the C++ radix-style path modeled by the regression.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}

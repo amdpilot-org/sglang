@@ -39,6 +39,7 @@ from sglang.srt.disaggregation.kv_events import (
     StorageMedium,
 )
 from sglang.srt.managers.schedule_batch import ReqKvInfo
+from sglang.srt.mem_cache.allocator.paged import PagedTokenToKVPoolAllocator
 from sglang.srt.mem_cache.allocator.token import TokenToKVPoolAllocator
 from sglang.srt.mem_cache.base_prefix_cache import (
     EvictParams,
@@ -539,6 +540,67 @@ class TestRadixCache(unittest.TestCase):
         torch.testing.assert_close(
             cache.req_to_token_pool.req_to_token[0], tree_indices
         )
+
+    def test_cache_unfinished_req_deferred_paged_free_owns_original_indices(self):
+        """A deferred page free must not retain the request-table view.
+
+        The C++ radix path queues duplicate request pages for release and then
+        overwrites that same request-table slice with the radix tree's canonical
+        pages.  Page allocators therefore have to take ownership of the queued
+        indices before the overwrite, or ``free_group_end`` releases the tree
+        pages and leaves dangling radix entries.
+        """
+
+        class ReqToTokenPool:
+            def __init__(self, row):
+                self.req_to_token = row.unsqueeze(0)
+
+            def write(self, indices, values):
+                self.req_to_token[indices] = values
+
+        page_size = 64
+        allocator = PagedTokenToKVPoolAllocator(
+            size=page_size * 8,
+            page_size=page_size,
+            dtype=torch.float16,
+            device="cpu",
+            kvcache=None,
+            need_sort=False,
+        )
+        cache = RadixCache.create_simulated(
+            page_size=page_size, mock_allocator=allocator
+        )
+        token_ids = array("q", range(page_size))
+        tree_indices = allocator.alloc(page_size)
+        request_indices = allocator.alloc(page_size)
+        assert tree_indices is not None
+        assert request_indices is not None
+        cache.insert(InsertParams(key=RadixKey(token_ids), value=tree_indices))
+        cache.req_to_token_pool = ReqToTokenPool(request_indices.clone())
+        free_pages_before = allocator.free_pages.clone()
+        allocator.free_group_begin()
+        # This is the C++ radix ordering: insert the request's pages, enqueue
+        # the duplicate request-table view for a grouped free, then rebind the
+        # table row to the canonical pages returned by the radix tree.
+        cache.insert(InsertParams(key=RadixKey(token_ids), value=request_indices))
+        request_table_view = cache.req_to_token_pool.req_to_token[0]
+        allocator.free(request_table_view)
+        match = cache.match_prefix(MatchPrefixParams(key=RadixKey(token_ids)))
+        cache.req_to_token_pool.write((0, slice(None)), match.device_indices)
+        allocator.free_group_end()
+
+        request_page = request_indices[0] // page_size
+        tree_page = tree_indices[0] // page_size
+        self.assertTrue(torch.any(allocator.free_pages == request_page))
+        self.assertFalse(torch.any(allocator.free_pages == tree_page))
+        self.assertEqual(
+            allocator.available_size(),
+            (free_pages_before.numel() + 1) * page_size,
+        )
+        torch.testing.assert_close(
+            cache.req_to_token_pool.req_to_token[0], tree_indices
+        )
+        torch.testing.assert_close(match.device_indices, tree_indices)
 
     def test_kv_cache_events(self):
         """Test KV cache events functionality."""
