@@ -99,6 +99,10 @@ class Schedule(msgspec.Struct):
             ],
         ),
     ] = "fcfs"
+    lpm_aging_tokens_per_pass: A[
+        int,
+        "Anti-starvation aging for the 'lpm' policy. Each active LPM scheduling pass adds this many tokens to a waiting request's effective matched-prefix length. Set to 0 to disable aging.",
+    ] = 0
     enable_priority_scheduling: A[
         bool,
         "Enable priority scheduling. Requests with higher priority integer values will be scheduled first by default.",
