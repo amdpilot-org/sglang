@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31766",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "52a17bf276b24ea1f62f93c2c43f4ffca182c217",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes sequential low-RLIMIT endpoint churn by deriving an fd-aware cache size, but active-sender protection permits unbounded cache overflow. With RLIMIT_NOFILE=128 and every cached endpoint send lock held, real CommonKVManager._connect still fails in monitor creation with ZMQError: Too many open files after 38 endpoints.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-007c2bb7284c/venv/bin/python /job/review-evidence-j-007c2bb7284c/probe_socket_cache.py --limit 128 --count 1000 --cache-size 10000 (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "The prepared base reproduced the original real-PyZMQ monitor-socket failure: 38 endpoints completed, the cache reached 39 entries, and get_monitor_socket raised ZMQError: Too many open files."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-007c2bb7284c/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_common_kv_manager_socket_cache.py (candidate 52a17bf276b24ea1f62f93c2c43f4ffca182c217)",
+      "exit_code": 0,
+      "what_was_measured": "All 8 candidate regression tests passed against source imported from the exact detached candidate checkout."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-007c2bb7284c/venv/bin/python /job/review-evidence-j-007c2bb7284c/probe_socket_cache.py --limit 128 --count 1000 (candidate 52a17bf276b24ea1f62f93c2c43f4ffca182c217)",
+      "exit_code": 0,
+      "what_was_measured": "Independent sequential churn passed: the derived limit was 21, 1,000 endpoints completed, 21 remained cached, and 76 fds were open."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-007c2bb7284c/venv/bin/python /job/review-evidence-j-007c2bb7284c/probe_socket_cache.py --limit 128 --count 1000 --hold-locks (candidate 52a17bf276b24ea1f62f93c2c43f4ffca182c217)",
+      "exit_code": 1,
+      "what_was_measured": "Independent active-sender adversarial case reproduced the original failure: eviction skipped all busy entries, the cache overflowed its limit of 21 to 38 entries, and real monitor creation raised ZMQError: Too many open files."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and counterexample are in host-side CommonKVManager/PyZMQ descriptor management; no GPU kernel participates. The reporter's 16x H800 distributed workload was unavailable, so no full-workload claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "When every cached endpoint has an active sender lock, _evict_idle_socket returns false and _connect deliberately permits cache overflow. Under soft RLIMIT_NOFILE=128, 38 busy distinct endpoints exhaust descriptors and real get_monitor_socket raises ZMQError: Too many open files even though the derived cache size is 21."
+  ],
+  "remaining_limitations": [
+    "The reporter's 16x NVIDIA H800 full-model, multi-node workload and weights were unavailable; this review validates the actual host-side manager and PyZMQ path only.",
+    "The prepared environment is x86_64 with PyTorch 2.11.0+rocm7.2, HIP 7.2, and PyZMQ 27.2.0; the assigned AMD GPU was not used because the fd lifecycle has no GPU execution.",
+    "No native source changed and repository-environment.json reports native as null, so no native rebuild was applicable.",
+    "An explicitly oversized SGLANG_DISAGGREGATION_ZMQ_SOCKET_CACHE_SIZE remains capable of exceeding the descriptor budget, as the candidate documents."
+  ]
+}
