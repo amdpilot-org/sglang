@@ -1,0 +1,27 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37548",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared main checkout already contains upstream commit cdfc224b0e5bd0fb5d10334d787c9bd3865ba1d9, which routes multimodal sentinel positions through ForwardBatch.mm_input_embeds, embeds only appended in-vocabulary tail tokens, and rotates multimodal embeddings with draft-prefill input IDs. Reverting the embedding-selection block reproduced the checked-in regression failure; restoring current main passed it.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-719ea5ab79e7/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_nextn_mm_embed.py (with only the issue fix block temporarily reverted)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before evidence: multimodal sentinel ID 1000006 reached embed_tokens with vocab_size 154880; the independent plain-text fallback case passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-719ea5ab79e7/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_nextn_mm_embed.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after evidence on the actual prepared implementation: the multimodal sentinel regression and independent no-multimodal fallback both passed (2 tests)."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-719ea5ab79e7/venv/bin/python reports/j-719ea5ab79e7/gpu_embedding_boundary.py",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X gfx950, two request segments with interior sentinel IDs selected and embedded only valid tail IDs 13 and 19; GPU output exactly matched an independent CPU gather."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-719ea5ab79e7/raw/gpu_embedding_boundary.log records AMD Instinct MI350X gfx950 execution and exact CPU-reference agreement; raw/gpu_inventory.log records the assigned device.",
+  "native_rebuilt": false,
+  "remaining_limitations": "GLM-5.3-Flash weights and the original 8x NVIDIA H20 TP8/DP8/EP8 environment were unavailable. No full model/HTTP request, CUDA graph, distributed scheduler, semantic output, or NVIDIA device-assert reproduction was performed. The single-gfx950 check qualifies only the issue-specific embedding boundary."
+}
