@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32056",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "ba54bcf0546d2d1bb2ce24899e0036f29f552181",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is valid test-only hardening for a production ownership guard already present on the recorded base. Its four GPU cases pass, fail specifically for borrowed inputs when the guards are temporarily removed, and an independent shared-gate-style caller reuse check passes. The candidate itself adds no production fix, and the reported full Qwen3.5 TP8/EP8 CUDA workload remains unverified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-1e1f896927bb/venv/bin/python -m pytest -q test/registered/unit/layers/moe/test_deep_gemm_standard_input_ownership.py -vv",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression on the assigned gfx950: compact/masked crossed with inplace false/true; 4 passed."
+    },
+    {
+      "command": "same pytest command after temporarily replacing both runner_config.inplace guards with unconditional disposal",
+      "exit_code": 1,
+      "what_was_measured": "Original ownership failure reproduced: both inplace=False cases collapsed the caller tensor to shape [0], while both inplace=True cases passed."
+    },
+    {
+      "command": "same pytest command with a temporary independent BF16 linear-plus-sigmoid caller-reuse assertion",
+      "exit_code": 0,
+      "what_was_measured": "Shared-expert-like reuse after pre-permute matched a preserved reference for compact and masked inplace=False paths; all 4 cases passed."
+    },
+    {
+      "command": "CUDA_VISIBLE_DEVICES='' /tmp/amdpilot-repo-j-1e1f896927bb/venv/bin/python -m pytest -q test/registered/unit/layers/moe/test_deep_gemm_standard_input_ownership.py -vv",
+      "exit_code": 2,
+      "what_was_measured": "CPU-only collection is blocked in this ROCm environment because an SGLang import probes torch.cuda device properties when no GPU is visible."
+    },
+    {
+      "command": "git diff --name-status 358c163250ad3b1f62939b01ce1314a0a31a0365 ba54bcf0546d2d1bb2ce24899e0036f29f552181",
+      "exit_code": 0,
+      "what_was_measured": "Candidate changes only one Python regression test and report artifacts; no production or native source changed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Tests imported /job/repo/python/sglang/srt/layers/moe/moe_runner/deep_gemm.py and executed GPU tensors on one AMD Instinct MI350X gfx950 using Torch 2.11.0+rocm7.2."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The candidate is test-only and does not itself introduce the production fix; the prepared base already contains the ownership guards.",
+    "Qwen3.5-397B-A17B-FP8 weights, eight H800 GPUs, CUDA 12.x, and TP8/EP8 were unavailable, so the reported full serving failure and fix were not run.",
+    "Packing kernels are mocked, so the regression establishes Python ownership behavior rather than DeepGEMM numerical correctness.",
+    "CPU-only test collection is blocked by a GPU property probe in this ROCm build's SGLang import path."
+  ],
+  "evidence_location": "/tmp/amdpilot-repo-j-1e1f896927bb/review-evidence"
+}
