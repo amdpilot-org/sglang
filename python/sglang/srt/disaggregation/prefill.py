@@ -995,6 +995,8 @@ class SchedulerDisaggregationPrefillMixin:
                 # todo: set Transferring correctly in backend
                 undone_reqs.append(req)
             elif poll == KVPoll.Success:  # transfer done
+                if isinstance(req.to_finish, FINISH_ABORT) and not req.finished():
+                    req.update_finish_state()
                 if not isinstance(req.finished_reason, FINISH_ABORT):
                     req.finished_reason = FINISH_LENGTH(length=0)
                 release_kv_cache(req, self.tree_cache)  # unlock the tree

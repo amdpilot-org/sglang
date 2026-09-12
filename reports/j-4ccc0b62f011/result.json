@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33507",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the PD prefill inflight success race at the scheduler queue boundary: a pending FINISH_ABORT in req.to_finish was overwritten by FINISH_LENGTH. The success path now promotes a pending abort through Req.update_finish_state() before applying the normal length completion. Regression coverage preserves the abort message/status and checks already-promoted-abort and ordinary-success boundaries.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-4ccc0b62f011/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_prefill_abort_result_cleanup.py -k successful_transfer_preserves_abort_reason",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before queue-level reproduction: pending FINISH_ABORT(status_code=503) became FINISH_LENGTH on KVPoll.Success; the ordinary-success boundary passed. Raw output: reports/j-4ccc0b62f011/raw/failing-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4ccc0b62f011/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_prefill_abort_result_cleanup.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after related unit suite: 14 tests passed, including pending abort preservation, already-promoted abort preservation, normal successful transfer length completion, and existing abort cleanup boundaries. Raw output: reports/j-4ccc0b62f011/raw/passing-after.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is a deterministic scheduler state transition before response streaming and requires no tensor execution. No GPU or full-model claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Qwen2-7B weights were available, so the original two-node PD HTTP reproduction was not run.",
+    "The test directly exercises the actual process_disagg_prefill_inflight_queue implementation with a mocked successful transfer poll; it does not qualify multi-node transport behavior, model semantics, or NVIDIA H100 hardware.",
+    "HTTP status propagation beyond the preserved FINISH_ABORT object was not exercised end-to-end; the regression verifies its status_code=503 and abort type at the scheduler output boundary."
+  ]
+}
