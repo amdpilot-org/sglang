@@ -12,7 +12,7 @@
 # limitations under the License.
 # ==============================================================================
 
-"""Batch-wise Adaptive Pruning (BWAP) — Phase-1 functional integration.
+"""Batch-wise Adaptive Pruning (BWAP).
 
 Training-free, inference-time FFN neuron pruning for gated-MLP LLMs,
 built for batched decode. See `bwap_manager.py` for the design note.

@@ -20,6 +20,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from sglang.srt.arg_groups.validation_hook import check_bwap_server_args
 from sglang.srt.bwap.bwap_fused import (
     fast_path_eligible,
     fused_pruned_mlp,
@@ -37,6 +38,7 @@ from sglang.srt.bwap.bwap_manager import (
 )
 from sglang.srt.layers.activation import SiluAndMul
 from sglang.srt.model_executor.forward_batch_info import ForwardMode
+from sglang.srt.server_args import ServerArgs
 from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import CustomTestCase
 
@@ -46,13 +48,20 @@ HIDDEN = 16
 INTERMEDIATE = 32
 
 
+class ReferenceSiluAndMul(SiluAndMul):
+    """CPU-capable reference that remains discoverable as ``SiluAndMul``."""
+
+    def forward(self, x):
+        return silu_and_mul(x)
+
+
 class TinyGatedMLP(nn.Module):
     """Qwen2MLP-shaped module: the hook target is ``mlp.act_fn``."""
 
     def __init__(self):
         super().__init__()
         self.gate_up_proj = nn.Linear(HIDDEN, 2 * INTERMEDIATE, bias=False)
-        self.act_fn = SiluAndMul()
+        self.act_fn = ReferenceSiluAndMul()
         self.down_proj = nn.Linear(INTERMEDIATE, HIDDEN, bias=False)
 
     def forward(self, x):
@@ -116,6 +125,40 @@ class TestBWAPScores(CustomTestCase):
         ) / (2**0.5)
         torch.testing.assert_close(compute_prompt_scores(z), expected)
 
+
+class TestBWAPServerArgs(CustomTestCase):
+    def test_defaults_and_validation(self):
+        cfg = ServerArgs("dummy")
+        self.assertFalse(cfg.enable_bwap)
+        self.assertEqual(cfg.bwap_sparsity, 0.5)
+        check_bwap_server_args(cfg)
+
+        enabled = ServerArgs(
+            "dummy", enable_bwap=True, bwap_sparsity=0.25, bwap_t_init=3
+        )
+        check_bwap_server_args(enabled)
+
+    def test_invalid_combinations_are_rejected(self):
+        cases = [
+            ({"bwap_fused": True}, "--bwap-fused requires"),
+            (
+                {"enable_bwap": True, "bwap_probe": True},
+                "--bwap-probe requires --bwap-fused",
+            ),
+            (
+                {"enable_bwap": True, "bwap_sparsity": 1.0},
+                "--bwap-sparsity",
+            ),
+        ]
+        for kwargs, message in cases:
+            with (
+                self.subTest(kwargs=kwargs),
+                self.assertRaisesRegex(AssertionError, message),
+            ):
+                check_bwap_server_args(ServerArgs("dummy", **kwargs))
+
+
+class TestBWAPScoreReduction(CustomTestCase):
     def test_decode_scores_are_batch_max_of_normalized_rows(self):
         # Two active sequences with disjoint large neurons: the shared
         # batch-aggregated score (Eq. 3, element-wise max) keeps both.
