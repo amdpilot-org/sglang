@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36678",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/661",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/656",
+  "candidate_commit": "0e629c84c3f909e5e94c58dc341714b4a4d986b3",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate implements the opt-in OpenAI request-metrics feature and fixes the reported prompt=[\"first\",\"second\"], n=1 loss when every emitted choice has measured timing data. Its focused completion, chat, and timing tests pass. It does not fully preserve per-choice association: both completion serializers filter choices whose metrics object is empty, so a two-choice response can carry a one-element request_metrics list with no way to identify which choice it belongs to. This is a partial fix rather than a full resolution of the reviewed contract.",
+  "remaining_counterexamples": [
+    "For a two-choice completion where choice 0 has no positive timing values and choice 1 has e2e_latency=2.5, the normal response contains two choices but sglext.request_metrics=[{\"e2e_latency\":2.5}]. Positional per-choice association is lost. The same filtering pattern is present in the streaming completion and chat serializers."
+  ],
+  "tests": [
+    {
+      "command": "On prepared base 358c163, temporarily use the candidate completion regression tests and run: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a075ff9bc8b2/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_completions.py -k 'batched_prompt_metrics_preserve_all_choices or batched_prompt_metrics_cardinality_multiplies_by_n'",
+      "exit_code": 1,
+      "what_was_measured": "Prepared-base failure in actual non-streaming handler/JSON serialization, streaming generator/SSE serialization, and 2 prompts x n=2 response construction: choices were emitted but sglext metrics were absent."
+    },
+    {
+      "command": "At exact candidate 0e629c84: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a075ff9bc8b2/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_completions.py test/registered/unit/entrypoints/openai/test_serving_chat.py test/registered/unit/observability/test_req_time_stats.py",
+      "exit_code": 0,
+      "what_was_measured": "170 tests and 70 subtests passed, including candidate regressions for normal and streaming completions, prompt cardinality multiplied by n, chat metrics, opt-in propagation, opt-out omission, scalar single-choice shape, and timing conversion."
+    },
+    {
+      "command": "At exact candidate 0e629c84, invoke OpenAIServingCompletion._build_completion_response with two choices, the first without positive timing fields and the second with e2e_latency=2.5, then assert metrics cardinality equals choice cardinality.",
+      "exit_code": 1,
+      "what_was_measured": "Independent adversarial serialization case produced choices=2 and metrics=1, proving positional per-choice association is not preserved when a choice has an empty metrics object."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 0e629c84c3f909e5e94c58dc341714b4a4d986b3 -- python test",
+      "exit_code": 0,
+      "what_was_measured": "Candidate source and tests have no whitespace errors; candidate-retained historical evidence files were intentionally excluded."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X (ROCm 7.2, Torch 2.11.0+rocm7.2) was visible, but this review exercised Python serving/serialization with deterministic generated outputs and did not claim an unrelated GPU numerical smoke as HTTP evidence. No model weights path was provided for a live model-backed server."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No model weights path was supplied, so a live model-backed HTTP server was not launched. Actual Python OpenAI handler and serialization methods were exercised with deterministic tokenizer-manager outputs.",
+    "The candidate changes no C, C++, HIP, CUDA, FlyDSL, or header files; repository-environment.json declares native=null, so no native rebuild was applicable.",
+    "The prepared architecture is x86_64 with one AMD Instinct MI350X under ROCm 7.2. The embedded Rust server remains outside the original issue's stated initial scope.",
+    "Only the demonstrated partial-metrics association counterexample blocks full acceptance; the originally reviewed all-measured multi-prompt n=1 and prompt_count x n cases pass."
+  ]
+}
