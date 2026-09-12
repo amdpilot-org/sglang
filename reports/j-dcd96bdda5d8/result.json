@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/29857",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "56ea75a6caa285191b31e8f3051fa0ecb4972dba",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "outcome": "candidate_verified",
+  "summary": "The candidate is accurate test-only hardening for an issue-specific production fix already present on the recorded base. It verifies that Qwen3.5/Qwen3.6 wrapper draft configuration exposes one MTP layer through hf_text_config, preventing the EAGLE profiler's erroneous 64-layer fallback and exact 5x KV cell-size inflation.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-dcd96bdda5d8/venv/bin/python -m pytest -q test/registered/unit/configs/test_model_config_shapes.py test/registered/unit/model_executor/test_pool_configurator.py::TestEagleConfigurator",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, all 14 model-config and EAGLE pool tests passed, including the candidate's wrapper, non-draft, and exact cell-size regressions. Raw output: candidate-tests.log"
+    },
+    {
+      "command": "same interpreter, issue-specific wrapper regression after temporarily removing only hf_text_config.num_nextn_predict_layers = 1",
+      "exit_code": 1,
+      "what_was_measured": "Controlled failing-before evidence: the nested draft depth was absent and the candidate regression failed. The production line was restored before leaving the candidate checkout. Raw output: failing-before.log"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-dcd96bdda5d8/venv/bin/python - (independent architecture and stale-value boundary script)",
+      "exit_code": 0,
+      "what_was_measured": "Dense/MoE conditional and causal-LM Qwen3.5 variants plus InternS2Preview all overwrote stale depth 64 with depth 1; reported geometry computed 34,816 corrected versus 163,840 broken bytes/token. Raw output: adversarial.log"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The available GPU was inventoried as AMD Instinct MI350X gfx950. Tests exercised deterministic configuration and allocator arithmetic on CPU; they did not execute model kernels on GPU. See gpu-inventory.log.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No NVIDIA RTX PRO 6000 Blackwell/CUDA execution was possible on the assigned AMD Instinct MI350X gfx950/ROCm 7.2 system.",
+    "The unsloth/Qwen3.6-27B-NVFP4 weights were unavailable, so the original full-model serving command and direct VRAM recovery were not reproduced.",
+    "The prepared recorded base already contains the production correction, so failing-before evidence required a controlled one-line reversion rather than an unmodified-base failure.",
+    "A distinct draft embed/lm_head pre-profile lifetime issue may account for smaller residual idle memory, but it does not counterexample the original exact 5x layer-count defect reviewed here.",
+    "No native code changed in the candidate; native rebuild and native import-path validation were not applicable. Python imports resolved from /job/repo/python through the prepared interpreter."
+  ]
+}
