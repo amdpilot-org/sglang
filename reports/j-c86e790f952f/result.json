@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32470",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "61a5235257fc808054bc3fe0061f763b49c5293f",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is test-only hardening on top of a prepared base that already contains upstream PR 32467's production fix. Its gfx950 JIT planner tests and independent adversarial cases pass, but its static regression rejects the historically valid barrier-based fix and its recorded git diff --check result is inaccurate.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_JIT_KERNEL_CACHE_DIR=/tmp/amdpilot-repo-j-c86e790f952f/review-cache /tmp/amdpilot-repo-j-c86e790f952f/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py -vv",
+      "exit_code": 0,
+      "what_was_measured": "All four candidate tests passed on gfx950, including 100 iterations of the reported 72x4 + 24x3 planner shape and CPU/GPU plan parity. Evidence: evidence/candidate-regression.log"
+    },
+    {
+      "command": "custom invocation of candidate _assert_gpu_matches_cpu for reversed, alternating, outlier, bs=2/31/32/33, and mixed E=32/33 cases",
+      "exit_code": 0,
+      "what_was_measured": "Nine independent GPU planner boundary/adversarial cases matched the CPU plan and retained bounded unique ragged IDs. Evidence: evidence/adversarial-gpu.log"
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..61a5235257fc808054bc3fe0061f763b49c5293f",
+      "exit_code": 2,
+      "what_was_measured": "Contrary to the candidate result.json claim, trailing whitespace exists in reports/j-d166451934c2/failing-before.log and passing-after.log."
+    },
+    {
+      "command": "git show c9c96b63f765db4ac7c88e824a755851f1049e30 and git show 58124fb983136b903108c8ef1305c135eb7d376f",
+      "exit_code": 0,
+      "what_was_measured": "Actual upstream history: a barrier was first added to fix the race, then initialization was removed. The candidate static test would reject the first correct implementation. Evidence: evidence/upstream-initial-fix.diff and evidence/upstream-cleanup.diff"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI350X gfx950 ran the checked-out JIT planner under PyTorch 2.11.0+rocm7.2; import and artifact paths are retained under evidence/.",
+  "native_rebuilt": true,
+  "native_rebuild_evidence": "The DSV4 compress-plan JIT shared library was built from the candidate checkout and loaded from /job/.cache/sglang/jit/gfx950/sgl_kernel_jit_dpsk_v4_compress_plan/build-0bbc057a34dba450/deps-666e3e1963b72122/sgl_kernel_jit_dpsk_v4_compress_plan.so. No monolithic native build is configured or required by the test-only candidate diff.",
+  "remaining_counterexamples": [
+    "A correct implementation retaining warp scratch initialization with a __syncthreads() before per-warp reduction is rejected by test_warp_extrema_have_one_writer_per_slot, despite being the initial upstream fix for the race.",
+    "The exact candidate fails git diff --check although its result.json records that command as exit code 0."
+  ],
+  "remaining_limitations": [
+    "The original CUDA/H20 TP=2 DeepSeek-V4-Flash-DSpark graph-capture failure could not be run with one AMD gfx950 and no model weights.",
+    "The prepared recorded base already contains the production fix, so the original illegal-memory-access was not reproduced on that base.",
+    "HIP planner parity does not verify CUDA warp scheduling, full model graph capture, semantic accuracy, serving transport, or distributed execution."
+  ]
+}
