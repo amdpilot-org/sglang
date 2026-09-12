@@ -1,0 +1,27 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/29857",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared main checkout already contains the issue-specific correction: Qwen3.5/3.6 draft configuration writes num_nextn_predict_layers=1 to hf_text_config, where ModelConfig shape derivation reads it. This prevents the KV profiler from falling back to the target's 64 layers and inflating the EAGLE cell size from 34,816 to 163,840 bytes/token. This PR adds regression and boundary coverage; it does not duplicate the existing source fix.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-88e1cf3f5c32/venv/bin/python -m pytest -q test/registered/unit/configs/test_model_config_shapes.py::TestQwen35DraftConfig::test_conditional_generation_mtp_depth_is_visible_to_shape_derivation (after temporarily removing the existing hf_text_config assignment)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: without the prepared source fix, the nested text config has no num_nextn_predict_layers and the issue-specific assertion fails. Raw output: reports/j-88e1cf3f5c32/pytest-failing-before.log"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-88e1cf3f5c32/venv/bin/python -m pytest -q test/registered/unit/configs/test_model_config_shapes.py test/registered/unit/model_executor/test_pool_configurator.py::TestEagleConfigurator::test_qwen35_hybrid_full_attention_cell_prices_one_mtp_layer",
+      "exit_code": 0,
+      "what_was_measured": "11 tests passed. The Qwen wrapper and causal-LM draft variants expose one MTP layer through hf_text_config, target configs remain unchanged, and FP8 KV arithmetic for 16 full-attention layers plus one MTP layer is 34,816 bytes/token rather than the reported erroneous 163,840 bytes/token. Raw output: reports/j-88e1cf3f5c32/pytest-focused.log"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The assigned device is an AMD Instinct MI350X (gfx950), recorded in reports/j-88e1cf3f5c32/gpu-inventory.log. The report requires an NVIDIA RTX PRO 6000 Blackwell checkpoint run with unsloth/Qwen3.6-27B-NVFP4 weights, which were not available. The deterministic configuration and byte-accounting regression is CPU-only; no GPU execution is claimed.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No full-model reproduction was performed because the reported NVIDIA Blackwell architecture and Qwen3.6-27B-NVFP4 weights were unavailable.",
+    "The prepared checkout is a shallow snapshot, so the local commit history cannot identify the exact commit that introduced the already-present nested-config assignment.",
+    "Upstream PR https://github.com/sgl-project/sglang/pull/30092 remains open and proposes a broader outer-config fallback; this PR only preserves evidence for the issue-specific Qwen path already fixed in the prepared source.",
+    "A separate draft embed/lm_head pre-profile memory issue is tracked in upstream PR https://github.com/sgl-project/sglang/pull/32468 and was not conflated with the reported 5x cell-size defect."
+  ]
+}

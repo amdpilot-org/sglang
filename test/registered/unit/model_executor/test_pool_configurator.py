@@ -692,6 +692,31 @@ class TestAllSWAConfigurator(CustomTestCase):
 class TestEagleConfigurator(CustomTestCase):
     """EAGLE: draft KV cache must be accounted for so total allocation fits in budget."""
 
+    def test_qwen35_hybrid_full_attention_cell_prices_one_mtp_layer(self):
+        """Qwen3.5/3.6 uses 16 full-attention layers plus one MTP layer."""
+        mr = _make_model_runner(
+            self,
+            num_kv_heads=4,
+            head_dim=256,
+            v_head_dim=256,
+            num_layers=16,
+        )
+        mr.spec_algorithm.is_eagle.return_value = True
+        mr.spec_algorithm.is_none.return_value = False
+        mr.spec_aux_config.eagle_draft_num_layers = 1
+
+        with mock_cpu_env(kv_size=1):
+            from sglang.srt.model_executor.pool_configurator import (
+                create_memory_pool_configurator,
+            )
+
+            cfg = create_memory_pool_configurator(mr)
+
+        # 16 target layers * 2,048 B/token + one 2,048 B/token MTP layer.
+        # The reported regression instead fell back to 64 draft layers and
+        # priced this as 163,840 B/token (exactly 5x the target cost).
+        self.assertEqual(cfg._cell_size, 34_816)
+
     def test_eagle_does_not_exceed_budget(self):
         """Total memory (target + draft KV cache) must not exceed available."""
         available = 10_000_000
