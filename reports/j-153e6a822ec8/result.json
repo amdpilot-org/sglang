@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34113",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1759",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1721",
+  "candidate_commit": "38c4cbff0291764be04514426e2654e2e08d3b9f",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate correctly fixes an independently reproduced AttributeError in create_abort_task when streaming cleanup runs before GenerateReqInput normalization. It does not change or establish the original issue's claimed /abort_request false-success path: that endpoint directly dispatches TokenizerManager.abort_request and does not call create_abort_task, and an identical real GPU/HTTP abort probe succeeded on both base and candidate.",
+  "tests": [
+    {
+      "command": "base: run TokenizerManager.create_abort_task for an unnormalized GenerateReqInput with asyncio.sleep mocked",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced AttributeError: 'GenerateReqInput' object has no attribute 'is_single'."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-153e6a822ec8/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py -k TestCreateAbortTask",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 3 passed, covering unstarted single, active single, and active batch cleanup."
+    },
+    {
+      "command": "candidate: independent create_abort_task script with mocked sleep and scheduler abort",
+      "exit_code": 0,
+      "what_was_measured": "Unstarted single no-op, active unnormalized single abort, mixed active/missing batch filtering, and empty batch all matched expected calls."
+    },
+    {
+      "command": "candidate: run_http_abort.py with qualified deterministic tiny Llama fixture on one gfx950",
+      "exit_code": 0,
+      "what_was_measured": "HTTP 200 from /abort_request; live stream ended with abort finish reason after five generated tokens; no AttributeError in server log."
+    },
+    {
+      "command": "base: identical run_http_abort.py and fixture on one gfx950",
+      "exit_code": 0,
+      "what_was_measured": "HTTP 200 from /abort_request; live stream ended with abort finish reason after four generated tokens; no AttributeError in server log, showing this behavior predates the candidate."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2/HIP 7.2.26015. Both base and candidate executed real tiny-Llama generation and abort requests."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The public /abort_request endpoint has the same direct-dispatch implementation on base and candidate and never invokes the changed create_abort_task function.",
+    "The endpoint's HTTP 200 still acknowledges local dispatch rather than confirmed downstream cancellation; the candidate adds no completion acknowledgement or failure propagation.",
+    "The original endpoint failure was not reproduced: the identical tiny-Llama GPU probe aborted cleanly on the recorded base, so the candidate cannot be credited for that result."
+  ],
+  "remaining_limitations": [
+    "The original meta-llama/Llama-3.2-1B-Instruct weights were unavailable.",
+    "The report used RTX 4090/CUDA; review used one AMD Instinct MI355X gfx950 with ROCm 7.2.",
+    "The deterministic tiny random Llama fixture validates transport and engine execution only, not model semantics, another architecture, or distributed execution.",
+    "No native source changed; no native rebuild was applicable.",
+    "Both server runs required SIGKILL after the 30-second graceful shutdown window, although owned descendants were reaped."
+  ]
+}
