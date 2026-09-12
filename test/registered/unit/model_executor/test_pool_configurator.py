@@ -798,6 +798,90 @@ class TestEagleConfigurator(CustomTestCase):
         self.assertLessEqual(used, available)
         self.assertGreater(used, available * 0.99)
 
+    def test_inkling_eight_layer_eagle_draft_pools_are_in_auto_budget(self):
+        """Regression for #31588: price every built-in MTP draft layer."""
+        available = int(65.45 * (1 << 30))
+        page_size = 128
+        ratio = 0.1
+        draft_layers = 8
+        mr = _make_model_runner(
+            self,
+            num_kv_heads=8,
+            head_dim=128,
+            v_head_dim=128,
+            num_layers=32,
+            is_hybrid_swa=True,
+            full_attention_layer_ids=list(range(16)),
+            swa_attention_layer_ids=list(range(16, 32)),
+            swa_num_kv_heads=8,
+            swa_full_tokens_ratio=ratio,
+            page_size=page_size,
+        )
+        mr.spec_algorithm.is_eagle.return_value = True
+        mr.spec_algorithm.is_none.return_value = False
+        mr.spec_aux_config.eagle_draft_num_layers = draft_layers
+        mr.spec_aux_config.eagle_draft_swa_num_layers = 0
+
+        with mock_cpu_env():
+            from sglang.srt.model_executor.pool_configurator import (
+                create_memory_pool_configurator,
+            )
+
+            cfg = create_memory_pool_configurator(mr)
+            config = cfg.calculate_pool_sizes(available, page_size)
+
+        full_tokens = config.full_max_total_num_tokens
+        swa_tokens = config.swa_max_total_num_tokens
+        full_pt = _full_per_token(mr)
+        swa_pt = _swa_per_token(mr)
+        actual = full_tokens * full_pt * (16 + draft_layers) + swa_tokens * swa_pt * 16
+        self.assertEqual(cfg._draft_full_layers_num, draft_layers)
+        self.assertLessEqual(actual, available)
+
+        # Reconstruct the reported pre-fix heuristic, which priced only the
+        # target pools.  Its selected capacity fits the target alone but OOMs
+        # once the eight equally-sized draft-layer pools are allocated.
+        target_only_cell = full_pt * 16 + ratio * swa_pt * 16
+        old_full_tokens = int(available // target_only_cell) // page_size * page_size
+        old_swa_tokens = int(old_full_tokens * ratio) // page_size * page_size
+        old_target = old_full_tokens * full_pt * 16 + old_swa_tokens * swa_pt * 16
+        old_with_drafts = old_target + old_full_tokens * full_pt * draft_layers
+        self.assertLessEqual(old_target, available)
+        self.assertGreater(old_with_drafts, available)
+
+    def test_eagle_draft_budget_page_boundary_never_exceeds_available_bytes(self):
+        """An eight-layer draft term remains safe at a one-page boundary."""
+        page_size = 128
+        mr = _make_model_runner(
+            self,
+            is_hybrid_swa=True,
+            full_attention_layer_ids=[0, 1, 2],
+            swa_attention_layer_ids=[3, 4],
+            swa_num_kv_heads=4,
+            swa_full_tokens_ratio=0.25,
+            page_size=page_size,
+        )
+        mr.spec_algorithm.is_eagle.return_value = True
+        mr.spec_algorithm.is_none.return_value = False
+        mr.spec_aux_config.eagle_draft_num_layers = 8
+        mr.spec_aux_config.eagle_draft_swa_num_layers = 0
+
+        with mock_cpu_env():
+            from sglang.srt.model_executor.pool_configurator import (
+                create_memory_pool_configurator,
+            )
+
+            cfg = create_memory_pool_configurator(mr)
+            two_page_bytes = 2 * page_size * cfg._cell_size
+            config = cfg.calculate_pool_sizes(two_page_bytes - 1, page_size)
+
+        self.assertEqual(config.full_max_total_num_tokens, page_size)
+        used = (
+            config.full_max_total_num_tokens * _full_per_token(mr) * 11
+            + config.swa_max_total_num_tokens * _swa_per_token(mr) * 2
+        )
+        self.assertLessEqual(used, two_page_bytes - 1)
+
 
 class TestDSAIndexerAllocationPolicy(CustomTestCase):
     @patch(
