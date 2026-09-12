@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35891",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The recorded base already filtered completed PendingRequest futures at group dequeue and between per-request encodes, preserving part of the referenced upstream candidate. An executed post-lock race showed that a future completed while waiting for encode_dispatch_lock was still broadcast and included in batch_encode. The dispatch path now re-filters the group under the lock and rebuilds the request list. Deterministic regressions exercise the actual PendingRequest and dispatch paths and verify that timed-out or completed requests reach neither sock_send nor the encoder while live requests complete.",
+  "tests": [
+    {
+      "command": "PYTHONPYCACHEPREFIX=/tmp/amdpilot-repo-j-472949ac8a49/pycache /tmp/amdpilot-repo-j-472949ac8a49/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_encoder_scheduler.py -k 'skips_timed_out_request_after_dequeue or rechecks_completed_requests_after_lock or per_request_dispatch_skips_future_completed_between_requests'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before baseline on the recorded base plus new tests: dequeue and per-request guards passed, while the post-lock test failed because batch_encode received ['completed', 'live'] instead of only ['live']. Raw output: reports/j-472949ac8a49/raw/before-focused-corrected.txt"
+    },
+    {
+      "command": "PYTHONPYCACHEPREFIX=/tmp/amdpilot-repo-j-472949ac8a49/pycache /tmp/amdpilot-repo-j-472949ac8a49/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_encoder_scheduler.py -k 'skips_timed_out_request_after_dequeue or rechecks_completed_requests_after_lock or per_request_dispatch_skips_future_completed_between_requests'",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after run: all three actual dispatch races passed, recording broadcast and encoder calls and confirming live futures completed. 3 passed. Raw output: reports/j-472949ac8a49/raw/after-focused.txt"
+    },
+    {
+      "command": "for iteration in $(seq 1 20); do PYTHONPYCACHEPREFIX=/tmp/amdpilot-repo-j-472949ac8a49/pycache /tmp/amdpilot-repo-j-472949ac8a49/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_encoder_scheduler.py -k 'skips_timed_out_request_after_dequeue or rechecks_completed_requests_after_lock or per_request_dispatch_skips_future_completed_between_requests' || exit $?; done",
+      "exit_code": 0,
+      "what_was_measured": "Independent scheduling repetitions: 20 complete runs and 60 race-test executions passed. Raw output: reports/j-472949ac8a49/raw/after-focused-repeat-20.txt"
+    },
+    {
+      "command": "PYTHONPYCACHEPREFIX=/tmp/amdpilot-repo-j-472949ac8a49/pycache /tmp/amdpilot-repo-j-472949ac8a49/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_encoder_scheduler.py",
+      "exit_code": 0,
+      "what_was_measured": "Full encoder scheduler CPU unit module: 17 passed. Raw output: reports/j-472949ac8a49/raw/full-module.txt"
+    },
+    {
+      "command": "PYTHONPYCACHEPREFIX=/tmp/amdpilot-repo-j-472949ac8a49/pycache /tmp/amdpilot-repo-j-472949ac8a49/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_encode_server.py test/registered/unit/disaggregation/test_encoder_health.py",
+      "exit_code": 0,
+      "what_was_measured": "Adjacent encoder serving-path CPU regressions: 75 tests and 4 subtests passed. Raw output: reports/j-472949ac8a49/raw/adjacent-encoder-tests.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the proposed patch."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The issue is an asyncio scheduler race reproducible at the CPU dispatch seam. Tests exercised actual PendingRequest, EncoderScheduler worker, encode_dispatch_lock, sock_send call sites, batch_encode, and per-request encode without model weights or GPU kernels."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": "No real tensor-parallel workers, model weights, HTTP transport, or GPU execution were used. Broadcast and encoder exclusion were verified at their production Python call sites with deterministic test doubles; distributed collective behavior and model semantics were not in scope for this scheduler race."
+}

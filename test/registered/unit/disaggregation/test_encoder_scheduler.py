@@ -112,6 +112,161 @@ def test_scheduler_coalesces_concurrent_submissions():
     asyncio.run(run_test())
 
 
+def _request(req_id: str, modality: str = "image") -> dict:
+    return {
+        "req_id": req_id,
+        "modality": modality,
+        "mm_items": [object()],
+        "num_parts": 1,
+        "part_idx": 0,
+    }
+
+
+def test_scheduler_skips_timed_out_request_after_dequeue():
+    class FakeEncoder:
+        def __init__(self):
+            self.encode_dispatch_lock = asyncio.Lock()
+            self.first_started = asyncio.Event()
+            self.release_first = asyncio.Event()
+            self.batches = []
+            self.released = []
+
+        async def batch_encode(self, requests, _modality):
+            req_ids = [request["req_id"] for request in requests]
+            self.batches.append(req_ids)
+            if req_ids == ["blocked"]:
+                self.first_started.set()
+                await self.release_first.wait()
+            return [(1, 2, 3, None, None) for _ in requests]
+
+        async def release_request(self, req_id):
+            self.released.append(req_id)
+
+    async def run_test():
+        encoder = FakeEncoder()
+        broadcasts = []
+        scheduler = EncoderScheduler(
+            encoder=encoder,
+            send_sockets=[object()],
+            max_batch_size=1,
+            request_timeout=1.0,
+        )
+        with patch(
+            "sglang.srt.disaggregation.encoder.runtime.sock_send",
+            side_effect=lambda _sock, payload: broadcasts.append(payload),
+        ):
+            scheduler.start()
+            blocked = asyncio.create_task(scheduler.submit(_request("blocked")))
+            try:
+                await encoder.first_started.wait()
+                scheduler.request_timeout = 0.01
+                with pytest.raises(asyncio.TimeoutError):
+                    await scheduler.submit(_request("timed-out"))
+
+                scheduler.request_timeout = 1.0
+                live = asyncio.create_task(scheduler.submit(_request("live")))
+                encoder.release_first.set()
+                assert await blocked == (1, 2, 3, None, None)
+                assert await live == (1, 2, 3, None, None)
+            finally:
+                encoder.release_first.set()
+                await scheduler.stop()
+
+        assert encoder.batches == [["blocked"], ["live"]]
+        assert encoder.released == ["timed-out"]
+        assert len(broadcasts) == 2
+
+    asyncio.run(run_test())
+
+
+def test_dispatch_rechecks_completed_requests_after_lock():
+    class FakeEncoder:
+        def __init__(self):
+            self.encode_dispatch_lock = asyncio.Lock()
+            self.batches = []
+
+        async def batch_encode(self, requests, _modality):
+            self.batches.append([request["req_id"] for request in requests])
+            return [(1, 2, 3, None, None) for _ in requests]
+
+    async def run_test():
+        encoder = FakeEncoder()
+        broadcasts = []
+        scheduler = EncoderScheduler(
+            encoder=encoder, send_sockets=[object()], max_batch_size=2
+        )
+        completed = PendingRequest(_request("completed"), asyncio.get_running_loop())
+        live = PendingRequest(_request("live"), asyncio.get_running_loop())
+
+        await encoder.encode_dispatch_lock.acquire()
+        with patch(
+            "sglang.srt.disaggregation.encoder.runtime.sock_send",
+            side_effect=lambda _sock, payload: broadcasts.append(payload),
+        ):
+            dispatch = asyncio.create_task(
+                scheduler._dispatch_group([completed, live], Modality.IMAGE)
+            )
+            await asyncio.sleep(0)
+            completed.future.set_result((9, 9, 9, None, None))
+            encoder.encode_dispatch_lock.release()
+            await dispatch
+
+        assert encoder.batches == [["live"]]
+        assert len(broadcasts) == 1
+        assert await live.future == (1, 2, 3, None, None)
+
+    asyncio.run(run_test())
+
+
+def test_per_request_dispatch_skips_future_completed_between_requests():
+    class FakeEncoder:
+        def __init__(self):
+            self.first_started = asyncio.Event()
+            self.release_first = asyncio.Event()
+            self.requests = []
+
+        async def encode(self, **kwargs):
+            req_id = kwargs["req_id"]
+            self.requests.append(req_id)
+            if req_id == "blocked":
+                self.first_started.set()
+                await self.release_first.wait()
+            return (1, 2, 3, None, None)
+
+    async def run_test():
+        encoder = FakeEncoder()
+        broadcasts = []
+        scheduler = EncoderScheduler(
+            encoder=encoder, send_sockets=[object()], max_batch_size=3
+        )
+        blocked = PendingRequest(_request("blocked", "video"), asyncio.get_running_loop())
+        completed = PendingRequest(
+            _request("completed", "video"), asyncio.get_running_loop()
+        )
+        live = PendingRequest(_request("live", "video"), asyncio.get_running_loop())
+
+        with patch(
+            "sglang.srt.disaggregation.encoder.runtime.sock_send",
+            side_effect=lambda _sock, payload: broadcasts.append(payload),
+        ):
+            dispatch = asyncio.create_task(
+                scheduler._dispatch_group(
+                    [blocked, completed, live], Modality.VIDEO
+                )
+            )
+            await encoder.first_started.wait()
+            completed.future.set_result((9, 9, 9, None, None))
+            encoder.release_first.set()
+            await dispatch
+
+        assert encoder.requests == ["blocked", "live"]
+        assert len(broadcasts) == 2
+        assert await blocked.future == (1, 2, 3, None, None)
+        assert await live.future == (1, 2, 3, None, None)
+
+    asyncio.run(run_test())
+
+
 def test_scheduler_isolates_bad_request_from_failed_fused_batch():
     class FakeEncoder:
         def __init__(self):

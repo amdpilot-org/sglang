@@ -294,6 +294,13 @@ class EncoderScheduler:
             # lock, while allowing concurrent HTTP handlers to enqueue before
             # waiting on their individual futures.
             async with self.encoder.encode_dispatch_lock:
+                # A request may complete while this group waits for an earlier
+                # dispatch. Re-check under the lock so abandoned work reaches
+                # neither the TP broadcast nor rank-0 encoder execution.
+                group = [pending for pending in group if not pending.future.done()]
+                if not group:
+                    return
+                requests = [pending.request for pending in group]
                 for sock in self.send_sockets:
                     sock_send(
                         sock,
