@@ -1,0 +1,114 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_______ test_eagle_result_uses_async_pinned_d2h[token_ids0-accept_lens0] _______
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f3b193cddf0>
+token_ids = [], accept_lens = []
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a GPU")
+    @pytest.mark.parametrize(
+        ("token_ids", "accept_lens"),
+        [
+            ([], []),
+            ([101, 102, 103, 201, 202, 203], [3, 2]),
+        ],
+    )
+    def test_eagle_result_uses_async_pinned_d2h(monkeypatch, token_ids, accept_lens):
+        device = torch.device("cuda")
+        copy_calls = []
+        original_copy = torch.Tensor.copy_
+    
+        def record_copy(self, src, *args, **kwargs):
+            copy_calls.append((self, src, args, kwargs))
+            return original_copy(self, src, *args, **kwargs)
+    
+        monkeypatch.setattr(torch.Tensor, "copy_", record_copy)
+        result = GenerationBatchResult(
+            logits_output=SimpleNamespace(
+                hidden_states=None,
+                auxiliary_device_output=None,
+                sampling_mask_output=None,
+            ),
+            next_token_ids=torch.tensor(token_ids, dtype=torch.int64, device=device),
+            accept_lens=torch.tensor(accept_lens, dtype=torch.int32, device=device),
+        )
+        result.copy_done = torch.cuda.Event()
+    
+        result.copy_to_cpu(return_logprob=False)
+        result.copy_done.synchronize()
+    
+        assert len(copy_calls) == 2
+        assert all(dst.device.type == "cpu" for dst, _, _, _ in copy_calls)
+        assert all(src.device.type == "cuda" for _, src, _, _ in copy_calls)
+        assert all(args == () for _, _, args, _ in copy_calls)
+>       assert all(kwargs == {"non_blocking": True} for _, _, _, kwargs in copy_calls)
+E       assert False
+E        +  where False = all(<generator object test_eagle_result_uses_async_pinned_d2h.<locals>.<genexpr> at 0x7f3b194059a0>)
+
+test/registered/spec/test_eagle_verify_result_d2h.py:104: AssertionError
+_______ test_eagle_result_uses_async_pinned_d2h[token_ids1-accept_lens1] _______
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f3b19298770>
+token_ids = [101, 102, 103, 201, 202, 203], accept_lens = [3, 2]
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a GPU")
+    @pytest.mark.parametrize(
+        ("token_ids", "accept_lens"),
+        [
+            ([], []),
+            ([101, 102, 103, 201, 202, 203], [3, 2]),
+        ],
+    )
+    def test_eagle_result_uses_async_pinned_d2h(monkeypatch, token_ids, accept_lens):
+        device = torch.device("cuda")
+        copy_calls = []
+        original_copy = torch.Tensor.copy_
+    
+        def record_copy(self, src, *args, **kwargs):
+            copy_calls.append((self, src, args, kwargs))
+            return original_copy(self, src, *args, **kwargs)
+    
+        monkeypatch.setattr(torch.Tensor, "copy_", record_copy)
+        result = GenerationBatchResult(
+            logits_output=SimpleNamespace(
+                hidden_states=None,
+                auxiliary_device_output=None,
+                sampling_mask_output=None,
+            ),
+            next_token_ids=torch.tensor(token_ids, dtype=torch.int64, device=device),
+            accept_lens=torch.tensor(accept_lens, dtype=torch.int32, device=device),
+        )
+        result.copy_done = torch.cuda.Event()
+    
+        result.copy_to_cpu(return_logprob=False)
+        result.copy_done.synchronize()
+    
+        assert len(copy_calls) == 2
+        assert all(dst.device.type == "cpu" for dst, _, _, _ in copy_calls)
+        assert all(src.device.type == "cuda" for _, src, _, _ in copy_calls)
+        assert all(args == () for _, _, args, _ in copy_calls)
+>       assert all(kwargs == {"non_blocking": True} for _, _, _, kwargs in copy_calls)
+E       assert False
+E        +  where False = all(<generator object test_eagle_result_uses_async_pinned_d2h.<locals>.<genexpr> at 0x7f3b194065e0>)
+
+test/registered/spec/test_eagle_verify_result_d2h.py:104: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/spec/test_eagle_verify_result_d2h.py::test_eagle_result_uses_async_pinned_d2h[token_ids0-accept_lens0]
+FAILED test/registered/spec/test_eagle_verify_result_d2h.py::test_eagle_result_uses_async_pinned_d2h[token_ids1-accept_lens1]
+2 failed, 2 deselected, 17 warnings in 12.03s

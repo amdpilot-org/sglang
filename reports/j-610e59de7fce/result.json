@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/26399",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "The candidate's useful GPU value and boundary coverage was preserved, but its nonblocking claim and lexical AST guard had the review's stated counterexamples. The consolidated tests now fail a blocking copy and follow module-local helpers. Prepared main already contains the runtime redesign, so no speculative production change was made.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-610e59de7fce/venv/bin/python -m pytest -q test/registered/spec/test_eagle_verify_result_d2h.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate at 8e74147151c20c79e779e97978f1f5b5af31e62c produced 3 passed on the assigned gfx950."
+    },
+    {
+      "command": "Execute the exact candidate GPU test functions after replacing managers.utils._async_d2h with a pinned blocking copy",
+      "exit_code": 0,
+      "what_was_measured": "Both candidate runtime cases still passed with copy_(..., non_blocking=False), reproducing the review counterexample."
+    },
+    {
+      "command": "Apply the candidate lexical AST algorithm to run_eagle_verify -> sync_helper -> Tensor.tolist()",
+      "exit_code": 0,
+      "what_was_measured": "The candidate guard returned an empty forbidden list despite the reachable helper conversion, reproducing the helper-bypass counterexample."
+    },
+    {
+      "command": "Temporarily change python/sglang/srt/managers/utils.py to copy_(..., non_blocking=False); HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-610e59de7fce/venv/bin/python -m pytest -q test/registered/spec/test_eagle_verify_result_d2h.py -k async_pinned_d2h",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before mutation evidence: both empty and multi-request GPU cases rejected the blocking D2H call contract. The mutation was reverted."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-610e59de7fce/venv/bin/python -m pytest -q test/registered/spec/test_eagle_verify_result_d2h.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after evidence: 4 passed, covering transitive host-conversion detection, the helper-indirection boundary, exact D2H call semantics, pinned host results, values, and empty tensors."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The exact candidate and consolidated regression executed real ROCm GPU tensors, D2H copies, HIP event synchronization, and exact host-value checks on HIP_VISIBLE_DEVICES=0, an AMD Instinct MI350X/gfx950."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "GLM-5.1 FP8 weights were unavailable.",
+    "Only one AMD gfx950 GPU was assigned, not eight H200 CUDA GPUs.",
+    "TP8 coordination, CUDA/H200 behavior, GLM-5.1 execution, 80K-160K prompts, near-full KV pressure, and the original watchdog hang remain unverified.",
+    "The regression qualifies the EAGLE result-transfer boundary, call contract, and values; it does not establish that every possible cause of the production hang is fixed."
+  ]
+}
