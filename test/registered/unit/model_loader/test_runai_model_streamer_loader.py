@@ -110,6 +110,19 @@ class TestRunaiModelStreamerLoader(CustomTestCase):
 
         self.assertEqual(selected, [files[3], files[4]])
 
+    def test_mixed_recognized_and_unknown_draft_layout_falls_back(self):
+        selected, files = self._get_streamed_files(
+            {
+                "model.layers.0.weight": "target-1.safetensors",
+                "model.layers.1.weight": "target-2.safetensors",
+                "mtp.0.decoder.weight": "draft-0.safetensors",
+                "mtp.1.decoder.weight": "draft-1.safetensors",
+                "model.nextn.layers.1.shared.weight": "draft-shared.safetensors",
+            }
+        )
+
+        self.assertEqual(selected, files)
+
     def test_selects_remote_shards_using_cached_object_storage_index(self):
         model_uri = "s3://bucket/model"
         files = [

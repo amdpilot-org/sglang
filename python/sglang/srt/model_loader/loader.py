@@ -4273,6 +4273,15 @@ class RunaiModelStreamerLoader(BaseModelLoader):
             if any(pattern.match(name) for name in weight_map)
         }
 
+        draft_namespace = re.compile(r"(?:^|\.)(?:mtp|nextn)(?:\.|$)")
+        if any(
+            draft_namespace.search(name)
+            and not any(pattern.match(name) for pattern, _ in layouts)
+            and not any(name.startswith(namespace) for namespace in present_layouts)
+            for name in weight_map
+        ):
+            return hf_weights_files
+
         selected_shards = set()
         requested_layer_found = False
         for name, shard in weight_map.items():

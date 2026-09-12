@@ -1,0 +1,27 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32485",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 2946's pre-stream MTP shard selection and corrected its mixed-layout safety gap: an index containing a supported requested-layer key plus an unrecognized MTP/NextN namespace now falls back to the complete prepared shard list.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6f4bf626a186/venv/bin/python -m pytest -vv test/registered/unit/model_loader/test_runai_model_streamer_loader.py::TestRunaiModelStreamerLoader::test_mixed_recognized_and_unknown_draft_layout_falls_back",
+      "exit_code": 1,
+      "what_was_measured": "At exact candidate e9952a5825d098de1c068d061062fe2522981d27, the RunAI iterator received only draft-1.safetensors instead of the complete five-file prepared list. Raw output: reports/j-6f4bf626a186/failing-before.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6f4bf626a186/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_runai_model_streamer_loader.py",
+      "exit_code": 0,
+      "what_was_measured": "17 focused loader tests and 6 subtests passed, covering supported layout selection, shared parameters, object-storage metadata paths, malformed/missing/incomplete/unknown indexes, auto-added MTP files, and the mixed-layout counterexample. Raw output: reports/j-6f4bf626a186/passing-after.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The corrected behavior is deterministic JSON key classification and filename-list selection before tensor streaming; no model weights or tensor computation are involved, so GPU execution would not validate this defect."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No live object-storage credentials or production MTP checkpoint were available; provider header-read counts, distributed loading, and end-to-end model semantics remain unverified.",
+    "Unknown draft layouts are conservatively detected by MTP or NextN namespace components. Layouts with no draft-signaling namespace remain indistinguishable from ordinary target-model keys and therefore cannot be classified without architecture-specific evidence."
+  ]
+}
