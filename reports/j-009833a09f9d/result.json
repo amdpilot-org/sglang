@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/18262",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "ab77a09846cc2503a63052c111d085807af255e0",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate substantively budgets the legacy AITER workspace and uses one exact sizing helper for budgeting and allocation. Deterministic issue-shaped arithmetic, focused tests, and a real gfx950 allocation passed, but the exact MI355X Qwen serving cases were unavailable.",
+  "tests": [
+    {
+      "command": "SGLANG_REPRO_BEFORE=1 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-009833a09f9d/venv/bin/python /job/review-evidence/reproduce.py",
+      "exit_code": 1,
+      "what_was_measured": "Pre-fix behavior with the candidate reservation disabled: 2,235,118 KV tokens, 4,096 requests, 69,793,218,560 workspace bytes, and 69,793,139,393 bytes of budget overcommit."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-009833a09f9d/venv/bin/python /job/review-evidence/reproduce.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate behavior: 1,669,878 KV tokens, 3,261 requests, 55,565,352,960 workspace bytes, and 79,167 bytes headroom."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-009833a09f9d/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_aiter_workspace_budget.py test/registered/unit/model_executor/test_pool_configurator.py",
+      "exit_code": 0,
+      "what_was_measured": "45 tests and 9 subtests passed, including sizing arithmetic, request floor/ceiling, explicit request limit, and existing pool configurator coverage."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-009833a09f9d/venv/bin/python /job/review-evidence/gpu_workspace_check.py",
+      "exit_code": 0,
+      "what_was_measured": "On MI350X gfx950, production helper size equaled the actual 65,495,040-byte uint8 allocation and boundary writes returned 17 and 29."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X gfx950:sramecc+:xnack- allocated 65,495,040 bytes using the candidate production sizing helper and passed boundary writes."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The exact Qwen3-30B-A3B-Instruct-2507 serving command on a 288 GiB MI355X was not run because the model weights and architecture were unavailable.",
+    "The online quark_mxfp4 reproduction was not run.",
+    "No multi-GPU or distributed workload was exercised.",
+    "The candidate reproduction script is not directly runnable on the recorded base because it patches a candidate-added method; failing-before was measured by disabling that method at the candidate."
+  ],
+  "remaining_limitations": [
+    "One 252 GiB MI350X gfx950 was available instead of the reported MI355X environment.",
+    "GPU evidence validates exact workspace allocation sizing, not full model startup or semantic accuracy.",
+    "No native sources changed; native rebuild was not applicable."
+  ]
+}
