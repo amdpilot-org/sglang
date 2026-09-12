@@ -1,0 +1,31 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/22935",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Exact candidate 6eaf6c1 reproduces the zero-hit counterexamples and contains no runtime correction. The cache safely reuses arbitrary-depth prefixes only when a complete Mamba state is actually owned at that exact depth; producing such a recurrent-plus-convolution checkpoint or replaying recurrent layers independently is outside the current execution path and could not be changed safely without a supported hybrid model.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=<candidate>/python /tmp/amdpilot-repo-j-85ad87c9e5b4/venv/bin/python -m pytest -q <candidate>/test/registered/unit/mem_cache/test_mamba_short_prefix_ownership.py <candidate>/test/registered/unit/mem_cache/test_mamba_unittest.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate suite: 20 passed; notably its short-prefix regression passes by asserting the unresolved zero hit."
+    },
+    {
+      "command": "PYTHONPATH=<candidate>/python /tmp/amdpilot-repo-j-85ad87c9e5b4/venv/bin/python reports/j-85ad87c9e5b4/independent_gpu_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "Actual MambaRadixCache with GPU-resident indices: depth-3-only n-1 hit=0, exact depth-2 hit=2, arbitrary depth-37 hit=37, and divergence before depth 64 hit=0; nonzero indices matched independent torch.arange references."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-85ad87c9e5b4/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_split_checkpoint_ownership.py test/registered/unit/mem_cache/test_mamba_unittest.py",
+      "exit_code": 0,
+      "what_was_measured": "Prepared-base consolidated ownership coverage: 20 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-85ad87c9e5b4/venv/bin/python reports/j-85ad87c9e5b4/independent_gpu_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "Delivery-base actual-cache results matched the exact candidate results."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": "No hybrid-Mamba weights were prepared, so no end-to-end logits, logprobs, or latency were measured. The current backend does not provide a complete arbitrary-depth recurrent-plus-convolution checkpoint for the three-token case, and the scheduler has no path to retain deeper attention KV while replaying recurrent layers. Therefore no runtime source correction or failing-before/passing-after runtime evidence is claimed."
+}
