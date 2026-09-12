@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39125",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced nonlinear xgrammar 0.2.1 compilation cost for deeply nested JSON schemas and added a backend-independent, iterative serialized-JSON nesting guard before compiler dispatch. The guard also covers JSON schemas embedded in structural-tag payloads while preserving a measured 128-level object schema and non-JSON grammars.",
+  "tests": [
+    {
+      "command": "timeout --signal=KILL 6s /tmp/amdpilot-repo-j-95de80bf7287/venv/bin/python /tmp/repro_schema_compile.py depth {192,256,320} xgrammar",
+      "exit_code": 137,
+      "what_was_measured": "Before the guard, actual xgrammar compilation completed depth 192 in 1.203s and depth 256 in 2.903s; depth 320 exceeded the 6s hard deadline and was killed. The listed exit code is the intentionally bounded depth-320 case."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-95de80bf7287/venv/bin/python -m pytest -q test/registered/unit/constrained/test_grammar_manager.py test/registered/unit/constrained/test_base_grammar_backend.py",
+      "exit_code": 0,
+      "what_was_measured": "84 tests passed, including failing-before/passing-after regressions proving excessive JSON nesting is rejected before backend dispatch, the boundary still dispatches, brackets in strings are ignored, structural tags are covered, and non-JSON grammars are unchanged."
+    },
+    {
+      "command": "timeout --signal=KILL 8s /tmp/amdpilot-repo-j-95de80bf7287/venv/bin/python -c '<depth-320 BaseGrammarBackend guarded dispatch probe>'",
+      "exit_code": 0,
+      "what_was_measured": "The guarded implementation rejected depth 320 in 0.000677s, returned InvalidGrammarObject, and did not call the compiler dispatch."
+    },
+    {
+      "command": "timeout --signal=KILL 8s /tmp/amdpilot-repo-j-95de80bf7287/venv/bin/python -c '<depth-128 guarded real-xgrammar compile probe>'",
+      "exit_code": 0,
+      "what_was_measured": "A supported depth-128 object schema passed the guard and compiled with the actual xgrammar compiler in 0.356s."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-95de80bf7287/venv/bin/python -c '<ROCm 2x2 matrix multiplication and independent expected tensor comparison>'",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X with torch 2.11.0+rocm7.2 and HIP 7.2.26015, GPU matrix multiplication returned [[19.0,22.0],[43.0,50.0]] with max absolute error 0.0 versus the independently specified expected tensor."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": "The external compiler API does not expose DFA/NFA state counts, so this change makes no unsupported state-count claim. It bounds the reproduced nesting vector before compilation. Very wide but shallow schemas remain subject to existing request-size controls and asynchronous grammar timeout behavior. No native source changed; source checkout was /job/repo and the prepared native artifact path was null."
+}
