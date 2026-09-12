@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30314",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "Exact candidate 49a136764025c3a0ac76b2105884bbf is a valid partial correction: it enables safe decode-prefix Mamba eviction by default and retains admission-safe pool ratios. Its deterministic regression fails on the recorded base and passes on the candidate. It does not verify or guarantee scheduler/HTTP bounded progress under an unreclaimable Mamba allocation and does not reproduce the production hierarchical-cache stall, so it cannot be accepted as a full original-issue fix.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-924074934b5f/venv/bin/python /job/review-evidence-j-924074934b5f/test_mamba_donated_alloc_ratio.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: 10 tests ran; default decode unlock was false and the enabled lazy-buffer ratio was 3 rather than the admission-safe 4. The same fixture also exercised the locked-prefix 2N exhaustion counterexample."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-924074934b5f/venv/bin/python test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "10 focused tests passed, covering default decode unlock, both environment-switch ratio modes, locked-prefix 2N failure, 3N success, evictable-prefix 2N recovery, lock-release symmetry, and PP sizing."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-924074934b5f/venv/bin/python test/registered/unit/mem_cache/test_unified_radix_allocation_eviction.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "17 allocation-aware eviction unit tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-924074934b5f/venv/bin/python test/registered/unit/managers/test_scheduler_init_req_max_new_tokens.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "8 configured request/token boundary tests passed; these do not exercise HTTP responsiveness or event-loop progress under Mamba allocation pressure."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Review tests were deterministic CPU-side cache/accounting tests. The available ROCm environment cannot qualify the reported H100 TP=8 CUDA workload, and compatible Qwen3.5 weights were unavailable."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Available architecture is ROCm 7.2 with Torch 2.11.0+rocm7.2, not eight H100 80GB GPUs; TP=8, CUDA, EAGLE, production-scale traffic, and model semantics were not tested.",
+    "Qwen3.5-397B-A17B-FP8 weights and the reported direct hierarchical-cache I/O setup were unavailable.",
+    "No native source changed, so a native rebuild was not applicable.",
+    "The tiny Llama transport fixture cannot exercise hybrid-Mamba allocation and would not qualify this issue contract."
+  ],
+  "remaining_counterexamples": [
+    "An admission whose Mamba slot remains unreclaimable has no demonstrated bounded scheduler progress or graceful fail-fast handling; the focused allocator test expects an assertion.",
+    "No regression proves /health or completion handling remains responsive while Mamba admission cannot make progress.",
+    "The zero-running post-flush exhaustion case is neither reproduced nor explained.",
+    "Direct hierarchical-cache I/O blocking and the reported 222-second TTFT remain untested.",
+    "The original Qwen3.5 hybrid-Mamba TP=8 H100 workload remains unverified."
+  ]
+}

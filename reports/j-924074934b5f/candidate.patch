@@ -1,0 +1,385 @@
+diff --git a/python/sglang/srt/environ.py b/python/sglang/srt/environ.py
+index 8e870fd..8177aea 100644
+--- a/python/sglang/srt/environ.py
++++ b/python/sglang/srt/environ.py
+@@ -1350,11 +1350,12 @@ class Envs:
+     # Kill-switch for the fused per-slot conv clear/copy kernel (MambaPool);
+     # falls back to the per-conv-type Python loop.
+     SGLANG_DISABLE_FUSED_MAMBA_SLOT_OPS = EnvBool(False)
+-    # Opt-in: on the unified radix tree, leave the matched-prefix mamba evictable
+-    # during decode (it is already COW'd to the request's own slot) and shrink the
+-    # mamba pool ratio accordingly. Frees one resident slot per running request,
+-    # raising max_running_requests. Off = original locking + ratio (escape hatch).
+-    SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK = EnvBool(False)
++    # On the unified radix tree, leave the matched-prefix mamba evictable
++    # during decode (it is already COW'd to the request's own slot). This prevents
++    # decode requests from pinning redundant snapshots until admission can no
++    # longer reclaim a state slot.
++    # Set to 0 for the original locking + ratio as a rollback escape hatch.
++    SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK = EnvBool(True)
+ 
+     # ===================================================================
+     # CUDA graphs and execution buffers
+diff --git a/python/sglang/srt/mem_cache/kv_cache_configurator.py b/python/sglang/srt/mem_cache/kv_cache_configurator.py
+index 94d6113..efe96a4 100644
+--- a/python/sglang/srt/mem_cache/kv_cache_configurator.py
++++ b/python/sglang/srt/mem_cache/kv_cache_configurator.py
+@@ -159,17 +159,14 @@ def mm_runtime_reservation_gb(
+     return reserved_mb / 1024
+ 
+ 
+-# base ratio of mamba pool size to max_running_requests. Under
+-# SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK the decode-time skip frees one resident slot
+-# per running request, so the base drops by 1 (overlap 5->4, lazy 4->3). no_buffer
+-# stays at effective 3 either way: its binding limit is the prefill->decode peak,
+-# which the decode-time drop does not shrink.
++# The base covers the admission-time peak: a request-owned state, its locked
++# matched-prefix state, and a donated state during the prefill-to-decode handoff.
++# Skipping the matched-prefix lock during decode lowers steady-state occupancy,
++# but happens too late to reduce this admission requirement.
+ MAMBA_CACHE_SIZE_MAX_RUNNING_REQUESTS_RATIO = 3
+-MAMBA_CACHE_BASE_RATIO_DROP_ON_SKIP = 1
+ MAMBA_CACHE_V2_ADDITIONAL_RATIO_OVERLAP = 2
+ MAMBA_CACHE_V2_ADDITIONAL_RATIO_OVERLAP_LAZY = 1
+ MAMBA_CACHE_V2_ADDITIONAL_RATIO_NO_OVERLAP = 1
+-MAMBA_CACHE_V2_ADDITIONAL_RATIO_NO_BUFFER = 1
+ 
+ 
+ def _pp_local_per_request_bytes(
+@@ -2214,10 +2211,7 @@ class KVCacheConfigurator:
+         if get_memory().disable_radix_cache:
+             return 1
+ 
+-        skip_decode_lock = envs.SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK.get()
+-        base = MAMBA_CACHE_SIZE_MAX_RUNNING_REQUESTS_RATIO - (
+-            MAMBA_CACHE_BASE_RATIO_DROP_ON_SKIP if skip_decode_lock else 0
+-        )
++        base = MAMBA_CACHE_SIZE_MAX_RUNNING_REQUESTS_RATIO
+ 
+         additional_ratio = 0
+         if get_exec().mamba.enable_mamba_extra_buffer:
+@@ -2233,12 +2227,6 @@ class KVCacheConfigurator:
+                     "Lazy extra buffer requires overlap schedule (--disable-overlap-schedule is incompatible)"
+                 )
+                 additional_ratio = MAMBA_CACHE_V2_ADDITIONAL_RATIO_NO_OVERLAP
+-        elif skip_decode_lock:
+-            # no_buffer under skip: add the base drop back so effective stays 3,
+-            # the prefill->decode peak needs ~3 slots/req and this leaf-only mode
+-            # has no ping-pong to absorb it.
+-            additional_ratio = MAMBA_CACHE_V2_ADDITIONAL_RATIO_NO_BUFFER
+-
+         return base + additional_ratio
+ 
+     def _apply_token_constraints(self, token_capacity: int) -> int:
+diff --git a/python/sglang/srt/mem_cache/unified_radix_cache.py b/python/sglang/srt/mem_cache/unified_radix_cache.py
+index 19bed9e..4eb5495 100644
+--- a/python/sglang/srt/mem_cache/unified_radix_cache.py
++++ b/python/sglang/srt/mem_cache/unified_radix_cache.py
+@@ -1137,12 +1137,13 @@ class UnifiedRadixCache(BasePrefixCache):
+         )
+ 
+         self._dec_req_lock(req, skip_swa=req.swa_prefix_lock_released)
+-        # Opt-in: leave the matched-prefix mamba evictable during decode (it is
++        # Leave the matched-prefix mamba evictable during decode (it is
+         # already COW'd to the request's own slot, never read from this node again).
+         # Safe only because any future COW source is the COWing request's own
+         # admission-locked last_node (recorded only if still present, locked before
+         # the next alloc) -- not this evictable node. A scheduler that matched a
+-        # whole batch before locking would break that. Off = original full lock.
++        # whole batch before locking would break that. The environment switch can
++        # restore the original full lock as a rollback escape hatch.
+         lock_result = self.inc_lock_ref(
+             new_last_node,
+             skip_lock_components=(
+diff --git a/reports/j-345906b8206f/allocation-eviction.log b/reports/j-345906b8206f/allocation-eviction.log
+new file mode 100644
+index 0000000..3b2d9aa
+--- /dev/null
++++ b/reports/j-345906b8206f/allocation-eviction.log
+@@ -0,0 +1,24 @@
++[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
++[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-345906b8206f/cache/aiter/module_aiter_core.so
++[CI Test Method] TestUnifiedRadixAllocationEviction.test_allocation_eviction_stops_when_shared_capacity_is_sufficient
++.[CI Test Method] TestUnifiedRadixAllocationEviction.test_c128_component_keeps_zero_quota
++.[CI Test Method] TestUnifiedRadixAllocationEviction.test_common_helper_uses_allocation_aware_entry_point
++.[CI Test Method] TestUnifiedRadixAllocationEviction.test_explicit_evict_preserves_component_count_semantics
++.[CI Test Method] TestUnifiedRadixAllocationEviction.test_full_donor_defers_preparation_until_safe_lower_bound
++.[CI Test Method] TestUnifiedRadixAllocationEviction.test_full_donor_flushes_grouped_frees_before_capacity_recheck
++.[CI Test Method] TestUnifiedRadixAllocationEviction.test_full_donor_observes_cascade_before_lower_bound
++.[CI Test Method] TestUnifiedRadixAllocationEviction.test_full_donor_rechecks_each_leaf_after_lower_bound
++.[CI Test Method] TestUnifiedRadixAllocationEviction.test_full_donor_walk_continues_until_mamba_capacity_is_visible
++.[CI Test Method] TestUnifiedRadixAllocationEviction.test_mamba_allocation_counts_collateral_full_capacity
++.[CI Test Method] TestUnifiedRadixAllocationEviction.test_mamba_allocation_does_not_evict_full_after_partial_id_recovery
++.[CI Test Method] TestUnifiedRadixAllocationEviction.test_mamba_allocation_does_not_evict_full_while_id_bound
++.[CI Test Method] TestUnifiedRadixAllocationEviction.test_mamba_allocation_recycles_mamba_for_id_shortfall
++.[CI Test Method] TestUnifiedRadixAllocationEviction.test_mamba_allocation_splits_mixed_id_and_byte_pressure
++.[CI Test Method] TestUnifiedRadixAllocationEviction.test_mamba_allocation_uses_full_as_donor_for_byte_shortfall
++.[CI Test Method] TestUnifiedRadixAllocationEviction.test_mamba_cache_is_last_resort_when_full_donor_is_exhausted
++.[CI Test Method] TestUnifiedRadixAllocationEviction.test_tri_pool_uses_the_same_full_donor_capability
++.
++----------------------------------------------------------------------
++Ran 17 tests in 0.016s
++
++OK
+diff --git a/reports/j-345906b8206f/candidate-mamba-ratio.log b/reports/j-345906b8206f/candidate-mamba-ratio.log
+new file mode 100644
+index 0000000..dddc976
+--- /dev/null
++++ b/reports/j-345906b8206f/candidate-mamba-ratio.log
+@@ -0,0 +1,7 @@
++[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
++[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-345906b8206f/cache/aiter/module_aiter_core.so
++..........
++----------------------------------------------------------------------
++Ran 10 tests in 0.093s
++
++OK
+diff --git a/reports/j-345906b8206f/failing-before-candidate.log b/reports/j-345906b8206f/failing-before-candidate.log
+new file mode 100644
+index 0000000..9480636
+--- /dev/null
++++ b/reports/j-345906b8206f/failing-before-candidate.log
+@@ -0,0 +1,15 @@
++[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
++[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-345906b8206f/cache/aiter/module_aiter_core.so
++.......F..
++======================================================================
++FAIL: test_flag_on_preserves_admission_peak_ratios (__main__.TestMambaRatioEnvGate.test_flag_on_preserves_admission_peak_ratios)
++----------------------------------------------------------------------
++Traceback (most recent call last):
++  File "/job/repo/test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py", line 158, in test_flag_on_preserves_admission_peak_ratios
++    self.assertEqual(
++AssertionError: 3 != 4
++
++----------------------------------------------------------------------
++Ran 10 tests in 0.039s
++
++FAILED (failures=1)
+diff --git a/reports/j-345906b8206f/investigation.md b/reports/j-345906b8206f/investigation.md
+new file mode 100644
+index 0000000..7663380
+--- /dev/null
++++ b/reports/j-345906b8206f/investigation.md
+@@ -0,0 +1,30 @@
++# Candidate correction investigation
++
++Candidate: https://github.com/amdpilot-org/sglang/pull/2453 at `8b1804ecee27f2c877529f501f53d79a5c8ef1fc`
++
++Independent review: https://github.com/amdpilot-org/sglang/pull/2535
++
++Upstream issue: https://github.com/sgl-project/sglang/issues/30314
++
++Mirror issue: https://github.com/amdpilot-org/sglang/issues/2546
++
++The exact candidate passed its original ten-test suite. Its deterministic cache
++fixture also confirmed the review counterexample: with `N` concurrent requests,
++`2N` slots are consumed by request-owned states and admission-locked matched
++prefixes, leaving no victim for a donated-state allocation. Eviction is attempted
++once and allocation raises `Can not alloc mamba cache`. At `3N`, allocation
++succeeds; after decode makes matched prefixes evictable, `2N` also succeeds.
++
++The candidate correctly made the existing safe decode-prefix unlock default-on,
++but coupled that change to a one-slot-per-request reduction in configured pool
++headroom. Decode unlocking occurs after the admission peak, so steady-state
++savings cannot justify reducing admission sizing. The correction keeps the
++candidate's unlock and rollback switch, while restoring ratios 3/4/5 for
++no-buffer/lazy/overlap modes under both switch settings.
++
++This also preserves the existing bounded startup behavior for undersized pools:
++`resolve_max_num_reqs` divides capacity by the admission ratio and raises when
++the result is zero. The scheduler's existing request-length bounds were tested
++separately. No speculative change was made to hierarchical-cache I/O.
++
++Raw failing-before and passing-after logs are retained in this directory.
+diff --git a/reports/j-345906b8206f/passing-after-mamba-ratio.log b/reports/j-345906b8206f/passing-after-mamba-ratio.log
+new file mode 100644
+index 0000000..83c84a8
+--- /dev/null
++++ b/reports/j-345906b8206f/passing-after-mamba-ratio.log
+@@ -0,0 +1,7 @@
++[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
++[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-345906b8206f/cache/aiter/module_aiter_core.so
++..........
++----------------------------------------------------------------------
++Ran 10 tests in 0.049s
++
++OK
+diff --git a/reports/j-345906b8206f/prefill-adder.log b/reports/j-345906b8206f/prefill-adder.log
+new file mode 100644
+index 0000000..c559315
+--- /dev/null
++++ b/reports/j-345906b8206f/prefill-adder.log
+@@ -0,0 +1,7 @@
++[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
++[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-345906b8206f/cache/aiter/module_aiter_core.so
++............................
++----------------------------------------------------------------------
++Ran 28 tests in 0.115s
++
++OK
+diff --git a/reports/j-345906b8206f/request-length-bounds.log b/reports/j-345906b8206f/request-length-bounds.log
+new file mode 100644
+index 0000000..d5233e2
+--- /dev/null
++++ b/reports/j-345906b8206f/request-length-bounds.log
+@@ -0,0 +1,7 @@
++[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
++[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-345906b8206f/cache/aiter/module_aiter_core.so
++........
++----------------------------------------------------------------------
++Ran 8 tests in 0.006s
++
++OK
+diff --git a/reports/j-345906b8206f/result.json b/reports/j-345906b8206f/result.json
+new file mode 100644
+index 0000000..2146713
+--- /dev/null
++++ b/reports/j-345906b8206f/result.json
+@@ -0,0 +1,55 @@
++{
++  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30314",
++  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
++  "outcome": "fixed",
++  "summary": "Preserved candidate 8b1804ecee27f2c877529f501f53d79a5c8ef1fc's default decode-prefix unlock, but rejected its reduced Mamba pool sizing. The candidate's own deterministic fixture reproduced an admission peak of N request-owned states plus N admission-locked prefix states plus a donated state: 2N capacity raises 'Can not alloc mamba cache' after eviction finds no victim, while 3N succeeds. Pool sizing now retains the original admission ratios (3 no-buffer, 4 lazy extra-buffer, 5 overlap extra-buffer) whether decode lock skipping is enabled or disabled.",
++  "tests": [
++    {
++      "command": "/tmp/amdpilot-repo-j-345906b8206f/venv/bin/python test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py (candidate before correction)",
++      "exit_code": 1,
++      "what_was_measured": "The new admission-ratio invariant failed on the exact candidate: default-on skip produced lazy ratio 3 instead of required 4 (and overlap ratio 4 instead of 5). Raw output: failing-before-candidate.log."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-345906b8206f/venv/bin/python test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py",
++      "exit_code": 0,
++      "what_was_measured": "10 tests passed, including locked-prefix 2N failure, locked-prefix 3N success, decode-evictable 2N recovery, default decode unlock, and admission-safe ratios under both switch settings."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-345906b8206f/venv/bin/python test/registered/unit/mem_cache/test_streaming_session_unit.py",
++      "exit_code": 0,
++      "what_was_measured": "9 tests passed for session state and component-lock release behavior."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-345906b8206f/venv/bin/python test/registered/unit/mem_cache/test_unified_radix_allocation_eviction.py",
++      "exit_code": 0,
++      "what_was_measured": "17 tests passed for allocation-aware eviction, capacity rechecks, donor exhaustion, and zero-free-slot recovery."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-345906b8206f/venv/bin/python test/registered/unit/managers/test_prefill_adder.py",
++      "exit_code": 0,
++      "what_was_measured": "28 scheduler admission tests passed."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-345906b8206f/venv/bin/python test/registered/unit/managers/test_scheduler_init_req_max_new_tokens.py",
++      "exit_code": 0,
++      "what_was_measured": "8 request-length and token-capacity boundary tests passed."
++    },
++    {
++      "command": "git diff --check",
++      "exit_code": 0,
++      "what_was_measured": "No whitespace errors."
++    }
++  ],
++  "gpu_execution": {
++    "value": false,
++    "evidence": "The corrected behavior is CPU-side cache sizing and admission policy; no model or GPU kernel is exercised by the deterministic regression."
++  },
++  "native_rebuilt": false,
++  "remaining_limitations": [
++    "The Qwen3.5-397B-A17B-FP8 weights and eight H100 80GB GPUs were unavailable; TP=8, EAGLE, 100K+ production traffic, CUDA behavior, and model semantics were not reproduced.",
++    "Direct hierarchical-cache I/O blocking and the reported 222-second TTFT were not reproduced.",
++    "The tiny Llama fixture cannot exercise Mamba state allocation, so it was not used as evidence for /health responsiveness under Mamba pressure.",
++    "No claim is made that decode-prefix locking explains the zero-running post-flush report by itself. The correction instead preserves enough admission-time capacity for the independently reproduced locked-prefix peak, while the candidate's decode unlock handles redundant decode-held locks.",
++    "HTTP /health and completion responsiveness under a real Mamba admission stall remains unverified without compatible model weights."
++  ]
++}
+diff --git a/reports/j-345906b8206f/streaming-session.log b/reports/j-345906b8206f/streaming-session.log
+new file mode 100644
+index 0000000..4c801aa
+--- /dev/null
++++ b/reports/j-345906b8206f/streaming-session.log
+@@ -0,0 +1,33 @@
++[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
++[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-345906b8206f/cache/aiter/module_aiter_core.so
++============================= test session starts ==============================
++platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0 -- /tmp/amdpilot-repo-j-345906b8206f/venv/bin/python
++cachedir: .pytest_cache
++hypothesis profile 'default'
++rootdir: /job/repo/test
++configfile: pytest.ini
++plugins: hypothesis-6.155.0, anyio-4.15.1, typeguard-4.3.0
++collecting ... collected 9 items
++
++test/registered/unit/mem_cache/test_streaming_session_unit.py::test_session_slot_round_trip_preserves_mamba_state PASSED [ 11%]
++test/registered/unit/mem_cache/test_streaming_session_unit.py::test_preabort_detaches_session_and_preserves_slot PASSED [ 22%]
++test/registered/unit/mem_cache/test_streaming_session_unit.py::test_first_mid_abort_nukes_ephemeral_slot PASSED [ 33%]
++test/registered/unit/mem_cache/test_streaming_session_unit.py::test_nth_mid_abort_nukes_session_slot PASSED [ 44%]
++test/registered/unit/mem_cache/test_streaming_session_unit.py::test_release_session_threads_mamba_lock_receipt PASSED [ 55%]
++test/registered/unit/mem_cache/test_streaming_session_unit.py::test_release_session_skips_swa_after_early_release PASSED [ 66%]
++test/registered/unit/mem_cache/test_streaming_session_unit.py::test_session_slot_does_not_restore_swa_branching_seqlen PASSED [ 77%]
++test/registered/unit/mem_cache/test_streaming_session_unit.py::test_trim_overshoot_postcondition PASSED [ 88%]
++test/registered/unit/mem_cache/test_streaming_session_unit.py::test_trim_overshoot_keeps_cursor_page_aligned_on_paged PASSED [100%]
++
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1309
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1309: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
++    self._mark_plugins_for_rewrite(hook, disable_autoload)
++
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++======================== 9 passed, 2 warnings in 0.84s =========================
+diff --git a/test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py b/test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py
+index 0c0a85e..29dfdea 100644
+--- a/test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py
++++ b/test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py
+@@ -101,10 +101,12 @@ def _build_peak(pool_size: int, lock_prefixes: bool):
+ 
+ 
+ class TestMambaRatioEnvGate(unittest.TestCase):
+-    """SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK gates the pool ratio: off restores the
+-    original base 3 (overlap 5, lazy 4, no_buffer 3), on drops the base to 2
+-    (overlap 4, lazy 3) while no_buffer stays 3. Guards the flag wiring so the
+-    ratio can never drift out of sync with whether the decode lock is skipped."""
++    """Decode lock skipping must not shrink admission-time pool headroom.
++
++    The matched-prefix lock is skipped only after a request reaches decode. At
++    admission, the request can still hold its own slot plus a locked prefix and
++    need a donated slot, so both switch settings require the original ratios.
++    """
+ 
+     @staticmethod
+     def _ratio(*, extra_buffer, lazy, disable_overlap, skip):
+@@ -146,7 +148,7 @@ class TestMambaRatioEnvGate(unittest.TestCase):
+             r(extra_buffer=True, lazy=False, disable_overlap=False), 5
+         )  # overlap
+ 
+-    def test_flag_on_drops_base_but_keeps_no_buffer(self):
++    def test_flag_on_preserves_admission_peak_ratios(self):
+         def r(**kwargs):
+             return self._ratio(skip=True, **kwargs)
+ 
+@@ -154,12 +156,20 @@ class TestMambaRatioEnvGate(unittest.TestCase):
+             r(extra_buffer=False, lazy=False, disable_overlap=True), 3
+         )  # no_buffer
+         self.assertEqual(
+-            r(extra_buffer=True, lazy=True, disable_overlap=False), 3
++            r(extra_buffer=True, lazy=True, disable_overlap=False), 4
+         )  # lazy
+         self.assertEqual(
+-            r(extra_buffer=True, lazy=False, disable_overlap=False), 4
++            r(extra_buffer=True, lazy=False, disable_overlap=False), 5
+         )  # overlap
+ 
++    def test_decode_lock_skip_is_enabled_by_default(self):
++        """The safe eviction path must protect default launches from pinning one
++        redundant cached Mamba state per decoding request.  Operators can still
++        set the environment variable to 0 as a rollback escape hatch."""
++        from sglang.srt.environ import envs
++
++        self.assertTrue(envs.SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK.default)
++
+ 
+ class _RecordingComp:
+     """Fake tree component: records the dec params it is asked to release with."""
