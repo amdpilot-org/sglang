@@ -10,8 +10,10 @@ import psutil
 import torch
 
 from sglang.srt.distributed.parallel_state import get_world_group
+from sglang.srt.environ import envs
 from sglang.srt.mem_cache.memory_pool import KVCache
 from sglang.srt.mem_cache.pool_host.common import (
+    HostTensorAllocator,
     _cuda_host_unregister,
     get_allocator_from_storage,
 )
@@ -48,7 +50,33 @@ def ranks_per_host() -> int:
     return max(world_group.world_size // get_parallel().nnodes, 1)
 
 
-def host_memory_budget_bytes() -> int:
+def free_hugepage_bytes(hugepage_size_bytes: int) -> int:
+    """Return free bytes in the default hugetlb pool when its size matches."""
+    try:
+        with open("/proc/meminfo") as meminfo:
+            values = {}
+            for line in meminfo:
+                key, separator, value = line.partition(":")
+                if separator and key in ("HugePages_Free", "Hugepagesize"):
+                    values[key] = int(value.split()[0])
+    except (OSError, ValueError, IndexError):
+        return 0
+
+    page_size = values.get("Hugepagesize", 0) * 1024
+    if page_size != hugepage_size_bytes:
+        return 0
+    return values.get("HugePages_Free", 0) * page_size
+
+
+def configured_hugepage_size_bytes(allocator) -> int:
+    """Hugepage size used by the default anonymous mmap allocator, or zero."""
+    if type(allocator) is not HostTensorAllocator:
+        return 0
+    value = (envs.SGLANG_HUGEPAGE_SIZE.get() or "").strip().upper()
+    return {"2MB": 2 * 1024**2, "1GB": 1024**3}.get(value, 0)
+
+
+def host_memory_budget_bytes(hugepage_size_bytes: int = 0) -> int:
     """Host RAM this rank may claim for a HiCache pool.
 
     psutil reports the whole machine, so co-located ranks each see the same free
@@ -56,6 +84,11 @@ def host_memory_budget_bytes() -> int:
     the host is oversubscribed by the number of ranks it holds.
     """
     free = psutil.virtual_memory().available - HICACHE_HOST_MEMORY_RESERVE_BYTES
+    if hugepage_size_bytes:
+        # The allocator tries the entire mapping from hugetlb first, then the
+        # entire mapping from normal RAM. These are alternatives, not additive
+        # capacity: a request larger than each individual pool still fails.
+        free = max(free, free_hugepage_bytes(hugepage_size_bytes))
     return free // ranks_per_host()
 
 
@@ -172,7 +205,9 @@ class HostKVCache(abc.ABC):
 
         # Verify there is enough available host memory.
         requested_bytes = self.size * self.size_per_token
-        available_bytes = host_memory_budget_bytes()
+        available_bytes = host_memory_budget_bytes(
+            configured_hugepage_size_bytes(self.allocator)
+        )
         if requested_bytes > available_bytes:
             raise ValueError(
                 f"Not enough host memory available. Requesting "
