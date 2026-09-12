@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30781",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the gateway's ResponsesRequest deserialization failure against openai-protocol 1.0.0, then vendored that pinned crate and synchronized ResponseToolType with the 12 tool types accepted by the Python protocol. The gateway now accepts and validates a custom tool request while retaining rejection of unknown tool types.",
+  "tests": [
+    {
+      "command": "cargo test --test spec_test response_tool_types -- --nocapture (before fix)",
+      "exit_code": 101,
+      "what_was_measured": "The actual gateway ResponsesRequest rejected web_search (and therefore did not reach custom), reporting the four old enum variants; the unknown-type boundary test passed. Raw output: reports/j-7de7248d7be5/baseline-response-tool-types.log"
+    },
+    {
+      "command": "cargo test --test spec_test response_tool_types",
+      "exit_code": 0,
+      "what_was_measured": "All 12 Python-supported response tool type spellings deserialize, a custom tool passes validator::Validate as used by the gateway extractor, and an unrelated unknown spelling remains rejected. Raw output: reports/j-7de7248d7be5/fixed-response-tool-types.log"
+    },
+    {
+      "command": "cargo test --test spec_test",
+      "exit_code": 0,
+      "what_was_measured": "Gateway protocol suite: 92 passed, 0 failed, 1 ignored. Raw output: reports/j-7de7248d7be5/spec-test.log"
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "exit_code": 0,
+      "what_was_measured": "Rust formatting check completed successfully. Raw output: reports/j-7de7248d7be5/cargo-fmt.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and fix are CPU-only Rust JSON deserialization/validation behavior. No model, kernel, or GPU execution claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No GLM-5.2 weights or four-node TP8 deployment were available, so the reporter's full model and distributed topology were not reproduced.",
+    "No live backend server was needed or started; the regression exercises the exact ResponsesRequest deserialization and validation types used by ValidatedJson at the gateway endpoint, not model semantics or downstream tool execution.",
+    "The vendored patch should be removed when the gateway can migrate to a compatible published openai-protocol version that contains these variants."
+  ]
+}
