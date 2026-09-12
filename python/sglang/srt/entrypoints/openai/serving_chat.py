@@ -4,6 +4,7 @@ import copy
 import json
 import logging
 import math
+import re
 import time
 import uuid
 from enum import Enum
@@ -203,6 +204,10 @@ def _extract_max_dynamic_patch(request: ChatCompletionRequest):
 KIMI_K3_IMAGE_PLACEHOLDER = "<|kimi_image_placeholder|>"
 KIMI_K3_IMAGE_PLACEHOLDER_ESCAPED = "<| kimi_image_placeholder |>"
 
+QWEN_VL_VISION_MARKER_RE = re.compile(
+    r"<\|vision_start\|>(?:<\|image_pad\|>)+<\|vision_end\|>"
+)
+
 
 def neutralize_kimi_k3_image_placeholder(text: str) -> str:
     return text.replace(KIMI_K3_IMAGE_PLACEHOLDER, KIMI_K3_IMAGE_PLACEHOLDER_ESCAPED)
@@ -219,6 +224,36 @@ def neutralize_kimi_k3_image_placeholder_value(value: Any) -> Any:
             for key, item in value.items()
         }
     return value
+
+
+def neutralize_qwen_vl_vision_markers(text: str) -> str:
+    """Keep client text from being mistaken for template-emitted attachments."""
+
+    def escape_marker(match: re.Match) -> str:
+        return (
+            match.group(0)
+            .replace("<|vision_start|>", "<| vision_start |>")
+            .replace("<|image_pad|>", "<| image_pad |>")
+            .replace("<|vision_end|>", "<| vision_end |>")
+        )
+
+    return QWEN_VL_VISION_MARKER_RE.sub(escape_marker, text)
+
+
+def neutralize_qwen_vl_message_markers(message: Dict[str, Any]) -> None:
+    content = message.get("content")
+    if isinstance(content, str):
+        message["content"] = neutralize_qwen_vl_vision_markers(content)
+        return
+    if not isinstance(content, list):
+        return
+    for part in content:
+        if (
+            isinstance(part, dict)
+            and part.get("type") in ("text", "input_text")
+            and isinstance(part.get("text"), str)
+        ):
+            part["text"] = neutralize_qwen_vl_vision_markers(part["text"])
 
 
 def _extract_video_question(request: ChatCompletionRequest) -> Optional[str]:
@@ -1362,6 +1397,17 @@ class OpenAIServingChat(OpenAIServingBase):
             normalize_assistant_tool_call_arguments(
                 message, strict=self.chat_encoding_spec != "kimi_k3"
             )
+
+        hf_config = self.tokenizer_manager.model_config.hf_config
+        model_type = getattr(hf_config, "model_type", None)
+        if (
+            is_multimodal
+            and isinstance(model_type, str)
+            and model_type.startswith("qwen")
+            and getattr(hf_config, "vision_config", None) is not None
+        ):
+            for message in messages:
+                neutralize_qwen_vl_message_markers(message)
 
         prompt_ids = self._encode_messages(
             copy.deepcopy(messages),
