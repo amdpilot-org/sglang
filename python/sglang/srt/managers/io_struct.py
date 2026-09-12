@@ -1761,6 +1761,20 @@ class ContinueGenerationReqInput(BaseReq, kw_only=True):
     torch_empty_cache: bool = True
 
 
+class DevReloadReqInput(BaseReq, kw_only=True):
+    """Reload pure-Python modules in scheduler workers without loading weights."""
+
+    modules: List[str]
+    recapture_cuda_graph: bool = True
+
+
+class DevReloadReqOutput(BaseReq, kw_only=True):
+    success: bool
+    message: str
+    modules: List[str] = []
+    rebound_references: int = 0
+
+
 class TokenizerWorkerRegistrationReq(BaseReq, kw_only=True):
     """Sent by each TokenizerWorker on startup to register its IPC name with the router."""
 

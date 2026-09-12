@@ -149,6 +149,9 @@ class BaseTpWorker(ABC):
         )
         return success, message
 
+    def recapture_cuda_graph_for_dev_reload(self):
+        self.model_runner.init_decode_cuda_graph()
+
     def init_weights_update_group(self, recv_req: InitWeightsUpdateGroupReqInput):
         success, message = self.model_runner.weight_updater.init_weights_update_group(
             recv_req.master_address,
