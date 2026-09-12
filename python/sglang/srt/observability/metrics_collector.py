@@ -2345,6 +2345,12 @@ class RadixCacheMetricsCollector(_StatLoggerDIMixin):
             "eager write-through did not complete before eviction.",
             labelnames=list(labels.keys()) + ["reason", "pool"],
         )
+        self.hicache_transfer_requests = Counter(
+            name="sglang:hicache_transfer_requests_total",
+            documentation="HiCache cross-tier transfer attempts by direction, "
+            "terminal result, and bounded failure reason.",
+            labelnames=list(labels.keys()) + ["direction", "result", "reason"],
+        )
 
     def increment_eviction_num_tokens(self, num_tokens: int) -> None:
         self.eviction_num_tokens.labels(**self.labels).inc(num_tokens)
@@ -2374,6 +2380,13 @@ class RadixCacheMetricsCollector(_StatLoggerDIMixin):
         self.hicache_dropped_tokens.labels(**self.labels, reason=reason, pool=pool).inc(
             num_tokens
         )
+
+    def increment_transfer_request(
+        self, direction: str, result: str, reason: str = "none"
+    ) -> None:
+        self.hicache_transfer_requests.labels(
+            **self.labels, direction=direction, result=result, reason=reason
+        ).inc()
 
 
 class EncoderMetricsCollector(_StatLoggerDIMixin):

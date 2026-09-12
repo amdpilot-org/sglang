@@ -1482,6 +1482,10 @@ class UnifiedRadixCache(BasePrefixCache):
                 node_id, device_value, comp_xfers, sidecar_xfers
             )
             if host_indices is None:
+                if self.metrics_collector is not None:
+                    self.metrics_collector.increment_transfer_request(
+                        "l1_to_l2", "failure", "host_capacity"
+                    )
                 return 0
             self.tree_core.commit_backup(node_id, host_indices, comp_xfers)
             lock_params = None
@@ -2988,6 +2992,7 @@ class UnifiedRadixCache(BasePrefixCache):
         """Record D->H backup volume and duration for a completed write ack."""
         if self.metrics_collector is None:
             return
+        self.metrics_collector.increment_transfer_request("l1_to_l2", "success")
         for pool, num_tokens in (ack.num_tokens_by_pool or {}).items():
             if num_tokens > 0:
                 self.metrics_collector.increment_backup_num_tokens(
@@ -3038,6 +3043,9 @@ class UnifiedRadixCache(BasePrefixCache):
                 self.tree_core.finish_load_back(node)
 
             if self.metrics_collector is not None:
+                self.metrics_collector.increment_transfer_request(
+                    "l2_to_l1", "success"
+                )
                 for pool, num_tokens in (ack.num_tokens_by_pool or {}).items():
                     if num_tokens > 0:
                         self.metrics_collector.increment_load_back_num_tokens(
@@ -3067,6 +3075,16 @@ class UnifiedRadixCache(BasePrefixCache):
         mem_quota = params.mem_quota
         req = params.req
         assert req is not None
+        logger.info(
+            "[HICACHE] rid=%s event=cache_lookup tier=l1 result=complete",
+            req.rid,
+        )
+        logger.info(
+            "[HICACHE] rid=%s event=cache_lookup tier=l2 result=%s hit_tokens=%d",
+            req.rid,
+            "hit" if params.host_hit_length else "miss",
+            params.host_hit_length,
+        )
         if self.linker is not None and self.linker.has_hit(req.rid):
             return self.linker.load_back(req)
         last_best_match_device_node_id = req.last_node
