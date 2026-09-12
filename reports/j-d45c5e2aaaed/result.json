@@ -1,0 +1,58 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32752",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "48a1e2bee69055ab37c8339e100ea88a7e37d598",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the observability gap on the real Axum PD chat route: successful same-host and breaker-fallback requests return HTTP 200 but emit no decode-affinity counter sample. At the exact candidate commit, the route-level regressions pass and the production path records the legacy host-affinity outcome only after a successful final selection. Independent tests confirmed exact once-per-request counting for the no-same-host fallback and confirmed that the default non-affinity decode policy does not emit a misleading affinity outcome. Plain mode and failure before decode selection remain uncounted.",
+  "tests": [
+    {
+      "command": "cargo test --test proxy legacy_decode_affinity_ -- --nocapture (candidate regression tests temporarily applied to recorded base)",
+      "exit_code": 101,
+      "what_was_measured": "Failing-before reproduction at 358c163250ad3b1f62939b01ce1314a0a31a0365. Both successful PD cases returned HTTP 200 but lacked metric samples; plain mode and an empty decode pool correctly remained absent. Raw: reports/j-d45c5e2aaaed/raw/base-candidate-regression.log"
+    },
+    {
+      "command": "cargo test --test proxy legacy_decode_affinity_ -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 48a1e2bee69055ab37c8339e100ea88a7e37d598, four route tests verified same-host and breaker increments plus plain-mode and empty-decode non-recording. Raw: reports/j-d45c5e2aaaed/raw/candidate-proxy.log"
+    },
+    {
+      "command": "cargo test --test proxy reviewer_ -- --nocapture (temporary independent reviewer tests)",
+      "exit_code": 0,
+      "what_was_measured": "Two successful no-same-host PD selections produced exactly fallback_no_same_host=2, and a successful default power-of-two decode selection emitted no affinity sample. Raw test patch: /job/review-evidence-j-d45c5e2aaaed/reviewer-tests.patch. Raw output: reports/j-d45c5e2aaaed/raw/reviewer-adversarial.log"
+    },
+    {
+      "command": "cargo test --lib policies::registry -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Fifteen selection/resolver tests covered same-host, no-same-host, malformed URL, breaker, load imbalance, empty pool, and all-breakers-open behavior. Raw: reports/j-d45c5e2aaaed/raw/candidate-registry.log"
+    },
+    {
+      "command": "cargo test --lib server::metrics -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Twenty-two metrics tests, including rendering all four bounded decode-affinity outcome labels. Raw: reports/j-d45c5e2aaaed/raw/candidate-metrics.log"
+    },
+    {
+      "command": "cargo check --all-targets",
+      "exit_code": 0,
+      "what_was_measured": "All Rust router targets compile from /job/repo/experimental/sgl-router using repository-pinned Rust 1.90 and a private target directory. Raw: reports/j-d45c5e2aaaed/raw/candidate-check.log"
+    },
+    {
+      "command": "cargo fmt -- --check",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Rust formatting passes with the Rust 1.90 rustfmt component. Raw: reports/j-d45c5e2aaaed/raw/candidate-fmt.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "This is CPU-side Rust HTTP routing and Prometheus accounting. No model kernels, weights, or GPU outputs participate in the affected path; using the assigned gfx950 GPU would not strengthen this contract test."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Validation used deterministic in-process mock prefill/decode workers, not a live weighted model deployment; it qualifies router HTTP execution, selection, and metric accounting only.",
+    "No multi-node or distributed deployment was exercised.",
+    "The host is x86_64 Linux and no GPU was used. The candidate changes Rust router source only, so Python/native-extension import validation and FlyDSL rebuilds are not applicable.",
+    "The image-prepared Cargo path was unreadable to the assigned user; the repository-pinned Rust 1.90 toolchain and rustfmt were installed in /tmp/amdpilot-repo-j-d45c5e2aaaed and all candidate tests compiled against /job/repo/experimental/sgl-router with CARGO_TARGET_DIR outside the checkout."
+  ]
+}
