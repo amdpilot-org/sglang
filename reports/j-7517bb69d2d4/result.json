@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/28194",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2907",
+  "candidate_commit": "a4415a06a3786e2489560131185182ff8a7f9408",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Independent review verified a partial Qwen-family implementation. On the recorded base, all five targeted Qwen VLM architectures fail the --language-model-only architecture gate. At the exact candidate commit, the candidate regression passes and independent gate checks accept Qwen2.5-VL, Qwen3-VL dense/MoE, and Qwen3.5 dense/MoE while preserving rejection of unsupported families. Source inspection confirms language-only construction/forward paths and visual-prefix filtering. The broad original request remains incomplete across other multimodal architectures, and end-to-end model/GPU claims remain unverified without qualifying weights.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-7517bb69d2d4/venv/bin/python - <<'PY' ... assert the five Qwen architectures are present in ServerArgs.LANGUAGE_MODEL_ONLY_ARCHITECTURES ... PY (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: Qwen2.5-VL, Qwen3-VL dense/MoE, and Qwen3.5 dense/MoE were all absent from the language-model-only allowlist."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7517bb69d2d4/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen_language_model_only.py (candidate a4415a06a3786e2489560131185182ff8a7f9408)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 4 tests passed with 15 subtests, covering the five architecture gates, an unsupported near-match, exact visual-prefix classification, and visual-tensor bypass in each affected loader."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7517bb69d2d4/venv/bin/python - <<'PY' ... invoke handle_language_model_only for supported and adversarial architectures ... PY",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial gate check: all five targeted Qwen VLM architectures were accepted; LlavaForConditionalGeneration, InternVLChatModel, Qwen2AudioForConditionalGeneration, and Qwen3OmniMoeForConditionalGeneration were rejected."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7517bb69d2d4/venv/bin/python -m pytest -q test/registered/unit/server_args/test_server_args.py -k 'language_model_only or language_only'",
+      "exit_code": 0,
+      "what_was_measured": "One existing focused server-argument compatibility test passed; 225 unrelated tests were deselected."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7517bb69d2d4/venv/bin/python -m compileall -q python/sglang/srt/models/qwen2_5_vl.py python/sglang/srt/models/qwen3_vl.py python/sglang/srt/models/qwen3_vl_moe.py python/sglang/srt/models/qwen3_5.py python/sglang/srt/server_args.py",
+      "exit_code": 0,
+      "what_was_measured": "All candidate-modified production Python modules compiled from the checkout."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned AMD Instinct MI355X (gfx950) was visible with ROCm 7.2 and Torch 2.11.0+rocm7.2. No qualifying Qwen multimodal checkpoint existed in the prepared runtime, so no model inference, numerical parity, or memory-recovery measurement was performed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "LlavaForConditionalGeneration remains rejected by --language-model-only and therefore does not receive the requested no-vision-tower behavior.",
+    "InternVLChatModel remains rejected by --language-model-only.",
+    "Qwen2AudioForConditionalGeneration remains rejected and its audio encoder is not covered.",
+    "Qwen3OmniMoeForConditionalGeneration remains rejected and its nested audio/vision towers are not covered."
+  ],
+  "remaining_limitations": [
+    "The original issue requests a general multimodal language-model-only mode; this candidate is a scoped Qwen vision-language family extension and is therefore a partial fix, not a full original-issue resolution.",
+    "No qualifying Qwen multimodal checkpoint was available, so actual checkpoint loading, text-output numerical parity, HTTP multimodal rejection on a running affected model, freed GPU memory, and increased KV-cache capacity remain unverified.",
+    "The deterministic tiny Llama fixture is not a qualifying substitute because it cannot validate Qwen architecture loading, multimodal semantics, or Qwen vision-memory removal.",
+    "No native code changed, so no native rebuild was applicable. Python imports were confirmed to resolve to /job/repo/python/sglang.",
+    "Testing was limited to the assigned AMD Instinct MI355X gfx950 / ROCm 7.2 environment; CUDA and other accelerator architectures were not tested."
+  ]
+}
