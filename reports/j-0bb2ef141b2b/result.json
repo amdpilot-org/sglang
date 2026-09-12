@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35987",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3116",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3094",
+  "candidate_commit": "1b55c6bd3cf8c53858bc78a7806fea3b6db8ca17",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes both previously reported correction-generation counterexamples, but chunked prefill still changes a request's Equation 2 score and selected neuron relative to the identical one-shot prompt. The original per-request Equation 2 then Equation 3 contract is therefore not fully resolved.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0bb2ef141b2b/venv/bin/python -m pytest -q test/registered/unit/bwap/test_bwap_manager.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite at exact commit 1b55c6b: 23 passed, 3 subtests passed."
+    },
+    {
+      "command": "independent Python reproduction against candidate parent 8590564",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced zero retained neurons for D_FF=5/rho=0.8 and pooled-prompt neuron 0 versus required per-request neuron 1."
+    },
+    {
+      "command": "independent one-shot versus two-chunk prompt-score adversarial script at exact candidate 1b55c6b",
+      "exit_code": 0,
+      "what_was_measured": "Identical prompt selected neuron 0 one-shot but neuron 1 when split into chunks of 4 and 1; score tensors were not equal."
+    },
+    {
+      "command": "independent ROCm FP16 gathered-FFN numerical script at exact candidate 1b55c6b",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X, D_FF=5/rho=0.8 retained k=1 and matched an independently constructed dense masked PyTorch reference with max absolute error 0.0."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X; Torch 2.11.0+rocm7.2; HIP 7.2.26015; evidence/gpu-independent.txt"
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Chunked prefill is not Equation-2 invariant: one five-token request scored in one forward selects neuron 0, while the identical request split into extend chunks of four and one selects neuron 1 because the candidate max-aggregates per-chunk scores instead of accumulating the full per-request sufficient statistics."
+  ],
+  "remaining_limitations": [
+    "No production model weights were available, so production semantic accuracy and throughput were not measured.",
+    "Actual HTTP serving with chunked prefill was not run; the deterministic tensor-level manager path establishes the scoring defect directly.",
+    "NVIDIA, quantized, biased, TP>1, speculative-decode, and unsupported architecture paths remain unverified or explicitly unsupported.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
