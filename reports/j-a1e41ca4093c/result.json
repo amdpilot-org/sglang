@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36010",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1430",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1394",
+  "candidate_commit": "e68b4de088fed8fc8d77882676dac6b8862e4d37",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "The candidate replaces the failing FlashInfer NVFP4 speculative extend route with TRTLLM MHA native-FP4 decode routing and adds guards against accidentally re-entering the host-prepared dequant workspace. Its focused mocked regression passes and the recorded base lacks the routing implementation. However, the NVIDIA kernel tests skip on the assigned AMD gfx950 GPU, and the reported SM120 model weights were unavailable, so successful target verification, CUDA graph replay, numerical FP4 attention, and external-draft serving were not independently demonstrated.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a1e41ca4093c/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_nvfp4_spec_decode.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate configuration routing, FlashInfer rejection guard, packed FP4 KV/scales plumbing, and fixed/ragged XQA mask behavior using mocks: 18 passed and 16 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a1e41ca4093c/venv/bin/python -m pytest -q test/registered/attention/test_trtllm_mha_xqa_spec_decode.py",
+      "exit_code": 0,
+      "what_was_measured": "Attempted candidate kernel-level attention coverage; both tests skipped because the assigned device is AMD gfx950 rather than supported NVIDIA architecture."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a1e41ca4093c/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-a1e41ca4093c/review-evidence/test_nvfp4_spec_decode.py",
+      "exit_code": 2,
+      "what_was_measured": "Recorded base failing-before comparison: collection fails because _nvfp4_speculative_attention_mode and the candidate routing implementation are absent."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Torch sees AMD Instinct MI355X gfx950 under ROCm 7.2. Candidate unit tests are mocked; the two kernel tests skipped. No NVFP4 attention kernel or full serving request executed."
+  },
+  "native_rebuilt": false,
+  "source_import_path": "/job/repo/python/sglang",
+  "native_import_path": "/tmp/amdpilot-repo-j-a1e41ca4093c/cache/aiter/module_aiter_core.so (environment dependency; candidate changes no native source)",
+  "remaining_counterexamples": [
+    "Successful first target-verify request with CUDA graphs disabled is not demonstrated on supported NVIDIA hardware.",
+    "Correct request-dependent behavior under CUDA graph capture/replay is not demonstrated on SM120.",
+    "Numerically correct NVFP4 dequantization and attention output is not demonstrated; candidate kernel tests skipped.",
+    "External draft-model serving with its backend/cache configuration is covered only by configuration mocks, not an end-to-end request."
+  ],
+  "remaining_limitations": [
+    "Assigned GPU is AMD Instinct MI355X gfx950 with ROCm 7.2, not NVIDIA RTX 5090 SM120/CUDA.",
+    "unsloth/Qwen3.8-27B-NVFP4 and compatible draft weights were unavailable.",
+    "No native C++ files changed, so no native rebuild applied.",
+    "The deterministic tiny Llama fixture cannot qualify NVFP4, Qwen3.8, TRTLLM XQA, or CUDA graph correctness and was therefore not treated as issue proof."
+  ]
+}
