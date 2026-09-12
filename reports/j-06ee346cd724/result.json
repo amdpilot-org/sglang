@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37846",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced both null-section failures on the prepared main checkout, applied the same narrow value-based guards as the still-open upstream candidate PR #37928, and added regression coverage for the shipped MiniMax config plus null, missing, populated, and priority-fallback cases.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-06ee346cd724/venv/bin/python -m pytest -q test/registered/unit/utils/test_hf_transformers.py::TestGetHfTextConfig::test_null_text_config_is_treated_as_missing test/registered/unit/utils/test_hf_transformers.py::TestGetHfTextConfig::test_null_higher_priority_config_falls_through test/registered/unit/layers/quantization/test_compressed_tensors_mixed_precision.py::TestOptionalLinearFp8Config::test_null_is_treated_as_missing",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: AssertionError for MiniMax text_config=None, incorrect priority fallback when higher-priority sections are null, and AttributeError for linear_fp8_config=None. Raw output: reports/j-06ee346cd724/raw/failing_before.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-06ee346cd724/venv/bin/python -m pytest -q test/registered/unit/utils/test_hf_transformers.py test/registered/unit/layers/quantization/test_compressed_tensors_mixed_precision.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after config utility and compressed-tensors suites: 76 passed and 2 subtests passed, covering null, absent, populated, and priority-fallback behavior. Raw output: reports/j-06ee346cd724/raw/unit_after_final.log"
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files python/sglang/srt/utils/hf_transformers/common.py python/sglang/srt/layers/quantization/compressed_tensors/compressed_tensors.py test/registered/unit/utils/test_hf_transformers.py test/registered/unit/layers/quantization/test_compressed_tensors_mixed_precision.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, spelling, and registered-test validation hooks passed. Raw output: reports/j-06ee346cd724/raw/precommit.log"
+    }
+  ],
+  "gpu_execution": {
+    "executed": false,
+    "evidence": "The assigned AMD Instinct MI350X gfx950 was enumerated with Torch 2.11.0+rocm7.2, but the reproduced code paths only parse CPU-side configuration and no GPU operation was needed or claimed. Raw output: reports/j-06ee346cd724/raw/gpu_inventory.log"
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported RedHatAI/Llama-3.2-1B-Instruct-FP8 live-server reproduction was not run because its model weights were not provided; the exact CompressedTensorsConfig.from_config failure beneath that serving path was reproduced directly.",
+    "No semantic model-accuracy, full-model serving, or distributed workload claim is made.",
+    "The issue also named historical ModelConfig, ModelOpt, and MuseGlimmer patterns, but those exact presence-only checks are not present in the prepared base; the two still-live and directly reproducible defects were corrected."
+  ]
+}
