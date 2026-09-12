@@ -66,13 +66,26 @@ class TestStandardGrpcHealth(unittest.TestCase):
             )
         self.assertEqual(caught.exception.code(), grpc.StatusCode.NOT_FOUND)
 
-    def test_watch_rejects_unknown_service(self):
+    def test_watch_keeps_unknown_service_open(self):
         responses = self.stub.Watch(
             health_pb2.HealthCheckRequest(service="unknown.Service"), timeout=5
         )
+        self.assertEqual(
+            next(responses).status,
+            health_pb2.HealthCheckResponse.SERVICE_UNKNOWN,
+        )
+        responses.cancel()
+
+    def test_watch_does_not_repeat_unchanged_status(self):
+        responses = self.stub.Watch(
+            health_pb2.HealthCheckRequest(service=""), timeout=1.5
+        )
+        self.assertEqual(
+            next(responses).status, health_pb2.HealthCheckResponse.SERVING
+        )
         with self.assertRaises(grpc.RpcError) as caught:
             next(responses)
-        self.assertEqual(caught.exception.code(), grpc.StatusCode.NOT_FOUND)
+        self.assertEqual(caught.exception.code(), grpc.StatusCode.DEADLINE_EXCEEDED)
 
     def test_watch_reports_health_transition(self):
         responses = self.stub.Watch(
