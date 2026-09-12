@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33464",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced EXIF Orientation being ignored by the CPU byte loader and direct-PIL loader, and confirmed that both GPU JPEG routes would return an untransformed tensor. Rotated JPEGs now use Pillow's canonical EXIF transpose while orientation 1 or absent retains the existing GPU fast paths.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-fa74d1441e28/venv/bin/python < issue reproduction script",
+      "exit_code": 0,
+      "what_was_measured": "Before: Orientation=6 decoded as (24, 16) instead of (16, 24), pixels differed from ImageOps.exif_transpose, direct PIL retained raw dimensions, and both mocked GPU decoders were called. After: CPU and direct-PIL outputs were pixel-identical with (16, 24), and both GPU decoders were bypassed. Raw logs: reports/j-fa74d1441e28/raw/before_reproduction.txt and after_reproduction.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fa74d1441e28/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_base_processor_image_decode.py",
+      "exit_code": 0,
+      "what_was_measured": "17 tests passed, including parity with Pillow for EXIF orientations 1-8, direct PIL dimensions, invalid/no-orientation boundaries, and routing for standard and fancy GPU JPEG decoders."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the proposed patch."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/utils/common.py test/registered/unit/multimodal/test_base_processor_image_decode.py reports/j-fa74d1441e28/result.json",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository hooks passed, including AST validation, isort, ruff lint/format, codespell, and CI registry validation."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fa74d1441e28/venv/bin/python -m ruff check python/sglang/srt/utils/common.py test/registered/unit/multimodal/test_base_processor_image_decode.py",
+      "exit_code": 1,
+      "what_was_measured": "The prepared interpreter does not include the ruff module; no lint result was claimed."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The assigned device was visible as AMD Instinct MI350X with ROCm 7.2, but sglang.srt.utils.common.is_cuda() returned false. The affected GPU JPEG branches are NVIDIA-only and were therefore tested through deterministic routing mocks, not executed on gfx950. See reports/j-fa74d1441e28/raw/gpu_environment.txt.",
+  "native_rebuilt": false,
+  "remaining_limitations": "No NVIDIA GPU was assigned, so actual torchvision nvJPEG and nvImageCodec decode execution was not validated. No model/server run was performed because the defect and correction are confined to deterministic image ingestion and require neither weights nor serving. Malformed EXIF behavior is fail-open to the unrotated image by design."
+}
