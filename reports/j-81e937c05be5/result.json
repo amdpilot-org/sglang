@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31894",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2835",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2802",
+  "candidate_commit": "252657c6ccfb8d8cbb37598a4fe5f4592397c111",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes the reproducible unconditional pinned-memory failures in LoRA layer offsets and torch_native batch metadata on CPU. It is a correct partial fix, but end-to-end CPU LoRA generation for the reported Intel Xeon AMX/Qwen3-VL deployment remains unverified and the candidate's tiny-Llama request hit a separate RoPE NameError.",
+  "tests": [
+    {
+      "command": "git checkout --detach 358c163250ad3b1f62939b01ce1314a0a31a0365 && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-81e937c05be5/venv/bin/python <independent mocked-no-pinned-allocator reproduction>",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: TorchNativeLoRABackend.prepare_lora_batch called Tensor.pin_memory and raised RuntimeError: no pinned memory allocator is available."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-81e937c05be5/venv/bin/python -m pytest -q test/registered/unit/lora/test_torch_native_cpu.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression and adversarial CPU checks: 3 passed, including forced pin allocator failure and independent CPU LoRA numerical reference."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-81e937c05be5/venv/bin/python -m pytest -q test/registered/unit/lora",
+      "exit_code": 0,
+      "what_was_measured": "LoRA unit compatibility suite: 82 passed, 6 skipped, 14 subtests passed."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..252657c6ccfb8d8cbb37598a4fe5f4592397c111",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "This independent review did not execute GPU kernels; the issue contract is CPU-only. The host has ROCm 7.2 and torch.cuda.is_available() is true, so it cannot emulate an accelerator-free deployment. Candidate-retained GPU evidence was inspected but not counted as an independent run."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The candidate's tiny-Llama CPU HTTP request did not generate a response; it failed later in the RoPE path with NameError: apply_rope_with_cos_sin_cache_inplace.",
+    "Qwen3-VL-8B-Instruct with the user's LoRA adapter was not exercised.",
+    "An accelerator-free Intel Xeon AMX environment was unavailable, so that architecture and allocator configuration remain unqualified."
+  ],
+  "remaining_limitations": [
+    "Available hardware is AMD ROCm, not Intel Xeon AMX, and Torch reports an available accelerator.",
+    "No Qwen3-VL weights or user adapter were available.",
+    "The deterministic tiny Llama fixture can validate transport/engine execution only and the candidate's retained run failed before completing generation.",
+    "No native source changed; native rebuild was not applicable."
+  ]
+}
