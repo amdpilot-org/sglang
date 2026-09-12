@@ -198,6 +198,11 @@ pub(super) async fn execute_streaming_tool_calls(
 // Payload Transformation
 // ============================================================================
 
+fn default_initial_tool_choice(obj: &mut serde_json::Map<String, Value>) {
+    obj.entry("tool_choice".to_string())
+        .or_insert_with(|| Value::String("auto".to_string()));
+}
+
 /// Transform payload to replace MCP tools with function tools
 pub(super) fn prepare_mcp_tools_as_functions(
     payload: &mut Value,
@@ -232,7 +237,8 @@ pub(super) fn prepare_mcp_tools_as_functions(
         }
         if !tools_json.is_empty() {
             obj.insert("tools".to_string(), Value::Array(tools_json));
-            obj.insert("tool_choice".to_string(), Value::String("auto".to_string()));
+            // Preserve an explicit choice on the initial request; default to auto.
+            default_initial_tool_choice(obj);
         }
     }
 }
@@ -288,6 +294,10 @@ pub(super) fn build_resume_payload(
             obj.insert("tools".to_string(), tools_json.clone());
         }
     }
+
+    // After a tool has run, let the model either call another tool or finish.
+    // Keeping an initial "required" choice here would force repeated calls.
+    obj.insert("tool_choice".to_string(), Value::String("auto".to_string()));
 
     // Set streaming mode based on caller's context
     obj.insert("stream".to_string(), Value::Bool(is_streaming));
@@ -890,4 +900,26 @@ pub(super) fn extract_function_call(resp: &Value) -> Option<(String, String, Str
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::default_initial_tool_choice;
+    use serde_json::json;
+
+    #[test]
+    fn initial_tool_choice_preserves_explicit_values() {
+        for choice in ["required", "auto", "none"] {
+            let mut payload = json!({"tool_choice": choice});
+            default_initial_tool_choice(payload.as_object_mut().unwrap());
+            assert_eq!(payload["tool_choice"], choice);
+        }
+    }
+
+    #[test]
+    fn initial_tool_choice_defaults_to_auto_when_omitted() {
+        let mut payload = json!({});
+        default_initial_tool_choice(payload.as_object_mut().unwrap());
+        assert_eq!(payload["tool_choice"], "auto");
+    }
 }
