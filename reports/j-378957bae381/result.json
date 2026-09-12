@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35642",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that Scheduler._get_new_batch_prefill_raw scans waiting_queue after a resumed chunk changes PrefillAdder.budget_state() to OTHER or NO_TOKEN. The scheduler now skips only that admission scan when the resumed chunk exhausts a budget, while preserving the scan when the budget remains CONTINUE and preserving final waiting-queue bookkeeping.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-378957bae381/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunk_budget_gate.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: exhausted chunk and total-budget cases each observed two waiting-queue iterations (admission scan plus bookkeeping) instead of one; the CONTINUE boundary passed. Raw output: reports/j-378957bae381/failing_before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-378957bae381/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunk_budget_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after scheduler execution regression: OTHER and NO_TOKEN skip the admission iteration, while CONTINUE still performs it (3 passed). Raw output: reports/j-378957bae381/test_scheduler_chunk_budget_gate.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-378957bae381/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunk_budget_gate.py test/registered/unit/managers/test_prefill_adder.py",
+      "exit_code": 0,
+      "what_was_measured": "Scheduler regression plus the related PrefillAdder budget/admission suite (31 passed, 12 subtests passed). Raw output: reports/j-378957bae381/related_unit_tests.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity. A subsequent optional ruff invocation could not run because ruff is not installed in the prepared interpreter."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The reported defect is scheduler admission control flow and the issue explicitly requires no model or device. No GPU/model smoke was used as substitute evidence.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No full model-serving or distributed reproduction was run because the issue is deterministically exercised before engine/GPU execution and requires no weights or device.",
+    "The regression executes the actual Scheduler._get_new_batch_prefill_raw method with isolated scheduler dependencies and a controlled PrefillAdder budget result; the existing real PrefillAdder unit suite was run independently.",
+    "The prepared Python environment does not include ruff, so the optional focused ruff check was unavailable; git diff --check and focused unit tests passed."
+  ]
+}
