@@ -2241,9 +2241,21 @@ class OpenAIServingChat(OpenAIServingBase):
                 # - Non-streaming (use_token_index=True): uses token_idx for full data
                 # - Streaming (use_token_index=False): uses index 0 for pre-sliced data
                 top_logprobs_idx = token_idx if use_token_index else 0
-                for top_token, top_logprob in logprobs.top_logprobs[
-                    top_logprobs_idx
-                ].items():
+                raw_top_logprobs = (
+                    logprobs.top_logprobs_raw[top_logprobs_idx]
+                    if top_logprobs_idx < len(logprobs.top_logprobs_raw)
+                    else None
+                )
+                if raw_top_logprobs is not None:
+                    candidates = (
+                        (top_token, top_logprob)
+                        for top_logprob, _, top_token in raw_top_logprobs
+                    )
+                else:
+                    candidates = (
+                        logprobs.top_logprobs[top_logprobs_idx] or {}
+                    ).items()
+                for top_token, top_logprob in candidates:
                     top_token_bytes = list(top_token.encode("utf-8"))
                     top_logprobs.append(
                         TopLogprob(

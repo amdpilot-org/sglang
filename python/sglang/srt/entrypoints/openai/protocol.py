@@ -142,6 +142,12 @@ class LogProbs(BaseModel):
     token_logprobs: List[Optional[float]] = Field(default_factory=list)
     tokens: List[str] = Field(default_factory=list)
     top_logprobs: List[Optional[Dict[str, float]]] = Field(default_factory=list)
+    # Keep the ordered candidates for APIs whose wire format is a list.  The
+    # legacy Completions API above is a text-keyed mapping and cannot represent
+    # distinct token ids that decode to the same text.
+    top_logprobs_raw: List[Optional[List[Tuple[float, int, str]]]] = Field(
+        default_factory=list, exclude=True
+    )
 
 
 class TopLogprob(BaseModel):

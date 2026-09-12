@@ -34,11 +34,18 @@ def to_openai_style_logprobs(
     def append_top_logprobs(top_logprobs):
         for tokens in top_logprobs:
             if tokens is not None:
-                ret_logprobs.top_logprobs.append(
-                    {token[2]: token[0] for token in tokens}
-                )
+                # The legacy Completions schema uses decoded text as a mapping
+                # key, so it cannot represent collisions. Keep the best-ranked
+                # value there, and retain every ordered candidate separately
+                # for Chat Completions and Responses, whose schemas use lists.
+                text_logprobs = {}
+                for token in tokens:
+                    text_logprobs.setdefault(token[2], token[0])
+                ret_logprobs.top_logprobs.append(text_logprobs)
+                ret_logprobs.top_logprobs_raw.append(list(tokens))
             else:
                 ret_logprobs.top_logprobs.append(None)
+                ret_logprobs.top_logprobs_raw.append(None)
 
     if input_token_logprobs is not None:
         append_token_logprobs(input_token_logprobs)
