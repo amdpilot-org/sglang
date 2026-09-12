@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/6531",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Added POST /abort_request to the Rust sgl-router. The route forwards the original body and safe transport headers to every registered plain or prefill/decode worker with bounded concurrency, reports per-worker outcomes, and returns 502 for partial or total upstream failure. The unmodified native router returned 404; the rebuilt patched router returned 200 and the recording worker received the exact payload and Authorization header.",
+  "tests": [
+    {
+      "command": "cargo build (Rust 1.90, unmodified base) followed by curl POST http://127.0.0.1:49125/abort_request",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before reproduction against the actual base binary: the router returned HTTP 404. Raw evidence: /tmp/amdpilot-repo-j-8025dbc2aede/evidence/base-cargo-build.log, base-abort-status.txt, base-abort-headers.txt, and base-abort-body.txt."
+    },
+    {
+      "command": "cargo test --lib server::routes::abort::tests -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Eight focused native Rust tests covering successful fleet fan-out, exact body and Authorization forwarding, forward-compatible unknown fields, opaque malformed input delegated to workers, partial 422 failure, unreachable workers, empty registries, trailing-slash URLs, and both prefill/decode modes. Raw output: /tmp/amdpilot-repo-j-8025dbc2aede/evidence/abort-unit-tests.log."
+    },
+    {
+      "command": "cargo test --lib",
+      "exit_code": 0,
+      "what_was_measured": "Full router library regression suite: 553 passed, 0 failed. Raw output: /tmp/amdpilot-repo-j-8025dbc2aede/evidence/router-lib-tests.log."
+    },
+    {
+      "command": "cargo clippy --lib --tests",
+      "exit_code": 0,
+      "what_was_measured": "Clippy completed; it reported one pre-existing nonminimal_bool warning in src/policies/buckets.rs:167 and no warning in the changed files. Raw output: /tmp/amdpilot-repo-j-8025dbc2aede/evidence/router-clippy-default.log."
+    },
+    {
+      "command": "cargo clippy --lib --tests -- -D warnings",
+      "exit_code": 101,
+      "what_was_measured": "Strict clippy was blocked solely by the pre-existing nonminimal_bool warning in src/policies/buckets.rs:167. Raw output: /tmp/amdpilot-repo-j-8025dbc2aede/evidence/router-clippy.log."
+    },
+    {
+      "command": "cargo build --bin sgl-router",
+      "exit_code": 0,
+      "what_was_measured": "Rebuilt the patched native router with pinned Rust 1.90. Binary: /tmp/amdpilot-repo-j-8025dbc2aede/cargo-target/debug/sgl-router. Raw output: /tmp/amdpilot-repo-j-8025dbc2aede/evidence/patched-native-build.log."
+    },
+    {
+      "command": "rebuilt sgl-router plus recording HTTP worker; curl POST /abort_request with Authorization and a future field",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after black-box transport: router returned HTTP 200 with a one-worker success result; worker received /abort_request, the byte-equivalent JSON payload including the unknown future field, and Bearer transport-test. Raw evidence: /tmp/amdpilot-repo-j-8025dbc2aede/evidence/patched-router.log, fake-worker.log, patched-abort-status.txt, patched-abort-headers.txt, and patched-abort-body.txt."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "No weighted model or distributed inference workload was run. The native router transport was validated with a recording HTTP worker; worker-side abort semantics remain covered by SGLang's existing engine tests rather than requalified here.",
+    "The router intentionally broadcasts because it has no durable request-owner mapping. This is correct for SGLang's unknown-rid no-op contract but costs one bounded HTTP request per registered worker.",
+    "A strict cargo clippy -- -D warnings gate is currently blocked by an unrelated pre-existing warning at experimental/sgl-router/src/policies/buckets.rs:167."
+  ]
+}
