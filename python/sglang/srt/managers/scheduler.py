@@ -200,6 +200,7 @@ from sglang.srt.managers.prefill_delayer import (
     PrefillDelayerSinglePassExecutor,
     RecentPrefillBatchSizeTracker,
 )
+from sglang.srt.managers.prefill_lookahead import PrefillLookahead
 from sglang.srt.managers.schedule_batch import (
     FINISH_ABORT,
     MultimodalInputs,
@@ -1407,6 +1408,23 @@ class Scheduler(
             self.enable_priority_scheduling
             and not get_schedule().disable_priority_preemption
         )
+
+        lookahead_count = envs.SGLANG_PREFILL_LOOKAHEAD.get()
+        if lookahead_count < 0:
+            raise ValueError("SGLANG_PREFILL_LOOKAHEAD must be non-negative")
+        self.prefill_lookahead = None
+        if lookahead_count > 0 and not self.enable_priority_scheduling:
+            reserve = envs.SGLANG_PREFILL_HEADLOCK_RESERVE_TOKENS.get()
+            self.prefill_lookahead = PrefillLookahead(
+                tree_cache=self.tree_cache,
+                max_candidates=lookahead_count,
+                aging_passes=envs.SGLANG_PREFILL_LOOKAHEAD_AGING_PASSES.get(),
+                reserve_tokens=self.max_prefill_tokens if reserve is None else reserve,
+            )
+        elif lookahead_count > 0:
+            logger.info(
+                "Prefill admission lookahead is disabled under priority scheduling."
+            )
 
         self.new_token_ratio_tracker = NewTokenRatioTracker.from_config()
 
@@ -3705,6 +3723,12 @@ class Scheduler(
         prefill_delayer_single_pass: Optional[PrefillDelayerSinglePassExecutor],
         running_batch: ScheduleBatch,
     ) -> Tuple[Optional[ScheduleBatch], ScheduleBatch]:
+        # Reconcile the cross-pass head lock before any early return or rematch.
+        if self.prefill_lookahead is not None:
+            self.prefill_lookahead.begin_pass(
+                self.waiting_queue[0] if self.waiting_queue else None
+            )
+
         # Check if the grammar is ready in the grammar queue
         if self.grammar_manager.has_waiting_grammars():
             ready_grammar_requests = self.grammar_manager.get_ready_grammar_requests()
@@ -3762,6 +3786,10 @@ class Scheduler(
             running_batch,
             processed_tokens=self.processed_tokens_counter,
         )
+        if self.prefill_lookahead is not None:
+            self.prefill_lookahead.begin_pass(
+                self.waiting_queue[0] if self.waiting_queue else None
+            )
 
         if TEST_RETRACT and running_bs > TEST_RETRACT_NO_PREFILL_BS:
             # If we are testing retraction and the running batch size exceeds
@@ -3824,8 +3852,14 @@ class Scheduler(
         mamba_allocator = getattr(self.req_to_token_pool, "mamba_allocator", None)
         if mamba_allocator is not None:
             mamba_allocator.alloc_group_begin(len(self.waiting_queue))
-        # Get requests from the waiting queue to a new prefill batch
-        for req in self.waiting_queue:
+        # Get requests from the waiting queue to a new prefill batch.
+        lookahead_remaining = 0
+        blocked_head = None
+        for queue_index, req in enumerate(self.waiting_queue):
+            if blocked_head is not None:
+                if lookahead_remaining <= 0:
+                    break
+                lookahead_remaining -= 1
             if self.enable_lora and not self._can_schedule_lora_req(req, running_loras):
                 continue
 
@@ -3900,6 +3934,10 @@ class Scheduler(
                 has_chunked_req=(self.chunked_req is not None),
                 truncation_align_size=self.truncation_align_size,
             )
+            added = len(adder.can_run_list) > 0 and req is adder.can_run_list[-1]
+
+            if self.prefill_lookahead is not None and queue_index == 0 and added:
+                self.prefill_lookahead.head_admitted(req)
 
             if self.enable_lora:
                 running_loras.add(req.lora_id)
@@ -3920,7 +3958,6 @@ class Scheduler(
                 # Only free if the slot was freshly allocated in this batch (not
                 # pre-existing from a session). Session-held slots have their own
                 # lifecycle and freeing them here causes double-free.
-                added = len(adder.can_run_list) > 0 and req is adder.can_run_list[-1]
                 if not added:
                     # init_next_round_input() may stage deferred Mamba COW/clear
                     # metadata before add_one_req() rejects the request.
@@ -3931,6 +3968,24 @@ class Scheduler(
                             req.kv.mamba_pool_idx.unsqueeze(-1)
                         )
                         req.kv.mamba_pool_idx = None
+                if (
+                    res == AddReqResult.NO_TOKEN
+                    and not added
+                    and self.prefill_lookahead is not None
+                    and queue_index == 0
+                    and self.prefill_lookahead.head_blocked(req, req.last_node)
+                ):
+                    blocked_head = req
+                    lookahead_remaining = self.prefill_lookahead.max_candidates
+                    running_batch.batch_is_full = False
+                    continue
+                if (
+                    blocked_head is not None
+                    and res == AddReqResult.NO_TOKEN
+                    and not added
+                ):
+                    running_batch.batch_is_full = False
+                    continue
                 break
 
         if mamba_allocator is not None:

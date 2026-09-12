@@ -590,6 +590,12 @@ class Envs:
     # Internal/testing only - users should not need to change this.
     SGLANG_PREFILL_TILE_BUDGET_MODE = EnvStr("compact")
     SGLANG_PREFILL_DELAYER_MAX_PREFILL_BS_WINDOW_SIZE = EnvInt(16)
+    # After a queue-head NO_TOKEN, inspect at most this many later requests.
+    # Zero keeps the historical strict-FCFS behavior and constructs no policy.
+    SGLANG_PREFILL_LOOKAHEAD = EnvInt(0)
+    SGLANG_PREFILL_LOOKAHEAD_AGING_PASSES = EnvInt(20)
+    # None means reserve max_prefill_tokens for an in-flight chunked request.
+    SGLANG_PREFILL_HEADLOCK_RESERVE_TOKENS = EnvInt(None)
 
     # ===================================================================
     # Scheduler polling, timeouts, and output
