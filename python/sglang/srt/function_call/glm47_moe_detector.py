@@ -265,7 +265,12 @@ class Glm47MoeDetector(BaseFormatDetector):
 
                 # construct match_result for parse_base_json
                 match_result = {"name": func_name, "parameters": arguments}
-                calls.extend(self.parse_base_json(match_result, tools))
+                parsed_calls = self.parse_base_json(match_result, tools)
+                for call in parsed_calls:
+                    # tool_index identifies this call's position in the response,
+                    # not the called function's position in the request tool list.
+                    call.tool_index = len(calls)
+                    calls.append(call)
             return StreamingParseResult(normal_text=normal_text, calls=calls)
         except Exception as e:
             logger.error(f"Error in detect_and_parse: {e}", exc_info=True)
