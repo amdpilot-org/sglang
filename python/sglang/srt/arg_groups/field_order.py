@@ -129,6 +129,7 @@ POSITIONAL_FIELD_ORDER = (
     "sidecar",
     "sidecar_args",
     "skip_server_warmup",
+    "enable_dev_reload",
     "warmups",
     "enable_http2",
     "http2_max_concurrent_streams",

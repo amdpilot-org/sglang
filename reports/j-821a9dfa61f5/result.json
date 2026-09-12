@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31021",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Added an opt-in admin hot-reload API that drains inference, reloads selected loaded pure-Python SGLang modules across scheduler workers, rebinds existing classes and direct imports, recaptures decode graphs, and preserves model weights.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-821a9dfa61f5/venv/bin/python -m pytest -q test/srt/test_dev_reload.py",
+      "exit_code": 0,
+      "what_was_measured": "Five compatibility, regression, and adversarial tests: live class rebinding after an edited source file, direct-import rebinding, rejection of non-SGLang/unloaded/native modules, and graph-recapture dispatch without a weight-loading call."
+    },
+    {
+      "command": "pre-commit run --files <all changed source, test, and documentation files>",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, import order, Ruff, codespell, syntax, and policy hooks."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 python -m sglang.launch_server <tiny-random-llama> --attention-backend triton --cuda-graph-max-bs-decode 2 --cuda-graph-bs-decode 1 2 --enable-dev-reload --admin-api-key dev-secret; POST /generate; POST /dev/reload; POST /generate",
+      "exit_code": 0,
+      "what_was_measured": "Real MI350X/gfx950 engine execution, HTTP auth and validation, in-process module reload, decode graph recapture (0.48 s), absence of another weight-load phase, and identical eight-token greedy output before/after reload."
+    },
+    {
+      "command": "AutoModelForCausalLM.from_pretrained(local_fixture).generate(do_sample=False, max_new_tokens=8)",
+      "exit_code": 0,
+      "what_was_measured": "Independent Hugging Face CPU reference exactly matched SGLang output IDs [12, 100, 124, 43, 124, 43, 124, 51]."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "AMD Instinct MI350X gfx950; startup graph capture 7.72 s; reload graph recapture 0.48 s; pre/post generation HTTP 200 with identical tokens; GPU returned to 0% use and 0% allocated VRAM after shutdown.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No native C++/CUDA/FlyDSL source changed, so no native rebuild was applicable.",
+    "GPU validation covered single-node TP=1 only; multi-rank broadcast was not hardware-tested.",
+    "Native extensions, newly imported modules, object-layout changes, process-topology changes, torch.compile artifacts, and JIT kernel changes require restart.",
+    "Reload is not transactional when changed module top-level execution fails.",
+    "The alternative fault-tolerant scheduler exception loop is not implemented.",
+    "The synthetic tiny Llama fixture validates transport and engine execution only, not large-model timing, other architectures, distributed execution, or semantic model quality.",
+    "The interactive server transcript was not captured in full; request/response payloads and an explicitly labeled relevant log excerpt are retained."
+  ]
+}

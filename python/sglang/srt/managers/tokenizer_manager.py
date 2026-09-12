@@ -70,6 +70,8 @@ from sglang.srt.managers.io_struct import (
     BatchTokenizedGenerateReqInput,
     ConfigureLoggingReq,
     ContinueGenerationReqInput,
+    DevReloadReqInput,
+    DevReloadReqOutput,
     ElasticScaleUpdateReq,
     EmbeddingReqInput,
     EncoderDispatchErrorReq,
@@ -646,6 +648,8 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
         )
         self.model_update_expected_workers = self.elastic_worker_count
         self.model_update_tmp: List[UpdateWeightFromDiskReqOutput] = []
+        self.dev_reload_result: Optional[Awaitable[DevReloadReqOutput]] = None
+        self.dev_reload_tmp: List[DevReloadReqOutput] = []
         self.is_pause = False
         self.is_pause_cond = asyncio.Condition()
 
@@ -759,6 +763,7 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                     UpdateWeightFromDiskReqOutput,
                     self._handle_update_weights_from_disk_req_output,
                 ),
+                (DevReloadReqOutput, self._handle_dev_reload_req_output),
                 (FreezeGCReq, lambda x: None),
                 # For handling case when scheduler skips detokenizer and forwards back to the tokenizer manager, we ignore it.
                 (HealthCheckOutput, lambda x: None),
@@ -2101,6 +2106,31 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
 
         return success, message, num_paused_requests
 
+    async def dev_reload(self, obj: DevReloadReqInput) -> DevReloadReqOutput:
+        if not get_serving().enable_dev_reload:
+            return DevReloadReqOutput(
+                success=False,
+                message="Developer reload is disabled; launch with --enable-dev-reload",
+            )
+        self.auto_create_handle_loop()
+        async with self.model_update_lock.writer_lock:
+            self.model_update_expected_workers = self.elastic_worker_count
+            self.dev_reload_tmp = []
+            self.dev_reload_result = asyncio.Future()
+            self._dispatch_to_scheduler(obj)
+            result = await self.dev_reload_result
+        if isinstance(result, list):
+            failures = [item for item in result if not item.success]
+            if failures:
+                return failures[0]
+            return DevReloadReqOutput(
+                success=True,
+                message=f"Reload completed on {len(result)} scheduler workers",
+                modules=result[0].modules,
+                rebound_references=sum(x.rebound_references for x in result),
+            )
+        return result
+
     def record_config_updates(self, source: str, **fields) -> None:
         """Record a control-plane config change: a weight update, a parser
         resolved from the chat template, a HiCache mirror attach.
@@ -3396,6 +3426,14 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
             self.model_update_tmp.append(recv_obj)
             if len(self.model_update_tmp) == self.model_update_expected_workers:
                 self.model_update_result.set_result(self.model_update_tmp)
+
+    def _handle_dev_reload_req_output(self, recv_obj):
+        if self.model_update_expected_workers == 1:
+            self.dev_reload_result.set_result(recv_obj)
+        else:
+            self.dev_reload_tmp.append(recv_obj)
+            if len(self.dev_reload_tmp) == self.model_update_expected_workers:
+                self.dev_reload_result.set_result(self.dev_reload_tmp)
 
     async def _validate_and_resolve_lora(
         self, obj: Union[GenerateReqInput, EmbeddingReqInput]

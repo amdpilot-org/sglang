@@ -24,6 +24,8 @@ from sglang.srt.managers.io_struct import (
     CheckWeightsReqOutput,
     DestroyWeightsUpdateGroupReqInput,
     DestroyWeightsUpdateGroupReqOutput,
+    DevReloadReqInput,
+    DevReloadReqOutput,
     GetWeightsByNameReqInput,
     GetWeightsByNameReqOutput,
     InitWeightsUpdateGroupReqInput,
@@ -127,6 +129,31 @@ class SchedulerWeightUpdaterManager:
             return UpdateWeightFromDiskReqOutput(
                 success=success, message=message, num_paused_requests=0
             )
+
+    def dev_reload(self, recv_req: DevReloadReqInput):
+        try:
+            from sglang.srt.dev_reload import reload_modules
+
+            result = reload_modules(recv_req.modules)
+            if recv_req.recapture_cuda_graph:
+                self.tp_worker.recapture_cuda_graph_for_dev_reload()
+                if self.draft_worker is not None:
+                    runner = _get_draft_model_runner(self.draft_worker)
+                    if runner is None:
+                        raise RuntimeError(
+                            "Draft worker does not expose a model runner"
+                        )
+                    runner.init_decode_cuda_graph()
+            return DevReloadReqOutput(
+                success=True,
+                message="Reloaded modules without loading model weights",
+                modules=list(result.modules),
+                rebound_references=result.rebound_references,
+            )
+        except Exception:
+            message = traceback.format_exc()
+            logger.error("Developer reload failed:\n%s", message)
+            return DevReloadReqOutput(success=False, message=message)
 
     def init_weights_update_group(self, recv_req: InitWeightsUpdateGroupReqInput):
         """Initialize the online model parameter update group."""

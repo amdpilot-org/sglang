@@ -1,0 +1,39 @@
+---
+title: "Developer hot reload"
+description: "Reload pure-Python serving code and recapture GPU graphs without loading model weights again."
+---
+
+
+SGLang can reload selected pure-Python modules in scheduler workers while keeping
+the model parameters and KV-cache allocation alive. This mode is intended only
+for local contributor debugging.
+
+Start the server with an admin key and the opt-in flag:
+
+```bash
+python -m sglang.launch_server --model MODEL \
+  --enable-dev-reload --admin-api-key SECRET
+```
+
+After editing a module that is already imported by scheduler workers, request a
+reload and CUDA/HIP graph recapture:
+
+```bash
+curl -X POST http://localhost:30000/dev/reload \
+  -H 'Authorization: Bearer SECRET' \
+  -H 'Content-Type: application/json' \
+  -d '{"modules":["sglang.srt.layers.activation"],"recapture_cuda_graph":true}'
+```
+
+The tokenizer manager blocks new inference while every scheduler rank reloads
+the same module list. Existing class instances and direct imports are rebound,
+then target and draft decode graphs are recaptured before inference resumes.
+Model weights are not loaded again.
+
+Only loaded `sglang.*` modules backed by `.py`/`.pyc` files are accepted. Native
+extensions, third-party packages, newly added modules, and changes to object
+layout or process topology require a normal restart. Reload is not transactional:
+if Python raises while executing a changed module, the endpoint returns the full
+worker traceback and the safest recovery is a server restart. In-flight requests
+are drained by the existing model-update lock; this mode does not make arbitrary
+serving exceptions recoverable.
