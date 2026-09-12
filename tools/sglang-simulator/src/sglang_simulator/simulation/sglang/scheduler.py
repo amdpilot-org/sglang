@@ -448,16 +448,17 @@ class C_SchedulerHook(BaseHook):
 
                 if not simulation_batch.is_empty():
                     StateManager.inc_iteration()
+                    predictor_wall_start = time.time()
                     pred_start = time.perf_counter()
                     predicted_latency = (
                         C_SchedulerHook.INFERENCE_PREDICTOR.predict_infer_time(
                             simulation_batch
                         )
                     )
+                    predictor_wall_time_cost = time.time() - predictor_wall_start
                     # Accumulate predictor execution time for performance analysis.
-                    C_SchedulerHook.TOTAL_PREDICTOR_TIME_COST += (
-                        time.perf_counter() - pred_start
-                    )
+                    predictor_time_cost = time.perf_counter() - pred_start
+                    C_SchedulerHook.TOTAL_PREDICTOR_TIME_COST += predictor_time_cost
                     predicted_latency = float(predicted_latency)
 
                     forward_latency = 0
@@ -468,6 +469,12 @@ class C_SchedulerHook(BaseHook):
                         StateManager.set_last_real_time_ts(now)
                     else:
                         forward_latency = predicted_latency
+                        # Predictor queries implement the simulation and must not
+                        # advance its logical clock as scheduler CPU overhead.
+                        StateManager.set_last_real_time_ts(
+                            StateManager.get_last_real_time_ts()
+                            + predictor_wall_time_cost
+                        )
 
                     StateManager.set_current_inference_dur(forward_latency)
 
