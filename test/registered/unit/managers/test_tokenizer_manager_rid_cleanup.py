@@ -32,6 +32,7 @@ from sglang.srt.managers.io_struct import (  # noqa: E402
 from sglang.srt.managers.tokenizer_manager import (  # noqa: E402
     ReqState,
     TokenizerManager,
+    _is_client_disconnected,
 )
 from sglang.srt.observability.req_time_stats import (  # noqa: E402
     APIServerReqTimeStats,
@@ -754,6 +755,83 @@ class TestWaitOneResponseAfterStateFreed(CustomTestCase):
         out = asyncio.run(drive())
         self.assertEqual(out["meta_info"]["id"], rid)
         self.assertEqual(out["text"], "hello")
+
+
+class TestDisconnectPollingCancellation(CustomTestCase):
+    """ASGI receive cancellation is a disconnect, not task cancellation."""
+
+    def _make_waiter(self, *, outputs=None):
+        tm = _make_tokenizer_manager(self)
+        tm.abort_request = Mock()
+        tm.request_logger = Mock()
+        tm.request_metrics_exporter_manager = MagicMock()
+        tm.request_metrics_exporter_manager.exporter_enabled.return_value = False
+        state = _make_req_state("disconnect_poll")
+        state.obj.background = False
+        if outputs is not None:
+            state.out_list = outputs
+            state.event.set()
+        tm.rid_to_state[state.obj.rid] = state
+        request = MagicMock()
+        request.is_disconnected = AsyncMock(side_effect=asyncio.CancelledError)
+        return tm, state, request
+
+    def test_connected_result_is_preserved(self):
+        request = MagicMock()
+        request.is_disconnected = AsyncMock(return_value=False)
+        self.assertFalse(asyncio.run(_is_client_disconnected(request)))
+
+    def test_receive_cancellation_aborts_waiting_request(self):
+        tm, state, request = self._make_waiter()
+
+        async def drive():
+            with patch(
+                "sglang.srt.managers.tokenizer_manager._REQUEST_STATE_WAIT_TIMEOUT",
+                0,
+            ):
+                await tm._stream_one_response(
+                    state.obj, state, request
+                ).__anext__()
+
+        with self.assertRaisesRegex(ValueError, "type 1"):
+            asyncio.run(drive())
+        tm.abort_request.assert_called_once_with(state.obj.rid)
+
+    def test_receive_cancellation_aborts_running_request(self):
+        out = {"meta_info": {}, "text": "partial"}
+        tm, state, request = self._make_waiter(outputs=[out])
+
+        async def drive():
+            await tm._stream_one_response(state.obj, state, request).__anext__()
+
+        with self.assertRaisesRegex(ValueError, "type 3"):
+            asyncio.run(drive())
+        tm.abort_request.assert_called_once_with(state.obj.rid)
+
+    def test_handler_task_cancellation_still_propagates(self):
+        tm, state, request = self._make_waiter()
+        entered = asyncio.Event()
+
+        async def blocked_poll():
+            entered.set()
+            await asyncio.Future()
+
+        request.is_disconnected.side_effect = blocked_poll
+
+        async def drive():
+            with patch(
+                "sglang.srt.managers.tokenizer_manager._REQUEST_STATE_WAIT_TIMEOUT",
+                0,
+            ):
+                waiter = tm._stream_one_response(state.obj, state, request)
+                task = asyncio.create_task(waiter.__anext__())
+                await entered.wait()
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+
+        asyncio.run(drive())
+        tm.abort_request.assert_not_called()
 
 
 class TestDisconnectAfterDispatchAbortsRequest(CustomTestCase):

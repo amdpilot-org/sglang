@@ -1,0 +1,258 @@
+.FF                                                                      [100%]
+=================================== FAILURES ===================================
+_ TestDisconnectPollingCancellation.test_receive_cancellation_aborts_running_request _
+
+self = <test_tokenizer_manager_rid_cleanup.TestDisconnectPollingCancellation testMethod=test_receive_cancellation_aborts_running_request>
+
+    def test_receive_cancellation_aborts_running_request(self):
+        out = {"meta_info": {}, "text": "partial"}
+        tm, state, request = self._make_waiter(outputs=[out])
+    
+        async def drive():
+            await tm._stream_one_response(state.obj, state, request).__anext__()
+    
+        with self.assertRaisesRegex(ValueError, "type 3"):
+>           asyncio.run(drive())
+
+test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py:802: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/usr/lib/python3.12/asyncio/runners.py:194: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+uvloop/loop.pyx:1518: in uvloop.loop.Loop.run_until_complete
+    ???
+test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py:799: in drive
+    await tm._stream_one_response(state.obj, state, request).__anext__()
+python/sglang/srt/managers/tokenizer_manager.py:1863: in _stream_one_response
+    and await request.is_disconnected()
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    async def _execute_mock_call(self, /, *args, **kwargs):
+        # This is nearly just like super(), except for special handling
+        # of coroutines
+    
+        _call = _Call((args, kwargs), two=True)
+        self.await_count += 1
+        self.await_args = _call
+        self.await_args_list.append(_call)
+    
+        effect = self.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+>               raise effect
+E               asyncio.exceptions.CancelledError
+
+/usr/lib/python3.12/unittest/mock.py:2262: CancelledError
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestDisconnectPollingCancellation.test_receive_cancellation_aborts_running_request
+_ TestDisconnectPollingCancellation.test_receive_cancellation_aborts_waiting_request _
+
+fut = <Task cancelled name='Task-10' coro=<Event.wait() done, defined at /usr/lib/python3.12/asyncio/locks.py:199>>
+timeout = 0
+
+    async def wait_for(fut, timeout):
+        """Wait for the single Future or coroutine to complete, with timeout.
+    
+        Coroutine will be wrapped in Task.
+    
+        Returns result of the Future or coroutine.  When a timeout occurs,
+        it cancels the task and raises TimeoutError.  To avoid the task
+        cancellation, wrap it in shield().
+    
+        If the wait is cancelled, the task is also cancelled.
+    
+        If the task suppresses the cancellation and returns a value instead,
+        that value is returned.
+    
+        This function is a coroutine.
+        """
+        # The special case for timeout <= 0 is for the following case:
+        #
+        # async def test_waitfor():
+        #     func_started = False
+        #
+        #     async def func():
+        #         nonlocal func_started
+        #         func_started = True
+        #
+        #     try:
+        #         await asyncio.wait_for(func(), 0)
+        #     except asyncio.TimeoutError:
+        #         assert not func_started
+        #     else:
+        #         assert False
+        #
+        # asyncio.run(test_waitfor())
+    
+    
+        if timeout is not None and timeout <= 0:
+            fut = ensure_future(fut)
+    
+            if fut.done():
+                return fut.result()
+    
+            await _cancel_and_wait(fut)
+            try:
+>               return fut.result()
+                       ^^^^^^^^^^^^
+
+/usr/lib/python3.12/asyncio/tasks.py:515: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <asyncio.locks.Event object at 0x7f841b7504a0 [unset]>
+
+>   async def wait(self):
+E   asyncio.exceptions.CancelledError
+
+/usr/lib/python3.12/asyncio/locks.py:199: CancelledError
+
+The above exception was the direct cause of the following exception:
+
+    async def _stream_one_response(
+        self,
+        obj: Union[GenerateReqInput, EmbeddingReqInput],
+        state: ReqState,
+        request: Optional[fastapi.Request] = None,
+    ):
+        # Not all request types have `stream` (e.g., EmbeddingReqInput). Default to non-streaming.
+        is_stream = getattr(obj, "stream", False)
+        while True:
+            try:
+>               await asyncio.wait_for(
+                    state.event.wait(), timeout=_REQUEST_STATE_WAIT_TIMEOUT
+                )
+
+python/sglang/srt/managers/tokenizer_manager.py:1768: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fut = <Task cancelled name='Task-10' coro=<Event.wait() done, defined at /usr/lib/python3.12/asyncio/locks.py:199>>
+timeout = 0
+
+    async def wait_for(fut, timeout):
+        """Wait for the single Future or coroutine to complete, with timeout.
+    
+        Coroutine will be wrapped in Task.
+    
+        Returns result of the Future or coroutine.  When a timeout occurs,
+        it cancels the task and raises TimeoutError.  To avoid the task
+        cancellation, wrap it in shield().
+    
+        If the wait is cancelled, the task is also cancelled.
+    
+        If the task suppresses the cancellation and returns a value instead,
+        that value is returned.
+    
+        This function is a coroutine.
+        """
+        # The special case for timeout <= 0 is for the following case:
+        #
+        # async def test_waitfor():
+        #     func_started = False
+        #
+        #     async def func():
+        #         nonlocal func_started
+        #         func_started = True
+        #
+        #     try:
+        #         await asyncio.wait_for(func(), 0)
+        #     except asyncio.TimeoutError:
+        #         assert not func_started
+        #     else:
+        #         assert False
+        #
+        # asyncio.run(test_waitfor())
+    
+    
+        if timeout is not None and timeout <= 0:
+            fut = ensure_future(fut)
+    
+            if fut.done():
+                return fut.result()
+    
+            await _cancel_and_wait(fut)
+            try:
+                return fut.result()
+            except exceptions.CancelledError as exc:
+>               raise TimeoutError from exc
+E               TimeoutError
+
+/usr/lib/python3.12/asyncio/tasks.py:517: TimeoutError
+
+During handling of the above exception, another exception occurred:
+
+self = <test_tokenizer_manager_rid_cleanup.TestDisconnectPollingCancellation testMethod=test_receive_cancellation_aborts_waiting_request>
+
+    def test_receive_cancellation_aborts_waiting_request(self):
+        tm, state, request = self._make_waiter()
+    
+        async def drive():
+            with patch(
+                "sglang.srt.managers.tokenizer_manager._REQUEST_STATE_WAIT_TIMEOUT",
+                0,
+            ):
+                await tm._stream_one_response(
+                    state.obj, state, request
+                ).__anext__()
+    
+        with self.assertRaisesRegex(ValueError, "type 1"):
+>           asyncio.run(drive())
+
+test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py:791: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/usr/lib/python3.12/asyncio/runners.py:194: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+uvloop/loop.pyx:1518: in uvloop.loop.Loop.run_until_complete
+    ???
+test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py:786: in drive
+    await tm._stream_one_response(
+python/sglang/srt/managers/tokenizer_manager.py:1775: in _stream_one_response
+    and await request.is_disconnected()
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    async def _execute_mock_call(self, /, *args, **kwargs):
+        # This is nearly just like super(), except for special handling
+        # of coroutines
+    
+        _call = _Call((args, kwargs), two=True)
+        self.await_count += 1
+        self.await_args = _call
+        self.await_args_list.append(_call)
+    
+        effect = self.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+>               raise effect
+E               asyncio.exceptions.CancelledError
+
+/usr/lib/python3.12/unittest/mock.py:2262: CancelledError
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestDisconnectPollingCancellation.test_receive_cancellation_aborts_waiting_request
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py::TestDisconnectPollingCancellation::test_receive_cancellation_aborts_running_request
+FAILED test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py::TestDisconnectPollingCancellation::test_receive_cancellation_aborts_waiting_request
+2 failed, 1 passed, 26 deselected, 17 warnings in 12.60s

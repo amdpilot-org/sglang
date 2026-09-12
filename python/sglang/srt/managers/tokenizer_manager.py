@@ -182,6 +182,24 @@ _REQUEST_STATE_WAIT_TIMEOUT = envs.SGLANG_REQUEST_STATE_WAIT_TIMEOUT.get()
 logger = logging.getLogger(__name__)
 
 
+async def _is_client_disconnected(request: fastapi.Request) -> bool:
+    """Poll an ASGI request without mistaking receive cancellation for a crash.
+
+    Uvicorn can cancel the pending ASGI receive future when the peer closes the
+    connection.  That surfaces from ``Request.is_disconnected`` as
+    ``CancelledError`` even though the surrounding request task was not
+    cancelled.  Preserve real task cancellation (for example server shutdown),
+    but treat receive-only cancellation as a disconnected client.
+    """
+    try:
+        return await request.is_disconnected()
+    except asyncio.CancelledError:
+        task = asyncio.current_task()
+        if task is not None and task.cancelling():
+            raise
+        return True
+
+
 def _reject_missing_dispatched_encoder_embedding(request_obj, mm_inputs):
     """Do not silently turn a failed EPD request into local vision work."""
     disagg = get_disagg()
@@ -1766,7 +1784,7 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                 if (
                     request is not None
                     and not obj.background
-                    and await request.is_disconnected()
+                    and await _is_client_disconnected(request)
                 ):
                     # Abort the request for disconnected requests (non-streaming, waiting queue)
                     self.abort_request(obj.rid)
@@ -1854,7 +1872,7 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                 if (
                     request is not None
                     and not obj.background
-                    and await request.is_disconnected()
+                    and await _is_client_disconnected(request)
                 ):
                     # Abort the request for disconnected requests (non-streaming, running)
                     self.abort_request(obj.rid)
