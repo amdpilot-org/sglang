@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35053",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced negative-only CFG Spectrum initialization and cross-request forecaster reuse on the prepared main checkout. Implemented branch-local generation-start reset for models with separate CFG state while preserving positive-only reset ownership for shared-counter models. Added regressions for negative-only initialization, stale forecaster removal, serial dual-branch synchronization, and the shared-counter boundary.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-bde897918c6b/venv/bin/python < issue state-machine reproduction (before patch)",
+      "exit_code": 0,
+      "what_was_measured": "On the prepared base, the first negative step used window 0.0 instead of 2.0 and the next request reused the prior negative forecaster. Raw output: reports/j-bde897918c6b/raw/reproduction_before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bde897918c6b/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_spectrum.py",
+      "exit_code": 0,
+      "what_was_measured": "10 focused Spectrum tests passed, including four lifecycle regression and boundary cases. Raw output: reports/j-bde897918c6b/raw/test_spectrum_after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bde897918c6b/venv/bin/python < issue state-machine reproduction (after patch)",
+      "exit_code": 0,
+      "what_was_measured": "The first negative step used the configured 2.0 window and the next request did not reuse the prior forecaster. Raw output: reports/j-bde897918c6b/raw/reproduction_after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bde897918c6b/venv/bin/python < CPU-vs-GPU Spectrum numerical check",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X gfx950, GPU prediction matched CPU with max absolute difference 2.288818359375e-05 and analytic reference relative L2 1.1933200767089147e-05. Raw output: reports/j-bde897918c6b/raw/gpu_numerical.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace integrity. Ruff was unavailable in the prepared interpreter and is recorded separately in reports/j-bde897918c6b/raw/format_check.txt."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A deterministic Spectrum forecaster CPU-vs-GPU numerical comparison ran on the assigned AMD Instinct MI355X with gcnArchName gfx950:sramecc+:xnack-. This was component-level validation, not full model or multi-rank reproduction."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Wan model weights were provided, so full diffusion generation and semantic output accuracy were not tested.",
+    "No multi-rank CFG-parallel model run was performed; the reported lifecycle was reproduced deterministically through the actual Spectrum implementation.",
+    "Ruff was not installed in the prepared Python environment; git diff --check passed."
+  ]
+}
