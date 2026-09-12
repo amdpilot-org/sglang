@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36481",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1274",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1237",
+  "candidate_commit": "970ab777f74aea05733c8f5444642f26006c3f59",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate prevents the reported unsupported Triton/hybrid compact graph capture by returning before capture and relying on the existing eager replay fallback. Its regression fails on the recorded base and passes on the candidate, but it does not repair or validate compact target-verify CUDA-graph execution, so it is a partial crash-avoidance mitigation rather than a full original-issue fix.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-4337e89459fc/venv/bin/python /job/review-evidence-j-4337e89459fc/candidate_test.py (at base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Candidate regression on the recorded base: 5 passed and the issue-specific unsupported-backend capture test failed because capture entered warmup."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4337e89459fc/venv/bin/python test/registered/spec/dspark/test_ragged_verify_backend_capability.py (at candidate 970ab777f74aea05733c8f5444642f26006c3f59)",
+      "exit_code": 0,
+      "what_was_measured": "All six mocked capability/control-flow tests passed, including unsupported compact skip, supported compact continuation, and non-compact continuation."
+    },
+    {
+      "command": "git diff 358c163250ad3b1f62939b01ce1314a0a31a0365 970ab777f74aea05733c8f5444642f26006c3f59 --check",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One assigned AMD Instinct MI355X gfx950 was visible through ROCm 7.2, but the regression uses mocks and no available fixture represented Qwen hybrid attention plus DSpark. No relevant kernel or numerical GPU result was claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "For a Triton-backed Qwen hybrid model, compact target verification still does not use a CUDA graph; the candidate deliberately routes it to eager execution.",
+    "The reported NVIDIA B300/CUDA 13.2 illegal memory access at batch size 20 and eight tokens per request was not reproduced or retested on matching hardware and weights.",
+    "The candidate test proves only mocked control flow; it does not execute extend_attention_fwd or a hybrid full-attention/GatedDeltaNet model."
+  ],
+  "remaining_limitations": [
+    "Review host architecture is AMD gfx950/ROCm 7.2 rather than NVIDIA B300/CUDA 13.2.",
+    "Qwen3.5/Qwen3.6 and DSpark model weights were unavailable.",
+    "A tiny Llama serving fixture cannot qualify the different hybrid architecture or speculative workload and was therefore not used as substitute proof.",
+    "No native files changed, so a native rebuild was not applicable."
+  ]
+}
