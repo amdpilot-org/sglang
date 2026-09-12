@@ -1,0 +1,78 @@
+                extend_logprob_start_len_per_req,
+            ) = (
+                result.logits_output,
+                result.next_token_ids,
+                result.extend_input_len_per_req,
+                result.extend_logprob_start_len_per_req,
+            )
+
+            # Move next_token_ids and logprobs to cpu
+            next_token_ids = next_token_ids.tolist()
+            self.move_logprobs_to_cpu(batch=batch, logits_output=logits_output)
+
+            self._validate_pp_skip_output_comm(batch, result)
+
+            hidden_state_offset = 0
+
+            # Check finish conditions
+            logprob_pt = 0
+
+            for i, (req, next_token_id) in enumerate(zip(batch.reqs, next_token_ids)):
+                if (
+                    req.finished() and req.inflight_middle_chunks <= 0
+                ) or req.is_retracted:
+                    # Decode req in a mixed batch, or a retracted req. Keep an
+                    # aborted middle chunk in the chunked branch long enough to
+                    # drain its accounting without streaming it.
+                    continue
+
+                if req.inflight_middle_chunks <= 0:
+                    req.time_stats.set_prefill_finished_time()
+
+                    # req output_ids are set here
+                    req.output_ids.append(next_token_id)
+
+                    self._maybe_update_reasoning_tokens(req, next_token_id)
+
+                    req.update_finish_state()
+                    if req.finished():
+                        self._maybe_collect_routed_experts(req)
+                        self._maybe_collect_indexer_topk(req)
+                        release_kv_cache(req, self.tree_cache)
+                        req.time_stats.set_completion_time()
+                    elif not batch.decoding_reqs or req not in batch.decoding_reqs:
+                        maybe_cache_unfinished_req(req, self.tree_cache)
+                        if get_memory().enable_hisparse:
+                            self.hisparse_coordinator.admit_request_into_staging(req)
+
+                    self._maybe_collect_customized_info(i, req, logits_output)
+
+                    if batch.return_logprob:
+                        logprob_pt = self._apply_prefill_logprobs(
+                            req=req,
+                            i=i,
+                            logits_output=logits_output,
+                            extend_input_len_per_req=extend_input_len_per_req,
+                            extend_logprob_start_len_per_req=extend_logprob_start_len_per_req,
+                            next_token_ids=next_token_ids,
+                            logprob_pt=logprob_pt,
+                        )
+
+                    if req.return_sampling_mask:
+                        self.add_sampling_mask_return_values(i, req, logits_output)
+
+                    if (
+                        req.return_hidden_states
+                        and logits_output.hidden_states is not None
+                    ):
+                        hidden_state_offset = self._append_prefill_hidden_states(
+                            req=req,
+                            logits_output=logits_output,
+                            hidden_state_offset=hidden_state_offset,
+                        )
+
+                    if req.grammar is not None:
+                        self._apply_prefill_grammar(
+                            req=req,
+                            next_token_id=next_token_id,
+                            already_advanced=result.grammar_advanced,
