@@ -1,0 +1,60 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38408",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1008",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/973",
+  "candidate_commit": "f7d3ecf469e2a685b261ff1893152fe087087895",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "request_changes",
+  "fully_resolves_original": true,
+  "summary": "The test-only candidate fully implements the original issue's bounded isolated-process, fresh-cache, process-group kill, and one-retry mitigation. Request changes only because the PR body omits the required current mirror issue URL https://github.com/amdpilot-org/sglang/issues/1008.",
+  "tests": [
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=<private> TORCH_EXTENSIONS_DIR=<private> /tmp/amdpilot-repo-j-c7663cf3142c/venv/bin/python test/registered/expert_pack/test_expert_pack_mxfp4.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Actual registered cold-cache JIT path on the recorded base; hipcc targeted gfx950 but the NVIDIA-only source failed to find cuda_bf16.h, so no kernel executed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c7663cf3142c/venv/bin/python -m pytest -q test/registered/kernels/test_jit_cache.py::test_build_lock_ignores_an_orphaned_lock_file test/registered/kernels/test_jit_cache.py::test_build_lock_is_released_when_the_holder_process_dies test/registered/kernels/test_jit_cache.py::test_mxfp4_registered_test_retries_a_stalled_worker_attempt -vv",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regressions; 3 passed, including invocation of the registered MXFP4 file with a stalled first attempt and successful retry."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c7663cf3142c/venv/bin/python -m pytest -q test/registered/kernels/test_jit_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "Full candidate JIT-cache suite; 45 passed."
+    },
+    {
+      "command": "SGLANG_MXFP4_TEST_TIMEOUT_SECONDS=0.001 SGLANG_MXFP4_TEST_SUPERVISOR_SELF_TEST=1 /tmp/amdpilot-repo-j-c7663cf3142c/venv/bin/python test/registered/expert_pack/test_expert_pack_mxfp4.py",
+      "exit_code": 124,
+      "what_was_measured": "Independent terminal-boundary case: both attempts used distinct fresh caches, timed out, and had their process groups killed before bounded exit 124."
+    },
+    {
+      "command": "timeout --signal=KILL 3s /tmp/amdpilot-repo-j-c7663cf3142c/venv/bin/python /job/review-evidence-j-c7663cf3142c/live_holder.py",
+      "exit_code": 137,
+      "what_was_measured": "A live production build-lock holder still blocks a waiter indefinitely; the candidate contains this at the registered-test supervisor boundary."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c7663cf3142c/venv/bin/python -m ruff check test/registered/expert_pack/test_expert_pack_mxfp4.py test/registered/kernels/test_jit_cache.py",
+      "exit_code": 1,
+      "what_was_measured": "Environment limitation: the mandated prepared interpreter does not contain the ruff module."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "AMD Instinct MI350X gfx950 was visible and the real JIT invoked hipcc with --offload-arch=gfx950:sramecc+:xnack-, but compilation stopped at missing NVIDIA cuda_bf16.h before any MXFP4 kernel execution."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The exact intermittent H200 stall was not statistically reproduced because the assigned device is AMD gfx950, not NVIDIA H200.",
+    "The production _build_lock intentionally remains unbounded while its owner is alive; only this registered test is bounded by the new supervisor.",
+    "The candidate regression validates supervisor mechanics but its self-test worker exits before executing the MXFP4 JIT or GPU kernel path.",
+    "The candidate PR body omits the required current mirror issue URL https://github.com/amdpilot-org/sglang/issues/1008."
+  ],
+  "remaining_limitations": [
+    "No H200 was available.",
+    "The NVIDIA-specific MXFP4 source cannot compile on the assigned AMD gfx950 host because cuda_bf16.h is unavailable.",
+    "No MXFP4 GPU numerical output was produced.",
+    "Ruff is absent from the mandated prepared Python environment."
+  ]
+}
