@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36894",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the parallel-sampling LoRA usage-counter imbalance in the actual TokenizerManager._handle_batch_request implementation: one n=4 prompt released 5 references after 4 acquisitions, and two n=3 prompts released 8 after 6. The prefix-cache warm-up request inherited LoRA ownership despite having no separately acquired reference. The fix keeps the scheduler-side LoRA identity for cache correctness but clears LoRA ownership from the warm-up request's tokenizer-side completion state. The regression passes after the change and covers single-sample and multi-prompt boundaries.",
+  "tests": [
+    {
+      "command": "SGLANG_TOKENIZER_MANAGER_SOURCE=/tmp/amdpilot-repo-j-6fcda1eec5fe/tokenizer_manager-before.py PYTHONPATH=python /tmp/amdpilot-repo-j-6fcda1eec5fe/venv/bin/python test/registered/lora/test_parallel_sampling_lora_accounting.py",
+      "exit_code": 1,
+      "what_was_measured": "Recorded-base implementation failed the issue-specific accounting assertions: 5 releases for 4 acquired references and 8 releases for 6 acquired references; n=1 passed. Raw output: reports/j-6fcda1eec5fe/raw/regression-before.log"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-6fcda1eec5fe/venv/bin/python test/registered/lora/test_parallel_sampling_lora_accounting.py",
+      "exit_code": 0,
+      "what_was_measured": "All three lifecycle tests passed after the fix: n=4 single prompt, n=3 with two prompts, and the n=1 boundary. Raw output: reports/j-6fcda1eec5fe/raw/regression-after.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6fcda1eec5fe/venv/bin/python -m compileall -q python/sglang/srt/managers/tokenizer_manager.py test/registered/lora/test_parallel_sampling_lora_accounting.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed source and regression test compile successfully."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6fcda1eec5fe/venv/bin/python <gfx950 torch matmul smoke>",
+      "exit_code": 0,
+      "what_was_measured": "One assigned AMD Instinct MI350X (gfx950) executed a deterministic 3x4 by 4x2 float32 matrix multiplication with maximum absolute error 0.0 against the independent CPU result. Raw output: reports/j-6fcda1eec5fe/raw/gpu-smoke.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Torch 2.11.0+rocm7.2 detected exactly one AMD Instinct MI350X, gfx950:sramecc+:xnack-, and the independent CPU/GPU matrix results matched exactly. This only establishes assigned-GPU execution, not a serving reproduction."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported Qwen3.5-0.8B model and rank-128 LoRA adapter weights were not available, so the full HTTP serving deadlock was not reproduced on that architecture.",
+    "The deterministic regression executes the actual checked-out _handle_batch_request source with controlled request lifecycle doubles; it validates reference accounting and the warm-up/real-request split, not model semantics.",
+    "The available tiny Llama fixture cannot qualify the reported Qwen hybrid-attention architecture or its adapter, so it was not presented as a substitute reproduction.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable.",
+    "The prepared environment has no ruff module or executable; compileall and the focused regression were used for source validation."
+  ]
+}
