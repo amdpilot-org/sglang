@@ -1,0 +1,29 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38022",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared base already contains upstream PR #37971, which fixes the issue-specific GLM mixed image/video offset ambiguity. A deterministic legacy-versus-current reproduction on gfx950 showed that the old generic lookup assigned all shared-token spans to both modalities, while the current implementation partitions them correctly using video boundaries. No new runtime fix was added; the unrelated open zero-padding proposal was not adopted because it lacks semantic-correctness evidence.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-5f70e3d76bd8/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_glm4v_mixed_offsets.py test/registered/unit/managers/test_mm_embedding_length.py",
+      "exit_code": 0,
+      "what_was_measured": "11 focused tests passed, including mixed image/video ordering, interleaving, distinct token IDs, chunk overlap counting, and short/long embedding boundaries. Raw output: reports/j-5f70e3d76bd8/raw/focused_pytest.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5f70e3d76bd8/venv/bin/python reports/j-5f70e3d76bd8/reproduce_mixed_offsets.py",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, the legacy generic lookup assigned four spans to each modality; the current implementation assigned the two image spans only to IMAGE and the two video-frame spans only to VIDEO. Raw output: reports/j-5f70e3d76bd8/raw/gpu_mixed_offsets.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI355X, arch gfx950:sramecc+:xnack-, recorded in reports/j-5f70e3d76bd8/raw/gpu_mixed_offsets.log"
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "GLM-5.3-Flash weights and the reported 8xH20 TP8/DP8/EP8 serving environment were unavailable; no full-model, HTTP, multi-GPU, or multi-node reproduction was claimed.",
+    "The generic _adjust_embedding_length helper still raises for a synthetically short embedding, so this verifies the reported mixed image/video trigger fix rather than universal request-level isolation for all future mismatch causes.",
+    "The assigned GPU is AMD gfx950 rather than H20; GPU execution validates tensor-based offset classification only, not GLM model accuracy.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
