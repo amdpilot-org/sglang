@@ -1,0 +1,56 @@
+    88	- `S` — state slots per running request: `extra_buffer=5` (default),
+    89	  `extra_buffer_lazy=4`, `no_buffer=3`, disabled radix cache `=1`. For the two
+    90	  `extra_buffer` strategies, `SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK=1` frees one
+    91	  slot, and `extra_buffer` frees one more with the overlap scheduler off; the
+    92	  calculator reads both knobs.
+    93	- `D` — verify intermediate states under speculative decoding. These are
+    94	  allocated in separate request-indexed buffers sized by the per-attention-DP
+    95	  `max_running_requests` clamp (plus one padding request). The calculator does
+    96	  not treat them as allocator slots; it exactly inverts the configurator's
+    97	  joint solve, which models `D` full-slot equivalents per request even where
+    98	  CUDA's physical conv-window scratch is deduplicated:
+    99	  `--speculative-num-draft-tokens` for EAGLE/MTP (4 at the recommended 3/1/4)
+   100	  and for DFLASH (8, DFlash2's block size);
+   101	  `--speculative-dspark-block-size + 1` for DSPARK, where the block size falls
+   102	  back to the draft checkpoint's `block_size` when the flag is omitted (7 for
+   103	  `RadixArk/Qwen3.8-27B-DSpark`, so `D = 8`); 0 with speculation off or with
+   104	  `--enable-linear-replayssm-spec`, which keeps the verify intermediates on a
+   105	  fixed ring instead of per-request slots.
+   106	- `state_bytes` — one state slot, from the fixed geometry
+   107	  (48 GDN layers x 48 heads x 128 x 128 at `--mamba-ssm-dtype`, plus bf16 conv
+   108	  state): 153.9 MB at fp32, 78.4 MB at bf16.
+   109	- `kv_bytes_per_token` — 16 attention layers x GQA 4 x 256 x K+V:
+   110	  32.8 KB at fp8, 65.5 KB at bf16.
+   111	- `L` — average total request length in tokens: input + output.
+   112	
+   113	`--max-mamba-cache-size = target_concurrency x S + 1` is the safe explicit
+   114	pin and overrides the ratio; the calculator emits it alongside. `D` is not a
+   115	term here: the engine divides the state pool by `S` alone and sizes the
+   116	speculative verify buffer separately. The extra usable slot covers the
+   117	chunk-boundary donation, which allocates before releasing the old state; the
+   118	backing tensor's additional row 0 is padding and cannot cover it. After boot,
+   119	verify with the `max_running_requests`
+   120	line in the server log — it should not be capped below your target concurrency.
+   238	  `--speculative-algorithm DSPARK --speculative-draft-model-path
+   239	  RadixArk/Qwen3.8-27B-DSpark` (the Playground's Speculative Decoding card
+   240	  emits this pair). DSpark does **not** take
+   241	  `--speculative-num-draft-tokens`: its verify window is
+   242	  `--speculative-dspark-block-size` (gamma) **+ 1**, and gamma is auto-inferred
+   243	  from the draft checkpoint when the flag is omitted (7 for this checkpoint, so
+   244	  D = 8). That `D` is a term in the balanced ratio —
+   245	  `r = (S + D) x token_equiv / L`, where `token_equiv` is the state slot
+   246	  expressed in KV tokens, `state_bytes / kv_bytes_per_token` (4698 at fp32
+   247	  state / 2394 at bf16, over fp8 KV) — so DSpark needs a materially higher
+   248	  `--mamba-full-memory-ratio` than no-spec at the same `S`, and pinning a
+   249	  different gamma changes the ratio with it. MTP is the opposite case: with
+   250	  `--enable-linear-replayssm-spec` its draft intermediates move onto a fixed
+   251	  ring, so `D = 0` and the ratio returns to the no-spec value. The
+   252	  [calculator](#mamba-ratio-calculator) applies both rules.
+   253	- **DFlash2**: a trained block-diffusion draft in a separate checkpoint — add
+   254	  `--speculative-algorithm DFLASH --speculative-draft-model-path
+   255	  incoai/Qwen3.8-27B-DFlash2 --speculative-num-draft-tokens 8` (8 is the
+   256	  draft's block size, and it is the `D` term in the ratio, same value as
+   257	  DSpark's). Runs on Ascend NPUs as well
+   258	  ([#35629](https://github.com/sgl-project/sglang/pull/35629)): the selector
+   259	  verify falls back to argmax there, matching what EAGLE and first-generation
+   260	  DFlash drafts (such as `z-lab/Qwen3-8B-DFlash-b16`) already do on NPU.
