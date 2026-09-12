@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36829",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The reported width crash is caused by selecting EAGLE3 for GLM-5.3-Flash's bundled native NextN head. The checked-out implementation then enables three auxiliary captures; each mHC state is 4H wide, while the checkpoint's eh_proj consumes one final H-wide target hidden state. NEXTN/EAGLE already uses that final hidden-state path. The change rejects only bundled GLM5 NextN plus EAGLE3 at startup and directs users to NEXTN/EAGLE, while retaining separately trained EAGLE3 drafts.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-78966bf08243/venv/bin/python - <<'PY' ... Glm5NextForConditionalGeneration.set_eagle3_layers_to_capture ... PY",
+      "exit_code": 0,
+      "what_was_measured": "Actual checked-out GLM5 capture logic selected layers [2, 22, 42]; an mHC H=4096 capture remained [2, 16384], yielding packed EAGLE3 width 49152 versus the bundled NextN head's expected width 4096."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-78966bf08243/venv/bin/python -m pytest -q test/registered/unit/spec/test_glm5_next_spec_algorithm.py test/registered/unit/models/test_glm5_next_dflash_capture.py",
+      "exit_code": 0,
+      "what_was_measured": "Six focused CPU tests passed: explicit and implicit bundled GLM5 EAGLE3 rejection, EAGLE acceptance, distinct EAGLE3 draft acceptance, non-GLM EAGLE3 acceptance, and existing GLM5 mHC DFlash contraction."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-78966bf08243/venv/bin/python -m pytest -q -rs test/registered/kernels/ops/layernorm/test_fused_eh_norm.py",
+      "exit_code": 0,
+      "what_was_measured": "All 16 fused_eh_norm tests were skipped because the suite explicitly requires CUDA; this ROCm limitation is not counted as kernel validation."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-78966bf08243/venv/bin/python - <<'PY' ... hc_contract GPU comparison ... PY",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI350X gfx950, hc_contract transformed [2, 16384] to [2, 4096] with max_abs_diff 0.0 against an independent reshape-and-mean reference."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/arg_groups/speculative_hook.py test/registered/unit/spec/test_glm5_next_spec_algorithm.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, AST, CI-registration, and related pre-commit checks passed."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One assigned AMD Instinct MI350X (gfx950:sramecc+:xnack-) executed the mHC contraction numerical comparison with zero error. The CUDA-only fused_eh_norm suite did not execute on ROCm.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The GLM-5.3-Flash weights were not available locally, so no full model server, output-quality, acceptance-length, or throughput run was performed.",
+    "The reported 4x H20 TP=4 environment was not reproduced; only the assigned single gfx950 GPU was used.",
+    "A separately trained GLM5 EAGLE3 draft remains allowed but was not available for validation.",
+    "The ROCm environment cannot execute the repository's CUDA-only fused_eh_norm tests; no claim is made about that CUDA kernel beyond the reproduced input-width mismatch preceding it."
+  ]
+}
