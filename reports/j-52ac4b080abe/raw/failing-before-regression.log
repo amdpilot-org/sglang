@@ -1,0 +1,121 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+______ TestParseStatus.test_socket_client_allows_delayed_job_wide_status _______
+
+self = <test_nccl_ras.TestParseStatus testMethod=test_socket_client_allows_delayed_job_wide_status>
+
+    def test_socket_client_allows_delayed_job_wide_status(self):
+        """The default timeout must allow NCCL to collect a job-wide reply."""
+        ready = threading.Event()
+        port = []
+        server_errors = []
+    
+        def serve_status():
+            try:
+                with socket.socket() as listener:
+                    listener.bind(("127.0.0.1", 0))
+                    listener.listen(1)
+                    port.append(listener.getsockname()[1])
+                    ready.set()
+                    conn, _ = listener.accept()
+                    with conn:
+                        request = b""
+                        while request.count(b"\n") < 2:
+                            request += conn.recv(4096)
+                        self.assertEqual(request, b"SET FORMAT json\nSTATUS\n")
+                        _time.sleep(1.2)
+                        conn.sendall(b"OK\n" + json.dumps(_healthy()).encode())
+            except BaseException as exc:
+                server_errors.append(exc)
+    
+        server = threading.Thread(target=serve_status)
+        server.start()
+        self.assertTrue(ready.wait(timeout=1.0))
+        status = RasSocketClient(addr="127.0.0.1", port=port[0]).poll_status()
+        server.join(timeout=3.0)
+    
+        self.assertFalse(server.is_alive())
+        self.assertEqual(server_errors, [])
+>       self.assertIsNotNone(status)
+E       AssertionError: unexpectedly None
+
+test/registered/unit/distributed/test_nccl_ras.py:201: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x72ffa38cc400>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x730886f5ede0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestParseStatus.test_socket_client_allows_delayed_job_wide_status
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/distributed/test_nccl_ras.py", line 201, in test_socket_client_allows_delayed_job_wide_status
+    self.assertIsNotNone(status)
+  File "/usr/lib/python3.12/unittest/case.py", line 1287, in assertIsNotNone
+    self.fail(self._formatMessage(msg, standardMsg))
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: unexpectedly None
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/distributed/test_nccl_ras.py::TestParseStatus::test_socket_client_allows_delayed_job_wide_status
+1 failed, 17 warnings in 9.76s
+
+exit_code=1

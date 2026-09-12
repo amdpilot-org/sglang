@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32928",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 2965 at f924d21cd65995706d9180fe289f088ec3ef8e2b, independently reproduced the review's stale Prometheus divergence, and reconciled successful snapshots so recovered collective labels and disappeared communicator gauges no longer retain active values. Normal registries remove obsolete labelsets; mmap-backed multiprocess gauges, which prometheus_client cannot delete, are explicitly zeroed.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-84cc22dcfd21/venv/bin/python -m pytest -q test/registered/unit/distributed/test_nccl_ras.py::TestRasMetrics::test_recovery_clears_divergence_and_disappeared_communicator_gauges (candidate before correction)",
+      "exit_code": 1,
+      "what_was_measured": "A real prometheus_client gauge retained AllReduce divergence 7 after recovery, independently reproducing the review counterexample."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-84cc22dcfd21/venv/bin/python -m pytest -q test/registered/unit/distributed/test_nccl_ras.py",
+      "exit_code": 0,
+      "what_was_measured": "36 tests plus 2 subtests passed, including recovery/disappearance reconciliation and all preserved candidate coverage."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-84cc22dcfd21/venv/bin/python -m compileall -q python/sglang/srt/distributed/nccl_ras.py python/sglang/srt/managers/scheduler.py python/sglang/srt/observability/metrics_collector.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed NCCL RAS integration modules compile using the prepared interpreter and checked-out source."
+    },
+    {
+      "command": "torch environment capability probe",
+      "exit_code": 0,
+      "what_was_measured": "One AMD Instinct MI355X, ROCm 7.2, and RCCL API compatibility 2.27.7; the required NVIDIA NCCL 2.28.7+ distributed environment is unavailable."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Only a non-compute capability query was run. The single assigned AMD MI355X/RCCL 2.27.7 environment cannot validate NVIDIA NCCL RAS or TP=2/two-node behavior."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Live NVIDIA NCCL 2.28.7+ STATUS polling remains unverified because the assigned environment provides AMD RCCL API compatibility 2.27.7.",
+    "Two-node unresponsive and considered-dead transitions remain unverified because no second node was assigned.",
+    "TP=2 serving metrics remain unverified because only one GPU was assigned; the tiny Llama fixture cannot substitute for the missing distributed NVIDIA NCCL architecture.",
+    "prometheus_client does not support deleting mmap-backed multiprocess labelsets, so disappeared communicator series remain exported at zero in that mode rather than being physically removed. Normal in-process registries remove them. No stale nonzero health value remains.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
