@@ -1225,7 +1225,9 @@ class OpenAIServingChat(OpenAIServingBase):
         # SGLang's ReasonerGrammarBackend owns the reasoning prefix
         # when --reasoning-parser is configured, so builtin xgrammar
         # tags must describe only the post-reasoning tool-call suffix.
-        xgrammar_reasoning = thinking_mode and (self.reasoning_parser is None)
+        xgrammar_reasoning = self.reasoning_parser is None and (
+            self._get_template_reasoning_from_request(request)
+        )
         tool_call_constraint = None
 
         # Apply chat template and its stop strings
@@ -2649,6 +2651,13 @@ class OpenAIServingChat(OpenAIServingBase):
         """
         if not self.reasoning_parser:
             return False
+
+        return self._get_template_reasoning_from_request(request)
+
+    def _get_template_reasoning_from_request(
+        self, request: ChatCompletionRequest
+    ) -> bool:
+        """Determine whether the chat template enables a reasoning prefix."""
 
         if self.reasoning_parser == "minimax-m3":
             # M3 template prefills <mm:think> for thinking_mode=enabled, so it never
