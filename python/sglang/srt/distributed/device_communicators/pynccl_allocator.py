@@ -231,7 +231,8 @@ def get_nccl_mem_pool() -> torch.cuda.MemPool:
         "(torch._C._cuda_beginAllocateCurrentThreadToPool was added there)."
     )
 
-    global _allocator, _mem_pool, _cur_device, _register_func
+    global _allocator, _mem_pool, _cur_device
+    global _register_func, _get_windows_func, _clear_windows_func
     if _allocator is None:
         import torch.utils.cpp_extension
 

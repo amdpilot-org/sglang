@@ -19,6 +19,7 @@ import pytest
 import torch
 
 from sglang.srt.distributed.device_communicators import pynccl as pynccl_mod
+from sglang.srt.distributed.device_communicators import pynccl_allocator
 from sglang.srt.distributed.device_communicators import pynccl_wrapper as W
 from sglang.srt.distributed.device_communicators.pynccl import PyNcclCommunicator
 from sglang.srt.distributed.device_communicators.pynccl_wrapper import (
@@ -29,6 +30,59 @@ from sglang.srt.distributed.device_communicators.pynccl_wrapper import (
 from sglang.test.ci.ci_register import register_cuda_ci
 
 register_cuda_ci(est_time=60, stage="base-b", runner_config="2-gpu-large")
+
+
+def test_allocator_loader_publishes_window_accessors(monkeypatch, tmp_path):
+    """The native accessors must reach the module globals consumed by
+    _collect_windows_for_comm; function-local bindings silently return []."""
+
+    import torch.utils.cpp_extension
+
+    class _Function:
+        restype = None
+        argtypes = None
+
+        def __init__(self, result=0):
+            self.result = result
+
+        def __call__(self, comm, out=None, cap=None):
+            if out is not None:
+                out[0] = 0xA11CE
+                return 1
+            return self.result
+
+    class _Library:
+        nccl_allocator_register_segments_with_comm = _Function()
+        nccl_allocator_get_windows_for_comm = _Function()
+        nccl_allocator_clear_windows_for_comm = _Function()
+
+    class _Allocator:
+        def allocator(self):
+            return object()
+
+    class _Pool:
+        def __init__(self, allocator):
+            self.id = 1
+
+    monkeypatch.setattr(pynccl_allocator, "_allocator", None)
+    monkeypatch.setattr(pynccl_allocator, "_mem_pool", None)
+    monkeypatch.setattr(pynccl_allocator, "_get_windows_func", None)
+    monkeypatch.setattr(pynccl_allocator, "_clear_windows_func", None)
+    monkeypatch.setattr(pynccl_allocator.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(torch.distributed, "barrier", lambda: None)
+    monkeypatch.setattr(torch.utils.cpp_extension, "load_inline", lambda **kwargs: "fake.so")
+    monkeypatch.setattr(pynccl_allocator.ctypes, "CDLL", lambda path: _Library())
+    monkeypatch.setattr(
+        pynccl_allocator, "CUDAPluggableAllocator", lambda *args: _Allocator()
+    )
+    monkeypatch.setattr(pynccl_allocator.torch.cuda, "MemPool", _Pool)
+    monkeypatch.setattr(pynccl_allocator.torch.cuda, "current_device", lambda: 0)
+
+    pynccl_allocator.get_nccl_mem_pool()
+
+    assert pynccl_allocator._get_windows_func is not None
+    assert pynccl_allocator._clear_windows_func is not None
+    assert pynccl_allocator._collect_windows_for_comm(0x1234) == [0xA11CE]
 
 
 def test_rma_function_table_is_complete():

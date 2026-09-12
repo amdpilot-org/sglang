@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32200",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved PR 2952's NCCL RMA implementation and compatibility fixes, reproduced PR 3021's remaining window-accessor scoping defect against exact candidate commit 34d861306b4fdce616d2260d9d9f52655d6ef145, and corrected it by publishing both native accessor bindings to the module globals consumed by _collect_windows_for_comm(). Added a loader-level regression proving a non-null handle is surfaced.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5294b228d0b5/venv/bin/python -m pytest -q test/registered/e2e/distributed/test_pynccl_rma.py --junitxml=reports/j-5294b228d0b5/candidate-focused-before.xml (exact candidate before correction)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate baseline: 18 passed and 2 two-GPU tests skipped; confirms the reviewed defect was not covered by the candidate suite."
+    },
+    {
+      "command": "Fresh /tmp/symm_allocator rebuild, then PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5294b228d0b5/venv/bin/python reports/j-5294b228d0b5/reproduce_window_binding.py (before correction)",
+      "exit_code": 1,
+      "what_was_measured": "Rebuilt and loaded nccl_allocator.so with -lrccl; both native accessor symbols existed, but both Python module globals were None and collection returned []."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5294b228d0b5/venv/bin/python -m pytest -q test/registered/e2e/distributed/test_pynccl_rma.py --junitxml=reports/j-5294b228d0b5/focused-after.xml",
+      "exit_code": 0,
+      "what_was_measured": "19 passed and 2 hardware tests skipped; new regression drives the allocator loader and verifies synthetic native handle 0xA11CE is returned by _collect_windows_for_comm()."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5294b228d0b5/venv/bin/python reports/j-5294b228d0b5/reproduce_window_binding.py (after correction)",
+      "exit_code": 0,
+      "what_was_measured": "The real rebuilt allocator exports both symbols and both module globals now hold ctypes function pointers. The arbitrary unregistered communicator correctly returns no windows."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X (gfx950) was visible under torch 2.11.0+rocm7.2. The loader touched the ROCm device and created a memory pool, but no GPU numerical RMA operation was executed; the required two-rank NVIDIA NCCL/NVLink topology was unavailable."
+  },
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "The real two-rank NVIDIA NCCL 2.30/NVLink ring put_signal/wait_signal handshake remains unverified because the assigned environment has one AMD GPU.",
+    "The successful gfx950 RCCL allocator rebuild validates compilation, loading, and exported accessor symbols, but does not qualify NVIDIA NCCL RMA behavior.",
+    "No registered non-NULL RCCL/NCCL window could be produced on this single-rank topology; non-NULL handle propagation is covered deterministically by the loader regression."
+  ]
+}
