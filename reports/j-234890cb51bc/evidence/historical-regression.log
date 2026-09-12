@@ -1,0 +1,44 @@
+FF.                                                                      [100%]
+=================================== FAILURES ===================================
+___________ test_post_attention_moe_gathers_replicated_hidden_states ___________
+
+    def test_post_attention_moe_gathers_replicated_hidden_states():
+        calls = _function_calls(_MODELS_DIR / "deepseek_v4.py", "_run_moe_ffn_dp_sync")
+    
+        replicate_calls = _named_calls(calls, "dp_gather_replicate")
+>       assert len(replicate_calls) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+test/registered/unit/models/test_deepseek_v4_dp_gather_semantics.py:51: AssertionError
+_________ test_main_and_nextn_clone_replicated_token_ids_before_gather _________
+
+    def test_main_and_nextn_clone_replicated_token_ids_before_gather():
+        for filename in ("deepseek_v4.py", "deepseek_v4_nextn.py"):
+            calls = _function_calls(_MODELS_DIR / filename, "forward")
+            matching = [
+                call
+                for call in _named_calls(calls, "dp_gather_replicate")
+                if isinstance(call.args[0], ast.Name)
+                and call.args[0].id == "input_ids_global"
+            ]
+            assert len(matching) == 1, filename
+            local_arg = matching[0].args[1]
+>           assert isinstance(local_arg, ast.Call), filename
+E           AssertionError: deepseek_v4.py
+E           assert False
+E            +  where False = isinstance(<ast.Subscript object at 0x750b2f545a10>, <class 'ast.Call'>)
+E            +    where <class 'ast.Call'> = ast.Call
+
+test/registered/unit/models/test_deepseek_v4_dp_gather_semantics.py:67: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/models/test_deepseek_v4_dp_gather_semantics.py::test_post_attention_moe_gathers_replicated_hidden_states
+FAILED test/registered/unit/models/test_deepseek_v4_dp_gather_semantics.py::test_main_and_nextn_clone_replicated_token_ids_before_gather
+2 failed, 1 passed, 1 warning in 3.92s
