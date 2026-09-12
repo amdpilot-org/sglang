@@ -541,7 +541,9 @@ class RadixCache(BasePrefixCache):
         if self.disable:
             return
 
-        token_ids = req.get_fill_ids()
+        # dLLM's trailing incomplete block is rewritten in place and cannot be
+        # transferred to the tree until it is resolved.
+        token_ids = req.get_cacheable_fill_ids()
         kv_indices = self.req_to_token_pool.req_to_token[
             req.kv.req_pool_idx, : len(token_ids)
         ]
