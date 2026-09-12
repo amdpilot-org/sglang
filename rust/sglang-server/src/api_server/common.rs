@@ -12,7 +12,8 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use std::sync::Arc;
+use serde::Deserialize;
+use std::{net::Ipv6Addr, sync::Arc};
 
 use super::app::AppState;
 use super::guard::AbortGuard;
@@ -107,7 +108,6 @@ async fn model_info(State(state): State<Arc<AppState>>) -> Response {
 /// curated [`ServerArgs`] accessors), never the raw server-args dump (embeds
 /// `api_key`/`admin_api_key`; see [`shape_server_info`]).
 ///
-/// TODO(server_info): Python also includes `kv_events`; add once plumbed.
 async fn server_info(State(state): State<Arc<AppState>>) -> Response {
     let bytes = match await_control_result(
         &state,
@@ -172,9 +172,68 @@ fn shape_server_info(msgpack: &[u8], server_args: &ServerArgs) -> Result<Vec<u8>
         "max_context_length": server_args.model_config.context_len,
         "max_total_num_tokens": server_args.max_total_num_tokens,
         "version": server_args.version,
+        "kv_events": describe_kv_events_publisher(server_args),
         "internal_states": [serde_json::Value::Object(state_out)],
     });
     serde_json::to_vec(&response).map_err(|e| e.to_string())
+}
+
+#[derive(Deserialize)]
+struct KvEventsConfig {
+    #[serde(default = "null_publisher")]
+    publisher: String,
+    #[serde(default = "default_kv_endpoint")]
+    endpoint: String,
+    #[serde(default)]
+    topic: String,
+}
+
+fn null_publisher() -> String {
+    "null".to_string()
+}
+
+fn default_kv_endpoint() -> String {
+    "tcp://*:5557".to_string()
+}
+
+fn describe_kv_events_publisher(server_args: &ServerArgs) -> Option<serde_json::Value> {
+    let raw = server_args.kv_events_config.as_deref()?;
+    let block_size = server_args.page_size.filter(|size| *size > 0)?;
+    let cfg: KvEventsConfig = serde_json::from_str(raw).ok()?;
+    if cfg.publisher == "null" {
+        return None;
+    }
+    let (host, port) = parse_advertisable_tcp(&cfg.endpoint)?;
+    Some(serde_json::json!({
+        "publisher": cfg.publisher,
+        "endpoint_host": host,
+        "endpoint_port_base": port,
+        "topic": cfg.topic,
+        "block_size": block_size,
+        "dp_size": server_args.dp_size,
+    }))
+}
+
+fn parse_advertisable_tcp(endpoint: &str) -> Option<(&str, u16)> {
+    let address = endpoint.strip_prefix("tcp://")?;
+    let (host, port_text) = if let Some(bracketed) = address.strip_prefix('[') {
+        let close = bracketed.find(']')?;
+        bracketed[..close].parse::<Ipv6Addr>().ok()?;
+        let host = &address[..close + 2];
+        let port = address.get(close + 2..)?.strip_prefix(':')?;
+        (host, port)
+    } else {
+        let (host, port) = address.rsplit_once(':')?;
+        if host.contains(':') {
+            return None;
+        }
+        (host, port)
+    };
+    if host.is_empty() {
+        return None;
+    }
+    let port = port_text.parse::<u16>().ok()?;
+    (port != 0).then_some((host, port))
 }
 
 #[cfg(test)]
@@ -239,5 +298,105 @@ mod tests {
         assert!(state0.get("api_key").is_none());
         // Curated top-level config comes from typed accessors, not the dump.
         assert_eq!(v["model_path"], "/m");
+        assert!(v["kv_events"].is_null());
+    }
+
+    fn msgpack_with_secret_canaries() -> Vec<u8> {
+        let internal = rmpv::Value::Map(vec![
+            (
+                rmpv::Value::from("api_key"),
+                rmpv::Value::from("API_SECRET_CANARY"),
+            ),
+            (
+                rmpv::Value::from("kv_events_config"),
+                rmpv::Value::from("RAW_CONFIG_CANARY"),
+            ),
+            (
+                rmpv::Value::from("last_gen_throughput"),
+                rmpv::Value::from(2.5),
+            ),
+        ]);
+        let outer = rmpv::Value::Map(vec![(rmpv::Value::from("internal_state"), internal)]);
+        let mut msgpack = Vec::new();
+        rmpv::encode::write_value(&mut msgpack, &outer).unwrap();
+        msgpack
+    }
+
+    #[test]
+    fn shape_server_info_advertises_valid_kv_events_without_raw_config() {
+        let raw = r#"{"publisher":"zmq","endpoint":"tcp://*:5557","topic":"kv","secret":"CONFIG_SECRET_CANARY"}"#;
+        let sa = ServerArgs {
+            kv_events_config: Some(raw.into()),
+            page_size: Some(64),
+            dp_size: 2,
+            ..Default::default()
+        };
+        let out = shape_server_info(&msgpack_with_secret_canaries(), &sa).unwrap();
+        let text = String::from_utf8(out.clone()).unwrap();
+        assert!(!text.contains("RAW_CONFIG_CANARY"));
+        assert!(!text.contains("CONFIG_SECRET_CANARY"));
+        assert!(!text.contains("API_SECRET_CANARY"));
+        let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(value["internal_states"][0]["last_gen_throughput"], 2.5);
+        assert_eq!(
+            value["kv_events"],
+            serde_json::json!({
+                "publisher": "zmq",
+                "endpoint_host": "*",
+                "endpoint_port_base": 5557,
+                "topic": "kv",
+                "block_size": 64,
+                "dp_size": 2,
+            })
+        );
+        assert!(value.get("kv_events_config").is_none());
+    }
+
+    #[test]
+    fn unsafe_kv_events_configurations_serialize_as_null() {
+        let invalid = [
+            None,
+            Some("not-json"),
+            Some(r#"{"publisher":"null"}"#),
+            Some(r#"{"publisher":"zmq","endpoint":"inproc://kv"}"#),
+            Some(r#"{"publisher":"zmq","endpoint":"tcp://host"}"#),
+            Some(r#"{"publisher":"zmq","endpoint":"tcp://host:nope"}"#),
+            Some(r#"{"publisher":"zmq","endpoint":"tcp://host:0"}"#),
+            Some(r#"{"publisher":"zmq","endpoint":"tcp://host:65536"}"#),
+            Some(r#"{"publisher":"zmq","endpoint":"tcp://2001:db8::1:5557"}"#),
+        ];
+        for raw in invalid {
+            let sa = ServerArgs {
+                kv_events_config: raw.map(str::to_string),
+                page_size: Some(64),
+                ..Default::default()
+            };
+            let out = shape_server_info(&msgpack_with_secret_canaries(), &sa).unwrap();
+            let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
+            assert!(value["kv_events"].is_null(), "raw={raw:?}");
+        }
+        for page_size in [None, Some(0), Some(-1)] {
+            let sa = ServerArgs {
+                kv_events_config: Some(r#"{"publisher":"zmq","endpoint":"tcp://*:5557"}"#.into()),
+                page_size,
+                ..Default::default()
+            };
+            let out = shape_server_info(&msgpack_with_secret_canaries(), &sa).unwrap();
+            let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
+            assert!(value["kv_events"].is_null(), "page_size={page_size:?}");
+        }
+    }
+
+    #[test]
+    fn bracketed_ipv6_endpoint_is_advertisable() {
+        assert_eq!(
+            parse_advertisable_tcp("tcp://[2001:db8::5]:5557"),
+            Some(("[2001:db8::5]", 5557))
+        );
+    }
+
+    #[test]
+    fn bracketed_non_ipv6_host_is_not_advertisable() {
+        assert_eq!(parse_advertisable_tcp("tcp://[not-ipv6]:5557"), None);
     }
 }

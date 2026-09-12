@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33055",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate https://github.com/amdpilot-org/sglang/pull/3414 at c5812a14220bf0d4ebe1cf98cd2c63b818c98aa8 and corrected the concrete counterexample independently reported by https://github.com/amdpilot-org/sglang/pull/3433. Rust now validates bracketed endpoint contents as an actual IPv6 address before advertising /server_info.kv_events, so tcp://[not-ipv6]:5557 produces null like Python while valid bracketed IPv6 remains supported. The candidate's typed ServerArgs plumbing, additive field, allowlist, redaction, malformed-config handling, and secret-canary coverage remain intact.",
+  "tests": [
+    {
+      "command": "PATH=/job/.cargo/bin:$PATH CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-e4438b826eaf/cargo-target cargo test -p sglang-server bracketed_non_ipv6_host_is_not_advertisable --manifest-path rust/Cargo.toml (before parser correction)",
+      "exit_code": 101,
+      "what_was_measured": "Independent failing-before reproduction on the exact candidate implementation: Rust returned Some((\"[not-ipv6]\", 5557)) where Python returns None."
+    },
+    {
+      "command": "PATH=/job/.cargo/bin:$PATH CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-e4438b826eaf/cargo-target cargo test -p sglang-server api_server::common::tests --manifest-path rust/Cargo.toml",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after Rust serializer contract: 5 focused tests cover the counterexample, valid IPv6, valid metadata, malformed/disabled configurations, page sizes, port bounds, allowlisting, and secret canaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e4438b826eaf/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_server_info.py",
+      "exit_code": 0,
+      "what_was_measured": "Real Python /server_info route contract: 29 tests and 12 subtests passed, including endpoint, port, page-size, IPv6, field-preservation, and malformed configuration behavior."
+    },
+    {
+      "command": "Python parse_advertisable_tcp reference probe for tcp://[not-ipv6]:5557, tcp://[2001:db8::5]:5557, and tcp://[::]:5557",
+      "exit_code": 0,
+      "what_was_measured": "Python returned None for the malformed bracketed hostname and accepted both concrete and wildcard bracketed IPv6 endpoints."
+    },
+    {
+      "command": "load_rust_extension('sglang.srt.rust_extensions._server', mode='force', cache_dir=Path('/tmp/amdpilot-repo-j-e4438b826eaf/rust-extension-cache-final'))",
+      "exit_code": 0,
+      "what_was_measured": "Forced a release native rebuild from /job/repo/rust using rustc 1.92.0 and imported the resulting extension from the private runtime cache."
+    },
+    {
+      "command": "cd /job/repo/rust && PATH=/job/.cargo/bin:$PATH cargo fmt --all -- --check && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Rust formatting and patch whitespace validation."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "No GPU execution was performed because this correction is CPU-only endpoint parsing and JSON metadata serialization. Torch 2.11.0+rocm7.2 and HIP 7.2 were left unchanged; model weights or architecture execution cannot add evidence for this parser defect.",
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "The corrected Rust serializer and freshly rebuilt PyO3 native extension were exercised, but a live model-backed Axum server was not launched. The deterministic tiny-Llama fixture would add transport/engine smoke coverage but is not needed to establish this endpoint-parser correction.",
+    "KV-event publishing remains intentionally out of scope and was not exercised."
+  ]
+}
