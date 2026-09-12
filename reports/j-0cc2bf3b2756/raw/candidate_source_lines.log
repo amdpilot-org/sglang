@@ -1,0 +1,77 @@
+  2205	                mooncake_session_id = waiting_req_bytes[3].decode("ascii")
+  2206	                if room == "None":
+  2207	                    decode_kv_args = KVArgsRegisterInfo.from_zmq(waiting_req_bytes)
+  2208	                    decode_kv_args.requires_dcp_relayout = self.requires_dcp_relayout(
+  2209	                        decode_kv_args.dst_dcp_size,
+  2210	                        decode_kv_args.dst_dcp_rank,
+  2211	                    )
+  2212	                    if decode_kv_args.requires_dcp_relayout:
+  2213	                        decode_kv_args.dcp_token_item_lens = (
+  2214	                            self.prepare_dcp_token_item_lens(
+  2215	                                [decode_kv_args.dst_kv_item_len]
+  2216	                                * len(self.kv_args.kv_item_lens)
+  2217	                            )
+  2218	                        )
+  2219	                        self._init_dcp_pack_buffers_once(decode_kv_args.dst_dcp_size)
+  2220	                    self.decode_kv_args_table[mooncake_session_id] = decode_kv_args
+  2221	                    self._mark_session_registered(mooncake_session_id)
+  2222	                    logger.debug(
+  2223	                        f"Register KVArgs from {mooncake_session_id} successfully"
+  2224	                    )
+  2225	                    continue
+  2226	                else:
+  2227	                    required_dst_info_num = int(waiting_req_bytes[7].decode("ascii"))
+  2228	                    room = int(room)
+  2229	                    if room not in self.transfer_infos:
+  2230	                        self.transfer_infos[room] = {}
+  2380	    def _on_heartbeat_success(self, bootstrap_addr: str):
+  2381	        current_rooms = self.addr_to_rooms_tracker[bootstrap_addr].copy()
+  2382	        for bootstrap_room in current_rooms:
+  2383	            # Remove KVPoll.Success requests from the tracker
+  2384	            if bootstrap_room not in self.request_status:
+  2385	                self.addr_to_rooms_tracker[bootstrap_addr].discard(bootstrap_room)
+  2386	
+  2387	    def _mark_session_registered(self, session_id: str) -> None:
+  2388	        with self.session_lock:
+  2389	            self.session_generations[session_id] += 1
+  2390	            self.failed_sessions.discard(session_id)
+  2391	            self.session_failures.pop(session_id, None)
+  2392	
+  2393	    def _run_one_probe_pass(self) -> None:
+  2394	        with self.session_lock:
+  2395	            snapshot = {
+  2396	                session_id: (
+  2397	                    self.session_generations[session_id],
+  2398	                    self.session_failures.get(session_id, 0),
+  2399	                )
+  2400	                for session_id in self.failed_sessions
+  2401	            }
+  2402	        for session_id, (generation, failure_count) in snapshot.items():
+  2403	            send_probe = getattr(self.engine, "send_probe", None)
+  2404	            if send_probe is None:
+  2405	                rc = -1
+  2406	            else:
+  2407	                try:
+  2408	                    rc = send_probe(session_id)
+  2409	                except Exception as e:
+  2410	                    logger.warning("send_probe(%s) raised: %s", session_id, e)
+  2411	                    continue
+  2412	            if rc == 0:
+  2413	                with self.session_lock:
+  2414	                    can_recover = (
+  2415	                        session_id in self.failed_sessions
+  2416	                        and self.session_generations[session_id] == generation
+  2417	                        and self.session_failures.get(session_id, 0) == failure_count
+  2418	                    )
+  2419	                    if can_recover:
+  2420	                        self.failed_sessions.remove(session_id)
+  2421	                        self.session_failures.pop(session_id, None)
+  2422	                if can_recover:
+  2423	                    logger.info(
+  2424	                        "Session %s recovered via probe; un-blacklisted",
+  2425	                        session_id,
+  2426	                    )
+  2427	                    FAILED_SESSION_RECOVERIES.inc()
+  2428	                else:
+  2429	                    logger.debug(
+  2430	                        "Ignoring stale successful probe for %s; failure state changed",

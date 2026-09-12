@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37022",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1448",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1410",
+  "candidate_commit": "74a54568046e3adaa9182fd609eab498a714bd36",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the reviewed stale-probe ABA sequence by comparing both registration generation and failure count, and its focused regression passes. It does not fully close session-state races: registration publishes new decode arguments before advancing the generation and clearing state, allowing a concurrent failure against the newly published session to be erased by the later registration cleanup. The underlying cause of the reported recurring 5P3D GLM5.2 NVIDIA/XCCL RoCEv2 transfer failures was not identified or reproduced.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0cc2bf3b2756/venv/bin/python -m pytest -q /tmp/candidate_test_mooncake.py (base 358c163)",
+      "exit_code": 1,
+      "what_was_measured": "Candidate regression against the recorded base: 4 failed, 10 passed, 3 subtests passed. Failures included default-disabled probing, both stale-probe races, and absent registration-generation bookkeeping."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0cc2bf3b2756/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_mooncake_transfer_batching.py (candidate 74a5456)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate's focused regression: 14 passed and 3 subtests passed, including the reviewed equal-count ABA sequence."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0cc2bf3b2756/venv/bin/python -m pytest -q /job/review-evidence-j-0cc2bf3b2756/adversarial_candidate.py (candidate 74a5456)",
+      "exit_code": 1,
+      "what_was_measured": "Independent ordering cases: the reviewed equal-count ABA case passed, but registration bookkeeping erased a failure occurring after new arguments were published (1 failed, 1 passed)."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0cc2bf3b2756/venv/bin/python -m compileall -q python/sglang/srt/disaggregation/mooncake/conn.py python/sglang/srt/environ.py test/registered/unit/disaggregation/test_mooncake_transfer_batching.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source and regression compile successfully."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..74a54568046e3adaa9182fd609eab498a714bd36",
+      "exit_code": 2,
+      "what_was_measured": "Candidate diff reports trailing whitespace in six lines of its committed raw evidence logs; no product-source whitespace error was reported."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned AMD Instinct MI350X (gfx950) was detected, but the race tests are CPU synchronization tests. No GPU computation was used as proof."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Registration stores decode_kv_args_table[session_id] before _mark_session_registered(). A concurrent transfer can consume those newly published arguments, record a failure, and then have that new failure removed by _mark_session_registered().",
+    "The recurring failures in the reported 5P3D GLM5.2 NVIDIA/XCCL multi-node RoCEv2 deployment remain unexplained and may continue; the candidate adds recovery behavior but does not identify or correct their underlying cause."
+  ],
+  "remaining_limitations": [
+    "The source deployment requires NVIDIA compute capability 8.6, XCCL, eight devices per node, multiple nodes, RoCEv2, and GLM5.2 weights; the prepared environment provides one AMD gfx950 GPU and no stated model weights or multi-node fabric.",
+    "No native source changed in the candidate, so no native rebuild was applicable.",
+    "The deterministic tiny-Llama serving fixture cannot qualify GLM5.2, XCCL, Mooncake RDMA, or a 5P3D distributed topology and was therefore not used as substitute proof."
+  ]
+}

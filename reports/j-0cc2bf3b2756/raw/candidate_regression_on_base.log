@@ -1,0 +1,98 @@
+........FFFF..                                                        [100%]
+=================================== FAILURES ===================================
+______ TestMooncakeFailedSessionRecovery.test_probe_is_enabled_by_default ______
+
+self = <candidate_test_mooncake.TestMooncakeFailedSessionRecovery testMethod=test_probe_is_enabled_by_default>
+
+    def test_probe_is_enabled_by_default(self):
+        with patch.dict(os.environ):
+            os.environ.pop("SGLANG_ENABLE_FAILED_SESSION_PROBE", None)
+>           self.assertTrue(envs.SGLANG_ENABLE_FAILED_SESSION_PROBE.get())
+E           AssertionError: False is not true
+
+/tmp/candidate_test_mooncake.py:169: AssertionError
+_ TestMooncakeFailedSessionRecovery.test_registration_starts_a_new_session_generation _
+
+self = <candidate_test_mooncake.TestMooncakeFailedSessionRecovery testMethod=test_registration_starts_a_new_session_generation>
+
+    def test_registration_starts_a_new_session_generation(self):
+        manager = self._make_manager(["decode:1234"], lambda _: 0)
+    
+>       MooncakeKVManager._mark_session_registered(manager, "decode:1234")
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: type object 'MooncakeKVManager' has no attribute '_mark_session_registered'
+
+/tmp/candidate_test_mooncake.py:160: AttributeError
+_ TestMooncakeFailedSessionRecovery.test_stale_probe_does_not_clear_newer_failure _
+
+self = <candidate_test_mooncake.TestMooncakeFailedSessionRecovery testMethod=test_stale_probe_does_not_clear_newer_failure>
+
+    def test_stale_probe_does_not_clear_newer_failure(self):
+        probe_started = threading.Event()
+        finish_probe = threading.Event()
+    
+        def send_probe(_):
+            probe_started.set()
+            self.assertTrue(finish_probe.wait(timeout=5))
+            return 0
+    
+        manager = self._make_manager(["decode:1234"], send_probe)
+        probe_thread = threading.Thread(
+            target=MooncakeKVManager._run_one_probe_pass, args=(manager,)
+        )
+        probe_thread.start()
+        self.assertTrue(probe_started.wait(timeout=5))
+        with manager.session_lock:
+            manager.session_failures["decode:1234"] += 1
+            manager.failed_sessions.add("decode:1234")
+        finish_probe.set()
+        probe_thread.join(timeout=5)
+    
+        self.assertFalse(probe_thread.is_alive())
+>       self.assertIn("decode:1234", manager.failed_sessions)
+E       AssertionError: 'decode:1234' not found in set()
+
+/tmp/candidate_test_mooncake.py:197: AssertionError
+_ TestMooncakeFailedSessionRecovery.test_stale_probe_does_not_clear_reregistered_failure_generation _
+
+self = <candidate_test_mooncake.TestMooncakeFailedSessionRecovery testMethod=test_stale_probe_does_not_clear_reregistered_failure_generation>
+
+    def test_stale_probe_does_not_clear_reregistered_failure_generation(self):
+        probe_started = threading.Event()
+        finish_probe = threading.Event()
+    
+        def send_probe(_):
+            probe_started.set()
+            self.assertTrue(finish_probe.wait(timeout=5))
+            return 0
+    
+        manager = self._make_manager(["decode:1234"], send_probe)
+        probe_thread = threading.Thread(
+            target=MooncakeKVManager._run_one_probe_pass, args=(manager,)
+        )
+        probe_thread.start()
+        self.assertTrue(probe_started.wait(timeout=5))
+    
+>       MooncakeKVManager._mark_session_registered(manager, "decode:1234")
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: type object 'MooncakeKVManager' has no attribute '_mark_session_registered'
+
+/tmp/candidate_test_mooncake.py:216: AttributeError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../../tmp/candidate_test_mooncake.py::TestMooncakeFailedSessionRecovery::test_probe_is_enabled_by_default
+FAILED ../../tmp/candidate_test_mooncake.py::TestMooncakeFailedSessionRecovery::test_registration_starts_a_new_session_generation
+FAILED ../../tmp/candidate_test_mooncake.py::TestMooncakeFailedSessionRecovery::test_stale_probe_does_not_clear_newer_failure
+FAILED ../../tmp/candidate_test_mooncake.py::TestMooncakeFailedSessionRecovery::test_stale_probe_does_not_clear_reregistered_failure_generation
+4 failed, 10 passed, 16 warnings, 3 subtests passed in 11.86s
+send_probe(decode:1234) raised: False is not true
