@@ -34,6 +34,7 @@ except ImportError as e:
 
 
 if TYPE_CHECKING:
+    from lmcache.v1.multiprocess.futures import MessagingFuture
     from sglang.srt.configs.model_config import ModelConfig
     from sglang.srt.managers.schedule_batch import Req
     from sglang.srt.mem_cache.cache_init_params import CacheInitParams
@@ -167,16 +168,105 @@ class LMCRadixCache(RadixCache):
             kvcache.register_layer_transfer_counter(self.layer_done_executor)
 
         self._in_flight_nodes: list[TreeNode] = []
+        self._in_flight_mp_stores: list[
+            tuple[TreeNode, MessagingFuture[bool], str]
+        ] = []
         self._node_lock = threading.Lock()
         self._mp_load_back_markers: dict[str, _LMCacheLoadBackMarker] = {}
 
     def reset(self):
+        error = self._reconcile_in_flight_stores()
         super().reset()
-        if hasattr(self, "_in_flight_nodes"):
-            with self._node_lock:
-                self._in_flight_nodes.clear()
         if hasattr(self, "_mp_load_back_markers"):
             self._mp_load_back_markers.clear()
+        if error is not None:
+            raise error
+
+    def release_host_resources(self) -> None:
+        """Finish stores before closing the connector on graceful shutdown."""
+        error = self._reconcile_in_flight_stores()
+        try:
+            self.lmcache_connector.close()
+        except Exception as exc:
+            if error is None:
+                error = exc
+            else:
+                logger.exception("Failed to close LMCache connector")
+        if error is not None:
+            raise error
+
+    def _reconcile_in_flight_stores(self) -> Optional[Exception]:
+        """Wait for submitted stores, then release their radix/session state.
+
+        The lists are detached before waiting so cleanup is performed exactly
+        once.  All entries are reconciled even if one completion or session
+        cleanup fails; the first error is returned after every node is safe to
+        evict and reuse.
+        """
+        if not hasattr(self, "_node_lock"):
+            return None
+
+        with self._node_lock:
+            ip_nodes = self._in_flight_nodes
+            self._in_flight_nodes = []
+            mp_stores = self._in_flight_mp_stores
+            self._in_flight_mp_stores = []
+
+        first_error: Optional[Exception] = None
+        if ip_nodes:
+            try:
+                self.store_stream.synchronize()
+            except Exception as exc:
+                first_error = exc
+            finally:
+                for node in ip_nodes:
+                    try:
+                        self.dec_lock_ref(node)
+                    except Exception as exc:
+                        if first_error is None:
+                            first_error = exc
+                        else:
+                            logger.exception("Failed to unlock LMCache IP store")
+
+        for node, future, request_id in mp_stores:
+            try:
+                if not future.result():
+                    raise RuntimeError(
+                        f"LMCache MP store failed for request_id={request_id}"
+                    )
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+                else:
+                    logger.exception(
+                        "Additional LMCache MP store failure for request_id=%s",
+                        request_id,
+                    )
+            finally:
+                try:
+                    self.dec_lock_ref(node)
+                except Exception as exc:
+                    if first_error is None:
+                        first_error = exc
+                    else:
+                        logger.exception(
+                            "Failed to unlock LMCache store for request_id=%s",
+                            request_id,
+                        )
+                finally:
+                    self._mp_load_back_markers.pop(request_id, None)
+                    try:
+                        self.lmcache_connector.end_session(request_id)
+                    except Exception as exc:
+                        if first_error is None:
+                            first_error = exc
+                        else:
+                            logger.exception(
+                                "Failed to end LMCache session for request_id=%s",
+                                request_id,
+                            )
+
+        return first_error
 
     def match_prefix(self, params: MatchPrefixParams) -> MatchResult:
         """Dispatch to the mode-specific match_prefix.
@@ -488,11 +578,33 @@ class LMCRadixCache(RadixCache):
             request_id=req.rid,
         )
         if self._mode is LMCacheMode.MP:
-            self.lmcache_connector.store_kv(store_md)
-            # MP store_kv blocks until the daemon's signal event fires, so the slots are safe to evict immediately.
-            self._mp_load_back_markers.pop(req.rid, None)
-            self.dec_lock_ref(new_last_node)
-            self.lmcache_connector.end_session(req.rid)
+            try:
+                future = self.lmcache_connector.store_kv_async(store_md)
+            except Exception:
+                self._mp_load_back_markers.pop(req.rid, None)
+                try:
+                    self.dec_lock_ref(new_last_node)
+                except Exception:
+                    logger.exception(
+                        "Failed to unlock rejected LMCache store for request_id=%s",
+                        req.rid,
+                    )
+                try:
+                    self.lmcache_connector.end_session(req.rid)
+                except Exception:
+                    logger.exception(
+                        "Failed to end rejected LMCache store session for "
+                        "request_id=%s",
+                        req.rid,
+                    )
+                raise
+            # The daemon still reads these slots. Keep the radix node locked
+            # until a reuse boundary resolves the daemon's real completion
+            # future and ends the request session.
+            with self._node_lock:
+                self._in_flight_mp_stores.append(
+                    (new_last_node, future, req.rid)
+                )
         elif self._mode is LMCacheMode.IP:
             with device_stream_context(self.store_stream):
                 self.lmcache_connector.store_kv(store_md)
@@ -505,11 +617,9 @@ class LMCRadixCache(RadixCache):
         if self.disable:
             return EvictResult()
 
-        self.store_stream.synchronize()
-        with self._node_lock:
-            for node in self._in_flight_nodes:
-                self.dec_lock_ref(node)
-            self._in_flight_nodes.clear()
+        error = self._reconcile_in_flight_stores()
+        if error is not None:
+            raise error
 
         return super().evict(params)
 

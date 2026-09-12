@@ -1,0 +1,97 @@
+        # the leading ``prefix_pad // page_size`` blocks. Real block_ids are
+        # computed only from the freshly-allocated slot range; the skipped
+        # blocks get harmless placeholder ids the kernel never dereferences.
+        prefix_pad = load_metadata.prefix_pad
+        fresh_start = offset + prefix_pad
+        prefix_pad_pages = prefix_pad // self.page_size
+
+        self._free_lookup_locks(token_ids, 0, offset, request_id)
+        fresh_block_ids = self._slot_mapping_to_block_ids(
+            load_metadata.slot_mapping[fresh_start:retrieve_token_num]
+        )
+        block_ids = [0] * prefix_pad_pages + fresh_block_ids
+
+        # Successful RETRIEVE releases the trailing read locks via
+        # ``finish_read_prefetched`` inside the daemon. The trailing
+        # ``_free_lookup_locks`` is the failure path's cleanup — calling
+        # it after a successful RETRIEVE would double-release and trigger
+        # "finish read on non-read-locked key".
+        retrieve_succeeded = False
+        try:
+            future = self._submit_retrieve(
+                request_id=request_id,
+                token_ids=token_ids,
+                offset=offset,
+                matched_end=retrieve_token_num,
+                block_ids=block_ids,
+                skip_prefix_n_blocks=prefix_pad_pages,
+            )
+            if not future.result(timeout=self._mq_timeout):
+                raise RuntimeError(
+                    f"LMCache MP retrieve failed for request_id={request_id}"
+                )
+            retrieve_succeeded = True
+        finally:
+            if not retrieve_succeeded:
+                self._free_lookup_locks(
+                    token_ids, offset, retrieve_token_num, request_id
+                )
+            with self._pending_lookups_lock:
+                if request_id in self._pending_lookups:
+                    self._pending_lookups[request_id].locks_held = False
+        return retrieve_token_num - offset
+
+    def store_kv_async(self, store_metadata: StoreMetadata) -> MessagingFuture[bool]:
+        """Submit a STORE and return its completion future without waiting.
+
+        Fires the STORE request for the chunk-aligned prefix of
+        ``store_metadata`` and returns immediately with a future the
+        caller can poll (``query`` / ``wait``) or block on (``result``)
+        at a later, deferred checkpoint. The future resolves to a
+        ``bool`` success flag once the daemon finishes copying the KV
+        slots GPU → warehouse.
+
+        The KV slots referenced by ``store_metadata`` must remain pinned
+        (not evicted or reused) until the returned future reports done;
+        the caller owns that lifetime. Paths that perform no wire send
+        return an already-completed future so callers never special-case
+        ``None``: an unhealthy connector resolves to ``False`` (nothing
+        was stored), and no chunk-aligned range resolves to ``True`` (a
+        no-op success).
+
+        END_SESSION is owned by ``LMCRadixCache.cache_finished_req``
+        (see :meth:`end_session`); it is not fired here.
+
+        Args:
+            store_metadata: tokens, request id, and KV slot indices for
+                the finished request.
+
+        Returns:
+            A future resolving to ``True`` when the store completes
+            successfully (or there was nothing to store), or ``False``
+            on daemon-side failure or an unhealthy connector.
+        """
+        if not self.is_healthy:
+            return _completed_future(False)
+
+        aligned_end = (len(store_metadata.token_ids) // self._lmcache_chunk_size) * (
+            self._lmcache_chunk_size
+        )
+        if aligned_end == 0:
+            return _completed_future(True)
+
+        request_id = store_metadata.request_id
+        block_ids = self._slot_mapping_to_block_ids(
+            store_metadata.kv_indices[:aligned_end]
+        )
+        event = torch_dev.Event(interprocess=True)
+        event.record(torch_dev.current_stream())
+        future = send_lmcache_request(
+            self.mq_client,
+            RequestType.STORE,
+            [
+                self._create_key(
+                    store_metadata.token_ids,
+                    start=0,
+                    end=aligned_end,
+                    request_id=request_id,
