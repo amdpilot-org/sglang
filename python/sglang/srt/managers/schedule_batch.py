@@ -995,6 +995,10 @@ class Req(ReqDllmMixin):
 
         self.session = session
         self.session_id = session_id
+        # True only for a streaming-session request that acquired the
+        # session-wide inflight slot. A request rejected before admission must
+        # not release another request's slot during pre-abort cleanup.
+        self.streaming_session_inflight_owner = False
         # Used by the session radix cache to reject registration after a close/reopen.
         self.session_generation: Optional[int] = None
         self.input_embeds = input_embeds

@@ -178,7 +178,7 @@ class StreamingSession(BasePrefixCache):
         if slot is None or not slot.kv.holds_kv:
             return None
         if req.to_finish is not None:
-            req.session.abort_req()
+            req.session.abort_req(req)
             req.session = None
             return None
         return slot
@@ -297,7 +297,7 @@ class StreamingSession(BasePrefixCache):
             else:
                 assert kv is slot.kv
             self.release_session(session_id)
-            req.session.abort_req()
+            req.session.abort_req(req)
             return True
 
         if is_first:

@@ -327,6 +327,7 @@ class Session:
         elif self.streaming:
             # req_nodes is NOT updated here — finish_req() handles it.
             self._inflight = True
+            new_req.streaming_session_inflight_owner = True
         else:
             new_req_node = SessionReqNode(new_req, last_req_node)
             self.req_nodes[req.rid] = new_req_node
@@ -336,6 +337,7 @@ class Session:
     def finish_req(self, req):
         """Update req_nodes after a streaming request finishes successfully."""
         self._inflight = False
+        req.streaming_session_inflight_owner = False
         if self.req_nodes:
             [prev_node] = self.req_nodes.values()
             prev_node.req.session = None
@@ -346,9 +348,13 @@ class Session:
         self.committed_unpadded_len = len(req.origin_input_ids_unpadded)
         self.committed_fill_len = len(req.full_untruncated_fill_ids)
 
-    def abort_req(self):
-        """Clear inflight flag on abort (req_nodes stays unchanged)."""
+    def abort_req(self, req=None):
+        """Release an inflight slot owned by req (req_nodes stays unchanged)."""
+        if req is not None and not req.streaming_session_inflight_owner:
+            return
         self._inflight = False
+        if req is not None:
+            req.streaming_session_inflight_owner = False
 
 
 class SessionController:

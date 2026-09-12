@@ -17,7 +17,9 @@ from array import array
 from types import SimpleNamespace
 
 from sglang.srt.sampling.sampling_params import SamplingParams
+from sglang.srt.runtime_context import get_parallel
 from sglang.srt.session.session_controller import Session
+from sglang.srt.session.streaming_session import SessionSlot, StreamingSession
 from sglang.test.test_utils import CustomTestCase
 
 VOCAB = 1 << 20
@@ -62,6 +64,10 @@ class TestSessionTokenShare(CustomTestCase):
             tokenizer=None,
             vocab_size=VOCAB,
         )
+
+    def _create_rejected(self, rid, input_ids):
+        with get_parallel().override(tp_rank=0):
+            return self._create(rid, input_ids)
 
     def _decode_and_finish(self, req, output, baked=None):
         """Simulate decode then a successful finish.
@@ -136,6 +142,46 @@ class TestSessionTokenShare(CustomTestCase):
         self._decode_and_finish(r2, [9])
         r3 = self._create("r3", [6])
         self.assertEqual(list(r3.origin_input_ids), [4, 5, 9, 6])
+
+    def test_rejected_overlap_does_not_release_inflight_owner(self):
+        """A request rejected by create_req never acquired the session flag."""
+        self._create("owner", [1, 2, 3])
+        rejected = self._create_rejected("rejected", [4, 5])
+        self.assertTrue(self.session._inflight)
+        self.assertIsNotNone(rejected.to_finish)
+
+        tree_cache = StreamingSession(SimpleNamespace())
+        tree_cache.slots["s"] = SessionSlot(
+            kv=SimpleNamespace(holds_kv=True),
+        )
+        self.assertIsNone(tree_cache.find_active_slot(rejected))
+
+        self.assertTrue(self.session._inflight)
+        self.assertIsNone(rejected.session)
+
+    def test_admitted_request_abort_releases_its_inflight_slot(self):
+        owner = self._create("owner", [1, 2, 3])
+        self.assertTrue(owner.streaming_session_inflight_owner)
+
+        self.session.abort_req(owner)
+
+        self.assertFalse(self.session._inflight)
+        self.assertFalse(owner.streaming_session_inflight_owner)
+
+    def test_rejected_overlap_cannot_admit_or_mutate_a_third_turn(self):
+        owner = self._create("owner", [10, 11])
+        rejected = self._create_rejected("rejected", [20])
+        original_owner_ids = list(owner.origin_input_ids)
+
+        tree_cache = StreamingSession(SimpleNamespace())
+        tree_cache.slots["s"] = SessionSlot(
+            kv=SimpleNamespace(holds_kv=True),
+        )
+        tree_cache.find_active_slot(rejected)
+        third = self._create_rejected("third", [30])
+
+        self.assertIsNotNone(third.to_finish)
+        self.assertEqual(list(owner.origin_input_ids), original_owner_ids)
 
     def test_max_new_tokens_overshoot_falls_back(self):
         in1 = list(range(300, 310))
