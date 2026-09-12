@@ -1,0 +1,467 @@
+358c163250ad3b1f62939b01ce1314a0a31a0365
+   747	                # Shape: [num_layers, size + 1, speculative_num_draft_tokens, HV, K, V]
+   748	                #
+   749	                # ReplaySSM spec-verify owns rollback via the ring + cursors (the
+   750	                # verify kernel never writes per-draft snapshots; the commit never
+   751	                # reads them), so this buffer -- the dominant spec scratch, ~46x
+   752	                # the conv state -- is dead weight there and is skipped. The conv
+   753	                # intermediate windows below STAY (conv rollback consumes them).
+   754	                # The recurrent-verify fallback cannot be reached under the flag
+   755	                # (GDN + linear chain + triton enforced in server_args; the
+   756	                # backend asserts loudly if it ever is).
+   757	                # ReplaySSM skips this dominant scratch (~9GB @ K3 dspark γ=7): the
+   758	                # KDA verify kernel takes intermediate_states_buffer=None (skips the
+   759	                # per-step write, CACHE_INTERMEDIATE_STATES=False) and the commit
+   760	                # replays the ring into the checkpoint instead. This is the memory win.
+   761	                if enable_linear_replayssm_spec:
+   762	                    intermediate_ssm_state_cache = None
+   763	                else:
+   764	                    intermediate_ssm_state_cache = torch.zeros(
+   765	                        size=(
+   766	                            num_mamba_layers,
+   767	                            spec_state_size + 1,
+   768	                            speculative_num_draft_tokens,
+   769	                            temporal_state_shape[0],
+   770	                            temporal_state_shape[1],
+   771	                            temporal_state_shape[2],
+   772	                        ),
+   773	                        dtype=ssm_dtype,
+   774	                        device=device,
+   775	                    )
+   776	                # Cache intermediate conv windows (last K-1 inputs) per draft token
+   777	                # during target verify.
+   778	                #
+   779	                # On CUDA (Triton conv kernel + Triton scatter) we use a
+   780	                # *deduplicated sliding-window* layout: consecutive draft tokens'
+   781	                # (K-1)-wide windows overlap by (K-2), so instead of D separate
+   782	                # [dim, K-1] windows we store one shared [dim, D+K-2] buffer per
+   783	                # (layer, slot) and expose an overlapping `as_strided` view of
+   784	                # logical shape [num_layers, size+1, draft_tokens, dim, K-1] where
+   785	                # step `t`'s window is the slice shared[..., :, t:t+K-1]. This
+   786	                # halves the conv-intermediate footprint (D*(K-1) -> D+K-2 columns)
+   787	                # with no numerical change: both the conv kernel write (idempotent
+   788	                # overlapping stores) and `fused_conv_window_scatter_with_mask`
+   789	                # consume the view through its strides.
+   790	                #
+   791	                # Dedup the sliding-window conv-intermediate only when it is safe:
+   792	                # CUDA + a linear draft chain (topk <= 1). NPU/CPU and EAGLE tree
+   793	                # verify (topk > 1) keep the dense layout -- see
+   794	                # `conv_window_dedup_enabled` for the full rationale. The
+   795	                # `fused_conv_window_scatter_with_mask` scatter is layout-agnostic,
+   796	                # so the dense fallback reads correctly through the same code path.
+   797	                dedup_conv_window = (
+   798	                    not cache_params.shape.disable_conv_window_dedup
+   799	                    and conv_window_dedup_enabled(
+   800	                        _is_npu, _is_cpu, speculative_eagle_topk, cache_params.is_kda
+   801	                    )
+   802	                )
+   803	                self._intermediate_conv_window_phys = []
+   804	                if dedup_conv_window:
+   805	                    win_len = cache_params.shape.conv_kernel - 1
+   806	                    self.conv_window_axis = self._detect_conv_window_axis(
+   807	                        conv_state_shape, win_len
+   808	                    )
+   809	                    intermediate_conv_window_cache = []
+   810	                    for conv_shape in conv_state_shape:
+   811	                        phys, view = self._allocate_deduplicated_conv_window(
+   812	                            conv_shape=conv_shape,
+   813	                            num_mamba_layers=num_mamba_layers,
+   814	                            spec_state_size=spec_state_size,
+   815	                            speculative_num_draft_tokens=speculative_num_draft_tokens,
+   816	                            conv_dtype=conv_dtype,
+   817	                        )
+   818	                        self._intermediate_conv_window_phys.append(phys)
+   819	                        intermediate_conv_window_cache.append(view)
+   820	                else:
+   821	                    # Original dense layout (NPU/CPU, or EAGLE tree verify): one
+   822	                    # [dim, K-1] window per draft token.
+   823	                    # Shape: [num_layers, size+1, draft_tokens, dim, K-1]
+   824	                    dense_conv_shapes = [
+   825	                        (
+   826	                            (conv_shape[1], conv_shape[0])
+   827	                            if _is_npu and cache_params.is_kda
+   828	                            else conv_shape
+   829	                        )
+   830	                        for conv_shape in conv_state_shape
+   831	                    ]
+   832	                    intermediate_conv_window_cache = [
+   833	                        torch.zeros(
+   834	                            size=(
+   835	                                num_mamba_layers,
+   836	                                spec_state_size + 1,
+   837	                                speculative_num_draft_tokens,
+   838	                                conv_shape[0],
+   839	                                conv_shape[1],
+   840	                            ),
+   841	                            dtype=conv_dtype,
+   842	                            device=device,
+   843	                        )
+   844	                        for conv_shape in dense_conv_shapes
+   845	                    ]
+   846	                    self._intermediate_conv_window_phys = intermediate_conv_window_cache
+   847	                self.mamba_cache = self.SpeculativeState(
+   848	                    conv=conv_state,
+   849	                    temporal=temporal_state,
+   850	                    intermediate_ssm=intermediate_ssm_state_cache,
+   851	                    intermediate_conv_window=intermediate_conv_window_cache,
+   852	                    replayssm_d=replayssm_d,
+   853	                    replayssm_k=replayssm_k,
+   854	                    replayssm_g=replayssm_g,
+   855	                    replayssm_rawv=replayssm_rawv,
+   856	                    replayssm_rawk=replayssm_rawk,
+   857	                    replayssm_beta=replayssm_beta,
+   858	                )
+   859	                intermediate_ssm_gb = (
+   860	                    get_tensor_size_bytes(intermediate_ssm_state_cache) / GB
+   861	                    if intermediate_ssm_state_cache is not None
+   862	                    else 0.0
+   863	                )
+   864	                logger.info(
+   865	                    f"Mamba Cache is allocated. "
+   866	                    f"max_mamba_cache_size: {size}, "
+   867	                    f"conv_state size: {get_tensor_size_bytes(conv_state) / GB:.2f}GB, "
+   868	                    f"ssm_state size: {get_tensor_size_bytes(temporal_state) / GB:.2f}GB "
+   869	                    f"intermediate_ssm_state_cache size: {intermediate_ssm_gb:.2f}GB "
+   870	                    # Report the deduplicated PHYSICAL conv-window buffers (the view
+   871	                    # over-reports its logical, un-deduplicated size).
+   872	                    f"intermediate_conv_window_cache size: {get_tensor_size_bytes(self._intermediate_conv_window_phys) / GB:.2f}GB "
+   873	                )
+   874	            else:
+   875	                self.mamba_cache = self.State(
+  2270	
+  2271	        return token_capacity
+  2272	
+  2273	    def resolve_max_num_reqs(self, token_capacity: int) -> int:
+  2274	        """Compute max concurrent requests (per dp worker) from the finalized
+  2275	        token capacity."""
+  2276	        # Estimate pool size (used as upper bound when user specifies max_running_requests)
+  2277	        estimated = int(token_capacity / self.model_config.context_len * 512)
+  2278	        estimated = max(min(estimated, 4096), 2048)
+  2279	
+  2280	        max_num_reqs = get_schedule().max_running_requests
+  2281	        if max_num_reqs is not None:
+  2282	            requested_per_worker = max_num_reqs // self.ps.attn_dp_size
+  2283	            max_num_reqs = min(requested_per_worker, token_capacity // 2)
+  2284	        else:
+  2285	            requested_per_worker = None
+  2286	            max_num_reqs = min(estimated, token_capacity // 2)
+  2287	
+  2288	        capped_by_mamba = False
+  2289	        if self.mambaish_config is not None:
+  2290	            ratio = self._calculate_mamba_ratio()
+  2291	            mamba_cap = get_schedule().max_mamba_cache_size // ratio
+  2292	            if mamba_cap < max_num_reqs:
+  2293	                capped_by_mamba = True
+  2294	                logger.warning(
+  2295	                    "max_running_requests is capped to %d by the mamba state "
+  2296	                    "cache (max_mamba_cache_size=%d, %d state slots per "
+  2297	                    "request). To raise it: increase --mamba-full-memory-ratio "
+  2298	                    "or --max-mamba-cache-size, or halve the state size with "
+  2299	                    "--mamba-ssm-dtype bfloat16.",
+  2300	                    mamba_cap,
+  2301	                    get_schedule().max_mamba_cache_size,
+  2302	                    ratio,
+  2303	                )
+  2304	            max_num_reqs = min(max_num_reqs, mamba_cap)
+  2305	
+  2306	            if max_num_reqs <= 0:
+  2307	                raise RuntimeError(
+  2308	                    f"Hybrid (mamba/linear-attention) state cache is too small to serve "
+  2309	                    f"any requests. max_mamba_cache_size={get_schedule().max_mamba_cache_size}, "
+  2310	                    f"mamba_ratio={ratio}, resulting max_num_reqs={max_num_reqs}. "
+  2410	        # ReplaySSM drops the per-step intermediate_ssm scratch, so its mamba budget
+  2411	        # no longer reserves the (1 + D/ratio) intermediate factor -- the whole
+  2412	        # budget goes to persistent slots (K sized like non-spec), which is how the
+  2413	        # freed ~9GB turns into higher max_running.
+  2414	        # The ring is not part of mamba_cache_per_req. GDN replay is fixed-size
+  2415	        # request scratch; KDA replay remains attached to each mamba slot.
+  2416	        replayssm_active = get_exec().mamba.enable_linear_replayssm_spec and (
+  2417	            self.hybrid_gdn_config is not None
+  2418	            or kimi_linear_config(self.model_config) is not None
+  2419	        )
+  2420	        if replayssm_active:
+  2421	            record_len = get_exec().mamba.linear_replayssm_cache_len
+  2422	            replayssm_ring_per_req = (
+  2423	                config.mamba2_cache_params.replayssm_ring_bytes_per_req(
+  2424	                    record_len=record_len
+  2425	                )
+  2426	            )
+  2427	        else:
+  2428	            replayssm_ring_per_req = 0
+  2429	        replayssm_ring_per_req = int(replayssm_ring_per_req * pp_layer_scale)
+  2430	        if replayssm_active and kimi_linear_config(self.model_config) is None:
+  2431	            replay_req_slots = (
+  2432	                get_schedule().max_running_requests // self.ps.attn_dp_size + 1
+  2433	            )
+  2434	            replayssm_fixed_bytes = replayssm_ring_per_req * replay_req_slots
+  2435	            replayssm_ring_per_slot = 0
+  2436	        else:
+  2437	            replayssm_fixed_bytes = 0
+  2438	            replayssm_ring_per_slot = replayssm_ring_per_req
+  2439	        if has_spec_dec:
+  2440	            assert get_spec().speculative_num_draft_tokens is not None
+  2441	            assert get_schedule().max_running_requests is not None
+  2442	
+  2443	        if get_schedule().max_mamba_cache_size is not None:
+  2444	            # Use explicitly set max_mamba_cache_size
+  2445	            get_context().override(
+  2446	                "mamba_pool.per_dp_shard",
+  2447	                max_mamba_cache_size=get_schedule().max_mamba_cache_size
+  2448	                // self.ps.attn_dp_size,
+  2449	            )
+  2450	            # Reserve intermediate memory based on capped max_num_reqs (+1: the
+  2451	            # pool's padding slot, see memory_pool.py). Skipped under replayssm
+  2452	            # (no intermediate_ssm allocated).
+  2453	            if has_spec_dec and not replayssm_active:
+  2454	                ratio = self._calculate_mamba_ratio()
+  2455	                capped_reqs = min(
+  2456	                    get_schedule().max_running_requests // self.ps.attn_dp_size,
+  2457	                    get_schedule().max_mamba_cache_size // ratio,
+  2458	                )
+  2459	                intermediate_size = (
+  2460	                    stage_per_req
+  2461	                    * (capped_reqs + 1)
+  2462	                    * get_spec().speculative_num_draft_tokens
+  2463	                )
+  2464	                total_rest_memory = total_rest_memory - (intermediate_size / (1 << 30))
+  2465	        elif (
+  2466	            get_memory().disable_radix_cache
+  2467	            and get_schedule().max_running_requests is not None
+  2468	        ):
+  2469	            # Use explicitly set max_running_requests when radix cache is disabled
+  2470	            get_context().override(
+  2471	                "mamba_pool.from_max_running_requests",
+  2472	                max_mamba_cache_size=get_schedule().max_running_requests
+  2473	                // self.ps.attn_dp_size,
+  2474	            )
+  2475	            # Reserve intermediate memory based on capped max_num_reqs (+1: the
+  2476	            # pool's padding slot). Skipped under replayssm.
+  2477	            if has_spec_dec and not replayssm_active:
+  2478	                intermediate_size = (
+  2479	                    stage_per_req
+  2480	                    * (get_schedule().max_mamba_cache_size + 1)
+  2481	                    * get_spec().speculative_num_draft_tokens
+  2482	                )
+  2483	                total_rest_memory = total_rest_memory - (intermediate_size / (1 << 30))
+  2484	        else:
+  2485	            # Use ratio-based calculation to auto-fit available memory
+  2486	            assert stage_per_req > 0
+  2487	            per_req = stage_per_req
+  2488	
+  2489	            # Solve jointly for max_mamba_cache_size (K), including the pool's
+  2490	            # +1 padding slot on both buffers (see memory_pool.py):
+  2491	            #   (K + 1) * per_req + (K / ratio + 1) * D * per_req = mamba_budget_bytes
+  2492	            mamba_budget = (
+  2493	                total_rest_memory
+  2494	                * get_schedule().mamba_full_memory_ratio
+  2495	                / (1 + get_schedule().mamba_full_memory_ratio)
+  2496	            )
+  2497	            mamba_budget_bytes = mamba_budget * (1 << 30)
+  2498	
+  2499	            if has_spec_dec and not replayssm_active:
+  2500	                ratio = self._calculate_mamba_ratio()
+  2501	                D = get_spec().speculative_num_draft_tokens
+  2502	                # Joint solve: main_state + intermediate = mamba_budget
+  2503	                get_context().override(
+  2504	                    "mamba_pool.memory_budget_spec",
+  2505	                    max_mamba_cache_size=int(
+  2506	                        (mamba_budget_bytes - per_req * (1 + D))
+  2507	                        // (per_req * (1 + D / ratio))
+  2508	                    ),
+  2509	                )
+  2510	                # Intermediate memory is included in mamba_budget, subtract it
+  2511	                # so the return value only has main_state subtracted from total
+  2512	                capped_reqs = min(
+  2513	                    get_schedule().max_running_requests // self.ps.attn_dp_size,
+  2514	                    get_schedule().max_mamba_cache_size // ratio,
+  2515	                )
+  2516	                intermediate_size = per_req * (capped_reqs + 1) * D
+  2517	                total_rest_memory = total_rest_memory - (intermediate_size / (1 << 30))
+  2518	            else:
+  2519	                per_slot = per_req + replayssm_ring_per_slot
+  2520	                get_context().override(
+  2521	                    "mamba_pool.memory_budget",
+  2522	                    max_mamba_cache_size=int(
+  2523	                        (mamba_budget_bytes - replayssm_fixed_bytes - per_slot)
+  2524	                        // per_slot
+  2525	                    ),
+  2526	                )
+  2527	
+  2528	        # Validate: max_mamba_cache_size must be positive after memory allocation.
+  2529	        # A non-positive value means GPU memory is insufficient for the requested
+  2530	        # configuration. Fail fast with actionable advice instead of silently
+  2531	        # producing garbled output at runtime.
+  2532	        if get_schedule().max_mamba_cache_size <= 0:
+  2533	            raise RuntimeError(
+  2534	                f"Not enough GPU memory for hybrid (mamba/linear-attention) state cache. "
+  2535	                f"Computed max_mamba_cache_size={get_schedule().max_mamba_cache_size} "
+  2536	                f"(total_rest_memory={total_rest_memory:.2f} GB, "
+  2537	                f"mamba_cache_per_req={stage_per_req / (1 << 20):.2f} MB). "
+  2538	                f"Try: (1) reduce --max-running-requests, "
+  2539	                f"(2) increase --mem-fraction-static, "
+  2540	                f"(3) reduce --speculative-num-draft-tokens, or "
+  2541	                f"(4) use GPUs with more memory."
+  2542	            )
+  2543	
+  2544	        # +1 accounts for each pool's padding slot.
+  2545	        mamba_state_memory = (
+  2546	            (get_schedule().max_mamba_cache_size + 1)
+  2547	            * (stage_per_req + replayssm_ring_per_slot)
+  2548	            + replayssm_fixed_bytes
+  2549	        ) / (1 << 30)
+  2550	        return total_rest_memory - mamba_state_memory
+  2551	
+  2552	
+  2553	def calculate_mla_kv_cache_dim(
+  2554	    *, model_config: ModelConfig, kv_cache_dtype: torch.dtype
+  2555	) -> int:
+   480	        assert cd.lock_ref > 0, f"Mamba release hit lock_ref=0 on node {node.id}"
+   481	        if cd.lock_ref == 1 and value is not None:
+   482	            vlen = len(value)
+   483	            self.tree_core.component_evictable_size_[ct] += vlen
+   484	            self.tree_core.component_protected_size_[ct] -= vlen
+   485	        cd.lock_ref -= 1
+   486	        if cd.lock_ref == 0:
+   487	            self.tree_core._update_evictable_leaf_sets(node)
+   488	
+   489	    def _alloc_mamba_slot(self) -> torch.Tensor:
+   490	        """Allocate one mamba pool slot, evicting if necessary."""
+   491	        slot = self.cache.req_to_token_pool.mamba_allocator.alloc(1)
+   492	        if slot is None:
+   493	            self.cache.evict_for_alloc(EvictParams(num_tokens=0, mamba_num=1))
+   494	            slot = self.cache.req_to_token_pool.mamba_allocator.alloc(1)
+   495	            assert slot is not None, "Can not alloc mamba cache"
+   496	        return slot
+   497	
+   498	    @property
+   499	    def int8_ckpt_pool(self):
+   500	        return getattr(self.cache.req_to_token_pool, "mamba_ckpt_pool", None)
+   501	
+   502	    def _alloc_int8_ckpt_slot(self) -> torch.Tensor:
+   503	        slot = self.int8_ckpt_pool.alloc(1)
+   504	        if slot is None:
+   505	            self.cache.evict(EvictParams(num_tokens=0, mamba_num=1))
+   506	            slot = self.int8_ckpt_pool.alloc(1)
+   507	            assert slot is not None, "Can not alloc int8 mamba checkpoint slot"
+   508	        return slot
+   509	
+   510	    def _commit_int8_checkpoint(self, active_slots: torch.Tensor) -> torch.Tensor:
+   511	        ckpt_slot = self._alloc_int8_ckpt_slot()
+   512	        self.int8_ckpt_pool.store_from_active(
+   513	            self.cache.req_to_token_pool.mamba_pool,
+   514	            active_slots.view(-1),
+   515	            ckpt_slot,
+   516	        )
+   517	        return ckpt_slot
+   518	
+   519	    def _free_mamba_value(self, mamba_value: torch.Tensor) -> None:
+   520	        if self.int8_ckpt_pool is not None:
+   521	            self.int8_ckpt_pool.free(mamba_value)
+   522	        else:
+   523	            self.cache.req_to_token_pool.mamba_allocator.free(mamba_value)
+   524	
+   525	    def prepare_for_caching_req(
+   526	        self,
+   527	        req: Req,
+   528	        insert_params: InsertParams,
+   529	        token_ids_len: int,
+   530	        is_finished: bool,
+   531	    ) -> Optional[int]:
+   532	        if self.cache.enable_mamba_extra_buffer:
+   533	            cache_len = req.kv.mamba_last_track_seqlen
+   534	        else:
+   535	            cache_len = token_ids_len
+   536	            # ReplaySSM (no_buffer): `temporal[slot]` lags the live state by the
+   537	            # slot's unflushed ring depth (`write_pos`), so on request finish cap
+   538	            # the donate to the last flush boundary (where temporal is current)
+   539	            # and reset the cursor, keeping the donated checkpoint consistent with
+   540	            # its key length. page_size is asserted == 1, so no realign. Mirrors
+   541	            # MambaRadixCache.cache_finished_req.
+   542	            if is_finished:
+   543	                write_pos_buf = (
+   544	                    self.cache.req_to_token_pool.mamba_pool.replayssm_write_pos
+   545	                )
+   546	                if write_pos_buf is not None:
+   547	                    cache_len -= int(write_pos_buf[req.kv.mamba_pool_idx].item())
+   548	                    write_pos_buf[req.kv.mamba_pool_idx] = 0
+   549	
+   550	        if is_finished:
+   551	            if cache_len is None:
+   552	                cache_len = 0
+   553	            if self.cache.enable_mamba_extra_buffer:
+   554	                keep_idx = self.cache.req_to_token_pool.get_mamba_ping_pong_keep_idx(
+   555	                    req
+   556	                )
+   557	                active_value = (
+   558	                    req.kv.mamba_ping_pong_track_buffer[keep_idx].unsqueeze(-1).clone()
+   559	                )
+   560	            else:
+   561	                active_value = req.kv.mamba_pool_idx.unsqueeze(-1).clone()
+   562	            if self.int8_ckpt_pool is not None:
+   563	                insert_params.mamba_value = self._commit_int8_checkpoint(active_value)
+   564	            else:
+   565	                insert_params.mamba_value = active_value
+   566	            return cache_len
+   567	        else:
+   568	            if cache_len is None:
+   569	                return 0
+   570	            # Donate the mamba index to the radix cache instead of copying.
+   571	            if self.int8_ckpt_pool is not None:
+   572	                if self.cache.enable_mamba_extra_buffer:
+   573	                    new_slot = self._alloc_mamba_slot()
+   574	                    src_active = (
+   575	                        self.cache.req_to_token_pool.donate_mamba_ping_pong_slot(
+   576	                            req, new_slot
+   577	                        )
+   578	                    )
+   579	                    mamba_value_donated = self._commit_int8_checkpoint(src_active)
+   580	                    self.cache.req_to_token_pool.mamba_allocator.free(src_active)
+   581	                else:
+   582	                    mamba_value_donated = self._commit_int8_checkpoint(
+   583	                        req.kv.mamba_pool_idx.view(-1)
+   584	                    )
+   585	            elif self.cache.enable_mamba_extra_buffer:
+   586	                new_slot = self._alloc_mamba_slot()
+   587	                mamba_value_donated = (
+   588	                    self.cache.req_to_token_pool.donate_mamba_ping_pong_slot(
+   589	                        req, new_slot
+   590	                    )
+   591	                )
+   592	            else:
+   593	                mamba_value_donated = self._alloc_mamba_slot()
+   594	                # mamba_pool is a pure PHYSICAL store; translate both slot ids
+   595	                # virtual->physical (identity for the non-unified memory pool) first.
+   596	                translate = self.cache.req_to_token_pool.translate_mamba_indices
+   597	                self.cache.req_to_token_pool.mamba_pool.copy_from(
+   598	                    translate(req.kv.mamba_pool_idx.unsqueeze(0)),
+   599	                    translate(mamba_value_donated),
+   600	                )
+   601	            insert_params.mamba_value = mamba_value_donated
+   602	            return cache_len
+   603	
+   604	    def cleanup_after_caching_req(
+   605	        self,
+   606	        req: Req,
+   607	        is_finished: bool,
+   608	        insert_result: Optional[InsertResult] = None,
+   609	        insert_params: Optional[InsertParams] = None,
+   610	    ) -> None:
+    70	        return self._do_alloc(need_size)
+    71	
+    72	    def _do_alloc(self, need_size: int) -> Optional[torch.Tensor]:
+    73	        if need_size > len(self.free_slots):
+    74	            return None
+    75	        select_index = self.free_slots[:need_size]
+    76	        self.free_slots = self.free_slots[need_size:]
+    77	        return select_index
+    78	
+    79	    def free(self, free_index: torch.Tensor):
+    80	        if free_index.numel() == 0:
+    81	            return
+    82	        self.free_slots = torch.cat((self.free_slots, free_index))
+    83	
+    84	    def clear(self):
+    85	        # Slot 0 is reserved as a dummy write target for padded tokens.
+    86	        self.free_slots = torch.arange(
+    87	            1, self.size + 1, dtype=torch.int64, device=self.device
+    88	        )

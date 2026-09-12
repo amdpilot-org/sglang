@@ -71,7 +71,7 @@ export const Qwen38MambaRatioCalculator = () => {
   // Derive the serving parameters from a flag list and evaluate the balance
   // formula, written as a per-request cost ratio:
   //
-  //   r = (S + D) x state_bytes / (L x kv_bytes_per_token)
+  //   variable r = S x state_bytes / (L x kv_bytes_per_token)
   //
   const derive = (flags, env) => {
     const flagArg = (name) => {
@@ -163,7 +163,18 @@ export const Qwen38MambaRatioCalculator = () => {
     const stateBytesPerSlot = 48 * (48 * 128 * 128 * ssmBytes + 10240 * 3 * 2);
     const kvBytesPerToken = 16 * 4 * 256 * 2 * kvBytes;
 
-    const ratio = ((slots + drafts) * stateBytesPerSlot) / (kvBytesPerToken * L);
+    const concurrency = Math.ceil(C);
+    // Invert kv_cache_configurator.py's joint solve exactly. It models plain-
+    // spec scratch as D/S slot-equivalents per usable slot, plus one padding
+    // row for both buffers. The allocator's CUDA conv-window deduplication can
+    // make physical scratch smaller, but substituting that geometry here does
+    // not invert the configurator and can floor K below the safe minimum.
+    const safeSlots = concurrency * slots + 1;
+    const modeledMambaBudgetBytes = stateBytesPerSlot * (
+      safeSlots * (1 + drafts / slots) + 1 + drafts
+    );
+    const kvBudgetBytes = concurrency * L * kvBytesPerToken;
+    const ratio = modeledMambaBudgetBytes / kvBudgetBytes;
     return { ratio, tp, kvDtype, ssmDtype, radixOff, strategy, slots, specOn,
              drafts, stateBytesPerSlot, kvBytesPerToken };
   };
@@ -184,9 +195,9 @@ export const Qwen38MambaRatioCalculator = () => {
   const baseValid = Number.isFinite(bs.ratio) && bs.ratio > 0 && L > 0 && bs.tp === 1;
   // The engine divides the state pool by S alone (kv_cache_configurator.py:
   // mamba_cap = max_mamba_cache_size // _calculate_mamba_ratio()) and sizes
-  // the speculative verify buffer separately from D, so the pin is C x S,
-  // not C x (S + D).
-  const pin = Math.ceil(C * slots);
+  // the speculative verify buffer separately from D. The pin is C x S plus
+  // one usable donation slot, not C x (S + D).
+  const pin = Math.ceil(C) * slots + 1;
   const pinValid = valid && Number.isFinite(pin) && pin > 0 && C > 0;
 
   const formatRatio = (value) => (Math.round(value * 100) / 100).toString();
@@ -315,7 +326,7 @@ export const Qwen38MambaRatioCalculator = () => {
             style={inputStyle}
           />
           <span style={{ color: colors.muted, fontSize: "11px", fontWeight: 400 }}>
-            Requests in flight — sizes the explicit pin, not the ratio
+            Requests in flight — sizes both the safe ratio and explicit pin
           </span>
         </label>
 
@@ -383,8 +394,9 @@ export const Qwen38MambaRatioCalculator = () => {
       <div style={{ color: colors.muted, fontSize: "11px" }}>
         state/slot {(stateBytesPerSlot / 1e6).toFixed(1)} MB · KV/token{" "}
         {(kvBytesPerToken / 1e3).toFixed(1)} KB · the ratio prices{" "}
-        {slots + drafts} state slots per request; the pin counts S = {slots},
-        so {targetConcurrency || "N"} concurrent requests pin{" "}
+        S = {slots} allocator slots per request; D = {drafts} uses separate
+        request-indexed scratch. The pin includes one usable stash margin, so{" "}
+        {targetConcurrency || "N"} concurrent requests pin{" "}
         {pinValid ? pin : "—"} slots.
       </div>
     </div>
