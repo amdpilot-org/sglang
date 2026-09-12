@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38975",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Removed the bf16 round-trip from sigmoid(beta) in the GDN packed-decode and shared linear ReplaySSM decode Triton kernels. Added GPU regressions that invoke the real GDN packed wrapper and the real KDA ReplaySSM wrapper (is_kda=true), compare fp32 recurrent state and bf16 output with an independent PyTorch fp32 recurrence, and cover 1, 32, and 256 repeated decode steps. The unchanged implementation failed all six cases; the corrected implementation passed all six without relaxed tolerances.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-771947ba3d6e/venv/bin/python -m pytest -q test/registered/kernels/test_fla_decode_beta_precision.py --junitxml=reports/j-771947ba3d6e/before.xml (run with the base implementation before applying the fix)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression on actual GDN packed decode and KDA ReplaySSM decode at 1, 32, and 256 steps. All six state comparisons against the independent fp32 recurrence failed; the one-step maximum absolute state error was 2.640560269355774e-4 and the 256-step maximum absolute state error was 1.2260675430297852e-3 for both isolated paths. Raw JUnit output: reports/j-771947ba3d6e/before.xml."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-771947ba3d6e/venv/bin/python -m pytest -q test/registered/kernels/test_fla_decode_beta_precision.py --junitxml=reports/j-771947ba3d6e/after.xml",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression on both actual affected kernels at 1, 32, and 256 steps: fp32 recurrent state matched the independent recurrence at rtol=2e-6/atol=2e-6, and bf16 outputs matched the independently computed and cast outputs exactly. Six tests passed. Raw JUnit output: reports/j-771947ba3d6e/after.xml."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-771947ba3d6e/venv/bin/python -m pytest -q test/registered/kernels/test_kda_replayssm_fold.py test/registered/kernels/test_kda_replayssm_ring_fused.py --junitxml=reports/j-771947ba3d6e/related.xml",
+      "exit_code": 0,
+      "what_was_measured": "Existing KDA ReplaySSM folding and fused ring-write GPU coverage remained passing: 22 tests passed. Raw JUnit output: reports/j-771947ba3d6e/related.xml."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validation."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-771947ba3d6e/venv/bin/python -m ruff check test/registered/kernels/test_fla_decode_beta_precision.py python/sglang/kernels/ops/attention/fla/fused_recurrent.py python/sglang/kernels/ops/attention/fla/fused_recurrent_linear_replayssm.py",
+      "exit_code": 1,
+      "what_was_measured": "Formatting/lint tool availability check; the prepared interpreter does not contain the ruff module, so this check could not run."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "All numerical regression and related tests ran on the assigned AMD Instinct MI350X (gfx950) through torch 2.11.0+rocm7.2; rocm-smi reported GPU unique ID 0x5e94f9cc641f4027."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": "Validation used the prepared ROCm MI350X environment rather than the reporter's NVIDIA A100. No FlyDSL C++ or other native source changed, and repository-environment.json provides no native rebuild target, so a native rebuild was not applicable. The focused KDA ReplaySSM regression forces each step to flush its length-one ring so the persistent checkpoint state is directly observable after every decode step; existing ring/fold tests separately cover buffered ReplaySSM operation. Ruff was not installed in the prepared interpreter; git diff --check and the executable tests passed."
+}
