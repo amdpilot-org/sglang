@@ -209,6 +209,44 @@ class SchedulerBatchResultProcessor:
                     elem = elem.copy()
                 req.customized_info[k].append(elem)
 
+    def _mark_full_nan_logits_reqs(
+        self,
+        batch: ScheduleBatch,
+        logits_output: Optional[LogitsProcessorOutput],
+    ) -> set[int]:
+        """Mark plain-sampling requests whose complete logits row was NaN."""
+        full_nan_rows = getattr(logits_output, "full_nan_rows", None)
+        if full_nan_rows is None:
+            return set()
+        assert batch.spec_algorithm.is_none(), (
+            "full-NaN request abort currently supports plain sampling only"
+        )
+        assert len(full_nan_rows) == len(batch.reqs), (
+            f"full_nan_rows has {len(full_nan_rows)} rows for "
+            f"{len(batch.reqs)} requests; expected one row per request"
+        )
+        aborted = set()
+        for i in full_nan_rows.nonzero().flatten().tolist():
+            req = batch.reqs[i]
+            if (
+                req.finished()
+                or req.is_retracted
+                or getattr(req, "inflight_middle_chunks", 0) > 0
+            ):
+                continue
+            req.skip_radix_cache_insert = True
+            req.to_finish = FINISH_ABORT(
+                "Transient numerical error (NaN logits); please retry.",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                "InternalServerError",
+            )
+            aborted.add(i)
+            logger.error(
+                "Aborting req %s: the model produced an all-NaN logits row",
+                req.rid,
+            )
+        return aborted
+
     @staticmethod
     def _visible_output_len(req: Req) -> int:
         return req.finished_len if req.finished_len is not None else len(req.output_ids)
@@ -295,6 +333,8 @@ class SchedulerBatchResultProcessor:
 
             self._validate_pp_skip_output_comm(batch, result)
 
+            full_nan_aborts = self._mark_full_nan_logits_reqs(batch, logits_output)
+
             hidden_state_offset = 0
             prefill_hidden_capture_mode = self._get_prefill_hidden_capture_mode(
                 batch,
@@ -344,7 +384,12 @@ class SchedulerBatchResultProcessor:
                 if req.inflight_middle_chunks <= 0:
                     req.time_stats.set_prefill_finished_time()
 
-                    if sampling_mask_finish_reason is not None:
+                    if i in full_nan_aborts:
+                        req.update_finish_state(0)
+                        release_kv_cache(req, self.tree_cache, is_insert=False)
+                        req.time_stats.set_completion_time()
+                        continue
+                    elif sampling_mask_finish_reason is not None:
                         req.to_finish = sampling_mask_finish_reason
                         req.update_finish_state(0)
                     elif req.beam_group is not None:
@@ -946,9 +991,12 @@ class SchedulerBatchResultProcessor:
             logits_output=logits_output,
             next_token_ids=next_token_ids,
         )
+        full_nan_aborts = self._mark_full_nan_logits_reqs(batch, logits_output)
 
         batch_size = batch.batch_size()
-        num_generated_tokens = result.get_num_generated_tokens(batch_size)
+        num_generated_tokens = result.get_num_generated_tokens(batch_size) - len(
+            full_nan_aborts
+        )
         self.metrics_reporter.num_generated_tokens += num_generated_tokens
         if not batch.spec_algorithm.is_none():
             self.metrics_reporter.update_spec_metrics(
@@ -973,6 +1021,12 @@ class SchedulerBatchResultProcessor:
 
         for i, req in enumerate(batch.reqs):
             req: Req
+
+            if i in full_nan_aborts:
+                req.time_stats.set_last_decode_finish_time()
+                req.update_finish_state(0)
+                self._handle_sampling_mask_abort(req)
+                continue
 
             if req.beam_group is not None:
                 # Under overlap a finished row reappears for one overshoot tick;

@@ -23,7 +23,7 @@ from sglang.srt.layers.logprob_processor import (
 from sglang.srt.runtime_context import get_exec, get_parallel, get_server_args
 from sglang.srt.sampling.sampling_batch_info import SamplingBatchInfo
 from sglang.srt.sampling.sampling_params import TOP_K_ALL
-from sglang.srt.utils.async_probe import sanitize_nan_logits
+from sglang.srt.utils.async_probe import detect_full_nan_rows, sanitize_nan_logits
 from sglang.srt.utils.common import (
     get_bool_env_var,
     is_cuda,
@@ -128,11 +128,15 @@ class Sampler(nn.Module):
         self.output_logprob_processor = OutputLogprobProcessor()
 
     def _preprocess_logits(
-        self, logits: torch.Tensor, sampling_info: SamplingBatchInfo
+        self,
+        logits: torch.Tensor,
+        sampling_info: SamplingBatchInfo,
+        logits_output: LogitsProcessorOutput,
     ) -> torch.Tensor:
         """Apply custom logit processors and sanitize non-finite logits."""
         if sampling_info.has_custom_logit_processor:
             apply_custom_logit_processor(logits, sampling_info)
+        logits_output.full_nan_rows = detect_full_nan_rows(logits)
         sanitize_nan_logits(logits, "sampler: next_token_logits")
         return logits
 
@@ -171,7 +175,7 @@ class Sampler(nn.Module):
 
         # Preprocess logits (custom processors and NaN handling)
         _trace_e2e_sampler("preprocess_enter")
-        logits = self._preprocess_logits(logits, sampling_info)
+        logits = self._preprocess_logits(logits, sampling_info, logits_output)
         _trace_e2e_sampler("preprocess_returned")
         sampling_mask_batch_indices = sampling_info.sampling_mask_batch_indices
         return_sampling_mask = sampling_mask_batch_indices is not None
