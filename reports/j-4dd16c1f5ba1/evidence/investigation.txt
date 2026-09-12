@@ -1,0 +1,40 @@
+Issue video metadata (decoded with OpenCV):
+{'path': '/tmp/amdpilot-repo-j-4dd16c1f5ba1/issue-36276.mp4', 'fps': 30.00000169971681, 'frames': 353, 'width': 1568, 'height': 842}
+Current GPU inventory:
+{'torch': '2.11.0+rocm7.2', 'hip': '7.2.26015', 'available': True, 'count': 1}
+{'name': 'AMD Instinct MI350X', 'arch': 'gfx950:sramecc+:xnack-'}
+Historical fix commit:
+sgl-project/sglang#19411 merged as bdc1e46e5ac93dd7ee2d53e5d8c2d3de7dc03f69 on 2026-02-26.
+It added is_last_layer=(layer_id == config.num_hidden_layers - 1) to both
+Qwen3_5LinearDecoderLayer and Qwen3_5AttentionDecoderLayer after demonstrating
+repetitive output from an un-reduced final-layer MLP contribution under TP.
+Current post-report boundary fallback:
+git show 5f216fc3^:python/sglang/srt/models/qwen3_5.py contains both is_last_layer
+assignments but no "last layer has no prepare_attn consumer" fallback.
+git show 5f216fc3:python/sglang/srt/models/qwen3_5.py contains that fallback in
+both decoder paths. Commit 5f216fc33f315ade378bc7cd295ee88f5322d4d3 was
+merged after the issue was updated, as part of sgl-project/sglang#35758.
+Current last-layer safeguards:
+1004-            input_layernorm=self.input_layernorm,
+1005-            post_attention_layernorm=self.post_attention_layernorm,
+1006-            allow_reduce_scatter=True,
+1007:            is_last_layer=(layer_id == config.num_hidden_layers - 1),
+1008-            enable_fused_ar_quant=enable_fused_ar_quant,
+1009-            fused_ar_quant_keep_bf16=enable_fused_ar_quant,
+1010-        )
+--
+1064-            and self.layer_communicator.is_last_layer
+1065-            and not defer_moe_finalize
+1066-        ):
+1067:            # The last layer has no prepare_attn consumer for deferred AllReduce;
+1068-            # fall back before MLP so postprocess_layer performs the collective.
+1069-            fuse_mlp_allreduce = False
+1070-        with get_forward().scoped(
+--
+1246-            input_layernorm=self.input_layernorm,
+1247-            post_attention_layernorm=self.post_attention_layernorm,
+1248-            allow_reduce_scatter=True,
+1249:            is_last_layer=(layer_id == config.num_hidden_layers - 1),
+1250-            enable_fused_ar_quant=enable_fused_ar_quant,
+1251-            fused_ar_quant_keep_bf16=False,
+1252-        )
