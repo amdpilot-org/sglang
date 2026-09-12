@@ -1,0 +1,30 @@
+Upstream issue: https://github.com/sgl-project/sglang/issues/1715
+
+Mirror issue: https://github.com/amdpilot-org/sglang/issues/3194
+
+Candidate parent: https://github.com/amdpilot-org/sglang/pull/3146 at `8f1eaa1011c775914123ce8ee3021e2eb2b82982`
+
+Independent review parent: https://github.com/amdpilot-org/sglang/pull/3192
+
+## What changed
+
+- Preserved the candidate's valid eager shared-prefix cascade decode implementation, including physical-prefix detection, split page-table planning, layer scaling, and stable state merge.
+- Added an NVIDIA-CUDA-only numerical integration regression that calls the real `BatchPrefillWithPagedKVCacheWrapper.forward_return_lse` paths and production merge kernel, checked against an independent PyTorch attention reference.
+- Corrected the exact candidate's `git diff --check` failure and retained failing-before/passing-after and environment evidence under `reports/j-fa6c77e67ff6/`.
+
+## Reproduce
+
+```bash
+HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python \
+  /tmp/amdpilot-repo-j-fa6c77e67ff6/venv/bin/python -m pytest -q \
+  test/registered/unit/test_flashinfer_cascade_attention.py
+
+git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..HEAD
+```
+
+On the recorded base the regression fails (`11 failed, 2 passed, 1 skipped`) because the cascade path is absent. After this change it reports `6 passed, 1 skipped, 7 subtests passed`. The portable float64 reference ran on the assigned AMD MI355X GPU. The skipped test is specifically the real FlashInfer integration test.
+
+## Remaining limitations
+
+This is an honest partial eager-path contribution, not evidence of complete feature integration. CUDA-graph replay, sliding-window attention, encoder-decoder cross attention, speculative decode, and dequant-workspace KV cache configurations still use ordinary decode. The prepared node is AMD ROCm and the pinned interpreter has no `flashinfer`, so real NVIDIA kernel execution, wrapper/cache-layout compatibility, and end-to-end serving performance remain unverified. The qualified tiny Llama fixture cannot exercise FlashInfer on this architecture and was not used as unrelated proof. No native source changed, so no native rebuild was applicable.
+

@@ -1,0 +1,621 @@
+diff --git a/python/sglang/srt/layers/attention/flashinfer_backend.py b/python/sglang/srt/layers/attention/flashinfer_backend.py
+index 140a571..fe6392f 100644
+--- a/python/sglang/srt/layers/attention/flashinfer_backend.py
++++ b/python/sglang/srt/layers/attention/flashinfer_backend.py
+@@ -150,6 +150,11 @@ class DecodeMetadata:
+     decode_wrappers: List[BatchDecodeWithPagedKVCacheWrapper]
+     # full->SWA translated out_cache_loc (SWA KV-store write target)
+     swa_out_cache_loc: Optional[torch.Tensor] = None
++    cascade_wrappers: Optional[List[BatchPrefillWithPagedKVCacheWrapper]] = None
++
++    @property
++    def use_cascade(self) -> bool:
++        return self.cascade_wrappers is not None
+ 
+ 
+ @dataclass
+@@ -174,6 +179,39 @@ FULL_CG_PREFILL_WORKSPACE_MARGIN = 1.25
+ global_override_indptr_cpu = None
+ 
+ 
++CASCADE_MIN_BATCH_SIZE = 4
++CASCADE_MIN_PREFIX_LEN = 512
++CASCADE_HIGH_PREFIX_RATIO = 0.8
++CASCADE_MIN_PREFIX_RATIO = 0.5
++CASCADE_MIN_BATCH_SIZE_FOR_PARTIAL_PREFIX = 16
++
++
++def should_use_cascade_attention(
++    batch_size: int, common_prefix_len: int, average_seq_len: int
++) -> bool:
++    """Return whether shared-prefix cascade decode is likely profitable."""
++    if batch_size < CASCADE_MIN_BATCH_SIZE:
++        return False
++    if common_prefix_len < CASCADE_MIN_PREFIX_LEN or average_seq_len <= 0:
++        return False
++    common_ratio = common_prefix_len / average_seq_len
++    if common_ratio < CASCADE_MIN_PREFIX_RATIO:
++        return False
++    return not (
++        common_ratio < CASCADE_HIGH_PREFIX_RATIO
++        and batch_size < CASCADE_MIN_BATCH_SIZE_FOR_PARTIAL_PREFIX
++    )
++
++
++def common_prefix_length(rows: torch.Tensor) -> int:
++    """Length of the identical leading run across a two-dimensional tensor."""
++    if rows.ndim != 2:
++        raise ValueError(f"Expected a 2-D token table, got shape {tuple(rows.shape)}")
++    if rows.shape[0] == 0 or rows.shape[1] == 0:
++        return 0
++    return int(torch.cumprod(torch.all(rows == rows[:1], dim=0), dim=0).sum().item())
++
++
+ def fast_prefill_plan(
+     self,
+     qo_indptr: torch.Tensor,
+@@ -510,12 +548,29 @@ class FlashInferAttnBackend(AttentionBackend):
+                 )
+             )
+ 
++        # Cascade decode is intentionally eager-only for now. A CUDA graph records
++        # one Python control-flow branch, while the common-prefix length and even
++        # whether a batch has a common prefix can change on every replay.
++        self.cascade_wrappers = None
++        if self.dispatch_reason is None and not self.decode_uses_dequant_workspace:
++            self.cascade_wrappers = [
++                BatchPrefillWithPagedKVCacheWrapper(
++                    self.workspace_buffer,
++                    "NHD",
++                    backend=self.prefill_backend,
++                )
++                for _ in range(2)
++            ]
++
+         # Create indices updater
+         if not skip_prefill:
+             self.indices_updater_prefill = FlashInferIndicesUpdaterPrefill(
+                 model_runner, self
+             )  # for verify
+         self.indices_updater_decode = FlashInferIndicesUpdaterDecode(model_runner, self)
++        self.indices_updater_cascade_decode = FlashInferIndicesUpdaterCascadeDecode(
++            model_runner, self
++        )
+ 
+         # Other metadata
+         self.forward_metadata: Union[PrefillMetadata, DecodeMetadata] = None
+@@ -943,20 +998,57 @@ class FlashInferAttnBackend(AttentionBackend):
+             )
+ 
+         if forward_batch.forward_mode.is_decode_or_idle():
+-            self.indices_updater_decode.update(
+-                forward_batch.seq_lens,
+-                forward_batch.seq_lens_cpu,
+-                forward_batch.seq_lens_sum,
+-                decode_wrappers=self.decode_wrappers,
+-                encoder_lens=forward_batch.encoder_lens,
+-                spec_info=forward_batch.spec_info,
+-                fixed_split_size=self.decode_split_tile_size,
+-                disable_split_kv=False,
+-                req_pool_indices=forward_batch.req_pool_indices,
+-            )
+-            self.forward_metadata = DecodeMetadata(
+-                self.decode_wrappers, swa_out_cache_loc=swa_out_cache_loc
+-            )
++            common_prefix_len = 0
++            use_cascade = False
++            if (
++                forward_batch.forward_mode.is_decode()
++                and forward_batch.spec_info is None
++                and self.cascade_wrappers is not None
++                and forward_batch.batch_size >= CASCADE_MIN_BATCH_SIZE
++            ):
++                seq_lens_cpu = forward_batch.seq_lens_cpu
++                min_seq_len = int(
++                    min(seq_lens_cpu)
++                    if seq_lens_cpu is not None
++                    else forward_batch.seq_lens.min().item()
++                )
++                request_tokens = self.req_to_token_pool.req_to_token[
++                    forward_batch.req_pool_indices, :min_seq_len
++                ]
++                common_prefix_len = common_prefix_length(request_tokens)
++                average_seq_len = forward_batch.seq_lens_sum // forward_batch.batch_size
++                use_cascade = should_use_cascade_attention(
++                    forward_batch.batch_size, common_prefix_len, average_seq_len
++                )
++
++            if use_cascade:
++                self.indices_updater_cascade_decode.update(
++                    forward_batch.req_pool_indices,
++                    forward_batch.seq_lens,
++                    forward_batch.seq_lens_cpu,
++                    common_prefix_len,
++                    self.cascade_wrappers,
++                )
++                self.forward_metadata = DecodeMetadata(
++                    self.decode_wrappers,
++                    cascade_wrappers=self.cascade_wrappers,
++                    swa_out_cache_loc=swa_out_cache_loc,
++                )
++            else:
++                self.indices_updater_decode.update(
++                    forward_batch.seq_lens,
++                    forward_batch.seq_lens_cpu,
++                    forward_batch.seq_lens_sum,
++                    decode_wrappers=self.decode_wrappers,
++                    encoder_lens=forward_batch.encoder_lens,
++                    spec_info=forward_batch.spec_info,
++                    fixed_split_size=self.decode_split_tile_size,
++                    disable_split_kv=False,
++                    req_pool_indices=forward_batch.req_pool_indices,
++                )
++                self.forward_metadata = DecodeMetadata(
++                    self.decode_wrappers, swa_out_cache_loc=swa_out_cache_loc
++                )
+         elif forward_batch.forward_mode.is_target_verify():
+             self.indices_updater_prefill.update(
+                 forward_batch.req_pool_indices,
+@@ -1493,16 +1585,33 @@ class FlashInferAttnBackend(AttentionBackend):
+         else:
+             kv_cache = self.token_to_kv_pool.get_kv_buffer(layer.layer_id)
+ 
+-        # Call the wrapped function
+-        o = decode_wrapper.forward(
+-            q.contiguous().view(-1, layer.tp_q_head_num, layer.head_dim),
+-            kv_cache,
+-            sm_scale=layer.scaling,
+-            logits_soft_cap=layer.logit_cap,
+-            # Must use _float to avoid device-to-host copy that breaks cuda graph capture.
+-            k_scale=layer.k_scale_float,
+-            v_scale=layer.v_scale_float,
+-        )
++        q = q.contiguous().view(-1, layer.tp_q_head_num, layer.head_dim)
++        if self.forward_metadata.use_cascade:
++            shared_wrapper, unique_wrapper = self.forward_metadata.cascade_wrappers
++            common_kwargs = dict(
++                causal=False,
++                sm_scale=layer.scaling,
++                logits_soft_cap=layer.logit_cap,
++                k_scale=layer.k_scale_float,
++                v_scale=layer.v_scale_float,
++            )
++            shared_o, shared_lse = shared_wrapper.forward_return_lse(
++                q, kv_cache, **common_kwargs
++            )
++            unique_o, unique_lse = unique_wrapper.forward_return_lse(
++                q, kv_cache, **common_kwargs
++            )
++            o, _ = _safe_merge_state(shared_o, shared_lse, unique_o, unique_lse)
++        else:
++            o = decode_wrapper.forward(
++                q,
++                kv_cache,
++                sm_scale=layer.scaling,
++                logits_soft_cap=layer.logit_cap,
++                # Must use _float to avoid device-to-host copy that breaks cuda graph capture.
++                k_scale=layer.k_scale_float,
++                v_scale=layer.v_scale_float,
++            )
+ 
+         return o.view(-1, layer.tp_q_head_num * layer.head_dim)
+ 
+@@ -1518,6 +1627,102 @@ class FlashInferAttnBackend(AttentionBackend):
+         raise ValueError(f"Unknown dispatch reason: {self.dispatch_reason}")
+ 
+ 
++class FlashInferIndicesUpdaterCascadeDecode:
++    """Build the two page tables used by shared-prefix cascade decode."""
++
++    def __init__(self, model_runner: ModelRunner, attn_backend: FlashInferAttnBackend):
++        self.num_qo_heads = (
++            model_runner.model_config.get_max_num_attention_heads()
++            // get_parallel().attn_tp_size
++        )
++        self.num_kv_heads = model_runner.model_config.get_num_kv_heads(
++            get_parallel().attn_tp_size, get_parallel().attn_dcp_size
++        )
++        self.head_dim = model_runner.model_config.head_dim
++        self.data_type = attn_backend.flashinfer_kv_cache_dtype
++        self.q_data_type = model_runner.dtype
++        self.attn_backend = attn_backend
++
++    def update(
++        self,
++        req_pool_indices: torch.Tensor,
++        seq_lens: torch.Tensor,
++        seq_lens_cpu: Optional[torch.Tensor],
++        common_prefix_len: int,
++        wrappers: List[BatchPrefillWithPagedKVCacheWrapper],
++    ) -> None:
++        bs = len(seq_lens)
++        device = req_pool_indices.device
++        suffix_lens = seq_lens - common_prefix_len
++        if seq_lens_cpu is None:
++            suffix_total = int(suffix_lens.sum().item())
++        elif isinstance(seq_lens_cpu, torch.Tensor):
++            suffix_total = int(seq_lens_cpu.sum()) - common_prefix_len * bs
++        else:
++            suffix_total = sum(seq_lens_cpu) - common_prefix_len * bs
++
++        shared_qo_indptr = torch.tensor([0, bs], dtype=torch.int32, device=device)
++        shared_kv_indptr = torch.tensor(
++            [0, common_prefix_len], dtype=torch.int32, device=device
++        )
++        shared_indices = torch.empty(
++            common_prefix_len, dtype=torch.int32, device=device
++        )
++        self.attn_backend.kv_index_translator.fill_packed_read_stream(
++            req_pool_indices=req_pool_indices[:1],
++            seq_lens=seq_lens.new_tensor([common_prefix_len]),
++            indptr=shared_kv_indptr,
++            total_tokens=common_prefix_len,
++            out=shared_indices,
++            kv_start_idx=None,
++            sliding_window=False,
++        )
++
++        unique_qo_indptr = torch.arange(bs + 1, dtype=torch.int32, device=device)
++        unique_kv_indptr = torch.zeros(bs + 1, dtype=torch.int32, device=device)
++        unique_kv_indptr[1:] = torch.cumsum(suffix_lens, dim=0)
++        unique_indices = torch.empty(suffix_total, dtype=torch.int32, device=device)
++        self.attn_backend.kv_index_translator.fill_packed_read_stream(
++            req_pool_indices=req_pool_indices,
++            seq_lens=suffix_lens,
++            indptr=unique_kv_indptr,
++            total_tokens=suffix_total,
++            out=unique_indices,
++            kv_start_idx=torch.full_like(seq_lens, common_prefix_len),
++            sliding_window=False,
++        )
++
++        for wrapper, qo_indptr, kv_indptr, indices, count in (
++            (
++                wrappers[0],
++                shared_qo_indptr,
++                shared_kv_indptr,
++                shared_indices,
++                1,
++            ),
++            (
++                wrappers[1],
++                unique_qo_indptr,
++                unique_kv_indptr,
++                unique_indices,
++                bs,
++            ),
++        ):
++            wrapper.begin_forward(
++                qo_indptr,
++                kv_indptr,
++                indices,
++                torch.ones(count, dtype=torch.int32, device=device),
++                self.num_qo_heads,
++                self.num_kv_heads,
++                self.head_dim,
++                1,
++                q_data_type=self.q_data_type,
++                kv_data_type=self.data_type,
++                non_blocking=True,
++            )
++
++
+ class FlashInferIndicesUpdaterDecode:
+     def __init__(self, model_runner: ModelRunner, attn_backend: FlashInferAttnBackend):
+         # Parse Constants
+diff --git a/test/registered/unit/test_flashinfer_cascade_attention.py b/test/registered/unit/test_flashinfer_cascade_attention.py
+new file mode 100644
+index 0000000..3d1b82c
+--- /dev/null
++++ b/test/registered/unit/test_flashinfer_cascade_attention.py
+@@ -0,0 +1,310 @@
++import math
++import types
++import unittest
++from unittest.mock import Mock, patch
++
++import torch
++
++from sglang.srt.layers.attention import flashinfer_backend as backend
++
++
++class TestCascadeSelection(unittest.TestCase):
++    def test_common_prefix_stops_at_first_mismatch(self):
++        rows = torch.tensor(
++            [[10, 11, 12, 13, 14], [10, 11, 99, 13, 14], [10, 11, 12, 13, 14]]
++        )
++        self.assertEqual(backend.common_prefix_length(rows), 2)
++
++    def test_common_prefix_rejects_non_matrix(self):
++        with self.assertRaisesRegex(ValueError, "2-D token table"):
++            backend.common_prefix_length(torch.tensor([1, 2, 3]))
++
++    def test_profitability_boundaries(self):
++        cases = [
++            ((3, 900, 1000), False),
++            ((4, 511, 600), False),
++            ((4, 512, 1025), False),
++            ((4, 800, 1000), True),
++            ((15, 600, 1000), False),
++            ((16, 600, 1000), True),
++            ((32, 512, 0), False),
++        ]
++        for args, expected in cases:
++            with self.subTest(args=args):
++                self.assertEqual(backend.should_use_cascade_attention(*args), expected)
++
++
++class TestCascadeForward(unittest.TestCase):
++    def test_index_updater_splits_shared_and_unique_page_tables(self):
++        token_table = torch.tensor(
++            [
++                [10, 11, 12, 20, 21, 22],
++                [10, 11, 12, 30, 31, 32],
++                [10, 11, 12, 40, 41, 42],
++                [10, 11, 12, 50, 51, 52],
++            ],
++            dtype=torch.int32,
++        )
++
++        class Translator:
++            def fill_packed_read_stream(
++                self,
++                *,
++                req_pool_indices,
++                seq_lens,
++                indptr,
++                total_tokens,
++                out,
++                kv_start_idx,
++                sliding_window,
++            ):
++                self.assertFalse(sliding_window)
++                offset = 0
++                for request_idx, (row, length) in enumerate(
++                    zip(req_pool_indices.tolist(), seq_lens.tolist())
++                ):
++                    start = (
++                        0 if kv_start_idx is None else int(kv_start_idx[request_idx])
++                    )
++                    out[offset : offset + length] = token_table[
++                        row, start : start + length
++                    ]
++                    offset += length
++
++            assertFalse = staticmethod(unittest.TestCase().assertFalse)
++
++        updater = backend.FlashInferIndicesUpdaterCascadeDecode.__new__(
++            backend.FlashInferIndicesUpdaterCascadeDecode
++        )
++        updater.num_qo_heads = 8
++        updater.num_kv_heads = 2
++        updater.head_dim = 64
++        updater.data_type = torch.float16
++        updater.q_data_type = torch.float16
++        updater.attn_backend = types.SimpleNamespace(
++            kv_index_translator=Translator()
++        )
++        wrappers = [Mock(), Mock()]
++        updater.update(
++            torch.arange(4, dtype=torch.int32),
++            torch.tensor([6, 5, 6, 4], dtype=torch.int32),
++            torch.tensor([6, 5, 6, 4], dtype=torch.int32),
++            3,
++            wrappers,
++        )
++
++        shared_args = wrappers[0].begin_forward.call_args.args
++        unique_args = wrappers[1].begin_forward.call_args.args
++        torch.testing.assert_close(
++            shared_args[0], torch.tensor([0, 4], dtype=torch.int32)
++        )
++        torch.testing.assert_close(
++            shared_args[1], torch.tensor([0, 3], dtype=torch.int32)
++        )
++        torch.testing.assert_close(
++            shared_args[2], torch.tensor([10, 11, 12], dtype=torch.int32)
++        )
++        torch.testing.assert_close(
++            unique_args[0], torch.tensor([0, 1, 2, 3, 4], dtype=torch.int32)
++        )
++        torch.testing.assert_close(
++            unique_args[1], torch.tensor([0, 3, 5, 8, 9], dtype=torch.int32)
++        )
++        torch.testing.assert_close(
++            unique_args[2],
++            torch.tensor([20, 21, 22, 30, 31, 40, 41, 42, 50], dtype=torch.int32),
++        )
++
++    def test_forwards_layer_scales_and_merges_states(self):
++        shared = Mock()
++        unique = Mock()
++        shared.forward_return_lse.return_value = (
++            torch.full((2, 3, 4), 1.0),
++            torch.full((2, 3), 2.0),
++        )
++        unique.forward_return_lse.return_value = (
++            torch.full((2, 3, 4), 3.0),
++            torch.full((2, 3), 4.0),
++        )
++        attn = backend.FlashInferAttnBackend.__new__(backend.FlashInferAttnBackend)
++        attn.forward_metadata = backend.DecodeMetadata(
++            decode_wrappers=[Mock()], cascade_wrappers=[shared, unique]
++        )
++        attn.num_wrappers = 1
++        attn.decode_uses_dequant_workspace = False
++        attn.token_to_kv_pool = types.SimpleNamespace(
++            get_kv_buffer=Mock(return_value="kv-cache")
++        )
++        layer = types.SimpleNamespace(
++            is_cross_attention=False,
++            tp_q_head_num=3,
++            head_dim=4,
++            layer_id=7,
++            scaling=0.125,
++            logit_cap=30.0,
++            k_scale_float=0.5,
++            v_scale_float=0.25,
++        )
++        batch = types.SimpleNamespace(out_cache_loc=None, encoder_out_cache_loc=None)
++        merged = torch.full((2, 3, 4), 7.0)
++
++        with patch.object(
++            backend, "_safe_merge_state", return_value=(merged, None), create=True
++        ):
++            output = attn.forward_decode(
++                torch.zeros(2, 12), None, None, layer, batch, save_kv_cache=False
++            )
++
++        self.assertTrue(torch.equal(output, merged.view(2, 12)))
++        expected_kwargs = dict(
++            causal=False,
++            sm_scale=0.125,
++            logits_soft_cap=30.0,
++            k_scale=0.5,
++            v_scale=0.25,
++        )
++        shared.forward_return_lse.assert_called_once_with(
++            unittest.mock.ANY, "kv-cache", **expected_kwargs
++        )
++        unique.forward_return_lse.assert_called_once_with(
++            unittest.mock.ANY, "kv-cache", **expected_kwargs
++        )
++
++
++@unittest.skipUnless(torch.cuda.is_available(), "requires a GPU")
++class TestCascadeNumerics(unittest.TestCase):
++    def test_split_softmax_matches_independent_full_attention(self):
++        torch.manual_seed(17)
++        device = "cuda"
++        batch, heads, dim = 5, 4, 32
++        shared_len, unique_len = 23, 11
++        q = torch.randn(batch, heads, dim, device=device, dtype=torch.float64)
++        shared_k = torch.randn(
++            shared_len, heads, dim, device=device, dtype=torch.float64
++        )
++        shared_v = torch.randn(
++            shared_len, heads, dim, device=device, dtype=torch.float64
++        )
++        unique_k = torch.randn(
++            batch, unique_len, heads, dim, device=device, dtype=torch.float64
++        )
++        unique_v = torch.randn_like(unique_k)
++        scale = 1 / math.sqrt(dim)
++
++        def attention(k, v):
++            scores = torch.einsum("bhd,bthd->bht", q, k) * scale
++            lse = torch.logsumexp(scores, dim=-1)
++            out = torch.einsum("bht,bthd->bhd", scores.softmax(dim=-1), v)
++            return out, lse
++
++        expanded_shared_k = shared_k.unsqueeze(0).expand(batch, -1, -1, -1)
++        expanded_shared_v = shared_v.unsqueeze(0).expand(batch, -1, -1, -1)
++        shared_out, shared_lse = attention(expanded_shared_k, expanded_shared_v)
++        unique_out, unique_lse = attention(unique_k, unique_v)
++        normalizer = torch.logaddexp(shared_lse, unique_lse)
++        cascade_out = (
++            shared_out * torch.exp(shared_lse - normalizer).unsqueeze(-1)
++            + unique_out * torch.exp(unique_lse - normalizer).unsqueeze(-1)
++        )
++
++        full_out, _ = attention(
++            torch.cat((expanded_shared_k, unique_k), dim=1),
++            torch.cat((expanded_shared_v, unique_v), dim=1),
++        )
++        torch.testing.assert_close(cascade_out, full_out, rtol=1e-12, atol=1e-12)
++
++
++@unittest.skipUnless(
++    backend.is_flashinfer_available()
++    and torch.cuda.is_available()
++    and torch.version.cuda is not None,
++    "requires FlashInfer on an NVIDIA CUDA GPU",
++)
++class TestCascadeFlashInferIntegration(unittest.TestCase):
++    def test_real_wrappers_and_merge_match_monolithic_attention(self):
++        """Exercise the exact wrappers and merge kernel used by the backend.
++
++        This is intentionally separate from the portable split-softmax identity test:
++        it validates FlashInfer's page-table interpretation, forward_return_lse output,
++        and merge_state kernel whenever the test runs in the supported CUDA environment.
++        """
++        from flashinfer import BatchPrefillWithPagedKVCacheWrapper
++
++        torch.manual_seed(23)
++        device = "cuda"
++        batch, num_heads, head_dim = 4, 4, 64
++        shared_len, unique_len = 17, 5
++        workspace = torch.empty(32 * 1024 * 1024, dtype=torch.uint8, device=device)
++
++        q = torch.randn(
++            batch, num_heads, head_dim, dtype=torch.float16, device=device
++        )
++        shared_kv = torch.randn(
++            shared_len, 2, 1, num_heads, head_dim,
++            dtype=torch.float16,
++            device=device,
++        )
++        unique_kv = torch.randn(
++            batch, unique_len, 2, 1, num_heads, head_dim,
++            dtype=torch.float16,
++            device=device,
++        )
++        kv_cache = torch.cat((shared_kv, unique_kv.flatten(0, 1)), dim=0)
++
++        def run_wrapper(qo_indptr, kv_indptr, indices):
++            wrapper = BatchPrefillWithPagedKVCacheWrapper(workspace, "NHD")
++            wrapper.begin_forward(
++                qo_indptr,
++                kv_indptr,
++                indices,
++                torch.ones(len(kv_indptr) - 1, dtype=torch.int32, device=device),
++                num_heads,
++                num_heads,
++                head_dim,
++                1,
++                q_data_type=q.dtype,
++                kv_data_type=kv_cache.dtype,
++            )
++            return wrapper.forward_return_lse(q, kv_cache, causal=False)
++
++        shared_o, shared_lse = run_wrapper(
++            torch.tensor([0, batch], dtype=torch.int32, device=device),
++            torch.tensor([0, shared_len], dtype=torch.int32, device=device),
++            torch.arange(shared_len, dtype=torch.int32, device=device),
++        )
++        unique_indices = torch.arange(
++            shared_len, shared_len + batch * unique_len,
++            dtype=torch.int32,
++            device=device,
++        )
++        unique_o, unique_lse = run_wrapper(
++            torch.arange(batch + 1, dtype=torch.int32, device=device),
++            torch.arange(
++                0,
++                (batch + 1) * unique_len,
++                unique_len,
++                dtype=torch.int32,
++                device=device,
++            ),
++            unique_indices,
++        )
++        cascade_o, _ = backend._safe_merge_state(
++            shared_o, shared_lse, unique_o, unique_lse
++        )
++
++        reference = []
++        scale = 1 / math.sqrt(head_dim)
++        for request_idx in range(batch):
++            pages = torch.cat((shared_kv, unique_kv[request_idx]), dim=0)
++            keys = pages[:, 0, 0].float()
++            values = pages[:, 1, 0].float()
++            scores = torch.einsum("hd,thd->ht", q[request_idx].float(), keys) * scale
++            reference.append(torch.einsum("ht,thd->hd", scores.softmax(-1), values))
++
++        torch.testing.assert_close(
++            cascade_o.float(), torch.stack(reference), rtol=2e-2, atol=2e-2
++        )
++
++
++if __name__ == "__main__":
++    unittest.main()
