@@ -8,6 +8,7 @@ from sglang.srt.entrypoints.openai.protocol import (
     ChatCompletionRequest,
     CompletionRequest,
     LogProbs,
+    RequestMetrics,
     SpecTokensDetails,
     StreamOptions,
 )
@@ -200,6 +201,23 @@ def process_spec_tokens_details_from_ret(
     if not getattr(request, "return_spec_tokens_details", False):
         return None
     return spec_tokens_details_from_meta_info(ret_item["meta_info"])
+
+
+def process_request_metrics_from_ret(
+    ret_item: Dict[str, Any],
+    request: Union[ChatCompletionRequest, CompletionRequest],
+) -> Optional[RequestMetrics]:
+    """Return only timings that were positively measured for this request."""
+    if not request.return_request_metrics:
+        return None
+
+    meta_info = ret_item["meta_info"]
+    values = {
+        name: meta_info.get(name)
+        for name in RequestMetrics.model_fields
+        if isinstance(meta_info.get(name), (int, float)) and meta_info[name] > 0
+    }
+    return RequestMetrics(**values) if values else None
 
 
 def convert_embeds_to_tensors(

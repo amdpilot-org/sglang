@@ -25,6 +25,7 @@ from sglang.srt.entrypoints.openai.utils import (
     process_hidden_states_for_response,
     process_hidden_states_from_ret,
     process_routed_experts_from_ret,
+    process_request_metrics_from_ret,
     process_spec_tokens_details_from_ret,
     should_include_usage,
     spec_tokens_details_from_meta_info,
@@ -120,6 +121,7 @@ class OpenAIServingCompletion(OpenAIServingBase):
             logprob_start_len=logprob_start_len,
             return_text_in_logprobs=True,
             stream=request.stream,
+            return_request_metrics=request.return_request_metrics,
             lora_path=lora_path,
             bootstrap_host=request.bootstrap_host,
             bootstrap_port=request.bootstrap_port,
@@ -242,6 +244,7 @@ class OpenAIServingCompletion(OpenAIServingBase):
         routed_experts = {}
         cached_tokens_details = {}
         spec_tokens_details = {}
+        request_metrics = {}
 
         stream_started = False
         try:
@@ -272,6 +275,10 @@ class OpenAIServingCompletion(OpenAIServingBase):
                 if request.return_spec_tokens_details:
                     spec_tokens_details[index] = spec_tokens_details_from_meta_info(
                         content["meta_info"]
+                    )
+                if request.return_request_metrics:
+                    request_metrics[index] = process_request_metrics_from_ret(
+                        content, request
                     )
 
                 is_first_chunk = index not in stream_offsets
@@ -446,12 +453,25 @@ class OpenAIServingCompletion(OpenAIServingBase):
                         spec_details if request.n > 1 else spec_details[0]
                     )
 
+            sglext_request_metrics = None
+            if request.return_request_metrics and request_metrics:
+                metrics = [
+                    request_metrics[index]
+                    for index in sorted(request_metrics)
+                    if request_metrics[index] is not None
+                ]
+                if metrics:
+                    sglext_request_metrics = (
+                        metrics if len(request_metrics) > 1 else metrics[0]
+                    )
+
             if any(
                 obj is not None
                 for obj in [
                     sglext_routed,
                     sglext_cached_tokens_details,
                     sglext_spec_tokens_details,
+                    sglext_request_metrics,
                 ]
             ):
                 sglext_chunk = CompletionStreamResponse(
@@ -464,6 +484,7 @@ class OpenAIServingCompletion(OpenAIServingBase):
                         routed_experts=sglext_routed,
                         cached_tokens_details=sglext_cached_tokens_details,
                         spec_tokens_details=sglext_spec_tokens_details,
+                        request_metrics=sglext_request_metrics,
                     ),
                 )
                 yield f"data: {sglext_chunk.model_dump_json()}\n\n"
@@ -556,12 +577,28 @@ class OpenAIServingCompletion(OpenAIServingBase):
             if request.n > 1
             else (spec_details[0] if spec_details else None)
         )
+        metrics = [
+            metric
+            for metric in (
+                process_request_metrics_from_ret(item, request) for item in ret
+            )
+            if metric is not None
+        ]
+        request_metrics = (
+            metrics if len(ret) > 1 else (metrics[0] if metrics else None)
+        )
         response_sglext = None
-        if routed_experts or cached_tokens_details or spec_tokens_details:
+        if (
+            routed_experts
+            or cached_tokens_details
+            or spec_tokens_details
+            or request_metrics
+        ):
             response_sglext = SglExt(
                 routed_experts=routed_experts,
                 cached_tokens_details=cached_tokens_details,
                 spec_tokens_details=spec_tokens_details,
+                request_metrics=request_metrics,
             )
 
         for idx, ret_item in enumerate(ret):

@@ -2272,7 +2272,9 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                 "num_retractions": recv_obj.retraction_counts[i],
             }
 
-            if self.enable_metrics:
+            if self.enable_metrics or getattr(
+                state.obj, "return_request_metrics", False
+            ):
                 if recv_obj.time_stats is not None:
                     scheduler_time_stats = recv_obj.time_stats[i]
                     meta_info.update(scheduler_time_stats.convert_to_output_meta_info())
@@ -2504,7 +2506,9 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
 
                 if get_spec().speculative_algorithm:
                     self._calculate_spec_decoding_metrics(meta_info, recv_obj, i)
-                if self.enable_metrics:
+                if self.enable_metrics or getattr(
+                    state.obj, "return_request_metrics", False
+                ):
                     scheduler_time_stats = (
                         recv_obj.time_stats[i]
                         if recv_obj.time_stats is not None
@@ -3499,6 +3503,9 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
             if rid in self.rid_to_state:
                 raise ValueError(f"Duplicate request ID detected: {rid}")
             time_stats = APIServerReqTimeStats(disagg_mode=self.disaggregation_mode)
+            time_stats.has_timing_data = getattr(
+                sub_obj, "return_request_metrics", False
+            )
             state = ReqState([], False, asyncio.Event(), sub_obj, time_stats)
             self.rid_to_state[rid] = state
             if self.enable_trace:
