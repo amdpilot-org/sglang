@@ -7,6 +7,7 @@ import textwrap
 import pytest
 import torch
 
+from sglang.srt.environ import envs
 from sglang.srt.speculative.spec_tp_sync import SpecTpSync, SpecTpSyncSite
 
 
@@ -63,6 +64,21 @@ def test_dspark_target_sync_boundary_is_a_noop(world_size, sites):
 
     assert result is values
     torch.testing.assert_close(result, torch.tensor([3, 5]))
+    assert group.broadcast_calls == 0
+
+
+def test_dspark_target_sync_off_leaves_divergent_state_unchanged():
+    """Disabling the safeguard is configuration, not divergence detection."""
+    group = _FakeTpGroup(world_size=8, rank=5, source=torch.tensor([17, 23, 42]))
+
+    with envs.SGLANG_SPEC_TP_SYNC.override("off"):
+        sync = SpecTpSync(group)
+
+    divergent_rank = torch.tensor([17, 99, 42])
+    result = sync.sync(SpecTpSyncSite.DSPARK_TARGET, divergent_rank)
+
+    assert result is divergent_rank
+    torch.testing.assert_close(result, torch.tensor([17, 99, 42]))
     assert group.broadcast_calls == 0
 
 
