@@ -122,6 +122,7 @@ from sglang.srt.managers.io_struct import (
     ConfigureLoggingReq,
     ContinueGenerationReqInput,
     DestroyWeightsUpdateGroupReqInput,
+    DevReloadReqInput,
     DumperControlReqInput,
     EmbeddingReqInput,
     GenerateReqInput,
@@ -1723,6 +1724,17 @@ async def continue_generation(
     return ORJSONResponse(
         content={"message": "Generation continued successfully.", "status": "ok"},
         status_code=200,
+    )
+
+
+@app.post("/dev/reload")
+@auth_level(AuthLevel.ADMIN_FORCE)
+async def dev_reload(obj: Annotated[DevReloadReqInput, Body()]):
+    """DEV ONLY: reload selected pure-Python modules and optionally recapture graphs."""
+    result = await _global_state.tokenizer_manager.dev_reload(obj)
+    return ORJSONResponse(
+        content=msgspec_to_builtins(result),
+        status_code=HTTPStatus.OK if result.success else HTTPStatus.BAD_REQUEST,
     )
 
 
