@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31404",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2463",
+  "candidate_commit": "df765c682bc88703e09f19714d75dfd4bbf42aa2",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes ordinary unknown-model handling, the required param=null response field, and adds gateway membership validation, but explicitly supplied empty-string models still bypass Python validation and reach request conversion.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-48433af67059/venv/bin/python -m pytest -q /tmp/candidate_test_model_validation.py (on base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before execution of the candidate regression at the exact recorded base; all four tests failed because validate_served_model was absent."
+    },
+    {
+      "command": "direct Minimal OpenAIServingBase.handle_request probe at base commit",
+      "exit_code": 0,
+      "what_was_measured": "An explicit gpt-nonexistent-999 model reached request conversion, reproducing the original validation gap without an engine or model weights."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-48433af67059/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_model_validation.py (on candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 4 tests passed and 2 subtests passed, covering ordinary unknown, served, omitted/default, and selected LoRA cases."
+    },
+    {
+      "command": "direct validate_served_model and handle_request adversarial probe at candidate commit",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed repository-native imports and correct 404/model_not_found/param=null for an ordinary unknown model, then demonstrated that an explicitly supplied empty model bypasses validation and reaches conversion."
+    },
+    {
+      "command": "command -v cargo; command -v rustfmt; git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..df765c682bc88703e09f19714d75dfd4bbf42aa2 -- sgl-model-gateway/src/routers/router_manager.rs",
+      "exit_code": 0,
+      "what_was_measured": "Cargo and rustfmt were unavailable; the Rust diff had no whitespace errors. This does not constitute compilation or native execution."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reviewed validation paths execute before engine inference. No GPU or model-weight claim was needed or made."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Python OpenAI serving accepts an explicitly supplied empty string model: CompletionRequest(model=\"\", prompt=\"hello\") has model in model_fields_set, but validate_served_model returns None and handle_request reaches conversion instead of returning 404 model_not_found.",
+    "The Python empty-model bypass is inconsistent with the candidate gateway resolver, which rejects an explicit empty model ID when it is not registered."
+  ],
+  "remaining_limitations": [
+    "The Rust gateway change was not compiled or executed because cargo and rustfmt are absent from the prepared environment.",
+    "No full HTTP server or model-weight run was performed; the Python result uses the actual request protocol and serving base but a minimal pre-engine handler, which is sufficient to exercise the validation gate only.",
+    "No GPU execution was performed because the issue-specific behavior occurs before engine execution."
+  ]
+}
