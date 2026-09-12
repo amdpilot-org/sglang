@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34740",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1969",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1933",
+  "candidate_commit": "fc74e1f19a9d56bf9261ebf5abb3aad62ab92650",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces both issue mechanisms: fixed simulated acceptance writes token id 100, while complete replacement-character output remains uncommitted and replacement streams leave an unbounded decode window. At the exact candidate commit, the authored regressions, independent UTF-8 boundary cases, deterministic content-equivalence fuzzing, and the gfx950 simulated-acceptance tensor check all pass. The Python source changes cover EAGLE, NGRAM, and DFlash and preserve incomplete UTF-8 suffixes while committing complete U+FFFD output. No remaining source-level counterexample was found.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-8d94586045e5/venv/bin/python -m pytest -q /job/review-evidence-j-8d94586045e5/test_detokenizer_incremental_window.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Recorded-base behavior using the candidate regression fixture: 4 failed and 4 passed. Complete UTF-8 U+FFFD and a literal replacement token emitted empty strings; long replacement streams remained uncommitted and unbounded."
+    },
+    {
+      "command": "base direct generate_simulated_accept_index fixed-mode check",
+      "exit_code": 0,
+      "what_was_measured": "The recorded base filled predict with [100, 100, 100, 100], reproducing the benchmark-path hardcoded-token defect."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8d94586045e5/venv/bin/python -m pytest -q test/registered/unit/managers/test_detokenizer_incremental_window.py test/registered/unit/spec/test_simulated_acceptance_token.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regressions: 11 passed, including the two prior-review counterexamples, immediate complete-U+FFFD commits, bounded oversized events, and tokenizer-derived simulated tokens."
+    },
+    {
+      "command": "candidate deterministic adversarial UTF-8 content-equivalence script",
+      "exit_code": 0,
+      "what_was_measured": "335 seeded random byte streams across lengths 1 through 4096 and randomized event splits matched Python's independent bytes.decode(errors='replace') reference after a clean flush; every decode window remained below 64 tokens. Targeted 2-, 3-, and 4-byte scalars crossing the recovery threshold also passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8d94586045e5/venv/bin/python -m pytest -q test/registered/unit/managers/test_detokenizer_incremental_window.py test/registered/unit/managers/test_trim_matched_stop.py test/registered/unit/spec/test_simulated_acceptance_token.py",
+      "exit_code": 0,
+      "what_was_measured": "Expanded candidate regression and adjacent stop-trimming suite: 19 passed."
+    },
+    {
+      "command": "candidate gfx950 generate_simulated_accept_index fixed-mode check",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, synchronized device tensors produced predict [64, 64, 64, 64] and num_correct_drafts [2]."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X, gfx950:sramecc+:xnack-. The candidate simulated-acceptance tensor path ran and synchronized successfully; raw output is retained in /job/review-evidence-j-8d94586045e5/candidate-gpu.log."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_reason": "The candidate changes only Python, tests, and reports. repository-environment.json declares native: null, and imported sglang sources resolved to /job/repo/python. No native rebuild was applicable.",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "DeepSeek-V4-Pro weights and tokenizer were unavailable, so its exact vocabulary mapping and semantic output were not rerun.",
+    "The reported eight-GPU TP8/DP8/EAGLE serving topology and 16,384-request throughput/TTFT experiment were unavailable; performance recovery at that scale remains unmeasured here.",
+    "The assigned single gfx950 validates the tensor mutation path only, not the unavailable model architecture or distributed serving workload."
+  ]
+}
