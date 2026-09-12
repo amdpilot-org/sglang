@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/29272",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "1f0aaaf3ea2c3019010f352ee614d71424128900",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate fixes global-rank CUDA device selection and coordinates GDS fallback and fatal copy errors across the process group before FilesBufferOnDevice tensor broadcasts. Base and prior-candidate failures were reproduced; candidate regressions, independent two-rank adversarial cases, and real fastsafetensors GPU data movement passed.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python timeout 90 /tmp/amdpilot-repo-j-5d68153d24a6/venv/bin/python -m pytest -q /tmp/j-5d68153d24a6-evidence/test_candidate.py -k 'fastsafetensors_uses_local_device_not_global_rank or fastsafetensors_coordinates_gds_fallback_across_ranks or fastsafetensors_does_not_mask_non_gds_errors' (base 358c163)",
+      "exit_code": 1,
+      "what_was_measured": "The prepared base failed local-device selection (cuda:11 instead of cuda:0) and asymmetric GDS fallback; two of three tests failed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python timeout 90 /tmp/amdpilot-repo-j-5d68153d24a6/venv/bin/python -m pytest -q /tmp/j-5d68153d24a6-evidence/test_candidate.py::TestPrefetchCheckpoints::test_fastsafetensors_coordinates_gds_fallback_across_ranks (prior candidate 04c853b)",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced the prior review counterexample: only the rank with the GDS error retried nogds, recording [(0, false), (1, false), (1, true)]."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python timeout 120 /tmp/amdpilot-repo-j-5d68153d24a6/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_prefetch_checkpoints.py -k fastsafetensors (candidate 1f0aaaf)",
+      "exit_code": 0,
+      "what_was_measured": "All seven candidate fastsafetensors regressions passed, including local-device selection and coordinated two-rank Gloo fallback."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python timeout 120 /tmp/amdpilot-repo-j-5d68153d24a6/venv/bin/python reports/j-5d68153d24a6/raw/adversarial_fastsafetensors.py (candidate 1f0aaaf)",
+      "exit_code": 0,
+      "what_was_measured": "Two real Gloo ranks handled asymmetric constructor-time GDS failure, completed a post-fallback broadcast on both ranks, and stopped both ranks before broadcast for asymmetric non-GDS and nogds-retry failures."
+    },
+    {
+      "command": "PYTHONPATH=<unpacked fastsafetensors-0.4.0 wheel>:/job/repo/python /tmp/amdpilot-repo-j-5d68153d24a6/venv/bin/python <real nogds GPU fixture>",
+      "exit_code": 0,
+      "what_was_measured": "Real fastsafetensors loaded a 4x4 float32 safetensor to AMD gfx950 with max absolute error 0 and sum 120 matching the CPU reference."
+    },
+    {
+      "command": "PYTHONPATH=<unpacked fastsafetensors-0.4.0 wheel>:/job/repo/python /tmp/amdpilot-repo-j-5d68153d24a6/venv/bin/python <real GDS-requested GPU fixture>",
+      "exit_code": 0,
+      "what_was_measured": "With GDS requested, real fastsafetensors detected missing /dev/nvidia-fs0, selected its nogds copier, and loaded 257 float32 values to gfx950 with max absolute error 0."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Real fastsafetensors 0.4.0 tensor loads ran on AMD Instinct MI355X gfx950:sramecc+:xnack- and matched independent CPU tensors exactly; see raw/real_fastsafetensors_nogds_gpu.log and raw/real_fastsafetensors_gds_requested_gpu.log.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Only one AMD gfx950 GPU and one node were available; the reported multi-node NVIDIA GDS/NCCL deployment was not run.",
+    "GLM-5.2 weights were unavailable, so the exact full-model serving deployment and model semantics remain unverified.",
+    "The prepared interpreter had no installed fastsafetensors package; real-package checks used an unpacked 0.4.0 wheel outside the checkout.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
