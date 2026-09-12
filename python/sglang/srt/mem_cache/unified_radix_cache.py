@@ -1137,12 +1137,13 @@ class UnifiedRadixCache(BasePrefixCache):
         )
 
         self._dec_req_lock(req, skip_swa=req.swa_prefix_lock_released)
-        # Opt-in: leave the matched-prefix mamba evictable during decode (it is
+        # Leave the matched-prefix mamba evictable during decode (it is
         # already COW'd to the request's own slot, never read from this node again).
         # Safe only because any future COW source is the COWing request's own
         # admission-locked last_node (recorded only if still present, locked before
         # the next alloc) -- not this evictable node. A scheduler that matched a
-        # whole batch before locking would break that. Off = original full lock.
+        # whole batch before locking would break that. The environment switch can
+        # restore the original full lock as a rollback escape hatch.
         lock_result = self.inc_lock_ref(
             new_last_node,
             skip_lock_components=(
