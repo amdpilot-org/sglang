@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38980",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that exact candidate 69a812d retains a public ver selector while only one FA3 operator is wired. Removed ver from both wrappers instead of inventing an unavailable FA2 dispatch, while preserving the candidate's device-aware validation, numeric CUDA-version check, supported SM8x/SM90 contract, missing-cache guard, and pinned native correction.",
+  "tests": [
+    {
+      "command": "TEST_FLASH_ATTN_SOURCE=/tmp/amdpilot-repro-j-0ac6272a51a8/candidate/python/sglang/kernels/aot/python/sgl_kernel/flash_attn.py /tmp/amdpilot-repo-j-0ac6272a51a8/venv/bin/python -m pytest -q python/sglang/kernels/aot/tests/test_flash_attn_public_contract.py",
+      "exit_code": 1,
+      "what_was_measured": "Exact candidate failing-before: 2 failed, 14 passed; both public wrappers still exposed ver. Remaining contract checks passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0ac6272a51a8/venv/bin/python -m pytest -q python/sglang/kernels/aot/tests/test_flash_attn_public_contract.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after: 16 passed; signatures no longer expose ver, and both wrappers retain input-device validation before the instrumented native boundary."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0ac6272a51a8/venv/bin/python -m py_compile python/sglang/kernels/aot/python/sgl_kernel/flash_attn.py python/sglang/kernels/aot/tests/test_flash_attn_public_contract.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source and regression test compile successfully."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Prepared interpreter is torch 2.11.0+rocm7.2 with torch.version.cuda=None; no NVIDIA GPU, nvcc, cuobjdump, or CUDA flash_ops build was available."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The pinned SM8x native correction was not rebuilt or numerically executed in this ROCm-only environment.",
+    "SM86-cubin execution on SM89 was not independently inspected or run; SM8x support was retained rather than changed based on unavailable local CUDA hardware.",
+    "Removing ver is an intentional public API correction: callers that previously passed it must stop doing so; no FA2 operation is wired to these wrappers in the pinned source."
+  ]
+}
