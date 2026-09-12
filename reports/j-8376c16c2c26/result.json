@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32807",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3372",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3370",
+  "candidate_commit": "e3b9d9055cb4d5cf348e3cc28313ba8fea266beb",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "The recorded base reproduced the dispatch defects with controlled fused-kernel spies, and the exact candidate passed its regression plus independent GPU-backed shape/layout boundary cases. No source counterexample was found. However, the assigned ROCm gfx950-class host cannot import or execute the affected CUDA-only Gemma kernel, so the original NVIDIA NaN behavior and actual fused CUDA execution remain unverified.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8376c16c2c26/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-8376c16c2c26/review-evidence/test_candidate.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before result: 4 failures and 1 pass. Rank-3 skipped the fused call; mixed-dtype normal and residual paths entered fused calls; invalid hidden width reached the mocked kernel."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8376c16c2c26/venv/bin/python -m pytest -q test/registered/layers/test_gemma3_rmsnorm_dispatch.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 5 tests passed for high-rank flatten/restore, noncontiguous input, mixed-dtype fallback with and without residual, and wrong hidden width."
+    },
+    {
+      "command": "Independent GPU adversarial script using kernel spies and forward_native reference",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X, rank-1/3/4 and zero-sized rank-3/4 inputs dispatched once, restored shape, and exactly matched the native reference. Device mismatch avoided the fused call and raised from native tensor incompatibility."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8376c16c2c26/venv/bin/python -m pytest -q test/manual/layers/test_layernorm.py::TestGemma3RMSNorm (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Existing ROCm/native Gemma3RMSNorm coverage: 5 tests and 70 subtests passed on the assigned AMD GPU."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X executed independent tensor/reference checks and the existing ROCm/native suite; raw logs are under reports/j-8376c16c2c26/raw. This was not execution of the CUDA-only fused kernel."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No executable CUDA/NVIDIA environment was available to reproduce the original mixed-dtype NaN or prove that the fallback prevents it around the real gemma_rmsnorm and gemma_fused_add_rmsnorm binaries.",
+    "Real fused CUDA output for flattened rank-3 q_norm/k_norm inputs was not compared against an independent numerical reference.",
+    "The reported H200 performance gains and full Gemma-3 model behavior were not reproduced; no model weights or NVIDIA GPU were available."
+  ],
+  "remaining_limitations": [
+    "The prepared host reports AMD Instinct MI350X with torch 2.11.0+rocm7.2 and HIP 7.2.26015, whereas the issue targets CUDA/H200.",
+    "sglang and layernorm.py imported from /job/repo/python; sgl_kernel imported from the prepared installed ROCm environment under /opt/venv.",
+    "The candidate changes only Python and adds tests/reports, so a native rebuild was not applicable.",
+    "No full-model, serving-path, semantic-accuracy, throughput, or multi-node claim is made."
+  ]
+}
