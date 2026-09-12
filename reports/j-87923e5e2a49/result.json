@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38574",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/655",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/631",
+  "candidate_commit": "e10d8adc527259f9bfd2a489675120226794f3fc",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a verified error-message improvement, but the original dense-BF16 MTP startup failure remains under a broad Linear W4A8 target unless the checkpoint config explicitly ignores the MTP prefix. It is a partial fix, not a full original-issue resolution.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-87923e5e2a49/venv/bin/python /job/raw/j-87923e5e2a49/repro_scheme.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced the original generic NotImplementedError with a real W4A8 Linear config and MTP prefix; verified that explicit re:mtp\\..* ignore selects UnquantizedLinearMethod with BF16 weights. Raw output: /job/raw/j-87923e5e2a49/base-repro.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-87923e5e2a49/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_nextn.py (candidate e10d8adc527259f9bfd2a489675120226794f3fc)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression tests passed: explicit ignore, actionable dense-MTP diagnostic, and pre-load packed-MTP no-silent-dense guard. 3 passed. Raw output: /job/raw/j-87923e5e2a49/candidate-regression.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/raw/j-87923e5e2a49:/job/repo/python /tmp/amdpilot-repo-j-87923e5e2a49/venv/bin/python /job/raw/j-87923e5e2a49/candidate_adversarial.py (candidate e10d8adc527259f9bfd2a489675120226794f3fc)",
+      "exit_code": 0,
+      "what_was_measured": "Independently confirmed the dense case still raises; checked prefix, target, format, W4/A8, ignore, and packed-storage context; guarded against silent dense selection; and compared the ignored BF16 GPU path with a CPU FP32 reference. Raw output: /job/raw/j-87923e5e2a49/candidate-adversarial-gpu.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-87923e5e2a49/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_nextn.py test/registered/unit/layers/quantization/test_compressed_tensors_mixed_precision.py test/registered/unit/layers/quantization/test_compressed_tensors_lm_head.py test/registered/unit/layers/quantization/test_compressed_tensors_kv_cache.py (candidate e10d8adc527259f9bfd2a489675120226794f3fc)",
+      "exit_code": 0,
+      "what_was_measured": "21 focused compressed-tensors scheme-selection tests passed. Raw output: /job/raw/j-87923e5e2a49/candidate-focused.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One assigned AMD Instinct MI355X (gfx950), Torch 2.11.0+rocm7.2, HIP 7.2.26015. The explicit-ignore BF16 path matched an independent CPU FP32 linear reference after BF16 conversion with maximum absolute error 0.0 in the deterministic case.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Dense mtp.layers.0.self_attn.qkv_proj.weight, broad Linear W4A8 target, and no MTP ignore entry still raises during construction, leaving the reported NEXTN startup failure unresolved.",
+    "Actual packed MTP checkpoint loading was not exercised; the candidate test and independent guard only establish that the pre-load selection does not silently choose UnquantizedLinearMethod.",
+    "The requested user documentation for re:mtp\\..* or mtp.* ignore configuration is not added."
+  ],
+  "remaining_limitations": [
+    "No full Qwen3-Next checkpoint was available, so the original 2x H100 NVL TP2/EP2 server startup was not run.",
+    "Validation used one AMD Instinct MI355X (gfx950); NVIDIA H100-specific execution is unverified.",
+    "Scheme selection runs before checkpoint tensor names are available, so this patch cannot distinguish dense .weight storage from weight_packed/weight_scale storage.",
+    "No native source changed and the prepared environment reports no separate native target; native rebuild was not applicable."
+  ],
+  "source_paths": [
+    "/job/repo/python/sglang/srt/layers/quantization/compressed_tensors/compressed_tensors.py",
+    "/job/repo/test/registered/unit/layers/quantization/test_compressed_tensors_nextn.py"
+  ],
+  "native_paths": []
+}
