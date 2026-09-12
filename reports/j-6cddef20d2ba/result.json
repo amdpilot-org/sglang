@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/7433",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "3f902c65bfe8cd791b399fa37a4ead268635d7dc",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate is valid test-only hardening for a production fix already present in the recorded base. Exact-candidate tests and its gfx950 probe passed, and an independent concurrency-scaling probe confirmed that the removed dense packed-token SDPA path grows quadratically while the current VisionTritonAttention path remains numerically aligned with per-sequence SDPA. Full H100 Kimi-VL serving and MMMU qualification remains unavailable, so the original issue is not claimed fully resolved by this review.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-6cddef20d2ba/venv/bin/python -m pytest -q test/registered/unit/models/test_kimi_vl.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit: five focused tests passed plus two subtests covering single-image and uneven packed cumulative boundaries forwarded through MoonVitEncoderLayer to VisionAttention."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-6cddef20d2ba/venv/bin/python reports/j-1ddba1aa1093/kimi_vl_attention_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit on gfx950: actual VisionTritonAttention matched independent per-sequence SDPA within 0.0078125; for lengths [1024,1536], reconstructed legacy peak was 261237248 bytes versus 0 allocator-visible intermediate bytes for the current path."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-6cddef20d2ba/venv/bin/python /job/review-evidence-j-6cddef20d2ba/adversarial_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent 1/2/4/8-image packed scaling on gfx950. Current output matched per-image SDPA within 0.00390625. Reconstructed pre-fix transient allocation grew from 6440960 to 373568000 bytes, demonstrating the concurrency-dependent quadratic mechanism."
+    },
+    {
+      "command": "git show cce5873513fe4a9059cd0f0bab416e1c64db4c31:python/sglang/srt/models/kimi_vl_moonvit.py",
+      "exit_code": 0,
+      "what_was_measured": "The implementation immediately before the already-landed production fix creates a [1,total_tokens,total_tokens] boolean mask and invokes 3-D PyTorch SDPA; the recorded base is a descendant of fix commit 7dcebca255991e0e357116003e249da6dbfc888b."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "One assigned AMD Instinct MI350X with gfx950 ISA; torch 2.11.0+rocm7.2 and HIP 7.2.26015. Repository source imports resolved under /job/repo/python/sglang.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No NVIDIA H100 was available, so CUDA/Hopper FA3 selection and memory behavior are not directly verified.",
+    "Kimi-VL-A3B-Thinking-2506 weights and MMMU were unavailable, so the reported full server, concurrency-8 request workload, semantic accuracy, and end-to-end peak memory are not reproduced.",
+    "Only one gfx950 GPU was assigned; four-GPU or other distributed behavior remains unverified."
+  ],
+  "remaining_limitations": [
+    "The candidate changes only tests and reports; it is not a duplicate production fix.",
+    "The recorded base is already post-fix, so failing-before evidence uses the actual pre-fix source plus execution of its reconstructed dense-SDPA algorithm rather than launching the old full model server.",
+    "No native files changed and repository-environment.json declares no native artifact, so a native rebuild was not applicable."
+  ]
+}
