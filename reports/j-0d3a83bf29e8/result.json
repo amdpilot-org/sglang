@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37022",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "PR 1101 is test-only hardening for an opt-in failed-session probe mechanism already present at the recorded base. Its regression passes unchanged on the base, probing defaults off, the original distributed failure was not reproduced, and an independent race can let a stale successful probe erase a newer transfer failure.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-0d3a83bf29e8/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_mooncake_transfer_batching.py (candidate 0aeacd1b2bf8d0a0920c0a2beb6db2393d88311c)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 9 tests and 3 subtests passed."
+    },
+    {
+      "command": "git show 0aeacd1b:test/registered/unit/disaggregation/test_mooncake_transfer_batching.py > /job/review-evidence-j-0d3a83bf29e8/candidate_test.py && /tmp/amdpilot-repo-j-0d3a83bf29e8/venv/bin/python -m pytest -q /job/review-evidence-j-0d3a83bf29e8/candidate_test.py (base 358c163)",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate regression also passed against the recorded base: 9 tests and 3 subtests, demonstrating no failing-before/passing-after candidate correction."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0d3a83bf29e8/venv/bin/python /job/review-evidence-j-0d3a83bf29e8/adversarial_probe.py (candidate 0aeacd1b)",
+      "exit_code": 1,
+      "what_was_measured": "Probe is disabled by default and a successful probe for an older failure generation erased a concurrently recorded newer failure for the same session."
+    },
+    {
+      "command": "git diff --quiet 358c163250ad3b1f62939b01ce1314a0a31a0365 0aeacd1b2bf8d0a0920c0a2beb6db2393d88311c -- python/sglang",
+      "exit_code": 0,
+      "what_was_measured": "Candidate and base production Python source are identical."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD gfx950 GPU was visible, but the original contract requires an unavailable multi-node NVIDIA/XCCL RoCEv2 Mooncake deployment. GPU compute was not used as substitute evidence for transport recovery."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With SGLANG_ENABLE_FAILED_SESSION_PROBE unset (default false), a failed Mooncake session remains blacklisted and later requests continue to receive the reported not-alive failure.",
+    "A probe begun for an older failure can return success after another transfer failure is recorded for the same session; _run_one_probe_pass then clears the newer failed_sessions and session_failures state.",
+    "The recurring transfer failures in the reported 5P3D GLM5.2 NVIDIA/XCCL RoCEv2 deployment may continue even when probing is enabled; the candidate neither identifies nor corrects their cause."
+  ],
+  "remaining_limitations": [
+    "The original 5-prefill/3-decode GLM5.2 workload and weights were unavailable.",
+    "The NVIDIA CUDA/XCCL multi-node RoCEv2 topology was unavailable; the prepared host exposed one AMD gfx950 GPU with ROCm 7.2.",
+    "The issue provides no minimal reproducer, and no end-to-end Mooncake RDMA session death/recovery was executed.",
+    "No native source changed, so no native rebuild was applicable. The installed Mooncake extension was verified to expose send_probe."
+  ]
+}
