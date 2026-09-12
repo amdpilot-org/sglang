@@ -41,6 +41,7 @@ from sglang.srt.layers.logits_processor import LogitsProcessor
 from sglang.srt.layers.moe import should_skip_post_experts_all_reduce
 from sglang.srt.layers.moe.ep_moe.layer import get_moe_impl_class
 from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
+from sglang.srt.layers.moe.router_gate import RouterGate
 from sglang.srt.layers.moe.topk import TopK
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
 from sglang.srt.layers.radix_attention import RadixAttention
@@ -111,26 +112,23 @@ class LagunaMLP(nn.Module):
         return x
 
 
-class LagunaMoEGate(nn.Module):
+class LagunaMoEGate(RouterGate):
     def __init__(
         self,
         config: LagunaConfig,
         prefix: str = "",
     ):
-        super().__init__()
-        self.weight = nn.Parameter(
-            torch.empty(config.num_experts, config.hidden_size, dtype=torch.float32)
+        super().__init__(
+            config.hidden_size,
+            config.num_experts,
+            fp32_compute=False,
+            has_correction_bias=True,
         )
         # Released checkpoint stores this under `mlp.experts.e_score_correction_bias`
         # (load_weights remaps it) but every value is 0.0; zero-init keeps us
         # correct if a future checkpoint omits the tensor entirely.
-        self.e_score_correction_bias = nn.Parameter(
-            torch.zeros(config.num_experts, dtype=torch.float32),
-            requires_grad=False,
-        )
-
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        return F.linear(hidden_states.to(torch.float32), self.weight, None)
+        self.e_score_correction_bias.requires_grad_(False)
+        self.e_score_correction_bias.data.zero_()
 
 
 class LagunaMoE(nn.Module):
