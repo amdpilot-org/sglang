@@ -1,6 +1,7 @@
 """Unit tests for trace.py — no server, no model loading."""
 
 import os
+import pickle
 
 from sglang.test.ci.ci_register import register_cpu_ci
 
@@ -25,6 +26,7 @@ from sglang.srt.observability.trace import (
     set_global_trace_level,
     trace_set_thread_info,
 )
+from sglang.srt.observability.trace_async import TraceReqContextAsync
 
 try:
     from opentelemetry import trace as otel_trace
@@ -196,9 +198,94 @@ class TestTraceReqContextDisabled(unittest.TestCase):
 
     def test_setstate_disabled(self):
         ctx = TraceReqContext(rid="req-1")
-        ctx.__setstate__({"tracing_enable": True, "is_copy": False})
-        # opentelemetry_initialized is False → tracing forced off
-        self.assertFalse(ctx.tracing_enable)
+        ctx.__setstate__(
+            {
+                "tracing_enable": True,
+                "is_copy": False,
+                "thread_context": None,
+                "root_span": None,
+            }
+        )
+        # An IPC-only process preserves the enabled wire state for forwarding.
+        self.assertTrue(ctx.tracing_enable)
+
+    def test_uninitialized_relay_preserves_context_for_initialized_destination(self):
+        state = {
+            "tracing_enable": True,
+            "rid": "relay-sync",
+            "bootstrap_room": None,
+            "start_time_ns": 1,
+            "role": "unified",
+            "trace_level": 3,
+            "module_name": "request",
+            "is_copy": False,
+            "pid": 1,
+            "thread_context": None,
+            "root_span": None,
+            "last_span_context": None,
+            "root_span_context": {
+                "traceparent": "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01"
+            },
+        }
+        relay = TraceReqContext.__new__(TraceReqContext)
+        relay.__setstate__(state)
+        forwarded = pickle.dumps(relay)
+
+        with patch.object(mod, "opentelemetry_initialized", True):
+            destination = pickle.loads(forwarded)
+
+        self.assertTrue(destination.tracing_enable)
+        self.assertTrue(
+            otel_trace.get_current_span(destination.root_span_context)
+            .get_span_context()
+            .is_valid
+        )
+
+    def test_disabled_context_remains_disabled_across_relay(self):
+        relay = TraceReqContext.__new__(TraceReqContext)
+        relay.__setstate__({"tracing_enable": False})
+        with patch.object(mod, "opentelemetry_initialized", True):
+            destination = pickle.loads(pickle.dumps(relay))
+        self.assertFalse(destination.tracing_enable)
+
+
+class TestTraceReqContextAsyncRelay(unittest.TestCase):
+    def test_unavailable_relay_preserves_context_for_available_destination(self):
+        state = {
+            "tracing_enable": True,
+            "rid": "relay-async",
+            "init_args": {
+                "rid": "relay-async",
+                "bootstrap_room": None,
+                "role": "unified",
+                "module_name": "request",
+                "external_trace_header": None,
+                "trace_level": 3,
+            },
+            "trace_level": 3,
+            "is_async": True,
+            "root_span_carrier": {
+                "traceparent": "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01"
+            },
+        }
+        with patch(
+            "sglang.srt.observability.trace_async.is_async_tracing_available",
+            return_value=False,
+        ):
+            relay = TraceReqContextAsync.__new__(TraceReqContextAsync)
+            relay.__setstate__(state)
+            forwarded = pickle.dumps(relay)
+
+        with patch(
+            "sglang.srt.observability.trace_async.is_async_tracing_available",
+            return_value=True,
+        ), patch(
+            "sglang.srt.observability.trace_async._get_zmq_socket", return_value=None
+        ):
+            destination = pickle.loads(forwarded)
+
+        self.assertTrue(destination.tracing_enable)
+        self.assertEqual(destination.rid, "relay-async")
 
         # Should not register anything
 
