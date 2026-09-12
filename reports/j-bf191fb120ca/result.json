@@ -1,0 +1,62 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39054",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/654",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/628",
+  "candidate_commit": "a50933dc739dba5fbd726b4e9b88af9b05765505",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate's import-time MUSA predicate fixes the reproduced cold- and warm-cache TorchDynamo gb0069 failure and preserves tested MUSA truth semantics. However, its unrelated reordering of the prefill-CP topology check introduces a confirmed ROCm regression: is_dsa_enable_prefill_cp() raises before the parallel runtime namespace is published, whereas the base returns False through the HIP guard. Remove or safely constrain that reordering before acceptance. The original 8-GPU B200 MiniMax tc_piecewise deployment was unavailable and remains unverified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-bf191fb120ca/venv/bin/python /job/review-evidence-j-bf191fb120ca/trace_probe.py --probe musa [with and without --warm] on base",
+      "exit_code": 1,
+      "what_was_measured": "Both cold and warm fullgraph traces reproduced TorchDynamo gb0069 Unsupported: Import failure at the real sglang.srt.utils.common.is_musa import of torchada."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bf191fb120ca/venv/bin/python -m pytest -q test/registered/unit/utils/test_common.py -k MusaDetection on candidate a50933d",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression passed: 1 test, 2 cold/warm subtests."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bf191fb120ca/venv/bin/python /job/review-evidence-j-bf191fb120ca/trace_probe.py --probe musa [with and without --warm] on candidate a50933d",
+      "exit_code": 0,
+      "what_was_measured": "Independent cold and warm fullgraph traces of the real is_musa probe passed and returned False without torchada installed."
+    },
+    {
+      "command": "PYTHONPATH=<fake torchada>:/job/repo/python /tmp/amdpilot-repo-j-bf191fb120ca/venv/bin/python musa_semantics.py [with absent and non-null torch.version.musa] on candidate a50933d",
+      "exit_code": 0,
+      "what_was_measured": "A present torchada module with no torch.version.musa returned False; the same module with torch.version.musa='4.2' returned True, preserving the prior predicate."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bf191fb120ca/venv/bin/python -m pytest -q test/registered/unit/utils/test_common.py test/registered/cp/test_cp_strategy_unit.py test/registered/unit/server_args/test_platform_prefill_cp_deprecation.py on candidate a50933d",
+      "exit_code": 0,
+      "what_was_measured": "37 tests and 57 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bf191fb120ca/venv/bin/python -c 'from sglang.srt.layers.attention.dsa.utils import is_dsa_enable_prefill_cp; print(is_dsa_enable_prefill_cp())' on candidate and base",
+      "exit_code": 1,
+      "what_was_measured": "Candidate raised ValueError because the parallel config namespace was not published; base exited 0 and returned False on ROCm."
+    },
+    {
+      "command": "TORCHINDUCTOR_CACHE_DIR=<private tmp> /tmp/amdpilot-repo-j-bf191fb120ca/venv/bin/python /job/review-evidence-j-bf191fb120ca/rocm_control.py on candidate a50933d",
+      "exit_code": 0,
+      "what_was_measured": "A fullgraph ROCm Inductor kernel calling is_musa matched an independent NumPy reference with max absolute error 2.384185791015625e-07. Generated HSACO/AMDGCN targeted gfx950."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI355X with PyTorch 2.11.0+rocm7.2 and HIP 7.2.26015. Generated artifact was elf64-amdgpu with EF_AMDGPU_MACH_AMDGCN_GFX950 and amdhsa.target amdgcn-amd-amdhsa--gfx950."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "On ROCm before the parallel runtime namespace is published, candidate is_dsa_enable_prefill_cp() raises ValueError at get_parallel().attn_cp_size; base returns False by evaluating is_hip() first."
+  ],
+  "remaining_limitations": [
+    "The original 8-GPU NVIDIA B200 MiniMax-M3 tc_piecewise prefill CUDA-graph deployment was unavailable; a one-GPU ROCm run does not qualify it.",
+    "MUSA hardware and the real torchada package were unavailable; predicate semantics were checked with a controlled importable module and torch.version.musa values.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable.",
+    "Raw logs, scripts, generated source references, and ISA evidence are preserved under /job/review-evidence-j-bf191fb120ca; compiler caches remained under /tmp outside the checkout."
+  ]
+}
