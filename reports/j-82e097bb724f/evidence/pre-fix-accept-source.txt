@@ -1,0 +1,146 @@
+        verify_input = DFlashVerifyInput(
+            draft_token=verify_input_ids,
+            positions=positions,
+            draft_token_num=int(self.block_size),
+            custom_mask=custom_mask,
+            capture_hidden_mode=CaptureHiddenMode.FULL,
+        )
+
+        batch.out_cache_loc = verify_out_cache_loc
+        sampling_info = batch.sampling_info
+
+        seq_lens_pre_verify = (
+            batch.seq_lens.clone() if self._need_mamba_verify_commit else None
+        )
+        seq_lens_cpu_backup = batch.seq_lens_cpu
+        seq_lens_sum_backup = batch.seq_lens_sum
+        if seq_lens_cpu_backup is not None:
+            # Verify host bound = committed prefix + one verify block (matches draft).
+            verify_host_seq_lens = seq_lens_cpu_backup + block_size
+            batch.seq_lens_cpu = verify_host_seq_lens
+            batch.seq_lens_sum = int(verify_host_seq_lens.sum())
+        elif draft_input.nxt_kv_lens_cpu is not None:
+            batch.seq_lens_cpu = draft_input.nxt_kv_lens_cpu
+            batch.seq_lens_sum = int(draft_input.nxt_kv_lens_sum)
+
+        verify_forward_batch, _ = verify_input.prepare_for_verify(
+            batch, self.target_worker
+        )
+        batch.seq_lens_cpu = seq_lens_cpu_backup
+        batch.seq_lens_sum = seq_lens_sum_backup
+
+        target_out = self.target_worker.forward_batch_generation(
+            batch=None,
+            forward_batch=verify_forward_batch,
+            is_verify=True,
+            skip_attn_backend_init=True,
+        )
+        logits_output = target_out.logits_output
+        can_run_cuda_graph = target_out.can_run_cuda_graph
+
+        grammar_mask = None
+        if batch.has_grammar:
+            grammar_mask = build_grammar_vocab_mask(
+                reqs=batch.reqs,
+                tree=grammar_tree,
+                sampling_info=batch.sampling_info,
+                device=logits_output.next_token_logits.device,
+                barrier=grammar_barrier,
+            )
+
+        if sampling_info is not None:
+            apply_dflash_verify_logits_adjustments(
+                next_token_logits=logits_output.next_token_logits,
+                sampling_info=sampling_info,
+                draft_token_num=int(self.block_size),
+            )
+
+        # Constrain every chain position before accept picks from it.
+        if grammar_mask is not None:
+            grammar_mask.apply(logits_output.next_token_logits)
+
+        candidates = draft_tokens
+        new_seq_lens = None
+        target_predict = None
+        if self._selector_sample is not None:
+            selector_candidate_ids, selector_q_rows = self._selector_sample
+            accept_len, bonus = self._selector_sampling_accept(
+                candidates=candidates,
+                next_token_logits=logits_output.next_token_logits,
+                candidate_ids=selector_candidate_ids,
+                q_rows=selector_q_rows,
+                sampling_info=sampling_info,
+                draft_input=draft_input,
+            )
+            out_tokens, commit_lens = _commit_accept(candidates, accept_len, bonus)
+        elif (
+            not _is_all_greedy(sampling_info) and is_dflash_sampling_verify_available()
+        ):
+            accept_len, bonus = compute_dflash_sampling_correct_drafts_and_bonus(
+                candidates=candidates,
+                next_token_logits=logits_output.next_token_logits,
+                sampling_info=sampling_info,
+                max_top_k=draft_input.max_top_k,
+                uniform_top_k_value=draft_input.uniform_top_k_value,
+            )
+            out_tokens, commit_lens = _commit_accept(candidates, accept_len, bonus)
+        else:
+            target_predict = torch.argmax(logits_output.next_token_logits, dim=-1).view(
+                bs, int(self.block_size)
+            )
+            if self._use_triton_accept_bonus:
+                try:
+                    (
+                        accept_len,
+                        commit_lens,
+                        bonus,
+                        out_tokens,
+                        new_seq_lens,
+                    ) = self._next_accept_bonus_buffers(bs)
+                    _compute_dflash_accept_bonus_triton_unchecked(
+                        candidates=candidates,
+                        target_top1=target_predict,
+                        accept_lens_out=accept_len,
+                        commit_lens_out=commit_lens,
+                        bonus_ids_out=bonus,
+                        out_tokens_out=out_tokens,
+                        prefix_lens=prefix_lens,
+                        new_seq_lens_out=new_seq_lens,
+                    )
+                except Exception as e:
+                    self._use_triton_accept_bonus = False
+                    logger.warning(
+                        "DFLASH Triton accept/bonus failed; falling back to eager path: %s",
+                        e,
+                    )
+                    accept_len, bonus = compute_dflash_correct_drafts_and_bonus(
+                        candidates=candidates,
+                        target_predict=target_predict,
+                    )
+                    out_tokens, commit_lens = _commit_accept(
+                        candidates, accept_len, bonus
+                    )
+            else:
+                accept_len, bonus = compute_dflash_correct_drafts_and_bonus(
+                    candidates=candidates,
+                    target_predict=target_predict,
+                )
+                out_tokens, commit_lens = _commit_accept(candidates, accept_len, bonus)
+
+        if SIMULATE_ACC_LEN > 0:
+            if SIMULATE_ACC_TOKEN_MODE not in ("fixed", "real-draft-token"):
+                raise ValueError(
+                    "Invalid SGLANG_SIMULATE_ACC_TOKEN_MODE "
+                    f"{SIMULATE_ACC_TOKEN_MODE!r}; expected 'fixed' or "
+                    "'real-draft-token'."
+                )
+
+            if SIMULATE_ACC_TOKEN_MODE == "real-draft-token" and target_predict is None:
+                # The sampling-verify branch does not materialize the target argmax.
+                target_predict = torch.argmax(
+                    logits_output.next_token_logits, dim=-1
+                ).view(bs, int(self.block_size))
+            apply_dflash_simulated_acceptance(
+                candidates=candidates,
+                target_predict=target_predict,
+                accept_len=accept_len,
