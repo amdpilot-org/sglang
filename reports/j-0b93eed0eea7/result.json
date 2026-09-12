@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/29562",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "GLM-5.2's ModelOpt FP4 metadata leaves shared experts unquantized while routed experts are packed NVFP4. The GLM DSA fusion gate accepted this mixed layout, causing the reported fused-slot shape mismatch. The gate now disables fusion only for that precision mismatch and preserves fusion for uniformly quantized checkpoints.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-0b93eed0eea7/venv/bin/python -m pytest -q test/registered/unit/models/test_shared_experts_fusion_gates.py -k 'glm52_mixed_precision or glm52_uniform' (before fix)",
+      "exit_code": 1,
+      "what_was_measured": "The exact GLM-5.2 architecture and ModelOpt exclusion pattern returned no disable reason before the fix; the independent uniform-FP4 boundary passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0b93eed0eea7/venv/bin/python -m pytest -q test/registered/unit/models/test_shared_experts_fusion_gates.py -k TestGlmMoeGate --junitxml=reports/j-0b93eed0eea7/glm_moe_gate.junit.xml",
+      "exit_code": 0,
+      "what_was_measured": "Four GLM fusion-gate cases passed, including mixed ModelOpt FP4 rejection, uniform ModelOpt FP4 preservation, W4AFP8 rejection, and DSA architecture identity."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0b93eed0eea7/venv/bin/python -m pytest -q test/registered/unit/models/test_glm5_next_modelopt.py --junitxml=reports/j-0b93eed0eea7/glm5_next_modelopt.junit.xml",
+      "exit_code": 0,
+      "what_was_measured": "Three neighboring GLM ModelOpt tests and two subtests passed, including mixed versus uniform shared-expert quantization boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0b93eed0eea7/venv/bin/python -m py_compile python/sglang/srt/models/glm4_moe.py test/registered/unit/models/test_shared_experts_fusion_gates.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources compile and the patch has no whitespace errors."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0b93eed0eea7/venv/bin/python -m pytest -q test/registered/unit/models/test_shared_experts_fusion_gates.py",
+      "exit_code": 1,
+      "what_was_measured": "35 tests passed; one unrelated existing assertion assumes EP fusion is blocked off ROCm, but the prepared gfx950 ROCm environment legitimately permits it."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "Inventory only: one AMD Instinct MI350X, capability (9, 5), PyTorch 2.11.0+rocm7.2. No GPU kernel was needed for the loader decision regression, and this is not the reported SM120 hardware.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original eight-GPU RTX PRO 6000 TP=8 launch was not run because neither SM120 hardware nor GLM-5.2-NVFP4 weights are available.",
+    "This patch addresses the 3072-versus-6144 weight-load mismatch only; SM120 DSA execution depends on separate FlashInfer/DeepGEMM architecture support identified in the issue history.",
+    "Ruff is not installed in the prepared interpreter; py_compile and git diff --check were used for static validation."
+  ]
+}
