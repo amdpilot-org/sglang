@@ -13,6 +13,7 @@ register_cpu_ci(est_time=5, suite="base-a-test-cpu")
     ("attn_tp_size", "attn_cp_size", "attn_tp_rank", "attn_cp_rank"),
     [
         (2, 2, 0, 1),  # Regression: a TP source that is not the combined leader.
+        (2, 2, 1, 0),  # Regression: unseeded source of CP group [1, 3].
         (2, 2, 1, 1),
         (2, 1, 1, 0),  # TP-only boundary.
         (1, 2, 0, 1),  # CP-only boundary.
@@ -35,6 +36,7 @@ def test_attn_cp_tp_broadcast_stages_data_at_every_source(
     tp_group = SimpleNamespace(
         name="tp",
         world_size=attn_tp_size,
+        rank_in_group=attn_tp_rank,
         rank=attn_tp_rank * attn_cp_size + attn_cp_rank,
         ranks=[rank * attn_cp_size + attn_cp_rank for rank in range(attn_tp_size)],
         cpu_group=object(),
@@ -56,6 +58,6 @@ def test_attn_cp_tp_broadcast_stages_data_at_every_source(
         result = communication_op.attn_cp_tp_broadcast_pyobj(initial_data)
 
     assert result == payload
-    assert calls == (["cp"] if attn_cp_size > 1 else []) + (
+    assert calls == (["cp"] if attn_cp_size > 1 and attn_tp_rank == 0 else []) + (
         ["tp"] if attn_tp_size > 1 else []
     )

@@ -102,14 +102,15 @@ def broadcast_tensor_dict(
 def attn_cp_tp_broadcast_pyobj(data: List[Any]) -> List[Any]:
     """Broadcast from the (attn-TP 0, attn-CP 0) rank to every rank of its DP shard."""
     # attn-TP and attn-CP are orthogonal factors of the shard and no single group
-    # covers both. Broadcast along CP first so every attn-TP source rank has the
-    # combined leader's data before it fans out along TP.
+    # covers both. First seed the attn-TP 0 column along CP, then fan out from
+    # those seeded ranks along TP. Other TP columns must not enter their CP
+    # collectives because their source ranks do not have data yet.
+    tp_group = get_attn_tp_group()
     cp_group = get_attn_cp_group()
-    if cp_group.world_size > 1:
+    if cp_group.world_size > 1 and tp_group.rank_in_group == 0:
         data = broadcast_pyobj(
             data, cp_group.rank, cp_group.cpu_group, src=cp_group.ranks[0]
         )
-    tp_group = get_attn_tp_group()
     if tp_group.world_size > 1:
         data = broadcast_pyobj(
             data, tp_group.rank, tp_group.cpu_group, src=tp_group.ranks[0]
