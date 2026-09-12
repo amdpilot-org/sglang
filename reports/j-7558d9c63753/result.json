@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37579",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the GLM-V bare-placeholder/data mismatch in the checked-out multimodal processor and fixed the OpenAI chat path by neutralizing literal image/video placeholders before template rendering, gated to GLM-V requests that actually contain multimodal input. Structured media, native generate behavior, text-only GLM-V requests, and non-GLM models are unchanged.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-7558d9c63753/venv/bin/python reports/j-7558d9c63753/reproduce_processor_mismatch.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction against BaseMultimodalProcessor.load_mm_data: one wrapped image token plus one stray literal with one image item logs the IMAGE mismatch and raises the reported empty-suffix RuntimeError. Raw output: reports/j-7558d9c63753/reproduction-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7558d9c63753/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py -k 'glm_v_neutralizes or non_glm_v_keeps or text_only_glm_v or glm_v_architecture'",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression and independent boundaries: image/video literals, reasoning, tool arguments/results/descriptions, structured image preservation, request immutability, GLM-V architecture gate, non-GLM behavior, and text-only GLM-V behavior; 4 tests and 5 subtests passed. Raw output: reports/j-7558d9c63753/focused-tests-final.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7558d9c63753/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py",
+      "exit_code": 0,
+      "what_was_measured": "Complete serving-chat unit suite; 139 tests and 73 subtests passed. Raw output: reports/j-7558d9c63753/test-serving-chat-final.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7558d9c63753/venv/bin/python -m py_compile python/sglang/srt/entrypoints/openai/serving_chat.py reports/j-7558d9c63753/reproduce_processor_mismatch.py",
+      "exit_code": 0,
+      "what_was_measured": "Python syntax validation for changed source and reproduction fixture."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned AMD Instinct MI350X gfx950 was inventoried with rocm-smi (reports/j-7558d9c63753/gpu-inventory.log), but the defect is CPU-side message/template processing and no GPU computation was relevant or executed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "GLM-5.3-Flash weights were unavailable, so the exact full-model HTTP 500/200 sequence was not run.",
+    "The deterministic fixture validates the actual prompt splitting and mismatch path with a stub media decoder; it does not validate GLM model semantics or generation accuracy.",
+    "Upstream PR https://github.com/sgl-project/sglang/pull/37900 was open and unmerged during investigation; this change follows that boundary but adds multimodal-only gating and tool-definition coverage."
+  ]
+}

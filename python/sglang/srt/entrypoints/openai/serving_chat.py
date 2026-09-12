@@ -203,6 +203,21 @@ def _extract_max_dynamic_patch(request: ChatCompletionRequest):
 KIMI_K3_IMAGE_PLACEHOLDER = "<|kimi_image_placeholder|>"
 KIMI_K3_IMAGE_PLACEHOLDER_ESCAPED = "<| kimi_image_placeholder |>"
 
+# Keep in sync with Glm4vImageProcessor.models. GLM-V chat templates add the
+# unescaped tokens for structured media after message text has been prepared.
+GLM_V_ARCHITECTURES = frozenset(
+    {
+        "Glm4vForConditionalGeneration",
+        "Glm4vMoeForConditionalGeneration",
+        "Glm5NextForConditionalGeneration",
+        "GlmOcrForConditionalGeneration",
+    }
+)
+GLM_V_PLACEHOLDER_REPLACEMENTS = {
+    "<|image|>": "<| image |>",
+    "<|video|>": "<| video |>",
+}
+
 
 def neutralize_kimi_k3_image_placeholder(text: str) -> str:
     return text.replace(KIMI_K3_IMAGE_PLACEHOLDER, KIMI_K3_IMAGE_PLACEHOLDER_ESCAPED)
@@ -217,6 +232,24 @@ def neutralize_kimi_k3_image_placeholder_value(value: Any) -> Any:
         return {
             key: neutralize_kimi_k3_image_placeholder_value(item)
             for key, item in value.items()
+        }
+    return value
+
+
+def neutralize_glm_v_placeholders(text: str) -> str:
+    for placeholder, escaped_placeholder in GLM_V_PLACEHOLDER_REPLACEMENTS.items():
+        text = text.replace(placeholder, escaped_placeholder)
+    return text
+
+
+def neutralize_glm_v_placeholder_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return neutralize_glm_v_placeholders(value)
+    if isinstance(value, list):
+        return [neutralize_glm_v_placeholder_value(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: neutralize_glm_v_placeholder_value(item) for key, item in value.items()
         }
     return value
 
@@ -312,6 +345,8 @@ class OpenAIServingChat(OpenAIServingBase):
             and self.tokenizer_manager.model_config.hf_config.model_type
             in ("gemma4", "gemma4_unified")
         )
+        architectures = self.tokenizer_manager.model_config.hf_config.architectures
+        self.is_glm_v = bool(GLM_V_ARCHITECTURES.intersection(architectures or []))
 
         # Which Python-based chat encoder (if any) bypasses apply_chat_template.
         # Values: "dsv32", "dsv4", or custom values set by subclass. None for default.
@@ -506,6 +541,37 @@ class OpenAIServingChat(OpenAIServingBase):
                 messages, request
             )
         return messages, image_count, assistant_prefix
+
+    @staticmethod
+    def _prepare_glm_v_messages(
+        messages: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Neutralize literal GLM-V placeholders while media is still typed."""
+        for message in messages:
+            content = message.get("content")
+            if isinstance(content, str):
+                message["content"] = neutralize_glm_v_placeholders(content)
+            elif isinstance(content, list):
+                for part in content:
+                    if (
+                        isinstance(part, dict)
+                        and part.get("type") in ("text", "input_text")
+                        and isinstance(part.get("text"), str)
+                    ):
+                        part["text"] = neutralize_glm_v_placeholders(part["text"])
+
+            for key in ("reasoning_content", "reasoning"):
+                if key in message:
+                    message[key] = neutralize_glm_v_placeholder_value(message[key])
+            for tool_call in message.get("tool_calls") or []:
+                function = (
+                    tool_call.get("function") if isinstance(tool_call, dict) else None
+                )
+                if isinstance(function, dict) and "arguments" in function:
+                    function["arguments"] = neutralize_glm_v_placeholder_value(
+                        function["arguments"]
+                    )
+        return messages
 
     def _encode_messages(
         self,
@@ -1461,7 +1527,17 @@ class OpenAIServingChat(OpenAIServingBase):
         else:
             if self.template_manager.jinja_template_may_reorder_tool_results:
                 messages = self._canonicalize_tool_message_order(messages)
-            for msg_dict in copy.deepcopy(messages):
+            messages_for_template = copy.deepcopy(messages)
+            tools_for_template = tools
+            if self.is_glm_v and is_multimodal:
+                messages_for_template = self._prepare_glm_v_messages(
+                    messages_for_template
+                )
+                tools_for_template = neutralize_glm_v_placeholder_value(
+                    copy.deepcopy(tools)
+                )
+
+            for msg_dict in messages_for_template:
                 if msg_dict.get("content") is None:
                     msg_dict["content"] = ""
 
@@ -1519,7 +1595,7 @@ class OpenAIServingChat(OpenAIServingBase):
                     openai_compatible_messages,
                     tokenize=False,
                     add_generation_prompt=True,
-                    tools=tools,
+                    tools=tools_for_template,
                     return_dict=False,
                     **extra_template_kwargs,
                 )
@@ -1529,9 +1605,12 @@ class OpenAIServingChat(OpenAIServingBase):
             except Exception:
                 # If the first attempt fails, try with flat function-only format.
                 # Some templates (e.g. Mistral) expect tools without the OpenAI wrapper.
-                tools = (
-                    [t["function"] if "function" in t else t for t in tools]
-                    if tools
+                tools_for_template = (
+                    [
+                        t["function"] if "function" in t else t
+                        for t in tools_for_template
+                    ]
+                    if tools_for_template
                     else None
                 )
                 try:
@@ -1540,7 +1619,7 @@ class OpenAIServingChat(OpenAIServingBase):
                             openai_compatible_messages,
                             tokenize=False,
                             add_generation_prompt=True,
-                            tools=tools,
+                            tools=tools_for_template,
                             return_dict=False,
                             **extra_template_kwargs,
                         )

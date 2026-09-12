@@ -398,6 +398,132 @@ class ServingChatTestCase(unittest.TestCase):
         )
         self.assertEqual(self.tm.tokenizer.apply_chat_template.call_count, 1)
 
+    def test_glm_v_neutralizes_literal_placeholders_before_template_rendering(self):
+        self.chat.is_glm_v = True
+        self.template_manager.jinja_template_content_format = "openai"
+        self.tm.tokenizer.apply_chat_template.return_value = "rendered prompt"
+        request = ChatCompletionRequest(
+            model="glm-v",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "explain <|image|>"},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "https://example.com/image.png"},
+                        },
+                    ],
+                },
+                {
+                    "role": "assistant",
+                    "content": "mentions <|video|>",
+                    "reasoning_content": "reason about <|image|>",
+                    "tool_calls": [
+                        {
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {
+                                "name": "inspect",
+                                "arguments": '{"token":"<|video|>"}',
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call-1",
+                    "content": "result contains <|image|>",
+                },
+                {"role": "user", "content": "continue"},
+            ],
+        )
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "inspect",
+                    "description": "handles <|image|> and <|video|>",
+                },
+            }
+        ]
+
+        result = self.chat._apply_jinja_template(request, tools, is_multimodal=True)
+
+        rendered_messages = self.tm.tokenizer.apply_chat_template.call_args.args[0]
+        rendered_tools = self.tm.tokenizer.apply_chat_template.call_args.kwargs["tools"]
+        self.assertEqual(
+            rendered_messages[0]["content"],
+            [
+                {"type": "text", "text": "explain <| image |>"},
+                {"type": "image"},
+            ],
+        )
+        self.assertEqual(rendered_messages[1]["content"], "mentions <| video |>")
+        self.assertEqual(
+            rendered_messages[1]["reasoning_content"], "reason about <| image |>"
+        )
+        self.assertEqual(
+            rendered_messages[1]["tool_calls"][0]["function"]["arguments"],
+            {"token": "<| video |>"},
+        )
+        self.assertEqual(
+            rendered_messages[2]["content"], "result contains <| image |>"
+        )
+        self.assertEqual(
+            rendered_tools[0]["function"]["description"],
+            "handles <| image |> and <| video |>",
+        )
+        self.assertEqual(
+            [image.url for image in result.image_data],
+            ["https://example.com/image.png"],
+        )
+        self.assertEqual(request.messages[0].content[0].text, "explain <|image|>")
+        self.assertEqual(
+            tools[0]["function"]["description"],
+            "handles <|image|> and <|video|>",
+        )
+
+    def test_non_glm_v_keeps_literal_placeholders_unchanged(self):
+        self.assertFalse(self.chat.is_glm_v)
+        self.tm.tokenizer.apply_chat_template.return_value = "rendered prompt"
+        request = ChatCompletionRequest(
+            model="llama",
+            messages=[{"role": "user", "content": "literal <|image|>"}],
+        )
+
+        self.chat._apply_jinja_template(request, None, is_multimodal=False)
+
+        rendered_messages = self.tm.tokenizer.apply_chat_template.call_args.args[0]
+        self.assertEqual(rendered_messages[0]["content"], "literal <|image|>")
+
+    def test_text_only_glm_v_keeps_literal_placeholders_unchanged(self):
+        self.chat.is_glm_v = True
+        self.tm.tokenizer.apply_chat_template.return_value = "rendered prompt"
+        request = ChatCompletionRequest(
+            model="glm-v",
+            messages=[{"role": "user", "content": "literal <|image|>"}],
+        )
+
+        self.chat._apply_jinja_template(request, None, is_multimodal=False)
+
+        rendered_messages = self.tm.tokenizer.apply_chat_template.call_args.args[0]
+        self.assertEqual(rendered_messages[0]["content"], "literal <|image|>")
+
+    def test_glm_v_architecture_gate(self):
+        for architecture, expected in (
+            ("Glm4vForConditionalGeneration", True),
+            ("Glm4vMoeForConditionalGeneration", True),
+            ("Glm5NextForConditionalGeneration", True),
+            ("GlmOcrForConditionalGeneration", True),
+            ("LlamaForCausalLM", False),
+        ):
+            with self.subTest(architecture=architecture):
+                tm = _MockTokenizerManager()
+                tm.model_config.hf_config.architectures = [architecture]
+                serving = OpenAIServingChat(tm, _MockTemplateManager())
+                self.assertEqual(serving.is_glm_v, expected)
+
     def test_parsers_follow_the_control_plane_overlay(self):
         """Template detection records the parsers through `override`, so they
         answer from the bags; `ServerArgs` keeps the launcher's seed."""
