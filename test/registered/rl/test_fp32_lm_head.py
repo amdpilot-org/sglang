@@ -6,6 +6,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from sglang.srt.distributed.device_communicators.triton_symm_mem_ag import (
+    MultimemAllGatherer,
+)
 from sglang.srt.layers.logits_processor import LogitsProcessor
 from sglang.srt.runtime_context import get_context
 from sglang.srt.utils import get_device
@@ -14,6 +17,23 @@ from sglang.test.test_utils import CustomTestCase
 
 register_cuda_ci(est_time=10, stage="base-b", runner_config="1-gpu-small")
 register_amd_ci(est_time=15, suite="stage-b-test-1-gpu-small-amd")
+
+
+class TestFP32LogitsGatherFallback(unittest.TestCase):
+    def test_fp32_uses_generic_all_gather_without_casting(self):
+        gatherer = MultimemAllGatherer.__new__(MultimemAllGatherer)
+        gatherer._state = None
+        x = torch.randn(2, 8, dtype=torch.float32)
+
+        with patch(
+            "sglang.srt.distributed.tensor_model_parallel_all_gather",
+            side_effect=lambda value, dim: torch.cat((value, value), dim=dim),
+        ) as generic_gather:
+            output = gatherer(x)
+
+        generic_gather.assert_called_once()
+        self.assertEqual(output.dtype, torch.float32)
+        torch.testing.assert_close(output, torch.cat((x, x), dim=-1))
 
 
 class LMHeadStub(nn.Module):
@@ -194,6 +214,58 @@ class TestLMHeadFP32(CustomTestCase):
             expected_dtype,
             expected_operation,
             config_enable_fp32=True,
+        )
+
+    def test_fp32_output_survives_tensor_parallel_gather(self):
+        """The opt-in must not revert to BF16 merely because TP gathers logits."""
+        device = get_device()
+        hidden_size, local_vocab = 64, 32
+        hidden_state = torch.randn(3, hidden_size, dtype=torch.bfloat16, device=device)
+        head = LMHeadStub(local_vocab, hidden_size, torch.bfloat16, device=device)
+        logprocessor = self._make_logprocessor(local_vocab * 2, enable_fp32=True)
+        logprocessor.do_tensor_parallel_all_gather = True
+
+        gathered_dtype = None
+
+        def fake_all_gather(local_logits):
+            nonlocal gathered_dtype
+            gathered_dtype = local_logits.dtype
+            return torch.cat((local_logits, local_logits), dim=-1)
+
+        logprocessor._logits_gatherer = fake_all_gather
+        logits = logprocessor._get_logits(hidden_state, head, DummyMeta())
+
+        self.assertEqual(gathered_dtype, torch.float32)
+        self.assertEqual(logits.dtype, torch.float32)
+        reference = torch.matmul(hidden_state.float(), head.weight.float().T)
+        torch.testing.assert_close(logits[:, :local_vocab], reference)
+        torch.testing.assert_close(logits[:, local_vocab:], reference)
+
+    def test_fp32_gemm_preserves_ranking_lost_by_bf16_output(self):
+        """Compare both output choices to an independent explicit-FP32 reference."""
+        if not torch.cuda.is_available():
+            self.skipTest("torch.mm(out_dtype=...) requires CUDA or ROCm")
+
+        device = get_device()
+        hidden = torch.ones((1, 64), dtype=torch.bfloat16, device=device)
+        weight = torch.zeros((2, 64), dtype=torch.bfloat16, device=device)
+        weight[0].fill_(1)
+        weight[1].fill_(1)
+        # The exact BF16-input dot products differ, but both round to the same
+        # BF16 logit. argmax then chooses row 0 instead of the true row 1.
+        weight[1, 0] = torch.tensor(1.0078125, dtype=torch.bfloat16, device=device)
+
+        reference = torch.matmul(hidden.float(), weight.float().T)
+        direct_fp32 = torch.mm(hidden, weight.T, out_dtype=torch.float32)
+        post_bf16_cast = torch.matmul(hidden, weight.T).float()
+
+        self.assertEqual(reference.argmax(-1).item(), 1)
+        self.assertEqual(direct_fp32.argmax(-1).item(), 1)
+        self.assertEqual(post_bf16_cast.argmax(-1).item(), 0)
+        torch.testing.assert_close(direct_fp32, reference, atol=0, rtol=0)
+        self.assertGreater(
+            (post_bf16_cast - reference).abs().max().item(),
+            (direct_fp32 - reference).abs().max().item(),
         )
 
 
