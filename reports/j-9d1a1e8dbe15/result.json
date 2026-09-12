@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37590",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1198",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1162",
+  "candidate_commit": "3323334eb03732b320e266a8b67cb953a5aaa6a7",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the source-side len(None) failure with real four-process Gloo collectives. The exact candidate seeds only the attention-TP rank-zero column across CP before fanning out each TP row, and passes its regression plus independent non-square, empty-payload, TP-only, and CP-only cases.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES='' timeout 60s /tmp/amdpilot-repo-j-9d1a1e8dbe15/venv/bin/python -m torch.distributed.run --standalone --nproc-per-node=4 /job/review-evidence-j-9d1a1e8dbe15/reproduce_4rank.py",
+      "revision": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 1,
+      "what_was_measured": "Original 2x2 attention TP/CP object-broadcast failure through the real broadcast helper; rank 2 was a TP source with data=None and raised TypeError from len(None)."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES='' timeout 60s /tmp/amdpilot-repo-j-9d1a1e8dbe15/venv/bin/python -m torch.distributed.run --standalone --nproc-per-node=4 reports/j-466508518402/reproduce_4rank.py",
+      "revision": "3323334eb03732b320e266a8b67cb953a5aaa6a7",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression with real Gloo process groups; the request payload reached all four ranks."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9d1a1e8dbe15/venv/bin/python -m pytest -q test/registered/unit/distributed/test_communication_op.py test/registered/unit/managers/test_pp_cp_rank_offsets.py",
+      "revision": "3323334eb03732b320e266a8b67cb953a5aaa6a7",
+      "exit_code": 0,
+      "what_was_measured": "Nine focused broadcast and scheduler integration tests passed."
+    },
+    {
+      "command": "TEST_TP/TEST_CP matrices 2x3, 3x2, 1x3, and 3x1 via torch.distributed.run and adversarial_broadcast.py",
+      "revision": "3323334eb03732b320e266a8b67cb953a5aaa6a7",
+      "exit_code": 0,
+      "what_was_measured": "Independent real-Gloo non-square topologies, empty leader payload, CP-only boundary, and TP-only boundary; every rank received the exact payload."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The collective defect was exercised with CPU Gloo. One AMD Instinct MI350X gfx950 GPU was visible, but the original contract requires an eight-GPU DeepSeek-V4 serving layout and model weights were unavailable."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_reason": "Not applicable: the candidate changes Python source and tests only; candidate-files.txt confirms no native source changed.",
+  "source_import_path": "/job/repo/python/sglang/srt/distributed/communication_op.py",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The original eight-GPU DeepSeek-V4 serving command was not run on the single assigned gfx950 GPU.",
+    "No DeepSeek-V4 weights were available, so DSV4 model execution and semantic behavior were not evaluated.",
+    "NCCL and multi-node behavior were not exercised; validation used the real Python serialization helper over deterministic CPU Gloo process groups."
+  ]
+}
