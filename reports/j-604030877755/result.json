@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34899",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "summary": "Added the missing bit-exact Inkling KL coverage for --enable-unified-memory, including deterministic prefill/decode baseline, prefill cache-hit restoration, and decode cache-hit restoration on both Python and Rust unified radix tree cores. The exact serving tests could not be executed in this ROCm image because Inkling's FA4 model module requires the NVIDIA CUTLASS Python package and failed model registration before weight loading. ROCm-supported unified-pool GPU parity and FULL/SWA/MAMBA view tests passed.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-604030877755/venv/bin/python -m pytest test/registered/e2e/models/test_inkling_unified.py::TestInklingUnifiedTriPool::test_input_output_logprobs_match -vv -s --junitxml=reports/j-604030877755/before-unified-logprob.xml",
+      "exit_code": 1,
+      "what_was_measured": "Attempted the pre-change unified-memory Inkling serving/logprob path on the assigned MI355X. Server startup failed before weights or inference because importing sglang.srt.models.inkling raised No module named 'cutlass', after which InklingForConditionalGeneration was not registered. This is an environment/architecture blocker and no KL value was measured."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-604030877755/venv/bin/python -m pytest --collect-only -q test/registered/radix_cache/unified_radix_tree/test_unified_radix_cache_kl_hybrid_bitexact.py",
+      "exit_code": 0,
+      "what_was_measured": "Collected 24 tests, including all six new unified-memory exact-KL cases: baseline, prefill cache hit, and decode cache hit for Python and Rust tree cores."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-604030877755/venv/bin/python -m pytest test/registered/unit/mem_cache/test_unified_mla_gpu_parity.py -vv -s --junitxml=reports/j-604030877755/unified-mla-gpu-parity.xml",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned MI355X, compared unified-memory GPU writes and reads bit-for-bit (rtol=0, atol=0) with the independent stock MLATokenToKVPool reference. Covered randomized locations, page sizes 1 and 64, and both the Triton small-write and JIT large-write paths; 3 tests and 4 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-604030877755/venv/bin/python -m pytest test/registered/unit/mem_cache/test_unified_mamba_views.py test/registered/unit/mem_cache/test_unified_swa_shared_virtual_ids.py -q --junitxml=reports/j-604030877755/unified-component-unit.xml",
+      "exit_code": 0,
+      "what_was_measured": "Validated unified MAMBA view construction and shared SWA virtual-ID translation/reuse behavior; 7 tests and 11 subtests passed."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace and conflict-marker validation."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "test_unified_mla_gpu_parity.py executed real kernels on GPU 0, AMD Instinct MI355X gfx950, and matched the independent stock-pool numerical reference bit-for-bit. The Inkling end-to-end serving path did not execute because its NVIDIA CUTLASS dependency is unavailable on this ROCm image.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The new exact-KL serving classes were not numerically executed. Inkling imports an FA4/CUTLASS implementation and this pinned ROCm environment has no cutlass module; model registration fails before weight loading.",
+    "No failing-before/passing-after defect regression was produced: the task is missing coverage, and the existing approximate test could not start on the assigned architecture.",
+    "The deterministic tiny Llama fixture cannot qualify this feature because it does not implement Inkling's combined FULL, SWA, and MAMBA cache architecture.",
+    "No native sources were changed and repository-environment.json declares no native rebuild target, so native_rebuilt is false.",
+    "A supported NVIDIA host with CUTLASS/FA4 and the thinkingmachines/Inkling test revision must run the six new exact-KL cases before the roadmap item can be considered fully verified."
+  ]
+}

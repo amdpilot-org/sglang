@@ -78,10 +78,9 @@ register_cuda_ci(est_time=2300, stage="extra-a", runner_config="1-gpu-large")
 _MODEL_PATH = os.environ.get("INKLING_TEST_MODEL_PATH", "thinkingmachines/Inkling")
 _MODEL_REVISION = os.environ.get("INKLING_TEST_MODEL_REVISION", "test")
 
-# Both classes measure exactly 0 in their fixed state -- every logprob matches bit
-# for bit. The floor only keeps a stray ulp from failing the run; a state-reuse
-# bug lands orders of magnitude above it. It cannot be 0.0: the comparison is a
-# strict `<`, so an exact 0 would fail its own threshold.
+# The older bit-exact classes still use this numerical threshold. Unified-memory
+# coverage below additionally requests direct elementwise equality so no nonzero
+# difference can be hidden by KL approximation, averaging, or a tolerance.
 KL_DIV_THRESHOLD = 1e-9
 
 # Equal to the page size below. Out-of-window SWA slots are freed a page at a
@@ -121,6 +120,37 @@ def _base_args(
         # and the chunked-prefill activations, which is what this config needs.
         "--mem-fraction-static",
         str(mem_fraction_static),
+        "--mamba-track-interval",
+        str(TRACK_INTERVAL),
+        "--enable-deterministic-inference",
+    ]
+
+
+def _unified_memory_args() -> list[str]:
+    """Run the same exact oracle through UnifiedKVPool's virtual addresses.
+
+    Unified memory currently requires the strided Triton attention path.  Full
+    prefill graphs are disabled because they bypass the virtual-to-physical
+    output-location rebind; decode graphs remain enabled and therefore still
+    cover graph replay over translated FULL, SWA, and MAMBA state.
+    """
+    return [
+        "--trust-remote-code",
+        "--enable-unified-memory",
+        "--attention-backend",
+        "triton",
+        "--page-size",
+        str(PAGE_SIZE),
+        "--mamba-radix-cache-strategy",
+        "extra_buffer",
+        "--cuda-graph-backend-prefill",
+        "disabled",
+        "--swa-full-tokens-ratio",
+        "0.1",
+        "--mamba-full-memory-ratio",
+        "0.1",
+        "--mem-fraction-static",
+        "0.5",
         "--mamba-track-interval",
         str(TRACK_INTERVAL),
         "--enable-deterministic-inference",
@@ -231,6 +261,69 @@ class TestUnifiedHybridLazyBitExact(TestUnifiedHybridBitExact):
             other_args=other_args,
             env=unified_radix_tree_server_env(cls.tree_core_backend),
         )
+
+
+class TestUnifiedMemoryHybridBitExact(CustomTestCase):
+    """Bit-exact reuse through the unified byte pool's three sub-pools.
+
+    This is deliberately separate from :class:`TestUnifiedHybridBitExact`.
+    ``--enable-unified-memory`` replaces the independent allocators with one
+    shared byte buffer and translates virtual cache locations into physical
+    FULL, SWA, and MAMBA views on every forward.  A passing non-unified run
+    therefore says nothing about this state-restoration boundary.
+
+    The baseline proves that deterministic Triton prefill and decode compute
+    the same function.  The two cache-hit cases then require exact equivalence
+    after restoring a prompt checkpoint and a decode checkpoint respectively.
+    """
+
+    tree_core_backend = "python"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.model = _MODEL_PATH
+        cls.base_url = DEFAULT_URL_FOR_TEST
+        other_args = _unified_memory_args()
+        if _MODEL_REVISION:
+            other_args += ["--revision", _MODEL_REVISION]
+        cls.process = popen_launch_server(
+            cls.model,
+            cls.base_url,
+            timeout=DEFAULT_TIMEOUT_FOR_SERVER_LAUNCH,
+            other_args=other_args,
+            env=unified_radix_tree_server_env(cls.tree_core_backend),
+        )
+
+        server_info = requests.get(cls.base_url + "/server_info", timeout=30).json()
+        assert server_info["enable_unified_memory"] is True
+        assert server_info["attention_backend"] == "triton"
+        assert server_info["cuda_graph_config"]["prefill"]["backend"] == "disabled"
+        assert server_info["enable_deterministic_inference"] is True
+
+    @classmethod
+    def tearDownClass(cls):
+        if getattr(cls, "process", None) is not None:
+            terminate_and_kill_process_tree(cls.process, wait_timeout=60)
+
+    def _run(self, helper):
+        helper(
+            self.base_url,
+            {self.model: {"kl_div": KL_DIV_THRESHOLD}},
+            self.model,
+            max_samples=32,
+            max_new_tokens=MAX_NEW_TOKENS,
+            trust_remote_code=True,
+            require_exact=True,
+        )
+
+    def test_logprobs_match(self):
+        self._run(assert_logprobs_match)
+
+    def test_prefill_cache_hit(self):
+        self._run(assert_prefill_cache_hit)
+
+    def test_decode_cache_hit(self):
+        self._run(assert_decode_cache_hit)
 
 
 class TestUnifiedHybridHiCacheBitExact(CustomTestCase):
@@ -405,6 +498,10 @@ class TestRustUnifiedHybridBitExact(TestUnifiedHybridBitExact):
 
 
 class TestRustUnifiedHybridLazyBitExact(TestUnifiedHybridLazyBitExact):
+    tree_core_backend = "rust"
+
+
+class TestRustUnifiedMemoryHybridBitExact(TestUnifiedMemoryHybridBitExact):
     tree_core_backend = "rust"
 
 
