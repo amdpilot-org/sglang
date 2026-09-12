@@ -291,6 +291,39 @@ def test_set_mla_kv_buffer_dcp_sharded_localizes_virtual_locs(rank, with_rope):
             )
 
 
+@pytest.mark.parametrize("with_rope", [False, True])
+def test_set_mla_kv_buffer_dcp_sharded_preserves_default_reserved_slot(with_rope):
+    """The default padding loc must be skipped before DCP localization."""
+    world_size = 2
+    loc = torch.tensor([0, 2], device=DEVICE)
+    nope = torch.full(
+        (loc.numel(), 1, TRITON_NOPE_DIM), float("nan"), device=DEVICE
+    )
+    nope[1] = 2.0
+    rope = (
+        torch.full((loc.numel(), 1, TRITON_ROPE_DIM), float("nan"), device=DEVICE)
+        if with_rope
+        else None
+    )
+    if with_rope:
+        rope[1] = 3.0
+    total_dim = TRITON_NOPE_DIM + (TRITON_ROPE_DIM if with_rope else 0)
+    kv_buffer = torch.full((4, 1, total_dim), -1.0, device=DEVICE)
+    reserved_before = kv_buffer[0].clone()
+
+    with get_parallel().override(attn_dcp_size=world_size, attn_dcp_rank=0):
+        set_mla_kv_buffer_dcp_sharded_triton(kv_buffer, loc, nope, rope)
+
+    torch.testing.assert_close(kv_buffer[0], reserved_before, rtol=0.0, atol=0.0)
+    torch.testing.assert_close(
+        kv_buffer[1, 0, :TRITON_NOPE_DIM], nope[1, 0], rtol=0.0, atol=0.0
+    )
+    if with_rope:
+        torch.testing.assert_close(
+            kv_buffer[1, 0, TRITON_NOPE_DIM:], rope[1, 0], rtol=0.0, atol=0.0
+        )
+
+
 def test_set_mla_kv_buffer_triton_fp8_quant_reserved_skip_index():
     fp8_dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
     cache_k_nope = torch.randn(

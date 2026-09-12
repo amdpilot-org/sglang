@@ -88,6 +88,7 @@ def set_mla_kv_buffer_kernel_norope(
     kv_buffer_ptr,
     cache_k_nope_ptr,
     loc_ptr,
+    reserved_skip_index,
     buffer_stride: tl.constexpr,
     nope_stride: tl.constexpr,
     nope_dim: tl.constexpr,
@@ -107,7 +108,7 @@ def set_mla_kv_buffer_kernel_norope(
         tl.extra.cuda.gdc_wait()
 
     loc = tl.load(loc_ptr + pid_loc).to(tl.int64)
-    is_valid = loc % DCP_WORLD_SIZE == DCP_RANK
+    is_valid = (loc != reserved_skip_index) & (loc % DCP_WORLD_SIZE == DCP_RANK)
     safe_loc = tl.where(is_valid, loc, 0) // DCP_WORLD_SIZE
     dst_ptr = kv_buffer_ptr + safe_loc * buffer_stride + offs
 
@@ -181,6 +182,7 @@ def _set_mla_kv_buffer_impl(
             kv_buffer,
             cache_k_nope,
             loc,
+            reserved_skip_index,
             kv_buffer.stride(0),
             cache_k_nope.stride(0),
             nope_dim,
