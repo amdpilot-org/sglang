@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34539",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that LMCache and FlexKV derived external-store lengths larger than the caller-provided effective KV boundary, then capped both backend-specific committed-length calculations by kv_len_to_handle. Added CPU mock regressions for normal and speculative calculations plus the independent case where a larger caller bound must not extend the backend-derived length.",
+  "tests": [
+    {
+      "command": "python -m pytest -q test/registered/unit/mem_cache/test_external_cache_effective_kv_len.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Both LMCache and FlexKV passed 9 normal-mode or 8 speculative-mode tokens/slots to their external stores when kv_len_to_handle was 4; four issue-specific subtests failed. Two then-incorrect independent-case expectations also failed and were corrected to preserve the existing speculative length of 8. Raw output: reports/j-22d2b5550954/raw/failing-before.txt"
+    },
+    {
+      "command": "SGLANG_CACHE_DIR=/tmp/amdpilot-repo-j-22d2b5550954/cache TORCHINDUCTOR_CACHE_DIR=/tmp/amdpilot-repo-j-22d2b5550954/cache/torchinductor TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-22d2b5550954/cache/triton /tmp/amdpilot-repo-j-22d2b5550954/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_external_cache_effective_kv_len.py",
+      "exit_code": 0,
+      "what_was_measured": "3 tests passed with 6 backend subtests: both stores honor a limit of 4 in normal and speculative modes, while a limit of 12 preserves the speculative backend-derived length of 8. Raw output: reports/j-22d2b5550954/raw/passing-after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-22d2b5550954/venv/bin/python -m pre_commit run --files python/sglang/srt/mem_cache/storage/lmcache/lmc_radix_cache.py python/sglang/srt/mem_cache/storage/flexkv/flexkv_radix_cache.py test/registered/unit/mem_cache/test_external_cache_effective_kv_len.py",
+      "exit_code": 0,
+      "what_was_measured": "All configured formatting, lint, syntax, registry, and repository policy hooks passed for the changed source and regression test. Raw output: reports/j-22d2b5550954/raw/pre-commit.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned GPU was identified as AMD Instinct MI355X, gfx950 (reports/j-22d2b5550954/raw/gpu-info.txt), but no GPU execution was used because the defect is deterministic CPU-side slicing of token IDs and slot-index metadata before either optional external connector is called."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "LMCache and FlexKV are not installed in the prepared interpreter, so validation uses dependency stubs and exercises the actual cache_finished_req implementations with mocked connectors; no live external-cache service integration was run.",
+    "No model, semantic-accuracy, distributed, or multi-node claim is made; those paths are not required to establish this metadata-boundary defect.",
+    "An open upstream candidate, https://github.com/sgl-project/sglang/pull/34541, independently proposes the same two source caps; it was inspected but is not merged into the recorded base."
+  ]
+}
