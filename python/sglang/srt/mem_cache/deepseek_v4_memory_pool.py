@@ -278,7 +278,14 @@ class HiSparseC4DevicePool(DeepSeekV4SingleKVPool):
             dtype=torch.uint64,
             device=self.device,
         )
+        self.mem_usage = sum(buf.nbytes for buf in self.allocated_tensors()) / GB
         self.compress_ratio = 4
+
+    def allocated_tensors(self) -> List[torch.Tensor]:
+        tensors = list(self.kv_buffer)
+        if hasattr(self, "data_ptrs"):
+            tensors.append(self.data_ptrs)
+        return tensors
 
     def register_mapping(self, full_to_hisparse_device_index_mapping: torch.Tensor):
         self.full_to_hisparse_device_index_mapping = (

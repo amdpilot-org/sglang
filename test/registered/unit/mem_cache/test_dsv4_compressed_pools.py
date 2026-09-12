@@ -8,6 +8,7 @@ import torch
 from sglang.srt.mem_cache.deepseek_v4_memory_pool import (
     DeepSeekV4SingleKVPool,
     DeepSeekV4TokenToKVPool,
+    HiSparseC4DevicePool,
     _CompressedPoolConfig,
 )
 from sglang.srt.mem_cache.memory_pool import GB
@@ -18,6 +19,28 @@ register_cpu_ci(est_time=5, suite="base-a-test-cpu")
 
 
 class TestDSV4CompressedPools(CustomTestCase):
+    def test_hisparse_mem_usage_includes_device_pointer_table(self):
+        for layer_num in (1, 3):
+            with self.subTest(layer_num=layer_num):
+                pool = HiSparseC4DevicePool(
+                    size=64,
+                    page_size=64,
+                    dtype=torch.float8_e4m3fn,
+                    qk_nope_head_dim=448,
+                    qk_rope_head_dim=64,
+                    layer_num=layer_num,
+                    device="cpu",
+                    enable_memory_saver=False,
+                )
+
+                allocated = pool.allocated_tensors()
+                self.assertEqual(allocated, [*pool.kv_buffer, pool.data_ptrs])
+                self.assertEqual(pool.data_ptrs.nbytes, layer_num * 8)
+                self.assertEqual(
+                    pool.mem_usage,
+                    sum(tensor.nbytes for tensor in allocated) / GB,
+                )
+
     def test_mem_usage_sums_non_unified_physical_buffers(self):
         pool = DeepSeekV4TokenToKVPool.__new__(DeepSeekV4TokenToKVPool)
         pool._unified_kv = False
