@@ -1,0 +1,58 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35912",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Upstream PR #35920 had already corrected the originally reported install guide and cookbook commands. The resolver bug was reproduced exactly, and one cookbook page added after that fix was found to recommend the vulnerable plain PyPI command. That remaining line now uses --prerelease=allow, and the existing cookbook checker prevents recurrence while excluding source/git installs that uv 0.11.16 resolves directly.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-753d531acb6a/resolver-evidence/uv011/bin/uv pip compile unpinned.in --python-platform x86_64-manylinux_2_34 --python-version 3.12",
+      "exit_code": 0,
+      "what_was_measured": "uv 0.11.16 resolved sglang<0.5.18 to sglang==0.5.9."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-753d531acb6a/resolver-evidence/uv012/bin/uv pip compile unpinned.in --python-platform x86_64-manylinux_2_34 --python-version 3.12",
+      "exit_code": 0,
+      "what_was_measured": "uv 0.12.0 resolved the same input to sglang==0.5.17 and flash-attn-4==4.0.0b19."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-753d531acb6a/resolver-evidence/uv011/bin/uv pip compile unpinned.in --prerelease=allow --python-platform x86_64-manylinux_2_34 --python-version 3.12",
+      "exit_code": 0,
+      "what_was_measured": "The documented flag made uv 0.11.16 resolve sglang==0.5.17."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-753d531acb6a/resolver-evidence/uv011/bin/uv pip compile pinned.in --python-platform x86_64-manylinux_2_34 --python-version 3.12",
+      "exit_code": 1,
+      "what_was_measured": "Pinned sglang==0.5.10.post1 exposed the flash-attn-4 prerelease rejection and uv's --prerelease=allow hint."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-753d531acb6a/resolver-evidence/uv011/bin/uv pip compile python/pyproject.toml --python-platform x86_64-manylinux_2_34 --python-version 3.12",
+      "exit_code": 0,
+      "what_was_measured": "Independent source-install boundary: current project metadata resolved cuda-tile==1.6.0rc5 and flash-attn-4==4.0.0b19 directly under uv 0.11.16."
+    },
+    {
+      "command": "node docs/scripts/check_cookbook_configs.mjs",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression identified the post-#35920 plain PyPI command in Qwen3.8-Flash-Next.mdx."
+    },
+    {
+      "command": "node docs/scripts/check_cookbook_configs.mjs",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after cookbook audit plus independent positive and negative command-classification cases."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is deterministic package resolution and documentation behavior; no model execution or GPU kernel claim was made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported Qwen3.8-27B-FP8 TP=2 semantic failure was not reproduced because the model weights and two-GPU topology were unavailable and are unnecessary to establish the resolver defect.",
+    "The guard covers cookbook PyPI install recommendations and the cookbook template; it does not attempt to change uv itself or prevent users from manually typing an unflagged command.",
+    "Full raw resolver lock output remains in /tmp/amdpilot-repo-j-753d531acb6a/resolver-evidence; the concise relevant output is retained in reports/j-753d531acb6a/resolver-reproduction.txt."
+  ]
+}
