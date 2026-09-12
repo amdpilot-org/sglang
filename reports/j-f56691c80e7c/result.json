@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36071",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1361",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/1317",
+  "candidate_commit": "40a46418db2ee8fdf9e4ae0fd209e34541180542",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate implements the issue-specific stable copy-in policy for custom all-reduce during DSA decode with DP attention, and preserves direct registration outside that configuration. Its regression fails on the recorded base and passes on the candidate; independent runtime-policy and single-gfx950 stable-address graph checks also pass. The full eight-GPU TP8/DP4 GLM-5.2 failure remains unverified because only one GPU and no model weights were available.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-f56691c80e7c/venv/bin/python -m pytest -q /job/review-evidence-j-f56691c80e7c/candidate_test.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before execution of the exact candidate regression: 9/9 cases failed because the base lacks the DSA+DP capture policy and selected capture-path field."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f56691c80e7c/venv/bin/python -m pytest -q test/registered/unit/distributed/test_custom_all_reduce_graph_capture_policy.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "9/9 candidate policy, capture-path, SGLang dispatch, deterministic dispatch, and AITER dispatch cases passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f56691c80e7c/venv/bin/python -m pytest -q test/registered/unit/distributed/test_custom_all_reduce_graph_capture_policy.py test/registered/unit/test_runtime_context.py",
+      "exit_code": 0,
+      "what_was_measured": "104 tests and 140 subtests passed, covering the candidate regression and the runtime-context subsystem it newly reads during communicator dispatch."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f56691c80e7c/venv/bin/python reports/j-bbbcc73e6807/gpu_stable_copy_graph.py",
+      "exit_code": 0,
+      "what_was_measured": "On one MI350X gfx950, four separately captured graphs used one stable BF16 address and replayed in reverse order; observed FP32 sums exactly matched [8192, 4096, 2048, 1024]."
+    },
+    {
+      "command": "independent inline runtime-context policy check retained as /job/review-evidence-j-f56691c80e7c/independent-runtime-policy.txt",
+      "exit_code": 0,
+      "what_was_measured": "Actual ServerArgs publication selected copy-in for DSA decode plus DP attention, including split decode DSA, while preserving direct registration for DSA without DP attention and prefill-only DSA."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X, gfx950:sramecc+:xnack-, ran the stable-address CUDA/HIP graph numerical fixture. This was not a distributed custom-all-reduce run."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No eight-GPU TP8/DP4 execution was possible, so graph-skewed peer IPC custom-all-reduce remains an unexecuted original-contract case.",
+    "No GLM-5.2-MXFP4 weights were available, so all-NaN logits and repeated token ID 0 were not reproduced before or verified absent after.",
+    "The single-GPU fixture does not exercise AITER or SGLang multi-rank custom-all-reduce kernels, peer registration, or incomplete collectives."
+  ],
+  "remaining_limitations": [
+    "Only one gfx950 GPU was assigned; the original environment requires eight MI350X GPUs.",
+    "Model weights were unavailable, so semantic output and throughput were not measured.",
+    "No native source changed; native rebuild was not applicable.",
+    "The candidate PR body references mirror issue 1259, while this reviewed task identifies mirror issue 1361; the review report and delivery PR use 1361."
+  ]
+}
