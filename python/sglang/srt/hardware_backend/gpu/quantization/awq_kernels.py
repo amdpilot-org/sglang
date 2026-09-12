@@ -9,6 +9,8 @@ from sglang.srt.layers.moe.moe_runner.marlin import MarlinMoeQuantInfo
 from sglang.srt.layers.quantization.marlin_utils import (
     apply_awq_marlin_linear,
     awq_to_marlin_zero_points,
+    get_marlin_workspace_for_forward,
+    marlin_init_stream_workspaces,
     marlin_make_empty_g_idx,
     marlin_make_workspace,
     marlin_moe_permute_scales,
@@ -113,6 +115,7 @@ class AWQMarlinLinearKernel:
         layer.scales = torch.nn.Parameter(layer.scales.data, requires_grad=False)
 
         layer.workspace = marlin_make_workspace(device)
+        marlin_init_stream_workspaces(layer)
 
         marlin_qweight = awq_marlin_repack(
             layer.qweight,
@@ -154,7 +157,7 @@ class AWQMarlinLinearKernel:
             weight_zp=layer.qzeros,
             g_idx=layer.g_idx,
             g_idx_sort_indices=layer.g_idx_sort_indices,
-            workspace=layer.workspace,
+            workspace=get_marlin_workspace_for_forward(layer),
             quant_type=self.quant_config.quant_type,
             output_size_per_partition=layer.output_size_per_partition,
             input_size_per_partition=layer.input_size_per_partition,
