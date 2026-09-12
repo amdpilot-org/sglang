@@ -1750,6 +1750,9 @@ class PauseGenerationReqInput(BaseReq, kw_only=True):
     """
 
     mode: Literal["abort", "retract", "in_place"] = "abort"
+    # Set internally by TokenizerWorker so a router broadcast can acknowledge
+    # the specific control request that originated it.
+    operation_id: Optional[str] = None
 
 
 class ContinueGenerationReqInput(BaseReq, kw_only=True):
@@ -1759,6 +1762,8 @@ class ContinueGenerationReqInput(BaseReq, kw_only=True):
     # inference resumes, with no race against active streams. Set to
     # False to skip the empty_cache call.
     torch_empty_cache: bool = True
+    # See PauseGenerationReqInput.operation_id.
+    operation_id: Optional[str] = None
 
 
 class TokenizerWorkerRegistrationReq(BaseReq, kw_only=True):
@@ -1771,6 +1776,7 @@ class PauseContinueBroadcastReq(BaseReq, kw_only=True):
     """Broadcast from router to all workers to set is_pause state."""
 
     is_pause: bool
+    operation_id: Optional[str] = None
 
 
 class UpdateWeightFromDiskReqInput(BaseReq, kw_only=True):

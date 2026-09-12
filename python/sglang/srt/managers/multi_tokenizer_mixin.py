@@ -27,6 +27,7 @@ import pickle
 import signal
 import sys
 import threading
+import uuid
 import zlib
 from multiprocessing import shared_memory
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
@@ -530,7 +531,9 @@ class MultiTokenizerRouter:
             ):
                 # Broadcast to ALL workers so every worker's is_pause is set
                 is_pause = isinstance(recv_obj, PauseGenerationReqInput)
-                broadcast = PauseContinueBroadcastReq(is_pause=is_pause)
+                broadcast = PauseContinueBroadcastReq(
+                    is_pause=is_pause, operation_id=recv_obj.operation_id
+                )
                 for ipc_name in self.all_worker_ipcs:
                     self.socket_mapping.send_output(ipc_name, broadcast)
                 # Forward to scheduler rank 0 (it broadcasts to all TP/PP/DP
@@ -685,8 +688,8 @@ class TokenizerWorker(TokenizerManager):
         reg = TokenizerWorkerRegistrationReq(worker_ipc_name=self.tokenizer_ipc_name)
         self._dispatch_to_scheduler(reg)
 
-        # Future for awaiting pause/continue broadcast confirmation
-        self._pause_continue_future: Optional[asyncio.Future] = None
+        # Futures awaiting their matching pause/continue broadcast confirmation.
+        self._pause_continue_futures: Dict[str, asyncio.Future] = {}
 
         # Register PauseContinueBroadcastReq in the result dispatcher so
         # handle_loop routes it to _handle_pause_continue_broadcast
@@ -697,12 +700,7 @@ class TokenizerWorker(TokenizerManager):
         )
 
     async def pause_generation(self, obj: PauseGenerationReqInput):
-        loop = asyncio.get_event_loop()
-        self._pause_continue_future = loop.create_future()
-        # Send to router which will broadcast to all workers
-        # (router also handles forwarding to scheduler for non-abort modes)
-        self._dispatch_to_scheduler(obj)
-        await self._pause_continue_future
+        await self._dispatch_and_wait_for_pause_continue_broadcast(obj)
 
         if obj.mode == "abort":
             # Abort polling: only the originator checks its own lock state
@@ -714,10 +712,21 @@ class TokenizerWorker(TokenizerManager):
                 await asyncio.sleep(1.0)
 
     async def continue_generation(self, obj: ContinueGenerationReqInput):
+        await self._dispatch_and_wait_for_pause_continue_broadcast(obj)
+
+    async def _dispatch_and_wait_for_pause_continue_broadcast(self, obj):
         loop = asyncio.get_event_loop()
-        self._pause_continue_future = loop.create_future()
-        self._dispatch_to_scheduler(obj)
-        await self._pause_continue_future
+        operation_id = uuid.uuid4().hex
+        obj.operation_id = operation_id
+        future = loop.create_future()
+        self._pause_continue_futures[operation_id] = future
+        try:
+            # The router broadcasts this operation to all workers and forwards
+            # it to the scheduler where applicable.
+            self._dispatch_to_scheduler(obj)
+            await future
+        finally:
+            self._pause_continue_futures.pop(operation_id, None)
 
     def _handle_pause_continue_broadcast(self, obj: PauseContinueBroadcastReq):
         """Called from handle_loop when a broadcast arrives from the router."""
@@ -733,10 +742,12 @@ class TokenizerWorker(TokenizerManager):
                 self.is_pause = False
                 self.is_pause_cond.notify_all()
 
-        # Resolve the pending future if this worker initiated the pause/continue
-        if self._pause_continue_future and not self._pause_continue_future.done():
-            self._pause_continue_future.set_result(True)
-            self._pause_continue_future = None
+        # Resolve only the waiter for the operation that produced this broadcast.
+        # Broadcasts also reach workers that did not originate the operation, and
+        # may arrive after an originator cancelled, so a missing waiter is normal.
+        future = self._pause_continue_futures.get(obj.operation_id)
+        if future is not None and not future.done():
+            future.set_result(True)
 
 
 def get_tokenizer_worker_class(server_args: ServerArgs) -> Type[TokenizerWorker]:
