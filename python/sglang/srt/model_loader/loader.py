@@ -4188,6 +4188,13 @@ class RunaiModelStreamerLoader(BaseModelLoader):
                 source.model_config.hf_config,
             )
 
+        if self.load_config.draft_model_idx is not None:
+            hf_weights_files = self._select_mtp_safetensors(
+                hf_weights_files,
+                hf_folder,
+                self.load_config.draft_model_idx,
+            )
+
         weights_iterator = runai_safetensors_weights_iterator(
             hf_weights_files, self._is_distributed, self.target_device_str
         )
@@ -4217,6 +4224,73 @@ class RunaiModelStreamerLoader(BaseModelLoader):
             )
 
         return apply_prefix(weights_iterator)
+
+    @staticmethod
+    def _select_mtp_safetensors(
+        hf_weights_files: List[str], hf_folder: str, draft_model_idx: int
+    ) -> List[str]:
+        """Select shards for one MTP layer before starting the streamer.
+
+        An index is only used when it contains the requested layer in a known
+        checkpoint layout. Any uncertainty falls back to the original list so
+        shard pruning can never make a previously loadable checkpoint partial.
+        """
+        from sglang.srt.utils.runai_utils import (
+            ObjectStorageModel,
+            is_runai_obj_uri,
+        )
+
+        metadata_folder = (
+            ObjectStorageModel.get_path(hf_folder)
+            if is_runai_obj_uri(hf_folder)
+            else hf_folder
+        )
+        index_path = os.path.join(metadata_folder, SAFE_WEIGHTS_INDEX_NAME)
+        try:
+            with open(index_path) as index_file:
+                weight_map = json.load(index_file)["weight_map"]
+            if not isinstance(weight_map, dict) or not all(
+                isinstance(name, str) and isinstance(shard, str)
+                for name, shard in weight_map.items()
+            ):
+                return hf_weights_files
+        except (OSError, json.JSONDecodeError, KeyError, TypeError):
+            return hf_weights_files
+
+        layouts = (
+            (re.compile(r"^mtp\.(\d+)\."), "mtp."),
+            (re.compile(r"^model\.mtp\.layers\.(\d+)\."), "model.mtp."),
+        )
+        present_layouts = {
+            namespace
+            for pattern, namespace in layouts
+            if any(pattern.match(name) for name in weight_map)
+        }
+
+        selected_shards = set()
+        requested_layer_found = False
+        for name, shard in weight_map.items():
+            layer_match = next(
+                (
+                    match
+                    for pattern, _ in layouts
+                    if (match := pattern.match(name)) is not None
+                ),
+                None,
+            )
+            if layer_match is not None:
+                if int(layer_match.group(1)) == draft_model_idx:
+                    requested_layer_found = True
+                    selected_shards.add(os.path.join(hf_folder, shard))
+            elif any(name.startswith(namespace) for namespace in present_layouts):
+                # Non-layer-specific weights in a recognized MTP namespace are
+                # shared by all draft layers.
+                selected_shards.add(os.path.join(hf_folder, shard))
+
+        if not requested_layer_found or not selected_shards.issubset(hf_weights_files):
+            return hf_weights_files
+
+        return [path for path in hf_weights_files if path in selected_shards]
 
     def _get_all_weights(
         self,
