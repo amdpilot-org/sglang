@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37342",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared main snapshot already contains the release-to-main correction. Commit 60ff1e33a51f363b8426d85e3434a1eb48e1b70a ([DeepSeek V4] Default FP4 checkpoints to FlashInfer MXFP4 MoE) is absent from v0.5.18 commit 71de97b264b04dcd514cf904003028aefe9775c8, is an ancestor of the reporter's working a1fe4e30a983b04bbb74099dfc71bc7148c5c577 snapshot, and makes detected DeepSeek-V4 FP4 experts select flashinfer_mxfp4 on SM90/SM100/SM120. No production-code change was needed. The existing regression was made host-independent and expanded to cover the reported SM90 boundary plus SM100 and SM120.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1ebd62d7dbd9/venv/bin/python -m pytest test/registered/unit/test_model_overrides.py::TestGoldenModelOverrides::test_deepseek_v4_overrides_at_callable_level -q (before test correction)",
+      "exit_code": 1,
+      "what_was_measured": "The regression leaked the physical ROCm platform into its nominal SM100 fixture, so the expected flashinfer_mxfp4 selection was absent. Raw output: /tmp/amdpilot-repo-j-1ebd62d7dbd9/evidence/model_override_test.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1ebd62d7dbd9/venv/bin/python -m pytest test/registered/unit/test_model_overrides.py::TestGoldenModelOverrides::test_deepseek_v4_overrides_at_callable_level -q",
+      "exit_code": 0,
+      "what_was_measured": "Three positive subtests verify auto-selection of flashinfer_mxfp4 for detected FP4 experts on SM90, SM100, and SM120. Existing independent boundaries verify explicit runner selection, A2A, dequant override, FP8 experts, HIP/NPU, unsupported NVIDIA architectures, and NVFP4 behavior. Raw output: /tmp/amdpilot-repo-j-1ebd62d7dbd9/evidence/model_override_test_after.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1ebd62d7dbd9/venv/bin/python -m pytest test/registered/unit/layers/quantization/test_mxfp4_sm90_cutlass.py -q",
+      "exit_code": 5,
+      "what_was_measured": "The SM90 FlashInfer execution test was collected but skipped at module scope because the assigned device is AMD gfx950, not NVIDIA SM90; pytest reports no runnable tests. Raw output: /tmp/amdpilot-repo-j-1ebd62d7dbd9/evidence/sm90_cutlass_test.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1ebd62d7dbd9/venv/bin/python (8x8 float32 GPU matmul compared with CPU torch reference)",
+      "exit_code": 0,
+      "what_was_measured": "Execution on the assigned AMD Instinct MI350X gfx950 GPU produced max_abs_error 0.0. This confirms GPU availability only, not the NVIDIA SM90 issue path. Raw output: /tmp/amdpilot-repo-j-1ebd62d7dbd9/evidence/gfx950_gpu_check.txt"
+    },
+    {
+      "command": "git comparison of v0.5.18 (71de97b), fix commit 60ff1e33, working snapshot a1fe4e30, and prepared base",
+      "exit_code": 0,
+      "what_was_measured": "The fix commit is absent from the release, is an ancestor of the reported working snapshot, and equivalent selection logic exists in the prepared base. Raw output: /tmp/amdpilot-repo-j-1ebd62d7dbd9/evidence/history.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "A numerical torch matmul ran on the single assigned AMD Instinct MI350X (gfx950) and matched the CPU reference exactly. The relevant FlashInfer SM90 kernel could not run on this architecture.",
+  "native_rebuilt": false,
+  "remaining_limitations": "The reported DeepSeek-V4-Flash-0731 weights and four H800/SM90 GPUs were unavailable. Therefore no full-model, TP=4, DSPARK, HTTP-serving, semantic-accuracy, or actual FlashInfer SM90 kernel reproduction is claimed. The deterministic result covers the configuration/routing defect and boundaries only. The source issue remains open upstream, so this is classified candidate_verified rather than fixed."
+}
