@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33360",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1998",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/1958",
+  "candidate_commit": "152efc1aaa4da7cf62be370847166446667d21e2",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate adds useful source-level regression coverage for a production fix already present in the recorded base, but its AST test accepts a wrong token-ID gather operand. Its report also cites the wrong mirror issue and mismatches the observed GPU model. The original H800/Marlin TP8/DP4 full-model failure could not be reproduced on one AMD gfx950 GPU.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-234890cb51bc/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v4_dp_gather_semantics.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate commit source-contract regression; 3 passed."
+    },
+    {
+      "command": "SGLANG_DSV4_GATHER_TEST_MODELS_DIR=/tmp/j-234890cb51bc-historical-a /tmp/amdpilot-repo-j-234890cb51bc/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v4_dp_gather_semantics.py",
+      "exit_code": 1,
+      "what_was_measured": "Historical source fixture restoring the partial hidden-state gather and removing token-ID clones; 2 failed and 1 passed."
+    },
+    {
+      "command": "SGLANG_DSV4_GATHER_TEST_MODELS_DIR=/tmp/j-234890cb51bc-adversarial-a /tmp/amdpilot-repo-j-234890cb51bc/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v4_dp_gather_semantics.py",
+      "exit_code": 0,
+      "what_was_measured": "Adversarial fixture gathering from input_ids_global.clone() instead of input_ids[:, None].clone(); incorrectly passed all 3 tests."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-234890cb51bc/venv/bin/python < independent gfx950 tensor mechanism script",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X gfx950, replicated-value summation scaled exactly by widths 2/4/8 and clone versus view aliasing behaved as expected."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Independent tensor arithmetic and aliasing ran on AMD Instinct MI355X, gfx950:sramecc+:xnack-. No distributed SGLang collective, Marlin kernel, or model served."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Both token-ID gathers can incorrectly use input_ids_global.clone() as their local operand and the candidate regression still passes.",
+    "An additional erroneous dp_gather_partial call can coexist in _run_moe_ffn_dp_sync without being rejected by the candidate hidden-state assertion.",
+    "The original eight-H800 TP8/DP4 DeepSeek-V4-Flash-0731 Marlin serving case remains unexecuted and its semantic output accuracy remains unverified."
+  ],
+  "remaining_limitations": [
+    "Only one AMD gfx950 GPU was available, not eight NVIDIA H800 GPUs.",
+    "DeepSeek-V4-Flash-0731 weights were unavailable.",
+    "NVIDIA Marlin and CUDA cannot execute on the assigned AMD GPU.",
+    "The GPU check validated only arithmetic and aliasing, not actual distributed collective execution or model accuracy.",
+    "No native code changed in the candidate, so a native rebuild was not applicable."
+  ]
+}
