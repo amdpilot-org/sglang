@@ -152,6 +152,19 @@ def _extract_field_by_index(
     return wrap_as_pickle(new_field) if should_wrap_result else new_field
 
 
+def _extract_pooled_hidden_states_by_index(output, index):
+    pooled_hidden_states = output.pooled_hidden_states
+    if pooled_hidden_states is None:
+        return None
+
+    # The scheduler stacks same-shaped states as [tensor(batch, ...)] to reduce
+    # IPC overhead. Convert that representation back to one state per output.
+    if len(pooled_hidden_states) == 1 and len(output.rids) > 1:
+        return [pooled_hidden_states[0][index]]
+
+    return _extract_field_by_index(output, "pooled_hidden_states", index)
+
+
 def _handle_output_by_index(output, i):
     """NOTE: A maintainable method is better here."""
     if isinstance(output, BatchTokenIDOutput):
@@ -283,6 +296,12 @@ def _handle_output_by_index(output, i):
             cached_tokens=_extract_field_by_index(output, "cached_tokens", i),
             placeholder_tokens_idx=None,
             placeholder_tokens_val=None,
+            retraction_counts=_extract_field_by_index(output, "retraction_counts", i),
+            cached_tokens_details=_extract_field_by_index(
+                output, "cached_tokens_details", i
+            ),
+            time_stats=_extract_field_by_index(output, "time_stats", i),
+            pooled_hidden_states=_extract_pooled_hidden_states_by_index(output, i),
         )
     elif isinstance(output, BatchStrOutput):
         new_output = BatchStrOutput(
