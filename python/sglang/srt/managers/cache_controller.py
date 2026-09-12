@@ -229,6 +229,17 @@ class StorageOperation:
         self.completed_tokens = 0
         self.hash_value = hash_value if hash_value is not None else []
         self.prefix_keys = prefix_keys
+        # Backup outcome, filled in by the backup worker so the ack consumer
+        # can distinguish a partial or failed write from a complete one.
+        self.failed: bool = False
+        # "backend_false" | "exception" | "sidecar_backend_false"
+        self.failure_kind: Optional[str] = None
+        # Safe, serializable details for an exception raised by the backend.
+        self.failure_exception_type: Optional[str] = None
+        self.failure_exception_message: Optional[str] = None
+        self.unwritten_pages: int = 0
+        # Pool name -> number of sidecar pages the backend did not write.
+        self.sidecar_unwritten_by_pool: dict = {}
         # Full queried page-hash chain, set by _storage_hit_query before
         # hash_value is truncated to the hit boundary; the tail is the
         # absence signal that invalidates buffer-mode existence beliefs.
@@ -1292,8 +1303,12 @@ class HiCacheController:
             extra_info = HiCacheStorageExtraInfo(prefix_keys=prefix_keys)
             success = self.page_set_func(batch_hashes, batch_host_indices, extra_info)
             if not success:
+                operation.failed = True
+                operation.failure_kind = "backend_false"
+                operation.unwritten_pages = len(operation.hash_value) - i
                 logger.warning(
-                    f"Write page to storage: {len(batch_hashes)} pages failed."
+                    f"Write page to storage: {len(batch_hashes)} pages failed, "
+                    f"{operation.unwritten_pages} pages unwritten."
                 )
                 break
 
@@ -1312,7 +1327,23 @@ class HiCacheController:
                     continue
 
                 if not self.backup_skip:
-                    self._page_backup(operation)
+                    try:
+                        self._page_backup(operation)
+                    except Exception as exc:
+                        # Backend failures must not kill the worker. Ack the
+                        # operation so its host memory can still be released.
+                        operation.failed = True
+                        operation.failure_kind = "exception"
+                        operation.failure_exception_type = type(exc).__name__
+                        operation.failure_exception_message = str(exc)
+                        operation.unwritten_pages = max(
+                            0,
+                            len(operation.hash_value)
+                            - operation.completed_tokens // self.page_size,
+                        )
+                        logger.exception(
+                            "Backup operation %s raised an exception.", operation.id
+                        )
                 self.ack_backup_queue.put(operation)
 
             except Empty:
