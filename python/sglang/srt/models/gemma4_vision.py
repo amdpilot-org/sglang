@@ -259,6 +259,11 @@ class Gemma4VisionAttention(nn.Module):
             cu_seqlens=None,
             bsz=bsz,
             seq_len=seq_len,
+            # Gemma 4 vision inputs are dense: every item has exactly
+            # ``seq_len`` tokens. Supplying this known host scalar avoids
+            # deriving it from a GPU cu_seqlens tensor (and synchronizing via
+            # ``.item()``) in every encoder block.
+            max_seqlen=seq_len,
             attention_mask=attn_mask_4d,
             softmax_scale=1.0,
         )

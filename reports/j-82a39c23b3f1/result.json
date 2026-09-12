@@ -1,0 +1,31 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35673",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Retained PR 1382's justified dense max_seqlen forwarding fix. Reproduced PR 1469's batched numerical failures and showed they came from omitting softmax_scale from the backend forward call; the actual Gemma call semantics match SDPA on gfx950. Full TP=8 readiness remains unverified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-82a39c23b3f1/venv/bin/python -m pytest -q test/registered/unit/models/test_gemma4_vision_attention.py",
+      "exit_code": 1,
+      "what_was_measured": "Against base source, both candidate contract regressions failed because max_seqlen was absent."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-82a39c23b3f1/venv/bin/python -m pytest -q test/registered/unit/models/test_gemma4_vision_attention.py test/registered/unit/layers/attention/test_vision_max_seqlen.py",
+      "exit_code": 0,
+      "what_was_measured": "Focused forwarding and max-seqlen contracts after the correction."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-82a39c23b3f1/venv/bin/python reports/j-82a39c23b3f1/raw/reproduce_direct_backend.py --batch {3,4} --seq-len {5,9} [--pass-scale-to-forward]",
+      "exit_code": 0,
+      "what_was_measured": "Exact review-harness mismatch without a forward scale, and SDPA agreement when using the actual Gemma forward-call semantics."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI355X gfx950 direct VisionTritonAttention runs: max abs error 0.00195312 versus PyTorch SDPA for both (3,5) and (4,9) when softmax_scale=1.0 is passed to forward.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one gfx950 GPU was assigned; TP=8 collectives and the reported eight-GPU topology were not exercised.",
+    "Gemma-4-31B-it weights were unavailable, so the full multimodal model, hybrid SWA allocation, and HTTP /health readiness were not exercised.",
+    "Removing this host synchronization does not prove that earlier GPU kernels or collectives cannot stall."
+  ]
+}
