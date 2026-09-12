@@ -61,6 +61,7 @@ from sglang.srt.speculative.dspark_components.dspark_observability import (
 from sglang.srt.speculative.dspark_components.dspark_planner import (
     DSparkVerifyPlanner,
     alloc_verify_window,
+    clamp_verify_lens,
     dp_global_verify_tier_num_tokens,
     idle_ragged_layout,
 )
@@ -70,6 +71,7 @@ from sglang.srt.speculative.dspark_components.dspark_verify import (
     TargetVerifyExecutor,
     verify_logits_adjustments_are_noop,
 )
+from sglang.srt.speculative.ragged_verify import RaggedVerifyLayout
 from sglang.srt.speculative.spec_tp_sync import SpecTpSync, SpecTpSyncSite
 from sglang.srt.speculative.spec_utils import (
     GrammarTree,
@@ -682,6 +684,28 @@ class DSparkWorkerV2(BaseSpecWorker):
         bs = len(batch.seq_lens)
         device = self.device
         prefix_lens = batch.seq_lens
+        requested_verify_lens = torch.full_like(
+            prefix_lens, self.verify_num_draft_tokens, dtype=torch.int64
+        )
+        remaining_generation_tokens = torch.tensor(
+            [
+                self.verify_num_draft_tokens
+                if req.sampling_params.max_new_tokens is None
+                else max(req.sampling_params.max_new_tokens - len(req.output_ids), 0)
+                for req in batch.reqs
+            ],
+            dtype=torch.int64,
+            device=device,
+        )
+        # The request-to-token table includes speculative headroom beyond the
+        # model's RoPE table, so it is not a valid positional upper bound.
+        max_context_len = self.model_runner.model_config.context_len
+        actual_verify_lens = clamp_verify_lens(
+            requested_verify_lens=requested_verify_lens,
+            seq_lens=prefix_lens,
+            remaining_generation_tokens=remaining_generation_tokens,
+            max_context_len=max_context_len,
+        )
 
         self._observers.begin_step()
 
@@ -693,6 +717,8 @@ class DSparkWorkerV2(BaseSpecWorker):
             verify_num_draft_tokens=self.verify_num_draft_tokens,
             block_pos_offsets=self._block_pos_offsets,
             model_runner=self.model_runner,
+            verify_lens=actual_verify_lens,
+            max_context_len=max_context_len,
         )
 
         sampling_info = batch.sampling_info
@@ -742,7 +768,25 @@ class DSparkWorkerV2(BaseSpecWorker):
             global_num_reqs=global_num_reqs,
             dp_tier_num_tokens=self._dp_verify_tier_num_tokens(batch),
         )
-        run_compact = self._verify_planner.should_run_compact(layout=layout)
+        planned_verify_lens = (
+            requested_verify_lens if layout is None else layout.verify_lens
+        )
+        actual_verify_lens = torch.minimum(
+            planned_verify_lens.to(torch.int64), actual_verify_lens
+        )
+        verify_lens_clipped = not torch.equal(actual_verify_lens, planned_verify_lens)
+        if verify_lens_clipped:
+            layout = RaggedVerifyLayout.from_verify_lens_device(
+                verify_lens=actual_verify_lens,
+                graph_num_tokens=(
+                    int(actual_verify_lens.sum().item())
+                    if layout is None
+                    else layout.graph_num_tokens
+                ),
+            )
+        run_compact = verify_lens_clipped or self._verify_planner.should_run_compact(
+            layout=layout
+        )
 
         verify_ids_2d = torch.cat(
             [draft_block_ids[:, :1], draft_tokens], dim=1
