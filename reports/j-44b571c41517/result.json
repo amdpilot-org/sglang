@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30314",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "f917979aeb38db42c20d164042cb24e2d7a1be65",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate's narrow changes are internally consistent: it enables decode-prefix Mamba eviction by default and restores admission-safe pool ratios, and its focused regression fails on the recorded base and passes at the exact candidate. It does not resolve or verify the original scheduler responsiveness contract. Its own locked 2N counterexample still ends in an allocator AssertionError after one eviction attempt, with no scheduler-level graceful rejection or progress test. The zero-running post-flush hang, direct hierarchical-cache I/O stall, 222-second TTFT, and reported TP=8 H100 workload remain unverified.",
+  "tests": [
+    {
+      "command": "git checkout f917979aeb38db42c20d164042cb24e2d7a1be65 && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-44b571c41517/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact-candidate focused regression: 10 passed. This includes 3N admission success, evictable-prefix 2N success, and locked-prefix 2N exhaustion expecting AssertionError after exactly one eviction request."
+    },
+    {
+      "command": "git checkout 358c163250ad3b1f62939b01ce1314a0a31a0365 && git checkout f917979aeb38db42c20d164042cb24e2d7a1be65 -- test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-44b571c41517/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before comparison using the candidate regression on the recorded base: 8 passed, 2 failed. The base defaulted decode-lock skipping off and returned lazy ratio 3 rather than 4."
+    },
+    {
+      "command": "git checkout f917979aeb38db42c20d164042cb24e2d7a1be65 && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-44b571c41517/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_radix_allocation_eviction.py",
+      "exit_code": 0,
+      "what_was_measured": "17 unified-cache allocation/eviction unit cases passed; these do not exercise HTTP responsiveness or direct hierarchical-cache I/O."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-44b571c41517/venv/bin/python -c 'import sglang,sglang.srt.environ; print(sglang.__file__); print(sglang.srt.environ.__file__)'",
+      "exit_code": 0,
+      "what_was_measured": "Imports resolved to /job/repo/python/sglang and the exact checked-out source, not an installed package copy."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..f917979aeb38db42c20d164042cb24e2d7a1be65",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The host exposes one AMD Instinct MI350X/gfx950 through Torch 2.11.0+rocm7.2. The original requires eight H100 80GB GPUs, CUDA, Qwen3.5-397B-A17B-FP8 weights, TP=8, EAGLE, and production-scale traffic. No unrelated GPU smoke is counted as issue evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With N request-owned slots plus N admission-locked prefix slots in a 2N pool, donated-state allocation makes one eviction request and raises AssertionError: Can not alloc mamba cache; graceful scheduler-level rejection and continued progress are not demonstrated.",
+    "No regression demonstrates that /health, completion handling, or other requests remain responsive while Mamba admission cannot progress.",
+    "The zero-running post-flush exhaustion case is not reproduced or explained.",
+    "Direct hierarchical-cache I/O blocking and the reported 222-second TTFT are untested.",
+    "The original Qwen3.5-397B-A17B-FP8 TP=8 H100 workload is unverified."
+  ],
+  "remaining_limitations": [
+    "Only CPU-side allocator/cache accounting tests were qualified.",
+    "The deterministic tiny Llama fixture has no hybrid-Mamba allocator and cannot qualify this issue.",
+    "No native source changed in the candidate, so no native rebuild was applicable.",
+    "The available single AMD MI350X/gfx950 ROCm environment cannot reproduce the reported eight-H100 CUDA architecture."
+  ]
+}
