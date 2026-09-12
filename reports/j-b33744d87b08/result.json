@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34239",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Scheduler fallback generation limits now reserve the same EAGLE/NEXTN draft-token slots as tokenizer-side explicit-length validation. This closes a source-proven context-boundary gap for requests without max_tokens; the exact H800 TP8 crash remains unavailable for reproduction.",
+  "tests": [
+    {
+      "command": "python -m pytest -q test/registered/unit/managers/test_scheduler_init_req_max_new_tokens.py::TestSchedulerInitReqMaxNewTokens::test_eagle_draft_slots_are_reserved_at_context_boundary (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "The old scheduler formula violated the four-slot speculative reserve at context_length=262144 and input_len=262091."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/managers/test_scheduler_init_req_max_new_tokens.py",
+      "exit_code": 0,
+      "what_was_measured": "Nine tests and 542 parameterized boundary subtests passed, including speculative reserve and non-speculative/page/admission boundaries."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 python reports/j-b33744d87b08/raw/gpu-check invocation",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI355X, 262091 + 49 + 4 equaled 262144 and an independent GPU reduction matched its CPU reference exactly."
+    },
+    {
+      "command": "python -m compileall -q python/sglang/srt/managers/scheduler.py test/registered/unit/managers/test_scheduler_init_req_max_new_tokens.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source and regression test compile successfully."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Qwen/Qwen3.5-397B-A17B-FP8 weights were available.",
+    "The assigned hardware was one AMD gfx950 GPU, not eight NVIDIA H800 GPUs.",
+    "CUDA, FA3 CUDA kernels, TP8, CUDA Graph replay, and the reported Xid 31 failure were not reproduced.",
+    "The result verifies a source-level boundary defect and its regression, not that this was the sole cause of the production crash."
+  ]
+}

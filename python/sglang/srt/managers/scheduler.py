@@ -275,6 +275,7 @@ from sglang.srt.managers.scheduler_pp_mixin import SchedulerPPMixin
 from sglang.srt.managers.utils import (
     EmbeddingBatchResult,
     GenerationBatchResult,
+    compute_num_reserved_tokens,
     is_health_check_generate_req,
     validate_input_length,
 )
@@ -502,6 +503,7 @@ class Scheduler(
         )
         self.max_recv_per_poll = envs.SGLANG_SCHEDULER_MAX_RECV_PER_POLL.get()
         self.max_new_tokens_limit = envs.SGLANG_MAX_NEW_TOKENS_LIMIT.get()
+        self.num_reserved_tokens = compute_num_reserved_tokens()
         self.enable_hisparse = get_memory().enable_hisparse
         self.enable_dp_attention = get_parallel().enable_dp_attention
         self.enable_unified_memory = get_memory().enable_unified_memory
@@ -2525,7 +2527,9 @@ class Scheduler(
             0,
             min(
                 max_new_tokens,
-                self.max_req_len - input_len - 1,
+                self.max_req_len
+                - input_len
+                - max(1, self.num_reserved_tokens),
                 self.max_total_num_tokens * get_parallel().attn_dcp_size
                 - paged_input_len
                 - self.page_size
