@@ -1,0 +1,32 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32470",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared main-based source already contains upstream PR #32467's fix: the competing warp-0 initialization writes to warp_min/warp_max were removed. Added deterministic source-invariant coverage and real gfx950 GPU planner parity/bounds coverage for the reported 72x4 + 24x3 compact ragged shape, warp-boundary variants, and uniform fast-path controls.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d166451934c2/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py::TestCompressPlanRaggedReduction::test_warp_extrema_have_one_writer_per_slot (after temporarily restoring the five pre-fix initialization lines)",
+      "exit_code": 1,
+      "what_was_measured": "Deterministic failing-before regression: rejected the unsynchronized warp_max[tx]/warp_min[tx] initialization writes from the pre-fix kernel. Raw output: reports/j-d166451934c2/failing-before.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_JIT_KERNEL_CACHE_DIR=/tmp/amdpilot-repo-j-d166451934c2/cache-current /tmp/amdpilot-repo-j-d166451934c2/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py",
+      "exit_code": 0,
+      "what_was_measured": "4 tests passed with 9 subtests on gfx950. The actual JIT-compiled GPU planner matched the independent CPU planner for compress/write rows; all valid write ragged_ids were unique and below num_q for the reported pattern, six warp-boundary patterns, and uniform E=1/4/32 controls. Raw output: reports/j-d166451934c2/passing-after.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validation."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X (gfx950), PyTorch 2.11.0+rocm7.2, HIP 7.2.26015. The test invoked CompressorPrefillPlan with GPU seq_lens/extend_lens and synchronized after the real plan_compress_prefill_kernel0 execution. JIT artifact: /job/.cache/sglang/jit/gfx950/sgl_kernel_jit_dpsk_v4_compress_plan/build-797f2abb2e01f584/deps-f53448a4c3fb4031/sgl_kernel_jit_dpsk_v4_compress_plan.so",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original CUDA/H20 TP=2 DeepSeek-V4-Flash-DSpark serving reproduction was not run: this environment provides one AMD gfx950 GPU and no reported model weights.",
+    "Restoring the old racy source did not manifest a runtime mismatch in 100 gfx950 executions; the failing-before evidence is the deterministic source invariant. This does not establish CUDA scheduler behavior on H20.",
+    "The test qualifies the real prefill plan kernel and its emitted metadata only; it is not a full model, CUDA graph capture, semantic-accuracy, or distributed serving reproduction.",
+    "No monolithic native rebuild is configured (repository-environment.json native is null); the exercised JIT extension was compiled from the checked-out source for gfx950."
+  ]
+}
