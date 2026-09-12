@@ -59,6 +59,16 @@ class TestAbortOnNanLogits(CustomTestCase):
                 detect_full_nan_rows(logits).tolist(), [True, False, False]
             )
 
+    def test_abort_mode_sanitizes_before_sampling_without_sanitize_flag(self):
+        logits = torch.full((1, 7), float("nan"))
+        with (
+            envs.SGLANG_ABORT_ON_NAN_LOGITS.override(True),
+            envs.SGLANG_SANITIZE_NAN_LOGITS.override(False),
+        ):
+            self.assertEqual(detect_full_nan_rows(logits).tolist(), [True])
+            sanitize_nan_logits(logits)
+        self.assertTrue(torch.isfinite(logits).all())
+
     def test_marks_only_affected_request_without_committing_token(self):
         reqs = [_req("healthy"), _req("nan")]
         aborted = _mark(reqs, torch.tensor([False, True]))

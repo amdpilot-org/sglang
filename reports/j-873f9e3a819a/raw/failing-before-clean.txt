@@ -1,0 +1,224 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_ TestAbortOnNanLogits.test_abort_mode_sanitizes_before_sampling_without_sanitize_flag _
+
+self = <test_abort_on_nan_logits.TestAbortOnNanLogits testMethod=test_abort_mode_sanitizes_before_sampling_without_sanitize_flag>
+
+    def test_abort_mode_sanitizes_before_sampling_without_sanitize_flag(self):
+        logits = torch.full((1, 7), float("nan"))
+        with (
+            envs.SGLANG_ABORT_ON_NAN_LOGITS.override(True),
+            envs.SGLANG_SANITIZE_NAN_LOGITS.override(False),
+        ):
+            self.assertEqual(detect_full_nan_rows(logits).tolist(), [True])
+            sanitize_nan_logits(logits)
+>       self.assertTrue(torch.isfinite(logits).all())
+E       AssertionError: tensor(False) is not true
+
+test/registered/unit/utils/test_abort_on_nan_logits.py:70: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7c0b98717b00>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7c147e2119e0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestAbortOnNanLogits.test_abort_mode_sanitizes_before_sampling_without_sanitize_flag
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/utils/test_abort_on_nan_logits.py", line 70, in test_abort_mode_sanitizes_before_sampling_without_sanitize_flag
+    self.assertTrue(torch.isfinite(logits).all())
+  File "/usr/lib/python3.12/unittest/case.py", line 727, in assertTrue
+    raise self.failureException(msg)
+AssertionError: tensor(False) is not true
+_ TestPrefillHiddenStateOffsets.test_full_nan_abort_uses_comprehensive_cleanup _
+
+self = <test_batch_result_processor_hidden_states.TestPrefillHiddenStateOffsets testMethod=test_full_nan_abort_uses_comprehensive_cleanup>
+
+    def test_full_nan_abort_uses_comprehensive_cleanup(self):
+        req = _PrefillReq(
+            rid="full-nan",
+            inflight_middle_chunks=0,
+            return_hidden_states=False,
+        )
+        batch = SimpleNamespace(
+            reqs=[req],
+            decoding_reqs=[],
+            return_logprob=False,
+            return_hidden_states=False,
+            return_hidden_states_mode=CaptureHiddenMode.NULL,
+            spec_info=None,
+            spec_algorithm=SimpleNamespace(is_none=lambda: True),
+            prefill_stats=None,
+            dp_cooperation_info=None,
+        )
+        result = SimpleNamespace(
+            copy_done=None,
+            auxiliary_host_output=None,
+            routed_experts_output=None,
+            indexer_topk_output=None,
+            logits_output=LogitsProcessorOutput(
+                next_token_logits=None,
+                full_nan_rows=torch.tensor([True]),
+            ),
+            next_token_ids=torch.tensor([0]),
+            extend_input_len_per_req=None,
+            extend_logprob_start_len_per_req=None,
+            grammar_advanced=False,
+            can_run_cuda_graph=False,
+            skipped_output_comm=False,
+        )
+        processor = _make_processor(self)
+
+        with (
+            patch.object(
+                SchedulerBatchResultProcessor, "_handle_sampling_mask_abort"
+            ) as cleanup,
+            patch(
+                "sglang.srt.managers.scheduler_components."
+                "batch_result_processor.release_kv_cache"
+            ) as direct_release,
+        ):
+            processor.process_batch_result_prefill(batch, result)
+
+>       cleanup.assert_called_once_with(req)
+
+test/registered/unit/managers/test_batch_result_processor_hidden_states.py:174:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <MagicMock name='_handle_sampling_mask_abort' id='136389251109552'>
+args = (<test_batch_result_processor_hidden_states._PrefillReq object at 0x7c0b9871b3b0>,)
+kwargs = {}
+msg = "Expected '_handle_sampling_mask_abort' to be called once. Called 0 times."
+
+    def assert_called_once_with(self, /, *args, **kwargs):
+        """assert that the mock was called exactly once and that that call was
+        with the specified arguments."""
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to be called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected '_handle_sampling_mask_abort' to be called once. Called 0 times.
+
+/usr/lib/python3.12/unittest/mock.py:955: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7c0b987e1f80>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7c147e2119e0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestPrefillHiddenStateOffsets.test_full_nan_abort_uses_comprehensive_cleanup
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/managers/test_batch_result_processor_hidden_states.py", line 174, in test_full_nan_abort_uses_comprehensive_cleanup
+    cleanup.assert_called_once_with(req)
+  File "/usr/lib/python3.12/unittest/mock.py", line 955, in assert_called_once_with
+    raise AssertionError(msg)
+AssertionError: Expected '_handle_sampling_mask_abort' to be called once. Called 0 times.
+------------------------------ Captured log call -------------------------------
+ERROR    sglang.srt.managers.scheduler_components.batch_result_processor:batch_result_processor.py:244 Aborting req full-nan: the model produced an all-NaN logits row
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/utils/test_abort_on_nan_logits.py::TestAbortOnNanLogits::test_abort_mode_sanitizes_before_sampling_without_sanitize_flag
+FAILED test/registered/unit/managers/test_batch_result_processor_hidden_states.py::TestPrefillHiddenStateOffsets::test_full_nan_abort_uses_comprehensive_cleanup
+2 failed, 17 warnings in 9.11s
