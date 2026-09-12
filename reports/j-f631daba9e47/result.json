@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36338",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Implemented selective FP8 KV dequantization for eager BF16 DSA sparse prefill. The path translates ragged logical top-k positions to physical cache slots, deduplicates shared/overlapping slots, dequantizes the union once, remaps top-k indices to the compact BF16 buffer, and falls back to full-prefix dequantization below a conservative measured crossover gate.",
+  "tests": [
+    {
+      "command": "TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-f631daba9e47/cache/triton /tmp/amdpilot-repo-j-f631daba9e47/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_selective_dsa_kv_dequant.py -s",
+      "exit_code": 0,
+      "what_was_measured": "Three MI350X GPU tests: exact independent FP8-pack/BF16-dequant numerical reconstruction, physical alias deduplication and remapping with duplicate/multi-request/-1 inputs, short-prefix fallback compatibility, and invalid/all-empty sentinel handling. 3 passed."
+    },
+    {
+      "command": "TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-f631daba9e47/cache/triton /tmp/amdpilot-repo-j-f631daba9e47/venv/bin/python reports/j-f631daba9e47/benchmark_selective_dequant.py",
+      "exit_code": 0,
+      "what_was_measured": "Actual MI350X Triton execution at 262144 logical rows, 8 query rows and top-k 2048: 4029 compact physical rows; BF16 staging 301989888 to 4641408 bytes; full 0.7931 ms versus selective 0.3013 ms (2.632x). Earlier retained investigation found 32768 rows regressed, motivating the 131072-row default floor."
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files python/sglang/kernels/ops/attention/dsa/dequant_k_cache.py python/sglang/srt/layers/attention/dsa_backend.py test/registered/kernels/ops/attention/test_selective_dsa_kv_dequant.py reports/j-f631daba9e47/benchmark_selective_dequant.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, syntax, registered-test manifest, and policy hooks all passed."
+    },
+    {
+      "command": "TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-f631daba9e47/cache/triton /tmp/amdpilot-repo-j-f631daba9e47/venv/bin/python -m pytest -q test/registered/attention/unittests/dsa/test_dsa.py -k sparse_fp8_prefill_cases -s",
+      "exit_code": 1,
+      "what_was_measured": "Attempted real DSA backend coverage on MI350X. Result: 1 passed, 4 skipped, 2 failed before attention execution because the prepared HIP legacy DSA path requires page_size == 1 while the fixture uses page_size 64. Raw traceback retained."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "New Triton dequantization and torch.unique/remap code executed numerically and under timing on the assigned AMD Instinct MI350X (gfx950); raw pytest and benchmark logs are retained in this report directory.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The requested BF16 flashmla_sparse attention kernel is NVIDIA Hopper/Blackwell-only and cannot execute on the assigned AMD MI350X. End-to-end sparse-attention output remains unverified on its target architecture; only the selective mapping/dequantization stage has independent GPU numerical validation here.",
+    "The existing DSA FP8 prefill fixture cannot reach attention on this HIP environment because its page_size=64 conflicts with the legacy HIP DSA requirement page_size==1.",
+    "The 131072-row crossover floor is conservative and calibrated on the assigned MI350X. The related upstream draft reports a lower H20 crossover, but this contribution does not claim an independently measured NVIDIA threshold or end-to-end model performance.",
+    "No full DeepSeek model weights or qualified architecture-matching serving fixture were available; transport/startup smoke would not validate this kernel feature and was therefore not substituted.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable."
+  ]
+}
