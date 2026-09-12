@@ -37,6 +37,11 @@ from sglang.srt.utils.common import is_npu, is_xpu
 _is_npu = is_npu()
 logger = logging.getLogger(__name__)
 
+# Only these PP tensors are guaranteed to be replicated across attention TP
+# ranks. Model-specific proxy or auxiliary entries may be TP-sharded and must
+# be sent whole to the matching rank in the next pipeline stage.
+_PP_ALL_GATHER_KEYS = {"hidden_states", "residual"}
+
 if TYPE_CHECKING:
     from sglang.srt.managers.scheduler import Scheduler
 
@@ -816,6 +821,7 @@ class SchedulerPPMixin:
             self.pp_group.send_tensor_dict(
                 tensor_dict=tensor_dict,
                 all_gather_group=(self.attn_tp_group),
+                all_gather_keys=_PP_ALL_GATHER_KEYS,
                 async_send=async_send,
             )
         )
@@ -838,7 +844,8 @@ class SchedulerPPMixin:
 
         while True:
             tensor_dict = self.pp_group.recv_tensor_dict(
-                all_gather_group=all_gather_group
+                all_gather_group=all_gather_group,
+                all_gather_keys=_PP_ALL_GATHER_KEYS,
             )
             received_kind = tensor_dict.get("__msg_type__", "default")
             if received_kind == expected_kind:
@@ -1204,6 +1211,8 @@ class SchedulerPPMixin:
                     send_tensor_dict=send_dict,
                     send_all_gather_group=all_gather_group,
                     recv_all_gather_group=all_gather_group,
+                    send_all_gather_keys=_PP_ALL_GATHER_KEYS,
+                    recv_all_gather_keys=_PP_ALL_GATHER_KEYS,
                 )
             _handle_recv_dict(recv_dict)
         elif send_dict is not None:

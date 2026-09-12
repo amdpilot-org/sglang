@@ -35,7 +35,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from multiprocessing import shared_memory
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from unittest.mock import patch
 
 import torch
@@ -1702,8 +1702,11 @@ class GroupCoordinator:
         dst: Optional[int] = None,
         all_gather_group: Optional["GroupCoordinator"] = None,
         async_send: bool = False,
+        all_gather_keys: Optional[Set[str]] = None,
     ) -> Optional[List[P2PWork]]:
         """Send the input tensor dictionary.
+        If ``all_gather_keys`` is set, the send-allgather optimization is
+        applied only to those tensor keys.
         NOTE: `dst` is the local rank of the source rank.
         """
         # Bypass the function if we are using only 1 GPU.
@@ -1736,13 +1739,20 @@ class GroupCoordinator:
         send_func = torch.distributed.isend if async_send else torch.distributed.send
         p2p_works = self.send_object(metadata_list, dst=dst, async_send=async_send)
 
-        for tensor in tensor_list:
+        tensor_keys = [
+            key for key, value in metadata_list if isinstance(value, TensorMetadata)
+        ]
+        for key, tensor in zip(tensor_keys, tensor_list):
             if tensor.numel() == 0:
                 # Skip sending empty tensors.
                 continue
 
             # send-allgather: send only a slice, then do allgather.
-            if all_gather_group is not None and tensor.numel() % all_gather_size == 0:
+            if (
+                all_gather_group is not None
+                and (all_gather_keys is None or key in all_gather_keys)
+                and tensor.numel() % all_gather_size == 0
+            ):
                 tensor = tensor.reshape(all_gather_size, -1)[all_gather_rank]
 
             comm_group = metadata_group if tensor.is_cpu else group
@@ -1755,8 +1765,10 @@ class GroupCoordinator:
         self,
         src: Optional[int] = None,
         all_gather_group: Optional["GroupCoordinator"] = None,
+        all_gather_keys: Optional[Set[str]] = None,
     ) -> Optional[Dict[str, Union[torch.Tensor, Any]]]:
         """Recv the input tensor dictionary.
+        If ``all_gather_keys`` is set, it must match the sender's allowlist.
         NOTE: `src` is the local rank of the source rank.
         """
         # Bypass the function if we are using only 1 GPU.
@@ -1788,6 +1800,7 @@ class GroupCoordinator:
                 # send-allgather: send only a slice, then do allgather.
                 use_all_gather = (
                     all_gather_group is not None
+                    and (all_gather_keys is None or key in all_gather_keys)
                     and tensor.numel() % all_gather_size == 0
                 )
 
@@ -1818,12 +1831,17 @@ class GroupCoordinator:
         recv_src: Optional[int] = None,
         send_all_gather_group: Optional["GroupCoordinator"] = None,
         recv_all_gather_group: Optional["GroupCoordinator"] = None,
+        send_all_gather_keys: Optional[Set[str]] = None,
+        recv_all_gather_keys: Optional[Set[str]] = None,
     ) -> Optional[Dict[str, Union[torch.Tensor, Any]]]:
         """Send tensor dict to *send_dst* and simultaneously recv from *recv_src*.
 
         Uses ``batch_isend_irecv`` to submit all send/recv operations
         atomically, avoiding deadlock on backends (e.g. NPU/HCCL) where
         ``isend`` may block until a matching ``recv`` is posted.
+
+        The send and receive all-gather key allowlists must match those used
+        by their respective peers.
 
         NOTE: ``send_dst`` / ``recv_src`` are local ranks within this group.
         """
@@ -1907,6 +1925,10 @@ class GroupCoordinator:
 
                 use_all_gather = (
                     recv_all_gather_group is not None
+                    and (
+                        recv_all_gather_keys is None
+                        or key in recv_all_gather_keys
+                    )
                     and tensor.numel() % recv_all_gather_group.world_size == 0
                 )
                 orig_shape = None
@@ -1930,12 +1952,18 @@ class GroupCoordinator:
                 recv_tensor_dict[key] = value
 
         # Add send ops
-        for tensor in send_tensor_list:
+        send_tensor_keys = [
+            key for key, value in send_metadata_list if isinstance(value, TensorMetadata)
+        ]
+        for key, tensor in zip(send_tensor_keys, send_tensor_list):
             if tensor.numel() == 0:
                 continue
             send_t = tensor
             if (
                 send_all_gather_group is not None
+                and (
+                    send_all_gather_keys is None or key in send_all_gather_keys
+                )
                 and send_t.numel() % send_all_gather_group.world_size == 0
             ):
                 send_t = send_t.reshape(send_all_gather_group.world_size, -1)[
