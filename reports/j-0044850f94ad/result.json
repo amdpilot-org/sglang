@@ -1,0 +1,56 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32264",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2780",
+  "candidate_commit": "333b37951dfca5d98dffb77b25ee5a8e0801100b",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate adds a substantial MLX-local Gemma 4 Frozen-KV MTP implementation and its architecture-independent Stage A suite passes, but it is not a verified full fix. The required Apple Silicon/MLX execution was unavailable, 11 MLX-dependent unit tests and the Stage B parity test skipped, and independent adversarial checks found Level 1 admission bypasses for nonzero temperature with top_k=1, beam search, and arbitrary model/revision identities. The exact pinned target/assistant execution, numerical parity, real proposal/verification activity, rotating native-cache behavior, cleanup, flush, and post-flush serving therefore remain unverified.",
+  "tests": [
+    {
+      "command": "base checkout inspection and importlib probes at 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced the missing-feature baseline: the MLX Gemma 4 speculative worker, assistant runtime, verifier, and regression test paths were absent and their import specs resolved to None. Evidence: reports/j-0044850f94ad/raw/base-reproduction.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0044850f94ad/venv/bin/python -m pytest -q test/registered/unit/hardware_backend/mlx/test_mlx_spec_decode.py test/registered/unit/hardware_backend/mlx/test_gemma4_cache_transaction.py test/registered/unit/hardware_backend/mlx/test_gemma4_target_adapter.py test/registered/unit/hardware_backend/mlx/test_gemma4_mtp_assistant.py test/registered/unit/hardware_backend/mlx/test_gemma4_mtp_worker.py test/registered/unit/hardware_backend/mlx/test_mlx_spec_guardrails.py test/registered/unit/spec/test_spec_registry.py test/registered/unit/spec/test_decode_bookkeeping_ownership.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Stage A result: 38 passed, 11 skipped, 26 subtests passed. The skipped cases are MLX-dependent, so this does not validate actual MLX array/cache behavior. Evidence: reports/j-0044850f94ad/raw/candidate-stage-a.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0044850f94ad/venv/bin/python -m pytest -q test/registered/mlx/models_e2e/test_gemma4_mtp_mlx_correctness.py",
+      "exit_code": 0,
+      "what_was_measured": "The sole pinned Stage B test collected but skipped because this host is not Darwin arm64 and lacks MLX/mlx-vlm. Evidence: reports/j-0044850f94ad/raw/candidate-stage-b.txt"
+    },
+    {
+      "command": "independent Python admission probes against candidate spec_config.py",
+      "exit_code": 0,
+      "what_was_measured": "Demonstrated that nonzero temperature with top_k=1, beam_width=2, and arbitrary shape-compatible target/assistant identifiers with moving revisions all return successful admission. Evidence: reports/j-0044850f94ad/raw/adversarial-guardrails.txt"
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 333b37951dfca5d98dffb77b25ee5a8e0801100b and python -m compileall -q changed MLX source paths",
+      "exit_code": 0,
+      "what_was_measured": "Candidate source is syntactically valid and the diff has no whitespace errors; this is not runtime proof."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Prepared environment is Linux x86_64 with torch 2.11.0+rocm7.2 on AMD hardware. Importing candidate MLX modules from /job/repo fails with ModuleNotFoundError: mlx. AMD/ROCm execution cannot qualify an Apple Silicon Metal/MLX feature. See reports/j-0044850f94ad/raw/candidate-import-paths.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A request constructed with temperature=0.7 and top_k=1 passes validate_mlx_frozen_kv_mtp_request, violating the explicit temperature=0 Level 1 constraint.",
+    "A request constructed with beam_width=2 passes validate_mlx_frozen_kv_mtp_request, although Level 1 permits only greedy single-request decoding.",
+    "Server admission accepts arbitrary shape-compatible target and assistant model identifiers and mutable revisions instead of enforcing the exact target and assistant repositories and immutable revisions in the Level 1 supported shape.",
+    "All real Apple Silicon/MLX numerical, native-cache, counter, cleanup, cache-flush, and post-flush serving claims remain unverified on the prepared Linux/ROCm host."
+  ],
+  "remaining_limitations": [
+    "No Darwin arm64 or Apple Silicon GPU was available.",
+    "MLX and mlx-vlm are not installed in the prepared interpreter; direct candidate module import reaches /job/repo and then fails at import mlx.core.",
+    "The pinned Gemma 4 target and assistant weights were not executed.",
+    "No independent GPU numerical reference could be produced for the MLX-only path.",
+    "No C++, FlyDSL, or other native source changed in the candidate, so a native rebuild was not applicable.",
+    "The candidate's concurrency/mixed-batch, heterogeneous paged/radix KV, and performance/overlap follow-up tracks remain out of scope as stated by the original issue."
+  ]
+}
