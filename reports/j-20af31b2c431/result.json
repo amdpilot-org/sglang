@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33846",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2766",
+  "candidate_commit": "3d4404dc8451656c212c758a5086d1ade93c4170",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Accept as test-only hardening. The candidate adds a valid focused regression for the KDA CPU-sequence-length opt-out, but changes no implementation. The recorded base already contains the reporter-confirmed source fix from upstream PR 32219. Independent GPU-path testing confirmed that the false flag avoids CPU sequence-length publication while the old true behavior selects the D2H path. The original nondeterministic TP8 Kimi-K3 serving hang was not independently reproduced or qualified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-20af31b2c431/venv/bin/python -m pytest -q test/registered/unit/managers/test_kda_cpu_seq_lens.py (at 3d4404dc8451656c212c758a5086d1ade93c4170)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's four scheduler-decision regression and boundary cases passed at the exact candidate commit."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 prepared-python inline adversarial call to FutureMap.resolve_seq_lens_cpu with needs_cpu_seq_lens=False and True",
+      "exit_code": 0,
+      "what_was_measured": "On MI350X/gfx950, False retained GPU seq_lens and set seq_lens_cpu/seq_lens_sum to None; the adversarial True control produced CPU value [7] and sum 7, directly exercising the production D2H gate."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-20af31b2c431/venv/bin/python -m pytest -q test/registered/attention/unittests/kda/test_triton.py::TestTritonKDABackendCorrectness::test_projected_kda_attention_cases",
+      "exit_code": 0,
+      "what_was_measured": "The production KDA Triton path passed 10 numerical subcases against its PyTorch reference on one MI350X/gfx950; this is kernel evidence, not a TP8 serving-hang reproduction."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "One assigned AMD Instinct MI350X, gfx950, Torch 2.11.0+rocm7.2 and HIP 7.2.26015 executed the independent FutureMap branch check and KDA Triton fixture. Candidate-retained evidence was from a different gfx950 product, MI355X.",
+  "native_rebuilt": false,
+  "native_rebuild_reason": "The exact candidate changes only a Python unit test and report artifacts; it changes no C++, FlyDSL, extension, or other native source.",
+  "source_import_paths": [
+    "/job/repo/python/sglang/__init__.py",
+    "/job/repo/python/sglang/srt/layers/attention/linear/kda_backend.py",
+    "/job/repo/python/sglang/srt/managers/overlap_utils.py"
+  ],
+  "remaining_counterexamples": [
+    "The 8xMI350X TP8 Kimi-K3 MXFP4 DSPARK workload and its approximately 3% permanent c=1 hang were not independently reproduced or stress-tested after the fix.",
+    "The unit test checks scheduler selection but cannot exclude unrelated blocking D2H operations elsewhere in the complete serving path.",
+    "A one-GPU KDA kernel fixture cannot validate distributed stream ordering, full-model DSPARK integration, or long-run hang frequency."
+  ],
+  "remaining_limitations": "Only one MI350X/gfx950 was assigned and Kimi-K3 MXFP4 weights plus the TP8 DSPARK deployment were unavailable. The candidate is verified as test-only hardening; full original-workload resolution remains dependent on the reporter's original-scale evidence."
+}
