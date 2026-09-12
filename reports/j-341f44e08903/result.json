@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37216",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the TP-rank-only metadata protocol in focused tests and changed TransferEngine registration, bootstrap storage, and remote lookup to use SGLang's model-parallel world rank, preventing PP stages with the same TP rank from overwriting each other.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-341f44e08903/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_engine_info_bootstrap_server.py test/registered/unit/model_executor/model_runner_components/test_remote_instance_weight_transporter.py test/registered/unit/model_loader/test_remote_instance_loader.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression on the original implementation: 4 failed and 4 passed, demonstrating rejection of world-rank registration and missing producer/consumer world-rank plumbing. Raw output: raw/failing-before.log."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-341f44e08903/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_engine_info_bootstrap_server.py test/registered/unit/model_executor/model_runner_components/test_remote_instance_weight_transporter.py test/registered/unit/model_loader/test_remote_instance_loader.py test/registered/unit/model_loader/test_weight_cache_protocol.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after coverage of TP1/PP2 stage isolation, a nonzero TP+PP world-rank boundary, ModelRunner rank injection, registration payload identity, remote loader lookup identity, and existing rank/protocol behavior: 42 passed plus 14 subtests. Raw output: raw/final-focused.log."
+    },
+    {
+      "command": "pre-commit run --files <changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, spelling, test-registration, and related pre-commit checks for all changed Python files. Raw output: raw/pre-commit.log."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The environment exposes one AMD Instinct MI350X. The issue's TP1/PP2 reproduction requires two concurrent pipeline workers, and the reported Qwen3-8B weights were unavailable. Inventory and rank initialization evidence are retained in raw/environment-and-rank-evidence.log."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No full two-GPU TP1/PP2 seed-to-destination TransferEngine run was possible with the assigned single GPU.",
+    "The reported Qwen3-8B weights were not available, so model-architecture behavior and semantic output were not validated.",
+    "No multi-node or RDMA transport claim is made; the regression validates the actual bootstrap HTTP server and Python producer/consumer control path."
+  ]
+}

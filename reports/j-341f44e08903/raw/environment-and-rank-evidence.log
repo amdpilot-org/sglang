@@ -1,0 +1,59 @@
+--- torch/accelerator inventory ---
+torch 2.11.0+rocm7.2
+hip 7.2.26015
+cuda_available True
+device_count 1
+device_0 AMD Instinct MI350X
+mooncake_installed True
+--- rank initialization evidence ---
+def _init_parallel_groups(
+    *,
+    backend: str,
+    dist_init_method: str,
+    server_args: ServerArgs,
+    model_config: ModelConfig,
+    gpu_id: int,
+    tp_rank: int,
+    tp_size: int,
+    pp_rank: int,
+    pp_size: int,
+    attn_dp_size: int,
+    attn_cp_size: int,
+    moe_ep_size: int,
+    moe_dp_size: int,
+    dcp_size: int,
+) -> None:
+    is_ep_joiner = get_exec().moe.is_ep_joiner
+    is_scale_joiner = get_exec().moe.is_ep_scale_joiner
+    rank_offset = get_parallel().ep_join_rank_offset if is_scale_joiner else 0
+    world_size = (
+        rank_offset + tp_size * pp_size if is_scale_joiner else tp_size * pp_size
+    )
+    rank = rank_offset + tp_size * pp_rank + tp_rank
+
+    init_distributed_environment(
+        backend=backend,
+        world_size=world_size,
+        rank=rank,
+        local_rank=gpu_id,
+        distributed_init_method=dist_init_method,
+        timeout=get_parallel().dist_timeout,
+        moe_a2a_backend=get_exec().moe.moe_a2a_backend,
+        recovered_rank=is_ep_joiner,
+        max_world_size=get_parallel().max_ep_size,
+    )
+        _TP = old_tp_group
+
+
+def get_world_size():
+    """Return world size for the world group."""
+    return get_world_group().world_size
+
+
+def get_world_rank():
+    """Return my rank for the world group."""
+    return get_world_group().rank_in_group
+
+
+def get_tensor_model_parallel_world_size():
+    """Return world size for the tensor model parallel group."""
