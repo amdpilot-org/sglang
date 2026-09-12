@@ -59,3 +59,18 @@ def test_qwen3_vl_deepstack_adapter_weights_are_assigned_to_layers(merger_index)
 
 def test_unindexed_qwen3_vl_merger_is_not_misclassified_as_a_layer():
     assert get_layer_id("model.visual.merger.linear_fc2.weight") is None
+
+
+@pytest.mark.parametrize(
+    "weight_name",
+    [
+        "model.notdeepstack_merger_list.4.linear_fc2.weight",
+        "model.otherlayers.9.self_attn.q_proj.weight",
+    ],
+)
+def test_layer_names_require_a_path_segment_boundary(weight_name):
+    assert get_layer_id(weight_name) is None
+
+
+def test_layer_name_at_start_of_path_is_supported():
+    assert get_layer_id("layers.3.self_attn.q_proj.weight") == 3
