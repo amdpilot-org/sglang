@@ -1,0 +1,33 @@
+Base commit:
+358c163250ad3b1f62939b01ce1314a0a31a0365
+
+Prepared checkout history depth:
+git rev-list --count HEAD
+1
+
+Current implementation evidence:
+python/sglang/srt/model_executor/runner_backend/full_cuda_graph_backend.py
+  capture_one creates one graph = torch.cuda.CUDAGraph() and stores it in self._graphs[shape_key].
+  replay calls self._graphs[shape_key].replay() once.
+
+python/sglang/srt/model_executor/runner/decode_cuda_graph_runner.py
+  capture calls self.backend.capture_one(...) once for each shape key.
+  execute calls self.backend.replay(self._replay_graph_key, forward_batch) once.
+
+python/sglang/srt/model_executor/cuda_graph_config.py
+  ALLOWED_KEYS_PER_PHASE[Phase.DECODE] is ("backend", "max_bs", "bs", "tc_compiler").
+  Backend.ALL is ("full", "breakable", "tc_piecewise", "disabled").
+  No split_nlayers field or layer-split backend exists.
+
+GitHub state at investigation time:
+https://github.com/sgl-project/sglang/issues/29960 was OPEN, updated 2026-07-24T11:46:58Z.
+gh search prs 'split_nlayers repo:sgl-project/sglang' returned [].
+gh search code 'split_nlayers repo:sgl-project/sglang' returned [].
+
+Environment:
+torch 2.11.0+rocm7.2
+HIP 7.2.26015
+torch.version.cuda: None
+GPU count: 1
+GPU: AMD Instinct MI355X
+Architecture: gfx950:sramecc+:xnack-

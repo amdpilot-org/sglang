@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/29960",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "unsupported_architecture",
+  "summary": "Current main still captures one full decode CUDAGraph per shape and performs one replay for target verify; no split_nlayers configuration or layer-split backend is present. The reported NVIDIA cudaGraphLaunch host-latency behavior could not be reproduced or evaluated on the assigned single AMD gfx950 GPU. No implementation change was made because the proposed two-graph design requires issue-specific performance and correctness evidence on the affected GLM-5.1 FP8/MTP, CUDA, and TP=8 path.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-634920cfc913/venv/bin/python -m pytest -q test/registered/unit/model_executor/runner_backend/test_full_cuda_graph_backend.py test/registered/unit/server_args/test_server_args.py -k 'full_cuda_graph_backend or cuda_graph_config_json'",
+      "exit_code": 0,
+      "what_was_measured": "Existing full-graph capture hooks and CUDA-graph configuration unit coverage; 5 passed and 226 were deselected. This is structural coverage, not the reported performance reproduction."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-634920cfc913/venv/bin/python < reports/j-634920cfc913/gpu_graph_check.py",
+      "exit_code": 0,
+      "what_was_measured": "A 512-operation torch.cuda.CUDAGraph fixture executed on the assigned AMD MI355X. Output agreed with an independent float64 closed-form reference (maximum absolute error 9.75328668e-06; allclose rtol/atol 2e-5), and replay observed a mutated static input (maximum absolute error 2.37463503e-06). This validates local HIP graph execution only."
+    },
+    {
+      "command": "gh issue view 29960 --repo sgl-project/sglang --json state,title,comments,updatedAt,url; gh search prs 'split_nlayers repo:sgl-project/sglang'; gh search code 'split_nlayers repo:sgl-project/sglang'",
+      "exit_code": 0,
+      "what_was_measured": "The source issue remained open, with no split_nlayers pull request or code-search result found at investigation time."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-634920cfc913/gpu_graph_check.txt records execution on AMD Instinct MI355X, gfx950:sramecc+:xnack-, with torch 2.11.0+rocm7.2 and HIP 7.2.26015. It is not CUDA/H200 evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The assigned hardware is one AMD MI355X (gfx950) using HIP; the report concerns NVIDIA H200 CUDA 13.0 host-side cudaGraphLaunch behavior.",
+    "The GLM-5.1-FP8 weights were not available locally, and the reported EAGLE/MTP target-verify architecture was not run.",
+    "TP=8, NCCL world-size 8 behavior cannot be reproduced with the assigned single GPU.",
+    "No profiler comparison of one full graph versus two layer-split graphs was possible, so launch overlap and latency benefit remain unverified.",
+    "The prepared checkout is a single-commit graft, so current source and GitHub issue/PR/code searches were inspected, but local historical archaeology is unavailable.",
+    "The deterministic tiny Llama fixture was not used because it cannot qualify GLM-5.1/MTP architecture behavior or the distributed CUDA launch-cost claim."
+  ]
+}
