@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33563",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1879",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1835",
+  "candidate_commit": "a373085734cbb1bfc47f6029307a71014a98c9a2",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "The historical issue commit reproduces both reported TypeErrors. The recorded prepared base already contains the complete runtime fix, and the exact candidate adds accurate regression-only hardening. Candidate tests and independent elementwise, broadcast, parallel-sampling, empty-string, length-validation, and HTTP-400 checks pass.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-d9b8eed965f8/venv/bin/python /job/review_historical_probe.py (checkout d257b58e67193780ff8a59ab54b48219b9dc28d2)",
+      "exit_code": 0,
+      "what_was_measured": "The actual historical repository schema accepted per-prompt lists and the actual _compute_extra_key implementation raised the reported TypeError independently for extra_key and cache_salt; imported source paths were recorded."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d9b8eed965f8/venv/bin/python /job/review_base_probe.py (checkout 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "On the recorded base, verified per-prompt lists for each field and both together, scalar broadcast, and wrong-length ValueError behavior through the real completion converter and GenerateReqInput normalization."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d9b8eed965f8/venv/bin/python test/registered/unit/entrypoints/openai/test_serving_completions.py ServingCompletionTestCase.test_batched_cache_namespaces_are_normalized_per_prompt ServingCompletionTestCase.test_scalar_cache_namespaces_are_broadcast_for_batched_prompts ServingCompletionTestCase.test_batched_cache_namespace_lengths_must_match_prompts -v",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit a373085734cbb1bfc47f6029307a71014a98c9a2, all three candidate regressions passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d9b8eed965f8/venv/bin/python test/registered/unit/entrypoints/openai/test_serving_completions.py -v",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate commit, all 22 tests in the targeted completion-serving unit file passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d9b8eed965f8/venv/bin/python /job/review_adversarial_probe.py (checkout a373085734cbb1bfc47f6029307a71014a98c9a2)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial validation of n=2 elementwise expansion, empty-string normalization, and real completion response-path HTTP 400 mapping for wrong-length extra_key and cache_salt lists."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One gfx950 AMD Instinct MI355X was visible, but the original defect occurs in CPU-side request adaptation and normalization before tokenization or engine execution; GPU execution would not add issue-specific evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No model weights, full HTTP transport server, model inference, semantic accuracy, or distributed workload were exercised.",
+    "The HTTP 400 check used the real completion response method with a deterministic mocked tokenizer-manager generator, not a listening server.",
+    "The candidate's report names mirror issue 1809 while this review assignment names mirror issue 1879; both currently describe the same upstream issue."
+  ]
+}
