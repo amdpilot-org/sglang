@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35564",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The recorded main base still reproduced the parser defects. Existing upstream PR https://github.com/sgl-project/sglang/pull/35625 contains a complete candidate correction; it was applied cleanly to this base and independently verified. With response-position tool indexes compared consistently, cohere_command4 and gemma4 expose an index-semantics defect rather than a streaming-only mismatch. The candidate also fixes GLM numeric typing, Minimax empty calls/start-marker buffering, Mistral repeated calls, and Step3 empty/multiple-call parsing.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-570829e32467/venv/bin/python reports/j-570829e32467/reproduce_streaming_empty_args.py",
+      "exit_code": 1,
+      "what_was_measured": "Before the correction at the recorded base: corrected issue fixture reproduced GLM/GLM45/GLM47 numeric type divergence, the missing Minimax call, and Step3 one-shot/streaming divergence. Raw output: reports/j-570829e32467/before.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-570829e32467/venv/bin/python reports/j-570829e32467/reproduce_streaming_empty_args.py",
+      "exit_code": 0,
+      "what_was_measured": "After the correction: all eight issue cases agree, with response-position indexes 0/1 retained for repeated calls. Raw output: reports/j-570829e32467/after.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-570829e32467/venv/bin/python -m pytest -q test/registered/unit/function_call/test_streaming_parity.py",
+      "exit_code": 0,
+      "what_was_measured": "Eight targeted regression tests passed, including whole-input, character-at-a-time, and every two-chunk split boundary: 8 passed and 876 subtests passed. Raw output: reports/j-570829e32467/pytest-streaming-parity.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-570829e32467/venv/bin/python -m pytest -q test/registered/unit/function_call",
+      "exit_code": 0,
+      "what_was_measured": "The complete registered function-call unit directory passed: 548 tests and 897 subtests. Raw output: reports/j-570829e32467/pytest-function-call.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is deterministic parser logic operating on supplied strings and tool schemas; it does not execute model or GPU kernels. No GPU claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No model-serving or model-architecture behavior was tested; this validates only parser output for deterministic supplied text.",
+    "The candidate's partial Minimax start-marker holdback is defensive for character splits inside a marker; the issue states real tokenization emits that marker atomically.",
+    "The pre-fix corrected reproducer stores calls by tool_index, so the base's duplicate-index defect collapses the two Mistral entries in that diagnostic. The regression suite independently checks response-position indexes and all split points after correction."
+  ]
+}
