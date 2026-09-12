@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/11186",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2993",
+  "candidate_commit": "d0666577d91c31b154d6492cdb4eaacef2fddb1c",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate implements and tests piggyback load reporting on the normal Python generation and embedding paths, including detokenization, multi-tokenizer fanout, HTTP-worker caching, stale rejection, and watch-mode merging. It is only a partial fix because the supported Rust generation egress bypasses the Python consumer and drops the attached load_snapshot field.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1d699ebf3fcb/venv/bin/python -m pytest -q /job/review-evidence-j-1d699ebf3fcb/test_piggyback_load.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: all four candidate regression tests failed because output collection, HTTP-worker caching, and watch/piggyback arbitration were absent."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1d699ebf3fcb/venv/bin/python -m pytest -q test/registered/unit/managers/test_piggyback_load.py test/registered/unit/managers/test_multi_tokenizer_mixin.py test/registered/unit/managers/test_loadstat_wire.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "44 tests and 19 subtests passed for the candidate's Python-path regression, fanout, and existing load wire coverage."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1d699ebf3fcb/venv/bin/python -m pytest -q /job/review-evidence-j-1d699ebf3fcb/test_adversarial_rust_piggyback.py (exact candidate)",
+      "exit_code": 1,
+      "what_was_measured": "Independent architecture contract check proved Rust generation egress bypasses the Python detokenizer/HTTP-worker path and RustServer.push_generation does not serialize or consume load_snapshot."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "Torch 2.11.0+rocm7.2 with HIP 7.2.26015 reported one visible AMD Instinct MI350X. No model workload was needed for the decisive egress-encoding counterexample.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With Rust generation egress enabled, SchedulerOutputStreamer attaches load_snapshot but sends the payload to RustServer.push_generation; that encoder does not carry or consume load_snapshot, and TokenizerManager.handle_loop is bypassed. The token response therefore does not update the HTTP-worker piggyback cache."
+  ],
+  "remaining_limitations": [
+    "The normal Python serving path was validated by focused source-checkout tests, but this independent review did not repeat the candidate author's tiny-model end-to-end serving run because its raw runtime artifacts were not part of the commit.",
+    "No multi-rank or multi-node allocation was exercised independently; per-rank merge and fanout behavior is unit-tested.",
+    "The visible GPU is an AMD Instinct MI350X. No NVIDIA, CPU-only serving, or distributed architecture was available.",
+    "No native C++, HIP, CUDA, or Rust source changed, so a native rebuild was not applicable."
+  ],
+  "evidence_path": "/job/review-evidence-j-1d699ebf3fcb"
+}
