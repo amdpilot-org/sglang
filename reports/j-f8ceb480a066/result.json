@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31588",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2309",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/2276",
+  "candidate_commit": "0f4eea4aca21cda5a900f6e9b9cffa87b4965ac5",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate adds only regression tests and reports over a base that already contains production draft-pool accounting. Its suite passes, but both new assertions undercount actual unified draft capacity by using full_tokens rather than the allocator's virtual-span-derived, page-padded draft token count. The candidate is incomplete test-only hardening, and the original 8x B300 Inkling startup path remains unverified in this ROCm single-GPU environment.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-f8ceb480a066/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_pool_configurator.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate exact commit: 43 pool-configurator tests and 7 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f8ceb480a066/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_pool_configurator.py::TestEagleConfigurator::test_inkling_eight_layer_eagle_draft_pools_are_in_auto_budget test/registered/unit/model_executor/test_pool_configurator.py::TestEagleConfigurator::test_eagle_draft_budget_page_boundary_never_exceeds_available_bytes",
+      "exit_code": 0,
+      "what_was_measured": "Both candidate regressions pass at the exact reviewed commit; source inspection shows their independent footprint formulas omit unified draft virtual-span and page-padding bytes."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-f8ceb480a066/venv/bin/python -c <import and FP32 matmul check>",
+      "exit_code": 0,
+      "what_was_measured": "sglang imported from /job/repo/python/sglang; Torch imported from the prepared ROCm installation; one AMD Instinct MI355X executed FP32 matmul with max absolute error 7.62939453125e-06 against a CPU FP64-derived reference."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "reports/j-f8ceb480a066/raw/import-gpu.log",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A hybrid full/SWA case where draft pools use ceil_align(target virtual span, page_size) plus one page is not independently measured by either new assertion; both charge draft layers for full_tokens only.",
+    "The exact 8x NVIDIA B300, CUDA 13, TP8, Inkling-NVFP4, eight-draft-pool startup sequence remains unexecuted and could still expose integration or architecture-specific allocation behavior.",
+    "The issue's MXFP8 scale-byte geometry is not exercised by the candidate's Inkling-style test."
+  ],
+  "remaining_limitations": [
+    "Only one AMD Instinct MI355X gfx950 with ROCm 7.2 was available; no NVIDIA B300 or CUDA environment was available.",
+    "Inkling-NVFP4 weights were unavailable, so no full server, FP4/MXFP8, TP8, or eight-GPU reproduction was possible.",
+    "No native source changed in the candidate, repository-environment.json declares no prepared native artifact, and no native rebuild was applicable.",
+    "The original reported failure was not reproduced end to end on the prepared base; the base source already contains related production accounting."
+  ]
+}
