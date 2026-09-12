@@ -1141,9 +1141,14 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
     def _normalize_mm_content_hashes(obj: GenerateReqInput) -> None:
         """Merge Native/OpenAI content identities and validate their alignment."""
         from sglang.srt.multimodal.cache import parse_cache_id, parse_content_hash
-        from sglang.srt.utils import ImageData
+        from sglang.srt.utils import AudioData, ImageData, VideoData
 
         images = obj.image_data or []
+        videos = obj.video_data or []
+        audios = obj.audio_data or []
+        images = images if isinstance(images, list) else [images]
+        videos = videos if isinstance(videos, list) else [videos]
+        audios = audios if isinstance(audios, list) else [audios]
         explicit = obj.mm_content_hashes
         inline = [
             image.content_hash if isinstance(image, ImageData) else None
@@ -1174,17 +1179,21 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
             obj.mm_content_hashes = normalized
 
         explicit_cache_ids = obj.mm_cache_ids
+        media = images + videos + audios
         inline_cache_ids = [
-            image.cache_id if isinstance(image, ImageData) else None for image in images
+            item.cache_id
+            if isinstance(item, (ImageData, VideoData, AudioData))
+            else None
+            for item in media
         ]
         if explicit_cache_ids is None and not any(inline_cache_ids):
             return
         if explicit_cache_ids is None:
             explicit_cache_ids = inline_cache_ids
-        if len(explicit_cache_ids) != len(images):
+        if len(explicit_cache_ids) != len(media):
             raise ValueError(
                 f"mm_cache_ids has {len(explicit_cache_ids)} entries for "
-                f"{len(images)} images"
+                f"{len(media)} media items"
             )
         normalized_cache_ids = []
         for index, (provided, embedded) in enumerate(
@@ -1197,7 +1206,7 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                 and embedded is not None
                 and provided != embedded
             ):
-                raise ValueError(f"Conflicting cache IDs for image_data[{index}]")
+                raise ValueError(f"Conflicting cache IDs for media item {index}")
             normalized_cache_ids.append(provided or embedded)
         obj.mm_cache_ids = normalized_cache_ids
 
