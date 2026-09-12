@@ -33,6 +33,9 @@ class AibrixKVCacheStorage(HiCacheStorage):
             self.local_rank = 0
         kv_cache = mem_pool.device_pool
         self.page_size = mem_pool.page_size
+        self.storage_kv_cache_dtype = (
+            storage_config.kv_cache_dtype if storage_config is not None else None
+        )
         self.kv_cache_dtype = kv_cache.dtype
         self.layer_num = kv_cache.layer_num
         self.kv_head_ids = [
@@ -63,6 +66,11 @@ class AibrixKVCacheStorage(HiCacheStorage):
                 "MLA is not supported by AibrixKVCacheStorage yet."
             )
 
+    def _scope_keys(self, keys: List[str]) -> List[str]:
+        if self.storage_kv_cache_dtype is None:
+            return keys
+        return [f"dtype_{self.storage_kv_cache_dtype}_{key}" for key in keys]
+
     def _aibrix_kvcache_metrics_report(self):
         self.kv_cache_manager.metrics.summary()
         self.kv_cache_manager.metrics.reset()
@@ -73,7 +81,7 @@ class AibrixKVCacheStorage(HiCacheStorage):
         target_locations: List[torch.Tensor],
         target_sizes: Optional[Any] = None,
     ) -> List[torch.Tensor | None]:
-        block_hash = BlockHashes(keys, self.page_size)
+        block_hash = BlockHashes(self._scope_keys(keys), self.page_size)
         status = self.kv_cache_manager.acquire(None, block_hash)
         log_every_n_seconds(
             logger, logging.INFO, self._aibrix_kvcache_metrics_report(), 1
@@ -107,7 +115,7 @@ class AibrixKVCacheStorage(HiCacheStorage):
         target_locations: Optional[Any] = None,
         target_sizes: Optional[Any] = None,
     ) -> bool:
-        block_hash = BlockHashes(keys, self.page_size)
+        block_hash = BlockHashes(self._scope_keys(keys), self.page_size)
         status = self.kv_cache_manager.allocate_for(None, block_hash)
         if not status.is_ok():
             logger.warning(
@@ -147,7 +155,7 @@ class AibrixKVCacheStorage(HiCacheStorage):
     def batch_exists(
         self, keys: List[str], extra_info: Optional[HiCacheStorageExtraInfo] = None
     ) -> int:
-        block_hash = BlockHashes(keys, self.page_size)
+        block_hash = BlockHashes(self._scope_keys(keys), self.page_size)
         status = self.kv_cache_manager.exists(None, block_hash)
         if status.is_ok():
             return status.value // self.page_size
