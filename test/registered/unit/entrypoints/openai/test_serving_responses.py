@@ -35,6 +35,41 @@ register_cpu_ci(est_time=10, suite="base-a-test-cpu")
 
 
 class InputMessageConstructionTestCase(CustomTestCase):
+    def test_make_request_normalizes_nullable_stream_for_chat_request(self):
+        serving = make_serving()
+
+        for stream, expected in ((None, False), (False, False), (True, True)):
+            with self.subTest(stream=stream):
+                seen = {}
+
+                def fake_process(chat_request, is_multimodal):
+                    seen["stream"] = chat_request.stream
+                    return MessageProcessingResult(
+                        prompt="prompt",
+                        prompt_ids=[1, 2, 3],
+                        image_data=None,
+                        audio_data=None,
+                        video_data=None,
+                        modalities=[],
+                        stop=[],
+                    )
+
+                serving._process_messages = Mock(side_effect=fake_process)
+                request = ResponsesRequest(
+                    model="x", input="hi", stream=stream, store=False
+                )
+
+                asyncio.run(
+                    serving._make_request(
+                        request, None, serving.tokenizer_manager.tokenizer
+                    )
+                )
+
+                self.assertIs(seen["stream"], expected)
+
+        omitted = ResponsesRequest(model="x", input="hi", store=False)
+        self.assertFalse(omitted.stream)
+
     def test_previous_response_replays_assistant_text_not_instructions(self):
         serving = make_serving()
         prev_response = Mock(id="resp_prev")

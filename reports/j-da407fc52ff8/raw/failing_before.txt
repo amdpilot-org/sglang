@@ -1,0 +1,102 @@
+.                                                                     [100%]
+=================================== FAILURES ===================================
+_ InputMessageConstructionTestCase.test_make_request_normalizes_nullable_stream_for_chat_request (stream=None) _
+
+self = <test_serving_responses.InputMessageConstructionTestCase testMethod=test_make_request_normalizes_nullable_stream_for_chat_request>
+
+    def test_make_request_normalizes_nullable_stream_for_chat_request(self):
+        serving = make_serving()
+    
+        for stream, expected in ((None, False), (False, False), (True, True)):
+            with self.subTest(stream=stream):
+                seen = {}
+    
+                def fake_process(chat_request, is_multimodal):
+                    seen["stream"] = chat_request.stream
+                    return MessageProcessingResult(
+                        prompt="prompt",
+                        prompt_ids=[1, 2, 3],
+                        image_data=None,
+                        audio_data=None,
+                        video_data=None,
+                        modalities=[],
+                        stop=[],
+                    )
+    
+                serving._process_messages = Mock(side_effect=fake_process)
+                request = ResponsesRequest(
+                    model="x", input="hi", stream=stream, store=False
+                )
+    
+>               asyncio.run(
+                    serving._make_request(
+                        request, None, serving.tokenizer_manager.tokenizer
+                    )
+                )
+
+test/registered/unit/entrypoints/openai/test_serving_responses.py:62: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/usr/lib/python3.12/asyncio/runners.py:194: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.entrypoints.openai.serving_responses.OpenAIServingResponses object at 0x7f67149b1100>
+request = ResponsesRequest(background=False, include=None, input='hi', instructions=None, max_output_tokens=None, max_tool_calls...che_salt=None, frequency_penalty=0.0, presence_penalty=0.0, stop=None, top_k=None, min_p=None, repetition_penalty=None)
+prev_response = None, tokenizer = <Mock id='140080704065696'>
+
+    async def _make_request(
+        self,
+        request: ResponsesRequest,
+        prev_response: Optional[ResponsesResponse],
+        tokenizer: Any,
+    ):
+        messages = self._construct_input_messages(request, prev_response)
+    
+        chat_tools = self._response_tools_to_chat_tools(request)
+>       chat_request = ChatCompletionRequest(
+            model=request.model,
+            messages=messages,
+            stream=request.stream,
+            tools=chat_tools or None,
+            tool_choice=(
+                self._chat_tool_choice(request.effective_tool_choice())
+                if chat_tools
+                else "none"
+            ),
+            parallel_tool_calls=(
+                request.parallel_tool_calls
+                if request.parallel_tool_calls is not None
+                else True
+            ),
+            stop=request.stop,
+            reasoning_effort=(request.reasoning.effort if request.reasoning else None),
+            chat_template_kwargs=request.chat_template_kwargs,
+        )
+E       pydantic_core._pydantic_core.ValidationError: 1 validation error for ChatCompletionRequest
+E       stream
+E         Input should be a valid boolean [type=bool_type, input_value=None, input_type=NoneType]
+E           For further information visit https://errors.pydantic.dev/2.13/v/bool_type
+
+python/sglang/srt/entrypoints/openai/serving_responses.py:577: ValidationError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SUBFAILED(stream=None) test/registered/unit/entrypoints/openai/test_serving_responses.py::InputMessageConstructionTestCase::test_make_request_normalizes_nullable_stream_for_chat_request
+1 failed, 1 passed, 3 warnings, 2 subtests passed in 26.07s

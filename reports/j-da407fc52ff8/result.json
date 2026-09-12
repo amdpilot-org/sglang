@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34209",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The Responses-to-Chat adapter forwarded an accepted null ResponsesRequest.stream value into the strict boolean ChatCompletionRequest.stream field. Normalize only null to false at that adapter boundary, preserving the nullable public request schema and explicit false/true behavior.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-da407fc52ff8/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_responses.py::InputMessageConstructionTestCase::test_make_request_normalizes_nullable_stream_for_chat_request (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Regression reproduced the reported Pydantic bool_type validation failure for stream=None while explicit false and true subtests passed; raw output: reports/j-da407fc52ff8/raw/failing_before.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-da407fc52ff8/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_responses.py::InputMessageConstructionTestCase::test_make_request_normalizes_nullable_stream_for_chat_request",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression covered null-to-false normalization, explicit false, explicit true, and the omitted-field default; 1 test and 3 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-da407fc52ff8/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_responses.py test/registered/unit/entrypoints/openai/test_responses_protocol.py",
+      "exit_code": 0,
+      "what_was_measured": "Related Responses serving and protocol suites passed: 57 tests and 5 subtests."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-da407fc52ff8/venv/bin/python /tmp/amdpilot-repo-j-da407fc52ff8/fixture-tools/run_server_probe.py --fixture /tmp/amdpilot-repo-j-da407fc52ff8/tiny-random-llama --output /job/repo/reports/j-da407fc52ff8/raw/e2e_llama2",
+      "exit_code": 0,
+      "what_was_measured": "A source-checkout SGLang server using the qualified deterministic tiny Llama fixture returned HTTP 200 for /v1/responses with stream omitted, null, false, and true. The first three were non-streaming responses; true produced 10 SSE events. Server logs record real GPU prefill/decode execution and the runner reaped its process group."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-da407fc52ff8/raw/gpu_environment.txt records one visible AMD Instinct MI350X through Torch 2.11.0+rocm7.2/HIP 7.2.26015. reports/j-da407fc52ff8/raw/e2e_llama2/server.log records GPU prefill/decode for the four /v1/responses requests; their retained request/response JSON files all report HTTP 200.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported DeepSeek-V4-Flash-0731 weights and architecture were unavailable, so that model configuration was not reproduced.",
+    "sgl-model-gateway was not present in the prepared checkout; its forwarding behavior was represented by the exact JSON null value accepted by SGLang's ResponsesRequest schema.",
+    "The tiny random Llama fixture qualifies HTTP transport and engine execution only; it does not qualify DeepSeek-V4, semantic accuracy, speculative decoding, MXFP4 MoE, or distributed execution.",
+    "An initial end-to-end attempt without a chat template returned an unrelated 400 because the synthetic tokenizer has no chat template. A second startup attempt used an invalid template name. Both attempts are retained under reports/j-da407fc52ff8/raw; the successful qualified run used the built-in llama-2 template."
+  ]
+}
