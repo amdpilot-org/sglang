@@ -1,0 +1,58 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39070",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/847",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/805",
+  "candidate_commit": "a0905d0fad4c0d6756bdbfc02ecf66dfd03a579b",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The candidate is test-only hardening for a production fix already present in the recorded base through upstream PR #37441. FLUX.2 still excludes SAGE_ATTN from its automatic-selection preference set, but the base selector admits an explicitly requested SAGE_ATTN after platform resolution and semantic capability validation. Restoring the pre-#37441 strict membership condition reproduces the original whitelist failure exactly; the exact candidate regression passes on the prepared base and adds useful FLUX.2-specific coverage without changing production or native code.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-704bd2442f10/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_attention_backend_selector.py (base 358c163)",
+      "exit_code": 0,
+      "what_was_measured": "Prepared-base selector suite: 25 tests and 4 subtests passed, confirming the pre-existing explicit-backend capability-admission behavior before applying the candidate."
+    },
+    {
+      "command": "Temporarily restore the pre-#37441 strict model-set membership condition, then run pytest -q ... -k flux2_explicit_sage_backend_bypasses",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction. The candidate regression failed with the original error: Attention backend 'sage_attn' is not supported by this attention layer; supported backends: ['aiter', 'aiter_sage', 'fa', 'torch_sdpa']. The exact candidate source was restored afterward and verified clean."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-704bd2442f10/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_attention_backend_selector.py -k flux2 (candidate a0905d0)",
+      "exit_code": 0,
+      "what_was_measured": "All three candidate FLUX.2 cases passed: explicit SAGE_ATTN bypasses the automatic-selection set, implicit selection respects it, and missing packed-varlen capability fails closed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-704bd2442f10/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_attention_backend_selector.py (candidate a0905d0)",
+      "exit_code": 0,
+      "what_was_measured": "Complete candidate selector suite: 28 tests and 4 subtests passed."
+    },
+    {
+      "command": "Independent fake-platform adversarial probe for FLUX.2 component override, explicit per-call selection, and packed-varlen rejection",
+      "exit_code": 0,
+      "what_was_measured": "Both component-specific and per-call explicit SAGE_ATTN requests bypassed the FLUX.2 automatic-selection set, while an unsupported packed-varlen requirement still raised ValueError."
+    },
+    {
+      "command": "Real current_platform.get_attn_backend_cls_str(SAGE_ATTN, 128, torch.bfloat16) on assigned GPU",
+      "exit_code": 0,
+      "what_was_measured": "The host was identified as AMD Instinct MI350X, gfx950, ROCm 7.2. The real resolver raised 'SAGE_ATTN is not supported on rocm', confirming that no SageAttention execution claim can be made on this architecture."
+    },
+    {
+      "command": "git diff --exit-code a0905d0fad4c0d6756bdbfc02ecf66dfd03a579b after temporary failing-before edit",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate checkout was restored byte-for-byte before returning to the prepared review branch."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "Torch detected the assigned AMD Instinct MI350X as gfx950:sramecc+:xnack- under ROCm 7.2, but the production ROCm resolver rejects SAGE_ATTN. No SageAttention kernel or FLUX.2 model was executed.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The assigned architecture is AMD gfx950 rather than NVIDIA Blackwell sm_120, and sageattention is not installed in the prepared interpreter; the CUDA resolver and SageAttention kernel path were not executed.",
+    "FLUX.2-klein-9b-kv weights were unavailable, so full model construction, serving startup, image generation, and semantic accuracy were not tested.",
+    "The candidate changes only Python tests. It contains no production or native-code changes, so no native rebuild was applicable.",
+    "The conclusion fully resolves the original whitelist-selection contract at source/selector level; it does not independently qualify SageAttention numerical correctness or FLUX.2 image quality."
+  ]
+}
