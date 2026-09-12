@@ -32,8 +32,13 @@ def _validate_module(name: str) -> ModuleType:
     return module
 
 
-def _replace_class_contents(old: type, new: type) -> None:
+def _replace_class_contents(
+    old: type, new: type, class_replacements: dict[int, type]
+) -> None:
     """Make existing instances dispatch through definitions from ``new``."""
+    new_bases = tuple(class_replacements.get(id(base), base) for base in new.__bases__)
+    if old.__bases__ != new_bases:
+        old.__bases__ = new_bases
     protected = {"__dict__", "__weakref__", "__module__", "__name__", "__qualname__"}
     for name in set(vars(old)) - set(vars(new)) - protected:
         delattr(old, name)
@@ -82,18 +87,39 @@ def reload_modules(module_names: Iterable[str]) -> ReloadResult:
 
     for module in modules:
         old_values = dict(vars(module))
+        preserved_module_names = {
+            "__builtins__",
+            "__cached__",
+            "__doc__",
+            "__file__",
+            "__loader__",
+            "__name__",
+            "__package__",
+            "__path__",
+            "__spec__",
+        }
+        for name in set(vars(module)) - preserved_module_names:
+            delattr(module, name)
         importlib.invalidate_caches()
         importlib.reload(module)
+        class_pairs: list[tuple[str, type, type]] = []
         for name, old in old_values.items():
             new = vars(module).get(name)
             if new is None or new is old:
                 continue
             if inspect.isclass(old) and inspect.isclass(new):
-                _replace_class_contents(old, new)
-                setattr(module, name, old)
                 replacements[id(new)] = old
+                class_pairs.append((name, old, new))
             elif inspect.isfunction(old) and inspect.isfunction(new):
                 replacements[id(old)] = new
+        class_replacements = {
+            object_id: replacement
+            for object_id, replacement in replacements.items()
+            if inspect.isclass(replacement)
+        }
+        for name, old, new in class_pairs:
+            _replace_class_contents(old, new, class_replacements)
+            setattr(module, name, old)
 
     rebound = 0
     for module in tuple(sys.modules.values()):

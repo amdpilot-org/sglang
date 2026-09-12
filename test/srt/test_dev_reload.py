@@ -69,6 +69,56 @@ def test_reload_rebinds_zero_argument_super_for_existing_instances(
     sys.modules.pop("sglang.reload_super_fixture", None)
 
 
+def test_reload_removes_deleted_module_definitions(tmp_path, monkeypatch):
+    module_path = tmp_path / "reload_delete_fixture.py"
+    module_path.write_text(
+        "def removed_function(): return 'stale'\n"
+        "class RemovedClass: pass\n"
+        "kept = 'before'\n"
+    )
+    monkeypatch.setattr(sglang, "__path__", [*sglang.__path__, str(tmp_path)])
+    module = importlib.import_module("sglang.reload_delete_fixture")
+
+    module_path.write_text("kept = 'after-with-a-different-source-size'\n")
+    importlib.invalidate_caches()
+    reload_modules(["sglang.reload_delete_fixture"])
+
+    assert module.kept == "after-with-a-different-source-size"
+    assert not hasattr(module, "removed_function")
+    assert not hasattr(module, "RemovedClass")
+    sys.modules.pop("sglang.reload_delete_fixture", None)
+
+
+def test_reload_updates_bases_of_preserved_classes(tmp_path, monkeypatch):
+    module_path = tmp_path / "reload_bases_fixture.py"
+    module_path.write_text(
+        "class BaseA:\n    def value(self): return 'A-old'\n"
+        "class BaseB:\n    def value(self): return 'B-old'\n"
+        "class Child(BaseA):\n"
+        "    def value(self): return super().value() + '-child-old'\n"
+    )
+    monkeypatch.setattr(sglang, "__path__", [*sglang.__path__, str(tmp_path)])
+    module = importlib.import_module("sglang.reload_bases_fixture")
+    child = module.Child()
+    old_child_class = module.Child
+    old_base_b_class = module.BaseB
+
+    module_path.write_text(
+        "class BaseA:\n    def value(self): return 'A-new-and-longer'\n"
+        "class BaseB:\n    def value(self): return 'B-new-and-longer'\n"
+        "class Child(BaseB):\n"
+        "    def value(self): return super().value() + '-child-new-and-longer'\n"
+    )
+    importlib.invalidate_caches()
+    reload_modules(["sglang.reload_bases_fixture"])
+
+    assert module.Child is old_child_class
+    assert module.Child.__bases__ == (old_base_b_class,)
+    assert child.value() == "B-new-and-longer-child-new-and-longer"
+    assert module.Child().value() == "B-new-and-longer-child-new-and-longer"
+    sys.modules.pop("sglang.reload_bases_fixture", None)
+
+
 @pytest.mark.parametrize(
     "name", ["json", "sglang.not_loaded", "sglang.srt._custom_ops"]
 )
