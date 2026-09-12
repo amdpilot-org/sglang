@@ -1,0 +1,56 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33055",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "c5812a14220bf0d4ebe1cf98cd2c63b818c98aa8",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a substantive partial fix: it plumbs typed kv_events_config/page_size/dp_size into the rebuilt Rust extension, adds the kv_events field, preserves the existing allowlist/redaction boundary, and passes its focused Rust serialization tests plus the Python route contract suite. It does not fully meet the safe-advertisement/parity contract because its hand-written TCP parser accepts malformed bracketed non-IPv6 hosts that Python's canonical parser rejects, causing Rust to advertise metadata where the contract requires null.",
+  "tests": [
+    {
+      "command": "git show 358c163250ad3b1f62939b01ce1314a0a31a0365:rust/sglang-server/src/api_server/common.rs | sed -n '/let response = serde_json::json!({/,/});/p' | grep -q '\"kv_events\"'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before comparison on the exact recorded base: the Rust /server_info serializer has no kv_events field."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a64e132cdd59/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_server_info.py",
+      "exit_code": 0,
+      "what_was_measured": "On the exact candidate, the real Python /server_info handler contract passed: 29 tests and 12 subtests, covering valid, disabled, malformed, endpoint/port/page-size, IPv6, and field-preservation cases."
+    },
+    {
+      "command": "PATH=/job/.cargo/bin:$PATH CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-a64e132cdd59/cargo-target cargo test -p sglang-server api_server::common::tests --manifest-path rust/Cargo.toml",
+      "exit_code": 0,
+      "what_was_measured": "Compiled the changed Rust crate at candidate commit c5812a14220bf0d4ebe1cf98cd2c63b818c98aa8 with pinned rustc 1.92.0 and ran the candidate's four focused serializer, null-fallback, IPv6, and redaction tests; all passed."
+    },
+    {
+      "command": "PATH=/job/.cargo/bin:$PATH SGLANG_RUST_BUILD_MODE=force SGLANG_RUST_CACHE_DIR=/tmp/amdpilot-repo-j-a64e132cdd59/rust-extension-cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a64e132cdd59/venv/bin/python <native import probe>",
+      "exit_code": 0,
+      "what_was_measured": "Forced a release rebuild from /job/repo/rust and imported the resulting candidate-native extension from /tmp/amdpilot-repo-j-a64e132cdd59/rust-extension-cache/artifacts/sglang-server/2ea160b8752586fa96c77fddaa174c3025dc3e11c1da99c5cf38336b0c42daae/_server.cpython-312-x86_64-linux-gnu.so; ServerArgs exposed kv_events_config, page_size, and dp_size."
+    },
+    {
+      "command": "PATH=/job/.cargo/bin:$PATH CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-a64e132cdd59/cargo-target cargo test -p sglang-server adversarial_non_ipv6_bracketed_host_is_rejected_like_python --manifest-path rust/Cargo.toml",
+      "exit_code": 101,
+      "what_was_measured": "Independent temporary adversarial test (removed immediately afterward): Python parse_advertisable_tcp('tcp://[not-ipv6]:5557') returns None, but candidate Rust returned Some(('[not-ipv6]', 5557)), violating malformed-endpoint null behavior and Python parity."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "No GPU execution was needed or performed. This change is CPU-side PyO3/Rust HTTP metadata parsing and serialization; it changes no model kernels. The prepared environment is x86_64 Linux with Torch 2.11.0+rocm7.2 and HIP 7.2, which were left unchanged.",
+  "native_rebuilt": true,
+  "remaining_counterexamples": [
+    "kv_events_config={\"publisher\":\"zmq\",\"endpoint\":\"tcp://[not-ipv6]:5557\",\"topic\":\"kv\"}, page_size=64, dp_size=1: Python declines advertisement (null), while candidate Rust advertises endpoint_host='[not-ipv6]' and endpoint_port_base=5557."
+  ],
+  "remaining_limitations": [
+    "The exact candidate's rebuilt Rust library and internal serializer were exercised, but a live Rust HTTP server was not started because this metadata-only review had no model-weight prerequisite and the deterministic tiny-Llama fixture would only add transport/engine smoke coverage; no candidate Axum route-level regression test was supplied.",
+    "The candidate uses a bespoke Rust endpoint parser rather than the Python NetworkAddress semantics, so malformed endpoint parity beyond the demonstrated bracketed-host counterexample remains under-specified and should receive a shared matrix test.",
+    "KV-event publishing itself is intentionally out of scope and was not exercised.",
+    "The host image initially lacked cargo/rustc. Rust 1.92.0 was installed into an isolated job-local toolchain and all Cargo targets/caches stayed outside the checkout; the frozen GPU software stack was not changed."
+  ],
+  "source_paths": [
+    "/job/repo/python/sglang/srt/rust_server/config.py",
+    "/job/repo/python/sglang/srt/runtime_context.py",
+    "/job/repo/python/sglang/srt/disaggregation/kv_events.py",
+    "/job/repo/rust/sglang-server/src/api_server/common.rs",
+    "/job/repo/rust/sglang-server/src/message/config.rs"
+  ],
+  "evidence_directory": "reports/j-a64e132cdd59/evidence"
+}
