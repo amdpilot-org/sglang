@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39042",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/728",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/725",
+  "candidate_commit": "8dc621e348a8a0b5c90f54bb524d32728f18ee99",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The prepared base reproduces predictor wall time leaking into OFFLINE TTFT. At the exact candidate commit, the candidate regression and an independent two-iteration adversarial harness show identical OFFLINE TTFT for delayed and cached predictor calls, including the reported divergent perf_counter/time.time case. BLOCKING coverage passes unchanged. No source or native import ambiguity was found.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/tools/sglang-simulator/src /tmp/amdpilot-repo-j-42df14f26b59/venv/bin/python -m pytest -q /job/review-evidence-j-42df14f26b59/independent_clock_harness.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction. A 250 ms predictor call changed two OFFLINE token latencies from the 190/140 ms reference to 440/390 ms; a 125 ms wall/250 ms perf predictor changed them to 315/265 ms."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/tools/sglang-simulator/src /tmp/amdpilot-repo-j-42df14f26b59/venv/bin/python -m pytest -q tools/sglang-simulator/test/test_simulation_offline_blocking.py::test_predictor_query_wall_time_does_not_change_offline_ttft (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Six candidate regression parameters passed across OFFLINE/BLOCKING and equal, reversed, and divergent wall/performance clock advances."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/tools/sglang-simulator/src /tmp/amdpilot-repo-j-42df14f26b59/venv/bin/python -m pytest -q /job/review-evidence-j-42df14f26b59/independent_clock_harness.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent slow/cached and two-iteration divergent-clock cases passed; all OFFLINE latencies were 190/140 ms, CPU overhead remained 90/90 ms, and last_real_time_ts equaled the wall clock after the second iteration."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/tools/sglang-simulator/src /tmp/amdpilot-repo-j-42df14f26b59/venv/bin/python -m pytest -q tools/sglang-simulator/test/test_simulation_offline_blocking.py (candidate)",
+      "exit_code": 1,
+      "what_was_measured": "The six focused tests passed; the pre-existing server integration case was environment-blocked during startup when CPU mode hid GPUs and a ROCm import queried GPU 0."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 8dc621e348a8a0b5c90f54bb524d32728f18ee99",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is deterministic host-clock accounting and was validated with mocked clocks. The assigned host exposes one AMD Instinct MI350X (gfx950), while the source report used NVIDIA H200. No GPU numerical claim was needed or made."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The original NVIDIA H200/Qwen3.6-27B/AIConfigurator database end-to-end workload was unavailable on this AMD MI350X (gfx950) host.",
+    "The broader CPU-mode simulator server test could not start because CUDA_VISIBLE_DEVICES='' led a ROCm import path to query GPU device 0 and raise 'No CUDA GPUs are available'.",
+    "The prepared interpreter initially lacked declared simulator dependencies; aiconfigurator==0.10.0 and joblib were installed with --no-deps without replacing Torch/ROCm.",
+    "No native source changed in the candidate, repository-environment.json reports native=null, and no native rebuild was applicable."
+  ]
+}
