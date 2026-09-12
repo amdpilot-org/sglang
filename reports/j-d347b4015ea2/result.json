@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39096",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/883",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the independent review's JSON-null counterexample at exact candidate commit bcbb219ef7d4c2a9a6d121928faec7f87d7b7ce0. The candidate correctly handles omitted fields and concrete explicit client values, but treated nullable fallback-backed fields present as JSON null as explicit after get_param() substituted generation-config or protocol defaults. The correction preserves the candidate design and excludes null temperature, top_p, top_k, min_p, and repetition_penalty from explicit-key metadata, restoring precedence concrete client value > preferred server value > model generation config > protocol default.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d347b4015ea2/venv/bin/python <inline JSON-null request conversion and merge probe at bcbb219ef7d4c2a9a6d121928faec7f87d7b7ce0>",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: all five null fields remained in model_fields_set and explicit keys; generation-config values 0.2/0.3/3/0.04/1.2 won instead of preferred values 0.7/0.8/20/0.05/1.1. Raw output: reports/j-d347b4015ea2/raw/candidate-null-before.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d347b4015ea2/venv/bin/python <inline JSON-null request conversion and merge probe after correction>",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after: the five fields remained present in model_fields_set but no longer appeared in explicit sampling keys, and every effective value matched the preferred server value. Raw output: reports/j-d347b4015ea2/raw/null-after.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d347b4015ea2/venv/bin/python -m pytest -q test/registered/unit/managers/test_chat_preferred_sampling_params.py test/registered/unit/entrypoints/openai/test_protocol.py",
+      "exit_code": 0,
+      "what_was_measured": "49 tests and 25 subtests passed, covering omitted fields, JSON-null fields, concrete explicit values including schema defaults, generation-config fallback, all mapped chat sampling fields, and legacy native-request precedence. Raw output: reports/j-d347b4015ea2/raw/focused-tests-after.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d347b4015ea2/venv/bin/python -m pre_commit run --files python/sglang/srt/entrypoints/openai/protocol.py python/sglang/srt/entrypoints/openai/serving_chat.py python/sglang/srt/managers/io_struct.py python/sglang/srt/managers/tokenizer_manager.py test/registered/unit/managers/test_chat_preferred_sampling_params.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, security, and registered-test metadata hooks passed. Raw output: reports/j-d347b4015ea2/raw/pre-commit-after.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reviewed counterexample is deterministic CPU-only Pydantic request conversion and dictionary precedence. No model execution, architecture behavior, or GPU numerical claim was needed or used as evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No GPU or model weights were used because they cannot strengthen the decisive CPU request-path regression; model architecture, semantic output quality, and distributed serving were not qualified.",
+    "No native source changed and repository-environment.json records no native target, so a native rebuild was not applicable.",
+    "The correction is intentionally limited to the five nullable sampler fields that use get_param() fallback; other nullable fields retain their existing explicit-null semantics."
+  ],
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/753",
+  "independent_review_url": "https://github.com/amdpilot-org/sglang/pull/850",
+  "candidate_commit": "bcbb219ef7d4c2a9a6d121928faec7f87d7b7ce0",
+  "source_paths": [
+    "python/sglang/srt/entrypoints/openai/protocol.py",
+    "python/sglang/srt/entrypoints/openai/serving_chat.py",
+    "python/sglang/srt/managers/io_struct.py",
+    "python/sglang/srt/managers/tokenizer_manager.py",
+    "test/registered/unit/managers/test_chat_preferred_sampling_params.py"
+  ]
+}

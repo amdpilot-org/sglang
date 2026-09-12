@@ -148,6 +148,46 @@ class TestChatPreferredSamplingParams(unittest.TestCase):
         for key, value in expected.items():
             self.assertEqual(effective[key], value, key)
 
+    def test_explicit_null_falls_through_to_preferences(self):
+        nullable_fields = {
+            "temperature": None,
+            "top_p": None,
+            "top_k": None,
+            "min_p": None,
+            "repetition_penalty": None,
+        }
+        request = ChatCompletionRequest(
+            model="m",
+            messages=[{"role": "user", "content": "hi"}],
+            **nullable_fields,
+        )
+        generation_config = {
+            "temperature": 0.2,
+            "top_p": 0.3,
+            "top_k": 3,
+            "min_p": 0.04,
+            "repetition_penalty": 1.2,
+        }
+        preferred = {
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "min_p": 0.05,
+            "repetition_penalty": 1.1,
+        }
+
+        converted = request.to_sampling_params([], generation_config)
+        effective = merge_preferred_sampling_params(
+            converted, preferred, request.get_explicit_sampling_keys()
+        )
+
+        self.assertTrue(nullable_fields.keys() <= request.model_fields_set)
+        self.assertTrue(
+            nullable_fields.keys().isdisjoint(request.get_explicit_sampling_keys())
+        )
+        for key, value in preferred.items():
+            self.assertEqual(effective[key], value, key)
+
     def test_generation_config_survives_for_keys_without_preferences(self):
         request = ChatCompletionRequest(
             model="m", messages=[{"role": "user", "content": "hi"}]

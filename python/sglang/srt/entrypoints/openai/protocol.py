@@ -1005,12 +1005,26 @@ class ChatCompletionRequest(BaseModel):
         "response_format": "json_schema",
     }
 
+    _NULL_MEANS_UNSET_SAMPLING_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "temperature",
+            "top_p",
+            "top_k",
+            "min_p",
+            "repetition_penalty",
+        }
+    )
+
     def get_explicit_sampling_keys(self) -> List[str]:
         """Return sampling keys whose values were explicitly supplied by the client."""
         keys = {
             sampling_key
             for field, sampling_key in self._FIELD_TO_SAMPLING_KEY.items()
             if field in self.model_fields_set
+            and not (
+                field in self._NULL_MEANS_UNSET_SAMPLING_FIELDS
+                and getattr(self, field) is None
+            )
         }
         if "response_format" in self.model_fields_set:
             keys.add("structural_tag")
