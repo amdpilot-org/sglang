@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/22935",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the MambaRadixCache compressed-edge split returning zero device indices for the fresh-prefill n-1 key, then verified the existing upstream candidate that snapshots and inserts an owned interior grid-boundary Mamba checkpoint for both legacy and UnifiedRadixCache no_buffer paths. The regression verifies that duplicate and stale state slots are freed and that prev_prefix_len preserves KV ownership. On the assigned MI350X, the actual cache returned 0 indices at the bare split and the exact 64-index GPU reference after an interior checkpoint.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ca858a3a4ab7/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_radix_cache_match.py -k 'n_minus_1 or tombstone or shared_prefix' -vv",
+      "exit_code": 0,
+      "what_was_measured": "Before the fix, the actual MambaRadixCache split the checkpointed [1,2,3] edge for an n-1 [1,2] lookup and returned 0 device indices while retaining the leaf checkpoint for a full 3-token match."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ca858a3a4ab7/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_radix_cache_match.py -vv",
+      "exit_code": 0,
+      "what_was_measured": "15 legacy/unified cache contract tests passed, including n-1 interior-checkpoint reuse, tombstone revival, duplicate/stale state freeing, and KV ownership across the two inserts."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ca858a3a4ab7/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_unittest.py test/registered/unit/mem_cache/test_registry.py",
+      "exit_code": 0,
+      "what_was_measured": "40 related Mamba cache and cache-registry tests passed."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ca858a3a4ab7/venv/bin/python reports/j-ca858a3a4ab7/gpu_cache_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "Actual MambaRadixCache execution on AMD Instinct MI350X / ROCm 7.2: bare split hit 0, full leaf hit 3, checkpointed split hit 64, and returned GPU indices exactly equaled an independent torch.arange(64) reference."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..HEAD && /tmp/amdpilot-repo-j-ca858a3a4ab7/venv/bin/python -m compileall -q python/sglang/srt/managers/schedule_batch.py python/sglang/srt/mem_cache/mamba_radix_cache.py python/sglang/srt/mem_cache/memory_pool.py python/sglang/srt/mem_cache/unified_radix_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed files have no whitespace errors and all changed Python modules compile."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "ROCR_VISIBLE_DEVICES=0/HIP_VISIBLE_DEVICES=0 actual-cache probe ran on AMD Instinct MI350X with torch ROCm 7.2.26015; exact GPU prefix-index equality was asserted against torch.arange.",
+  "native_rebuilt": false,
+  "remaining_limitations": "No FlyDSL or native C++ code changed. A full hybrid-Mamba model server run was not performed because no model weights were prepared for this job; validation covers the real cache implementations and scheduler/cache ownership contracts but not end-to-end model logits or latency. The candidate intentionally does not cover prompts shorter than one checkpoint grid, speculative decoding, ReplaySSM, int8 checkpoints, extra_buffer, SWA-mixed unified trees, or divergence before the deepest retained interior boundary."
+}
