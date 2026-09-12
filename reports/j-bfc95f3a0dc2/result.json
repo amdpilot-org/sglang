@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39042",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate ebabac5380b40bbade69cab1830b00db27e2183a's valid OFFLINE predictor exclusion and BLOCKING semantics, but corrected its remaining clock-domain defect. Predictor implementation overhead is now measured with time.time() before adjusting the time.time()-based last_real_time_ts; perf_counter() remains the independent performance telemetry clock. A two-iteration regression proves that a 250 ms perf-counter advance paired with a 125 ms wall-clock advance no longer suppresses 45 ms of legitimate host overhead in either iteration.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/evidence-j-bfc95f3a0dc2:tools/sglang-simulator/src /tmp/amdpilot-repo-j-bfc95f3a0dc2/venv/bin/python -m pytest -p clock_stubs -q tools/sglang-simulator/test/test_simulation_offline_blocking.py -k predictor_query_wall_time -vv (candidate ebabac5380b40bbade69cab1830b00db27e2183a)",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate's four stable-clock cases pass: OFFLINE delayed/cached invariance and unchanged BLOCKING wall-time semantics. Raw output: reports/j-bfc95f3a0dc2/raw/candidate-stable-clock.txt"
+    },
+    {
+      "command": "PYTHONPATH=tools/sglang-simulator/src /tmp/amdpilot-repo-j-bfc95f3a0dc2/venv/bin/python -m pytest -q /job/evidence-j-bfc95f3a0dc2/test_candidate_clock.py -vv (candidate ebabac5380b40bbade69cab1830b00db27e2183a)",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced the independent review counterexample through the actual scheduler hooks. With predictor perf_counter advancing 250 ms and time.time advancing 125 ms, the candidate reported 100 ms TTFT rather than the independent 145 ms reference, then 50 ms rather than 95 ms on the next iteration, proving persistent suppression of legitimate overhead. Raw output: reports/j-bfc95f3a0dc2/raw/failing-before-candidate.txt"
+    },
+    {
+      "command": "PYTHONPATH=tools/sglang-simulator/src /tmp/amdpilot-repo-j-bfc95f3a0dc2/venv/bin/python -m pytest -q /job/evidence-j-bfc95f3a0dc2/test_candidate_clock.py -vv",
+      "exit_code": 0,
+      "what_was_measured": "The corrected source reports the modeled-plus-host-overhead references of 145 ms TTFT and 95 ms second-token latency under divergent clocks. Raw output: reports/j-bfc95f3a0dc2/raw/passing-after-independent.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/evidence-j-bfc95f3a0dc2:tools/sglang-simulator/src /tmp/amdpilot-repo-j-bfc95f3a0dc2/venv/bin/python -m pytest -p clock_stubs -q tools/sglang-simulator/test/test_simulation_offline_blocking.py -k predictor_query_wall_time",
+      "exit_code": 0,
+      "what_was_measured": "All six final regressions pass: stable clocks in cold-first and cached-first order plus divergent clocks, each in OFFLINE and BLOCKING modes. Raw output: reports/j-bfc95f3a0dc2/raw/passing-after-final.txt"
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files tools/sglang-simulator/src/sglang_simulator/simulation/sglang/scheduler.py tools/sglang-simulator/test/test_simulation_offline_blocking.py",
+      "exit_code": 0,
+      "what_was_measured": "Applicable repository formatting, import ordering, syntax, whitespace, secret, and spelling checks passed. Raw output: reports/j-bfc95f3a0dc2/raw/pre-commit.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "No GPU kernel was executed because this is host-clock scheduler accounting. Environment inspection found AMD Instinct MI355X, Torch 2.11.0+rocm7.2, and ROCm 7.2.26015; this is not the reported NVIDIA H200/CUDA 13.0 architecture. Raw output: reports/j-bfc95f3a0dc2/raw/environment.txt",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The NVIDIA H200, Qwen3.6-27B weights, and h200_sxm/sglang/0.5.12 AIConfigurator database were unavailable, so the exact 1K/1K serving benchmark was not rerun.",
+    "The prepared interpreter lacks the optional AIConfigurator and joblib packages. Focused scheduler-hook tests used import-only stubs; no predictor database query was claimed.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}

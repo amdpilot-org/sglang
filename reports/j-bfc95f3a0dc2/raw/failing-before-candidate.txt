@@ -1,0 +1,122 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0 -- /tmp/amdpilot-repo-j-bfc95f3a0dc2/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /job/evidence-j-bfc95f3a0dc2
+plugins: hypothesis-6.155.0, anyio-4.15.1
+collecting ... collected 1 item
+
+../../job/evidence-j-bfc95f3a0dc2/test_candidate_clock.py::test_offline_predictor_exclusion_uses_wall_clock_domain FAILED [100%]
+
+=================================== FAILURES ===================================
+___________ test_offline_predictor_exclusion_uses_wall_clock_domain ____________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7e5e735519a0>
+
+    def test_offline_predictor_exclusion_uses_wall_clock_domain(monkeypatch):
+        from sglang_simulator.simulation.sglang import scheduler
+        from sglang_simulator.simulation.types import SimulationMode
+
+        hook = scheduler.C_SchedulerHook
+        state = scheduler.StateManager
+        stats_manager = scheduler.request_stats_manager
+        clock = SimpleNamespace(wall=100.0, monotonic=500.0)
+
+        def advance_both(duration):
+            clock.wall += duration
+            clock.monotonic += duration
+
+        monkeypatch.setattr(
+            scheduler,
+            "time",
+            SimpleNamespace(
+                time=lambda: clock.wall,
+                perf_counter=lambda: clock.monotonic,
+                sleep=advance_both,
+            ),
+        )
+        monkeypatch.setattr(hook, "SIM_MODE", SimulationMode.OFFLINE)
+        monkeypatch.setattr(hook, "OVERLAP_SCHEDULE", False)
+        monkeypatch.setattr(hook, "ITERATION_STATS", [])
+        monkeypatch.setattr(hook, "TOTAL_PREDICTOR_TIME_COST", 0.0)
+        monkeypatch.setattr(hook, "SIMULATION_BATCH", None)
+
+        predictions = iter([0.1, 0.05])
+
+        def predict(_batch):
+            # Deliberately diverge the two clocks during predictor execution.
+            clock.wall += 0.125
+            clock.monotonic += 0.250
+            return next(predictions)
+
+        monkeypatch.setattr(
+            hook,
+            "INFERENCE_PREDICTOR",
+            SimpleNamespace(predict_infer_time=predict),
+        )
+        req = SimpleNamespace(
+            rid="r1", extend_input_len=4, prefix_indices=[], output_ids=[]
+        )
+        batch = SimpleNamespace(
+            reqs=[req],
+            forward_mode=SimpleNamespace(
+                is_extend=lambda: not req.output_ids,
+                is_decode=lambda: bool(req.output_ids),
+            ),
+        )
+        monkeypatch.setattr(scheduler, "get_obj_from_args", lambda _type_name, obj: obj)
+
+        class GenerationBatchResult:
+            pass
+
+        def run_batch(_self, _batch):
+            advance_both(0.02)
+            return GenerationBatchResult()
+
+        def process_batch_result(_self, _batch):
+            advance_both(0.02)
+            req.output_ids.append(1)
+
+        target = SimpleNamespace(
+            _prefetch_kvcache=Mock(),
+            get_new_batch_prefill=Mock(),
+            run_batch=run_batch,
+            process_batch_result=process_batch_result,
+            event_loop_normal=Mock(),
+            init_request_dispatcher=Mock(),
+        )
+        hook.hook(target)
+        state.reset()
+        stats_manager.reset()
+        state.set_last_real_time_ts(clock.wall)
+        req_stats = stats_manager.get_req_stats(req.rid)
+        req_stats.created_time = 0.0
+        req_stats.input_length = 4
+        req_stats.output_length = 2
+        req_stats.queue_start = req_stats.queue_end = 0.0
+
+        try:
+            advance_both(0.005)
+            target.run_batch(None, batch)
+            target.process_batch_result(None, batch)
+            first_baseline = state.get_last_real_time_ts()
+
+            advance_both(0.005)
+            target.run_batch(None, batch)
+            target.process_batch_result(None, batch)
+
+            # Each iteration has 5 ms scheduler + 20 ms run + 20 ms result work.
+>           assert req_stats.gen_token_latencies == pytest.approx([0.145, 0.095])
+E           assert [0.1, 0.05000000000000002] == approx([0.145...95 ± 9.5e-08])
+E
+E             comparison failed. Mismatched elements: 2 / 2:
+E             Max absolute difference: 0.044999999999999984
+E             Max relative difference: 0.8999999999999994
+E             Index | Obtained            | Expected
+E             0     | 0.1                 | 0.145 ± 1.4e-07
+E             1     | 0.05000000000000002 | 0.095 ± 9.5e-08
+
+/job/evidence-j-bfc95f3a0dc2/test_candidate_clock.py:150: AssertionError
+=========================== short test summary info ============================
+FAILED ../../job/evidence-j-bfc95f3a0dc2/test_candidate_clock.py::test_offline_predictor_exclusion_uses_wall_clock_domain
+============================== 1 failed in 0.33s ===============================

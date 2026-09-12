@@ -86,28 +86,36 @@ def test_request_rate_offline_matches_blocking(tmp_path):
 
 
 @pytest.mark.parametrize("mode", ["OFFLINE", "BLOCKING"])
-@pytest.mark.parametrize("predictor_delays", [(0.25, 0.001), (0.001, 0.25)])
+@pytest.mark.parametrize(
+    ("predictor_wall_delays", "predictor_perf_delays"),
+    [
+        ((0.25, 0.001), (0.25, 0.001)),
+        ((0.001, 0.25), (0.001, 0.25)),
+        ((0.125, 0.125), (0.25, 0.25)),
+    ],
+)
 def test_predictor_query_wall_time_does_not_change_offline_ttft(
-    monkeypatch, mode, predictor_delays
+    monkeypatch, mode, predictor_wall_delays, predictor_perf_delays
 ):
-    """Equal predictions have equal offline token latency despite query delay."""
+    """Offline latency ignores predictor time even when clock domains diverge."""
     from sglang_simulator.simulation.sglang import scheduler
     from sglang_simulator.simulation.types import SimulationMode
 
     hook = scheduler.C_SchedulerHook
     state = scheduler.StateManager
     stats_manager = scheduler.request_stats_manager
-    clock = SimpleNamespace(now=100.0)
+    clock = SimpleNamespace(wall=100.0, perf=500.0)
 
     def advance(duration):
-        clock.now += duration
+        clock.wall += duration
+        clock.perf += duration
 
     monkeypatch.setattr(
         scheduler,
         "time",
         SimpleNamespace(
-            time=lambda: clock.now,
-            perf_counter=lambda: clock.now,
+            time=lambda: clock.wall,
+            perf_counter=lambda: clock.perf,
             sleep=advance,
         ),
     )
@@ -117,11 +125,13 @@ def test_predictor_query_wall_time_does_not_change_offline_ttft(
     monkeypatch.setattr(hook, "TOTAL_PREDICTOR_TIME_COST", 0.0)
     monkeypatch.setattr(hook, "SIMULATION_BATCH", None)
 
-    delays = iter(predictor_delays)
+    wall_delays = iter(predictor_wall_delays)
+    perf_delays = iter(predictor_perf_delays)
     predicted_latencies = iter([0.1, 0.05])
 
     def predict(_batch):
-        advance(next(delays))
+        clock.wall += next(wall_delays)
+        clock.perf += next(perf_delays)
         return next(predicted_latencies)
 
     monkeypatch.setattr(
@@ -163,7 +173,7 @@ def test_predictor_query_wall_time_does_not_change_offline_ttft(
     hook.hook(target)
     state.reset()
     stats_manager.reset()
-    state.set_last_real_time_ts(clock.now)
+    state.set_last_real_time_ts(clock.wall)
     req_stats = stats_manager.get_req_stats(req.rid)
     req_stats.created_time = 0.0
     req_stats.input_length = 4
@@ -171,7 +181,7 @@ def test_predictor_query_wall_time_does_not_change_offline_ttft(
     req_stats.queue_start = req_stats.queue_end = 0.0
 
     try:
-        for _ in predictor_delays:
+        for _ in predictor_wall_delays:
             advance(0.02)
             target.run_batch(None, batch)
             target.process_batch_result(None, batch)
@@ -180,13 +190,15 @@ def test_predictor_query_wall_time_does_not_change_offline_ttft(
         if mode == "BLOCKING":
             expected_latencies = [
                 latency + delay
-                for latency, delay in zip(expected_latencies, predictor_delays)
+                for latency, delay in zip(expected_latencies, predictor_wall_delays)
             ]
         assert req_stats.gen_token_latencies == pytest.approx(expected_latencies)
         metrics = scheduler.calc_metrics([req_stats])
         assert metrics["mean_ttft_ms"] == pytest.approx(expected_latencies[0] * 1000)
         assert metrics["mean_itl_ms"] == pytest.approx(expected_latencies[1] * 1000)
-        assert hook.TOTAL_PREDICTOR_TIME_COST == pytest.approx(sum(predictor_delays))
+        assert hook.TOTAL_PREDICTOR_TIME_COST == pytest.approx(
+            sum(predictor_perf_delays)
+        )
     finally:
         state.reset()
         stats_manager.reset()
