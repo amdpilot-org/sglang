@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31337",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "b8b17e6d25941987360e9dad6d5d196c66b25cad",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduced missing DSV4 thinking/high defaults and a global ROCm700A workaround. The exact candidate fixes the requested source-level contract: DSV4 alone defaults to thinking/high when unset, explicit request/environment values retain precedence, other model defaults are preserved, and SGLANG_USE_ROCM700A=0 is scoped to gfx950-rocm720.",
+  "tests": [
+    {
+      "command": "independent DSV4 official-profile render on recorded base with SGLANG_DEFAULT_THINKING and SGLANG_DSV4_REASONING_EFFORT cleared",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced thinking_mode=chat, reasoning_effort=None, no <think> tag, and no high-effort instruction; the original-contract assertion failed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ac1fc0fb25ba/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py test/registered/unit/tools/test_rocm_docker_defaults.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 138 passed and 70 subtests passed, covering DSV4 defaults/overrides, unchanged non-DSV4 behavior, and Docker-stage scoping."
+    },
+    {
+      "command": "independent DSV4/non-DSV4 override matrix at b8b17e6d25941987360e9dad6d5d196c66b25cad",
+      "exit_code": 0,
+      "what_was_measured": "Official and preview unset defaults, explicit false and empty values, request precedence over environment, and non-DSV4 unset/configured behavior."
+    },
+    {
+      "command": "isolated SGLANG_USE_ROCM700A={0,1} imports plus CPU-vs-ROCm numerical comparison",
+      "exit_code": 0,
+      "what_was_measured": "On MI355X/gfx950, flag 0 selected MAX_LEN and flag 1 selected SUM_LEN for the CUDA-graph default; GPU arithmetic matched the CPU reference with max absolute error 4.76837158203125e-07."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI355X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2/HIP 7.2.26015; raw evidence records the flag branches and successful CPU-vs-GPU numerical check."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "DeepSeek-V4-Pro weights were unavailable, so full-model semantics, quality, accuracy, and throughput remain unverified.",
+    "No distributed DP-attention workload was run; flag testing verifies the selected code branch, not distributed correctness or performance.",
+    "The production gfx950-rocm720 Docker image was not rebuilt; exact Dockerfile stage inheritance was validated statically and by regression.",
+    "No native/C++/FlyDSL files changed, so a native rebuild was not applicable."
+  ]
+}
