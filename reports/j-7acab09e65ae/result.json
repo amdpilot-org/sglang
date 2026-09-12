@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33867",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced all three independent-review counterexamples against candidate abf75d1860543491105348b87de9615268245e20. Function output arrays now retain text boundaries and serialize schema-valid image/file parts into the chat-compatible tool string instead of dropping them.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-7acab09e65ae/venv/bin/python schema/normalization probe (recorded in evidence/candidate_before.txt)",
+      "exit_code": 0,
+      "what_was_measured": "Before the correction, schema-valid image-only and file-only outputs normalized to an empty string, mixed text/image/text normalized to beforeafter, and the two-text issue payload lost its part boundary."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7acab09e65ae/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_responses.py::InputItemNormalizationTestCase",
+      "exit_code": 0,
+      "what_was_measured": "Eight focused input-item normalization regressions passed, including string, text-array, image-only, file-only, mixed-array, and unsupported-item boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7acab09e65ae/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_responses.py",
+      "exit_code": 0,
+      "what_was_measured": "The complete Responses serving unit file passed: 39 tests and 2 subtests."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/entrypoints/openai/serving_responses.py test/registered/unit/entrypoints/openai/test_serving_responses.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository formatting, lint, safety, and registered-test checks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "ROCm reported the assigned gfx950 GPU in evidence/environment.txt, but this deterministic schema/normalization correction did not execute GPU kernels."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 weights and the reported parser/DSPARK configuration were unavailable; architecture-specific generation was not tested.",
+    "Non-text function outputs must be represented textually because Chat tool messages accept strings or text parts, not image/file parts; compact JSON preserves the original part data for the model."
+  ]
+}

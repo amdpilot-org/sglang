@@ -1090,10 +1090,26 @@ class OpenAIServingResponses(OpenAIServingChat):
             }
         if msg_type == "function_call_output":
             # ``output`` may be a string or an array of content parts (OpenAI
-            # allows both); the chat tool message needs a string, so flatten.
+            # allows both). Chat tool messages cannot carry image/file parts,
+            # so preserve non-text parts as JSON instead of silently dropping
+            # them while converting the array to a string.
             out = message.get("output", "")
             if isinstance(out, list):
-                out = "".join(p.get("text", "") for p in out if isinstance(p, dict))
+                serialized_parts = []
+                for part in out:
+                    if hasattr(part, "model_dump"):
+                        part = part.model_dump(exclude_none=True)
+                    if isinstance(part, dict) and part.get("type") in (
+                        "input_text",
+                        "output_text",
+                        "text",
+                    ):
+                        serialized_parts.append(part.get("text", ""))
+                    elif isinstance(part, str):
+                        serialized_parts.append(part)
+                    else:
+                        serialized_parts.append(orjson.dumps(part).decode("utf-8"))
+                out = "\n".join(serialized_parts)
             return {
                 "role": "tool",
                 "tool_call_id": message.get("call_id"),
