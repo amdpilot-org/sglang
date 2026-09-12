@@ -1,0 +1,153 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ TestHTTPServerLiveness.test_ping_responds_while_chat_preprocessing_is_blocked _
+
+self = <test_http_server_liveness.TestHTTPServerLiveness testMethod=test_ping_responds_while_chat_preprocessing_is_blocked>
+
+    def test_ping_responds_while_chat_preprocessing_is_blocked(self):
+        conversion_started = threading.Event()
+        ping_completed = threading.Event()
+        release_conversion = threading.Event()
+        ping_was_starved = threading.Event()
+        conversion_did_not_start = threading.Event()
+        serving = _BlockingChatServing(conversion_started, release_conversion)
+    
+        def release_after_ping():
+            if not conversion_started.wait(timeout=2):
+                conversion_did_not_start.set()
+                release_conversion.set()
+                return
+            if not ping_completed.wait(timeout=1):
+                ping_was_starved.set()
+            release_conversion.set()
+    
+        watchdog = threading.Thread(target=release_after_ping)
+        watchdog.start()
+    
+        had_previous_serving = hasattr(app.state, "openai_serving_chat")
+        previous_serving = getattr(app.state, "openai_serving_chat", None)
+        app.state.openai_serving_chat = serving
+    
+        async def call_chat_and_ping():
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
+                chat_task = asyncio.create_task(
+                    client.post(
+                        "/v1/chat/completions",
+                        json={
+                            "model": "test-model",
+                            "messages": [{"role": "user", "content": "hello"}],
+                        },
+                    )
+                )
+                # Queue liveness before chat conversion gets its first event-loop turn.
+                ping_task = asyncio.create_task(client.get("/ping"))
+                ping_response = await ping_task
+                ping_completed.set()
+                chat_response = await chat_task
+                return ping_response, chat_response
+    
+        try:
+            ping_response, chat_response = asyncio.run(call_chat_and_ping())
+        finally:
+            release_conversion.set()
+            watchdog.join(timeout=2)
+            executor = getattr(
+                serving.tokenizer_manager, "_request_preprocessor_executor", None
+            )
+            if executor is not None:
+                executor.shutdown(wait=True)
+            if had_previous_serving:
+                app.state.openai_serving_chat = previous_serving
+            else:
+                delattr(app.state, "openai_serving_chat")
+    
+        self.assertEqual(ping_response.status_code, 200)
+        self.assertEqual(chat_response.status_code, 200)
+        self.assertEqual(chat_response.json(), {"status": "ok"})
+        self.assertFalse(conversion_did_not_start.is_set())
+        self.assertFalse(watchdog.is_alive())
+>       self.assertFalse(
+            ping_was_starved.is_set(),
+            "/ping was starved by synchronous chat request preprocessing",
+        )
+E       AssertionError: True is not false : /ping was starved by synchronous chat request preprocessing
+
+test/registered/unit/entrypoints/test_http_server_liveness.py:118: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7fc7605ae980>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7fd0457f5d00>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestHTTPServerLiveness.test_ping_responds_while_chat_preprocessing_is_blocked
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/entrypoints/test_http_server_liveness.py", line 118, in test_ping_responds_while_chat_preprocessing_is_blocked
+    self.assertFalse(
+  File "/usr/lib/python3.12/unittest/case.py", line 721, in assertFalse
+    raise self.failureException(msg)
+AssertionError: True is not false : /ping was starved by synchronous chat request preprocessing
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/entrypoints/test_http_server_liveness.py::TestHTTPServerLiveness::test_ping_responds_while_chat_preprocessing_is_blocked
+1 failed, 17 warnings in 13.58s
