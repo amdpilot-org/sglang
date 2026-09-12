@@ -11,6 +11,7 @@ recognize both keys, fall back cleanly when no usable grid is present, and not
 mis-split a degenerate flat grid. No server / GPU / weight loading involved.
 """
 
+import pickle
 import unittest
 
 import numpy as np
@@ -41,6 +42,51 @@ def _bundled_item(grid_key=None, grid=None, feature_len=10, num_images=2):
 
 
 class TestGetNewExpandedMMItems(CustomTestCase):
+    def test_cpu_tensor_slices_do_not_retain_parent_storage(self):
+        n, rows, width = 32, 8, 64
+        feature = torch.zeros((n * rows, width), dtype=torch.float32)
+        item = MultimodalDataItem(
+            modality=Modality.IMAGE,
+            offsets=[(i, i) for i in range(n)],
+            feature=feature,
+            model_specific_data={
+                "image_grid_thw": torch.tensor([[1, 1, rows]] * n),
+                "patch_metadata": torch.arange(n * rows),
+            },
+        )
+
+        out = get_new_expanded_mm_items([item])
+        logical_bytes = sum(x.feature.nbytes for x in out)
+        pickle_bytes = len(pickle.dumps(out, protocol=pickle.HIGHEST_PROTOCOL))
+
+        self.assertLess(pickle_bytes, logical_bytes * 2)
+        self.assertEqual(out[0].feature.untyped_storage().nbytes(), out[0].feature.nbytes)
+        metadata = out[0].model_specific_data
+        self.assertEqual(
+            metadata["image_grid_thw"].untyped_storage().nbytes(),
+            metadata["image_grid_thw"].nbytes,
+        )
+        self.assertEqual(
+            metadata["patch_metadata"].untyped_storage().nbytes(),
+            metadata["patch_metadata"].nbytes,
+        )
+
+    def test_cpu_precomputed_embedding_slices_do_not_retain_parent_storage(self):
+        embeddings = torch.arange(24, dtype=torch.float32).reshape(8, 3)
+        item = MultimodalDataItem(
+            modality=Modality.IMAGE,
+            offsets=[(0, 0), (1, 1)],
+            precomputed_embeddings=embeddings,
+            model_specific_data={"image_grid_thw": [[1, 1, 3], [1, 1, 5]]},
+        )
+
+        out = get_new_expanded_mm_items([item])
+
+        self.assertEqual([x.precomputed_embeddings.shape[0] for x in out], [3, 5])
+        for split in out:
+            tensor = split.precomputed_embeddings
+            self.assertEqual(tensor.untyped_storage().nbytes(), tensor.nbytes)
+
     def test_image_grid_hws_splits_per_image(self):
         # grid rows [[2,3],[4,1]] -> prod = [6, 4] patches -> feature_len 10.
         item = _bundled_item(

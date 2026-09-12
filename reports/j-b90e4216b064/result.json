@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33388",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced 518.307x pickle amplification from CPU tensor views created by get_new_expanded_mm_items. CPU tensor slices are now cloned at split time, including feature, precomputed_embeddings, and split tensor metadata, while accelerator slices remain views for IPC/shared-memory paths. The exact fixture now measures 1.312x amplification.",
+  "tests": [
+    {
+      "command": "XDG_CACHE_HOME=/tmp/amdpilot-repo-j-b90e4216b064/cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b90e4216b064/venv/bin/python reports/j-b90e4216b064/reproduce_pickle_amplification.py",
+      "exit_code": 0,
+      "what_was_measured": "Before: 512 split image items, 1,048,576 logical feature bytes, 543,484,451 pickle bytes, 518.307x amplification, and 1,048,576-byte storage retained by a 2,048-byte slice. After: 1,375,278 pickle bytes, 1.312x amplification, and 2,048-byte storage for the 2,048-byte slice."
+    },
+    {
+      "command": "XDG_CACHE_HOME=/tmp/amdpilot-repo-j-b90e4216b064/cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b90e4216b064/venv/bin/python -m pytest -q test/registered/unit/managers/test_mm_utils_split.py",
+      "exit_code": 0,
+      "what_was_measured": "9 tests passed, covering pickle size and owned storage for CPU feature slices, precomputed embeddings, item- and feature-aligned tensor metadata, plus existing image grid, numpy, fallback, and pass-through boundaries. The two new regression tests failed before the source correction."
+    },
+    {
+      "command": "XDG_CACHE_HOME=/tmp/amdpilot-repo-j-b90e4216b064/cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b90e4216b064/venv/bin/python reports/j-b90e4216b064/verify_gpu_slice.py",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X with ROCm/HIP 7.2.26015, an accelerator slice matched an independent expected tensor and retained the parent's storage pointer, confirming the CPU-only materialization boundary."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-b90e4216b064/gpu-validation.txt records AMD Instinct MI355X, correct slice values, and shared parent storage for the accelerator path."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No model weights or multimodal serving workload were used; validation targets the reported deterministic splitting and pickle serialization path directly.",
+    "The source report used CUDA H200 hardware; accelerator boundary validation here used the assigned single AMD Instinct MI355X with ROCm. Pickling behavior under test is CPU-side.",
+    "No native code changed, so no native rebuild was applicable."
+  ]
+}
