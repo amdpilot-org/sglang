@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/26794",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "e04feb629fd9333d65b9a3f25f421cad96528d50",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Accept as test-only hardening. The candidate adds a focused regression but no production source change, and the same regression passes on the recorded base where the canonical NPU MoE parameter-layout correction is already present. Independent AMD GPU loader checks cover repeated separate gate/up/down reloads including the reported 1408-row dimension. Real Ascend kernel behavior and end-to-end scheduler survival remain unverified.",
+  "tests": [
+    {
+      "command": "git switch --detach e04feb629fd9333d65b9a3f25f421cad96528d50 && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7f0641cdb008/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_npu_unquant_moe_reload.py",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate commit, three focused tests exercised mocked NPU post-processing followed by the real FusedMoE separate gate/up/down tensor loaders; all passed."
+    },
+    {
+      "command": "git switch amdpilot/j-7f0641cdb008 && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7f0641cdb008/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-7f0641cdb008/review-evidence/test_npu_unquant_moe_reload.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate regression, preserved outside the checkout, also passed unchanged on recorded base 358c163, proving the candidate is test-only hardening rather than a new behavioral fix."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-7f0641cdb008/venv/bin/python - <<'PY' # repeated FusedMoE loader checks and obsolete-layout reproduction",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X gfx950, separate BF16 gate/up/down loads were numerically checked for intermediate sizes 1, 3, and 1408 across two reload cycles. An obsolete transposed persistent destination failed through the real loader with a dimension mismatch, reproducing the original mechanism."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7f0641cdb008/venv/bin/python - <<'PY' # inspect module paths and runtimes",
+      "exit_code": 0,
+      "what_was_measured": "SGLang, FusedMoE, and the NPU method imported from /job/repo/python/sglang. PyTorch was 2.11.0+rocm7.2 and torch_npu import failed with ModuleNotFoundError."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-7f0641cdb008/raw/adversarial_loader.txt records numerical tensor-loader execution on the assigned AMD Instinct MI350X (gfx950). This was not Ascend execution."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No Ascend device, CANN, or torch_npu runtime was available, so actual npu_format_cast and Ascend grouped-matmul behavior were not independently executed.",
+    "No full DeepSeekV3.2 Engine or HTTP update_weights_from_disk run established scheduler survival after reload.",
+    "The candidate test mocks npu_format_cast and directly invokes loader methods; it does not exercise model weight-name mapping, scheduler subprocess handling, HTTP transport, or distributed execution.",
+    "The candidate changes only tests and reports; the production correction predates it on the recorded base."
+  ],
+  "remaining_limitations": [
+    "The available accelerator is AMD Instinct MI350X gfx950, not an Ascend NPU.",
+    "CANN and torch_npu are unavailable.",
+    "The reported DeepSeekV3.2 checkpoint/model weights are unavailable.",
+    "No native source changed and repository-environment.json specifies no native build target, so no native rebuild was applicable."
+  ]
+}
