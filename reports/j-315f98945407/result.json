@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/3365",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3127",
+  "candidate_commit": "a02a0a49441faa169529abec7f93cfcdba92fe13",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate implements and unit-tests root-only TP logits gather plus sampled-token broadcast for ordinary eager generation, but its eligibility policy also selects eager tensor-parallel dLLM. dLLM consumes full_logits on every rank and bypasses ModelRunner.sample, so non-root ranks receive None and cannot execute denoising. Non-root gather ranks also skip existing grammar-mask and auxiliary-output cleanup. This is a partial fix with blocking compatibility regressions, while real multi-GPU RCCL execution remains unavailable on the one-GPU review node.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-315f98945407/venv/bin/python -m pytest -q /job/review-evidence-j-315f98945407/candidate-test_tp_logits_gather.py (at recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: all 9 candidate feature tests failed because the base always used all-gather and had no root-only sampling path. Raw output: /job/review-evidence-j-315f98945407/base-candidate-regression.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-315f98945407/venv/bin/python -m pytest -q test/registered/unit/layers/test_tp_logits_gather.py test/registered/unit/model_executor/test_model_runner_decode_rows.py (at a02a0a49441faa169529abec7f93cfcdba92fe13)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite and adjacent decode-row behavior: 10 passed. Raw output: /job/review-evidence-j-315f98945407/candidate-focused-tests.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-315f98945407/venv/bin/python -m pytest -q /job/review-evidence-j-315f98945407/test_adversarial_tp_logits_gather.py (at a02a0a49441faa169529abec7f93cfcdba92fe13)",
+      "exit_code": 1,
+      "what_was_measured": "Two independent adversarial contract checks failed: eager DLLM_EXTEND was incorrectly eligible for root-only gather, and non-root sampling retained grammar_mask/auxiliary output. Raw output: /job/review-evidence-j-315f98945407/candidate-adversarial.log"
+    },
+    {
+      "command": "single-GPU deterministic FP32 full-vocabulary projection compared with two independently computed vocabulary shards concatenated in TP order",
+      "exit_code": 0,
+      "what_was_measured": "AMD Instinct MI350X local numerical arithmetic: max_abs_error=0.0 and identical argmax tokens. This does not exercise communication. Raw output: /job/review-evidence-j-315f98945407/gpu-local-numerical.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI350X (gfx950:sramecc+:xnack-) ran the local numerical reference under Torch 2.11.0+rocm7.2 / HIP 7.2.26015; only one GPU was visible, so no RCCL collective was executed.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Eager TP dLLM uses ForwardMode.DLLM_EXTEND with full_logits consumed on every rank. The candidate policy selects gather when CUDA graph execution is unavailable, returning None on non-root ranks; dLLM bypasses the sampled-token broadcast path.",
+    "On non-root gather ranks ModelRunner.sample skips _preprocess_logits, leaving sampling_info.grammar_mask allocated, and does not clear a pre-existing auxiliary_device_output."
+  ],
+  "remaining_limitations": [
+    "Only one GPU was assigned, so a real two-rank RCCL gather/broadcast model or serving run and a communication-performance comparison were not possible.",
+    "The installed ProcessGroupNCCL interface declares gather support, but runtime RCCL behavior was not verified.",
+    "The candidate intentionally retains all-gather for CUDA graphs, speculative decoding, return-logprob, prefill-only, DP-attention, attention-TP, and TP-LM-head all-to-all, so those paths do not gain the requested optimization.",
+    "The candidate result references raw Gloo and GPU logs that are absent from the exact candidate commit; those claims were not accepted as evidence.",
+    "No native source changed, so native rebuild was not applicable."
+  ]
+}
