@@ -426,6 +426,7 @@ class ServerArgs(DisaggServerArgsMixin):
     vae_cpu_offload: bool | None = False
     use_fsdp_inference: bool | None = None
     pin_cpu_memory: bool = True
+    parallel_loading: bool = True
     ltx2_two_stage_device_mode: str | None = None
     _explicit_arg_names: set[str] = field(default_factory=set, repr=False)
     _automatic_component_attention_backend_keys: set[str] = field(
@@ -2614,6 +2615,16 @@ class ServerArgs(DisaggServerArgsMixin):
             action=StoreBoolean,
             help='Pin memory for CPU offload. Only added as a temp workaround if it throws "CUDA error: invalid argument". '
             "Should be enabled in almost all cases",
+        )
+        parser.add_argument(
+            "--parallel-loading",
+            action=StoreBoolean,
+            default=ServerArgs.parallel_loading,
+            help=(
+                "Load independent diffusion pipeline components concurrently to "
+                "reduce startup time. Disable to reduce peak host-memory and I/O "
+                "pressure. Multi-rank launches always load sequentially."
+            ),
         )
         parser.add_argument(
             "--ltx2-two-stage-device-mode",
