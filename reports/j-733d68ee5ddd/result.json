@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35808",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Exported UnifiedRadixCache's previously internal L3 prefetch lifecycle counters as bounded-label Prometheus metrics, added full/partial/miss request and token classification, emitted request-correlated structured query and terminal prefetch logs, documented the diagnostics, and preserved monotonic counter behavior across repeated flushes and cache reset epochs.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-733d68ee5ddd/venv/bin/python -m pytest -q test/registered/unit/observability/test_stat_loggers_di.py",
+      "exit_code": 0,
+      "what_was_measured": "16 CPU unit tests, including failing-before coverage for metric export, delta-only repeated flushes, reset epochs, fixed-label rejection of unknown/user-controlled keys, and existing storage failure-token metrics. Raw JUnit: reports/j-733d68ee5ddd/cpu-observability.xml"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-733d68ee5ddd/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py -k 'buffer_only_read_path_roundtrip' -x",
+      "exit_code": 0,
+      "what_was_measured": "One-GPU ROCm HiCache file-storage round trips over the supported parameter matrix: 13 passed, 6 repository-gated skips, 2553 deselected. The test exercises L3 query, host staging, GPU load-back, byte-for-byte K/V comparison with producer tensors, and verifies the new hit counters reach StorageMetricsCollector. Raw JUnit: reports/j-733d68ee5ddd/gpu-hicache-roundtrip.xml"
+    },
+    {
+      "command": "pre-commit run --files docs/docs/references/production_metrics.mdx python/sglang/srt/mem_cache/unified_radix_cache.py python/sglang/srt/observability/metrics_collector.py test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py test/registered/unit/observability/test_stat_loggers_di.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, Ruff lint/format, import ordering, codespell, AST, conflict, secret, and registered-test policy checks."
+    },
+    {
+      "command": "isolated prometheus_client generate_latest probe using StorageMetricsCollector",
+      "exit_code": 0,
+      "what_was_measured": "Real Prometheus exposition contained hicache_prefetch_outcomes_total, hicache_storage_requests_total, and hicache_storage_query_tokens_total with the expected bounded labels and 5 hit / 3 miss tokens for an 8-token partial-hit fixture."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No C++/FlyDSL/native source changed, so a native rebuild was not applicable.",
+    "No model-weight HTTP serving run was needed for this metrics-collector and cache-runtime change; the deterministic tiny Llama fixture would validate transport/engine execution but not add coverage beyond the direct HiCache GPU round trip.",
+    "Mooncake, HF3FS, NIXL, UMBP, multi-node, TP/PP distributed, and unavailable model-specific storage paths were not exercised on this single-GPU node.",
+    "The new lifecycle snapshot originates in UnifiedRadixCache, the current comprehensive cache implementation. Legacy HiRadixCache continues to expose its existing success/bandwidth and unfulfilled-token telemetry but does not produce the new query-result snapshot.",
+    "The change exposes and classifies the issue's confirmed remaining gap; it does not duplicate existing L1/L2 byte, token, duration, eviction, or dropped-token metrics."
+  ]
+}

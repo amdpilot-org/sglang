@@ -62,6 +62,7 @@ from sglang.srt.mem_cache.utils import (
 )
 from sglang.srt.observability.metrics_collector import (
     STAT_LOGGER_ROLE_STORAGE,
+    StorageMetrics,
     StorageMetricsCollector,
     resolve_collector_class,
 )
@@ -202,6 +203,14 @@ class HiRadixCache(RadixCache):
         # track per-request tokens loaded from storage (L3 hits)
         # key: request_id, value: number of tokens actually loaded from storage
         self.prefetch_loaded_tokens_by_reqid: dict[str, int] = {}
+        self._prefetch_outcome_stats = {
+            "l3_demand_requests": 0,
+            "l3_hit_requests": 0,
+            "l3_partial_hit_requests": 0,
+            "l3_miss_requests": 0,
+            "l1l2_miss_tokens": 0,
+            "l3_miss_tokens": 0,
+        }
         self.work_list: List[torch.distributed.Work] = []
         # todo: dynamically adjust the threshold
         self.write_through_threshold = (
@@ -614,6 +623,30 @@ class HiRadixCache(RadixCache):
                 if info is None:
                     # request already aborted/cleaned up, skip
                     continue
+                requested = len(info[1])
+                hit = min(operation.storage_hit_count, requested)
+                stats = self._prefetch_outcome_stats
+                stats["l3_demand_requests"] += 1
+                stats["l1l2_miss_tokens"] += requested
+                stats["l3_miss_tokens"] += requested - hit
+                if hit == requested:
+                    stats["l3_hit_requests"] += 1
+                    query_result = "hit"
+                elif hit:
+                    stats["l3_partial_hit_requests"] += 1
+                    query_result = "partial_hit"
+                else:
+                    stats["l3_miss_requests"] += 1
+                    query_result = "miss"
+                logger.info(
+                    "[HICACHE] rid=%s event=storage_query tier=l3 result=%s "
+                    "requested_tokens=%d hit_tokens=%d miss_tokens=%d",
+                    req_id,
+                    query_result,
+                    requested,
+                    hit,
+                    requested - hit,
+                )
                 if operation.is_terminated():
                     # request was aborted while the storage query was in flight
                     self._revoke_pending_prefetch(req_id)
@@ -881,6 +914,10 @@ class HiRadixCache(RadixCache):
             if not write_back:
                 self.inc_lock_ref(node)
         else:
+            if self.metrics_collector is not None:
+                self.metrics_collector.increment_transfer_request(
+                    "l1_to_l2", "failure", "host_capacity"
+                )
             return 0
 
         return len(host_indices)
@@ -1084,6 +1121,7 @@ class HiRadixCache(RadixCache):
         """Record D->H backup volume and duration for a completed write ack."""
         if self.metrics_collector is None:
             return
+        self.metrics_collector.increment_transfer_request("l1_to_l2", "success")
         for pool, num_tokens in (ack.num_tokens_by_pool or {}).items():
             if num_tokens > 0:
                 self.metrics_collector.increment_backup_num_tokens(
@@ -1118,6 +1156,9 @@ class HiRadixCache(RadixCache):
                 self.dec_lock_ref(end_node)
 
             if self.metrics_collector is not None:
+                self.metrics_collector.increment_transfer_request(
+                    "l2_to_l1", "success"
+                )
                 for pool, num_tokens in (ack.num_tokens_by_pool or {}).items():
                     if num_tokens > 0:
                         self.metrics_collector.increment_load_back_num_tokens(
@@ -1466,9 +1507,26 @@ class HiRadixCache(RadixCache):
     ):
         last_node = params.best_match_node
         mem_quota = params.mem_quota
+        rid = getattr(params.req, "rid", "unknown")
+        logger.info(
+            "[HICACHE] rid=%s event=cache_lookup tier=l1 result=complete",
+            rid,
+        )
+        logger.info(
+            "[HICACHE] rid=%s event=cache_lookup tier=l2 result=%s hit_tokens=%d",
+            rid,
+            "hit" if params.host_hit_length else "miss",
+            params.host_hit_length,
+        )
         if last_node.evicted:
             loading_values = self.load_back(last_node, mem_quota)
             if loading_values is not None:
+                logger.info(
+                    "[HICACHE] rid=%s event=cache_transfer tier=l2_to_l1 "
+                    "result=scheduled tokens=%d",
+                    rid,
+                    len(loading_values),
+                )
                 logger.debug(
                     f"loading back {len(loading_values)} tokens for node {last_node.id}"
                 )
@@ -1566,9 +1624,11 @@ class HiRadixCache(RadixCache):
                     log_metrics=True,
                 )
         if self.enable_storage_metrics:
-            self.storage_metrics_collector.log_storage_metrics(
-                self.cache_controller.storage_backend.get_stats()
-            )
+            storage_metrics = self.cache_controller.storage_backend.get_stats()
+            if storage_metrics is None:
+                storage_metrics = StorageMetrics()
+            storage_metrics.prefetch_stats = self._prefetch_outcome_stats.copy()
+            self.storage_metrics_collector.log_storage_metrics(storage_metrics)
 
     def drain_storage_control_queues(self):
         """

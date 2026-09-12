@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35808",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 2737's UnifiedRadixCache L3 metrics and corrected the independently reviewed gaps: bounded L1/L2 transfer success and host-capacity failure counters, request-correlated L1/L2 lifecycle records in both cache implementations, and legacy HiRadixCache L3 request/token snapshots. Candidate PR: https://github.com/amdpilot-org/sglang/pull/2737. Review PR: https://github.com/amdpilot-org/sglang/pull/2827.",
+  "tests": [
+    {
+      "command": "candidate e32bd205: python assertion that RadixCacheMetricsCollector exposes increment_transfer_request",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before counterexample: the exact candidate had no L1/L2 transfer-result metric API. Raw output: /tmp/amdpilot-repo-j-77fd2a1fe32e/evidence/before/counterexamples.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-77fd2a1fe32e/venv/bin/python -m pytest -q test/registered/unit/observability/test_stat_loggers_di.py",
+      "exit_code": 0,
+      "what_was_measured": "17 passed after correction, including bounded cross-tier transfer labels and the preserved L3 delta/reset regressions. Raw output: /tmp/amdpilot-repo-j-77fd2a1fe32e/evidence/after/observability.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-77fd2a1fe32e/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hiradix_cache_unit.py test/registered/unit/mem_cache/test_hiradix_pp_sync_drain.py",
+      "exit_code": 0,
+      "what_was_measured": "4 passed on the assigned AMD GPU, exercising legacy HiRadixCache GPU-to-host completion and PP queue-drain behavior with the corrected instrumentation. Raw output: /tmp/amdpilot-repo-j-77fd2a1fe32e/evidence/after/hiradix.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-77fd2a1fe32e/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py -k buffer_only_read_path_roundtrip -x",
+      "exit_code": 0,
+      "what_was_measured": "13 passed and 6 repository-gated skips on one AMD Instinct MI350X; actual file-backed L3 query, host staging, GPU load-back and K/V equality checks passed. Raw output: /tmp/amdpilot-repo-j-77fd2a1fe32e/evidence/after/unified-gpu.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI350X with Torch 2.11.0+rocm7.2 and HIP 7.2.26015; legacy and unified HiCache GPU tests passed as recorded above.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No native source changed, so a native rebuild was not applicable.",
+    "The new L1-to-L2 failure result covers the concrete synchronous host-capacity failure path. Unexpected asynchronous GPU transfer exceptions remain process errors rather than recoverable metric events.",
+    "Eviction-driven L1-to-L2 backups are cache-node lifecycle operations and do not always belong to one request, so they intentionally have aggregate metrics but no fabricated rid.",
+    "Mooncake, HF3FS, NIXL, UMBP, multi-node, TP/PP distributed, model-specific storage paths, and NVIDIA/CUDA were unavailable and remain unverified. No source changes were inferred from those unavailable paths.",
+    "The direct GPU regressions qualify cache transport and K/V round-trip equality, not HTTP serving, model semantic accuracy, or a different model architecture."
+  ]
+}

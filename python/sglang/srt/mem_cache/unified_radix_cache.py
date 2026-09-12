@@ -279,6 +279,9 @@ class UnifiedRadixCache(BasePrefixCache):
             "revoked_insufficient": 0,
             "revoked_full_miss": 0,
             "l3_demand_requests": 0,
+            "l3_hit_requests": 0,
+            "l3_partial_hit_requests": 0,
+            "l3_miss_requests": 0,
             "l3_miss_tokens": 0,
             "l1l2_miss_tokens": 0,
         }
@@ -1518,6 +1521,10 @@ class UnifiedRadixCache(BasePrefixCache):
                 node_id, device_value, comp_xfers, sidecar_xfers
             )
             if host_indices is None:
+                if self.metrics_collector is not None:
+                    self.metrics_collector.increment_transfer_request(
+                        "l1_to_l2", "failure", "host_capacity"
+                    )
                 return 0
             self.tree_core.commit_backup(node_id, host_indices, comp_xfers)
             lock_params = None
@@ -2182,10 +2189,19 @@ class UnifiedRadixCache(BasePrefixCache):
             )
         else:
             self.prefetch_loaded_storage_start_by_reqid.pop(req_id, None)
+        if insert_result.host_insert_dropped:
+            prefetch_result = "dropped"
+        elif completed_tokens == 0:
+            prefetch_result = "failed"
+        elif completed_tokens < operation.storage_hit_count:
+            prefetch_result = "partial"
+        else:
+            prefetch_result = "success"
         logger.info(
-            "HiCache prefetch %s req=%s completed=%d matched=%d loaded=%d occupied=%d",
-            "dropped" if insert_result.host_insert_dropped else "success",
+            "[HICACHE] rid=%s event=storage_prefetch tier=l3_to_l2 result=%s "
+            "completed_tokens=%d matched_tokens=%d loaded_tokens=%d occupied_tokens=%d",
             req_id,
+            prefetch_result,
             completed_tokens,
             insert_result.prefix_len,
             loaded_from_storage,
@@ -2490,8 +2506,26 @@ class UnifiedRadixCache(BasePrefixCache):
                 stats["revoked_full_miss"] += 1
         miss = requested - hit
         stats["l3_demand_requests"] += 1
+        if hit == requested:
+            stats["l3_hit_requests"] += 1
+            query_result = "hit"
+        elif hit > 0:
+            stats["l3_partial_hit_requests"] += 1
+            query_result = "partial_hit"
+        else:
+            stats["l3_miss_requests"] += 1
+            query_result = "miss"
         stats["l1l2_miss_tokens"] += requested
         stats["l3_miss_tokens"] += miss
+        logger.info(
+            "[HICACHE] rid=%s event=storage_query tier=l3 result=%s "
+            "requested_tokens=%d hit_tokens=%d miss_tokens=%d",
+            operation.request_id,
+            query_result,
+            requested,
+            hit,
+            miss,
+        )
 
     def prefetch_outcome_stats_snapshot(self) -> dict:
         return self._prefetch_outcome_stats.copy()
@@ -2998,6 +3032,7 @@ class UnifiedRadixCache(BasePrefixCache):
         """Record D->H backup volume and duration for a completed write ack."""
         if self.metrics_collector is None:
             return
+        self.metrics_collector.increment_transfer_request("l1_to_l2", "success")
         for pool, num_tokens in (ack.num_tokens_by_pool or {}).items():
             if num_tokens > 0:
                 self.metrics_collector.increment_backup_num_tokens(
@@ -3048,6 +3083,9 @@ class UnifiedRadixCache(BasePrefixCache):
                 self.tree_core.finish_load_back(node)
 
             if self.metrics_collector is not None:
+                self.metrics_collector.increment_transfer_request(
+                    "l2_to_l1", "success"
+                )
                 for pool, num_tokens in (ack.num_tokens_by_pool or {}).items():
                     if num_tokens > 0:
                         self.metrics_collector.increment_load_back_num_tokens(
@@ -3077,6 +3115,16 @@ class UnifiedRadixCache(BasePrefixCache):
         mem_quota = params.mem_quota
         req = params.req
         assert req is not None
+        logger.info(
+            "[HICACHE] rid=%s event=cache_lookup tier=l1 result=complete",
+            req.rid,
+        )
+        logger.info(
+            "[HICACHE] rid=%s event=cache_lookup tier=l2 result=%s hit_tokens=%d",
+            req.rid,
+            "hit" if params.host_hit_length else "miss",
+            params.host_hit_length,
+        )
         if self.linker is not None and self.linker.has_hit(req.rid):
             return self.linker.load_back(req)
         last_best_match_device_node_id = req.last_node
@@ -3166,8 +3214,7 @@ class UnifiedRadixCache(BasePrefixCache):
             storage_metrics = self.cache_controller.storage_backend.get_stats()
             if storage_metrics is None:
                 storage_metrics = StorageMetrics()
-            if not hasattr(storage_metrics, "prefetch_stats"):
-                storage_metrics.prefetch_stats = self.prefetch_outcome_stats_snapshot()
+            storage_metrics.prefetch_stats = self.prefetch_outcome_stats_snapshot()
             self.storage_metrics_collector.log_storage_metrics(storage_metrics)
 
     def ready_to_load_host_cache(self) -> int:
