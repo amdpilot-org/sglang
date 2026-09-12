@@ -1,0 +1,63 @@
+.......FF..                                                           [100%]
+=================================== FAILURES ===================================
+______ TestMooncakeFailedSessionRecovery.test_probe_is_enabled_by_default ______
+
+self = <test_mooncake_transfer_batching.TestMooncakeFailedSessionRecovery testMethod=test_probe_is_enabled_by_default>
+
+    def test_probe_is_enabled_by_default(self):
+        with patch.dict(os.environ):
+            os.environ.pop("SGLANG_ENABLE_FAILED_SESSION_PROBE", None)
+>           self.assertTrue(envs.SGLANG_ENABLE_FAILED_SESSION_PROBE.get())
+E           AssertionError: False is not true
+
+test/registered/unit/disaggregation/test_mooncake_transfer_batching.py:159: AssertionError
+_ TestMooncakeFailedSessionRecovery.test_stale_probe_does_not_clear_newer_failure _
+
+self = <test_mooncake_transfer_batching.TestMooncakeFailedSessionRecovery testMethod=test_stale_probe_does_not_clear_newer_failure>
+
+    def test_stale_probe_does_not_clear_newer_failure(self):
+        probe_started = threading.Event()
+        finish_probe = threading.Event()
+
+        def send_probe(_):
+            probe_started.set()
+            self.assertTrue(finish_probe.wait(timeout=5))
+            return 0
+
+        manager = self._make_manager(["decode:1234"], send_probe)
+        probe_thread = threading.Thread(
+            target=MooncakeKVManager._run_one_probe_pass, args=(manager,)
+        )
+        probe_thread.start()
+        self.assertTrue(probe_started.wait(timeout=5))
+        with manager.session_lock:
+            manager.session_failures["decode:1234"] += 1
+            manager.failed_sessions.add("decode:1234")
+        finish_probe.set()
+        probe_thread.join(timeout=5)
+
+        self.assertFalse(probe_thread.is_alive())
+>       self.assertIn("decode:1234", manager.failed_sessions)
+E       AssertionError: 'decode:1234' not found in set()
+
+test/registered/unit/disaggregation/test_mooncake_transfer_batching.py:183: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/disaggregation/test_mooncake_transfer_batching.py::TestMooncakeFailedSessionRecovery::test_probe_is_enabled_by_default
+FAILED test/registered/unit/disaggregation/test_mooncake_transfer_batching.py::TestMooncakeFailedSessionRecovery::test_stale_probe_does_not_clear_newer_failure
+2 failed, 9 passed, 17 warnings, 3 subtests passed in 19.30s
