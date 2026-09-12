@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/1932",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/3310",
+  "candidate_commit": "2a64f7dfc428bb7b06ccf5187c5d6b7c81c90fa2",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is a working bounded optimization for repeated identical Qwen image requests, but it does not provide the original explicit save/load-by-ID contract. Its regression and focused compatibility tests pass, while independent adversarial checks reproduce prompt-scoped keys, process-local storage, absent explicit API operations, and video/audio bypass. The candidate honestly documents these semantic limits, but its committed diff-check claim is contradicted by trailing whitespace in two raw logs.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-0a8f13200086/venv/bin/python -c '<inspect QwenVLImageProcessor on base>'",
+      "exit_code": 0,
+      "what_was_measured": "At the recorded base, the imported Qwen processor came from /job/repo, had no request cache-key method, did not reference the preprocess cache, and called load_mm_data directly."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0a8f13200086/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_qwen_preprocess_request_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate's cache-hit, single-flight, identity-scoping, bypass, and defensive-copy regression coverage; 4 tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0a8f13200086/venv/bin/python -c '<independent cache contract probe>'",
+      "exit_code": 0,
+      "what_was_measured": "The same content ID under a changed prompt generated a different key and two computations; a fresh processor recomputed; video/audio returned no key; Chat Completions and Responses exposed no explicit preprocessing save/load fields."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0a8f13200086/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_qwen_preprocess_request_cache.py test/registered/unit/multimodal/test_media_artifact_processor.py test/registered/unit/multimodal/test_preprocess_cache.py test/registered/unit/managers/test_mm_hashes.py test/registered/unit/parser/test_jinja_template_utils.py test/registered/unit/entrypoints/openai/test_protocol.py",
+      "exit_code": 0,
+      "what_was_measured": "Focused cache, identity, parser, and OpenAI protocol compatibility; 115 tests and 30 subtests passed."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 2a64f7dfc428bb7b06ccf5187c5d6b7c81c90fa2",
+      "exit_code": 2,
+      "what_was_measured": "Candidate patch whitespace integrity; trailing whitespace was found in two committed raw pytest logs, contradicting the candidate report's claimed passing diff check."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The prepared stack reports torch 2.11.0+rocm7.2 and HIP 7.2, but no qualifying Qwen-VL weights were available; no GPU result is used as evidence.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The same saved image content ID cannot reuse preprocessing when the rendered prompt changes because prompt text is part of the cache key.",
+    "There is no OpenAI API operation to explicitly save a preprocessing result and later load it by a caller-selected ID.",
+    "Cache entries are owned by each processor/tokenizer-worker process and are not shared across workers or preserved across restart.",
+    "Qwen video and audio requests explicitly bypass the new cache path."
+  ],
+  "remaining_limitations": [
+    "No qualifying Qwen-VL model weights were available, so end-to-end Qwen semantic equivalence and preprocessing performance were not validated.",
+    "The tiny Llama serving fixture cannot validate Qwen architecture-specific preprocessing, cross-worker sharing, or restart persistence.",
+    "No native source changed, so a native rebuild was not applicable.",
+    "The candidate's committed raw pytest logs contain trailing whitespace even though its report claims git diff --check passed."
+  ]
+}
