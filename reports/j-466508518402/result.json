@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37590",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1120",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/990",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/1085",
+  "candidate_commit": "d184ccfe3578f7cb75647e364570107d971030d9",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the independent review counterexample against the exact candidate: CP-first broadcasting raises len(None) on global rank 1. Preserved CP-before-TP staging but limited the CP collective to the attn-TP rank-zero column, whose source is the combined leader; the seeded rank in each CP row then fans out through TP. A real four-process Gloo run delivered the payload to all ranks.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES='' timeout 60s /tmp/amdpilot-repo-j-466508518402/venv/bin/python -m torch.distributed.run --standalone --nproc-per-node=4 /tmp/reproduce_4rank.py (candidate d184ccfe3578f7cb75647e364570107d971030d9)",
+      "exit_code": 1,
+      "what_was_measured": "Exact candidate failed on global rank 1, the unseeded source of CP group [1,3], with TypeError from len(None). Raw excerpt: reports/j-466508518402/candidate-failing-before.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES='' timeout 60s /tmp/amdpilot-repo-j-466508518402/venv/bin/python -m torch.distributed.run --standalone --nproc-per-node=4 reports/j-466508518402/reproduce_4rank.py",
+      "exit_code": 0,
+      "what_was_measured": "Real Gloo groups matching the 2x2 attention TP/CP topology delivered rank 0's request payload to all four ranks. Raw output: reports/j-466508518402/fixed-real-gloo.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-466508518402/venv/bin/python -m pytest -q test/registered/unit/distributed/test_communication_op.py test/registered/unit/managers/test_pp_cp_rank_offsets.py",
+      "exit_code": 0,
+      "what_was_measured": "Nine focused topology and adjacent scheduler tests passed, including the review's omitted rank-1 counterexample and TP-only/CP-only boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-466508518402/venv/bin/python -m pre_commit run --files python/sglang/srt/distributed/communication_op.py test/registered/unit/distributed/test_communication_op.py reports/j-466508518402/reproduce_4rank.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, spelling, and registered-test checks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is a Python object-collective ordering error. Only one gfx950 GPU was assigned, while the reported topology needs at least four ranks and the original serving command uses eight GPUs."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original eight-GPU DeepSeek-V4 serving command was not run because only one gfx950 GPU was assigned and model weights were unavailable.",
+    "No NCCL, DSV4 semantic, full-model, or multi-node claim is made; the four-process CPU/Gloo test covers the actual serialization and collective implementation with the reported rank topology."
+  ]
+}
