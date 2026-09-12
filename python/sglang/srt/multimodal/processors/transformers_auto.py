@@ -11,7 +11,7 @@ from sglang.srt.multimodal.processors.base_processor import (
     BaseMultimodalProcessor,
     MultimodalSpecialTokens,
 )
-from sglang.srt.utils import load_image
+from sglang.srt.utils import load_image, observe_media_load
 
 
 def _first_attr(obj, names: tuple[str, ...], default=None):
@@ -101,9 +101,10 @@ class TransformersAutoMultimodalProcessor(BaseMultimodalProcessor):
             return []
         images = []
         for data in image_data:
-            img, _ = load_image(data)
-            if img.mode != "RGB":
-                img = img.convert("RGB")
+            with observe_media_load(getattr(self, "metrics_collector", None), "image"):
+                img, _ = load_image(data)
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
             images.append(img)
         return images
 

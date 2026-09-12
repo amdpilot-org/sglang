@@ -9,6 +9,8 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
+from contextvars import ContextVar
+from functools import wraps
 from typing import (
     Any,
     Dict,
@@ -66,6 +68,25 @@ from sglang.srt.utils import (
 _is_cpu = is_cpu()
 _is_npu = is_npu()
 _is_xpu = is_xpu()
+
+_mm_processor_observation_depth: ContextVar[int] = ContextVar(
+    "mm_processor_observation_depth", default=0
+)
+
+
+def _observe_process_mm_data(method):
+    """Measure every processor implementation, including direct async callers."""
+
+    if getattr(method, "_observes_mm_processor", False):
+        return method
+
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self._observe_mm_processor():
+            return method(self, *args, **kwargs)
+
+    wrapped._observes_mm_processor = True
+    return wrapped
 
 
 @dataclasses.dataclass
@@ -235,6 +256,12 @@ class BaseMultimodalProcessor(ABC):
     # `process_and_combine_mm_data` -- resolves that clone instead of
     # `self._processor`, so isolation does not depend on the subclass.
     supports_mm_processor_concurrency = True
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        process_mm_data = cls.__dict__.get("process_mm_data")
+        if process_mm_data is not None:
+            cls.process_mm_data = _observe_process_mm_data(process_mm_data)
 
     def __init__(
         self, hf_config, server_args, _processor, transport_mode, *args, **kwargs
@@ -822,6 +849,7 @@ class BaseMultimodalProcessor(ABC):
         with torch.cuda.use_mem_pool(pool, device=device):
             yield
 
+    @_observe_process_mm_data
     def process_mm_data(
         self,
         input_text,
@@ -1697,21 +1725,25 @@ class BaseMultimodalProcessor(ABC):
         return collected_items, input_ids, ret
 
     def _call_process_mm_data(self, **kwargs) -> dict:
-        """Time the shared dispatch so subclass overrides cannot bypass metrics."""
-        with self._observe_mm_processor():
-            return self.process_mm_data(**kwargs)
+        return self.process_mm_data(**kwargs)
 
     @contextmanager
     def _observe_mm_processor(self):
+        depth = _mm_processor_observation_depth.get()
+        token = _mm_processor_observation_depth.set(depth + 1)
         processor_started_at = time.perf_counter()
         try:
             yield
         finally:
-            metrics_collector = getattr(self, "metrics_collector", None)
-            if metrics_collector is not None:
-                metrics_collector.observe_mm_processor(
-                    time.perf_counter() - processor_started_at
-                )
+            try:
+                if depth == 0:
+                    metrics_collector = getattr(self, "metrics_collector", None)
+                    if metrics_collector is not None:
+                        metrics_collector.observe_mm_processor(
+                            time.perf_counter() - processor_started_at
+                        )
+            finally:
+                _mm_processor_observation_depth.reset(token)
 
     @staticmethod
     def _ensure_input_ids_is_tensor(input_ids) -> Optional[torch.Tensor]:

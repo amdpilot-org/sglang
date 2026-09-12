@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38676",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 724's multimodal latency metrics and corrected the two independently reproduced gaps from review PR 744: TransformersAuto remote image loads now use the shared per-item media observer, and every concrete process_mm_data implementation is timed even when a specialized async override calls it directly. Nested override/super calls emit one processor observation.",
+  "tests": [
+    {
+      "command": "At exact candidate d59233e0bf91f107c60a4c0fdcad430d1e1b615d: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c4c4a8c652c2/venv/bin/python -m pytest -q /tmp/review_adversarial.py",
+      "exit_code": 1,
+      "what_was_measured": "The review's unchanged bounded localhost HTTP image test and direct async processor override both failed with zero observations (2 failed)."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c4c4a8c652c2/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_mm_latency_metrics.py test/registered/unit/multimodal/test_base_processor_bad_input.py test/registered/unit/multimodal/test_base_processor_image_decode.py test/registered/unit/observability/test_stat_loggers_di.py",
+      "exit_code": 0,
+      "what_was_measured": "42 passed and 15 subtests passed, including remote TransformersAuto image load/download observations, direct async processor dispatch, nested processor overrides, request isolation, absent download values, and error paths."
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files python/sglang/srt/multimodal/processors/base_processor.py python/sglang/srt/multimodal/processors/transformers_auto.py test/registered/unit/multimodal/test_mm_latency_metrics.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, syntax, spelling, and registered-test validation hooks passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c4c4a8c652c2/venv/bin/python GPU FP32 identity matmul check",
+      "exit_code": 0,
+      "what_was_measured": "One AMD Instinct MI350X executed a 4x4 FP32 matmul matching the independent NumPy reference exactly (max absolute error 0.0); this is environment evidence only because the corrected metrics paths are host-side."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-c4c4a8c652c2/raw/gpu-numerical-check.txt records torch 2.11.0+rocm7.2, HIP 7.2.26015, one AMD Instinct MI350X, and max_abs_error=0.0."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No model weights were downloaded and no model server was launched; bounded synthetic fixtures directly exercise the affected host-side loaders and processor dispatch.",
+    "No native source changed, repository-environment.json reports native as null, and no native rebuild was applicable.",
+    "Architecture-specific semantic accuracy and distributed execution are outside what these instrumentation regressions establish."
+  ]
+}

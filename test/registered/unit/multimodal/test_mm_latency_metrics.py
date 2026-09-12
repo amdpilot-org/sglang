@@ -15,6 +15,9 @@ register_cpu_ci(est_time=15, suite="base-a-test-cpu")
 from sglang.srt.managers.schedule_batch import Modality
 from sglang.srt.multimodal.processors.base_processor import BaseMultimodalProcessor
 from sglang.srt.multimodal.processors.moss_vl import MossVLImageProcessor
+from sglang.srt.multimodal.processors.transformers_auto import (
+    TransformersAutoMultimodalProcessor,
+)
 
 
 class _RecordingCollector:
@@ -160,6 +163,71 @@ def test_processor_override_is_timed_at_shared_dispatch():
 
     assert len(collector.processor) == 1
     assert collector.processor[0] >= 0.015
+
+
+def test_direct_processor_call_from_async_override_is_timed():
+    collector = _RecordingCollector()
+
+    class _DirectAsyncProcessor(_StubProcessor):
+        async def process_mm_data_async(self, *args, **kwargs):
+            return self.process_mm_data()
+
+        def process_mm_data(self, **kwargs):
+            time.sleep(0.02)
+            return {"input_ids": [[1]]}
+
+    processor = _DirectAsyncProcessor.__new__(_DirectAsyncProcessor)
+    processor.metrics_collector = collector
+
+    asyncio.run(processor.process_mm_data_async())
+
+    assert len(collector.processor) == 1
+    assert collector.processor[0] >= 0.015
+
+
+def test_nested_processor_overrides_emit_one_observation():
+    collector = _RecordingCollector()
+
+    class _ParentProcessor(_StubProcessor):
+        def process_mm_data(self, **kwargs):
+            return {"input_ids": [[1]]}
+
+    class _NestedProcessor(_ParentProcessor):
+        def process_mm_data(self, **kwargs):
+            return super().process_mm_data(**kwargs)
+
+    processor = _NestedProcessor.__new__(_NestedProcessor)
+    processor.metrics_collector = collector
+
+    processor.process_mm_data(input_text="nested")
+
+    assert len(collector.processor) == 1
+
+
+def test_transformers_auto_remote_image_observes_item_metrics():
+    collector = _RecordingCollector()
+    payload = _png_bytes()
+    _ImageHandler.payload = payload
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _ImageHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        processor = TransformersAutoMultimodalProcessor.__new__(
+            TransformersAutoMultimodalProcessor
+        )
+        processor.metrics_collector = collector
+        images = processor._load_images(
+            [f"http://127.0.0.1:{server.server_port}/fixture.png"]
+        )
+
+        assert images[0].size == (2, 2)
+        assert len(collector.media) == 1
+        assert collector.media[0]["modality"] == "image"
+        assert collector.media[0]["download_seconds"] is not None
+        assert collector.media[0]["download_bytes"] == len(payload)
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def test_specialized_video_download_observes_item_metrics(monkeypatch):
