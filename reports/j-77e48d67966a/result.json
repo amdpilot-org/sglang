@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33207",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "e0e0ef0817fe8ead8ee19803501c7d7e09c49691",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Accept as test-only hardening. The candidate adds no production change, and both regression cases already pass on its exact parent/base. Independent use of the real checkpoint config confirms that current AUTO dispatch selects SGLang's native DeepseekV4ForCausalLM before the Hugging Face fallback. The original end-to-end two-GPU NVIDIA serving scenario remains unverified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-77e48d67966a/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_deepseek_v4_dispatch.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate e0e0ef0817fe8ead8ee19803501c7d7e09c49691, its native-dispatch regression and unknown-architecture fallback test both passed (2 passed)."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-77e48d67966a/venv/bin/python -m pytest -q /job/review-evidence-j-77e48d67966a/test_deepseek_v4_dispatch.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate test file also passed unchanged on exact base/parent 358c163250ad3b1f62939b01ce1314a0a31a0365 (2 passed), proving the candidate is test-only hardening rather than a failing-before/passing-after fix."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-77e48d67966a/venv/bin/python - <<'PY' # load the current real DeepSeek-V4-Flash-0731 config, resolve AUTO dispatch, and force the HF-only boundary\n...\nPY",
+      "exit_code": 0,
+      "what_was_measured": "The real config loaded as _DeepseekV4ConfigAlias and resolved to sglang.srt.models.deepseek_v4.DeepseekV4ForCausalLM under AUTO. Direct AutoModelForCausalLM.from_config reproduced the reported ValueError, locating the observed exception at the HF-only boundary rather than current native AUTO dispatch."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-77e48d67966a/venv/bin/python - <<'PY' # construct actual ModelConfig objects from the real config with AUTO and TRANSFORMERS modes\n...\nPY",
+      "exit_code": 0,
+      "what_was_measured": "Actual ModelConfig AUTO resolved the native DeepSeek V4 class. Explicit TRANSFORMERS mode selected the generic TransformersMoEForCausalLM wrapper, a separate path not exercised by the reported default command."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "No GPU execution was used as proof. Configuration parsing and class dispatch occur before GPU execution, and the available single AMD gfx950 cannot qualify the reported two-GPU NVIDIA Blackwell environment.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No end-to-end launch of deepseek-ai/DeepSeek-V4-Flash-0731 was performed, so a later startup failure after successful native dispatch is not excluded.",
+    "The reported TP=2 NVIDIA B200/RTX PRO 6000 Blackwell, CUDA 13.3, and flashinfer_mxfp4 path was not available and remains unverified.",
+    "The full checkpoint weights and semantic generation output were not tested.",
+    "A direct Hugging Face AutoModelForCausalLM.from_config call with SGLang's alias still raises the exact reported ValueError; current default AUTO routing avoids that boundary rather than registering the alias with Hugging Face AutoModel."
+  ],
+  "remaining_limitations": [
+    "Architecture mismatch: one AMD gfx950 with ROCm 7.2 was available instead of two NVIDIA Blackwell GPUs with CUDA 13.3.",
+    "No model weights, TP=2 execution, FlashInfer MXFP4 execution, full server startup, numerical generation reference, or NVIDIA compiler/ISA validation.",
+    "The candidate changes no native or production source, so native rebuild validation was not applicable."
+  ]
+}
