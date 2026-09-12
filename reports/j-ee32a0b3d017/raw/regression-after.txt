@@ -1,0 +1,248 @@
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+____ TestCudaGraphRequestCapacityWarning.test_disabled_graph_does_not_warn _____
+
+self = <test_cuda_graph_request_capacity_warning.TestCudaGraphRequestCapacityWarning testMethod=test_disabled_graph_does_not_warn>
+
+    def test_disabled_graph_does_not_warn(self):
+>       resolved, warning = self._resolve(graph_backend="disabled")
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/registered/unit/model_executor/test_cuda_graph_request_capacity_warning.py:64:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/registered/unit/model_executor/test_cuda_graph_request_capacity_warning.py:43: in _resolve
+    resolved = KVCacheConfigurator.resolve_max_num_reqs(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = namespace(model_config=namespace(context_len=32768), ps=namespace(attn_dp_size=1), mambaish_config=None, _warned_cuda_graph_request_capacity=False)
+token_capacity = 3145118
+
+    def resolve_max_num_reqs(self, token_capacity: int) -> int:
+        """Compute max concurrent requests (per dp worker) from the finalized
+        token capacity."""
+        # Estimate pool size (used as upper bound when user specifies max_running_requests)
+        estimated = int(token_capacity / self.model_config.context_len * 512)
+        estimated = max(min(estimated, 4096), 2048)
+
+        max_num_reqs = get_schedule().max_running_requests
+        if max_num_reqs is not None:
+            requested_per_worker = max_num_reqs // self.ps.attn_dp_size
+            max_num_reqs = min(requested_per_worker, token_capacity // 2)
+        else:
+            requested_per_worker = None
+            max_num_reqs = min(estimated, token_capacity // 2)
+
+        capped_by_mamba = False
+        if self.mambaish_config is not None:
+            ratio = self._calculate_mamba_ratio()
+            mamba_cap = get_schedule().max_mamba_cache_size // ratio
+            if mamba_cap < max_num_reqs:
+                capped_by_mamba = True
+                logger.warning(
+                    "max_running_requests is capped to %d by the mamba state "
+                    "cache (max_mamba_cache_size=%d, %d state slots per "
+                    "request). To raise it: increase --mamba-full-memory-ratio "
+                    "or --max-mamba-cache-size, or halve the state size with "
+                    "--mamba-ssm-dtype bfloat16.",
+                    mamba_cap,
+                    get_schedule().max_mamba_cache_size,
+                    ratio,
+                )
+            max_num_reqs = min(max_num_reqs, mamba_cap)
+
+            if max_num_reqs <= 0:
+                raise RuntimeError(
+                    f"Hybrid (mamba/linear-attention) state cache is too small to serve "
+                    f"any requests. max_mamba_cache_size={get_schedule().max_mamba_cache_size}, "
+                    f"mamba_ratio={ratio}, resulting max_num_reqs={max_num_reqs}. "
+                    f"Try: (1) reduce --max-running-requests, "
+                    f"(2) increase --mem-fraction-static, or "
+                    f"(3) use GPUs with more memory."
+                )
+        if (
+            requested_per_worker is not None
+            and max_num_reqs < requested_per_worker
+            and not capped_by_mamba
+        ):
+            logger.warning(
+                "max_running_requests was reduced from the requested %d to %d "
+                "(per dp worker) due to the available KV cache capacity.",
+                requested_per_worker,
+                max_num_reqs,
+            )
+>       self._warn_cuda_graph_request_capacity(max_num_reqs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'types.SimpleNamespace' object has no attribute '_warn_cuda_graph_request_capacity'. Did you mean: '_warned_cuda_graph_request_capacity'?
+
+python/sglang/srt/mem_cache/kv_cache_configurator.py:2327: AttributeError
+____ TestCudaGraphRequestCapacityWarning.test_equal_capacity_does_not_warn _____
+
+self = <test_cuda_graph_request_capacity_warning.TestCudaGraphRequestCapacityWarning testMethod=test_equal_capacity_does_not_warn>
+
+    def test_equal_capacity_does_not_warn(self):
+>       resolved, warning = self._resolve(max_running_requests=32)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/registered/unit/model_executor/test_cuda_graph_request_capacity_warning.py:58:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/registered/unit/model_executor/test_cuda_graph_request_capacity_warning.py:43: in _resolve
+    resolved = KVCacheConfigurator.resolve_max_num_reqs(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = namespace(model_config=namespace(context_len=32768), ps=namespace(attn_dp_size=1), mambaish_config=None, _warned_cuda_graph_request_capacity=False)
+token_capacity = 3145118
+
+    def resolve_max_num_reqs(self, token_capacity: int) -> int:
+        """Compute max concurrent requests (per dp worker) from the finalized
+        token capacity."""
+        # Estimate pool size (used as upper bound when user specifies max_running_requests)
+        estimated = int(token_capacity / self.model_config.context_len * 512)
+        estimated = max(min(estimated, 4096), 2048)
+
+        max_num_reqs = get_schedule().max_running_requests
+        if max_num_reqs is not None:
+            requested_per_worker = max_num_reqs // self.ps.attn_dp_size
+            max_num_reqs = min(requested_per_worker, token_capacity // 2)
+        else:
+            requested_per_worker = None
+            max_num_reqs = min(estimated, token_capacity // 2)
+
+        capped_by_mamba = False
+        if self.mambaish_config is not None:
+            ratio = self._calculate_mamba_ratio()
+            mamba_cap = get_schedule().max_mamba_cache_size // ratio
+            if mamba_cap < max_num_reqs:
+                capped_by_mamba = True
+                logger.warning(
+                    "max_running_requests is capped to %d by the mamba state "
+                    "cache (max_mamba_cache_size=%d, %d state slots per "
+                    "request). To raise it: increase --mamba-full-memory-ratio "
+                    "or --max-mamba-cache-size, or halve the state size with "
+                    "--mamba-ssm-dtype bfloat16.",
+                    mamba_cap,
+                    get_schedule().max_mamba_cache_size,
+                    ratio,
+                )
+            max_num_reqs = min(max_num_reqs, mamba_cap)
+
+            if max_num_reqs <= 0:
+                raise RuntimeError(
+                    f"Hybrid (mamba/linear-attention) state cache is too small to serve "
+                    f"any requests. max_mamba_cache_size={get_schedule().max_mamba_cache_size}, "
+                    f"mamba_ratio={ratio}, resulting max_num_reqs={max_num_reqs}. "
+                    f"Try: (1) reduce --max-running-requests, "
+                    f"(2) increase --mem-fraction-static, or "
+                    f"(3) use GPUs with more memory."
+                )
+        if (
+            requested_per_worker is not None
+            and max_num_reqs < requested_per_worker
+            and not capped_by_mamba
+        ):
+            logger.warning(
+                "max_running_requests was reduced from the requested %d to %d "
+                "(per dp worker) due to the available KV cache capacity.",
+                requested_per_worker,
+                max_num_reqs,
+            )
+>       self._warn_cuda_graph_request_capacity(max_num_reqs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'types.SimpleNamespace' object has no attribute '_warn_cuda_graph_request_capacity'. Did you mean: '_warned_cuda_graph_request_capacity'?
+
+python/sglang/srt/mem_cache/kv_cache_configurator.py:2327: AttributeError
+_____ TestCudaGraphRequestCapacityWarning.test_warns_for_issue_default_gap _____
+
+self = <test_cuda_graph_request_capacity_warning.TestCudaGraphRequestCapacityWarning testMethod=test_warns_for_issue_default_gap>
+
+    def test_warns_for_issue_default_gap(self):
+>       resolved, warning = self._resolve()
+                            ^^^^^^^^^^^^^^^
+
+test/registered/unit/model_executor/test_cuda_graph_request_capacity_warning.py:49:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/registered/unit/model_executor/test_cuda_graph_request_capacity_warning.py:43: in _resolve
+    resolved = KVCacheConfigurator.resolve_max_num_reqs(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = namespace(model_config=namespace(context_len=32768), ps=namespace(attn_dp_size=1), mambaish_config=None, _warned_cuda_graph_request_capacity=False)
+token_capacity = 3145118
+
+    def resolve_max_num_reqs(self, token_capacity: int) -> int:
+        """Compute max concurrent requests (per dp worker) from the finalized
+        token capacity."""
+        # Estimate pool size (used as upper bound when user specifies max_running_requests)
+        estimated = int(token_capacity / self.model_config.context_len * 512)
+        estimated = max(min(estimated, 4096), 2048)
+
+        max_num_reqs = get_schedule().max_running_requests
+        if max_num_reqs is not None:
+            requested_per_worker = max_num_reqs // self.ps.attn_dp_size
+            max_num_reqs = min(requested_per_worker, token_capacity // 2)
+        else:
+            requested_per_worker = None
+            max_num_reqs = min(estimated, token_capacity // 2)
+
+        capped_by_mamba = False
+        if self.mambaish_config is not None:
+            ratio = self._calculate_mamba_ratio()
+            mamba_cap = get_schedule().max_mamba_cache_size // ratio
+            if mamba_cap < max_num_reqs:
+                capped_by_mamba = True
+                logger.warning(
+                    "max_running_requests is capped to %d by the mamba state "
+                    "cache (max_mamba_cache_size=%d, %d state slots per "
+                    "request). To raise it: increase --mamba-full-memory-ratio "
+                    "or --max-mamba-cache-size, or halve the state size with "
+                    "--mamba-ssm-dtype bfloat16.",
+                    mamba_cap,
+                    get_schedule().max_mamba_cache_size,
+                    ratio,
+                )
+            max_num_reqs = min(max_num_reqs, mamba_cap)
+
+            if max_num_reqs <= 0:
+                raise RuntimeError(
+                    f"Hybrid (mamba/linear-attention) state cache is too small to serve "
+                    f"any requests. max_mamba_cache_size={get_schedule().max_mamba_cache_size}, "
+                    f"mamba_ratio={ratio}, resulting max_num_reqs={max_num_reqs}. "
+                    f"Try: (1) reduce --max-running-requests, "
+                    f"(2) increase --mem-fraction-static, or "
+                    f"(3) use GPUs with more memory."
+                )
+        if (
+            requested_per_worker is not None
+            and max_num_reqs < requested_per_worker
+            and not capped_by_mamba
+        ):
+            logger.warning(
+                "max_running_requests was reduced from the requested %d to %d "
+                "(per dp worker) due to the available KV cache capacity.",
+                requested_per_worker,
+                max_num_reqs,
+            )
+>       self._warn_cuda_graph_request_capacity(max_num_reqs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'types.SimpleNamespace' object has no attribute '_warn_cuda_graph_request_capacity'. Did you mean: '_warned_cuda_graph_request_capacity'?
+
+python/sglang/srt/mem_cache/kv_cache_configurator.py:2327: AttributeError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/model_executor/test_cuda_graph_request_capacity_warning.py::TestCudaGraphRequestCapacityWarning::test_disabled_graph_does_not_warn
+FAILED test/registered/unit/model_executor/test_cuda_graph_request_capacity_warning.py::TestCudaGraphRequestCapacityWarning::test_equal_capacity_does_not_warn
+FAILED test/registered/unit/model_executor/test_cuda_graph_request_capacity_warning.py::TestCudaGraphRequestCapacityWarning::test_warns_for_issue_default_gap
+3 failed, 17 warnings in 8.56s
