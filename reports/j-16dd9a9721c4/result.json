@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36889",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The reported 8-request/10-slot/5-slots-per-request shape reproduces the effective concurrency cap of 2 in the actual resolver. However, the claimed info-only diagnostic does not reproduce: both the recorded base and the reporter's cited aa8c950a3 revision emit an actionable WARNING, and the recorded base publishes the resolved per-DP value as effective_max_running_requests_per_dp in server internal state. Added focused regression coverage for the reported shape and independent exact-capacity and zero-capacity boundaries; no production correction was justified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-16dd9a9721c4/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_concurrency_cap.py",
+      "exit_code": 0,
+      "what_was_measured": "The issue-shaped 8 requested / 10 state slots / ratio 5 case resolves to 2 and logs the effective cap and sizing inputs at WARNING; an exactly sized 40-slot pool resolves to 8 without a warning; a 4-slot pool fails startup because it cannot back one request. Result: 3 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-16dd9a9721c4/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_concurrency_cap.py test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py",
+      "exit_code": 0,
+      "what_was_measured": "The new concurrency-cap regression plus existing independent Mamba slot-ratio, allocation-pressure, and pipeline-parallel sizing coverage. Result: 12 passed."
+    },
+    {
+      "command": "git show aa8c950a3df62b6642c4ea60a93a5e3eb1a1450e:python/sglang/srt/mem_cache/kv_cache_configurator.py | sed -n '2005,2025p'",
+      "exit_code": 0,
+      "what_was_measured": "Actual source at the revision cited by the reporter already calls logger.warning for the Mamba state-cache concurrency cap."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validation."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned device was inventoried as one AMD Instinct MI355X (gfx950), but the verified behavior is CPU-side capacity resolution and logging. No GLM-5.3-Flash target weights, DFlash2 drafter weights, 2x DGX Spark GB10 hardware, CUDA 13 environment, or two-node topology were available, so no GPU/model throughput claim was made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported +75% throughput effect was not reproduced: the cited GLM-5.3-Flash NVFP4 and DFlash2 weights and the 2x DGX Spark GB10 TP=2/nnodes=2 environment were unavailable.",
+    "The exact model's five-slot ratio was represented by the real resolver with an injected ratio; this validates cap arithmetic, warning severity, and boundaries, not GLM-5.3 model execution or semantic accuracy.",
+    "The top-level /server_info max_running_requests remains the configured value. The effective per-DP value is available inside internal_states; a separate open upstream PR, https://github.com/sgl-project/sglang/pull/38931, proposes a top-level effective_max_running_requests convenience field and was not duplicated here.",
+    "No native code changed, so no native rebuild was applicable."
+  ]
+}
