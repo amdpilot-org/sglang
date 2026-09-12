@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33483",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1951",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1913",
+  "candidate_commit": "a3ff51e96cf96008a8382e5e18ec0af420519a17",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a verified partial diagnostic improvement: it warns at startup about the request-capacity/decode-graph gap, but leaves the 4096-versus-32 mismatch and original eager-decode absorbing-state mechanism intact. Its submitted regression is not a valid clean failing-before test because all three cases raise AttributeError on the recorded base before exercising behavior.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-7b5bdd3be71e/venv/bin/python -m pytest -vv /tmp/test_cuda_graph_request_capacity_warning.py --tb=short (candidate test extracted unchanged, run at base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before quality: 3/3 tests failed in helper setup with AttributeError because the new private method did not exist; this contradicts the candidate's recorded 1-failed/2-passed characterization and does not isolate the missing warning behavior."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7b5bdd3be71e/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_cuda_graph_request_capacity_warning.py test/registered/unit/model_executor/test_pool_configurator.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression and adjacent configurator coverage: 44 tests and 7 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7b5bdd3be71e/venv/bin/python (independent mocked resolve_max_num_reqs boundary matrix)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate still resolved issue defaults to 4096 versus graph max 32 and warned once; equality and DP-scaled equality did not warn; 33 versus 32 warned; disabled/absent graph configs did not warn; a KV cap below 32 did not emit the graph-gap warning."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7b5bdd3be71e/venv/bin/python /tmp/amdpilot-repo-j-7b5bdd3be71e/review-fixture-tools/run_server_probe.py --fixture /tmp/amdpilot-repo-j-7b5bdd3be71e/review-tiny-llama --output /job/review-evidence/candidate/server-fixture --graph",
+      "exit_code": 0,
+      "what_was_measured": "Exact-candidate source checkout on gfx950 warned for effective capacity 4 versus graph max 2, captured decode batches [1, 2], served four HTTP probes with status 200, and reaped its owned process group."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-7b5bdd3be71e/raw/candidate/server-fixture/server.log records AMD gfx950 startup, the 4-versus-2 warning, and decode graph capture [1, 2]; probe-summary.json records four HTTP 200 responses.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With token_capacity=3145118, context_len=32768, graph max_bs=32, and default admission, the candidate still returns max_running_requests=4096. A warning does not prevent batches above 32 or their eager fallback.",
+    "The candidate makes no scheduler or graph-capacity policy change, so the original L40/Qwen workload can still enter the reported high-latency absorbing state after crossing the graph ceiling.",
+    "The unchanged candidate regression cannot distinguish behavioral absence of the warning on base from absence of the newly introduced private helper; all three base cases fail with AttributeError."
+  ],
+  "remaining_limitations": [
+    "The assigned GPU was AMD MI350X/gfx950, not NVIDIA L40; the reported CUDA/L40 performance transition was not reproduced.",
+    "Qwen/Qwen2.5-0.5B-Instruct weights and ShareGPT workload were unavailable, so the 4x ITL transition and no-recovery dynamics remain unverified in this environment.",
+    "The deterministic tiny Llama fixture validates transport and engine execution only, not Qwen architecture, semantic accuracy, full-model performance, or distributed behavior.",
+    "No native source changed; no native rebuild was required."
+  ]
+}
