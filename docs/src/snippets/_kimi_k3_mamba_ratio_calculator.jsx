@@ -7,6 +7,7 @@
 export const KimiK3MambaRatioCalculator = () => {
   const [isDark, setIsDark] = useState(false);
   const [requestLength, setRequestLength] = useState("11264");
+  const [targetConcurrency, setTargetConcurrency] = useState("64");
   const [copied, setCopied] = useState(false);
   // Effective serving config; empty until the Playground's first broadcast
   // (the parse below then falls back to the stock defaults: tp8, bf16 KV,
@@ -44,13 +45,14 @@ export const KimiK3MambaRatioCalculator = () => {
   }, []);
 
   const length = Number.parseFloat(requestLength);
+  const target = Number.parseFloat(targetConcurrency);
 
   // Derive the serving parameters from a flag/env list and evaluate the balance
   // formula (measured dual-pool balance), written as a per-request cost ratio:
   //
-  //   r = (S + D) x state_bytes / (L x per_token_kv_bytes)
+  //   variable r = S x state_bytes / (L x per_token_kv_bytes)
   //
-  // The state side (S main slots plus D verify intermediates) is per-GPU and
+  // The main S-slot pool and separate D-deep verify scratch are per-GPU and
   // never DCP-sharded. The KV side is per-GPU per logical token: DCP shards the
   // MLA latent KV across its ranks, while the DSPARK draft model's own KV is
   // replicated on every rank, so it stays a flat term. Without DCP the draft
@@ -125,8 +127,18 @@ export const KimiK3MambaRatioCalculator = () => {
     // shard and is added flat.
     const draftKvBytesPerToken = specOn ? 1400 : 0;
     const kvBytesPerTokenPerRank = kvBytesPerToken / dcp + draftKvBytesPerToken;
-    const ratio =
-      ((slots + drafts) * stateBytesPerSlot) / (kvBytesPerTokenPerRank * length);
+    // max_running_requests is divided by attention DP before it sizes plain
+    // spec scratch. Model the requested global target conservatively with ceil.
+    const concurrencyPerDp = Math.ceil(target / dp);
+    // KDA keeps dense conv intermediates, so one draft step has the same byte
+    // geometry as one main state slot. It is nevertheless a separate
+    // request-indexed buffer, with one padding request row.
+    const fixedSpecBytes = drafts > 0
+      ? (concurrencyPerDp + 1) * drafts * stateBytesPerSlot
+      : 0;
+    const mainStateBytes = (concurrencyPerDp * slots + 2) * stateBytesPerSlot;
+    const kvBudgetBytes = concurrencyPerDp * length * kvBytesPerTokenPerRank;
+    const ratio = (mainStateBytes + fixedSpecBytes) / kvBudgetBytes;
     return { ratio, tp, dp, attnTp, dcp, kvDtype, ssmDtype, radixOff, strategy, skipLock, slots, specOn, replaySpec, block, pdRole };
   };
 
@@ -140,8 +152,8 @@ export const KimiK3MambaRatioCalculator = () => {
   const explicitSizing = (cfg.baseFlags.length ? cfg.baseFlags : cfg.flags)
     .some((f) => f.startsWith("--max-mamba-cache-size"));
   const { ratio, tp, dp, attnTp, dcp, kvDtype, ssmDtype, radixOff, strategy, skipLock, slots, specOn, replaySpec, block, pdRole } = eff;
-  const valid = Number.isFinite(ratio) && ratio > 0 && length > 0 && 96 % attnTp === 0;
-  const baseValid = Number.isFinite(bs.ratio) && bs.ratio > 0 && length > 0;
+  const valid = Number.isFinite(ratio) && ratio > 0 && length > 0 && target > 0 && 96 % attnTp === 0;
+  const baseValid = Number.isFinite(bs.ratio) && bs.ratio > 0 && length > 0 && target > 0;
 
   const formatRatio = (value) => {
     if (!Number.isFinite(value)) return "—";
@@ -259,7 +271,7 @@ export const KimiK3MambaRatioCalculator = () => {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "minmax(180px, 260px) 1fr",
+          gridTemplateColumns: "minmax(180px, 240px) minmax(150px, 200px) 1fr",
           gap: "14px",
           alignItems: "start",
         }}
@@ -277,6 +289,22 @@ export const KimiK3MambaRatioCalculator = () => {
           />
           <span style={{ color: colors.muted, fontSize: "11px", fontWeight: 400 }}>
             Input + output tokens — the only free parameter
+          </span>
+        </label>
+
+        <label htmlFor="k3-ratio-concurrency" style={labelStyle}>
+          Target concurrency
+          <input
+            id="k3-ratio-concurrency"
+            type="number"
+            min="1"
+            step="1"
+            value={targetConcurrency}
+            onChange={(event) => setTargetConcurrency(event.target.value)}
+            style={inputStyle}
+          />
+          <span style={{ color: colors.muted, fontSize: "11px", fontWeight: 400 }}>
+            Global requests; scratch is sized after attention-DP division
           </span>
         </label>
 

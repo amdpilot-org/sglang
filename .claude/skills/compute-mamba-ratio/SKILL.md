@@ -15,14 +15,16 @@ A hybrid model (attention layers + linear-attention layers — the recurrent-sta
 ## The formula
 
 ```
-r*  =  (S + D) · token_equiv · dcp_size / L
+r_variable  =  S · token_equiv · dcp_size / L
 token_equiv  =  state_bytes_per_slot / kv_bytes_per_token
 ```
 
 - `L` = average context length per request (input + output tokens)
 - `token_equiv` = full-KV token-equivalent of one state slot
 - `S` = state slots per running request (cache-strategy dependent, table below)
-- `D` = `--speculative-num-draft-tokens` (0 if NOSPEC); each running req carries `D` extra intermediate states
+- `D` = the verify depth. On current main, plain speculative decoding allocates
+  these intermediates in a separate request-indexed buffer; `D` is therefore a
+  fixed-memory term driven by `max_running_requests`, not a slot-pool term.
 - `dcp_size` = `--dcp-size` (1 without DCP). DCP shards the per-rank KV by `dcp_size`, so KV gets ~`dcp_size×` cheaper per request → the balance shifts that much toward the state pool.
 
 `r` is dimensionless (just the split). To also predict the actual concurrency you need `rest` (below).
@@ -36,7 +38,10 @@ token_equiv  =  state_bytes_per_slot / kv_bytes_per_token
      - `KV Cache is allocated. #tokens: M, KV size: Y GB` → `kv_bytes_per_token = Y / M`
    - **(b) derived** — model arch (linear-layer count + state dims `d_state/d_conv/heads/head_dim`; attention type + KV dims: MLA latent dim, or GQA `kv_heads·head_dim·layers`) **× the dtypes** below.
 3. **`S`** — from `--mamba-radix-cache-strategy`, the overlap scheduler, and `SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK` (table below).
-4. **`D`** — `--speculative-num-draft-tokens` (0 if NOSPEC; **also 0 when ReplaySSM spec-verify is enabled** — see caveats).
+4. **Spec scratch** — record `D`, whether ReplaySSM spec-verify is enabled, and
+   `--max-running-requests`. Prefer the boot-log
+   `intermediate_ssm_state_cache` and `intermediate_conv_window_cache` sizes;
+   their exact geometry is not generally one full state slot per draft step.
 5. **`dcp_size`** — `--dcp-size` (1 if no DCP). If DCP **and** spec with a replicated draft KV, apply the draft caveat (below).
 6. **KV dtype** (bf16 / fp8) and **ssm dtype** (fp32 / bf16) — they set the two byte constants (see the `token_equiv` 2×2).
 7. *(only to also predict the clamp, not just `r`)* **`rest`** = per-GPU memory − weights at the chosen `--mem-fraction-static`. Read `avail mem` after `Load weight end`, or `Memory pool end. avail mem` + pool sizes, from the boot log.
@@ -85,17 +90,30 @@ KV Cache is allocated. dtype: torch.float8_e4m3fn, #tokens: 1167552, KV size: 15
 ## Compute
 
 ```python
-def optimal_ratio(L, state_bytes_per_slot, kv_bytes_per_token, S, D=0, dcp_size=1):
+def variable_pool_ratio(L, state_bytes_per_slot, kv_bytes_per_token, S, dcp_size=1):
     token_equiv = state_bytes_per_slot / kv_bytes_per_token
-    r = (S + D) * token_equiv * dcp_size / L
-    return r  # value of --mamba-full-memory-ratio (>1 is legal)
+    return S * token_equiv * dcp_size / L
 
-def predict_clamp(rest_bytes, r, state_bytes_per_slot, S, D=0):
-    mamba_budget = rest_bytes * r / (1 + r)
+def cli_ratio(rest_bytes, fixed_spec_bytes, variable_ratio):
+    # The CLI ratio includes the fixed scratch inside the mamba-side budget.
+    variable_rest = rest_bytes - fixed_spec_bytes
+    assert variable_rest > 0
+    kv_budget = variable_rest / (1 + variable_ratio)
+    return variable_ratio + fixed_spec_bytes / kv_budget
+
+def predict_clamp(rest_bytes, r, state_bytes_per_slot, S, fixed_spec_bytes=0):
+    mamba_budget = rest_bytes * r / (1 + r) - fixed_spec_bytes
     slots = mamba_budget / state_bytes_per_slot
-    # spec: each running req reserves (S+D) worth; non-spec just S
-    return int(slots // S)  # NOSPEC; with spec the budget joint-solves for (S+D)·per_req per req
+    return int(slots // S)
+
+def safe_pin(target_concurrency_per_attention_dp, S):
+    # One usable donation slot is needed before the old chunk state is freed.
+    return target_concurrency_per_attention_dp * S + 1
 ```
+
+The runtime also allocates a non-usable tensor padding row at index 0. Do not
+count it as the donation margin: `--max-mamba-cache-size=K` exposes exactly `K`
+allocator slots even though the backing state tensors have `K + 1` rows.
 
 Then state the result three ways: the **`r` value**, the **predicted clamp** (if `rest` given), and **which pool binds** (`min(mamba_clamp, KV_cap)`, where `KV_cap = kv_tokens · dcp_size / L`).
 
@@ -103,8 +121,15 @@ Then state the result three ways: the **`r` value**, the **predicted clamp** (if
 
 1. **Free lever first**: if the boot log shows large idle in `Memory pool end. avail mem` (e.g. 30–40 GB at mem-frac 0.85), raise `--mem-fraction-static` (→0.92) before touching the split — it grows `rest` for both pools at no cost. Validate graph-capture headroom once.
 2. Collect the inputs. Prefer a real boot log for the two byte constants.
-3. Compute `r*`. If `r*` would drive the state pool below one request's worth (`mamba_budget < S · per_req`, happens at very long `L`), **switch to pinning `--max-mamba-cache-size = target_concurrency · S`** and let the rest go to KV — a sub-0.15 `r` is fragile.
-4. Report `r`, predicted clamp, binding pool, and any dtype accuracy gate that applies.
+3. Compute `r_variable`. For plain spec, deduct the separately allocated
+   intermediate buffers from `rest` and translate to the CLI ratio with
+   `cli_ratio`; this makes the result depend on `max_running_requests`. If the
+   required inputs are unavailable, report the variable-pool ratio and say that
+   the final CLI ratio must be verified from a boot log.
+4. If the ratio would drive the state pool below one request's worth, **switch
+   to pinning `--max-mamba-cache-size = target_concurrency_per_attention_dp · S + 1`**.
+   The `+1` is a usable transient stash slot.
+5. Report `r`, predicted clamp, binding pool, and any dtype accuracy gate that applies.
 
 ## Worked examples (TP8, B300, validated against measured clamps)
 
@@ -125,13 +150,35 @@ Reference `r` for **this example model** (`token_equiv ≈ 4080`, i.e. fp32 ssm 
 
 | L | 2K | 4K | 8K | 32K | 64K | 128K |
 |---|---|---|---|---|---|---|
-| r | 10.0 | 5.0 | 2.5 | 0.62 | 0.31 | 0.16 |
+| variable-pool r | 10.0 | 5.0 | 2.5 | 0.62 | 0.31 | 0.16 |
 
 ## Caveats
 
 - **DCP + spec**: a replicated (non-DCP-sharded) draft KV does **not** shard by `dcp_size`; at long `L` it dominates per-token cost, so the clean `×dcp_size` overstates DCP's advantage — fall back to a per-token direct-solve (KV term `/dcp` + an un-sharded draft-KV term) when spec is on. (NOSPEC → clean `×dcp_size` holds.)
-- **Spec + ReplaySSM → use `D=0`, not the draft-token count.** When ReplaySSM spec-verify is enabled, the `D` intermediate SSM states move off the per-request slot budget onto a **fixed ring** (a one-time deduction from `rest`, not a per-req term). So the mamba-slot cost per running request drops back to `S` (clamp = `mmcs / S`, not `/(S+D)`), and the balance ratio returns to the NOSPEC value (`r* ≈ S·token_equiv·dcp/L`). Measured example (TP8, D=8, L≈9K): applying `D=8` computes `r*≈2.6` but the true optimum is `r≈1.0` — `D=8` lands KV-bound at ~45% below the achievable peak concurrency. Plain spec (no replayssm) keeps `D` = the draft-token count.
-- **Under DCP the balance point sits beyond any realistic `L`** (the state pool binds first for almost everything), so the practical recommendation is to **pin `--max-mamba-cache-size = target_concurrency · S` directly** rather than dial a large `r`.
+- **Plain spec uses a separate intermediate buffer.** The main allocator clamp
+  is always `floor(K / S)`, not `floor(K / (S + D))`. The buffer is indexed by
+  request, with an extra padding request: approximately
+  `(C_spec + 1) · D`, where
+  `C_spec = min(floor(max_running_requests / attention_dp_size), floor(K / S))`.
+  Use the logged intermediate-buffer bytes because SSM and conv intermediates
+  have different shapes and CUDA may deduplicate overlapping conv windows.
+- **ReplaySSM is different, but still has no `D` slot term.** ReplaySSM skips
+  `intermediate_ssm_state_cache`; GDN uses fixed request-indexed ring scratch,
+  while KDA can attach ring bytes to each main slot. Conv rollback scratch may
+  remain. Account the buffers printed by the boot log rather than treating
+  ReplaySSM as identical to either NOSPEC or plain spec.
+- **Attention-DP division floors.** Both explicit `max_running_requests` and
+  `max_mamba_cache_size` are divided by `attn_dp_size` before per-worker use;
+  remainders do not provide capacity. For a balanced global target `C`, use a
+  per-rank target (normally `C / attn_dp_size`) and pin each rank to `C_rank·S+1`.
+  A global flag that guarantees `ceil(C / attn_dp_size)` on every rank is
+  `attn_dp_size · (ceil(C / attn_dp_size)·S + 1)`.
+- **Chunk-boundary boundary case.** At `K = C·S`, all admitted slots can be
+  locked by running requests. `prepare_for_caching_req` allocates the donated
+  cache slot before freeing the old state, eviction cannot reclaim a locked
+  slot, and allocation asserts. Pin at least `K = C·S + 1`; more operational
+  headroom is reasonable.
+- **Under DCP the balance point sits beyond any realistic `L`** (the state pool binds first for almost everything), so the practical recommendation is to **pin `--max-mamba-cache-size = target_concurrency_per_attention_dp · S + 1` directly** rather than dial a large `r`.
 - **`--max-mamba-cache-size` overrides `r`**; bytes beyond the `r` budget come out of the KV pool one-for-one.
 - **Precision changes are behind accuracy gates**: `--kv-cache-dtype fp8_e4m3` (doubles `token_equiv` → doubles `r`) and `--mamba-ssm-dtype bfloat16` (~halves `token_equiv`; also silently switches the linear-attention decode backend on SM100+ — pin `--linear-attn-decode-backend triton`) shift outputs; validate accuracy for the workload before production.
 - **Asymmetry**: the state pool is worst-case-reserved and fail-loud; KV degrades gracefully (retraction). When `L` is spiky/uncertain, bias `r` **up** rather than starve the state pool.
