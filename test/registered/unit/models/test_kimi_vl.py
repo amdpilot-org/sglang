@@ -7,6 +7,7 @@ import pytest
 import torch
 import torch.nn as nn
 
+from sglang.srt.layers.attention.vision import VisionAttentionMetadata
 from sglang.srt.layers.linear import (
     ColumnParallelLinear,
     QKVParallelLinear,
@@ -57,6 +58,16 @@ class _GridRecordingVisionTower:
         return pixel_values
 
 
+class _PackedAttentionRecorder(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.calls = []
+
+    def forward(self, hidden_states, **kwargs):
+        self.calls.append((hidden_states, kwargs))
+        return torch.zeros_like(hidden_states)
+
+
 def _bare_model(*, use_data_parallel: bool):
     model = KimiVLForConditionalGeneration.__new__(KimiVLForConditionalGeneration)
     nn.Module.__init__(model)
@@ -95,6 +106,50 @@ class TestKimiVLEncoderParallelism(CustomTestCase):
         self.assertIsInstance(layer.attn.proj, RowParallelLinear)
         self.assertIsInstance(layer.mlp.fc0, ColumnParallelLinear)
         self.assertIsInstance(layer.mlp.fc1, RowParallelLinear)
+
+    def test_moonvit_routes_packed_boundaries_to_vision_attention(self):
+        for case, cu_seqlens, max_seqlen in (
+            ("single-image", [0, 4], 4),
+            ("uneven-images", [0, 3, 8, 10], 5),
+        ):
+            with self.subTest(case=case):
+                with (
+                    get_parallel().override(
+                        tp_size=1, tp_rank=0, attn_tp_size=1, attn_tp_rank=0
+                    ),
+                    get_context().override_server_args(),
+                ):
+                    layer = MoonVitEncoderLayer(
+                        num_heads=2,
+                        hidden_dim=8,
+                        mlp_dim=16,
+                        prefix="vision_tower.encoder.blocks.0",
+                    )
+
+                recorder = _PackedAttentionRecorder()
+                layer.attn = recorder
+                layer.mlp = nn.Identity()
+                hidden_states = torch.randn(cu_seqlens[-1], 8)
+                cu_seqlens_tensor = torch.tensor(cu_seqlens, dtype=torch.int32)
+                metadata = VisionAttentionMetadata(
+                    cu_seqlens=cu_seqlens_tensor,
+                    seq_lens=cu_seqlens_tensor[1:] - cu_seqlens_tensor[:-1],
+                    max_seqlen=max_seqlen,
+                )
+
+                output = layer(
+                    hidden_states,
+                    cu_seqlens_tensor,
+                    max_seqlen=max_seqlen,
+                    forward_metadata=metadata,
+                )
+
+                self.assertEqual(output.shape, hidden_states.shape)
+                self.assertEqual(len(recorder.calls), 1)
+                _, kwargs = recorder.calls[0]
+                self.assertIs(kwargs["cu_seqlens"], cu_seqlens_tensor)
+                self.assertIs(kwargs["forward_metadata"], metadata)
+                self.assertEqual(kwargs["max_seqlen"], max_seqlen)
 
     def test_encoder_dp_uses_existing_mrope_sharding_helper(self):
         model = _bare_model(use_data_parallel=True)
