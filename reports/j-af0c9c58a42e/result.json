@@ -1,0 +1,53 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/22935",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/567",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/564",
+  "candidate_commit": "ebba936894d3cd195c0795c40ce6cfca2bf6c8a2",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The base reproduces the reported zero-hit. The candidate adds one interior grid-boundary checkpoint and improves supported long no_buffer prefills, but the exact three-token original scenario and every prompt below the first checkpoint grid still return a zero-token hit. This is a partial fix, not a full resolution.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-af0c9c58a42e/venv/bin/python /job/review-evidence-j-af0c9c58a42e/independent_probe.py (base)",
+      "exit_code": 0,
+      "what_was_measured": "Actual MambaRadixCache GPU device indices: minimal n-1 hit 0, full leaf hit 3, long n-1 hit without an interior checkpoint 0."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-af0c9c58a42e/venv/bin/python /job/review-evidence-j-af0c9c58a42e/independent_probe.py (candidate ebba936894d3cd195c0795c40ce6cfca2bf6c8a2)",
+      "exit_code": 0,
+      "what_was_measured": "The exact minimal n-1 hit remains 0. Invoking the candidate insertion helper for a 128-token path yields exactly 64 GPU indices equal to the independent range [0, 63]."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-af0c9c58a42e/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_radix_cache_match.py -vv",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 15 passed, including tests that explicitly retain the short-prompt zero-hit contract."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-af0c9c58a42e/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_unittest.py test/registered/unit/mem_cache/test_registry.py",
+      "exit_code": 0,
+      "what_was_measured": "Surrounding Mamba and registry regression coverage: 40 passed."
+    },
+    {
+      "command": "python -m py_compile <four changed Python modules> && git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 ebba936894d3cd195c0795c40ce6cfca2bf6c8a2",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources compile and the candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI355X, HIP 7.2.26015. Actual cache-return tensors were compared with independent torch.arange references on device.",
+  "native_rebuilt": false,
+  "native_rebuild_reason": "No native C++/HIP/FlyDSL source changed; repository-environment.json reports native=null, so no native rebuild was applicable.",
+  "remaining_counterexamples": [
+    "The original [A,B,C] then n-1 [A,B] lookup still returns zero indices.",
+    "Prompts with no interior state/page grid boundary (64 tokens or fewer in the tested configuration) still return zero on an identical fresh-prefill n-1 lookup.",
+    "A shared-prefix divergence before the deepest retained interior checkpoint cannot reuse that structurally matched prefix.",
+    "The candidate is disabled for speculative decoding, ReplaySSM, int8 checkpoints, extra_buffer, and unified Mamba+SWA trees."
+  ],
+  "remaining_limitations": [
+    "No prepared hybrid-Mamba model weights were available, so end-to-end logits, scheduler-to-model state snapshots, and latency were not validated.",
+    "The GPU probe validated actual cache tensors and the new insertion helper, not a full serving process.",
+    "The candidate changes only Python; native rebuild validation was not applicable."
+  ]
+}
