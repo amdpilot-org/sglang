@@ -91,12 +91,16 @@ class _PrefillReq:
         self.require_reasoning = False
         self.customized_info = None
         self.beam_group = None
+        self.to_finish = None
+        self.finished_reason = None
 
     def finished(self):
-        return False
+        return self.finished_reason is not None
 
-    def update_finish_state(self):
-        return None
+    def update_finish_state(self, *_args):
+        if self.to_finish is not None:
+            self.finished_reason = self.to_finish
+            self.to_finish = None
 
 
 class _DecodeReq:
@@ -121,6 +125,92 @@ class _DecodeReq:
 
 
 class TestPrefillHiddenStateOffsets(CustomTestCase):
+    def test_abort_cleanup_runs_hooks_without_cache_publication(self):
+        processor = _make_processor(self)
+        hisparse = Mock()
+        object.__setattr__(processor, "hisparse_coordinator", hisparse)
+        req = SimpleNamespace(
+            rid="full-nan",
+            multimodal_inputs=Mock(),
+            session=None,
+            time_stats=Mock(),
+        )
+
+        with (
+            patch(
+                "sglang.srt.managers.scheduler_components."
+                "batch_result_processor.get_disagg",
+                return_value=SimpleNamespace(
+                    disaggregation_decode_enable_offload_kvcache=False
+                ),
+            ),
+            patch(
+                "sglang.srt.managers.scheduler_components."
+                "batch_result_processor.get_memory",
+                return_value=SimpleNamespace(enable_hisparse=True),
+            ),
+            patch(
+                "sglang.srt.managers.scheduler_components."
+                "batch_result_processor.release_kv_cache"
+            ) as release,
+        ):
+            processor._handle_sampling_mask_abort(req)
+
+        req.multimodal_inputs.release_features.assert_called_once_with()
+        hisparse.request_finished.assert_called_once_with(req)
+        processor.model_worker.prepare_for_kv_cache_release.assert_called_once_with(req)
+        release.assert_called_once_with(req, processor.tree_cache, is_insert=False)
+        req.time_stats.set_completion_time.assert_called_once_with()
+
+    def test_full_nan_abort_uses_comprehensive_cleanup(self):
+        req = _PrefillReq(
+            rid="full-nan",
+            inflight_middle_chunks=0,
+            return_hidden_states=False,
+        )
+        batch = SimpleNamespace(
+            reqs=[req],
+            decoding_reqs=[],
+            return_logprob=False,
+            return_hidden_states=False,
+            return_hidden_states_mode=CaptureHiddenMode.NULL,
+            spec_info=None,
+            spec_algorithm=SimpleNamespace(is_none=lambda: True),
+            prefill_stats=None,
+            dp_cooperation_info=None,
+        )
+        result = SimpleNamespace(
+            copy_done=None,
+            auxiliary_host_output=None,
+            routed_experts_output=None,
+            indexer_topk_output=None,
+            logits_output=LogitsProcessorOutput(
+                next_token_logits=None,
+                full_nan_rows=torch.tensor([True]),
+            ),
+            next_token_ids=torch.tensor([0]),
+            extend_input_len_per_req=None,
+            extend_logprob_start_len_per_req=None,
+            grammar_advanced=False,
+            can_run_cuda_graph=False,
+            skipped_output_comm=False,
+        )
+        processor = _make_processor(self)
+
+        with (
+            patch.object(
+                SchedulerBatchResultProcessor, "_handle_sampling_mask_abort"
+            ) as cleanup,
+            patch(
+                "sglang.srt.managers.scheduler_components."
+                "batch_result_processor.release_kv_cache"
+            ) as direct_release,
+        ):
+            processor.process_batch_result_prefill(batch, result)
+
+        cleanup.assert_called_once_with(req)
+        direct_release.assert_not_called()
+
     def test_active_middle_chunk_advances_before_new_last_request(self):
         cases = (
             (
