@@ -14,7 +14,7 @@ class TestSchedulerInitReqMaxNewTokens(unittest.TestCase):
     """Property tests for Scheduler.init_req_max_new_tokens.
 
     Rules enforced when clipping a request's max_new_tokens:
-      1. context: input_len + max_new_tokens < max_req_len
+      1. context: input_len + max_new_tokens + speculative reserve <= max_req_len
       2. admission budget (PrefillAdder):
          ceil_page(input_len) + max_new_tokens + page_size < max_total_num_tokens
       3. env limit: <= SGLANG_MAX_NEW_TOKENS_LIMIT when set and positive
@@ -56,6 +56,7 @@ class TestSchedulerInitReqMaxNewTokens(unittest.TestCase):
         scheduler.max_total_num_tokens = max_total_num_tokens
         scheduler.page_size = page_size
         scheduler.max_new_tokens_limit = envs.SGLANG_MAX_NEW_TOKENS_LIMIT.get()
+        scheduler.num_reserved_tokens = 0
         return scheduler
 
     def _new_req(self, max_new_tokens, input_len: int = 8, min_new_tokens: int = 0):
@@ -81,7 +82,10 @@ class TestSchedulerInitReqMaxNewTokens(unittest.TestCase):
         limit_active = limit is not None and limit > 0
 
         def satisfies_rules(candidate: int) -> bool:
-            context_ok = input_len + candidate < scheduler.max_req_len
+            context_ok = (
+                input_len + candidate + max(1, scheduler.num_reserved_tokens)
+                <= scheduler.max_req_len
+            )
             budget_ok = (
                 paged_input_len + candidate + page_size < scheduler.max_total_num_tokens
             )
@@ -130,6 +134,21 @@ class TestSchedulerInitReqMaxNewTokens(unittest.TestCase):
             self.assertEqual(
                 self._init_and_check(scheduler, req), max_req_len - input_len - 1
             )
+
+    def test_eagle_draft_slots_are_reserved_at_context_boundary(self):
+        scheduler = self._new_scheduler(
+            max_req_len=262144, max_total_num_tokens=1 << 20, page_size=1
+        )
+        scheduler.num_reserved_tokens = 4
+        req = self._new_req(max_new_tokens=None, input_len=262091)
+
+        self.assertEqual(self._init_and_check(scheduler, req), 49)
+        self.assertEqual(
+            len(req.origin_input_ids)
+            + req.sampling_params.max_new_tokens
+            + scheduler.num_reserved_tokens,
+            scheduler.max_req_len,
+        )
 
     def test_budget_rule_binds_tighter_than_limit(self):
         max_total_num_tokens, page_size, input_len = 24, 4, 8
