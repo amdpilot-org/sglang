@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37186",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that Qwen3.5 pipeline-parallel weight filtering treated model.visual.layers.N as decoder layer N and dropped visual encoder weights outside the local decoder range. Restricted the four Qwen3.5 PP filters to normalized model.layers.N names and added a regression using the actual conditional-generation load_weights implementation plus independent namespace and PP-boundary cases.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-171f439b3fc8/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen3_5_pipeline_parallel.py -k filters_only_decoder_layer_range",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: decoder layers at the local range boundaries were filtered as expected, but model.visual.layers.3.weight was incorrectly absent from the loaded set. Raw output: reports/j-171f439b3fc8/raw/failing-before.log"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-171f439b3fc8/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen3_5_pipeline_parallel.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression and boundary coverage: 7 tests passed, including actual Qwen3_5ForConditionalGeneration.load_weights behavior for decoder indices below, inside, and at the exclusive end of the PP range, an out-of-range visual encoder layer, and independent visual/audio/bare namespace cases. Raw output: reports/j-171f439b3fc8/raw/passing-after-format.log"
+    },
+    {
+      "command": "SKIP=no-commit-to-branch pre-commit run --files python/sglang/srt/models/qwen3_5.py test/registered/unit/models/test_qwen3_5_pipeline_parallel.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository formatting, lint, syntax, registry, and hygiene hooks passed. Raw output: reports/j-171f439b3fc8/raw/pre-commit.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reproduced defect is deterministic weight-name filtering performed before tensor placement. No GPU execution was used or claimed."
+  },
+  "native_rebuilt": false,
+  "source_paths": [
+    "python/sglang/srt/models/qwen3_5.py",
+    "test/registered/unit/models/test_qwen3_5_pipeline_parallel.py"
+  ],
+  "native_paths": [],
+  "remaining_limitations": [
+    "No Qwen3.5 model weights were available, so a full checkpoint load was not performed.",
+    "No multi-process or multi-node pipeline-parallel serving workload was run; the regression exercises the actual load_weights implementation with a deterministic minimal module fixture.",
+    "Semantic model accuracy and serving behavior were not evaluated because the bug occurs before encoder tensors are copied and the fixture does not represent a complete model."
+  ]
+}
