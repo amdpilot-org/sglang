@@ -1,0 +1,32 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38773",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the zero-token failure through the real SGLang MoeRunner flashinfer_mxfp4 wrapper with an instrumented external CUTLASS boundary. Added shape validation and a valid-empty return after routing materialization and symmetric output allocation, preserving output shape, BF16 dtype, device, and pre-kernel collective obligations. The nonempty control still invokes the external boundary; malformed empty routing is rejected.",
+  "tests": [
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-7eddc31c12de/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_mxfp4_empty_input.py (source fix temporarily reversed)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: both tests failed because the real MoeRunner invoked the instrumented external kernel for zero-token input and accepted malformed empty routing. Raw output: reports/j-7eddc31c12de/raw/pytest_before_fix.txt"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-7eddc31c12de/venv/bin/python -m pytest -vv test/registered/unit/layers/quantization/test_mxfp4_empty_input.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after GPU regression through the real MoeRunner: valid empty output shape/dtype/device, symmetric allocation context participation, zero external kernel calls for empty input, one kernel call and independent expected output for the nonempty control, and rejection of mismatched routing token dimensions. Raw output: reports/j-7eddc31c12de/raw/pytest_mxfp4_empty_input.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7eddc31c12de/venv/bin/python -m compileall -q python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py test/registered/unit/layers/quantization/test_mxfp4_empty_input.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Python syntax compilation and patch whitespace validation."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "Tests allocated and checked tensors on the single assigned AMD Instinct MI350X through torch 2.11.0+rocm7.2 (HIP 7.2.26015); a separate GPU arithmetic reference produced [2.0, 4.0, 6.0]. Raw environment output: reports/j-7eddc31c12de/raw/gpu_environment.txt",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The assigned GPU is AMD Instinct MI350X; the NVIDIA H20/SM90 FlashInfer CUTLASS kernel could not be executed.",
+    "The reported four-rank DP-attention plus two-batch-overlap end-to-end server scenario and its collectives remain unverified because four H20 GPUs and the DeepSeek-V4-Flash checkpoint were not available.",
+    "The regression instruments only the external FlashInfer kernel boundary; it verifies SGLang wrapper behavior and GPU tensor contracts, not FlashInfer kernel execution on NVIDIA hardware.",
+    "No native code changed, so no native library rebuild was applicable."
+  ]
+}

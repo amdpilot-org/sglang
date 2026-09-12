@@ -359,6 +359,23 @@ def _fused_experts_flashinfer_mxfp4_cutlass(
     topk_ids = topk_output.topk_ids
     topk_weights = topk_output.topk_weights
 
+    if x.ndim != 2:
+        raise ValueError(
+            "FlashInfer MXFP4 MoE expects 2D hidden states, "
+            f"got shape {tuple(x.shape)}."
+        )
+    if topk_ids.ndim != 2 or topk_weights.ndim != 2:
+        raise ValueError(
+            "FlashInfer MXFP4 MoE expects 2D top-k ids and weights, got "
+            f"{tuple(topk_ids.shape)} and {tuple(topk_weights.shape)}."
+        )
+    if topk_ids.shape != topk_weights.shape or topk_ids.shape[0] != x.shape[0]:
+        raise ValueError(
+            "FlashInfer MXFP4 MoE requires matching top-k shapes and token "
+            f"dimension; hidden states {tuple(x.shape)}, ids "
+            f"{tuple(topk_ids.shape)}, weights {tuple(topk_weights.shape)}."
+        )
+
     # GPT-OSS: pad input hidden dim up to the loaded weight width. DSv4
     # leaves padded_hidden as None (or equal to origin_hidden), no pad.
     origin_hidden = x.shape[-1]
@@ -390,6 +407,21 @@ def _fused_experts_flashinfer_mxfp4_cutlass(
         )
     if use_wfp4afp8_humming and use_mxfp8_act_scaling:
         raise ValueError("SM90 Humming and SM120 MXFP8 scaling are mutually exclusive.")
+
+    out_hidden = padded_hidden if do_pad else origin_hidden
+    output_dtype = torch.bfloat16
+    with use_symmetric_memory(get_tp_group(), disabled=not is_allocation_symmetric()):
+        out = torch.empty(x.shape[0], out_hidden, dtype=output_dtype, device=x.device)
+
+    # CUTLASS rejects null input pointers, which are valid for zero-sized torch
+    # tensors. Dispatch and routing have already run (including their required
+    # collectives), so only skip the external kernel boundary for a valid empty
+    # activation while preserving the normal output contract.
+    if x.shape[0] == 0:
+        if do_pad:
+            out = out[:, :origin_hidden].contiguous()
+        return StandardCombineInput(hidden_states=out)
+
     input_sf = None
     fc1_expert_weights = quant_info.w13_weight
     fc2_expert_weights = quant_info.w2_weight
@@ -426,15 +458,10 @@ def _fused_experts_flashinfer_mxfp4_cutlass(
             quant_info.w2_weight_scale.view(torch.int32),
         ]
 
-    out_hidden = padded_hidden if do_pad else origin_hidden
-    output_dtype = torch.bfloat16
     # FlashInfer 0.6.17 intentionally reverted the Humming API. Do not pass the
     # new keyword at all on the existing W4A16/MXFP8 paths, so those paths keep
     # working with SGLang's currently pinned release.
     humming_kwargs = {"use_wfp4afp8_humming": True} if use_wfp4afp8_humming else {}
-    with use_symmetric_memory(get_tp_group(), disabled=not is_allocation_symmetric()):
-        out = torch.empty(x.shape[0], out_hidden, dtype=output_dtype, device=x.device)
-
     flashinfer_cutlass_fused_moe(
         input=x,
         token_selected_experts=topk_ids.to(torch.int32),
