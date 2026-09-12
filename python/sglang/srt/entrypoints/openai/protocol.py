@@ -908,7 +908,7 @@ class ChatCompletionRequest(BaseModel):
     thinking: Optional[ChatCompletionThinkingParam] = Field(
         default=None,
         description="MiniMax reasoning control. 'disabled' disables reasoning and "
-        "'adaptive' enables it.",
+        "'adaptive' lets the model decide whether to reason.",
     )
     task: Optional[
         Literal["action", "query", "authority", "domain", "title", "read_url"]
@@ -1023,10 +1023,7 @@ class ChatCompletionRequest(BaseModel):
                 ctk = values.get("chat_template_kwargs")
                 if not isinstance(ctk, dict):
                     ctk = {}
-                ctk.setdefault(
-                    "thinking_mode",
-                    "disabled" if thinking_type == "disabled" else "enabled",
-                )
+                ctk.setdefault("thinking_mode", thinking_type)
                 values["chat_template_kwargs"] = ctk
 
         if r is not None and isinstance(r, dict):
@@ -1078,6 +1075,11 @@ class ChatCompletionRequest(BaseModel):
             # - "enable_thinking" for qwen3, glm45, nemotron_3, interns1
             ctk.setdefault("thinking", thinking)
             ctk.setdefault("enable_thinking", thinking)
+            # MiniMax-M3 uses a string mode. Only map the model-independent
+            # disable signal here; enabling has no equivalent adaptive/forced
+            # distinction in reasoning_effort.
+            if not thinking:
+                ctk.setdefault("thinking_mode", "disabled")
             values["chat_template_kwargs"] = ctk
 
         return values
