@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31924",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "PR 2819 at f112ca15 is valid fused-QKV regression hardening but does not correct issue 31924. Its tests pass, while independent CPU and gfx950 execution reproduces the review: mapped incompatible layouts reach the ordinary loader unchanged, and BF16 exact-name QKV tensors bypass fused mapping. No runtime layout change is justified without the unavailable failing checkpoint tensor and its initial-load transform, so this PR preserves the valid tests and records the precise limitation.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/tmp/amdpilot-repo-j-4a50c8915d09/candidate-f112ca1/python /tmp/amdpilot-repo-j-4a50c8915d09/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-4a50c8915d09/candidate-f112ca1/python/sglang/multimodal_gen/test/unit/test_flux2_weight_reload.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit f112ca15, both fused-QKV shard routing and runtime-layout boundary tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/tmp/amdpilot-repo-j-4a50c8915d09/candidate-f112ca1/python /tmp/amdpilot-repo-j-4a50c8915d09/venv/bin/python reports/j-4a50c8915d09/reproduce_candidate_counterexamples.py",
+      "exit_code": 0,
+      "what_was_measured": "On CPU and AMD gfx950, a mapped deliberately incompatible img_in.weight layout reached the ordinary loader and raised the empty AssertionError; an exact-name BF16-style to_q.weight loaded through the identity path."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4a50c8915d09/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_flux2_weight_reload.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's valid fused-routing and ordinary-loader boundary regressions were preserved against the prepared base; 2 tests passed."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "The proposed test and report changes contain no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The independent candidate reproduction ran parameter and loaded tensors on cuda:0, reported AMD Instinct MI350X and gfx950:sramecc+:xnack-, reproduced the mapped-layout empty AssertionError, and validated the exact-name identity load."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Qwen-Image and FLUX.2-klein-base-4B weights were unavailable, so the historical full-model HTTP 400 was not replayed and the exact failing transformer tensor remains unidentified.",
+    "The arbitrary transposed fixture proves only that the generic updater does not guess layouts; it does not identify a correct transpose or reshape for a real checkpoint, so no speculative runtime transform was added.",
+    "The secondary text-encoder/VAE silent-drop behavior is not qualified as fixed; the prepared updater still builds its lookup from named_parameters and does not invoke architecture-specific startup load_weights logic.",
+    "The ROCm update_weights_from_disk standalone test remains skipped pending an evidence-backed transformer correction and a full passing AMD run.",
+    "Layerwise offload, FSDP/DTensor, tensor parallel, multi-GPU, and multi-node behavior were not qualified by the focused fixture.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
