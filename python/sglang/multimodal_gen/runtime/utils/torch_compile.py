@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import hashlib
+import json
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -61,31 +63,42 @@ def resolve_torch_compile_mode(
     return default
 
 
+def matching_submodule_names(module: nn.Module) -> tuple[str, ...]:
+    conditions = getattr(module, "_compile_conditions", ())
+    return tuple(
+        name
+        for name, submodule in module.named_modules()
+        if name and any(condition(name, submodule) for condition in conditions)
+    )
+
+
+def region_inventory_digest(regions: tuple[str, ...]) -> str:
+    payload = json.dumps(regions, separators=(",", ":"))
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
 def compile_matching_submodules(
     module: nn.Module,
     *,
     compile_kwargs: dict[str, object],
 ) -> int:
-    conditions = getattr(module, "_compile_conditions", ())
-    matches = [
-        submodule
-        for name, submodule in module.named_modules()
-        if name and any(condition(name, submodule) for condition in conditions)
-    ]
-    if not matches:
+    names = matching_submodule_names(module)
+    modules = dict(module.named_modules())
+    if not names:
         raise ValueError(
             "regional compile found no matching submodules; "
             f"check {type(module).__name__}._compile_conditions"
         )
 
-    for submodule in matches:
-        submodule.compile(**compile_kwargs)
-    return len(matches)
+    for name in names:
+        modules[name].compile(**compile_kwargs)
+    return len(names)
 
 
 @dataclass
 class CompiledModuleRegistry:
     module_ids: set[int] = field(default_factory=set)
+    region_inventories: dict[int, tuple[str, ...]] = field(default_factory=dict)
 
     def is_compiled(self, module: nn.Module) -> bool:
         return id(module) in self.module_ids
@@ -116,8 +129,15 @@ class CompiledModuleRegistry:
             module,
             compile_kwargs=compile_kwargs,
         )
+        self.region_inventories[module_id] = matching_submodule_names(module)
         self.module_ids.add(module_id)
         return compiled_count
+
+    def region_inventory(self, module: nn.Module) -> tuple[str, ...]:
+        return self.region_inventories.get(id(module), matching_submodule_names(module))
+
+    def region_digest(self, module: nn.Module) -> str:
+        return region_inventory_digest(self.region_inventory(module))
 
 
 class CallableModule(nn.Module):

@@ -10,10 +10,14 @@ from sglang.multimodal_gen.runtime.models.dits.ltx_2 import (
 from sglang.multimodal_gen.runtime.pipelines_core.stages.denoising import (
     DenoisingStage,
 )
+from sglang.multimodal_gen.runtime.utils.compile_trajectory import (
+    CompilePlanResolution,
+)
 from sglang.multimodal_gen.runtime.utils.torch_compile import (
     CompiledModuleRegistry,
     build_torch_compile_kwargs,
     compile_matching_submodules,
+    region_inventory_digest,
 )
 
 
@@ -154,6 +158,13 @@ def test_compiled_module_registry_installs_regions_once():
         == 0
     )
     assert [len(block.compile_calls) for block in model.transformer_blocks] == [1, 1]
+    assert registry.region_inventory(model) == (
+        "transformer_blocks.0",
+        "transformer_blocks.1",
+    )
+    assert registry.region_digest(model) == region_inventory_digest(
+        ("transformer_blocks.0", "transformer_blocks.1")
+    )
 
 
 def test_denoising_stage_selects_regional_compile():
@@ -196,3 +207,23 @@ def test_denoising_stage_selects_regional_compile():
         [compile_kwargs],
     ]
     assert not model.compile_calls
+
+
+def test_denoising_stage_keeps_eager_path_for_uncovered_plan():
+    model = _RegionalModel()
+    stage = DenoisingStage.__new__(DenoisingStage)
+    stage.server_args = SimpleNamespace(
+        enable_breakable_cuda_graph=False,
+        enable_torch_compile=True,
+        regional_compile=True,
+    )
+    stage._cache_dit_enabled = False
+    stage._torch_compile_registry = CompiledModuleRegistry()
+
+    stage._maybe_torch_compile(
+        model,
+        CompilePlanResolution(None, "workload_signature_mismatch"),
+    )
+
+    assert not model.compile_calls
+    assert all(not block.compile_calls for block in model.transformer_blocks)
