@@ -54,6 +54,7 @@ from sglang.benchmark.serving import (
     _EMBEDDING_BACKENDS,
     ASYNC_REQUEST_FUNCS,
     _finite_positive_float,
+    _get_ready_check_url,
     async_request_openai_embeddings,
     flush_server_cache,
 )
@@ -158,6 +159,35 @@ class TestEmbeddingBenchmarkBackends(CustomTestCase):
             ASYNC_REQUEST_FUNCS["vllm-embedding"], async_request_openai_embeddings
         )
         self.assertEqual(_BACKEND_API_PATHS["vllm-embedding"], "/v1/embeddings")
+
+
+class TestBenchmarkReadinessEndpoint(CustomTestCase):
+    def test_sglang_generation_backends_wait_for_generation_readiness(self):
+        base_url = "http://127.0.0.1:30000"
+        model_url = f"{base_url}/v1/models"
+
+        for backend in ("sglang", "sglang-native", "sglang-oai", "sglang-oai-chat"):
+            with self.subTest(backend=backend):
+                self.assertEqual(
+                    _get_ready_check_url(base_url, model_url, backend),
+                    f"{base_url}/health_generate",
+                )
+
+    def test_non_generation_and_non_sglang_backends_keep_existing_endpoint(self):
+        base_url = "http://127.0.0.1:8000"
+        model_url = f"{base_url}/v1/models"
+
+        for backend in ("sglang-embedding", "vllm", "vllm-chat", "vllm-embedding"):
+            with self.subTest(backend=backend):
+                self.assertEqual(
+                    _get_ready_check_url(base_url, model_url, backend), model_url
+                )
+
+        for backend in ("trt", "gserver"):
+            with self.subTest(backend=backend):
+                self.assertEqual(
+                    _get_ready_check_url(base_url, model_url, backend), base_url
+                )
 
 
 class TestBenchmarkCacheFlush(CustomTestCase):
