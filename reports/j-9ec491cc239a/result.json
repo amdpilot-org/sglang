@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33713",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3441",
+  "review_issue_url": "https://github.com/amdpilot-org/sglang/issues/3459",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3456",
+  "candidate_commit": "cd287687e83f1b82e3d52b25f016e852ac3b63ba",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Accept as focused test-only hardening. The exact candidate adds no production fix. Its three Full+MAMBA host-tier tests passed with real D2H/H2D transfers on the assigned MI350X, and the recorded base already passed adjacent unified-cache HiCache tests. The original failure could not be reproduced at the required base because that base already contains generalized host-leaf demotion and MAMBA host-LRU behavior. This does not establish the reported TP4 hybrid-KDA serving fix.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-9ec491cc239a/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py -k 'FULL_MAMBA_ps1 and hicache' -s",
+      "exit_code": 0,
+      "what_was_measured": "Recorded-base adjacent unified-cache Full+MAMBA HiCache behavior: 40 passed, 36 skipped."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-9ec491cc239a/venv/bin/python -m pytest -q <candidate three focused test node ids> -s",
+      "exit_code": 0,
+      "what_was_measured": "Exact-candidate committed Full+MAMBA backup, device eviction, host discovery, host LRU/locks/accounting, H2D load-back and exact tensor restoration; plus missing-MAMBA and MAMBA-only negative states. 3 passed."
+    },
+    {
+      "command": "temporary review mutation removing MambaComponent's local host-LRU insertion, then run the positive candidate test",
+      "exit_code": 0,
+      "what_was_measured": "The test still passed because UnifiedTreeCore._demote independently inserts auxiliary host-LRU entries. The mutation was fully reverted before leaving the candidate checkout; this is evidence of redundant enforcement, not a candidate failure."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "PyTorch 2.11.0+rocm7.2 reported one AMD Instinct MI350X; the candidate fixture used CUDA/HIP pools and compared restored GPU KV, temporal, and convolution tensors exactly."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No TP4 Ling-3.0-flash or other hybrid-KDA model serving reproduction was run; only one GPU and no qualifying model weights were available.",
+    "There is no failing-before at recorded base 358c163250ad3b1f62939b01ce1314a0a31a0365, so the historical production regression and the commit that fixed it remain unidentified.",
+    "The candidate is test-only and cannot itself repair an older affected revision."
+  ],
+  "remaining_limitations": [
+    "The deterministic tiny Llama fixture was intentionally not used because it cannot qualify MAMBA/KDA architecture or TP4 behavior.",
+    "The prepared checkout is shallow/grafted, limiting historical attribution.",
+    "No native source changed in the candidate, so a native rebuild was not applicable."
+  ]
+}
