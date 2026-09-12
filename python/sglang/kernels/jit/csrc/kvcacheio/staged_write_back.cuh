@@ -1,63 +1,19 @@
 #pragma once
 
+#include "cuda_memcpy_batch_compat.cuh"
 #include "hicache.cuh"
 #include "relayout.cuh"
 #include <dlfcn.h>
-#include <limits>
 #include <vector>
 
 namespace sglang {
 
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080
-#if CUDA_VERSION >= 13000
-using CudaMemcpyBatchPtr = const void*;
-using CudaMemcpyBatchAsyncFn = cudaError_t (*)(
-    CudaMemcpyBatchPtr*,
-    CudaMemcpyBatchPtr*,
-    const size_t*,
-    size_t,
-    cudaMemcpyAttributes*,
-    size_t*,
-    size_t,
-    cudaStream_t);
-#else
 using CudaMemcpyBatchPtr = void*;
-using CudaMemcpyBatchAsyncFn = cudaError_t (*)(
-    CudaMemcpyBatchPtr*,
-    CudaMemcpyBatchPtr*,
-    size_t*,
-    size_t,
-    cudaMemcpyAttributes*,
-    size_t*,
-    size_t,
-    size_t*,
-    cudaStream_t);
-#endif
 
-inline auto get_cuda_memcpy_batch_async() -> CudaMemcpyBatchAsyncFn {
-  static CudaMemcpyBatchAsyncFn cuda_memcpy_batch_async = []() {
-    void* symbol = dlsym(RTLD_DEFAULT, "cudaMemcpyBatchAsync");
-    return reinterpret_cast<CudaMemcpyBatchAsyncFn>(symbol);
-  }();
+inline auto get_cuda_memcpy_batch_async() -> void* {
+  static void* cuda_memcpy_batch_async = dlsym(RTLD_DEFAULT, "cudaMemcpyBatchAsync");
   return cuda_memcpy_batch_async;
-}
-
-inline auto call_cuda_memcpy_batch_async(
-    CudaMemcpyBatchAsyncFn copy_fn,
-    CudaMemcpyBatchPtr* dsts,
-    CudaMemcpyBatchPtr* srcs,
-    size_t* sizes,
-    size_t count,
-    cudaMemcpyAttributes* attrs,
-    size_t* attrs_idxs,
-    size_t num_attrs,
-    cudaStream_t stream) -> cudaError_t {
-#if CUDA_VERSION >= 13000
-  return copy_fn(dsts, srcs, sizes, count, attrs, attrs_idxs, num_attrs, stream);
-#else
-  size_t fail_idx = std::numeric_limits<size_t>::max();
-  return copy_fn(dsts, srcs, sizes, count, attrs, attrs_idxs, num_attrs, &fail_idx, stream);
-#endif
 }
 #endif
 
@@ -119,6 +75,15 @@ inline bool try_copy_page_first_pages_batch(
     return false;
   }
 
+  // dlsym resolves the entry point from the libcudart loaded by this process.
+  // CUDA 13 removed failIdx, so select its ABI from that runtime rather than
+  // from the CUDA headers used to compile this JIT object.
+  static int runtime_version = 0;
+  static const cudaError_t runtime_version_err = cudaRuntimeGetVersion(&runtime_version);
+  if (runtime_version_err != cudaSuccess || runtime_version < 12080) {
+    return false;
+  }
+
   const size_t num_copies = static_cast<size_t>(src_ptrs.size()) * static_cast<size_t>(num_pages);
   batch_srcs.clear();
   batch_dsts.clear();
@@ -166,6 +131,7 @@ inline bool try_copy_page_first_pages_batch(
 
   cudaError_t err = call_cuda_memcpy_batch_async(
       copy_fn,
+      runtime_version,
       batch_dsts.data(),
       batch_srcs.data(),
       batch_sizes.data(),
