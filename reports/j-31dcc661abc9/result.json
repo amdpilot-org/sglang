@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37712",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1021",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/985",
+  "candidate_commit": "a4c8fbf3a96e6e935572f45d581cb8554514c09a",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate bounds the reported dense MQA logits allocation for the tested RAGGED orchestration, but its chunked PAGED path incorrectly slices a global request page table by query-row chunk offsets while retaining global request row indices. The candidate regression does not exercise fused PAGED metadata. Full CUDA/B300 serving reproduction was unavailable.",
+  "tests": [
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-31dcc661abc9/venv/bin/python -m pytest -q /job/review-evidence-j-31dcc661abc9/test_candidate_regression.py",
+      "revision": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before behavior of the candidate regression on the recorded base: 5 failed, 1 passed; the plan path made one call instead of three and returned the old unbounded budget."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-31dcc661abc9/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_dsa_kpool_mqa_logits_chunking.py test/registered/unit/layers/attention/test_dsa_mqa_logits_chunking.py",
+      "revision": "a4c8fbf3a96e6e935572f45d581cb8554514c09a",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression plus existing MQA budget suite: 9 passed. DeepGEMM/top-k were mocked in the candidate's GPU regression."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-31dcc661abc9/venv/bin/python -m pytest -q /job/review-evidence-j-31dcc661abc9/test_adversarial_candidate.py",
+      "revision": "a4c8fbf3a96e6e935572f45d581cb8554514c09a",
+      "exit_code": 1,
+      "what_was_measured": "Independent fused-top-k metadata equivalence and minimum-budget cases: 2 passed, 1 failed. RAGGED metadata and padding were preserved; PAGED failed because the second chunk received a sliced page table with global row indices."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X, gfx950:sramecc+:xnack-, PyTorch 2.11.0+rocm7.2/HIP 7.2.26015. Candidate and adversarial orchestration allocated real FP8/device tensors, but mocked DeepGEMM and top-k kernels."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With SGLANG_DSA_FUSE_TOPK enabled and TopkTransformMethod.PAGED, a later query-row chunk slices ragged_paged_page_table by query offsets while passing global ragged_paged_page_table_row_index values, breaking dense/chunked equivalence and potentially indexing outside the sliced table.",
+    "If total_k_rows * 4 exceeds the computed logits budget, query-only chunking cannot honor the budget because the minimum chunk is one full concatenated-K output row."
+  ],
+  "remaining_limitations": [
+    "No four-B300 CUDA TP=4/EP=4 environment, NVIDIA DeepGEMM, GLM-5.3-Flash/RadixArk weights, 300K-1M token traffic, hierarchical cache, or DFLASH serving reproduction was available.",
+    "The actual DeepGEMM allocation and actual fused top-k kernel were not run on this ROCm device; the independent failure checks the Python orchestration contract and tensor coordinate spaces.",
+    "The exact original 73.65 GiB allocation therefore remains unverified in this architecture, although the base regression establishes the dead/unapplied chunking behavior."
+  ]
+}
