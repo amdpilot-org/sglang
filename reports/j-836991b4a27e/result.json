@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/2345",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "unsupported_architecture",
+  "summary": "Reproduced that Efficient-Large-Model/VILA1.5-3b-AWQ cannot be loaded: its custom llava_llama/LlavaLlamaModel config is unregistered, its only available language-model payload uses a legacy TinyChat int16 qweight/scaled_zeros AWQ layout unsupported by SGLang, and the nominal BF16 safetensor shards referenced by the repository are absent.",
+  "tests": [
+    {
+      "command": "HF_HOME=/tmp/amdpilot-repo-j-836991b4a27e/hf /tmp/amdpilot-repo-j-836991b4a27e/venv/bin/python reports/j-836991b4a27e/reproduce_model_config.py",
+      "exit_code": 0,
+      "what_was_measured": "A regression harness reproduced and asserted the current checked-out ModelConfig failure for the checkpoint's unregistered llava_llama model type."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-836991b4a27e/venv/bin/python reports/j-836991b4a27e/inspect_checkpoint.py /tmp/amdpilot-repo-j-836991b4a27e/models/VILA1.5-3b-AWQ/llm/vila-1.5-3b-w4-g128-awq-v2.pt",
+      "exit_code": 0,
+      "what_was_measured": "Independently inspected all 739 tensors and asserted the legacy AWQ contract: int16 qweight and scaled_zeros are present while standard qzeros are absent."
+    },
+    {
+      "command": "curl -fsS -o /dev/null https://huggingface.co/Efficient-Large-Model/VILA1.5-3b-AWQ/resolve/f18f59ccac0b45f92e70a490e6f88ab5ebadef23/llm/model-00001-of-00002.safetensors",
+      "exit_code": 22,
+      "what_was_measured": "The first BF16 shard named by model.safetensors.index.json is absent (HTTP 404); the second shard was checked separately with the same result."
+    },
+    {
+      "command": "rocm-smi --showproductname --showuniqueid --showmeminfo vram --csv",
+      "exit_code": 0,
+      "what_was_measured": "Recorded the assigned AMD Instinct MI355X gfx950 accelerator without changing device state."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No VILA 1.5 model/config implementation is registered in SGLang.",
+    "No VILA 1.5 multimodal processor or split-component checkpoint loader is implemented.",
+    "The checkpoint's legacy TinyChat AWQ layout is unsupported by SGLang and lacks standard quantization metadata.",
+    "The BF16 safetensor shards referenced by the checkpoint index are unavailable from the model repository.",
+    "The requested model was not executed and semantic or numerical accuracy was not validated.",
+    "The model card does not list AMD GPUs, and no compatible AMD TinyChat path was available on the assigned MI355X."
+  ]
+}
