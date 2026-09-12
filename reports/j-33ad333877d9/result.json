@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34113",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the reported AttributeError in streaming-response cleanup when cleanup runs before GenerateReqInput normalization. Fixed cleanup to use the request ID shape instead of the normalization-only is_single attribute. The live public /abort_request path was independently verified to return HTTP 200 and terminate an active tiny-Llama stream with an abort finish reason; it does not invoke create_abort_task.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-33ad333877d9/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py -k TestCreateAbortTask (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "The unstarted streaming cleanup raised AttributeError because GenerateReqInput.is_single was absent. The raw run also exposed incomplete dispatch mocking in the two boundary tests; those test-only setup errors were corrected before after-fix validation."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-33ad333877d9/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py -k TestCreateAbortTask",
+      "exit_code": 0,
+      "what_was_measured": "Three focused cases passed: cleanup before normalization is a no-op, an active single request is aborted, and every active request in a batch is aborted."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-33ad333877d9/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py",
+      "exit_code": 0,
+      "what_was_measured": "All 29 tests and 3 subtests in the tokenizer-manager request-state cleanup suite passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-33ad333877d9/venv/bin/python reports/j-33ad333877d9/run_http_abort.py /tmp/amdpilot-repo-j-33ad333877d9/tiny-random-llama reports/j-33ad333877d9/evidence/http",
+      "exit_code": 0,
+      "what_was_measured": "A real SGLang server on gfx950 generated four tokens, /abort_request returned HTTP 200, the stream ended with finish_reason.type=abort, and the server log contained no AttributeError."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-33ad333877d9/venv/bin/python -m ruff format/check ...",
+      "exit_code": 1,
+      "what_was_measured": "Formatting tool availability only: the prepared interpreter does not contain the ruff module. git diff --check was used instead."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-33ad333877d9/evidence/gpu-info.txt identifies the assigned AMD Instinct MI355X as gfx950; evidence/http/http-result.json contains generated token events and the abort finish reason from the live engine.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original meta-llama/Llama-3.2-1B-Instruct weights were unavailable.",
+    "The source report used NVIDIA RTX 4090/CUDA, while this job had one AMD Instinct MI355X/gfx950 with ROCm.",
+    "The deterministic tiny random Llama fixture qualifies transport and engine execution only, not semantic accuracy or a different architecture.",
+    "The exact claimed causal link from POST /abort_request to create_abort_task was not reproduced: those are separate code paths in this checkout.",
+    "After the successful probe, the owned server process exceeded the runner's 30-second graceful-shutdown window and was killed and reaped."
+  ]
+}
