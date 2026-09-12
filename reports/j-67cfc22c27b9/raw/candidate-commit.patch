@@ -1,0 +1,343 @@
+commit eb796a5798ccc3692728b84ce04e7daeae4baa38
+Author:     AMDPilot Agent <amdpilot-agent@users.noreply.github.com>
+AuthorDate: Sat Sep 12 21:01:26 2026 +0000
+Commit:     AMDPilot Agent <amdpilot-agent@users.noreply.github.com>
+CommitDate: Sat Sep 12 21:01:50 2026 +0000
+
+    fix: reject impossible ignore-eos SWA requests
+
+diff --git a/python/sglang/srt/managers/schedule_policy.py b/python/sglang/srt/managers/schedule_policy.py
+index 7588db6..6fbab43 100644
+--- a/python/sglang/srt/managers/schedule_policy.py
++++ b/python/sglang/srt/managers/schedule_policy.py
+@@ -1166,12 +1166,19 @@ class PrefillAdder:
+         if paged_input > min(self.cur_rem_tokens, self.rem_total_tokens):
+             return AddReqResult.NO_TOKEN
+         if self.is_hybrid_swa:
++            max_new_tokens = self._swa_new_tokens(req)
+             if (
+-                self._swa_budget_for_req(
+-                    cand_extend_input_len, self._swa_new_tokens(req)
+-                )
++                self._swa_budget_for_req(cand_extend_input_len, max_new_tokens)
+                 > self.rem_swa_tokens
+             ):
++                # Prefix-cache-disabled ignore_eos admission does not support
++                # chunked prefill. If the complete request cannot fit even
++                # after transient SWA pressure drains, deferring it can never
++                # make progress and would pin the FCFS queue indefinitely.
++                if self._swa_req_never_fits(
++                    cand_extend_input_len, max_new_tokens
++                ):
++                    return self._reject_swa_req(req, max_new_tokens)
+                 return AddReqResult.NO_TOKEN
+ 
+         def add_req_state(r, insert_sort=False):
+diff --git a/reports/j-722b1713a1d3/investigation.md b/reports/j-722b1713a1d3/investigation.md
+new file mode 100644
+index 0000000..5745e1b
+--- /dev/null
++++ b/reports/j-722b1713a1d3/investigation.md
+@@ -0,0 +1,32 @@
++# Hybrid SWA ignore-eos starvation correction
++
++Upstream issue: https://github.com/sgl-project/sglang/issues/31205
++
++Mirror issue: https://github.com/amdpilot-org/sglang/issues/3342
++
++Candidate PR: https://github.com/amdpilot-org/sglang/pull/3275 at exact commit `75b30f8215eca5480055578e2bc4c02efcddcf18`
++
++Independent review PR: https://github.com/amdpilot-org/sglang/pull/3311
++
++## Reproduction
++
++The candidate's two commits were applied unchanged to the prepared base before testing. A regression using the review's exact geometry (`size_swa=rem_swa=512`, `page_size=512`, 2,000-token prompt, `max_new_tokens=1`, `ignore_eos=True`, and `tree_cache.disable=True`) called `add_one_req` three times. At the candidate state all three attempts returned `NO_TOKEN`; no extend range or terminal rejection was recorded. The failing pytest output is retained in `raw/ignore-eos-before.txt`.
++
++The source confirms why: `add_one_req` immediately dispatches this configuration to `add_one_req_ignore_eos`, before the candidate's ordinary-request safe-chunk/reject logic. That specialized path cannot chunk a prefill and compared only against currently remaining SWA capacity, so no future pool drain could make an intrinsically oversized request admissible.
++
++## Correction
++
++The candidate's valid changes are preserved. In `add_one_req_ignore_eos`, an SWA capacity miss now uses the same total-pool predicate and rejection mechanism as ordinary admission. It rejects only when the complete request cannot fit after all transient SWA pressure drains. A companion boundary test verifies that `rem_swa=512` with `size_swa=4096` still returns `NO_TOKEN`, because that request may become admissible later.
++
++The scheduler handling inherited from the candidate removes `REJECT` requests from the queue, releases cache-side state, and returns the existing HTTP 400 error response.
++
++## Evidence
++
++- Candidate regression: 1 failed; three attempts ended in `NO_TOKEN` rather than `REJECT`.
++- Corrected focused cases: 2 passed (permanent oversize rejects, transient pressure defers).
++- Complete `test_prefill_adder.py`: 36 passed, 12 subtests passed.
++- Python byte-compilation and `git diff --check` both exited 0.
++
++## Limitations
++
++DeepSeek-V4-Pro/DSpark weights and the reported 1P1D TP4+TP4 mooncake TCP multi-node 8xB300 deployment were unavailable. The assigned device enumerated as one AMD Instinct MI355X (`gfx950`), but deterministic scheduler-admission tests do not launch GPU kernels. This work therefore does not claim a full HTTP serving, model-semantic, transfer, or distributed reproduction. No native source changed, so no native rebuild was applicable.
+diff --git a/reports/j-722b1713a1d3/raw/gpu-enumeration.txt b/reports/j-722b1713a1d3/raw/gpu-enumeration.txt
+new file mode 100644
+index 0000000..ff1e097
+--- /dev/null
++++ b/reports/j-722b1713a1d3/raw/gpu-enumeration.txt
+@@ -0,0 +1,13 @@
++Agent 3
++*******
++  Name:                    gfx950
++  Uuid:                    GPU-c1a597582efe51ae
++  Marketing Name:          AMD Instinct MI355X
++  Vendor Name:             AMD
++  Feature:                 KERNEL_DISPATCH
++--
++  ISA Info:
++    ISA 1
++      Name:                    amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-
++      Machine Models:          HSA_MACHINE_MODEL_LARGE
++      Profiles:                HSA_PROFILE_BASE
+diff --git a/reports/j-722b1713a1d3/raw/ignore-eos-after-focused.txt b/reports/j-722b1713a1d3/raw/ignore-eos-after-focused.txt
+new file mode 100644
+index 0000000..a8fa894
+--- /dev/null
++++ b/reports/j-722b1713a1d3/raw/ignore-eos-after-focused.txt
+@@ -0,0 +1,18 @@
++..                                                                       [100%]
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++2 passed, 17 warnings in 8.75s
+diff --git a/reports/j-722b1713a1d3/raw/ignore-eos-before.txt b/reports/j-722b1713a1d3/raw/ignore-eos-before.txt
+new file mode 100644
+index 0000000..61723ba
+--- /dev/null
++++ b/reports/j-722b1713a1d3/raw/ignore-eos-before.txt
+@@ -0,0 +1,99 @@
++F                                                                        [100%]
++=================================== FAILURES ===================================
++_ TestPrefillAdder.test_ignore_eos_intrinsically_oversized_swa_req_is_rejected _
++
++self = <test_prefill_adder.TestPrefillAdder testMethod=test_ignore_eos_intrinsically_oversized_swa_req_is_rejected>
++
++    def test_ignore_eos_intrinsically_oversized_swa_req_is_rejected(self):
++        adder, req = self._build_dsv4_issue_req(
++            prompt_len=2_000, rem_swa=512, size_swa=512
++        )
++        self.mock_tree_cache.disable = True
++        req.sampling_params.ignore_eos = True
++
++        for _ in range(3):
++            result = adder.add_one_req(
++                req, has_chunked_req=False, truncation_align_size=None
++            )
++            if result is AddReqResult.REJECT:
++                break
++
++>       self.assertIs(result, AddReqResult.REJECT)
++E       AssertionError: <AddReqResult.NO_TOKEN: 2> is not <AddReqResult.REJECT: 4>
++
++test/registered/unit/managers/test_prefill_adder.py:1052: AssertionError
++
++During handling of the above exception, another exception occurred:
++python/sglang/test/test_utils.py:2194: in _callTestMethod
++    retry(
++_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
++
++fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x74b5690ccc20>
++max_retry = 0, initial_delay = 2.0, max_delay = 60.0
++should_retry = <function <lambda> at 0x74be4ec8ed40>
++
++    def retry(
++        fn,
++        max_retry: int,
++        initial_delay: float = 2.0,
++        max_delay: float = 60.0,
++        should_retry: Callable[[Any], bool] = lambda e: True,
++    ):
++        for try_index in itertools.count():
++            try:
++                return fn()
++            except SkipTest:
++                # Do NOT retry skipped tests - used in CI and unittest
++                raise
++            except _ShouldStop:
++                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
++                # when a subtest fails/skips and `result.failfast` is True
++                # (CI invokes `python3 file.py -f`). It signals the outer
++                # `testPartExecutor` to stop the test method cleanly; do
++                # NOT retry, just propagate so unittest handles it.
++                raise
++            except Exception as e:
++                traceback.print_exc()
++
++                if try_index >= max_retry:
++>                   raise Exception(f"retry() exceed maximum number of retries.")
++E                   Exception: retry() exceed maximum number of retries.
++
++python/sglang/srt/utils/common.py:3529: Exception
++----------------------------- Captured stderr call -----------------------------
++Traceback (most recent call last):
++  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
++    return fn()
++           ^^^^
++  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
++    lambda: super(CustomTestCase, self)._callTestMethod(method),
++            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
++    if method() is not None:
++       ^^^^^^^^
++  File "/job/repo/test/registered/unit/managers/test_prefill_adder.py", line 1052, in test_ignore_eos_intrinsically_oversized_swa_req_is_rejected
++    self.assertIs(result, AddReqResult.REJECT)
++  File "/usr/lib/python3.12/unittest/case.py", line 1166, in assertIs
++    self.fail(self._formatMessage(msg, standardMsg))
++  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
++    raise self.failureException(msg)
++AssertionError: <AddReqResult.NO_TOKEN: 2> is not <AddReqResult.REJECT: 4>
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++=========================== short test summary info ============================
++FAILED test/registered/unit/managers/test_prefill_adder.py::TestPrefillAdder::test_ignore_eos_intrinsically_oversized_swa_req_is_rejected
++1 failed, 17 warnings in 19.31s
+diff --git a/reports/j-722b1713a1d3/raw/prefill-adder-full.txt b/reports/j-722b1713a1d3/raw/prefill-adder-full.txt
+new file mode 100644
+index 0000000..767c97d
+--- /dev/null
++++ b/reports/j-722b1713a1d3/raw/prefill-adder-full.txt
+@@ -0,0 +1,18 @@
++....................................                         [100%]
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++36 passed, 17 warnings, 12 subtests passed in 8.85s
+diff --git a/reports/j-722b1713a1d3/raw/static-checks.txt b/reports/j-722b1713a1d3/raw/static-checks.txt
+new file mode 100644
+index 0000000..f5eab76
+--- /dev/null
++++ b/reports/j-722b1713a1d3/raw/static-checks.txt
+@@ -0,0 +1,2 @@
++compileall_exit=0
++git_diff_check_exit=0
+diff --git a/reports/j-722b1713a1d3/result.json b/reports/j-722b1713a1d3/result.json
+new file mode 100644
+index 0000000..38d60b0
+--- /dev/null
++++ b/reports/j-722b1713a1d3/result.json
+@@ -0,0 +1,42 @@
++{
++  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31205",
++  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
++  "outcome": "fixed",
++  "summary": "Reproduced PR 3311's remaining counterexample against candidate PR 3275 at 75b30f8215eca5480055578e2bc4c02efcddcf18: the prefix-cache-disabled ignore_eos path returned NO_TOKEN on three attempts for an intrinsically impossible hybrid-SWA request. Preserved the candidate's valid safe-chunking, rejection, and scheduler cleanup fixes, and extended total-pool rejection to the specialized non-chunking ignore_eos path while retaining transient-pressure deferral.",
++  "tests": [
++    {
++      "command": "PYTHONPATH=/job/repo/python:/job/repo /tmp/amdpilot-repo-j-722b1713a1d3/venv/bin/python -m pytest -q test/registered/unit/managers/test_prefill_adder.py::TestPrefillAdder::test_ignore_eos_intrinsically_oversized_swa_req_is_rejected (candidate logic before correction)",
++      "exit_code": 1,
++      "what_was_measured": "Exact review geometry returned NO_TOKEN after three attempts instead of terminal REJECT; retained in raw/ignore-eos-before.txt."
++    },
++    {
++      "command": "PYTHONPATH=/job/repo/python:/job/repo /tmp/amdpilot-repo-j-722b1713a1d3/venv/bin/python -m pytest -q test/registered/unit/managers/test_prefill_adder.py::TestPrefillAdder::test_ignore_eos_intrinsically_oversized_swa_req_is_rejected test/registered/unit/managers/test_prefill_adder.py::TestPrefillAdder::test_ignore_eos_swa_req_under_transient_pressure_still_defers",
++      "exit_code": 0,
++      "what_was_measured": "2 passed: intrinsically impossible ignore_eos request rejects, while a request blocked only by current SWA pressure still defers."
++    },
++    {
++      "command": "PYTHONPATH=/job/repo/python:/job/repo /tmp/amdpilot-repo-j-722b1713a1d3/venv/bin/python -m pytest -q test/registered/unit/managers/test_prefill_adder.py",
++      "exit_code": 0,
++      "what_was_measured": "Complete focused scheduler-admission regression file: 36 passed, 12 subtests passed."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-722b1713a1d3/venv/bin/python -m compileall -q python/sglang/srt/managers/schedule_policy.py python/sglang/srt/managers/scheduler.py",
++      "exit_code": 0,
++      "what_was_measured": "Changed and integrated Python scheduler sources byte-compiled successfully."
++    },
++    {
++      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365",
++      "exit_code": 0,
++      "what_was_measured": "Consolidated diff has no whitespace errors."
++    }
++  ],
++  "gpu_execution": false,
++  "gpu_execution_evidence": "No GPU kernels were needed or launched by the deterministic PrefillAdder tests. rocminfo enumerated the assigned device as AMD Instinct MI355X with gfx950 ISA; retained in raw/gpu-enumeration.txt.",
++  "native_rebuilt": false,
++  "remaining_limitations": [
++    "DeepSeek-V4-Pro/DSpark weights were unavailable.",
++    "The reported 1P1D TP4+TP4 mooncake TCP multi-node 8xB300 deployment was unavailable; only one assigned gfx950 MI355X was visible.",
++    "Deterministic scheduler-admission coverage does not validate full HTTP transport, model semantics, transfer, or distributed behavior.",
++    "No native source changed, so a native rebuild was not applicable."
++  ]
++}
+diff --git a/test/registered/unit/managers/test_prefill_adder.py b/test/registered/unit/managers/test_prefill_adder.py
+index d9a2f22..0c48ed1 100644
+--- a/test/registered/unit/managers/test_prefill_adder.py
++++ b/test/registered/unit/managers/test_prefill_adder.py
+@@ -1035,6 +1035,37 @@ class TestPrefillAdder(CustomTestCase):
+         self.assertEqual([item[0] for item in adder.rejected_reqs], [req])
+         self.assertIn("capacity=512 tokens", adder.rejected_reqs[0][1])
+ 
++    def test_ignore_eos_intrinsically_oversized_swa_req_is_rejected(self):
++        adder, req = self._build_dsv4_issue_req(
++            prompt_len=2_000, rem_swa=512, size_swa=512
++        )
++        self.mock_tree_cache.disable = True
++        req.sampling_params.ignore_eos = True
++
++        for _ in range(3):
++            result = adder.add_one_req(
++                req, has_chunked_req=False, truncation_align_size=None
++            )
++            if result is AddReqResult.REJECT:
++                break
++
++        self.assertIs(result, AddReqResult.REJECT)
++        req.set_extend_range.assert_not_called()
++        self.assertEqual([item[0] for item in adder.rejected_reqs], [req])
++
++    def test_ignore_eos_swa_req_under_transient_pressure_still_defers(self):
++        adder, req = self._build_dsv4_issue_req(
++            prompt_len=2_000, rem_swa=512, size_swa=4_096
++        )
++        self.mock_tree_cache.disable = True
++        req.sampling_params.ignore_eos = True
++
++        self.assertIs(
++            adder.add_one_req(req, has_chunked_req=False, truncation_align_size=None),
++            AddReqResult.NO_TOKEN,
++        )
++        self.assertEqual(adder.rejected_reqs, [])
++
+     def test_intrinsically_oversized_swa_req_rejects_below_one_page_cap(self):
+         # 1,023 free tokens leave 510 after decode/page headroom: positive, but
+         # still less than one 512-token page and therefore not a usable chunk.
