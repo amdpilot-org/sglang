@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38795",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the ModelOpt NVFP4 MoE apply-dispatch contradiction with a cached FLASHINFER_CUTLASS layer backend and live TRITON/AUTO global state. Inspected open upstream PR https://github.com/sgl-project/sglang/pull/38932, then implemented the requested mirror fix with regression coverage and preserved the existing routed TRT-LLM behavior. Changed the TRT-LLM, CuTeDSL, and CUTLASS apply guards to use the same authoritative per-layer backend already used by the other branches and diagnostics. Regression tests exercise adaptive-style target/draft state transitions, every supported local apply branch, and missing cached state while stopping external kernels at the runner boundary.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-54a5d4cf04a4/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_modelopt_nvfp4_backend_dispatch.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction through the actual ModelOptNvFp4FusedMoEMethod.apply dispatch: cached FLASHINFER_CUTLASS with live TRITON/AUTO raised the contradictory NotImplementedError. Raw output: /job/raw-output/failing-before.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-54a5d4cf04a4/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_modelopt_nvfp4_backend_dispatch.py test/registered/unit/test_runtime_context.py",
+      "exit_code": 0,
+      "what_was_measured": "103 tests and 140 subtests passed. Covered cached CUTLASS under live TRITON/AUTO, cached unsupported TRITON under live CUTLASS, absent cached state, and CUTLASS/TRT-LLM/CuTeDSL/MegaMoE/Marlin local apply branches. External fused kernels were intercepted at runner.run. Raw output: /job/raw-output/passing-after.txt"
+    },
+    {
+      "command": "git diff --check && PYTHONPATH=python /tmp/amdpilot-repo-j-54a5d4cf04a4/venv/bin/python -m py_compile python/sglang/srt/layers/quantization/modelopt_quant.py test/registered/unit/layers/quantization/test_modelopt_nvfp4_backend_dispatch.py",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity and Python syntax compilation."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-54a5d4cf04a4/venv/bin/python -m ruff check python/sglang/srt/layers/quantization/modelopt_quant.py test/registered/unit/layers/quantization/test_modelopt_nvfp4_backend_dispatch.py",
+      "exit_code": 1,
+      "what_was_measured": "Lint tool availability; the prepared interpreter has no ruff module. Raw output: /job/raw-output/ruff.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "Prepared interpreter reports torch 2.11.0+rocm7.2, HIP 7.2.26015, CUDA runtime null, and one ROCm-visible device. No CUDA/Blackwell kernel was executed because the issue requires CUDA NVFP4 on B300; this dispatch-only change does not alter numerical kernels.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported 8xB300 sm_103 adaptive EAGLE startup and CUDA-graph capture remain explicitly unverified because the assigned environment is a single ROCm device with no CUDA runtime.",
+    "No GPU numerical comparison was performed: the patch changes only backend branch selection and calls the existing runner unchanged; external kernels were instrumented only at runner.run.",
+    "No native code changed and repository-environment.json provides no native rebuild target.",
+    "Ruff was unavailable in the prepared Python environment."
+  ]
+}
