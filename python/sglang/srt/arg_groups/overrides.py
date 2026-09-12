@@ -622,6 +622,7 @@ def _check_dsa_backend_constraints(
     decode_backend: Optional[str],
     *,
     hip: bool,
+    dcp_size: int = 1,
 ) -> None:
     """Validate DSA backend / platform / kv-cache-dtype constraints."""
     chosen = {prefill_backend, decode_backend}
@@ -634,15 +635,13 @@ def _check_dsa_backend_constraints(
             "(flashmla_kv on Hopper, trtllm on Blackwell)."
         )
 
-    cuda_fp8_unsupported = {"tilelang"} & chosen
-    if not hip and kv_cache_dtype == "fp8_e4m3" and cuda_fp8_unsupported:
-        raise ValueError(
-            f"The {'/'.join(sorted(cuda_fp8_unsupported))} DSA prefill/decode kernels "
-            "only support an fp8_e4m3 KV cache on ROCm/HIP; on CUDA they require "
-            "a bfloat16 KV cache. Use --kv-cache-dtype bfloat16, or keep "
-            "--kv-cache-dtype fp8_e4m3 and pick an fp8-capable DSA backend "
-            "(flashmla_kv on Hopper, trtllm on Blackwell)."
-        )
+    _check_tilelang_dsa_fp8_kv(
+        kv_cache_dtype,
+        prefill_backend,
+        decode_backend,
+        hip=hip,
+        dcp_size=dcp_size,
+    )
 
 
 def _check_tilelang_dsa_fp8_kv(
@@ -651,10 +650,40 @@ def _check_tilelang_dsa_fp8_kv(
     decode_backend: Optional[str],
     *,
     hip: bool,
+    dcp_size: int = 1,
 ) -> None:
-    """Backward-compatible entry point for the TileLang DSA validation."""
-    _check_dsa_backend_constraints(
-        kv_cache_dtype, prefill_backend, decode_backend, hip=hip
+    """Validate the raw-layout TileLang FP8 KV path on CUDA."""
+    if (
+        hip
+        or kv_cache_dtype != "fp8_e4m3"
+        or "tilelang" not in {prefill_backend, decode_backend}
+    ):
+        return
+    if dcp_size > 1:
+        raise ValueError(
+            "The tilelang DSA fp8_e4m3 KV path on CUDA stores the raw MLA "
+            "layout and its fused-quant writer does not apply the DCP rank "
+            "filter, so it is incompatible with --dcp-size > 1. Use "
+            "--kv-cache-dtype bfloat16 with DCP, or dcp_size 1 with fp8."
+        )
+    if prefill_backend != decode_backend:
+        raise ValueError(
+            "On CUDA, an fp8_e4m3 KV cache with a tilelang DSA backend requires "
+            "BOTH --dsa-prefill-backend and --dsa-decode-backend to be tilelang: "
+            "tilelang consumes the raw fp8 MLA KV layout, while other CUDA "
+            "backends expect the scaled layout."
+        )
+    import torch
+
+    major, minor = torch.cuda.get_device_capability()
+    if major * 10 + minor < 89:
+        raise ValueError(
+            "The tilelang DSA fp8_e4m3 KV path on CUDA requires fp8 tensor-core "
+            f"MMA (SM89+); got sm_{major}{minor}."
+        )
+    logger.warning(
+        "Enabling the tilelang DSA fp8_e4m3 KV cache on CUDA with the raw fp8 "
+        "MLA layout. Expect a small accuracy delta versus bfloat16 KV cache."
     )
 
 
@@ -753,7 +782,11 @@ def _dsa_split_backend_resolution(view: Any) -> dict:
         # dtype-aware, so an explicitly requested backend still has to clear the
         # shared backend/kv-cache-dtype rules before this arm returns early.
         _check_dsa_backend_constraints(
-            kv_cache_dtype, prefill, decode, hip=get_platform().is_hip
+            kv_cache_dtype,
+            prefill,
+            decode,
+            hip=get_platform().is_hip,
+            dcp_size=getattr(view, "dcp_size", 1) or 1,
         )
         logger.warning(
             f"HiSparse enabled ({kv_cache_dtype}): using DSA backends "
@@ -783,7 +816,11 @@ def _dsa_split_backend_resolution(view: Any) -> dict:
     prefill = declared.get("dsa_prefill_backend", view.dsa_prefill_backend)
     decode = declared.get("dsa_decode_backend", view.dsa_decode_backend)
     _check_dsa_backend_constraints(
-        kv_cache_dtype, prefill, decode, hip=get_platform().is_hip
+        kv_cache_dtype,
+        prefill,
+        decode,
+        hip=get_platform().is_hip,
+        dcp_size=getattr(view, "dcp_size", 1) or 1,
     )
     logger.warning(
         f"Set DSA backends for {kv_cache_dtype} KV Cache: "
