@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39092",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/663",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/530",
+  "candidate_commit": "f5bffd783f1b1a9d1b2006fe5b4be4c1db960ae2",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The base reproduced the third-flush IndexError and pre-crash trace mislabeling. The exact candidate bound each flush to its actual ShapeKey and produced 16 collision-free, correctly attributed real GPU traces across batch, LoRA, attention/DSA-like, and stream variants.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-9a024001c2c2/venv/bin/python /job/review-evidence-j-9a024001c2c2/candidate_gpu_repro.py (base revision)",
+      "exit_code": 1,
+      "what_was_measured": "Genuine ROCm CUDA-graph/profiler callback reproduction; failed on the third flush with IndexError after writing two traces, including one misattributed filename."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9a024001c2c2/venv/bin/python -m pytest -q test/registered/unit/model_executor/runner/test_decode_cuda_graph_runner.py test/registered/unit/model_executor/runner_backend/test_full_cuda_graph_backend.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression coverage for exact ShapeKey enqueueing, optional identity fields, unique filenames, profiler scheduling, and backend integration; 18 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9a024001c2c2/venv/bin/python /job/review-evidence-j-9a024001c2c2/candidate_gpu_repro.py (candidate revision)",
+      "exit_code": 0,
+      "what_was_measured": "16 real GPU graph captures/replays across 2 batch sizes x 2 stream IDs x 2 LoRA states x 2 attention variants; 16 unique traces and max absolute replay error 0.0."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9a024001c2c2/venv/bin/python /job/review-evidence-j-9a024001c2c2/verify_trace_attribution.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent parsing of all 16 Chrome traces, matching filename identities to exact ProfilerStep order and requiring kernel events."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X (gfx950), ROCm 7.2.26015, Torch 2.11.0+rocm7.2; real torch.cuda.CUDAGraph capture/replay and profiler traces were executed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The full amd/GLM-5.2-MXFP4 TP=8 server/model was not run; the same callback path was exercised with minimal genuine GPU graphs.",
+    "Production PDMUX is NVIDIA-only; multiple stream groups were represented by separate profiler contexts and ShapeKey stream IDs on ROCm, not run through the NVIDIA PDMUX implementation.",
+    "The available GPU was MI350X rather than the reporter's MI355X.",
+    "No native rebuild was performed because the candidate changed no native source."
+  ]
+}
