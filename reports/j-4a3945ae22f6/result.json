@@ -1,0 +1,28 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35702",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the DeepSeek MLA state-dict key transition in the checked-out implementation: registering kv_b_proj on attn_mha after forward causes sharded-state deduplication to retain only the attn_mha alias, which a fresh model does not expose. The loader now narrowly resolves that historical alias to the canonical fresh-model key.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-4a3945ae22f6/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_sharded_state_loader_mla_alias.py",
+      "exit_code": 0,
+      "what_was_measured": "Four CPU regressions covering the failing post-forward/fresh-model key mismatch, an already-present alias, an unrelated attn_mha key, and a missing canonical key."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-4a3945ae22f6/venv/bin/python reports/j-4a3945ae22f6/reproduce_state_dict_transition.py",
+      "exit_code": 0,
+      "what_was_measured": "The actual ShardedStateLoader._filter_subtensors implementation retains kv_b_proj.weight before alias registration and attn_mha.kv_b_proj.weight afterward; direct lookup in a fresh state dict raises KeyError."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned AMD Instinct MI350X (gfx950 class) was visible through ROCm PyTorch, but the defect and regression are CPU-only state-dict naming behavior; no model inference was claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V2-Lite weights were not available, so the full Engine save/load reproduction and model-semantic validation were not run.",
+    "The deterministic tiny Llama serving fixture cannot qualify DeepSeek MLA architecture behavior and was therefore not substituted for the reported model.",
+    "No CUDA/GH200 reproduction was possible in the assigned ROCm gfx950 environment."
+  ]
+}

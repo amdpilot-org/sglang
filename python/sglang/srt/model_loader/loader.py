@@ -1658,6 +1658,8 @@ class ShardedStateLoader(BaseModelLoader):
     """
 
     DEFAULT_PATTERN = "model-rank-{rank}-part-{part}.safetensors"
+    _MLA_KV_B_PROJ_ALIAS = ".self_attn.attn_mha.kv_b_proj."
+    _MLA_KV_B_PROJ_CANONICAL = ".self_attn.kv_b_proj."
 
     def __init__(self, load_config: LoadConfig):
         super().__init__(load_config)
@@ -1719,6 +1721,30 @@ class ShardedStateLoader(BaseModelLoader):
                     result[k] = t
         return result
 
+    @classmethod
+    def _resolve_state_dict_key(
+        cls, checkpoint_key: str, state_dict: Dict[str, torch.Tensor]
+    ) -> str:
+        """Resolve the historical MLA runtime alias used by sharded saves.
+
+        DeepSeek MLA installs ``self_attn.kv_b_proj`` on its ``attn_mha``
+        child during the first forward.  A checkpoint saved afterwards can
+        therefore contain the same parameter under the registered runtime
+        alias, while a fresh model only exposes the canonical key.
+        """
+        if checkpoint_key in state_dict:
+            return checkpoint_key
+
+        canonical_key = checkpoint_key.replace(
+            cls._MLA_KV_B_PROJ_ALIAS,
+            cls._MLA_KV_B_PROJ_CANONICAL,
+            1,
+        )
+        if canonical_key in state_dict:
+            return canonical_key
+
+        return checkpoint_key
+
     def _prepare_weights(self, model_name_or_path: str, revision: Optional[str]):
         if os.path.isdir(model_name_or_path):
             return model_name_or_path
@@ -1773,11 +1799,12 @@ class ShardedStateLoader(BaseModelLoader):
                 with safe_open(path, framework="pt") as f:
                     for key in f.keys():  # noqa: SIM118
                         tensor = f.get_tensor(key)
+                        state_dict_key = self._resolve_state_dict_key(key, state_dict)
                         # If loading with LoRA enabled, additional padding may
                         # be added to certain parameters. We only load into a
                         # narrowed view of the parameter data.
-                        param_data = state_dict[key].data
-                        param_shape = state_dict[key].shape
+                        param_data = state_dict[state_dict_key].data
+                        param_shape = state_dict[state_dict_key].shape
                         for dim, size in enumerate(tensor.shape):
                             if size < param_shape[dim]:
                                 param_data = param_data.narrow(dim, 0, size)
@@ -1786,11 +1813,11 @@ class ShardedStateLoader(BaseModelLoader):
                                 "loading tensor of shape %s into "
                                 "parameter '%s' of shape %s",
                                 tensor.shape,
-                                key,
+                                state_dict_key,
                                 param_shape,
                             )
                         param_data.copy_(tensor)
-                        state_dict.pop(key)
+                        state_dict.pop(state_dict_key)
             if state_dict:
                 raise ValueError(f"Missing keys {tuple(state_dict)} in loaded state!")
 
