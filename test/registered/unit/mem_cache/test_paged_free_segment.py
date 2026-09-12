@@ -14,7 +14,10 @@ import torch
 from sglang.srt.managers.schedule_batch import ReqKvInfo
 from sglang.srt.mem_cache.allocator.base import BaseTokenToKVPoolAllocator
 from sglang.srt.mem_cache.allocator.paged import PagedTokenToKVPoolAllocator
-from sglang.srt.mem_cache.common import _release_overallocated_kv_indices
+from sglang.srt.mem_cache.common import (
+    _release_overallocated_kv_indices,
+    free_kv_row_segments,
+)
 from sglang.test.ci.ci_register import register_cpu_ci
 
 register_cpu_ci(est_time=10, suite="base-a-test-cpu")
@@ -189,6 +192,37 @@ class TestFreeSegments(unittest.TestCase):
         for spans in ([(0, 5), (5, 8)], [(0, 5), (7, 11)], [(0, 6), (4, 11)]):
             with self.assertRaises(AssertionError):
                 self._freed_by_segments(11, spans)
+
+    def test_kv_row_cleanup_coalesces_touching_ranges(self):
+        spans = [(0, 5), (5, 7), (8, 11)]
+        for _ in range(2):
+            alloc = _make_allocator()
+            row = _make_kv_row(alloc, 11)
+            before = len(alloc.free_pages)
+
+            free_kv_row_segments(
+                alloc,
+                [(row[a:b], a) for a, b in spans],
+                swa_evicted_seqlen=0,
+            )
+
+            freed = alloc.free_pages[: len(alloc.free_pages) - before]
+            reference = torch.unique(
+                torch.cat([row[a:b] for a, b in spans]) // PAGE_SIZE
+            )
+            self.assertTrue(torch.equal(torch.sort(freed)[0], reference))
+
+    def test_kv_row_cleanup_retry_is_idempotent(self):
+        alloc = _make_allocator()
+        row = _make_kv_row(alloc, 7)
+        segments = [(row[:5], 0), (row[5:], 5)]
+        before = len(alloc.free_pages)
+
+        free_kv_row_segments(alloc, segments, swa_evicted_seqlen=0)
+        self.assertEqual(len(alloc.free_pages), before + 2)
+
+        free_kv_row_segments(alloc, segments, swa_evicted_seqlen=0)
+        self.assertEqual(len(alloc.free_pages), before + 2)
 
 
 class _RecordingBaseAllocator(BaseTokenToKVPoolAllocator):
