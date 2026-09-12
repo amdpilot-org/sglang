@@ -5,6 +5,7 @@ import torch
 
 from sglang.kernels.ops.attention.fla.fused_gdn_gating import fused_gdn_gating
 from sglang.kernels.ops.mamba.causal_conv1d_triton import (
+    PAD_SLOT_ID,
     causal_conv1d_fn,
     causal_conv1d_update,
 )
@@ -88,8 +89,18 @@ def _causal_conv1d_with_cache_dtype(
     # The Triton prefill kernel combines values loaded from conv_states with
     # mixed_qkv and requires those branches to have one dtype. Convert only the
     # active slots for computation, then preserve the configured cache dtype at
-    # the storage boundary.
-    kernel_conv_states = conv_states[cache_indices].to(mixed_qkv.dtype)
+    # the storage boundary. Padded rows must remain detached from the real
+    # cache: indexing with PAD_SLOT_ID would otherwise gather and later update
+    # conv_states[-1].
+    valid_slots = cache_indices != PAD_SLOT_ID
+    kernel_conv_states = torch.zeros(
+        (cache_indices.shape[0], *conv_states.shape[1:]),
+        dtype=mixed_qkv.dtype,
+        device=conv_states.device,
+    )
+    kernel_conv_states[valid_slots] = conv_states[cache_indices[valid_slots]].to(
+        mixed_qkv.dtype
+    )
     kernel_cache_indices = torch.arange(
         cache_indices.shape[0], device=cache_indices.device, dtype=cache_indices.dtype
     )
@@ -101,7 +112,9 @@ def _causal_conv1d_with_cache_dtype(
         cache_indices=kernel_cache_indices,
         **kwargs,
     )
-    _store_tracked_conv_states(conv_states, cache_indices, kernel_conv_states)
+    _store_tracked_conv_states(
+        conv_states, cache_indices[valid_slots], kernel_conv_states[valid_slots]
+    )
     return output
 
 
@@ -1198,7 +1211,7 @@ class GDNAttnBackend(MambaAttnBackendBase):
         ssm_cache_indices: torch.Tensor,
         inplace_update: bool,
     ) -> torch.Tensor:
-        mixed_qkv = causal_conv1d_fn(
+        mixed_qkv = _causal_conv1d_with_cache_dtype(
             mixed_qkv.transpose(0, 1),
             layer.conv_weights,
             layer.bias,
