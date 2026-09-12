@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36194",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1414",
+  "candidate_commit": "05725ffdd663b9db51a182f49cb9f39e856ca759",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review reproduced the original explicit strict:null rejection on the recorded base and verified that the exact candidate accepts and normalizes null to false for ResponsesRequest and ChatCompletionRequest. The normalized false value is retained by model_dump and by the Responses-to-Chat serving conversion. Omitted, false, and true inputs retain their established behavior.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4eab53e9f497/venv/bin/python /job/review-evidence-j-4eab53e9f497/check_contract.py (at base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Both ResponsesRequest and ChatCompletionRequest rejected explicit strict:null with bool_type while omitted and boolean values worked, reproducing the original issue. Raw output: reports/j-4eab53e9f497/raw/base_contract.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4eab53e9f497/venv/bin/python /job/review-evidence-j-4eab53e9f497/check_contract.py (at candidate 05725ffdd663b9db51a182f49cb9f39e856ca759)",
+      "exit_code": 0,
+      "what_was_measured": "Explicit null was accepted and normalized to false in both request objects, both model_dump outputs, and the Responses-to-Chat conversion. Omitted/false/true behavior was preserved; object input remained invalid; existing Pydantic coercion of integer/string inputs was unchanged. Raw output: reports/j-4eab53e9f497/raw/candidate_contract.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4eab53e9f497/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_protocol.py test/registered/unit/entrypoints/openai/test_responses_protocol.py",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate passed 69 focused tests and 25 subtests, including its null-normalization regressions. Raw output: reports/j-4eab53e9f497/raw/candidate_pytest.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4eab53e9f497/venv/bin/python < direct model_validate_json checks (at candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Actual JSON null input produced false in the request models and serialized output for both APIs. Raw output: reports/j-4eab53e9f497/raw/candidate_json_input.txt"
+    },
+    {
+      "command": "git diff --check 05725ff^ 05725ff",
+      "exit_code": 2,
+      "what_was_measured": "The candidate has one trailing-whitespace line in reports/j-245abc24dc19/raw/focused_tests_after.txt; no product source or test code whitespace error was reported. Raw output: reports/j-4eab53e9f497/raw/candidate_diff_check.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "No GPU execution was needed: the failure is deterministic Pydantic validation/serialization and an in-process serving conversion. The prepared environment reports PyTorch 2.11.0+rocm7.2, but no model or GPU claim is made.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No live HTTP server/model test was run; request schema validation, JSON parsing, serialization, and the serving conversion were exercised directly without model weights.",
+    "No GPU architecture, model semantic accuracy, transport stack, or distributed behavior was validated because those are not involved in the original contract.",
+    "No native files changed in the candidate, so a native rebuild was not applicable.",
+    "The candidate contains trailing whitespace in a stored report artifact; this is non-functional and outside the source fix."
+  ]
+}
