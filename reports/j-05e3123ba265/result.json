@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35673",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1602",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1566",
+  "candidate_commit": "0f30ee814e66ff26cdfe3bd990856182e25f2d51",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate correctly removes one repeated Gemma 4 vision GPU-to-host max-seqlen synchronization and its focused contract and GPU numerical behavior are verified. It is a partial fix only: the original Gemma-4-31B-it TP=8 hybrid-SWA readiness hang was not reproducible in the available one-GPU, no-weights environment.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-05e3123ba265/venv/bin/python -m pytest -q /job/review-evidence-j-05e3123ba265/test_gemma4_vision_attention.py",
+      "exit_code": 1,
+      "what_was_measured": "At the recorded base, both exact candidate regression cases fail with KeyError because Gemma4VisionAttention does not forward max_seqlen."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-05e3123ba265/venv/bin/python -m pytest -q test/registered/unit/models/test_gemma4_vision_attention.py test/registered/unit/layers/attention/test_vision_max_seqlen.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, 9 focused forwarding and precomputed-max-seqlen tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-05e3123ba265/venv/bin/python /job/review-evidence-j-05e3123ba265/reproduce_direct_backend.py --batch {3,4} --seq-len {5,9} [--pass-scale-to-forward]",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, reproduced large errors 1.60046387 and 2.66284180 without a forward scale; actual Gemma semantics with forward softmax_scale=1.0 matched PyTorch SDPA with max error 0.00195312."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-05e3123ba265/venv/bin/python /job/review-evidence-j-05e3123ba265/reproduce_direct_backend.py --batch/--seq-len (1,1), (2,17), (7,3) --pass-scale-to-forward",
+      "exit_code": 0,
+      "what_was_measured": "Independent dense boundary and non-square batch/sequence cases matched PyTorch SDPA with maximum absolute errors 0, 0.00195312, and 0.00195312."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Direct VisionTritonAttention kernels executed on one AMD Instinct MI355X, arch gfx950:sramecc+:xnack-, with PyTorch 2.11.0+rocm7.2 and HIP 7.2.26015.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No evidence shows /health reaches HTTP 200 for Gemma-4-31B-it with TP=8 and hybrid SWA on AMD/ROCm.",
+    "Removing the host .item() synchronization does not establish that earlier GPU kernels or TP collectives cannot remain stalled."
+  ],
+  "remaining_limitations": [
+    "Only one gfx950 AMD Instinct MI355X was assigned; TP=8 and the reported eight Radeon AI PRO R9700 topology were unavailable.",
+    "Gemma-4-31B-it weights were unavailable, so the full model, multimodal path, hybrid SWA allocation, and HTTP readiness were not exercised.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
