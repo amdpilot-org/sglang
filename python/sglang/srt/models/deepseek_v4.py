@@ -790,6 +790,12 @@ class MqaAttentionBase(nn.Module):
         from sglang.kernels.ops.attention.deepseek_v4_rope import precompute_freqs_cis
 
         rope_theta, rope_scaling = get_rope_config(config)
+        if isinstance(rope_scaling, dict) and (
+            "main" in rope_scaling or "compress" in rope_scaling
+        ):
+            rope_section = "compress" if self.compress_ratio else "main"
+            rope_scaling = rope_scaling.get(rope_section) or {}
+            rope_theta = rope_scaling.get("rope_theta", rope_theta)
         self.rope_scaling = dict(rope_scaling) if rope_scaling else None
         scaling = self.rope_scaling or {}
 
@@ -803,7 +809,7 @@ class MqaAttentionBase(nn.Module):
             rope_original_seq_len
             if rope_original_seq_len is not None
             else (
-                scaling["original_max_position_embeddings"]
+                scaling.get("original_max_position_embeddings", 0)
                 if self.compress_ratio
                 else 0
             )
@@ -920,7 +926,13 @@ class MQALayer(MqaAttentionBase):
         )
 
         active_rope_scaling = None
-        if self.compress_ratio in (4, 128):
+        if (
+            self.compress_ratio in (4, 128)
+            and (self.rope_scaling or {}).get(
+                "rope_type", (self.rope_scaling or {}).get("type")
+            )
+            != "default"
+        ):
             active_rope_scaling = dict(self.rope_scaling or {})
             active_rope_scaling["rope_type"] = "deepseek_yarn"
         self.rotary_emb = get_rope_wrapper(
