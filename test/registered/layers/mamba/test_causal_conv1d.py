@@ -240,6 +240,59 @@ def test_causal_conv1d_update(dim, width, seqlen, has_bias, silu_activation, ity
     assert torch.allclose(out, out_ref, rtol=rtol, atol=atol)
 
 
+@pytest.mark.parametrize(
+    ("width", "state_len", "seqlen", "cache_cursor"),
+    [
+        (2, 8, 3, None),
+        (3, 4, 3, 0),
+        (3, 4, 3, 2),
+        (4, 6, 2, 5),
+    ],
+)
+def test_causal_conv1d_update_state_layouts(
+    width, state_len, seqlen, cache_cursor
+):
+    """Oversized linear and circular states match an independent conv reference."""
+    device = get_device()
+    torch.manual_seed(41)
+    batch, dim = 1, 32
+    x = torch.randn(batch, dim, seqlen, device=device, dtype=torch.float32)
+    conv_state = torch.randn(
+        batch, dim, state_len, device=device, dtype=torch.float32
+    )
+    weight = torch.randn(dim, width, device=device, dtype=torch.float32)
+    cache_seqlens = (
+        None
+        if cache_cursor is None
+        else torch.full(
+            (batch,), cache_cursor, dtype=torch.int32, device=device
+        )
+    )
+    conv_state_ptr = conv_state.data_ptr()
+    conv_state_ref = conv_state.clone()
+
+    out = causal_conv1d_update(
+        x, conv_state, weight, cache_seqlens=cache_seqlens
+    )
+    out_ref = causal_conv1d_update_ref(
+        x, conv_state_ref, weight, cache_seqlens=cache_seqlens
+    )
+
+    assert conv_state.data_ptr() == conv_state_ptr
+    torch.testing.assert_close(out, out_ref, rtol=3e-4, atol=1e-3)
+    torch.testing.assert_close(conv_state, conv_state_ref, rtol=0, atol=0)
+
+
+def test_causal_conv1d_update_rejects_unsupported_width():
+    device = get_device()
+    x = torch.randn(1, 8, 1, device=device)
+    conv_state = torch.randn(1, 8, 4, device=device)
+    weight = torch.randn(8, 5, device=device)
+
+    with pytest.raises(ValueError, match="width must be between 2 and 4"):
+        causal_conv1d_update(x, conv_state, weight)
+
+
 @pytest.mark.parametrize("itype", [torch.float32, torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("silu_activation", [False, True])
 @pytest.mark.parametrize("has_bias", [False, True])

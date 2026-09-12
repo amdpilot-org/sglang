@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38622",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/551",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced all three silent correctness failures in the Triton causal_conv1d_update fallback, then fixed tail-aligned reads for oversized linear state, cache_seqlens-based circular history and in-place writes, and explicit rejection of widths outside 2-4. Regression coverage compares GPU output and the mutated state against an independent torch.nn.functional.conv1d plus gather/scatter reference across wrapped and unwrapped ring boundaries.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c4c3fd74f1ba/venv/bin/python -m pytest -q test/registered/layers/mamba/test_causal_conv1d.py -k 'update_state_layouts or update_rejects_unsupported_width' -vv",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression on the checked-out implementation: oversized linear output mismatch, circular state mutation mismatch, and width 5 did not raise. Raw output: reports/j-c4c3fd74f1ba/raw/failing_before.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c4c3fd74f1ba/venv/bin/python -m pytest -q test/registered/layers/mamba/test_causal_conv1d.py -k 'causal_conv1d_update'",
+      "exit_code": 0,
+      "what_was_measured": "Full existing Triton update suite plus regressions: 209 passed before the final two boundary parameters were added. Raw output: reports/j-c4c3fd74f1ba/raw/triton_update_suite.txt"
+    },
+    {
+      "command": "TRITON_CACHE_DIR=<private-mktemp-dir> TORCHINDUCTOR_CACHE_DIR=<private-mktemp-dir> PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c4c3fd74f1ba/venv/bin/python -m pytest -q test/registered/layers/mamba/test_causal_conv1d.py -k 'update_state_layouts or update_rejects_unsupported_width' -vv",
+      "exit_code": 0,
+      "what_was_measured": "Clean-cache compilation and execution of the real Triton kernel: 5 passed, covering oversized state, ring cursors 0, 2, and 5 (wrapped and unwrapped boundaries), exact in-place state equality, and width rejection. Generated AMDGCN, HSACO, LLVM IR, TTGIR, and TTIR artifacts are listed in reports/j-c4c3fd74f1ba/raw/triton_compiler_artifacts.txt; raw test output is in reports/j-c4c3fd74f1ba/raw/clean_cache_gpu_run.txt."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Executed on card0, AMD Instinct MI355X (gfx950), with PyTorch 2.11.0+rocm7.2 and Triton 3.7.0. Environment evidence: reports/j-c4c3fd74f1ba/raw/environment.txt. Clean-cache compilation emitted _causal_conv1d_update_kernel.hsaco and _causal_conv1d_update_kernel.amdgcn before all focused numerical tests passed."
+  },
+  "native_rebuilt": false,
+  "source_paths": [
+    "python/sglang/kernels/ops/mamba/causal_conv1d_triton.py",
+    "test/registered/layers/mamba/test_causal_conv1d.py"
+  ],
+  "native_paths": [],
+  "remaining_limitations": "The real Triton kernel was compiled and executed on the assigned AMD MI355X/ROCm GPU; the reporter's NVIDIA RTX 4090/CUDA architecture was not available in this environment. No native C++ or FlyDSL component was changed or rebuilt. The existing speculative-decoding state-window behavior was preserved; combining cache_seqlens circular mode with num_accept_tokens is rejected because those state models are not jointly defined by the wrapper contract."
+}
