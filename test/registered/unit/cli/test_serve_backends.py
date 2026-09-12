@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from sglang.cli.serve import serve
@@ -12,6 +14,7 @@ from sglang.cli.serve_backends import (
     ServeBackendRegistry,
     ServeRequest,
 )
+from sglang.cli.utils import try_get_model_path
 from sglang.test.ci.ci_register import register_cpu_ci
 
 register_cpu_ci(est_time=6, suite="base-a-test-cpu")
@@ -228,6 +231,25 @@ class TestServeBackendDispatch(unittest.TestCase):
     @patch("sglang.cli.serve.kill_process_tree")
     @patch("sglang.srt.plugins.load_plugins")
     @patch("sglang.cli.serve._create_backend_registry")
+    def test_config_model_path_reaches_backend_detection(
+        self, mock_registry_factory, _mock_load_plugins, _mock_kill
+    ):
+        backend = _backend()
+        registry = MagicMock()
+        registry.auto_detect.return_value = RegisteredServeBackend("llm", backend)
+        mock_registry_factory.return_value = registry
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+            config_path.write_text("model-path: Example/FromConfig\n")
+            serve(None, ["--config", str(config_path)])
+
+        request = registry.auto_detect.call_args.args[0]
+        self.assertEqual(request.model_path, "Example/FromConfig")
+        backend.run.assert_called_once_with(request)
+
+    @patch("sglang.cli.serve.kill_process_tree")
+    @patch("sglang.srt.plugins.load_plugins")
+    @patch("sglang.cli.serve._create_backend_registry")
     def test_targeted_help_is_forwarded_without_startup_or_model_path(
         self, mock_registry_factory, mock_load_plugins, mock_kill
     ):
@@ -243,6 +265,36 @@ class TestServeBackendDispatch(unittest.TestCase):
         self.assertIsNone(request.model_path)
         mock_load_plugins.assert_not_called()
         mock_kill.assert_not_called()
+
+
+class TestTryGetModelPath(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmpdir.cleanup)
+        self.config_path = Path(self.tmpdir.name) / "config.yaml"
+
+    def test_explicit_cli_model_path_overrides_config(self):
+        self.config_path.write_text("model-path: FromConfig\n")
+        self.assertEqual(
+            try_get_model_path(
+                ["--config", str(self.config_path), "--model-path", "FromCLI"]
+            ),
+            "FromCLI",
+        )
+
+    def test_model_alias_is_resolved_from_config(self):
+        self.config_path.write_text("model: Alias/FromConfig\n")
+        self.assertEqual(
+            try_get_model_path(["--config", str(self.config_path)]),
+            "Alias/FromConfig",
+        )
+
+    def test_invalid_config_returns_none(self):
+        self.config_path.write_text("model-path: [unterminated\n")
+        self.assertIsNone(try_get_model_path(["--config", str(self.config_path)]))
+
+    def test_missing_config_returns_none(self):
+        self.assertIsNone(try_get_model_path(["--config", str(self.config_path)]))
 
 
 if __name__ == "__main__":
