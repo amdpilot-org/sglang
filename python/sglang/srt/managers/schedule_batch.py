@@ -1892,7 +1892,10 @@ class Req(ReqDllmMixin):
                 req_pool_index=self.kv.req_pool_idx,
             ),
             mamba_cpu=(
-                mamba_pool.get_cpu_copy(self.kv.mamba_pool_idx.unsqueeze(0))
+                mamba_pool.get_cpu_copy(
+                    self.kv.mamba_pool_idx.unsqueeze(0),
+                    replay_indices=self.kv.req_pool_idx,
+                )
                 if mamba_pool is not None and self.kv.holds_mamba
                 else None
             ),

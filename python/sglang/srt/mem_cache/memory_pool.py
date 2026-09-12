@@ -1061,7 +1061,43 @@ class MambaPool:
         for sibling in self._slot_siblings:
             sibling.copy_slots(src_indices, dst_indices)
 
-    def get_cpu_copy(self, indices):
+    def _materialize_replayssm_for_cpu_copy(self, indices, replay_indices):
+        """Fold pending request-keyed GDN history before copying a checkpoint."""
+        write_pos = getattr(self, "replayssm_spec_write_pos", None)
+        if write_pos is None or replay_indices is None:
+            return
+        if indices.ndim == 0:
+            indices = indices.unsqueeze(0)
+        if not isinstance(replay_indices, torch.Tensor):
+            replay_indices = torch.tensor(
+                [replay_indices], dtype=torch.int64, device=write_pos.device
+            )
+
+        from sglang.kernels.ops.attention.fla.gdn_replayssm_spec_decode import (
+            commit_gdn_replayssm_circular,
+        )
+
+        # CPU retraction releases and reallocates the request row, which clears
+        # these request-keyed cursors. Materialize its accepted history into the
+        # physical checkpoint first so the CPU copy is logically complete.
+        self.replayssm_is_flush[replay_indices] = 1
+        commit_gdn_replayssm_circular(
+            checkpoint_state=self.mamba_cache.temporal,
+            d_cache=self.mamba_cache.replayssm_d,
+            k_cache=self.mamba_cache.replayssm_k,
+            g_cache=self.mamba_cache.replayssm_g,
+            d_residual_cache=self.mamba_cache.replayssm_rawv,
+            k_residual_cache=self.mamba_cache.replayssm_rawk,
+            state_batch_indices=indices,
+            replay_indices=replay_indices,
+            write_pos=write_pos,
+            cache_base=self.replayssm_cache_base,
+            is_flush=self.replayssm_is_flush,
+            accept_lens=torch.zeros_like(replay_indices, dtype=torch.int32),
+        )
+
+    def get_cpu_copy(self, indices, replay_indices=None):
+        self._materialize_replayssm_for_cpu_copy(indices, replay_indices)
         current_platform.synchronize()
         conv_cpu = [
             conv[:, indices].to("cpu", non_blocking=True)
@@ -4126,7 +4162,9 @@ class HybridLinearKVPool(KVCache):
         kv_cpu = self.full_kv_pool.get_cpu_copy(indices, req_pool_index=req_pool_index)
         # mamba_pool stores PHYSICAL ids; translate the (unified-pool virtual) ids first.
         mamba_cpu = (
-            self.mamba_pool.get_cpu_copy(self._mamba_translate(mamba_indices))
+            self.mamba_pool.get_cpu_copy(
+                self._mamba_translate(mamba_indices), replay_indices=req_pool_index
+            )
             if mamba_indices is not None
             else None
         )
