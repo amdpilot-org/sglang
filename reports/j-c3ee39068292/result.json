@@ -1,0 +1,65 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37283",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1069",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1034",
+  "candidate_commit": "0361a214d3a72f831ea23570c09c6453bb01df73",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate source fix skips non-object tool-call entries independently and preserves valid neighboring calls. The base failure was reproduced, candidate regressions and broader parser tests passed, and independent adversarial checks covered entry position, all reported JSON types, additional scalar types, affected parser formats, unknown-tool forwarding, and the HTTP route implementation.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c3ee39068292/venv/bin/python - <<'PY' ... baseline parser matrix ... PY",
+      "exit_code": 0,
+      "what_was_measured": "At exact base 358c1632, qwen25 and trinity raised AttributeError on non-object entries and discarded valid neighboring calls; integer, string, null, and list cases all reproduced. Raw output: /job/baseline-parser-evidence.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c3ee39068292/venv/bin/python -m pytest -q test/registered/unit/function_call/test_unknown_tool_name.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's focused regression suite passed 7 tests."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c3ee39068292/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py test/registered/unit/function_call/test_unknown_tool_name.py",
+      "exit_code": 0,
+      "what_was_measured": "The broader parser suite passed 250 tests and 4 subtests."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c3ee39068292/venv/bin/python - <<'PY' ... independent candidate adversarial matrix ... PY",
+      "exit_code": 0,
+      "what_was_measured": "Valid calls survived malformed entries before, after, and between calls; int, string, null, list, bool, float, top-level scalar, qwen25, trinity, llama3, mistral, and both unknown-tool forwarding modes behaved consistently."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c3ee39068292/venv/bin/python - <<'PY' ... direct parse_function_call_request invocation ... PY",
+      "exit_code": 0,
+      "what_was_measured": "The actual HTTP route implementation returned 200 and preserved the valid mixed-array call; an all-invalid array returned 200 with no calls instead of raising."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 0361a214d3a72f831ea23570c09c6453bb01df73 && PYTHONPATH=python /tmp/amdpilot-repo-j-c3ee39068292/venv/bin/python -m compileall -q python/sglang/srt/function_call/base_format_detector.py test/registered/unit/function_call/test_unknown_tool_name.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate whitespace and changed Python syntax were valid."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reviewed defect is CPU-side Python JSON validation. The prepared host exposes one AMD Instinct MI355X (gfx950) through PyTorch 2.11.0+rocm7.2, but no GPU computation is involved in the affected path."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No model weights, model generation, semantic accuracy, or distributed workload were tested.",
+    "No live socket-bound server was launched; the HTTP endpoint implementation was invoked directly, so network transport and middleware are not qualified.",
+    "No native rebuild was performed because the candidate changes only Python and no native source or generated native artifact."
+  ],
+  "evidence_paths": {
+    "review": "reports/j-c3ee39068292/review.md",
+    "failing_before_raw": "/job/baseline-parser-evidence.txt",
+    "candidate_focused_raw": "/job/candidate-focused-pytest.txt",
+    "candidate_suite_raw": "/job/candidate-parser-suite.txt",
+    "candidate_adversarial_raw": "/job/candidate-adversarial-evidence.txt",
+    "candidate_http_route_raw": "/job/candidate-http-route-evidence.txt",
+    "candidate_diff_raw": "/job/candidate-0361a214.diff",
+    "source_import": "/job/repo/python/sglang/srt/function_call/base_format_detector.py",
+    "native_library": null
+  }
+}
