@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38516",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 2689's valid pre-Ampere gates and added the missing gate for standalone QKNorm, closing review PR 2733's simulated-sm_75 loader counterexample.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-31b1fd2609e8/venv/bin/python <standalone loader counterexample> at candidate 811f07d456adfd5744b1cb703c5a67e989a39fff",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before evidence: simulated sm_75 standalone QKNorm returned true and invoked _jit_qknorm_module once."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-31b1fd2609e8/venv/bin/python -m pytest -q test/registered/kernels/ops/diffusion/test_jit_arch_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "17 tests passed: all three affected loaders reject simulated sm_75 before loading; sm_80, sm_90, sm_121, and ROCm boundary behavior remains enabled."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-31b1fd2609e8/jit-cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-31b1fd2609e8/venv/bin/python <residual-gate numerical check>",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X/gfx950, the HIP exemption remained enabled, the residual-gate JIT executed, and fp32 output matched an independent CPU-fp64 expression with max_abs=0.0."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-31b1fd2609e8/venv/bin/python -m pytest -q test/registered/kernels/ops/layernorm/test_qknorm.py",
+      "exit_code": 1,
+      "what_was_measured": "Environment blocker: 560 cases failed in the unchanged AOT reference because the installed extension lacks torch.ops.sgl_kernel.rmsnorm; the changed JIT path was not reached."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-31b1fd2609e8/venv/bin/python -m compileall -q <three changed Python modules>",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources compiled successfully."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the consolidated correction."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "AMD Instinct MI350X/gfx950 with torch 2.11.0+rocm7.2 executed the residual-gate HIP JIT and matched the independent numerical reference exactly for the fp32 fixture.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No NVIDIA sm_75 GPU or pip CUDA 13 nvcc/glibc environment was available, so the exact rsqrt/rsqrtf compiler clash and compiler-level latency elimination were not directly measured.",
+    "No FLUX.2-klein-4B weights were available, so full denoise first-step latency and model semantics were not measured.",
+    "The prepared ROCm environment's installed AOT sgl_kernel extension lacks torch.ops.sgl_kernel.rmsnorm, blocking the existing full QKNorm numerical test independently of this Python dispatch change."
+  ]
+}

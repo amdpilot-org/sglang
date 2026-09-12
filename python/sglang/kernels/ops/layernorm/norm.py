@@ -7,7 +7,9 @@ import torch
 
 from sglang.kernels.jit.utils import (
     cache_once,
+    get_jit_cuda_arch,
     is_arch_support_pdl,
+    is_hip_runtime,
     load_jit,
     make_cpp_args,
 )
@@ -18,6 +20,25 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+_LOGGED_PRE_AMPERE_QKNORM_SKIP = False
+
+
+def _is_qknorm_cuda_jit_supported() -> bool:
+    """Avoid known-bad CUDA QK-Norm JIT probes on pre-Ampere devices."""
+    global _LOGGED_PRE_AMPERE_QKNORM_SKIP
+    if is_hip_runtime():
+        return True
+    arch = get_jit_cuda_arch()
+    if arch.major >= 8:
+        return True
+    if not _LOGGED_PRE_AMPERE_QKNORM_SKIP:
+        logger.info(
+            "Skipping QK-Norm CUDA JIT on unsupported sm_%s%s",
+            arch.major,
+            arch.minor,
+        )
+        _LOGGED_PRE_AMPERE_QKNORM_SKIP = True
+    return False
 
 
 @cache_once
@@ -99,6 +120,8 @@ def _jit_qknorm_across_heads_module(dtype: torch.dtype) -> Module:
 @torch.compiler.assume_constant_result
 @cache_once
 def can_use_fused_inplace_qknorm(head_dim: int, dtype: torch.dtype) -> bool:
+    if not _is_qknorm_cuda_jit_supported():
+        return False
     if head_dim not in [64, 128, 256, 512, 1024]:
         logger.warning(f"Unsupported head_dim={head_dim} for JIT QK-Norm kernel")
         return False
