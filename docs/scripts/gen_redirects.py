@@ -105,7 +105,7 @@ EXPLICIT = {
     "/basic_usage/llama4": "/cookbook/autoregressive/Meta/Llama4",
     "/basic_usage/minimax_m2": "/cookbook/autoregressive/MiniMax/MiniMax-M2",
     "/basic_usage/popular_model_usage": "/cookbook/autoregressive/intro",
-    "/basic_usage/qwen3": "/cookbook/autoregressive/Qwen/Qwen3",
+    "/basic_usage/qwen3": "/cookbook/autoregressive/Qwen/Qwen3-Next",
     "/basic_usage/qwen3_5": "/cookbook/autoregressive/Qwen/Qwen3.5",
     "/basic_usage/qwen3_vl": "/cookbook/autoregressive/Qwen/Qwen3-VL",
     # advanced_features dropped pages
