@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/1763",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3136",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3122",
+  "candidate_commit": "155d433aa15aa7105cc619decaf00a22c86ecee6",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a partial, experimental SGLang adapter, not a verified resolution of the original SageAttention request. The recorded base rejects `sage`; the candidate registers it, parses split prefill/decode selection, rejects ROCm, and its gathered-prefix/GQA adapter matches an independent PyTorch SDPA reference on the assigned AMD GPU when the SageAttention callable is replaced. The actual SageAttention package, native INT8 Q/K kernels, CUDA numerical behavior, model quality, and performance claim were not built or executed. In addition, the exact dependency revision named by the candidate dispatches SM80/86/89/90/120 but raises on SM100, while the candidate documentation describes support broadly as NVIDIA CUDA only.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-71995f824f5e/venv/bin/python <base CLI/backend presence probe>",
+      "exit_code": 2,
+      "what_was_measured": "At the exact recorded base, argparse rejected `--prefill-attention-backend sage`; `sage` was absent from both ATTENTION_BACKEND_CHOICES and ATTENTION_BACKENDS. This reproduces the missing-feature failure. See base-reproduction.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-71995f824f5e/venv/bin/python -m pytest -q test/registered/unit/layers/test_sage_attention_backend.py test/registered/unit/server_args/test_resolution_is_reproducible.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's 17 tests, 18 subtests, and resolution regression suite passed. Its numerical tests substitute torch.scaled_dot_product_attention for the real SageAttention callable, so they measure adapter behavior rather than quantized native output. See candidate-tests.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-71995f824f5e/venv/bin/python <independent gathered-prefix, GQA, CLI, ROCm, and mask adversarial probe>",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X, split CLI selection and registry wiring passed; ROCm admission failed closed; the inherited dense paged-KV gather for a prefix-5/extend-3 causal GQA case matched an explicit bottom-right causal PyTorch reference; sliding-window/mask input was rejected. The Sage callable was still a reference substitute. See independent-adversarial.txt."
+    },
+    {
+      "command": "git checkout d9704247a5139ab4c03bf7fc6b35cc0e2cbb5ea4 in a private SageAttention source clone; inspect setup.py and sageattention/core.py",
+      "exit_code": 0,
+      "what_was_measured": "The exact documented dependency revision was inspected. Its public sageattn dispatcher selects SM80, SM86, SM89, SM90, and SM120, and otherwise raises `Unsupported CUDA architecture`; there is no SM100 dispatch branch despite setup.py recognizing SM100. See architecture-evidence.txt."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Independent adapter numerics executed on one AMD Instinct MI355X (gfx950) with Torch 2.11.0+rocm7.2. No SageAttention CUDA kernel executed; the installed environment has no `sageattention` module and no NVIDIA GPU.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "On NVIDIA SM100, the exact documented SageAttention revision's public `sageattn` dispatcher raises `ValueError: Unsupported CUDA architecture: sm100`; the candidate neither rejects this configuration during admission nor documents the exclusion.",
+    "No real SageAttention import, native build, or INT8 Q/K kernel execution was demonstrated, so installation and runtime behavior on every claimed CUDA architecture remain unverified.",
+    "No independent numerical comparison used quantized SageAttention output; replacing `sageattn` with full-precision PyTorch SDPA cannot establish the original same-accuracy claim.",
+    "No end-to-end model serving, perplexity/task-quality, long-context, throughput, latency, or memory measurement was performed, so the original approximately 2x inference-speed motivation remains unverified.",
+    "The backend's dense paged-KV gather and materialized GQA/MQA expansion may dominate or erase kernel gains, especially outside the recommended prefill-only split; this has not been measured."
+  ],
+  "remaining_limitations": [
+    "The assigned architecture is AMD gfx950 under ROCm 7.2; upstream SageAttention is CUDA-only.",
+    "No NVIDIA device, CUDA toolkit path, supported model weights, or real SageAttention installation was available.",
+    "The candidate changes no SGLang native source, so there was no candidate native component to rebuild. The external native dependency could not be built meaningfully for the assigned ROCm architecture.",
+    "The deterministic tiny Llama fixture was not used because a transport smoke on ROCm with a different attention backend cannot validate the CUDA-only quantized kernel, accuracy, or performance contract."
+  ]
+}
