@@ -29,6 +29,9 @@ from sglang.multimodal_gen.runtime.loader.component_loaders.transformer_loader i
     TransformerLoader,
 )
 from sglang.multimodal_gen.runtime.loader.component_loaders.vae_loader import VAELoader
+from sglang.multimodal_gen.runtime.models.dits.flux_2 import (
+    Flux2Transformer2DModel,
+)
 from sglang.multimodal_gen.runtime.pipelines.diffusers_pipeline import (
     DiffusersPipeline,
 )
@@ -76,6 +79,18 @@ class _FakeAITERBackend:
         return ("packed varlen attention",) if requirements.packed_varlen else ()
 
 
+class _FakeSageBackend:
+    @classmethod
+    def get_enum(cls) -> AttentionBackendEnum:
+        return AttentionBackendEnum.SAGE_ATTN
+
+    @classmethod
+    def unsupported_requirements(
+        cls, requirements: AttentionRequirements
+    ) -> tuple[str, ...]:
+        return ("packed varlen attention",) if requirements.packed_varlen else ()
+
+
 class _FakeSparseBackend:
     @classmethod
     def get_enum(cls) -> AttentionBackendEnum:
@@ -95,6 +110,8 @@ class _FakePlatform:
         cls.selected_backend = selected_backend
         if selected_backend == AttentionBackendEnum.AITER:
             return "fake.AITERBackend"
+        if selected_backend == AttentionBackendEnum.SAGE_ATTN:
+            return "fake.SageBackend"
         if selected_backend == AttentionBackendEnum.LASER_ATTN:
             return "fake.SparseBackend"
         if selected_backend in (None, AttentionBackendEnum.FA):
@@ -105,6 +122,7 @@ class _FakePlatform:
 _FAKE_BACKENDS = {
     "fake.AITERBackend": _FakeAITERBackend,
     "fake.FABackend": _FakeFABackend,
+    "fake.SageBackend": _FakeSageBackend,
     "fake.SparseBackend": _FakeSparseBackend,
     "fake.SDPABackend": _FakeSDPABackend,
 }
@@ -237,6 +255,43 @@ class TestAttentionBackendFallback(unittest.TestCase):
 
         self.assertIs(backend, _FakeAITERBackend)
         self.assertEqual(_FakePlatform.selected_backend, AttentionBackendEnum.AITER)
+
+    def test_flux2_explicit_sage_backend_bypasses_automatic_selection_set(self):
+        self.assertNotIn(
+            AttentionBackendEnum.SAGE_ATTN,
+            Flux2Transformer2DModel._supported_attention_backends,
+        )
+
+        backend = self._resolve(
+            AttentionBackendEnum.SAGE_ATTN,
+            explicit=True,
+            is_cross_attention=False,
+            supported=Flux2Transformer2DModel._supported_attention_backends,
+        )
+
+        self.assertIs(backend, _FakeSageBackend)
+        self.assertEqual(_FakePlatform.selected_backend, AttentionBackendEnum.SAGE_ATTN)
+
+    def test_flux2_implicit_sage_backend_respects_automatic_selection_set(self):
+        backend = self._resolve(
+            AttentionBackendEnum.SAGE_ATTN,
+            explicit=False,
+            is_cross_attention=False,
+            supported=Flux2Transformer2DModel._supported_attention_backends,
+        )
+
+        self.assertIs(backend, _FakeFABackend)
+        self.assertIsNone(_FakePlatform.selected_backend)
+
+    def test_flux2_explicit_sage_backend_still_checks_capabilities(self):
+        with self.assertRaisesRegex(ValueError, "packed varlen attention"):
+            self._resolve(
+                AttentionBackendEnum.SAGE_ATTN,
+                explicit=True,
+                is_cross_attention=False,
+                supported=Flux2Transformer2DModel._supported_attention_backends,
+                attention_requirements=AttentionRequirements(packed_varlen=True),
+            )
 
     def test_explicit_backend_still_fails_missing_capability(self):
         with self.assertRaisesRegex(ValueError, "packed varlen attention"):
