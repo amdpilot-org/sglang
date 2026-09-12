@@ -1,0 +1,62 @@
+F.F.                                                                     [100%]
+=================================== FAILURES ===================================
+_ TestTokenizerManagerWeightUpdates.test_cancellation_keeps_ownership_until_response_is_drained _
+
+self = <test_tokenizer_manager_weight_updates.TestTokenizerManagerWeightUpdates testMethod=test_cancellation_keeps_ownership_until_response_is_drained>
+
+    async def test_cancellation_keeps_ownership_until_response_is_drained(self):
+        manager, scheduler = _manager()
+        first = asyncio.create_task(manager.update_weights_from_disk(_request("first")))
+        await scheduler.wait_for_requests(1)
+        first.cancel()
+        await asyncio.sleep(0)
+    
+        second = asyncio.create_task(manager.update_weights_from_disk(_request("second")))
+        try:
+            await asyncio.sleep(0)
+>           self.assertEqual(
+                len(scheduler.requests),
+                1,
+                "a cancelled update released ownership before its response arrived",
+            )
+E           AssertionError: 2 != 1 : a cancelled update released ownership before its response arrived
+
+test/registered/unit/managers/test_tokenizer_manager_weight_updates.py:103: AssertionError
+_ TestTokenizerManagerWeightUpdates.test_paused_concurrent_updates_each_receive_own_completion _
+
+self = <test_tokenizer_manager_weight_updates.TestTokenizerManagerWeightUpdates testMethod=test_paused_concurrent_updates_each_receive_own_completion>
+
+    async def test_paused_concurrent_updates_each_receive_own_completion(self):
+        manager, scheduler = _manager()
+        first = asyncio.create_task(manager.update_weights_from_disk(_request("first")))
+        second = asyncio.create_task(manager.update_weights_from_disk(_request("second")))
+    
+        try:
+            await scheduler.wait_for_requests(1)
+            scheduler.complete("first complete")
+    
+            done, _ = await asyncio.wait({first}, timeout=0.1)
+>           self.assertIn(first, done, "the first update lost its completion")
+E           AssertionError: <Task pending name='Task-16' coro=<TokenizerManager.update_weights_from_disk() running at /job/repo/python/sglang/srt/managers/tokenizer_manager.py:2082> wait_for=<Future pending cb=[Task.task_wakeup()] created at /job/repo/python/sglang/srt/managers/tokenizer_manager.py:2139> created at /usr/lib/python3.12/asyncio/tasks.py:420> not found in set() : the first update lost its completion
+
+test/registered/unit/managers/test_tokenizer_manager_weight_updates.py:78: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/managers/test_tokenizer_manager_weight_updates.py::TestTokenizerManagerWeightUpdates::test_cancellation_keeps_ownership_until_response_is_drained
+FAILED test/registered/unit/managers/test_tokenizer_manager_weight_updates.py::TestTokenizerManagerWeightUpdates::test_paused_concurrent_updates_each_receive_own_completion
+2 failed, 2 passed, 17 warnings in 9.13s
