@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/3642",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "5870e01368cead04c7d273ffbd0b3a89b4108f88",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the reproduced nonzero-reserved-slot prompt accounting case and passes its regression suite, but still silently accepts an impossible request when configured EAGLE reserved slots exceed the model context. Its HTTP/GPU smoke has speculative decoding disabled and therefore does not exercise the changed path.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e8b62a343c72/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-e8b62a343c72/review-evidence/test_candidate.py (base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before on the exact recorded base: reserved-token prompt truncation retained 10 prompt tokens instead of the context-safe 7; the other three candidate tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e8b62a343c72/venv/bin/python -m pytest -q test/registered/unit/managers/test_auto_truncate_validation.py test/registered/unit/managers/test_sampling_mask_validation.py test/registered/unit/managers/test_hidden_state_server_mode.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate source checkout: 11 tests and 11 subtests passed, including the reproduced reserved-slot regression and adjacent validation compatibility."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e8b62a343c72/venv/bin/python /tmp/amdpilot-repo-j-e8b62a343c72/review-evidence/adversarial_probe.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Independent boundaries. Normal prompt/completion and reserved=3 cases fit context after truncation; disabled mode raises. Counterexample: context=10 and reserved=11 returns without error with accounted total=11."
+    },
+    {
+      "command": "git diff --name-only 358c163250ad3b1f62939b01ce1314a0a31a0365 5870e01368cead04c7d273ffbd0b3a89b4108f88 | filter native extensions",
+      "exit_code": 0,
+      "what_was_measured": "No native source files changed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No independent GPU execution was needed for Python request-budget arithmetic. The candidate's retained MI355X/gfx950 HTTP evidence was inspected, but speculative_algorithm=None means it did not exercise the changed reserved-token path."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With context_len=10 and num_reserved_tokens=11, auto-truncation returns normally after reducing prompt and completion to zero even though the accounted total remains 11 > 10."
+  ],
+  "remaining_limitations": [
+    "No qualified EAGLE draft model was available, so nonzero reserved-token behavior was validated directly at TokenizerManager rather than end-to-end on GPU.",
+    "The deterministic tiny-Llama HTTP fixture can validate transport and engine execution only and cannot validate the EAGLE-specific changed path without a compatible speculative draft model.",
+    "No native source changed; native rebuild and compiler/ISA validation were not applicable.",
+    "Independent GPU numerical comparison is not applicable to this request-validation control flow."
+  ]
+}
