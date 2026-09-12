@@ -20,10 +20,21 @@ class _ByteFallbackTokenizer:
         return [self._decode(ids) for ids in ids_list]
 
     @staticmethod
+    def convert_ids_to_tokens(token_id):
+        if token_id < 256:
+            return f"<0x{token_id:02X}>"
+        return "\ufffd" if token_id == 257 else "a"
+
+    @staticmethod
     def _decode(ids):
         data = bytearray()
         for token_id in ids:
-            data.append(token_id if token_id < 256 else ord("a"))
+            if token_id < 256:
+                data.append(token_id)
+            elif token_id == 257:
+                data.extend("\ufffd".encode())
+            else:
+                data.append(ord("a"))
         return data.decode("utf-8", errors="replace")
 
 
@@ -60,6 +71,33 @@ def _stream(steps):
 
 
 class TestIncrementalDetokenizationWindow(unittest.TestCase):
+    def test_recovery_boundary_preserves_split_utf8(self):
+        state = _stream([[STRAY_CONTINUATION_BYTE] * 63 + [0xE4], [0xB8, 0xAD]])
+        self.assertEqual(state.get_decoded_text(), "\ufffd" * 63 + "\u4e2d")
+
+    def test_recovery_boundary_preserves_four_byte_character(self):
+        state = _stream([[STRAY_CONTINUATION_BYTE] * 62 + [0xF0, 0x9F], [0x98, 0x80]])
+        self.assertEqual(state.get_decoded_text(), "\ufffd" * 62 + "\U0001f600")
+
+    def test_complete_replacement_character_commits_immediately(self):
+        manager = _manager()
+        output = manager._decode_batch_token_id_output(
+            _Batch("rid", [TEXT_TOKEN, 0xEF, 0xBF, 0xBD], 1)
+        )
+        state = manager.decode_status["rid"]
+        self.assertEqual(output, ["\ufffd"])
+        self.assertEqual(state.get_decoded_text(), "\ufffd")
+        self.assertEqual(state.surr_offset, 1)
+        self.assertEqual(state.read_offset, 4)
+
+    def test_literal_replacement_token_commits_immediately(self):
+        manager = _manager()
+        output = manager._decode_batch_token_id_output(
+            _Batch("rid", [TEXT_TOKEN, 257], 1)
+        )
+        self.assertEqual(output, ["\ufffd"])
+        self.assertEqual(manager.decode_status["rid"].get_decoded_text(), "\ufffd")
+
     def test_replacement_character_stream_has_bounded_window(self):
         state = _stream([[STRAY_CONTINUATION_BYTE] * 4] * 256)
 

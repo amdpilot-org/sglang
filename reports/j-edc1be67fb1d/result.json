@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34740",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 1732's tokenizer-derived simulated token and bounded incremental window, while correcting both PR 1810 counterexamples by distinguishing tokenizer-identified incomplete UTF-8 byte suffixes from complete U+FFFD output and retaining incomplete suffixes across forced recovery.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-edc1be67fb1d/venv/bin/python -m pytest -q test/registered/unit/managers/test_detokenizer_incremental_window.py test/registered/unit/spec/test_simulated_acceptance_token.py (exact candidate before correction)",
+      "exit_code": 1,
+      "what_was_measured": "The two independent review regressions failed while seven candidate tests passed: recovery lost U+4E2D across E4 | B8 AD, and complete EF BF BD output was delayed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-edc1be67fb1d/venv/bin/python -m pytest -q test/registered/unit/managers/test_detokenizer_incremental_window.py test/registered/unit/spec/test_simulated_acceptance_token.py",
+      "exit_code": 0,
+      "what_was_measured": "11 focused tests passed after correction, covering bounded invalid-byte streams, oversized events, two/three/four-byte boundaries, complete and literal U+FFFD, and tokenizer-derived simulated acceptance."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-edc1be67fb1d/venv/bin/python -m pytest -q test/registered/unit/managers/test_detokenizer_incremental_window.py test/registered/unit/managers/test_trim_matched_stop.py test/registered/unit/spec/test_simulated_acceptance_token.py",
+      "exit_code": 0,
+      "what_was_measured": "19 tests passed with neighboring stop-trimming coverage included."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/managers/detokenizer_manager.py test/registered/unit/managers/test_detokenizer_incremental_window.py",
+      "exit_code": 0,
+      "what_was_measured": "All configured formatting, lint, registry, and repository policy hooks passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-edc1be67fb1d/venv/bin/python -c '<synchronized simulated-acceptance tensor fixture on cuda>'",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, the preserved fixed-token tensor path produced predict=[64,64,64,64] and num_correct_drafts=[2]."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X, gfx950:sramecc+:xnack-; synchronized tensor result retained at /tmp/amdpilot-repo-j-edc1be67fb1d/evidence/gpu.log. This was not a model-serving run.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Pro weights/tokenizer were unavailable, so its exact tokenizer semantics were not directly verified.",
+    "The reported eight-GPU topology was unavailable, so model output, throughput, TTFT, and distributed behavior remain unverified.",
+    "No native source changed and the prepared environment declares native null, so no native rebuild was applicable."
+  ]
+}
