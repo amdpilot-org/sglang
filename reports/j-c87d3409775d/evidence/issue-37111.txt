@@ -1,0 +1,24 @@
+author:	hellojiaru
+association:	none
+edited:	true
+status:	none
+--
+Follow-up boundary clarification: after the decode-Graph semantic-corruption A/B reported here, the retained Eager/no-overlap profile later encountered a **separate** long-stream failure. That later event had a clear client-disconnect precursor and matched #36333: the tokenizer state was deleted while scheduler work continued, followed about two seconds later by invalid probabilities and TP termination.
+
+Backporting #36418 reclaimed two forced TCP disconnects in 2.155/2.183 seconds and then completed a 28,672-token generation with zero rank restarts.
+
+This does not change the Graph result in this issue: Graph still returned HTTP 200 with punctuation loops and failed long-context retrieval, while Eager passed those semantic gates. The lifecycle fix and evidence are published separately in `v0.1.2-canary`: https://github.com/hellojiaru/qwen38-flash-next-dual-gb10/releases/tag/v0.1.2-canary
+--
+author:	hellojiaru
+association:	none
+edited:	false
+status:	none
+--
+Important scope update: the Eager control used for this Graph semantic-corruption A/B later suffered a **separate service-level crash** under real multi-turn long-prefill traffic even after the streaming-disconnect lifecycle repair.
+
+The latest recurrence had CUDA Graph and overlap disabled, one running request, no queue, approximately 10% KV/token-pool use, `OOMKilled=false`, and no disconnect/deleted-state precursor. Both ranks reached invalid probabilities, CUDA assert, Xid 43, and restart around 50.6K total context.
+
+This does not change the result reported here: Graph silently corrupted the bounded semantic prompts while Eager passed them. It does mean that “Eager passed these gates” must not be promoted to “the Eager NEXTN/EAGLE stack is service-stable.” We have withdrawn the companion deployment profile. The numerical crash branch is tracked as related evidence in #37052.
+
+Sanitized advisory: https://github.com/hellojiaru/qwen38-flash-next-dual-gb10/blob/main/docs/withdrawal-advisory.md
+--
