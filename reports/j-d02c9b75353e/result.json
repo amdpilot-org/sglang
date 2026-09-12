@@ -1,0 +1,64 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30770",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2462",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/2428",
+  "candidate_commit": "815de1809d62c2386dea6fff94762a182f931491",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduced both synchronous preprocessing starvation paths and real ASGI /ping starvation. The exact candidate passed all three unchanged regressions and an independent concurrency/context/exception-recovery stress case. Both original blocking paths are offloaded through a serialized, context-propagating worker.",
+  "tests": [
+    {
+      "command": "python test/registered/unit/entrypoints/openai/test_serving_base_event_loop.py (recorded base with candidate regression only)",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced synchronous OpenAI request conversion blocking the API event loop."
+    },
+    {
+      "command": "python test/registered/unit/managers/test_tokenizer_manager_event_loop.py (recorded base with candidate regression only)",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced regular tokenizer fallback blocking the API event loop; serialization/context tests were skipped because the base lacks the executor."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/entrypoints/test_http_server_liveness.py (recorded base with candidate regression only)",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced /ping starvation through real in-process FastAPI chat and ping routes."
+    },
+    {
+      "command": "python test/registered/unit/entrypoints/openai/test_serving_base_event_loop.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "OpenAI conversion no longer starved an independent event-loop coroutine."
+    },
+    {
+      "command": "python test/registered/unit/managers/test_tokenizer_manager_event_loop.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Regular tokenizer responsiveness, single-worker serialization, and ContextVar propagation passed."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/entrypoints/test_http_server_liveness.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Real in-process /ping remained schedulable while chat preprocessing was blocked."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python python reports/.../raw/independent/adversarial_preprocessor.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent 50-request stress verified isolated ContextVars, maximum concurrency one, exception propagation, and executor recovery."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The deterministic defect and all reviewed paths execute in CPU request preprocessing before scheduler/GPU work; no GPU claim is made."
+  },
+  "native_rebuilt": false,
+  "native_rebuilt_reason": "Candidate changes only Python source, tests, and report artifacts; no native source or extension changed.",
+  "source_import_evidence": [
+    "/job/repo/python/sglang/srt/entrypoints/openai/serving_base.py",
+    "/job/repo/python/sglang/srt/managers/tokenizer_manager.py"
+  ],
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No model weights, inference output, semantic accuracy, distributed serving, or architecture-specific GPU behavior were tested because they are outside the pre-scheduler CPU responsiveness contract.",
+    "The candidate uses an unbounded ThreadPoolExecutor submission queue; overload/backpressure policy was not part of the original issue contract.",
+    "git diff --check reports trailing whitespace only in candidate-retained raw pytest log artifacts, not in changed source or tests."
+  ]
+}
