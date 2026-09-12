@@ -1,0 +1,139 @@
+diff --git a/python/sglang/srt/parser/conversation.py b/python/sglang/srt/parser/conversation.py
+index 585ecdc..8c32e4a 100644
+--- a/python/sglang/srt/parser/conversation.py
++++ b/python/sglang/srt/parser/conversation.py
+@@ -638,13 +638,16 @@ def generate_chat_conv(
+             if isinstance(message.content, str):
+                 conv.system_message = message.content
+             elif isinstance(message.content, list):
+-                if (
+-                    len(message.content) != 1
+-                    or getattr(message.content[0], "type", None) != "text"
++                if any(
++                    getattr(content, "type", None) != "text"
++                    for content in message.content
+                 ):
+-                    raise ValueError("The system message should be a single text.")
+-                else:
+-                    conv.system_message = getattr(message.content[0], "text", "")
++                    raise ValueError(
++                        "The system message should only contain text parts."
++                    )
++                conv.system_message = "".join(
++                    getattr(content, "text", "") for content in message.content
++                )
+         elif msg_role == "user":
+             # Handle the various types of Chat Request content types here.
+             if isinstance(message.content, str):
+@@ -709,15 +712,16 @@ def generate_chat_conv(
+             if isinstance(message.content, str):
+                 parsed_content = message.content
+             elif isinstance(message.content, list):
+-                if (
+-                    len(message.content) != 1
+-                    or getattr(message.content[0], "type", None) != "text"
++                if any(
++                    getattr(content, "type", None) != "text"
++                    for content in message.content
+                 ):
+                     raise ValueError(
+-                        "The assistant's response should be a single text."
++                        "The assistant's response should only contain text parts."
+                     )
+-                else:
+-                    parsed_content = getattr(message.content[0], "text", "")
++                parsed_content = "".join(
++                    getattr(content, "text", "") for content in message.content
++                )
+             conv.append_message(conv.roles[1], parsed_content)
+         else:
+             raise ValueError(f"Unknown role: {msg_role}")
+diff --git a/test/registered/unit/parser/test_conversation.py b/test/registered/unit/parser/test_conversation.py
+index 868bf4a..ae57327 100644
+--- a/test/registered/unit/parser/test_conversation.py
++++ b/test/registered/unit/parser/test_conversation.py
+@@ -777,6 +777,36 @@ class TestGenerateChatConv(CustomTestCase):
+         conv = generate_chat_conv(request, "chatml")
+         self.assertEqual(conv.system_message, "System text")
+ 
++    def test_system_message_joins_multiple_text_parts(self):
++        request = self._make_request(
++            [
++                ChatCompletionMessageGenericParam(
++                    role="system",
++                    content=[
++                        ChatCompletionMessageContentTextPart(
++                            type="text", text="You are "
++                        ),
++                        ChatCompletionMessageContentTextPart(
++                            type="text", text="helpful."
++                        ),
++                    ],
++                ),
++                ChatCompletionMessageUserParam(role="user", content="Hi"),
++            ]
++        )
++        conv = generate_chat_conv(request, "chatml")
++        self.assertEqual(conv.system_message, "You are helpful.")
++
++    def test_empty_system_content_list_is_empty_text(self):
++        request = self._make_request(
++            [
++                ChatCompletionMessageGenericParam(role="system", content=[]),
++                ChatCompletionMessageUserParam(role="user", content="Hi"),
++            ]
++        )
++        conv = generate_chat_conv(request, "chatml")
++        self.assertEqual(conv.system_message, "")
++
+     def test_system_message_invalid_list_raises(self):
+         """Test that system message with non-text content raises ValueError."""
+         request = self._make_request(
+@@ -830,6 +860,47 @@ class TestGenerateChatConv(CustomTestCase):
+         conv = generate_chat_conv(request, "chatml")
+         self.assertEqual(conv.messages[1][1], "Hello!")
+ 
++    def test_assistant_message_joins_multiple_text_parts(self):
++        request = self._make_request(
++            [
++                ChatCompletionMessageUserParam(role="user", content="Hi"),
++                ChatCompletionMessageGenericParam(
++                    role="assistant",
++                    content=[
++                        ChatCompletionMessageContentTextPart(
++                            type="text", text="Hello, "
++                        ),
++                        ChatCompletionMessageContentTextPart(
++                            type="text", text="world!"
++                        ),
++                    ],
++                ),
++            ]
++        )
++        conv = generate_chat_conv(request, "chatml")
++        self.assertEqual(conv.messages[1][1], "Hello, world!")
++
++    def test_assistant_message_mixed_parts_raises(self):
++        request = self._make_request(
++            [
++                ChatCompletionMessageUserParam(role="user", content="Hi"),
++                ChatCompletionMessageGenericParam(
++                    role="assistant",
++                    content=[
++                        ChatCompletionMessageContentTextPart(type="text", text="Look"),
++                        ChatCompletionMessageContentImagePart(
++                            type="image_url",
++                            image_url=ChatCompletionMessageContentImageURL(
++                                url="http://example.com/img.jpg"
++                            ),
++                        ),
++                    ],
++                ),
++            ]
++        )
++        with self.assertRaisesRegex(ValueError, "only contain text parts"):
++            generate_chat_conv(request, "chatml")
++
+     def test_assistant_invalid_list_raises(self):
+         """Test that assistant message with non-text content raises ValueError."""
+         request = self._make_request(
