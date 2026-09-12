@@ -5,6 +5,13 @@ use super::{
 use crate::bridge::TerminalError;
 use std::collections::HashMap;
 use tonic::Code;
+use tonic_health::ServingStatus;
+
+#[test]
+fn standard_health_status_matches_native_health() {
+    assert_eq!(super::serving_status(true), ServingStatus::Serving);
+    assert_eq!(super::serving_status(false), ServingStatus::NotServing);
+}
 
 #[test]
 fn openai_status_code_uses_forwarded_status_when_present() {
