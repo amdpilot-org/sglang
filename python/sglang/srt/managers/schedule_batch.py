@@ -108,6 +108,7 @@ from sglang.srt.mem_cache.allocator import BaseTokenToKVPoolAllocator
 from sglang.srt.mem_cache.base_prefix_cache import (
     BasePrefixCache,
     DecLockRefParams,
+    EvictParams,
     MatchPrefixParams,
     zero_match_result,
 )
@@ -2153,6 +2154,33 @@ def retract_all(
             hisparse_coordinator=hisparse_coordinator,
             offload_kv=offload_kv,
         )
+
+    # release_req() drops each request's lock on its radix-owned prefix, but its
+    # pressure-based eviction only reclaims enough space for a few decode steps.
+    # A generation pause is a cache-invalidation boundary (not ordinary decode
+    # preemption), so reclaim every entry that became evictable after all locks
+    # have been released. Do this once after the loop so prefixes shared by two
+    # retracted requests are not kept alive by the later request's lock.
+    if tree_cache is not None and not tree_cache.is_chunk_cache():
+        if tree_cache.supports_swa() or tree_cache.supports_mamba():
+            params = EvictParams(
+                num_tokens=tree_cache.full_evictable_size(),
+                swa_num_tokens=(
+                    tree_cache.swa_evictable_size()
+                    if tree_cache.supports_swa()
+                    else 0
+                ),
+                mamba_num=(
+                    tree_cache.mamba_evictable_size()
+                    if tree_cache.supports_mamba()
+                    else 0
+                ),
+            )
+        else:
+            params = EvictParams(num_tokens=tree_cache.evictable_size())
+
+        if params.num_tokens or params.swa_num_tokens or params.mamba_num:
+            tree_cache.evict(params)
 
 
 def compute_extend_logprob_start_len(
