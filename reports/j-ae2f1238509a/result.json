@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37393",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "27b34c2785e79791a4b900633329c5863fb6c131",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "PR 1192 is accurate test-only hardening: its six tests pass unchanged on the recorded base and candidate, and it correctly rejects the earlier unsupported claim of a runtime fix. Independent real multiprocess collectives reproduce both reported unequal embedding-row contracts, but neither the candidate nor the available environment identifies or corrects the serving transition that creates rank-local row-count divergence.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ae2f1238509a/venv/bin/python -m pytest -q /job/review-evidence-j-ae2f1238509a/test_spec_tp_sync_candidate.py",
+      "exit_code": 0,
+      "what_was_measured": "The exact six candidate tests passed on the unmodified recorded base, demonstrating that the candidate is not a failing-before/passing-after runtime fix."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ae2f1238509a/venv/bin/python -m pytest -q test/registered/unit/spec/test_spec_tp_sync.py",
+      "exit_code": 0,
+      "what_was_measured": "All six candidate tests passed at exact commit 27b34c2785e79791a4b900633329c5863fb6c131; the cuda parameter used the assigned gfx950 GPU."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ae2f1238509a/venv/bin/python /job/review-evidence-j-ae2f1238509a/reproduce_unequal_allreduce.py",
+      "exit_code": 1,
+      "what_was_measured": "Expected failure: two real Gloo ranks submitted (628,7168) and (1140,7168), exactly 4,501,504 and 8,171,520 elements, and the collective aborted on a received-size mismatch."
+    },
+    {
+      "command": "ROWS=6098,9682 /tmp/amdpilot-repo-j-ae2f1238509a/venv/bin/python /job/review-evidence-j-ae2f1238509a/reproduce_unequal_allreduce.py",
+      "exit_code": 1,
+      "what_was_measured": "Expected failure: two real Gloo ranks submitted (6098,7168) and (9682,7168), exactly 43,710,464 and 69,400,576 elements, and the collective aborted on a received-size mismatch."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The candidate's cuda-parameterized same-device overwrite test ran on one AMD Instinct MI350X/gfx950 using PyTorch 2.11.0+rocm7.2. This was not a multi-GPU collective or full serving test."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The candidate's fake TP group only copies a same-shaped local tensor; it cannot validate collective ordering, shape agreement, process-group participation, NCCL/RCCL behavior, or safe failure after divergence.",
+    "SGLANG_SPEC_TP_SYNC=off intentionally leaves divergent target samples unchanged and performs no divergence detection.",
+    "The AST assertion covers one DSpark target-prefill call site and does not prove all DSpark, scheduler, batching, or multimodal transitions keep TP batch membership and sequence lengths identical.",
+    "No evidence connects either recorded production collective sequence number to rank-local target sampling rather than another upstream state divergence.",
+    "The full Kimi-K3 TP=8 B300/NCCL serving workload and its original scheduler stall were not reproduced."
+  ],
+  "remaining_limitations": [
+    "Only one AMD Instinct MI350X/gfx950 was available; eight NVIDIA B300 GPUs, CUDA 13.0, and NCCL 2.28.3 were unavailable.",
+    "Kimi-K3 and DSpark model weights were unavailable.",
+    "The exact unequal-shape contract was reproduced with two CPU Gloo ranks, not the production NCCL process group.",
+    "No native rebuild was performed because the candidate changes only tests and reports and has no native or runtime source changes."
+  ]
+}
