@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36600",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced an AddressSanitizer heap-buffer-overflow in the x86 CPU topk_sigmoid_cpu correction-bias path for one expert. Partial SIMD loads and stores now bound accesses for float32 and reduced-precision inputs, with regression coverage for 1, 2, 4, and 8 experts.",
+  "tests": [
+    {
+      "command": "LD_PRELOAD=$(gcc -print-file-name=libasan.so) ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 <python> -c '<load ASan CPU common_ops and run the reported one-expert reproducer>'",
+      "exit_code": 1,
+      "what_was_measured": "Before the fix, AddressSanitizer reported a 64-byte heap-buffer-overflow read in sigmoid<float, 1> at topk.cpp:181, immediately after a 4-byte gating_output allocation."
+    },
+    {
+      "command": "LD_PRELOAD=$(gcc -print-file-name=libasan.so) ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 <python> -c '<exercise float32/bfloat16 x 1/2/4/8 experts x renormalize true/false>'",
+      "exit_code": 0,
+      "what_was_measured": "The rebuilt ASan native library completed 32 small-vector cases without a sanitizer finding and matched independent torch.sigmoid, torch.topk, gather, and normalization references."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python <python> -c '<load rebuilt release common_ops and run TestCustomTopK.test_topk_sigmoid_with_correction_bias_small_expert_counts>'",
+      "exit_code": 0,
+      "what_was_measured": "The added repository regression passed all float32/bfloat16, 1/2/4/8-expert, and renormalization boundary combinations."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python <python> -c '<load rebuilt release common_ops and run the existing correction-bias and mixed-input-dtype tests>'",
+      "exit_code": 0,
+      "what_was_measured": "The existing broad correction-bias matrix and mixed-input-dtype tests passed against the rebuilt native library."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reported defect and changed operator are x86 CPU-only; no GPU result is relevant to the bounded host SIMD access."
+  },
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "Validation covers the standalone CPU operator, not a full model or serving workload.",
+    "The full registered test module could not be imported under AddressSanitizer because ROCm SMI triggered an unrelated libasan C++ exception-interceptor check; direct native operator sanitizer validation passed, and the registered regression passed against a separate non-ASan rebuild."
+  ]
+}
