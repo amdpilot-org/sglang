@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31021",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3039",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3006",
+  "candidate_commit": "9080a9f9b7d091a3f6ea8c7c1717c753dc592349",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes the previously reported zero-argument super() failure and its focused tests pass, but it is only a partial hot-reload implementation. Independent adversarial cases show that deleted module definitions remain executable and that an edited class inheritance hierarchy remains stale for preserved classes and instances. The optional fault-tolerant serving loop is also not implemented. Request changes so unsupported source edits are either applied correctly or rejected explicitly rather than reported as successful.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a4a38b1dc797/venv/bin/python -c 'import sglang.srt.dev_reload' at recorded base",
+      "exit_code": 1,
+      "what_was_measured": "Original feature absence on the prepared recorded base; import failed with ModuleNotFoundError."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a4a38b1dc797/venv/bin/python -m pytest -q test/srt/test_dev_reload.py at 9080a9f9b7d091a3f6ea8c7c1717c753dc592349",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite, including preservation of an existing inherited instance whose updated method uses zero-argument super(); 6 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a4a38b1dc797/venv/bin/python reports/j-a4a38b1dc797/evidence/adversarial_cases.py at 9080a9f9b7d091a3f6ea8c7c1717c753dc592349",
+      "exit_code": 0,
+      "what_was_measured": "Independent pure-Python reload behavior. The named super() regression passed, but deleted definitions remained present and callable, and changing Child(BaseA) to Child(BaseB) retained BaseA and produced the wrong result."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 9080a9f9b7d091a3f6ea8c7c1717c753dc592349",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The pinned interpreter reports torch 2.11.0+rocm7.2, HIP 7.2.26015, and torch.cuda.is_available() true, but this review did not execute a model server or GPU graph capture. Pure-Python counterexamples are sufficient to disprove full reload correctness; no startup smoke is claimed as serving-path proof."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "No C++, CUDA/HIP, FlyDSL, or other native source differs in the candidate; repository-environment.json also records native and wheel as null. A native rebuild was not applicable.",
+  "remaining_counterexamples": [
+    "When a loaded selected module removes a top-level function or class, importlib.reload retains the old name in the module dictionary. reload_modules reports success, and the deleted function remains callable with stale code.",
+    "When a loaded selected module changes an existing preserved class from Child(BaseA) to Child(BaseB), _replace_class_contents does not update old Child.__bases__. Existing and new instances of the exposed preserved class continue through BaseA while the endpoint reports success."
+  ],
+  "remaining_limitations": [
+    "The original issue's optional fault-tolerant scheduler event-loop behavior is not implemented.",
+    "Actual HTTP serving, weight preservation, target/draft graph recapture, and request drain/resume were not independently executed in this review; the available GPU does not by itself verify those paths.",
+    "Multi-rank TP/PP/DP/EP coordination was not exercised and requires a distributed architecture allocation.",
+    "Native extensions, new modules, object-layout/topology changes, torch.compile artifacts, JIT kernels, and arbitrary descriptors remain outside the candidate's supported scope.",
+    "Reload is non-transactional when module execution or a later worker fails."
+  ]
+}
