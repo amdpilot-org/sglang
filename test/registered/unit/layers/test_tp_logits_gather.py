@@ -51,6 +51,7 @@ def test_tp_logits_gather_is_disabled_during_graph_capture():
         {"extend_return_logprob": True},
         {"is_prefill_only": True},
         {"is_speculative": True},
+        {"forward_mode": ForwardMode.DLLM_EXTEND},
         {"can_run_decode_cuda_graph": True},
     ],
 )
@@ -82,7 +83,7 @@ def _runner(sampled_tokens):
 
 def _forward_batch():
     return SimpleNamespace(
-        sampling_info=object(),
+        sampling_info=SimpleNamespace(grammar_mask=None),
         return_logprob=False,
         top_logprobs_nums=[],
         token_ids_logprobs=[],
@@ -132,3 +133,27 @@ def test_non_root_never_reads_missing_logits_and_receives_root_tokens():
     runner.sampler.assert_not_called()
     assert group.broadcast_calls == 1
     runner.ngram_embedding_manager.update_after_decode.assert_called_once()
+
+
+def test_non_root_releases_rank_local_sampling_state():
+    expected = torch.tensor([7, 11])
+    runner = _runner(expected)
+    group = _FakeGroup(rank=1, root_tokens=expected)
+    forward_batch = _forward_batch()
+    forward_batch.sampling_info = SimpleNamespace(grammar_mask=torch.ones(16))
+    stale_auxiliary_output = object()
+    output = SimpleNamespace(
+        tp_logits_gathered=True,
+        next_token_logits=None,
+        auxiliary_device_output=stale_auxiliary_output,
+    )
+
+    with patch(
+        "sglang.srt.model_executor.model_runner.get_tp_group", return_value=group
+    ):
+        ModelRunner.sample(runner, output, forward_batch)
+
+    assert forward_batch.sampling_info.grammar_mask is None
+    assert output.auxiliary_device_output is None
+    runner._preprocess_logits.assert_not_called()
+    runner.sampler.assert_not_called()

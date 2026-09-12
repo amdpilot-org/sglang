@@ -1949,6 +1949,10 @@ class ModelRunner:
                 )
         else:
             assert logits_output.next_token_logits is None
+            # There are no full logits to preprocess on a non-root gather rank,
+            # but these invocation-local objects must still be released/reset.
+            forward_batch.sampling_info.grammar_mask = None
+            logits_output.auxiliary_device_output = None
             next_token_ids = torch.empty(
                 forward_batch.seq_lens.shape,
                 dtype=torch.int64,

@@ -914,6 +914,8 @@ class LogitsProcessor(nn.Module):
             and not logits_metadata.extend_return_logprob
             and not logits_metadata.is_prefill_only
             and not logits_metadata.is_speculative
+            # dLLM consumes full_logits on every TP rank and bypasses sample().
+            and not logits_metadata.forward_mode.is_dllm_extend()
             and not logits_metadata.can_run_decode_cuda_graph
             and not get_flags().capture.disable_dispose_tensor
             and not self.use_tp_lm_head_all_to_all
