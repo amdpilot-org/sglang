@@ -23,6 +23,7 @@ from unittest.mock import MagicMock, patch
 from sglang.srt.arg_groups.overrides import resolution_result
 from sglang.srt.constrained.base_grammar_backend import (
     GRAMMAR_BACKEND_REGISTRY,
+    MAX_GRAMMAR_JSON_DEPTH,
     BaseGrammarBackend,
     BaseGrammarObject,
     GrammarStats,
@@ -527,6 +528,79 @@ class TestNulByteGrammarRejection(unittest.TestCase):
                 self.backend._init_value_dispatch((key_type, key_string), False)
 
                 dispatch.assert_called_once_with(key_string)
+
+
+class TestGrammarJsonDepthLimit(unittest.TestCase):
+    def setUp(self):
+        self.backend = BaseGrammarBackend()
+
+    def tearDown(self):
+        self.backend.executor.shutdown(wait=True)
+
+    @staticmethod
+    def _nested_json(depth):
+        value = "leaf"
+        for _ in range(depth):
+            value = {"child": value}
+        return json.dumps(value)
+
+    def test_excessively_nested_schema_never_reaches_backend(self):
+        dispatch = MagicMock()
+        self.backend.dispatch_json = dispatch
+
+        result = self.backend._init_value_dispatch(
+            ("json", self._nested_json(MAX_GRAMMAR_JSON_DEPTH + 2)), False
+        )
+
+        self.assertIsInstance(result, InvalidGrammarObject)
+        self.assertIn("nesting depth", result.error_message)
+        dispatch.assert_not_called()
+
+    def test_schema_at_depth_limit_still_dispatches(self):
+        compiled = BaseGrammarObject()
+        dispatch = MagicMock(return_value=compiled)
+        self.backend.dispatch_json = dispatch
+        schema = self._nested_json(MAX_GRAMMAR_JSON_DEPTH + 1)
+
+        result = self.backend._init_value_dispatch(("json", schema), False)
+
+        self.assertIs(result, compiled)
+        dispatch.assert_called_once_with(schema)
+
+    def test_structural_tag_is_also_guarded(self):
+        dispatch = MagicMock()
+        self.backend.dispatch_structural_tag = dispatch
+
+        result = self.backend._init_value_dispatch(
+            (
+                "structural_tag",
+                self._nested_json(MAX_GRAMMAR_JSON_DEPTH + 2),
+            ),
+            False,
+        )
+
+        self.assertIsInstance(result, InvalidGrammarObject)
+        dispatch.assert_not_called()
+
+    def test_non_json_grammars_are_unchanged(self):
+        dispatch = MagicMock(return_value=BaseGrammarObject())
+        self.backend.dispatch_ebnf = dispatch
+        grammar = "root ::= " + "(" * (MAX_GRAMMAR_JSON_DEPTH + 1)
+
+        self.backend._init_value_dispatch(("ebnf", grammar), False)
+
+        dispatch.assert_called_once_with(grammar)
+
+    def test_brackets_inside_json_strings_do_not_count(self):
+        dispatch = MagicMock(return_value=BaseGrammarObject())
+        self.backend.dispatch_json = dispatch
+        schema = json.dumps(
+            {"type": "string", "pattern": "[{}]" * (MAX_GRAMMAR_JSON_DEPTH + 2)}
+        )
+
+        self.backend._init_value_dispatch(("json", schema), False)
+
+        dispatch.assert_called_once_with(schema)
 
 
 if __name__ == "__main__":

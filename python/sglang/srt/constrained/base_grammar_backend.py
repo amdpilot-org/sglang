@@ -35,6 +35,11 @@ logger = logging.getLogger(__name__)
 
 GRAMMAR_BACKEND_REGISTRY = {}
 
+# xgrammar's JSON-schema compilation cost grows nonlinearly with nesting. This
+# limit is on JSON container nesting (objects and arrays), not schema keywords;
+# a conventional chain of 128 nested object properties remains supported.
+MAX_GRAMMAR_JSON_DEPTH = 256
+
 
 @dataclass
 class GrammarStats:
@@ -187,6 +192,42 @@ def _grammar_key_contains_nul(key_type: str, key_string: str) -> bool:
     return False
 
 
+def _grammar_json_depth_error(key_type: str, key_string: str) -> Optional[str]:
+    """Return an error for JSON-backed grammars with excessive nesting.
+
+    Scan the serialized JSON rather than decoding it first, so validation of an
+    adversarial payload cannot itself exhaust Python's JSON-parser recursion.
+    Brackets inside strings are ignored. Malformed JSON is otherwise left to
+    the selected backend so its existing diagnostics are preserved.
+    """
+    if key_type not in ("json", "structural_tag"):
+        return None
+    depth = -1
+    in_string = False
+    escaped = False
+    for char in key_string:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            if depth > MAX_GRAMMAR_JSON_DEPTH:
+                return (
+                    "JSON grammar nesting depth exceeds the supported limit of "
+                    f"{MAX_GRAMMAR_JSON_DEPTH}"
+                )
+        elif char in "]}":
+            depth -= 1
+    return None
+
+
 class InvalidGrammarObject(BaseGrammarObject):
     """Represents a grammar that failed to compile, carrying the original error message."""
 
@@ -260,6 +301,9 @@ class BaseGrammarBackend:
     ) -> BaseGrammarObject:
         s = time.perf_counter()
         key_type, key_string = key
+        if depth_error := _grammar_json_depth_error(key_type, key_string):
+            logger.error(f"Rejecting {key_type} grammar: {depth_error}")
+            return InvalidGrammarObject(depth_error)
         if _grammar_key_contains_nul(key_type, key_string):
             logger.error(f"Rejecting {key_type} grammar containing a NUL byte")
             return InvalidGrammarObject(
