@@ -1,0 +1,133 @@
+FFFF.                                                                    [100%]
+=================================== FAILURES ===================================
+________ test_broadcasts_additive_penalties_over_entire_verify_block[1] ________
+
+draft_token_num = 1
+
+    @pytest.mark.parametrize("draft_token_num", [1, 3])
+    def test_broadcasts_additive_penalties_over_entire_verify_block(draft_token_num):
+        additive_penalties = torch.tensor(
+            [[0.0, float("-inf"), 2.0], [3.0, 0.5, -4.0]], dtype=torch.float32
+        )
+        sampling_info = _sampling_info(
+            batch_size=2, additive_penalties=additive_penalties
+        )
+        logits = torch.zeros((2 * draft_token_num, 3), dtype=torch.float64)
+    
+        apply_dflash_verify_logits_adjustments(
+            next_token_logits=logits,
+            sampling_info=sampling_info,
+            draft_token_num=draft_token_num,
+        )
+    
+        expected = (
+            additive_penalties.to(dtype=logits.dtype)
+            .unsqueeze(1)
+            .expand(-1, draft_token_num, -1)
+            .reshape_as(logits)
+        )
+>       torch.testing.assert_close(logits, expected)
+E       AssertionError: Tensor-likes are not close!
+E       
+E       Mismatched elements: 5 / 6 (83.3%)
+E       Greatest absolute difference: inf at index (0, 1) (up to 1e-07 allowed)
+E       Greatest relative difference: nan at index (0, 1) (up to 1e-07 allowed)
+
+test/registered/unit/spec/test_dflash_verify_logits_adjustments.py:61: AssertionError
+________ test_broadcasts_additive_penalties_over_entire_verify_block[3] ________
+
+draft_token_num = 3
+
+    @pytest.mark.parametrize("draft_token_num", [1, 3])
+    def test_broadcasts_additive_penalties_over_entire_verify_block(draft_token_num):
+        additive_penalties = torch.tensor(
+            [[0.0, float("-inf"), 2.0], [3.0, 0.5, -4.0]], dtype=torch.float32
+        )
+        sampling_info = _sampling_info(
+            batch_size=2, additive_penalties=additive_penalties
+        )
+        logits = torch.zeros((2 * draft_token_num, 3), dtype=torch.float64)
+    
+        apply_dflash_verify_logits_adjustments(
+            next_token_logits=logits,
+            sampling_info=sampling_info,
+            draft_token_num=draft_token_num,
+        )
+    
+        expected = (
+            additive_penalties.to(dtype=logits.dtype)
+            .unsqueeze(1)
+            .expand(-1, draft_token_num, -1)
+            .reshape_as(logits)
+        )
+>       torch.testing.assert_close(logits, expected)
+E       AssertionError: Tensor-likes are not close!
+E       
+E       Mismatched elements: 15 / 18 (83.3%)
+E       Greatest absolute difference: inf at index (0, 1) (up to 1e-07 allowed)
+E       Greatest relative difference: nan at index (0, 1) (up to 1e-07 allowed)
+
+test/registered/unit/spec/test_dflash_verify_logits_adjustments.py:61: AssertionError
+_______________ test_additive_penalties_compose_with_logit_bias ________________
+
+    def test_additive_penalties_compose_with_logit_bias():
+        additive_penalties = torch.tensor([[0.0, -2.0, 1.0]])
+        logit_bias = torch.tensor([[4.0, 0.5, -3.0]])
+        sampling_info = _sampling_info(
+            batch_size=1,
+            additive_penalties=additive_penalties,
+            logit_bias=logit_bias,
+        )
+        logits = torch.zeros((2, 3))
+    
+        apply_dflash_verify_logits_adjustments(
+            next_token_logits=logits,
+            sampling_info=sampling_info,
+            draft_token_num=2,
+        )
+    
+>       torch.testing.assert_close(
+            logits, (additive_penalties + logit_bias).expand_as(logits)
+        )
+E       AssertionError: Tensor-likes are not close!
+E       
+E       Mismatched elements: 4 / 6 (66.7%)
+E       Greatest absolute difference: 2.0 at index (0, 1) (up to 1e-05 allowed)
+E       Greatest relative difference: 1.3333333730697632 at index (0, 1) (up to 1.3e-06 allowed)
+
+test/registered/unit/spec/test_dflash_verify_logits_adjustments.py:80: AssertionError
+____________ test_additive_penalties_disable_dspark_noop_fast_path _____________
+
+    def test_additive_penalties_disable_dspark_noop_fast_path():
+        sampling_info = _sampling_info(
+            batch_size=1,
+            additive_penalties=torch.zeros((1, 4), dtype=torch.float32),
+        )
+    
+>       assert not verify_logits_adjustments_are_noop(sampling_info)
+E       assert not True
+E        +  where True = verify_logits_adjustments_are_noop(_SamplingInfo(batch_size=1, has_custom_logit_processor=False, acc_additive_penalties=tensor([[0., 0., 0., 0.]]), penalizer_orchestrator=None, grammar_mask=None, logit_bias=None))
+
+test/registered/unit/spec/test_dflash_verify_logits_adjustments.py:91: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/spec/test_dflash_verify_logits_adjustments.py::test_broadcasts_additive_penalties_over_entire_verify_block[1]
+FAILED test/registered/unit/spec/test_dflash_verify_logits_adjustments.py::test_broadcasts_additive_penalties_over_entire_verify_block[3]
+FAILED test/registered/unit/spec/test_dflash_verify_logits_adjustments.py::test_additive_penalties_compose_with_logit_bias
+FAILED test/registered/unit/spec/test_dflash_verify_logits_adjustments.py::test_additive_penalties_disable_dspark_noop_fast_path
+4 failed, 1 passed, 17 warnings in 27.43s
