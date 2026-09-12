@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35295",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1628",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1593",
+  "candidate_commit": "41d3846aea50aee5a478156a0797d6a7d3fa35dd",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes word revisions and punctuation-only growth during non-final update() calls, including the three prior review counterexamples, but leaves the same duplicated-word punctuation failure in finalize(), which is used by the final HTTP SSE and realtime chunk path.",
+  "tests": [
+    {
+      "command": "At recorded base, PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-280d5ca9d57f/venv/bin/python -c <direct StreamingASRState reproduction>",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the actual imported source path and reproduced the original cat-to-caterpillar mid-word delta plus punctuation accumulation as hello world comma-with-space."
+    },
+    {
+      "command": "At exact candidate commit, PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-280d5ca9d57f/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_streaming_asr_state.py test/registered/unit/entrypoints/openai/test_serving_transcription.py test/registered/unit/entrypoints/openai/test_audio_chunking.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite and related focused tests passed: 33 tests and 4 parameter subtests."
+    },
+    {
+      "command": "At exact candidate commit, PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-280d5ca9d57f/venv/bin/python -c <independent update/finalize punctuation matrix>",
+      "exit_code": 0,
+      "what_was_measured": "Non-final update handling passed for comma, quote, ellipsis, em dash, multi-character punctuation, and fullwidth punctuation; finalize duplicated the preceding word for every one of those suffixes."
+    },
+    {
+      "command": "At exact candidate commit, PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-280d5ca9d57f/venv/bin/python -c <process_asr_chunk is_last=True contract assertion>",
+      "exit_code": 1,
+      "what_was_measured": "The production shared helper returned world, and accumulated hello world world, for final punctuation-only growth; the assertion required comma-only delta and hello world, accumulator."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 41d3846aea50aee5a478156a0797d6a7d3fa35dd",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the candidate diff."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The issue is deterministic Python string-state logic. One MI350X gfx950 GPU was visible, but no GPU operation was relevant or claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "After update('hello world one two three four five'), setting final full transcript to 'hello world,' and calling finalize() emits 'world,' and records 'hello world world,' instead of emitting ',' and recording 'hello world,'.",
+    "The same final-chunk duplicated-word failure occurs for closing quote, Unicode ellipsis, em dash, multi-character punctuation '?!', and fullwidth closing parenthesis.",
+    "process_asr_chunk(..., is_last=True) exposes the comma counterexample through the shared production helper used by HTTP chunked streaming and realtime."
+  ],
+  "remaining_limitations": [
+    "No Qwen3-ASR model weights or model inference were used; semantic transcription quality is unverified.",
+    "No live HTTP SSE or realtime WebSocket server was launched; deterministic shared helper control flow was tested instead.",
+    "The known whitespace-free CJK rollback limitation remains outside this review.",
+    "No native source changed, so native rebuild validation was not applicable."
+  ]
+}
