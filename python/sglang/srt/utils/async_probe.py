@@ -63,6 +63,18 @@ def maybe_warn_nan(tensor: Optional[torch.Tensor], msg: str = ""):
     _nan_warner.check(tensor, msg)
 
 
+def detect_full_nan_rows(logits: torch.Tensor) -> Optional[torch.Tensor]:
+    """Return a per-row all-NaN mask when request-scoped abort is enabled.
+
+    Detection must happen before :func:`sanitize_nan_logits`, which replaces a
+    fully-NaN row with a constant and makes it indistinguishable from a valid
+    (uniform) sampling distribution.
+    """
+    if not envs.SGLANG_ABORT_ON_NAN_LOGITS.get():
+        return None
+    return torch.isnan(logits).all(dim=-1)
+
+
 def sanitize_nan_logits(logits: torch.Tensor, msg: str = ""):
     """Detect NaN (assert in CI, throttled warning in prod), then sanitize in
     place: NaN logits (e.g. fp16 activation overflow) are undefined behavior
