@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/28157",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3303",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3300",
+  "candidate_commit": "a5b60944c1762c4b9196fec907c2a72a58e9143b",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": true,
+  "summary": "The candidate's subprocess isolation, singleflight response, and bounded timeout fix the reproduced original event-loop starvation mechanism, and its ordinary single-value name[], gzip, and OpenMetrics cases pass. It should still receive changes because repeated Accept or Accept-Encoding fields are not joined as in prometheus_client.make_asgi_app, causing incorrect content negotiation.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-4d39ca524529/venv/bin/python reports/j-4d39ca524529/reproduce_starvation.py at base 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: a 350 ms synchronous metrics bake delayed unrelated async work by 0.332 seconds."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4d39ca524529/venv/bin/python reports/j-4d39ca524529/reproduce_starvation.py at candidate a5b60944c1762c4b9196fec907c2a72a58e9143b",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after isolation check: metrics completed successfully and unrelated event-loop lag was 0.001 seconds."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4d39ca524529/venv/bin/python reports/j-4d39ca524529/candidate_contracts.py at candidate a5b60944c1762c4b9196fec907c2a72a58e9143b",
+      "exit_code": 0,
+      "what_was_measured": "The three prior review counterexamples pass for ordinary single-value headers: name[] excludes unrelated metrics, gzip is negotiated, and OpenMetrics is negotiated."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4d39ca524529/venv/bin/python reports/j-4d39ca524529/adversarial_contracts.py at candidate a5b60944c1762c4b9196fec907c2a72a58e9143b",
+      "exit_code": 1,
+      "what_was_measured": "Independent repeated-header case: the reference joins duplicate Accept and Accept-Encoding fields and returns OpenMetrics plus gzip, while the candidate reads only the first field and returns Prometheus 0.0.4 without gzip."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4d39ca524529/venv/bin/python -m pytest -q test/registered/unit/utils/test_common.py -k PrometheusMetricsExporter at candidate a5b60944c1762c4b9196fec907c2a72a58e9143b",
+      "exit_code": 0,
+      "what_was_measured": "Five focused candidate regression tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4d39ca524529/venv/bin/python -m py_compile python/sglang/srt/utils/common.py test/registered/unit/utils/test_common.py reports/j-14d3f4918cd1/reproduce_candidate_contracts.py && git diff --check at candidate a5b60944c1762c4b9196fec907c2a72a58e9143b",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources compiled and the candidate diff had no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The prepared environment exposed one AMD GPU with PyTorch 2.11.0+rocm7.2, but this defect is confined to CPU-side ASGI scheduling and Prometheus exposition; GPU execution would not validate it."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Two Accept fields are not joined: when application/json is first and application/openmetrics-text is second, prometheus_client.make_asgi_app returns OpenMetrics but the candidate returns Prometheus text 0.0.4.",
+    "Two Accept-Encoding fields are not joined: when identity;q=0 is first and gzip is second, prometheus_client.make_asgi_app returns gzip but the candidate returns an uncompressed response."
+  ],
+  "remaining_limitations": [
+    "The original eight-H100 multi-node single-tokenizer PD deployment, sustained scrape load, bootstrap read timeouts, and decode-side connection-loss logs were unavailable and were not reproduced end to end.",
+    "The deterministic probe validates the source-level event-loop failure mechanism and its isolation, not model semantics or a distributed workload.",
+    "No native files changed, so no native rebuild was applicable."
+  ]
+}
