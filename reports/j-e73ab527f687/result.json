@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32470",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2537",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2511",
+  "candidate_commit": "ce83d4edb8fe5dc09d5de4502e3c152654cdd09c",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is partial test-only hardening. Its fresh gfx950 JIT GPU regression passes and its new braced divergent-barrier case covers the supplied counterexample, but the source helper still accepts the same divergent __syncthreads() behind an unbraced single-statement if. The prepared base production planner already contains the race fix, so the original failure was not reproducible there; the candidate changes no production/native source.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-e73ab527f687/review-jit-cache-ce83 /tmp/amdpilot-repo-j-e73ab527f687/venv/bin/python -m pytest -vv test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, five tests and nine subtests passed on gfx950. This included 100 repetitions of [4] * 72 + [3] * 24, warp-boundary and uniform cases, CPU/GPU plan equality, ragged-ID bounds, and the candidate's source checks. A fresh private JIT shared library was produced. Raw output: evidence/candidate-pytest.log and evidence/jit-artifacts.log."
+    },
+    {
+      "command": "Invoke the candidate's _assert_warp_extrema_synchronized helper on production kernel text augmented with initialized warp extrema followed by: if (tx < kNumWarps) __syncthreads();",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial failure of the regression: the helper returned successfully and printed ACCEPTED_DIVERGENT_SINGLE_STATEMENT_BARRIER although most block threads skip the block barrier. Raw output: evidence/adversarial-single-statement-barrier.log."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..ce83d4edb8fe5dc09d5de4502e3c152654cdd09c",
+      "exit_code": 0,
+      "what_was_measured": "Candidate aggregate diff has no whitespace errors. Raw output: evidence/diff-check.log."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI355X gfx950 ran the real JIT planner. PyTorch imported from the prepared interpreter (2.11.0+rocm7.2), sglang imported from /job/repo/python/sglang, and the fresh extension was built under the job-private SGLANG_JIT_CACHE_DIR. See evidence/environment.log, evidence/candidate-pytest.log, and evidence/jit-artifacts.log.",
+  "native_rebuilt": true,
+  "native_rebuild_evidence": "No production/native files differ in the exact candidate commit, and repository-environment.json has no monolithic native build. The applicable planner JIT native extension was nevertheless rebuilt from the candidate checkout into a previously unused private cache; its object and shared-library paths are recorded in evidence/jit-artifacts.log.",
+  "remaining_counterexamples": [
+    "The source regression accepts initialized warp extrema followed by `if (tx < kNumWarps) __syncthreads();` without braces. Its brace-depth heuristic sees function scope, but only kNumWarps threads reach the block barrier, so the kernel can deadlock or violate block synchronization."
+  ],
+  "remaining_limitations": [
+    "The original failure cannot be reproduced on the recorded prepared base because that source already removed the racy scratch initialization and has one writer per warp extrema slot followed by a block-wide barrier.",
+    "The original NVIDIA H20 CUDA TP=2 DeepSeek-V4-Flash-DSpark compact graph-capture workload was not run: this environment has one AMD gfx950 GPU and no reported model weights.",
+    "The gfx950 run qualifies planner metadata, bounds, and CPU/GPU parity on HIP; it does not qualify NVIDIA CUDA scheduling, full-model graph capture, semantic accuracy, or a distributed serving workload.",
+    "The candidate's static source helper is not a C++ parser and remains vulnerable to semantically divergent control flow that its brace-count heuristic does not recognize."
+  ]
+}
