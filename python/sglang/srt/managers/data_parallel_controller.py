@@ -793,7 +793,10 @@ class DataParallelController:
             "req.bootstrap_room should not be None. Do not send requests directly to "
             "prefill or decode instances; send to the router instead."
         )
-        target_rank = req.bootstrap_room % len(self.workers)
+        active = self._active_workers
+        if not active:
+            raise RuntimeError("No active DP workers are available for routing.")
+        target_rank = active[req.bootstrap_room % len(active)]
         sock_send(self.workers[target_rank], req)
 
     def total_requests_scheduler(self, req: Req):

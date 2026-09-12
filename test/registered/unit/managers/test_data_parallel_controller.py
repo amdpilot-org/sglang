@@ -234,6 +234,34 @@ class TestFollowBootstrapRoomScheduler(CustomTestCase):
         ctl.workers[3].send_pyobj.assert_called_once()
         ctl.workers[1].send_pyobj.assert_not_called()
 
+    def test_reserved_slots_are_excluded_from_bootstrap_room_mapping(self):
+        ctl = _make_controller(dp_size=4)
+        ctl.workers[2:] = [None, None]
+        ctl.status[2:] = [False, False]
+        ctl._active_workers = [0, 1]
+
+        ctl.follow_bootstrap_room_scheduler(_req(bootstrap_room=2))
+
+        ctl.workers[0].send_pyobj.assert_called_once()
+        ctl.workers[1].send_pyobj.assert_not_called()
+
+    def test_sparse_active_slots_preserve_logical_dp_rank_mapping(self):
+        ctl = _make_controller(dp_size=5)
+        ctl._active_workers = [1, 4]
+
+        ctl.follow_bootstrap_room_scheduler(_req(bootstrap_room=3))
+
+        ctl.workers[4].send_pyobj.assert_called_once()
+        for rank in (0, 1, 2, 3):
+            ctl.workers[rank].send_pyobj.assert_not_called()
+
+    def test_no_active_workers_fails_explicitly(self):
+        ctl = _make_controller(dp_size=2)
+        ctl._active_workers = []
+
+        with self.assertRaisesRegex(RuntimeError, "No active DP workers"):
+            ctl.follow_bootstrap_room_scheduler(_req(bootstrap_room=0))
+
 
 class TestTotalRequestsScheduler(CustomTestCase):
     def test_dispatches_to_min_request_worker(self):
