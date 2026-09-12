@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33292",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2014",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1980",
+  "candidate_commit": "37ae11682644b4be75ad81ed7224ed38b31557c4",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "prepared_checkout_difference": "None: the prepared branch was exactly the recorded base before review. origin/main advanced to a207786205bff0919eb2c8c9126c67f302ccff34 during review.",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproducibly raises AttributeError during construction when XPU dispatch is selected for a CustomOp subclass that implements only forward_native. The exact candidate adds the missing base forward_xpu fallback to forward_native. Its regression and independent adversarial cases pass from the repository source path. This is a full source-level correction of the reported dispatch contract, not merely test hardening. Actual execution on Intel XPU could not be qualified on this AMD gfx950 host.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-e14867da2a02/venv/bin/python < base reproduction with current_platform patched to XPU >",
+      "exit_code": 1,
+      "what_was_measured": "At the recorded base and actual /job/repo source import, constructing a native-only CustomOp raised AttributeError because forward_xpu was undefined."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e14867da2a02/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_custom_op.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, all 3 XPU dispatch regression tests passed: native fallback, explicit override preservation, and execution-time failure when native implementation is absent."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e14867da2a02/venv/bin/python < independent adversarial XPU dispatch cases >",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, positional/keyword forwarding, bound cached dispatch, explicit subclass override precedence, successful construction without forward_native, and delayed NotImplementedError all matched the contract."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned device is AMD Instinct MI355X (gfx950) with PyTorch 2.11.0+rocm7.2. No Intel XPU was present, so XPU selection was deterministically patched at the platform boundary and no Intel kernel execution was claimed."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_reason": "Not applicable: the candidate changes only Python source and Python tests; no native source or generated native artifact changed.",
+  "source_import_path": "/job/repo/python/sglang/multimodal_gen/runtime/layers/custom_op.py",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No Intel XPU hardware or XPU-enabled PyTorch was available, so actual Intel device model construction and execution remain untested.",
+    "The AMD gfx950 GPU is unrelated to the failing XPU dispatch branch and was intentionally not presented as substitute evidence.",
+    "No full multimodal model weights or distributed workload were exercised; the original defect is the pre-forward base-class dispatch failure isolated by these tests."
+  ]
+}
