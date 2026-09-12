@@ -1,0 +1,88 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ TestRadixCache.test_cache_unfinished_req_deferred_paged_free_owns_original_indices _
+
+self = <test_radix_cache_unit.TestRadixCache testMethod=test_cache_unfinished_req_deferred_paged_free_owns_original_indices>
+
+    def test_cache_unfinished_req_deferred_paged_free_owns_original_indices(self):
+        """A deferred page free must not retain the request-table view.
+    
+        ``cache_unfinished_req`` queues the duplicate request pages for release
+        and then overwrites that same request-table slice with the radix tree's
+        canonical pages.  Page allocators therefore have to take ownership of
+        the queued indices before the overwrite, or ``free_group_end`` releases
+        the tree pages and leaves dangling radix entries.
+        """
+    
+        class ReqToTokenPool:
+            def __init__(self, row):
+                self.req_to_token = row.unsqueeze(0)
+    
+            def write(self, indices, values):
+                self.req_to_token[indices] = values
+    
+        page_size = 64
+        allocator = PagedTokenToKVPoolAllocator(
+            size=page_size * 8,
+            page_size=page_size,
+            dtype=torch.float16,
+            device="cpu",
+            kvcache=None,
+            need_sort=False,
+        )
+        cache = RadixCache.create_simulated(
+            page_size=page_size, mock_allocator=allocator
+        )
+        token_ids = array("q", range(page_size))
+        tree_indices = allocator.alloc(page_size)
+        request_indices = allocator.alloc(page_size)
+        assert tree_indices is not None
+        assert request_indices is not None
+        cache.insert(InsertParams(key=RadixKey(token_ids), value=tree_indices))
+        cache.req_to_token_pool = ReqToTokenPool(request_indices.clone())
+        req = unittest.mock.Mock(
+            kv=ReqKvInfo(req_pool_idx=0, cache_protected_len=0),
+            extra_key=None,
+            cache_salt=None,
+            priority=0,
+            last_node=cache.root_node,
+        )
+        req.get_fill_ids.return_value = token_ids
+    
+        free_pages_before = allocator.free_pages.clone()
+        allocator.free_group_begin()
+        # This is the C++ radix ordering: insert the request's pages, enqueue
+        # the duplicate request-table view for a grouped free, then rebind the
+        # table row to the canonical pages returned by the radix tree.
+        cache.insert(InsertParams(key=RadixKey(token_ids), value=request_indices))
+        request_table_view = cache.req_to_token_pool.req_to_token[0]
+        allocator.free(request_table_view)
+        match = cache.match_prefix(MatchPrefixParams(key=RadixKey(token_ids)))
+        cache.req_to_token_pool.write((0, slice(None)), match.device_indices)
+        allocator.free_group_end()
+    
+        request_page = request_indices[0] // page_size
+        tree_page = tree_indices[0] // page_size
+>       self.assertTrue(torch.any(allocator.free_pages == request_page))
+E       AssertionError: tensor(False) is not true
+
+test/registered/unit/mem_cache/test_radix_cache_unit.py:603: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/mem_cache/test_radix_cache_unit.py::TestRadixCache::test_cache_unfinished_req_deferred_paged_free_owns_original_indices
+1 failed, 17 warnings in 11.51s
