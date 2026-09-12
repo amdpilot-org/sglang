@@ -1,0 +1,53 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35484",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1442",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1398",
+  "candidate_commit": "2ffc47a4c31856746c82020ea6e55e50cc2c8709",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate correctly namespaces Mooncake SSD paths by dp/tp/pp rank for the legacy HiCacheController construction path and preserves the configured path when storage_config is absent. It is only a partial fix: the registered MooncakeDirectLinker construction path also creates MooncakeStore clients but does not propagate a DP rank, so the new default dp_rank=0 still aliases DP-attention clients that share local TP and PP ranks. The candidate also does not document the one-client-per-directory contract requested by the issue.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-068af9e4af8d/venv/bin/python /job/review-evidence-j-068af9e4af8d/test_mooncake_ssd_offload_path.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: the base HiCacheStorageConfig cannot accept dp_rank, producing three errors and demonstrating that DP identity cannot reach Mooncake path selection."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-068af9e4af8d/venv/bin/python test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: three tests passed for DP/TP/PP path separation and absent SSD configuration."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-068af9e4af8d/venv/bin/python /job/review-evidence-j-068af9e4af8d/independent_adversarial.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent boundary checks: 12 distinct (dp,tp,pp) tuples produced 12 existing directories; storage_config=None passed the original configured path unchanged to Mooncake setup."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-068af9e4af8d/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mooncake_group_semantics.py test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "13 relevant mocked Mooncake unit tests passed."
+    },
+    {
+      "command": "source inspection of python/sglang/srt/mem_cache/storage/mooncake_store/mooncake_direct_linker.py at candidate commit",
+      "exit_code": 0,
+      "what_was_measured": "MooncakeDirectLinker is registered and constructs HiCacheStorageConfig without dp_rank; the dataclass default is 0, leaving a same-local-TP/PP DP collision counterexample."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI355X gfx950 GPU was visible through torch 2.11.0+rocm7.2, but this path-selection defect is CPU configuration logic and no GPU kernel or model execution would validate the missing DP identity."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Two DP-attention workers using the registered MooncakeDirectLinker path with identical attention-local tp_rank and pp_rank both leave HiCacheStorageConfig.dp_rank at 0 and therefore select the same rank_0_<tp>_<pp> SSD directory.",
+    "The requested supported-model documentation for one Mooncake client per storage directory is absent."
+  ],
+  "remaining_limitations": [
+    "No DeepSeek-V4-Flash weights or TP8/multi-node allocation were available, so the production topology was not executed.",
+    "No live Mooncake master plus eight simultaneously created LOCAL_DISK clients was run; deterministic fake clients verified the SGLang setup paths, not Mooncake bucket corruption or restart re-adoption.",
+    "The Mooncake-side recovery/ownership change referenced by the issue was not part of candidate commit 2ffc47a4 and was not independently qualified.",
+    "No native rebuild was applicable because the candidate changes only Python and report/test files."
+  ]
+}

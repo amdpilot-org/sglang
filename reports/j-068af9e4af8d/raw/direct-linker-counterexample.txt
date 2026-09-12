@@ -1,0 +1,74 @@
+Candidate exact commit:
+2ffc47a4c31856746c82020ea6e55e50cc2c8709
+
+MooncakeDirectLinker constructor:
+        )
+        self.pools = self.pool_group.entry_map
+        self.num_layers = self.pool_group.num_layers
+
+        tp_rank = 0
+        tp_size = get_parallel().tp_size
+        tp_group = params.attn_tp_cache_group or params.tp_cache_group
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            tp_rank = torch.distributed.get_rank(group=tp_group)
+            tp_size = torch.distributed.get_world_size(group=tp_group)
+        rank_replicated = self.pool_group.rank_replicated
+        self.offload_owner = not rank_replicated or tp_rank == 0
+        extra_config, *_ = HybridCacheController.parse_storage_backend_extra_config(
+            get_memory().hicache_storage_backend_extra_config
+        )
+        storage_config = HiCacheStorageConfig(
+            tp_rank=tp_rank,
+            tp_size=tp_size,
+            pp_rank=params.pp_rank,
+            pp_size=params.pp_size,
+            attn_cp_rank=params.attn_cp_rank,
+            attn_cp_size=params.attn_cp_size,
+            is_mla_model=rank_replicated,
+            enable_storage_metrics=False,
+            is_page_first_layout=False,
+            model_name=get_model().model_path,
+            extra_config=extra_config,
+        )
+        if storage is None:
+            from sglang.srt.mem_cache.storage.mooncake_store.mooncake_store import (
+                MooncakeStore,
+            )
+
+            self.storage = MooncakeStore(storage_config, mem_pool=None)
+        else:
+            self.storage = storage
+        self.storage.mem_pool_host = self.pool_group
+
+Candidate dataclass default:
+logger = logging.getLogger(__name__)
+
+# Max pages per batched storage IO call.
+STORAGE_BATCH_SIZE = 128
+
+
+@dataclass
+class HiCacheStorageConfig:
+    tp_rank: int
+    tp_size: int
+    pp_rank: int
+    pp_size: int
+    attn_cp_rank: int
+    attn_cp_size: int
+    is_mla_model: bool
+    enable_storage_metrics: bool
+    is_page_first_layout: bool
+    model_name: Optional[str]
+    tp_lcm_size: Optional[int] = None
+    should_split_heads: bool = False
+    # With DP attention, tp_rank is attention-group-local and does not identify
+    # the embedded storage client by itself.
+    dp_rank: int = 0
+    extra_config: Optional[dict] = None
+
+
+@dataclass
+class HiCacheStorageExtraInfo:
+    prefix_keys: Optional[List[str]] = None
+    extra_info: Optional[dict] = None
+
