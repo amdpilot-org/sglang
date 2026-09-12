@@ -1,0 +1,72 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35912",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate corrects the one remaining unsafe cookbook sentence on a base where an earlier related change had already fixed the originally enumerated pages, and its checker catches that exact one-line regression. Independent resolver runs reproduce the original uv 0.11.16 downgrade. However, the candidate is a narrow docs correction plus incomplete hardening: its line- and case-sensitive cookbook-only guard misses ordinary multiline commands, case-variant package names, and regressions in the main docs tree. It does not change uv or package metadata, so old uv still silently downgrades users who type the plain command.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-378b8c16eb27/resolver-review/uv011/bin/uv pip compile unpinned.in --python-platform x86_64-manylinux_2_34 --python-version 3.12 --no-cache",
+      "exit_code": 0,
+      "what_was_measured": "Fresh uv 0.11.16 resolution selected sglang==0.5.9 for the historical sglang<0.5.18 release boundary."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-378b8c16eb27/resolver-review/uv012/bin/uv pip compile unpinned.in --python-platform x86_64-manylinux_2_34 --python-version 3.12 --no-cache",
+      "exit_code": 0,
+      "what_was_measured": "Fresh uv 0.12.0 resolution selected sglang==0.5.17 and flash-attn-4==4.0.0b19."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-378b8c16eb27/resolver-review/uv011/bin/uv pip compile unpinned.in --prerelease=allow --python-platform x86_64-manylinux_2_34 --python-version 3.12 --no-cache",
+      "exit_code": 0,
+      "what_was_measured": "The documented prerelease flag made uv 0.11.16 select sglang==0.5.17 and flash-attn-4==4.0.0b19."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-378b8c16eb27/resolver-review/uv011/bin/uv pip compile pinned.in --python-platform x86_64-manylinux_2_34 --python-version 3.12 --no-cache",
+      "exit_code": 1,
+      "what_was_measured": "Pinned sglang==0.5.10.post1 exposed flash-attn-4 prerelease rejection and uv's --prerelease=allow hint."
+    },
+    {
+      "command": "node docs/scripts/check_cookbook_configs.mjs (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's regression/checker suite passed at exact commit 0f6ace775da584a0bfe330ff908470574b14fb7c."
+    },
+    {
+      "command": "node docs/scripts/check_cookbook_configs.mjs (candidate checker with the edited sentence temporarily restored to plain uv pip install sglang)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before behavior: the checker rejected the exact one-line regression at Qwen3.8-Flash-Next.mdx:34."
+    },
+    {
+      "command": "node docs/scripts/check_cookbook_configs.mjs (temporary multiline, SGLang case-variant, and docs/docs adversarial fixtures)",
+      "exit_code": 0,
+      "what_was_measured": "Adversarial failure: the checker accepted all three unsafe recommendations, demonstrating line-sensitive, case-sensitive, and scope bypasses."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-378b8c16eb27/venv/bin/python -c 'import sglang, torch; ...'",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed repository SGLang source import, prepared Torch/ROCm import, HIP 7.2.26015, and one visible GPU."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 0f6ace775da584a0bfe330ff908470574b14fb7c",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Resolution and documentation behavior are CPU/network deterministic. One gfx950 GPU was visible, but no GPU run can qualify the reported Qwen3.8-27B-FP8 TP=2 consequence without its weights and two-GPU topology."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A cookbook recommendation split as `uv pip install \\` followed by `sglang` on the next line passes the candidate checker while uv 0.11.16 remains vulnerable.",
+    "`uv pip install SGLang` passes the candidate checker even though Python package names are case-insensitive.",
+    "An unsafe command added under docs/docs (including install or quickstart pages) is outside the candidate checker's scope.",
+    "A user manually running the obvious plain `uv pip install sglang` command with uv 0.11.16 still silently resolves the historical release set to 0.5.9; the candidate mitigates documentation only."
+  ],
+  "remaining_limitations": [
+    "The original Qwen3.8-27B-FP8 semantic error was not reproduced: the assigned host exposes one gfx950 GPU, while the report requires TP=2 and unavailable model weights.",
+    "No tiny-model or startup smoke was substituted for the unavailable architecture/topology claim.",
+    "No native rebuild was performed because the candidate changes no native or Python runtime source.",
+    "Network resolution was evaluated against the package index as available on 2026-09-12, constrained to sglang<0.5.18 to reproduce the issue's historical release boundary."
+  ]
+}
