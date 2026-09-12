@@ -1,0 +1,191 @@
+FFF.                                                                     [100%]
+=================================== FAILURES ===================================
+______ test_xpu_token_sync_avoids_integer_min_all_reduce[rank_values0-42] ______
+
+rank_values = [42, 42], expected = 42
+
+    @pytest.mark.parametrize(
+        "rank_values, expected",
+        [
+            ([42, 42], 42),
+            ([17, 5], 5),
+            ([0, 0, 0, 0], 0),
+        ],
+    )
+    def test_xpu_token_sync_avoids_integer_min_all_reduce(rank_values, expected):
+        token_ids = torch.tensor([rank_values[0]], dtype=torch.long)
+        sampler = sampler_module.Sampler.__new__(sampler_module.Sampler)
+        sampler.tp_sync_group = object()
+    
+        def broken_xccl_all_reduce(tensor, op, group):
+            assert op == torch.distributed.ReduceOp.MIN
+            tensor.fill_(sum(rank_values))
+    
+        def xccl_all_gather(output, tensor, group):
+            output.copy_(torch.tensor(rank_values, dtype=tensor.dtype).reshape_as(output))
+    
+        with (
+            patch.object(sampler_module, "SYNC_TOKEN_IDS_ACROSS_TP", True),
+            patch.object(sampler_module, "is_xpu", return_value=True, create=True),
+            patch.object(
+                torch.distributed, "get_world_size", return_value=len(rank_values)
+            ),
+            patch.object(
+                torch.distributed,
+                "all_reduce",
+                side_effect=broken_xccl_all_reduce,
+            ) as all_reduce,
+            patch.object(
+                torch.distributed,
+                "all_gather_into_tensor",
+                side_effect=xccl_all_gather,
+            ) as all_gather,
+        ):
+            sampler._sync_token_ids_across_tp(
+                token_ids, SimpleNamespace(grammars=None)
+            )
+    
+>       assert token_ids.item() == expected
+E       assert 84 == 42
+E        +  where 84 = <built-in method item of Tensor object at 0x7fc234cacb40>()
+E        +    where <built-in method item of Tensor object at 0x7fc234cacb40> = tensor([84]).item
+
+test/registered/unit/layers/test_sampler_xpu_token_sync.py:51: AssertionError
+______ test_xpu_token_sync_avoids_integer_min_all_reduce[rank_values1-5] _______
+
+rank_values = [17, 5], expected = 5
+
+    @pytest.mark.parametrize(
+        "rank_values, expected",
+        [
+            ([42, 42], 42),
+            ([17, 5], 5),
+            ([0, 0, 0, 0], 0),
+        ],
+    )
+    def test_xpu_token_sync_avoids_integer_min_all_reduce(rank_values, expected):
+        token_ids = torch.tensor([rank_values[0]], dtype=torch.long)
+        sampler = sampler_module.Sampler.__new__(sampler_module.Sampler)
+        sampler.tp_sync_group = object()
+    
+        def broken_xccl_all_reduce(tensor, op, group):
+            assert op == torch.distributed.ReduceOp.MIN
+            tensor.fill_(sum(rank_values))
+    
+        def xccl_all_gather(output, tensor, group):
+            output.copy_(torch.tensor(rank_values, dtype=tensor.dtype).reshape_as(output))
+    
+        with (
+            patch.object(sampler_module, "SYNC_TOKEN_IDS_ACROSS_TP", True),
+            patch.object(sampler_module, "is_xpu", return_value=True, create=True),
+            patch.object(
+                torch.distributed, "get_world_size", return_value=len(rank_values)
+            ),
+            patch.object(
+                torch.distributed,
+                "all_reduce",
+                side_effect=broken_xccl_all_reduce,
+            ) as all_reduce,
+            patch.object(
+                torch.distributed,
+                "all_gather_into_tensor",
+                side_effect=xccl_all_gather,
+            ) as all_gather,
+        ):
+            sampler._sync_token_ids_across_tp(
+                token_ids, SimpleNamespace(grammars=None)
+            )
+    
+>       assert token_ids.item() == expected
+E       assert 22 == 5
+E        +  where 22 = <built-in method item of Tensor object at 0x7fc234caeda0>()
+E        +    where <built-in method item of Tensor object at 0x7fc234caeda0> = tensor([22]).item
+
+test/registered/unit/layers/test_sampler_xpu_token_sync.py:51: AssertionError
+______ test_xpu_token_sync_avoids_integer_min_all_reduce[rank_values2-0] _______
+
+rank_values = [0, 0, 0, 0], expected = 0
+
+    @pytest.mark.parametrize(
+        "rank_values, expected",
+        [
+            ([42, 42], 42),
+            ([17, 5], 5),
+            ([0, 0, 0, 0], 0),
+        ],
+    )
+    def test_xpu_token_sync_avoids_integer_min_all_reduce(rank_values, expected):
+        token_ids = torch.tensor([rank_values[0]], dtype=torch.long)
+        sampler = sampler_module.Sampler.__new__(sampler_module.Sampler)
+        sampler.tp_sync_group = object()
+    
+        def broken_xccl_all_reduce(tensor, op, group):
+            assert op == torch.distributed.ReduceOp.MIN
+            tensor.fill_(sum(rank_values))
+    
+        def xccl_all_gather(output, tensor, group):
+            output.copy_(torch.tensor(rank_values, dtype=tensor.dtype).reshape_as(output))
+    
+        with (
+            patch.object(sampler_module, "SYNC_TOKEN_IDS_ACROSS_TP", True),
+            patch.object(sampler_module, "is_xpu", return_value=True, create=True),
+            patch.object(
+                torch.distributed, "get_world_size", return_value=len(rank_values)
+            ),
+            patch.object(
+                torch.distributed,
+                "all_reduce",
+                side_effect=broken_xccl_all_reduce,
+            ) as all_reduce,
+            patch.object(
+                torch.distributed,
+                "all_gather_into_tensor",
+                side_effect=xccl_all_gather,
+            ) as all_gather,
+        ):
+            sampler._sync_token_ids_across_tp(
+                token_ids, SimpleNamespace(grammars=None)
+            )
+    
+        assert token_ids.item() == expected
+>       all_reduce.assert_not_called()
+
+test/registered/unit/layers/test_sampler_xpu_token_sync.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock name='all_reduce' id='140472086257520'>
+
+    def assert_not_called(self):
+        """assert that the mock was never called.
+        """
+        if self.call_count != 0:
+            msg = ("Expected '%s' to not have been called. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'all_reduce' to not have been called. Called 1 times.
+E           Calls: [call(tensor([0]), op=<RedOpType.MIN: 3>, group=<object object at 0x7fc24af43210>)].
+
+/usr/lib/python3.12/unittest/mock.py:905: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/layers/test_sampler_xpu_token_sync.py::test_xpu_token_sync_avoids_integer_min_all_reduce[rank_values0-42]
+FAILED test/registered/unit/layers/test_sampler_xpu_token_sync.py::test_xpu_token_sync_avoids_integer_min_all_reduce[rank_values1-5]
+FAILED test/registered/unit/layers/test_sampler_xpu_token_sync.py::test_xpu_token_sync_avoids_integer_min_all_reduce[rank_values2-0]
+3 failed, 1 passed, 17 warnings in 11.95s
