@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34092",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3043",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2950",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/3009",
+  "candidate_commit": "8ae54e54289174deeb7f13f3f306126f430ca108",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced all three remaining review counterexamples against the exact candidate, then preserved its valid normalization fixes while selecting the native Transformers DeepSeek V4 parser when available and rejecting incomplete compression-rate and nested RoPE mappings.",
+  "tests": [
+    {
+      "command": "Exact candidate 8ae54e54289174deeb7f13f3f306126f430ca108: inspect _CONFIG_REGISTRY and load a serialized Transformers DeepseekV4Config through get_config",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before parser reproduction: both registry and loaded object were SGLang's _DeepseekV4ConfigAlias derived from DeepseekV3Config. Raw log: /job/evidence-j-8e0a757134dc/candidate/review-counterexamples-valid.log"
+    },
+    {
+      "command": "Exact candidate adversarial normalization using a Transformers-created partial compress_rates mapping and nested rope_parameters without compress",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before validation reproduction: partial rates silently became [0, 4] and missing compressed RoPE silently became {}. Raw log: /job/evidence-j-8e0a757134dc/candidate/review-counterexamples-valid.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python AITER_JIT_DIR=/tmp/amdpilot-repo-j-8e0a757134dc/cache/aiter /tmp/amdpilot-repo-j-8e0a757134dc/venv/bin/python -m pytest -q test/registered/unit/configs/test_model_config.py",
+      "exit_code": 0,
+      "what_was_measured": "12 tests and 4 subtests passed, covering native V4 registration/loading, generated modern configs, legacy compatibility, dictionary ordering, and malformed schema rejection. Raw log: /job/evidence-j-8e0a757134dc/fixed/pytest-model-config.log"
+    },
+    {
+      "command": "Passing-after native parser and adversarial normalization probe",
+      "exit_code": 0,
+      "what_was_measured": "The registry and loader returned transformers.DeepseekV4Config; incomplete rates and missing compressed RoPE raised ValueError; a valid generated config produced [128, 128, 128, 4] and one indexer layer. Raw log: /job/evidence-j-8e0a757134dc/fixed/review-counterexamples.log"
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-8e0a757134dc/pre-commit /opt/venv/bin/pre-commit run --files python/sglang/srt/utils/hf_transformers/common.py python/sglang/srt/configs/model_config.py python/sglang/srt/models/deepseek_v4.py test/registered/unit/configs/test_model_config.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, repository-policy, and test-registry hooks passed. Raw log: /job/evidence-j-8e0a757134dc/fixed/pre-commit.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No DeepSeek V4 model weights were available. These reproduced failures and corrections are deterministic CPU-side configuration parsing and validation; no unrelated GPU smoke is claimed as architecture or numerical validation."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No DeepSeek V4 weights were available, so weight loading, serving startup, semantic accuracy, GPU numerical output, and distributed execution remain unverified.",
+    "The pinned environment uses Transformers 5.12.1 rather than exactly 4.57.x; it exposes the modern native DeepseekV4Config and schema under investigation.",
+    "Older Transformers releases without native DeepseekV4Config use the preserved V3-derived compatibility fallback; that fallback was source-reviewed but not exercised in this pinned environment.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}

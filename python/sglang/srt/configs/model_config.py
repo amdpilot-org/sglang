@@ -354,6 +354,106 @@ def get_dsa_index_kpool_compress(config: PretrainedConfig) -> bool:
 REQUANTIZATION_METHODS = ["quark_mxfp4"]
 
 
+def _normalize_deepseek_v4_config(config) -> tuple[list[int], Optional[dict]]:
+    """Normalize legacy and Transformers 4.57+ DeepSeek V4 config fields.
+
+    New configs describe compression by attention type, while SGLang's V4
+    runtime consumes one integer ratio per layer.  New RoPE configs similarly
+    split the ordinary and compressed-layer parameters into separate sections.
+    Keep the legacy runtime attributes populated without replacing the native
+    Transformers V4 parser.
+    """
+    compress_rates = getattr(config, "compress_rates", None)
+    legacy_ratios = getattr(config, "compress_ratios", None)
+
+    if isinstance(compress_rates, dict):
+        layer_types = getattr(config, "layer_types", None)
+        if layer_types is None:
+            raise ValueError(
+                "DeepSeek V4 dictionary compress_rates requires layer_types"
+            )
+        missing_layer_types = sorted(set(layer_types) - compress_rates.keys())
+        if missing_layer_types:
+            raise ValueError(
+                "DeepSeek V4 compress_rates is missing rates for layer types: "
+                + ", ".join(missing_layer_types)
+            )
+        compress_ratios = [compress_rates[layer_type] for layer_type in layer_types]
+    elif compress_rates is not None:
+        # Some remote-code configs use the new spelling with the legacy list
+        # representation. Preserve compatibility with those configs.
+        compress_ratios = list(compress_rates)
+    elif legacy_ratios is not None:
+        compress_ratios = list(legacy_ratios)
+    else:
+        raise ValueError(
+            "DeepSeek V4 config must define compress_rates or compress_ratios"
+        )
+
+    if legacy_ratios is not None and list(legacy_ratios) != compress_ratios:
+        raise ValueError(
+            "DeepSeek V4 config has conflicting compress_rates and compress_ratios"
+        )
+    if len(compress_ratios) != config.num_hidden_layers:
+        raise ValueError(
+            "DeepSeek V4 compression configuration must have one entry per layer: "
+            f"expected {config.num_hidden_layers}, got {len(compress_ratios)}"
+        )
+
+    rope_parameters = getattr(config, "rope_parameters", None)
+    legacy_rope_scaling = getattr(config, "rope_scaling", None)
+    rope_scaling = rope_parameters
+    if isinstance(rope_parameters, dict) and (
+        "main" in rope_parameters or "compress" in rope_parameters
+    ):
+        if not rope_parameters.get("compress"):
+            raise ValueError(
+                "DeepSeek V4 nested rope_parameters requires a non-empty "
+                "compress section"
+            )
+        main_rope = rope_parameters.get("main") or {}
+        compress_rope = rope_parameters.get("compress") or {}
+        if not isinstance(main_rope, dict) or not isinstance(compress_rope, dict):
+            raise ValueError(
+                "DeepSeek V4 rope_parameters main and compress sections must be dictionaries"
+            )
+        rope_scaling = compress_rope
+        # Transformers v5 exposes rope_scaling as an alias of the complete
+        # rope_parameters object. A genuinely flat legacy value must match the
+        # active compressed-layer subsection.
+        if legacy_rope_scaling is not None and legacy_rope_scaling not in (
+            rope_parameters,
+            compress_rope,
+        ):
+            raise ValueError(
+                "DeepSeek V4 config has conflicting rope_parameters and rope_scaling"
+            )
+        if "rope_theta" in main_rope:
+            config.rope_theta = main_rope["rope_theta"]
+        if "rope_theta" in compress_rope:
+            config.compress_rope_theta = compress_rope["rope_theta"]
+    elif (
+        rope_parameters is not None
+        and legacy_rope_scaling is not None
+        and rope_parameters != legacy_rope_scaling
+    ):
+        raise ValueError(
+            "DeepSeek V4 config has conflicting rope_parameters and rope_scaling"
+        )
+    elif rope_parameters is None:
+        rope_scaling = legacy_rope_scaling
+
+    config.compress_ratios = compress_ratios
+    # In Transformers v5 rope_scaling is a property alias for rope_parameters;
+    # assigning the selected subsection would destroy the nested source data.
+    if not (
+        isinstance(rope_parameters, dict)
+        and ("main" in rope_parameters or "compress" in rope_parameters)
+    ):
+        config.rope_scaling = rope_scaling
+    return compress_ratios, rope_scaling
+
+
 def get_num_indexer_layers(config) -> int:
     """Layer count for the global indexer-topk capturer's host buffer.
 
@@ -367,7 +467,7 @@ def get_num_indexer_layers(config) -> int:
     if is_deepseek_dsa(config):
         return config.num_hidden_layers
     if is_deepseek_v4(config):
-        compress_ratios = getattr(config, "compress_ratios", None) or []
+        compress_ratios, _ = _normalize_deepseek_v4_config(config)
         return sum(1 for r in compress_ratios if r == 4)
     return getattr(config, "num_indexer_layers", 0)
 
@@ -1127,9 +1227,11 @@ class ModelConfig:
             self.head_dim = self.qk_nope_head_dim + self.qk_rope_head_dim
             self.v_head_dim = self.head_dim
             self.index_head_dim = self.hf_config.index_head_dim
-            self.compress_ratios = self.hf_config.compress_ratios
+            self.compress_ratios, rope_scaling = _normalize_deepseek_v4_config(
+                self.hf_config
+            )
             self.attention_arch = AttentionArch.MHA
-            self._init_mla_scaling(self.hf_config.rope_scaling)
+            self._init_mla_scaling(rope_scaling)
         elif "Glm4MoeForCausalLMNextN" in self.hf_config.architectures:
             if self.head_dim is None:
                 self.head_dim = (
