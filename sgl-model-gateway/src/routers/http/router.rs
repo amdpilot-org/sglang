@@ -3,7 +3,10 @@ use std::{sync::Arc, time::Instant};
 use axum::{
     body::{to_bytes, Body},
     extract::Request,
-    http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method, StatusCode},
+    http::{
+        header::{CONTENT_LENGTH, CONTENT_TYPE},
+        HeaderMap, HeaderValue, Method, StatusCode,
+    },
     response::{IntoResponse, Response},
     Json,
 };
@@ -34,6 +37,7 @@ use crate::{
         rerank::{RerankRequest, RerankResponse, RerankResult},
         responses::{ResponsesGetParams, ResponsesRequest},
     },
+    reasoning_parser::ParserFactory as ReasoningParserFactory,
     routers::{
         error::{self, extract_error_code_from_response},
         grpc::utils::{error_type_from_status, route_to_endpoint},
@@ -41,7 +45,61 @@ use crate::{
         streaming_utils::BreakerTrackedStream,
         RouterTrait,
     },
+    tokenizer::registry::TokenizerRegistry,
 };
+
+async fn parse_chat_reasoning_payload(
+    factory: &ReasoningParserFactory,
+    configured_parser: Option<&str>,
+    model: &str,
+    payload: &mut serde_json::Value,
+) {
+    let Some(choices) = payload
+        .get_mut("choices")
+        .and_then(|value| value.as_array_mut())
+    else {
+        return;
+    };
+
+    for choice in choices {
+        let Some(message) = choice
+            .get_mut("message")
+            .and_then(|value| value.as_object_mut())
+        else {
+            continue;
+        };
+        if message
+            .get("reasoning_content")
+            .is_some_and(|value| {
+                !value.is_null() && value.as_str().is_none_or(|reasoning| !reasoning.is_empty())
+            })
+        {
+            continue;
+        }
+        let Some(content) = message.get("content").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        let parser =
+            crate::routers::grpc::utils::get_reasoning_parser(factory, configured_parser, model);
+        let mut parser = parser.lock().await;
+        parser.reset();
+        parser.mark_reasoning_started();
+        match parser.detect_and_parse_reasoning(content) {
+            Ok(parsed) if !parsed.reasoning_text.is_empty() => {
+                message.insert(
+                    "content".into(),
+                    serde_json::Value::String(parsed.normal_text),
+                );
+                message.insert(
+                    "reasoning_content".into(),
+                    serde_json::Value::String(parsed.reasoning_text),
+                );
+            }
+            Ok(_) => {}
+            Err(err) => error!("HTTP reasoning parsing failed: {}", err),
+        }
+    }
+}
 
 /// Regular router that uses injected load balancing policies
 pub struct Router {
@@ -51,6 +109,9 @@ pub struct Router {
     dp_aware: bool,
     enable_igw: bool,
     retry_config: RetryConfig,
+    tokenizer_registry: Arc<TokenizerRegistry>,
+    reasoning_parser_factory: Option<ReasoningParserFactory>,
+    configured_reasoning_parser: Option<String>,
 }
 
 impl std::fmt::Debug for Router {
@@ -76,7 +137,63 @@ impl Router {
             dp_aware: ctx.router_config.dp_aware,
             enable_igw: ctx.router_config.enable_igw,
             retry_config: ctx.router_config.effective_retry_config(),
+            tokenizer_registry: ctx.tokenizer_registry.clone(),
+            reasoning_parser_factory: ctx.reasoning_parser_factory.clone(),
+            configured_reasoning_parser: ctx.configured_reasoning_parser.clone(),
         })
+    }
+
+    async fn parse_chat_reasoning_response(
+        &self,
+        request: &ChatCompletionRequest,
+        response: Response,
+    ) -> Response {
+        if request.is_stream() || !request.separate_reasoning || !response.status().is_success() {
+            return response;
+        }
+
+        let Some(factory) = &self.reasoning_parser_factory else {
+            return response;
+        };
+        let Some(tokenizer) = self.tokenizer_registry.get(&request.model) else {
+            return response;
+        };
+        if !crate::routers::grpc::utils::should_mark_reasoning_started(
+            crate::routers::grpc::utils::resolve_user_thinking(
+                request.chat_template_kwargs.as_ref(),
+                tokenizer.thinking_key_name(),
+            ),
+            tokenizer.thinking_toggle(),
+            tokenizer.think_in_prefill(),
+        ) {
+            return response;
+        }
+
+        let (mut parts, body) = response.into_parts();
+        let Ok(bytes) = to_bytes(body, usize::MAX).await else {
+            return error::internal_error(
+                "read_response_body_failed",
+                "Failed to read HTTP worker chat response body",
+            );
+        };
+        let Ok(mut payload) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+            return Response::from_parts(parts, Body::from(bytes));
+        };
+        parse_chat_reasoning_payload(
+            factory,
+            self.configured_reasoning_parser.as_deref(),
+            &request.model,
+            &mut payload,
+        )
+        .await;
+
+        match serde_json::to_vec(&payload) {
+            Ok(body) => {
+                parts.headers.remove(CONTENT_LENGTH);
+                Response::from_parts(parts, Body::from(body))
+            }
+            Err(_) => Response::from_parts(parts, Body::from(bytes)),
+        }
     }
 
     fn select_first_worker(&self) -> Result<String, String> {
@@ -762,8 +879,10 @@ impl RouterTrait for Router {
         body: &ChatCompletionRequest,
         model_id: Option<&str>,
     ) -> Response {
-        self.route_typed_request(headers, body, "/v1/chat/completions", model_id)
-            .await
+        let response = self
+            .route_typed_request(headers, body, "/v1/chat/completions", model_id)
+            .await;
+        self.parse_chat_reasoning_response(body, response).await
     }
 
     async fn route_completion(
@@ -880,6 +999,9 @@ mod tests {
             client: Client::new(),
             retry_config: RetryConfig::default(),
             enable_igw: false,
+            tokenizer_registry: Arc::new(TokenizerRegistry::new()),
+            reasoning_parser_factory: None,
+            configured_reasoning_parser: None,
         }
     }
 
@@ -922,5 +1044,56 @@ mod tests {
 
         let worker = router.worker_registry.get_by_url(&url).unwrap();
         assert!(worker.is_healthy());
+    }
+
+    #[tokio::test]
+    async fn test_http_chat_response_parses_prefilled_qwen3_reasoning() {
+        let factory = ReasoningParserFactory::new();
+        let mut payload = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "Compute 17 * 23. </think>\n\n391",
+                    "reasoning_content": null
+                }
+            }]
+        });
+
+        parse_chat_reasoning_payload(&factory, Some("qwen3"), "Qwen3.8-27B", &mut payload).await;
+
+        assert_eq!(
+            payload["choices"][0]["message"]["reasoning_content"],
+            "Compute 17 * 23. "
+        );
+        assert_eq!(payload["choices"][0]["message"]["content"], "\n\n391");
+    }
+
+    #[tokio::test]
+    async fn test_http_chat_response_preserves_worker_reasoning() {
+        let factory = ReasoningParserFactory::new();
+        let mut payload = serde_json::json!({
+            "choices": [{"message": {"content": "answer", "reasoning_content": "worker"}}]
+        });
+
+        parse_chat_reasoning_payload(&factory, Some("qwen3"), "Qwen3.8-27B", &mut payload).await;
+
+        assert_eq!(
+            payload["choices"][0]["message"]["reasoning_content"],
+            "worker"
+        );
+        assert_eq!(payload["choices"][0]["message"]["content"], "answer");
+    }
+
+    #[tokio::test]
+    async fn test_http_chat_response_parses_empty_worker_reasoning() {
+        let factory = ReasoningParserFactory::new();
+        let mut payload = serde_json::json!({
+            "choices": [{"message": {"content": "work</think>answer", "reasoning_content": ""}}]
+        });
+
+        parse_chat_reasoning_payload(&factory, Some("qwen3"), "Qwen3.8-27B", &mut payload).await;
+
+        assert_eq!(payload["choices"][0]["message"]["reasoning_content"], "work");
+        assert_eq!(payload["choices"][0]["message"]["content"], "answer");
     }
 }

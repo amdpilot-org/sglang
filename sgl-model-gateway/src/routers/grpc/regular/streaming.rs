@@ -245,6 +245,19 @@ impl StreamingProcessor {
                 model,
             );
 
+        // If the chat template enables thinking, it may have already injected
+        // `<think>` into the generation prompt. Initialize each streaming
+        // parser accordingly before the first generated chunk arrives.
+        let thinking_override = utils::should_mark_reasoning_started(
+            utils::resolve_user_thinking(
+                original_request.chat_template_kwargs.as_ref(),
+                tokenizer.thinking_key_name(),
+            ),
+            tokenizer.thinking_toggle(),
+            tokenizer.think_in_prefill(),
+        );
+        let think_in_prefill = tokenizer.think_in_prefill();
+
         // Check if JSON schema constraint was used (specific function or required mode)
         let used_json_schema = match tool_choice {
             Some(ToolChoice::Function { .. }) => true,
@@ -358,6 +371,8 @@ impl StreamingProcessor {
                                 &delta,
                                 index,
                                 &mut reasoning_parsers,
+                                thinking_override,
+                                think_in_prefill,
                                 request_id,
                                 model,
                                 created,
@@ -1101,6 +1116,8 @@ impl StreamingProcessor {
         delta: &str,
         index: u32,
         reasoning_parsers: &mut HashMap<u32, Arc<tokio::sync::Mutex<Box<dyn ReasoningParser>>>>,
+        thinking_override: bool,
+        think_in_prefill: bool,
         request_id: &str,
         model: &str,
         created: u64,
@@ -1108,12 +1125,16 @@ impl StreamingProcessor {
     ) -> (String, Option<ChatCompletionStreamResponse>, bool) {
         // Create fresh parser for this index (not pooled, to avoid state pollution)
         reasoning_parsers.entry(index).or_insert_with(|| {
-            let parser = utils::create_reasoning_parser(
+            let mut parser = utils::create_reasoning_parser(
                 &self.reasoning_parser_factory,
                 self.configured_reasoning_parser.as_deref(),
                 model,
             )
             .expect("Parser should be available - checked upfront");
+            if thinking_override && think_in_prefill {
+                parser.mark_reasoning_started();
+                parser.mark_think_start_stripped();
+            }
             Arc::new(tokio::sync::Mutex::new(parser))
         });
 
