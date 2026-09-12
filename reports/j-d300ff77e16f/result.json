@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/26399",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "PR 2617 is valid test-only hardening: its exact candidate passes on the assigned gfx950 and its GPU regression now rejects a blocking D2H mutation. It does not change production code or independently prove the TP8 H200 near-full-KV hang is resolved.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d300ff77e16f/venv/bin/python -m pytest -q test/registered/spec/test_eagle_verify_result_d2h.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate c6a20683551a8513301dd49d93c12cf78494683f: 4 passed, covering direct and helper-indirected host-conversion guards plus empty and populated real-GPU D2H results."
+    },
+    {
+      "command": "Temporarily mutate managers.utils._async_d2h to copy_(..., non_blocking=False), then run pytest -q test/registered/spec/test_eagle_verify_result_d2h.py -k async_pinned_d2h",
+      "exit_code": 1,
+      "what_was_measured": "Both GPU parameter cases failed at the explicit non_blocking=True assertion; the mutation was restored immediately."
+    },
+    {
+      "command": "Run the candidate AST algorithm on module-local sync_helper, alias = sync_helper, and run_eagle_verify calling alias",
+      "exit_code": 0,
+      "what_was_measured": "The scanner returned no forbidden conversion, demonstrating an alias-indirection boundary not covered by the static guard."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Real ROCm tensors, pinned host allocations, D2H copies, event synchronization, and exact values ran on HIP_VISIBLE_DEVICES=0, AMD Instinct MI350X/gfx950."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A module-local alias to a helper containing Tensor.tolist()/cpu()/numpy() bypasses the candidate AST scanner; imported helpers and dynamic dispatch are also outside its scope.",
+    "The production hang may still depend on TP8 coordination, CUDA/H200 behavior, GLM-5.1 FP8 execution, or near-full KV/memory pressure, none of which this environment can exercise."
+  ],
+  "remaining_limitations": [
+    "GLM-5.1 FP8 weights were unavailable.",
+    "Only one AMD Instinct MI350X/gfx950 with ROCm 7.2 was assigned, not eight H200 CUDA GPUs.",
+    "The original synchronous tolist failure is already absent on recorded base 358c163250ad3b1f62939b01ce1314a0a31a0365, so failing-before production reproduction on that prepared base was impossible.",
+    "No native source changed; native rebuild was not applicable."
+  ]
+}
