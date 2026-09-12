@@ -1,0 +1,51 @@
+548-                )
+549-            )
+550-
+551:        # Cascade decode is intentionally eager-only for now. A CUDA graph records
+552-        # one Python control-flow branch, while the common-prefix length and even
+553-        # whether a batch has a common prefix can change on every replay.
+554-        self.cascade_wrappers = None
+555:        if self.dispatch_reason is None and not self.decode_uses_dequant_workspace:
+556-            self.cascade_wrappers = [
+557-                BatchPrefillWithPagedKVCacheWrapper(
+558-                    self.workspace_buffer,
+--
+781-                seq_lens[:bs],
+782-                seq_lens_cpu[:bs] if seq_lens_cpu is not None else None,
+783-                seq_lens_sum,
+784:                decode_wrappers=self.decode_cuda_graph_metadata[bs],
+785-                encoder_lens=encoder_lens[:bs] if encoder_lens is not None else None,
+786-                spec_info=spec_info,
+787-                fixed_split_size=None,
+--
+848-        if in_capture and forward_mode.is_decode_or_idle():
+849-            # fast_decode_plan needs _cached_module from the initial begin_forward
+850-            # above, so install it only after that first plan has run.
+851:            for w in self.decode_cuda_graph_metadata[bs]:
+852-                w.begin_forward = partial(fast_decode_plan, w)
+853-
+854-        if (
+--
+1002-            use_cascade = False
+1003-            if (
+1004-                forward_batch.forward_mode.is_decode()
+1005:                and forward_batch.spec_info is None
+1006-                and self.cascade_wrappers is not None
+1007-                and forward_batch.batch_size >= CASCADE_MIN_BATCH_SIZE
+1008-            ):
+--
+1193-                ForwardMode.DECODE,
+1194-                spec_info=None,
+1195-            )
+1196:            wrappers = self.decode_cuda_graph_metadata[bs]
+1197-        return wrappers
+1198-
+1199-    def _create_prefill_wrappers(self, bs: int, use_custom_mask: bool = False) -> list:
+--
+1346-    ) -> None:
+1347-        if forward_mode.is_decode_or_idle():
+1348-            decode_wrappers = self._create_decode_wrappers(bs, num_tokens)
+1349:            self.decode_cuda_graph_metadata[bs] = decode_wrappers
+1350-            self.forward_metadata = DecodeMetadata(decode_wrappers)
+1351-        elif forward_mode.is_target_verify() or forward_mode.is_dllm_extend():
+1352-            use_custom_mask = (
