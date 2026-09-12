@@ -1,0 +1,63 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32527",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/2108",
+  "candidate_commit": "907c7dc1e99455a48716e31730101aad1e2e08e7",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The base implementation makes EAGLE draft graph/eager selection depend on rank-local DSA seed availability, reproducing the original asymmetric-path mechanism. The candidate makes the decision rank-independent for precisely PD decode, attention DP greater than one, and DSA draft-extend seed sharing by forcing all affected ranks to eager execution. Independent idle/non-idle and boundary tests passed. Eager ModelRunner execution applies DP/MLP synchronization padding from globally shared token counts; for the reported one-active/seven-idle shape it selects SUM_LEN with an identical shared buffer length on every rank. This is a source-level full fix for the reported deadlock mechanism, though the exact 8x B30Z GLM-5.2 deployment could not be run on the assigned single gfx950 GPU.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-158082916d36/venv/bin/python -m pytest test/registered/unit/spec/test_eagle_worker_v2_topk1_fastpath.py::TestEagleWorkerV2BackendFallback::test_missing_seed_cuda_graph_fallback -q --junitxml=/job/review-evidence-j-158082916d36/base-original-regression.xml",
+      "exit_code": 0,
+      "what_was_measured": "On the recorded base, three subtests confirm graph replay with a present seed but eager execution with a missing seed, directly reproducing the rank-local branch divergence behind the issue."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-158082916d36/venv/bin/python -m pytest test/registered/unit/spec/test_eagle_worker_v2_topk1_fastpath.py -q --junitxml=/job/review-evidence-j-158082916d36/candidate-spec.xml",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit 907c7dc1e99455a48716e31730101aad1e2e08e7, 9 tests and 10 subtests passed, including the candidate regression and adjacent EAGLE behavior."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-158082916d36/venv/bin/python -m pytest test/registered/unit/disaggregation/test_disaggregation_wire.py -q --junitxml=/job/review-evidence-j-158082916d36/candidate-wire.xml",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate, 37 tests and 12 subtests passed for adjacent PD-disaggregation metadata and wire behavior."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-158082916d36/venv/bin/python -m pytest /job/review-evidence-j-158082916d36/test_adversarial_rank_symmetry.py -q --junitxml=/job/review-evidence-j-158082916d36/candidate-adversarial.xml",
+      "exit_code": 0,
+      "what_was_measured": "Eight independent review cases explicitly exercised both idle and non-idle affected ranks, seed present/absent, non-PD mode, DP=1, seed-sharing disabled, and an already-eager decision. All affected ranks selected eager while unrelated configurations retained prior behavior."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-158082916d36/venv/bin/python (DP padding selection and ROCm tensor reference check; raw log outside checkout)",
+      "exit_code": 0,
+      "what_was_measured": "For global token counts [4,0,0,0,0,0,0,0], eager DP padding selected SUM_LEN and a shared buffer length of 4. A gfx950 GPU tensor calculation produced [4,4,1], equal to the independent CPU reference."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-158082916d36/venv/bin/python -m compileall -q python/sglang/srt/speculative/eagle_worker_v2.py",
+      "exit_code": 0,
+      "what_was_measured": "The changed Python source compiled successfully at the exact candidate commit."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X (gfx950) executed the independent DP-count tensor check. The original eight-rank NCCL deadlock was not run because only one GPU was assigned."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Only one AMD Instinct MI355X (gfx950) was assigned; the reported environment used eight B30Z Blackwell GPUs, so the original NCCL hang and post-fix completion were not reproduced end-to-end.",
+    "The zai-org/GLM-5.2-FP8 weights and a full speculative PD prefill/decode deployment were unavailable; model semantic accuracy and production performance remain unmeasured.",
+    "The candidate intentionally disables draft CUDA graphs for the affected configuration. Correctness is supported by eager DP padding behavior, but the performance cost was not benchmarked.",
+    "No C++ or FlyDSL/native source changed, repository-environment.json records native as null, and imports resolved to /job/repo/python/sglang; no native rebuild was applicable.",
+    "The candidate commit contains trailing whitespace in its archived failing-before XML report. This does not affect runtime code or the fix and is not treated as a correctness defect."
+  ],
+  "evidence_directory": "/job/review-evidence-j-158082916d36",
+  "source_paths": [
+    "python/sglang/srt/speculative/eagle_worker_v2.py",
+    "python/sglang/srt/model_executor/forward_batch_info.py",
+    "python/sglang/srt/layers/dp_attention.py",
+    "test/registered/unit/spec/test_eagle_worker_v2_topk1_fastpath.py"
+  ],
+  "native_paths": []
+}
