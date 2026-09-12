@@ -1,0 +1,32 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38118",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the chunked-prefill request-slot double count in the checked-out Scheduler: with 14 decoding requests, one in-flight chunk holding a pool row, one free pool row, and a ceiling of 16, the baseline marks the batch full and leaves the queued request unissued. The fix credits the held row only when that chunk is actually appended to the current prefill batch, including the PD-prefill gate, while preserving PP, Hybrid-SWA, pending-beam-row, and beam-width limits.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 SGLANG_USE_AITER=0 /tmp/amdpilot-repo-j-572b9fd57481/venv/bin/python -m pytest -q test/registered/unit/managers/test_get_new_batch_prefill_chunked_slot.py::TestGetNewBatchPrefillChunkedSlot::test_chunked_slot_added_back_so_queued_req_is_issued --tb=short (baseline source, before fix)",
+      "exit_code": 1,
+      "what_was_measured": "The behavioral regression failed because the queued request was not in PrefillAdder.can_run_list; raw output: /tmp/amdpilot-repo-j-572b9fd57481/evidence/focused_before.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 SGLANG_USE_AITER=0 /tmp/amdpilot-repo-j-572b9fd57481/venv/bin/python -m pytest -q test/registered/unit/managers/test_get_new_batch_prefill_chunked_slot.py test/registered/unit/managers/test_scheduler_chunked_req_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "11 scheduler tests passed: the issue-specific admission regression, PP ceiling, no-chunk legacy path, PD-prefill, final chunk, parked Hybrid-SWA chunk, pending Beam reservations, Beam width, and related chunk-stash behavior; raw output: /tmp/amdpilot-repo-j-572b9fd57481/evidence/focused_and_related_after.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-572b9fd57481/venv/bin/python -c '<4096-element ROCm tensor operation compared with CPU reference>'",
+      "exit_code": 0,
+      "what_was_measured": "Executed on AMD Instinct MI350X gfx950; 4096 float32 elements matched the CPU reference exactly (max_abs_diff=0.0); raw output: /tmp/amdpilot-repo-j-572b9fd57481/evidence/gpu_smoke.txt. This only verifies the assigned GPU/runtime, not the scheduler defect or GLM-5 semantics."
+    },
+    {
+      "command": "git diff --check && /tmp/amdpilot-repo-j-572b9fd57481/venv/bin/python -m compileall -q python/sglang/srt/managers/scheduler.py test/registered/unit/managers/test_get_new_batch_prefill_chunked_slot.py",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace and Python syntax validation."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X (gfx950:sramecc+:xnack-) executed an independent 4096-element float32 numerical check with max_abs_diff=0.0. The scheduler regression itself is deterministic CPU-side logic.",
+  "native_rebuilt": false,
+  "remaining_limitations": "The reported zai-org/GLM-5-FP8 weights, eight NVIDIA B200 GPUs, CUDA/TRT-LLM NSA backends, and DP=8 topology were unavailable. Therefore the original full-model serving workload and its throughput effect were not rerun. The available single gfx950 GPU cannot qualify that architecture or distributed workload. No native code changed, so no native rebuild was applicable."
+}
