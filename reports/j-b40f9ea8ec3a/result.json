@@ -1,0 +1,59 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39072",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/992",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/958",
+  "candidate_commit": "fb6171b515c97df55661f9de12c61f63ba25bdc3",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes the reproduced attention-TP metadata padding mismatch and passes its regression plus independent CPU and gfx950 adversarial checks. It is a verified partial source fix, not proof of the full eight-H20 GLM-5.3 disaggregated deployment.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b40f9ea8ec3a/venv/bin/python -m pytest -q /tmp/review-j-b40f9ea8ec3a/tests/test_dsa_dp_spec_padding.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction of the candidate contract: three padding cases failed (9 vs 12, 6 vs 8, and 9 vs 12 rows); the no-padding identity case passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b40f9ea8ec3a/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_dsa_dp_spec_padding.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 4 passed, covering issue-class SUM_LEN padding, another DP rank, MAX_LEN, and no-padding identity."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b40f9ea8ec3a/venv/bin/python - (independent CPU matrix; candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "100 independent cases across padding modes, DP ranks, TP widths, boundary token counts, rank-2 tensors, prefix preservation, and zero-fill."
+    },
+    {
+      "command": "timeout 60s env PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b40f9ea8ec3a/venv/bin/python - (gfx950 tensor probe; candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X, a device tensor was padded from 9 to 12 rows with its prefix preserved and three zero rows appended."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b40f9ea8ec3a/venv/bin/python -m py_compile python/sglang/srt/layers/attention/dsa/utils.py test/registered/unit/layers/attention/test_dsa_dp_spec_padding.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source and regression compile successfully."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 fb6171b515c97df55661f9de12c61f63ba25bdc3",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate base-to-tip diff has no whitespace errors; the prior raw-log counterexample is corrected."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A production pad_dsa_cache_seqlens tensor operation ran on one AMD Instinct MI350X/gfx950 and passed. This is not the original CUDA/H20 kernel path."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_reason": "No native source changed. The candidate modifies one Python module, adds a Python test, and updates report artifacts.",
+  "remaining_counterexamples": [
+    "The original eight-H20 GLM-5.3-W4AFP8 disaggregated decode path was not executable in the one-gfx950 environment.",
+    "CUDA FlashMLA and its fwd_kvcache_mla num_splits validation were not executed; the available system is ROCm, not CUDA.",
+    "Mooncake/InfiniBand transfer, TP=8/DP=2 multi-rank synchronization, model-specific GLM behavior, and EAGLE warmup remain unverified."
+  ],
+  "remaining_limitations": [
+    "Only the shared Python metadata-sizing contract and a ROCm device tensor operation were exercised.",
+    "No GLM-5.3-W4AFP8 weights or eight NVIDIA H20 GPUs were available.",
+    "A passing narrow regression cannot establish end-to-end semantic or distributed correctness."
+  ]
+}
