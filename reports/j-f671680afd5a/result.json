@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33902",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1778",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1743",
+  "candidate_commit": "acfc84690fe81bebb30c94e0f4a086def3190787",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review reproduced the reported GLM-4 and GLM-4.7 streaming leak on the recorded base, then verified that the exact candidate filters completed undeclared names when forwarding is disabled, preserves forwarding when enabled, consumes unknown calls with and without arguments, and resumes correctly for following declared calls and normal text across character, single-chunk, and boundary-split delivery.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-f671680afd5a/venv/bin/python /job/review-evidence-j-f671680afd5a/review_harness.py (on base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "The issue-specific harness reproduced both reported leaks with forwarding disabled: each detector emitted unknown-name and empty-object deltas. It also recorded one-chunk, character-wise, and end-boundary behavior for adversarial sequences."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f671680afd5a/venv/bin/python -m pytest -q test/registered/unit/function_call/test_glm_unknown_tool_streaming.py (on candidate acfc84690fe81bebb30c94e0f4a086def3190787)",
+      "exit_code": 0,
+      "what_was_measured": "All 8 candidate regression parametrizations passed for both detectors, both forwarding-policy values, character-wise and single-chunk recovery to a following declared call."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f671680afd5a/venv/bin/python /job/review-evidence-j-f671680afd5a/review_harness.py (on candidate acfc84690fe81bebb30c94e0f4a086def3190787)",
+      "exit_code": 0,
+      "what_was_measured": "Independent 60-case matrix covered disabled/enabled forwarding, both detectors, three chunking modes, unknown calls with arguments, two consecutive unknown calls, a following known call, and trailing normal text. Disabled mode emitted no unknown deltas; enabled behavior remained forwarded; parser state recovered for known calls and text."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f671680afd5a/venv/bin/python -m pytest -q test/registered/unit/function_call/test_glm_unknown_tool_streaming.py test/registered/unit/function_call/test_unknown_tool_name.py test/registered/unit/function_call/test_function_call_parser.py::TestGlm4MoeDetector test/registered/unit/function_call/test_function_call_parser.py::TestGlm47MoeDetector",
+      "exit_code": 0,
+      "what_was_measured": "36 candidate and existing parser tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f671680afd5a/venv/bin/python -m py_compile python/sglang/srt/function_call/base_format_detector.py python/sglang/srt/function_call/glm4_moe_detector.py python/sglang/srt/function_call/glm47_moe_detector.py && git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 acfc84690fe81bebb30c94e0f4a086def3190787",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources compile and the exact candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The original contract is a deterministic CPU-side incremental text-parser policy; no model, kernel, numerical output, or GPU execution is involved. The assigned gfx950 GPU was therefore not used and no GPU/model-serving claim is made.",
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "The exact base-to-candidate name-status and diff contain no C/C++/CUDA/HIP/native build changes. Runtime imports were confirmed from /job/repo/python/sglang, so rebuilding native code was neither required nor relevant.",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Validation is parser-level and does not claim a full HTTP server or model-weight reproduction; those layers are unnecessary to reproduce this parser state-machine defect.",
+    "No GPU or distributed workload was run because the affected implementation is CPU-only text parsing.",
+    "The prepared checkout matched the recorded base exactly; there was no image/base revision difference."
+  ]
+}
