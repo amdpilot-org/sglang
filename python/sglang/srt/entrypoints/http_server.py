@@ -74,6 +74,7 @@ from sglang.srt.entrypoints.anthropic.protocol import (
 from sglang.srt.entrypoints.anthropic.serving import AnthropicServing
 from sglang.srt.entrypoints.engine import (
     Engine,
+    _add_effective_max_running_requests,
     init_tokenizer_manager,
     run_detokenizer_process,
     run_scheduler_process,
@@ -827,20 +828,20 @@ async def server_info():
 
     server_args = _global_state.tokenizer_manager.server_args
 
-    return msgspec_to_builtins(
-        {
-            **server_args.resolved_dict(),
-            "launch_command": server_args.launch_command,
-            **_global_state.scheduler_info,
-            "startup_time": _global_state.tokenizer_manager.startup_time,
-            "internal_states": internal_states,
-            "version": __version__,
-            # Structured KV-event publisher descriptor for KV-aware routers.
-            # `None` when publishing is disabled or misconfigured; see
-            # `runtime_context.describe_kv_events_publisher` for the contract.
-            "kv_events": describe_kv_events_publisher(server_args),
-        }
-    )
+    result = {
+        **server_args.resolved_dict(),
+        "launch_command": server_args.launch_command,
+        **_global_state.scheduler_info,
+        "startup_time": _global_state.tokenizer_manager.startup_time,
+        "internal_states": internal_states,
+        "version": __version__,
+        # Structured KV-event publisher descriptor for KV-aware routers.
+        # `None` when publishing is disabled or misconfigured; see
+        # `runtime_context.describe_kv_events_publisher` for the contract.
+        "kv_events": describe_kv_events_publisher(server_args),
+    }
+    _add_effective_max_running_requests(result, internal_states)
+    return msgspec_to_builtins(result)
 
 
 @app.get("/get_load")

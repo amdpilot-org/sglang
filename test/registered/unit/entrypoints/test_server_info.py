@@ -30,6 +30,7 @@ import msgspec.structs
 
 from sglang.srt.arg_groups.validation_hook import check_load_publish_args
 from sglang.srt.entrypoints import http_server
+from sglang.srt.entrypoints.engine import Engine
 from sglang.srt.lora.lora_registry import LoRARef
 from sglang.srt.managers.tokenizer_manager import TokenizerManager
 from sglang.srt.runtime_context import publish, reset_context
@@ -478,6 +479,55 @@ class TestServerInfoExistingFieldsPreserved(CustomTestCase):
 
         self.assertIn("internal_states", info)
         self.assertIn("version", info)
+
+    def test_effective_max_running_requests_reports_state_cache_reduction(self):
+        args = ServerArgs(model_path="dummy", max_running_requests=32)
+
+        info = _call_server_info_with(
+            args,
+            internal_states=[{"effective_max_running_requests_per_dp": 9}],
+        )
+
+        self.assertEqual(info["max_running_requests"], 32)
+        self.assertEqual(info["effective_max_running_requests"], 9)
+
+    def test_effective_max_running_requests_when_requested_limit_is_unset(self):
+        args = ServerArgs(model_path="dummy", max_running_requests=None)
+
+        info = _call_server_info_with(
+            args,
+            internal_states=[{"effective_max_running_requests_per_dp": 47}],
+        )
+
+        self.assertIsNone(info["max_running_requests"])
+        self.assertEqual(info["effective_max_running_requests"], 47)
+
+    def test_effective_max_running_requests_is_omitted_when_unavailable(self):
+        args = ServerArgs(model_path="dummy", max_running_requests=32)
+
+        info = _call_server_info_with(args, internal_states=[{}])
+
+        self.assertNotIn("effective_max_running_requests", info)
+
+    def test_engine_get_server_info_exposes_the_same_effective_limit(self):
+        args = ServerArgs(model_path="dummy", max_running_requests=32)
+
+        async def _fake_internal_state():
+            return [{"effective_max_running_requests_per_dp": 9}]
+
+        engine = Engine.__new__(Engine)
+        engine.loop = asyncio.new_event_loop()
+        engine.tokenizer_manager = _stub_tokenizer_manager(args, _fake_internal_state)
+        engine._scheduler_init_result = SimpleNamespace(
+            scheduler_infos=[{"max_req_input_len": 1024}]
+        )
+        try:
+            info = engine.get_server_info()
+        finally:
+            engine.loop.close()
+
+        self.assertEqual(info["max_running_requests"], 32)
+        self.assertEqual(info["effective_max_running_requests"], 9)
 
     def test_kv_events_config_raw_field_still_surfaced(self):
         # The new structured `kv_events` block sits alongside the
