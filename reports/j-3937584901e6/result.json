@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36395",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The base already initialized MoE runtime flags for bench_one_batch latency runs, but correctness runs still reached shared model loading with the lazy AUTO backend even when ServerArgs requested AITER. MoE initialization now occurs in load_model before ModelConfig and ModelRunner construction, covering both entry paths without changing backend resolution semantics.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-3937584901e6/venv/bin/python -m pytest -q test/registered/unit/benchmark/test_one_batch_moe_config.py (with the source fix temporarily reverted)",
+      "exit_code": 1,
+      "what_was_measured": "The new regression failed only for correctness mode: requested AITER was observed as AUTO at the first model-loading operation; latency and explicit AUTO boundaries passed. Raw output: reports/j-3937584901e6/raw/regression_before.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-3937584901e6/venv/bin/python -m pytest -q test/registered/unit/benchmark/test_one_batch_moe_config.py",
+      "exit_code": 0,
+      "what_was_measured": "All three backend-propagation cases passed after the fix: correctness/AITER, latency/AITER, and correctness/AUTO. Raw output: reports/j-3937584901e6/raw/regression_after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3937584901e6/venv/bin/python -m py_compile python/sglang/benchmark/one_batch.py test/registered/unit/benchmark/test_one_batch_moe_config.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source and regression test compile successfully."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No issue-specific GPU kernel was executed. rocminfo identified the assigned accelerator as AMD Instinct MI350X, gfx950 (reports/j-3937584901e6/raw/gpu_inventory.txt), while flashinfer_mxfp4 and the reported trtllm-gen kernels require the reported NVIDIA GB300/SM103 environment."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The Kimi-K3 MXFP4 checkpoint was not available, so weight materialization and forward-kernel provenance were not profiled.",
+    "The assigned gfx950 AMD GPU cannot validate the NVIDIA-only flashinfer_mxfp4/trtllm-gen execution path reported on GB300/SM103.",
+    "The regression validates the real bench_one_batch control flow and backend value at the first model-loading operation, not model semantic accuracy or distributed execution."
+  ]
+}
