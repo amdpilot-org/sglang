@@ -1,0 +1,135 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0 -- /tmp/amdpilot-repo-j-7b4f775ed3c3/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /job/repo/test
+configfile: pytest.ini
+plugins: hypothesis-6.155.0, anyio-4.15.1
+collecting ... collected 1 item
+
+test/registered/kernels/ops/quantization/test_hadamard_jit.py::test_hadamard_transform[1-dtype0] FAILED [100%]
+
+=================================== FAILURES ===================================
+______________________ test_hadamard_transform[1-dtype0] _______________________
+
+dim = 1, dtype = torch.float32
+
+    @pytest.mark.parametrize("dim,dtype", _POWER_OF_TWO_CASES)
+    def test_hadamard_transform(dim, dtype):
+        device = "cuda"
+    
+        # Tolerances from python/sglang/kernels/aot/tests/test_hadamard.py (old AOT test)
+        if dtype == torch.float32:
+            rtol, atol = 3e-4, 3e-3
+        elif dtype == torch.bfloat16:
+            rtol, atol = 1e-2, 5e-2
+        else:  # float16
+            rtol, atol = 3e-3, 5e-3
+    
+        torch.random.manual_seed(0)
+        batch_size = 15
+    
+        x = torch.randn(batch_size, dim, device=device, dtype=dtype)
+        scale = 1.0 / math.sqrt(dim)
+    
+>       out = hadamard_transform(x, scale=scale)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/registered/kernels/ops/quantization/test_hadamard_jit.py:277: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/opt/venv/lib/python3.12/site-packages/torch/_ops.py:1269: in __call__
+    return self._op(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/kernels/ops/quantization/hadamard.py:69: in hadamard_transform
+    module = _jit_hadamard_module(x.dtype)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/kernels/jit/utils/common.py:38: in wrapper
+    result_map[key] = fn(*args, **kwargs)
+                      ^^^^^^^^^^^^^^^^^^^
+python/sglang/kernels/ops/quantization/hadamard.py:18: in _jit_hadamard_module
+    return load_jit(
+/opt/venv/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1263: in _fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+python/sglang/kernels/jit/utils/compile/loader.py:170: in load_jit
+    library = ninja.build(spec=spec, build_dir=staging, build_file=build_file)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def build(*, spec: BuildSpec, build_dir: pathlib.Path, build_file: str) -> pathlib.Path:
+        """Write the sources and *build_file* into *build_dir*, then run ninja.
+    
+        The caller passes the generated text rather than letting this regenerate it,
+        so the text the cache key was taken over is provably the text that gets
+        compiled.
+    
+        *build_dir* is always a fresh staging directory, so there is nothing here to
+        keep current — every file is written once and compiled once.
+        """
+        build_dir.mkdir(parents=True, exist_ok=True)
+        for unit in spec.translation_units():
+            # Only the generated wrappers are materialized; sources that already
+            # exist are compiled where they are.
+            if unit.source is not None:
+                (build_dir / unit.filename).write_text(unit.source)
+        (build_dir / _BUILD_FILE).write_text(build_file)
+    
+        command = ["ninja", "-f", _BUILD_FILE]
+        jobs = os.environ.get("MAX_JOBS")
+        if jobs:
+            command += ["-j", jobs]
+        completed = subprocess.run(
+            command,
+            cwd=str(build_dir),
+            capture_output=True,
+            text=True,
+            timeout=_NINJA_TIMEOUT_S,
+            check=False,
+        )
+        if completed.returncode != 0:
+>           raise RuntimeError(
+                f"Failed to build JIT module {spec.module_name} in {build_dir}\n"
+                f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
+            )
+E           RuntimeError: Failed to build JIT module sgl_kernel_jit_hadamard_fp32_t in /tmp/amdpilot-repo-j-7b4f775ed3c3/jit-cache/gfx950/sgl_kernel_jit_hadamard_fp32_t/build-14579b92933371c3/.staging-955d65dc3a8d43c0a0ecf5728d31d31a
+E           stdout:
+E           [1/2] /opt/rocm/bin/hipcc -MD -MF "cuda_0.o.d" -fPIC -D__HIP_PLATFORM_AMD__=1 -fno-gpu-rdc --offload-arch=gfx950:sramecc+:xnack- -DUSE_ROCM -std=c++20 -O3 -DHIP_FP8_TYPE_E4M3=1 -I/opt/venv/lib/python3.12/site-packages/tvm_ffi/include -I/opt/rocm/include -I/job/repo/python/sglang/kernels/jit/include -I/job/repo/python/sglang/kernels/jit/csrc/fast-hadamard-transform -c "cuda.cu" -o "cuda_0.o"
+E           FAILED: [code=1] cuda_0.o 
+E           /opt/rocm/bin/hipcc -MD -MF "cuda_0.o.d" -fPIC -D__HIP_PLATFORM_AMD__=1 -fno-gpu-rdc --offload-arch=gfx950:sramecc+:xnack- -DUSE_ROCM -std=c++20 -O3 -DHIP_FP8_TYPE_E4M3=1 -I/opt/venv/lib/python3.12/site-packages/tvm_ffi/include -I/opt/rocm/include -I/job/repo/python/sglang/kernels/jit/include -I/job/repo/python/sglang/kernels/jit/csrc/fast-hadamard-transform -c "cuda.cu" -o "cuda_0.o"
+E           In file included from cuda.cu:6:
+E           In file included from /job/repo/python/sglang/kernels/jit/csrc/fast-hadamard-transform/hadamard_jit.cuh:15:
+E           /job/repo/python/sglang/kernels/jit/csrc/fast-hadamard-transform/fast_hadamard_transform_common.h:9:10: fatal error: 'cuda_bf16.h' file not found
+E               9 | #include <cuda_bf16.h>
+E                 |          ^~~~~~~~~~~~~
+E           1 error generated when compiling for gfx950.
+E           failed to execute:/opt/rocm-7.2.4/lib/llvm/bin/clang++  --offload-arch=gfx950:sramecc+:xnack-  -MD -MF cuda_0.o.d -fPIC -D__HIP_PLATFORM_AMD__=1 -fno-gpu-rdc -DUSE_ROCM -std=c++20 -O3 -DHIP_FP8_TYPE_E4M3=1 -I/opt/venv/lib/python3.12/site-packages/tvm_ffi/include -I/opt/rocm/include -I/job/repo/python/sglang/kernels/jit/include -I/job/repo/python/sglang/kernels/jit/csrc/fast-hadamard-transform -c -x hip cuda.cu -o "cuda_0.o"
+E           ninja: build stopped: subcommand failed.
+E           
+E           stderr:
+
+python/sglang/kernels/jit/utils/compile/ninja.py:168: RuntimeError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/kernels/ops/quantization/test_hadamard_jit.py::test_hadamard_transform[1-dtype0] - RuntimeError: Failed to build JIT module sgl_kernel_jit_hadamard_fp32_t in /tmp/amdpilot-repo-j-7b4f775ed3c3/jit-cache/gfx950/sgl_kernel_jit_hadamard_fp32_t/build-14579b92933371c3/.staging-955d65dc3a8d43c0a0ecf5728d31d31a
+stdout:
+[1/2] /opt/rocm/bin/hipcc -MD -MF "cuda_0.o.d" -fPIC -D__HIP_PLATFORM_AMD__=1 -fno-gpu-rdc --offload-arch=gfx950:sramecc+:xnack- -DUSE_ROCM -std=c++20 -O3 -DHIP_FP8_TYPE_E4M3=1 -I/opt/venv/lib/python3.12/site-packages/tvm_ffi/include -I/opt/rocm/include -I/job/repo/python/sglang/kernels/jit/include -I/job/repo/python/sglang/kernels/jit/csrc/fast-hadamard-transform -c "cuda.cu" -o "cuda_0.o"
+FAILED: [code=1] cuda_0.o 
+/opt/rocm/bin/hipcc -MD -MF "cuda_0.o.d" -fPIC -D__HIP_PLATFORM_AMD__=1 -fno-gpu-rdc --offload-arch=gfx950:sramecc+:xnack- -DUSE_ROCM -std=c++20 -O3 -DHIP_FP8_TYPE_E4M3=1 -I/opt/venv/lib/python3.12/site-packages/tvm_ffi/include -I/opt/rocm/include -I/job/repo/python/sglang/kernels/jit/include -I/job/repo/python/sglang/kernels/jit/csrc/fast-hadamard-transform -c "cuda.cu" -o "cuda_0.o"
+In file included from cuda.cu:6:
+In file included from /job/repo/python/sglang/kernels/jit/csrc/fast-hadamard-transform/hadamard_jit.cuh:15:
+/job/repo/python/sglang/kernels/jit/csrc/fast-hadamard-transform/fast_hadamard_transform_common.h:9:10: fatal error: 'cuda_bf16.h' file not found
+    9 | #include <cuda_bf16.h>
+      |          ^~~~~~~~~~~~~
+1 error generated when compiling for gfx950.
+failed to execute:/opt/rocm-7.2.4/lib/llvm/bin/clang++  --offload-arch=gfx950:sramecc+:xnack-  -MD -MF cuda_0.o.d -fPIC -D__HIP_PLATFORM_AMD__=1 -fno-gpu-rdc -DUSE_ROCM -std=c++20 -O3 -DHIP_FP8_TYPE_E4M3=1 -I/opt/venv/lib/python3.12/site-packages/tvm_ffi/include -I/opt/rocm/include -I/job/repo/python/sglang/kernels/jit/include -I/job/repo/python/sglang/kernels/jit/csrc/fast-hadamard-transform -c -x hip cuda.cu -o "cuda_0.o"
+ninja: build stopped: subcommand failed.
+
+stderr:
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+========================= 1 failed, 1 warning in 6.26s =========================

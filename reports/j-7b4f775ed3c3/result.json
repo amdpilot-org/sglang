@@ -1,0 +1,31 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31347",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared main checkout already contains the race-safety property requested by the issue, via merged upstream PR https://github.com/sgl-project/sglang/pull/34274. load_jit builds in a UUID-private staging directory, loads the artifact before publication, and atomically renames the complete directory into an immutable cache leaf. Cross-node failure of flock can therefore cause duplicate private builds, but cannot make nodes rewrite the same object or shared library. No source correction was justified; this PR records the evidence and limitations.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-7b4f775ed3c3/venv/bin/python -m pytest -q test/registered/kernels/test_jit_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "42 cache tests passed, including atomic publication losing a concurrent race gracefully and build-lock exclusion. This validates the checked-out cache implementation without relying on a shared-NFS flock for correctness."
+    },
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-7b4f775ed3c3/jit-cache /tmp/amdpilot-repo-j-7b4f775ed3c3/venv/bin/python -m pytest -x -vv 'test/registered/kernels/ops/quantization/test_hadamard_jit.py::test_hadamard_transform[1-dtype0]'",
+      "exit_code": 1,
+      "what_was_measured": "A cold gfx950 Hadamard JIT attempt used the new private .staging-<uuid> path, then failed at compilation before GPU kernel execution because the CUDA-oriented source includes cuda_bf16.h, which is absent from the prepared ROCm toolchain. The failure was not ESTALE and did not involve in-place shared-cache linking."
+    },
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-7b4f775ed3c3/jit-cache /tmp/amdpilot-repo-j-7b4f775ed3c3/venv/bin/python -m pytest -q test/registered/kernels/ops/quantization/test_hadamard_jit.py",
+      "exit_code": 130,
+      "what_was_measured": "The broad Hadamard matrix was stopped after repeated instances of the same compile-time missing cuda_bf16.h blocker; it was not treated as a numerical or serving validation."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one gfx950 host was assigned. The required two-node shared-NFS mount with node-local flock semantics was unavailable, so the original multi-node ESTALE failure was not reproduced end to end.",
+    "The reported CUDA DSA/NSA model and weights were unavailable; no full-model, CUDA, or distributed startup claim is made.",
+    "The gfx950 Hadamard kernel could not execute because its CUDA-oriented source requires cuda_bf16.h. This is a separate architecture/toolchain blocker and was not changed as part of the NFS-cache investigation.",
+    "Atomic rename behavior was validated on the local prepared filesystem and by focused regression tests, not on the reporter's particular NFS implementation."
+  ]
+}
