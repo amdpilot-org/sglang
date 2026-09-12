@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33493",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "4fc5ad8a7df70cd4eb4306b7d08acf190ce7a6d9",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate correctly fixes the stale acc_linear_penalties reads and passes focused CPU and gfx950 tensor checks, but it does not advance the real min_new_tokens penalizer state in DFLASH/DSPARK decode preparation. Stop tokens can remain suppressed after the configured minimum, so this is a verified partial fix rather than a full contract fix.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b808fe9cf77c/venv/bin/python -m pytest -q /tmp/test_dflash_verify_logits_adjustments_candidate.py (recorded base source)",
+      "exit_code": 1,
+      "what_was_measured": "Candidate regression against base: four failures and one pass; additive penalties were omitted and DSPARK incorrectly classified adjustments as a no-op."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b808fe9cf77c/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_verify_logits_adjustments.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Five focused candidate cases passed for additive-penalty broadcasting, dtype conversion, -inf masking, logit-bias composition, and the no-op predicate."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b808fe9cf77c/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_logits.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Ten existing DFlash logits tests passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b808fe9cf77c/venv/bin/python reports/j-b808fe9cf77c/evidence/adversarial_checks.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned gfx950 GPU, two-row/four-position additive penalties plus logit bias exactly matched an explicit CPU reference, preserved -inf masks, and rejected invalid row count and zero draft-token inputs."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b808fe9cf77c/venv/bin/python - <<'PY' ... BatchedMinNewTokensPenalizer lifecycle ... PY (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "The real penalizer kept EOS at -inf without cumulate_output_tokens and lifted the mask only after two cumulations, while DFLASH decode preparation has no corresponding cumulation call."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI355X, gfx950, single assigned GPU; affected tensor operation matched CPU reference exactly.",
+  "native_rebuilt": false,
+  "native_rebuild_reason": "No native/C++ source changed in the candidate; Python modules were imported directly from the exact checkout.",
+  "remaining_counterexamples": [
+    "With min_new_tokens=2, DFLASH/DSPARK decode preparation does not cumulate accepted output tokens, so the real EOS/stop-token adjustment can remain -inf after two or more generated tokens instead of being lifted at the minimum.",
+    "The candidate regression injects acc_additive_penalties directly and does not exercise creation, per-step advancement, refresh, or removal of the real min_new_tokens penalty.",
+    "The exact DeepSeek-V4-Flash TP4 HTTP serving reproduction remains unverified because only one gfx950 GPU and no qualified model weights were available."
+  ],
+  "remaining_limitations": [
+    "No full-model DeepSeek-V4-Flash serving run, semantic generation validation, or TP4/distributed reproduction was possible.",
+    "The deterministic tiny Llama fixture cannot qualify the reported DSPARK model architecture and was not used as substitute proof.",
+    "GPU validation covers the affected tensor adjustment only, not the full serving engine path."
+  ]
+}
