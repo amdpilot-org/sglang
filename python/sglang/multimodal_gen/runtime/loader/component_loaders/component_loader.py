@@ -41,6 +41,7 @@ from sglang.multimodal_gen.runtime.loader.utils import (
     hf_to_custom_state_dict,
     initialize_model,
     load_model_state_dict,
+    model_construction_lock,
 )
 from sglang.multimodal_gen.runtime.loader.weight_load_plan import WeightLoadPlan
 from sglang.multimodal_gen.runtime.loader.weight_utils import (
@@ -306,17 +307,22 @@ class ComponentLoader(ABC):
         component_attn_name: str | None,
         require_backend_selection: bool,
     ) -> AutoModel:
-        with self.component_attention_backend_context(
-            attn_backend,
-            component_attn_name,
-            require_backend_selection,
-        ):
-            component = self.load_native(
-                component_model_path,
-                server_args,
-                transformers_or_diffusers,
-                component_name,
-            )
+        # Native Transformers/Diffusers from_pretrained implementations temporarily
+        # mutate process-global torch dtype and nn.Module registration hooks. Their
+        # construction and checkpoint-loading phases are not exposed separately, so
+        # the complete native call must remain isolated from other constructors.
+        with model_construction_lock:
+            with self.component_attention_backend_context(
+                attn_backend,
+                component_attn_name,
+                require_backend_selection,
+            ):
+                component = self.load_native(
+                    component_model_path,
+                    server_args,
+                    transformers_or_diffusers,
+                    component_name,
+                )
         return component
 
     def load(

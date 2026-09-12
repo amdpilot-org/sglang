@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19092",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 2914's single-rank parallel component scheduler and corrected the independently reviewed serialization defect at exact candidate commit 1baf5337c192902f8f19b56e05d713945b5ab4ff. The candidate held model_construction_lock around the complete native from_pretrained operation; an independent probe reproduced max_active_native_loads=1 and about 0.40 seconds for two 0.20-second loads. The correction removes that whole-load lock while retaining the narrower lock used by SGLang construction contexts, and the same probe then measured max_active_native_loads=2 and about 0.20 seconds. This fixes the concrete native-overlap regression, not every requested or unmeasured part of the upstream feature.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-47587d144490/venv/bin/python reports/j-47587d144490/raw/native_overlap_probe.py (exact candidate before correction)",
+      "exit_code": 1,
+      "what_was_measured": "Independent _load_native_with_context probe reproduced serialization: max_active_native_loads=1 and elapsed_seconds=0.4011 for two 0.2-second native loads."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-47587d144490/venv/bin/python reports/j-47587d144490/raw/native_overlap_probe.py (after correction)",
+      "exit_code": 0,
+      "what_was_measured": "The identical probe demonstrated actual native-call overlap: max_active_native_loads=2 and elapsed_seconds=0.2011."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-47587d144490/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_parallel_component_loading.py python/sglang/multimodal_gen/test/unit/test_plain_component_loader.py python/sglang/multimodal_gen/test/unit/test_component_loader_identity.py python/sglang/multimodal_gen/test/unit/test_component_loading_order.py",
+      "exit_code": 0,
+      "what_was_measured": "32 tests passed, including the new native-loader overlap regression, outer scheduler overlap, deterministic assembly, opt-out, distributed fallback, exception propagation, serialized SGLang default-dtype contexts, loader compatibility, and CLI behavior."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-47587d144490/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_utility_ownership.py python/sglang/multimodal_gen/test/unit/test_component_quantization_admission.py python/sglang/multimodal_gen/test/unit/test_disagg_roles.py",
+      "exit_code": 0,
+      "what_was_measured": "68 compatibility tests and 9 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-47587d144490/venv/bin/python -m pytest -vv python/sglang/multimodal_gen/test/unit/test_parallel_component_loading.py::test_parallel_loaded_gpu_modules_match_numpy_reference",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X, three concurrently loaded GPU modules matched independent NumPy matrix-multiplication references. This is a scheduler/GPU regression, not a Qwen-Image accuracy or launch benchmark."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X with torch 2.11.0+rocm7.2 and HIP 7.2.26015; focused GPU numerical test passed against NumPy."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Qwen/Qwen-Image weights were not available, so the reported 63.20-second module load and end-to-end launch-time reduction were not reproduced or measured.",
+    "No real Transformers or Diffusers checkpoint was available for representative concurrent weight loading. The failing-before/passing-after regression directly exercises the native-call boundary with controlled load work, but does not establish a real-model speedup or semantic result.",
+    "Sleep/wake restoration and post-training refit paths remain unchanged and untested; this correction covers initial ComposedPipelineBase module loading only.",
+    "Production checkpoint mappings remain pageable. The candidate's transfer microbenchmark is retained as diagnostic evidence only; pinned or direct-to-device production checkpoint loading is not implemented.",
+    "Multi-rank component loading remains sequential by design because component initialization can enter distributed collectives. No distributed workload was claimed as fixed.",
+    "Concurrent loading can increase peak host memory and storage pressure. The explicit --parallel-loading false fallback remains, but automatic memory admission and representative peak-memory measurements are not implemented.",
+    "The narrower model_construction_lock protects SGLang-owned set_default_torch_dtype/initialize_model contexts. Third-party from_pretrained internals were not qualified across every Transformers/Diffusers version or remote-code model architecture.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}

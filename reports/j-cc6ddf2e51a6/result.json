@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19092",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate d8a3b79's single-rank parallel scheduler, deterministic assembly, CLI opt-out, distributed fallback, and SGLang construction lock, while correcting its reproduced native-library race. Native Transformers/Diffusers from_pretrained calls are serialized because their pinned implementations mutate process-global torch dtype and module-registration hooks and do not expose construction separately from checkpoint loading. Safe/customized component loads can still overlap. This fixes the concrete correctness defect but remains a partial implementation of the original feature request.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-cc6ddf2e51a6/venv/bin/python reports/j-cc6ddf2e51a6/raw/native_dtype_race_probe.py (exact candidate d8a3b79 behavior before correction)",
+      "exit_code": 1,
+      "what_was_measured": "Transformers 5.12.1 local_torch_dtype contexts raced: float16 observed float64, float64 observed float32, and the process default ended at float16 rather than the original float32. Raw output: raw/native-dtype-before.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-cc6ddf2e51a6/venv/bin/python reports/j-cc6ddf2e51a6/raw/native_dtype_race_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "After correction, each native load observed its requested dtype and the process default returned to float32. Raw output: raw/native-dtype-after.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cc6ddf2e51a6/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_parallel_component_loading.py python/sglang/multimodal_gen/test/unit/test_plain_component_loader.py python/sglang/multimodal_gen/test/unit/test_component_loader_identity.py python/sglang/multimodal_gen/test/unit/test_component_loading_order.py",
+      "exit_code": 0,
+      "what_was_measured": "Focused scheduler, native isolation, CLI, failure, ordering, and loader compatibility coverage: 32 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cc6ddf2e51a6/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_utility_ownership.py python/sglang/multimodal_gen/test/unit/test_component_quantization_admission.py python/sglang/multimodal_gen/test/unit/test_disagg_roles.py",
+      "exit_code": 0,
+      "what_was_measured": "Extended compatibility: 68 passed and 9 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cc6ddf2e51a6/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_parallel_component_loading.py::test_parallel_loaded_gpu_modules_match_numpy_reference",
+      "exit_code": 0,
+      "what_was_measured": "Synthetic parallel scheduler GPU outputs matched independent NumPy references: 1 passed. This does not validate Qwen-Image or native checkpoint semantics."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X with torch 2.11.0+rocm7.2 / HIP 7.2.26015 ran the synthetic numerical regression against NumPy. No Qwen-Image weights were available."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Qwen-Image weights were unavailable, so the reported 63.20-second module-load bottleneck and launch-time reduction were not measured.",
+    "Native Transformers/Diffusers from_pretrained calls are serialized for correctness; realizing native construction/checkpoint overlap requires a library-specific split loader or upstream thread-safe scoped contexts.",
+    "Sleep/wake restoration and post-training refit paths are unchanged and untested.",
+    "Production checkpoint mappings remain pageable; pinned checkpoint loading is not implemented or validated.",
+    "Multi-rank component loading remains sequential because component initialization may contain rank collectives.",
+    "Peak host memory and storage pressure are not automatically bounded and were not measured with representative checkpoints.",
+    "No native C/C++/CUDA/HIP source changed, so a native rebuild was not applicable."
+  ]
+}
