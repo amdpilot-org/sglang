@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34677",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the reported character-at-a-time JSON-array loss and Qwen call corruption on the prepared base. The shared streaming parser now buffers an unknown call until its JSON boundary is complete, discards only that call, preserves following buffered calls and prior per-call bookkeeping, keeps valid tool indices contiguous, and logs the undefined name once.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-fb37cb1b0105/venv/bin/python issue reproduction (character-at-a-time JsonArrayParser and Qwen25Detector)",
+      "exit_code": 0,
+      "what_was_measured": "Before the change, JsonArrayParser returned {} and Qwen25Detector merged Tokyo and JST arguments under get_time at index 0. After the change, both returned get_weather at index 0 and get_time at index 1 with independently valid JSON arguments. Raw outputs: reports/j-fb37cb1b0105/raw/reproduction-before.txt and reproduction-after.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fb37cb1b0105/venv/bin/python -m pytest -q test/registered/unit/function_call/test_unknown_tool_name.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: all three new streaming cases failed on the recorded base, covering unknown-first, unknown-middle, and unknown-last state preservation. Raw output: reports/j-fb37cb1b0105/raw/regression-before.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fb37cb1b0105/venv/bin/python -m pytest -q test/registered/unit/function_call",
+      "exit_code": 0,
+      "what_was_measured": "All function-call parser tests passed after the fix: 543 tests and 21 subtests. Raw output: reports/j-fb37cb1b0105/raw/function-call-suite-after.txt."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-fb37cb1b0105/pre-commit pre-commit run --files python/sglang/srt/function_call/base_format_detector.py test/registered/unit/function_call/test_unknown_tool_name.py test/registered/unit/function_call/test_function_call_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, and registered-test checks passed for every modified Python source. Raw output: reports/j-fb37cb1b0105/raw/pre-commit.txt."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The source issue is confined to pure-Python incremental request parsing and its supplied reproduction requires no model, weights, compiler, or accelerator; GPU execution would not exercise the affected state machine differently.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No HTTP server or model-level reproduction was performed; the deterministic parser fixture directly exercises the reported implementation path but does not validate model semantics.",
+    "SGLANG_FORWARD_UNKNOWN_TOOLS remains outside this issue's scope; the shared streaming path continues its existing default policy of dropping unknown calls.",
+    "The broader open upstream PR https://github.com/sgl-project/sglang/pull/23453 was inspected for related work but not copied wholesale; its environment-variable feature is separate from this narrow collateral-damage fix."
+  ]
+}
