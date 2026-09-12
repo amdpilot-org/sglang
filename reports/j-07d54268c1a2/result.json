@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31261",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The recorded base already contains upstream PR #27869's Qwen3.5 batch-invariance implementation. This contribution adds exact Qwen3.5-27B TP=2 Triton serving regression coverage and GPU kernel-level coverage for the dense model's Gated DeltaNet RMSNorm path. On the assigned MI355X, the same BF16 row was bitwise identical at batch row counts 1 and 1025 and matched an independent FP32 PyTorch reference within the stated tolerance. The reported full TP=2 model-serving workload was not run because only one GPU was assigned and Qwen3.5-27B weights were unavailable, so this is not claimed as a complete end-to-end reproduction of the report.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python XDG_CACHE_HOME=/tmp/amdpilot-repo-j-07d54268c1a2/cache TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-07d54268c1a2/cache/triton /tmp/amdpilot-repo-j-07d54268c1a2/venv/bin/python -m pytest -q test/registered/layers/test_qwen35_gated_norm_deterministic.py",
+      "exit_code": 0,
+      "what_was_measured": "Real MI355X execution of the Qwen3.5-27B-shaped BF16 gated RMSNorm kernel: constant deterministic launch geometry over 11 adversarial row counts, bitwise equality for an identical row at batch sizes 1 and 1025, and numerical agreement with an independent FP32 PyTorch reference. Result: 2 passed, 11 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-07d54268c1a2/venv/bin/python -m pytest --collect-only -q test/registered/attention/test_qwen35_deterministic.py test/registered/layers/test_qwen35_gated_norm_deterministic.py",
+      "exit_code": 0,
+      "what_was_measured": "Collection of both the exact Qwen3.5-27B TP=2 Triton deterministic serving tests and focused kernel regression tests. Result: 8 tests collected."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-07d54268c1a2/cache/pre-commit /opt/venv/bin/pre-commit run --files test/registered/attention/test_qwen35_deterministic.py test/registered/layers/test_qwen35_gated_norm_deterministic.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, security, and registered-test CI registry checks for all changed test files."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "The focused test executed Triton BF16 kernels on GPU 0, AMD Instinct MI355X (gfx950), ROCm 7.2, Torch 2.11.0+rocm7.2. The output row was bitwise equal across batch shapes and matched the independent torch.float32 reference.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The exact reported server workload requires TP=2, but this job was assigned one GPU.",
+    "Qwen/Qwen3.5-27B model weights were not present on the node, so full generation, logprob, parser, 262144-context, and repeated HTTP batch tests were not executed.",
+    "The available GPU is AMD MI355X; the pre-existing end-to-end Qwen3.5 deterministic test is registered for NVIDIA H100/FA3. The new exact-issue serving class is collected but was not executed locally.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable.",
+    "The Llama fixture from amdpilot-org/sglang PR649 was not used because it cannot qualify Qwen3.5 architecture semantics or the TP=2 distributed path."
+  ]
+}

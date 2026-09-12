@@ -14,13 +14,37 @@ from sglang.test.test_deterministic_utils import (
 
 register_cuda_ci(est_time=119, stage="extra-b", runner_config="4-gpu-h100")
 
-QWEN35 = "Qwen/Qwen3.5-35B-A3B"
+QWEN35_27B = "Qwen/Qwen3.5-27B"
+QWEN35_35B_A3B = "Qwen/Qwen3.5-35B-A3B"
+
+
+class TestQwen35DenseTritonDeterministic(TestDeterministicBase):
+    """Exact architecture, tensor parallelism, and attention backend from #31261."""
+
+    @classmethod
+    def get_model(cls):
+        return QWEN35_27B
+
+    @classmethod
+    def get_server_args(cls):
+        return list(COMMON_SERVER_ARGS) + [
+            "--tp",
+            "2",
+            "--attention-backend",
+            "triton",
+            "--linear-attn-backend",
+            "triton",
+            "--mamba-radix-cache-strategy",
+            "extra_buffer",
+            "--mem-fraction-static",
+            "0.8",
+        ]
 
 
 class TestQwen35Fa3Deterministic(TestDeterministicBase):
     @classmethod
     def get_model(cls):
-        return QWEN35
+        return QWEN35_35B_A3B
 
     @classmethod
     def get_server_args(cls):
