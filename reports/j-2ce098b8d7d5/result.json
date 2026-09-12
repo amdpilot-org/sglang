@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/1932",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "5a5fa419998d16bb1c1cba5a91023b1272e06444",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate correctly adds bounded in-process reuse for exact repeated Qwen image requests with trusted content hashes, but it is a partial optimization rather than the original general save/load-by-ID feature. Changed prompts miss, there is no explicit cache-ID API or durable/cross-worker lifecycle, and concurrent cold requests are not coalesced.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-2ce098b8d7d5/venv/bin/python -m pytest -q /tmp/test_qwen_preprocess_request_cache_review.py (at base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: all 3 candidate regression tests fail because the base Qwen processor has no request preprocess cache-key/load path."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2ce098b8d7d5/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_qwen_preprocess_request_cache.py test/registered/unit/multimodal/test_preprocess_cache.py test/registered/unit/managers/test_mm_hashes.py (at candidate 5a5fa419998d16bb1c1cba5a91023b1272e06444)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and related cache/hash behavior: 38 passed and 5 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2ce098b8d7d5/venv/bin/python /job/review-evidence-j-2ce098b8d7d5/adversarial_review.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent counterexamples: changed prompt changes the cache key; two simultaneous identical cold misses both invoke preprocessing."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 5a5fa419998d16bb1c1cba5a91023b1272e06444",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "ROCm/Torch GPU inventory was captured, but no qualifying Qwen-VL weights were available. The tiny Llama fixture cannot validate this architecture or preprocessing contract."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The same saved image content ID cannot reuse preprocessing when the prompt changes because the rendered prompt is included in the key.",
+    "There is no OpenAI API operation to explicitly save a cache and later load it by a caller-selected ID.",
+    "Cache entries are process-local, are not shared across tokenizer workers, and do not survive restart.",
+    "Two simultaneous identical cold requests can both perform the expensive preprocessing because the new Qwen path does not use single-flight lookup.",
+    "Video and audio are explicitly excluded."
+  ],
+  "remaining_limitations": [
+    "No Qwen2-VL/Qwen2.5-VL model weights were available for a real end-to-end serving or independent numerical comparison.",
+    "No distributed or multi-tokenizer-worker cache sharing was validated or implemented.",
+    "No native code changed; native rebuild was not applicable.",
+    "Candidate PR base bd45cd50ca900dd821f829ca9adfbf9aa3336bda differs from the required recorded comparison base 358c163250ad3b1f62939b01ce1314a0a31a0365."
+  ]
+}
