@@ -56,6 +56,7 @@ ARG GPU_ARCH=gfx950
 # ===============================
 # Base image 942 with rocm700 and args
 FROM $BASE_IMAGE_942 AS gfx942
+ENV SGLANG_USE_ROCM700A="1"
 ENV BUILD_VLLM="0"
 ENV BUILD_TRITON="0"
 ENV BUILD_LLVM="0"
@@ -66,6 +67,7 @@ ENV AITER_COMMIT_DEFAULT="4ad99832823dde2315b361cbd3b54b1c5c12acd5"
 # ===============================
 # Base image 942 with rocm720 and args
 FROM $BASE_IMAGE_942_ROCM720 AS gfx942-rocm720
+ENV SGLANG_USE_ROCM700A="1"
 ENV BUILD_VLLM="0"
 ENV BUILD_TRITON="1"
 ENV BUILD_LLVM="0"
@@ -77,6 +79,7 @@ ENV TRITON_COMMIT_DEFAULT="42270451990532c67e69d753fbd026f28fcc4840"
 # ===============================
 # Base image 942 with rocm724 and args (Python 3.12 + torch 2.11)
 FROM $BASE_IMAGE_942_ROCM724 AS gfx942-rocm724
+ENV SGLANG_USE_ROCM700A="1"
 ENV BUILD_VLLM="0"
 ENV BUILD_TRITON="1"
 ENV BUILD_LLVM="0"
@@ -101,6 +104,7 @@ ENV HSA_ENABLE_IPC_MODE_LEGACY=1
 # ===============================
 # Base image 950 and args
 FROM $BASE_IMAGE_950 AS gfx950
+ENV SGLANG_USE_ROCM700A="1"
 ENV BUILD_VLLM="0"
 ENV BUILD_TRITON="0"
 ENV BUILD_LLVM="0"
@@ -111,6 +115,9 @@ ENV AITER_COMMIT_DEFAULT="4ad99832823dde2315b361cbd3b54b1c5c12acd5"
 # ===============================
 # Base image 950 with rocm720 and args
 FROM $BASE_IMAGE_950_ROCM720 AS gfx950-rocm720
+# This selects a ROCm-7.0.0-alpha RCCL workaround, not a GPU architecture.
+# It is not needed by the MI355X ROCm 7.2 image and changes DP graph padding.
+ENV SGLANG_USE_ROCM700A="0"
 ENV BUILD_VLLM="0"
 ENV BUILD_TRITON="1"
 ENV BUILD_LLVM="0"
@@ -122,6 +129,7 @@ ENV TRITON_COMMIT_DEFAULT="42270451990532c67e69d753fbd026f28fcc4840"
 # ===============================
 # Base image 950 with rocm724 and args (Python 3.12 + torch 2.11)
 FROM $BASE_IMAGE_950_ROCM724 AS gfx950-rocm724
+ENV SGLANG_USE_ROCM700A="1"
 ENV BUILD_VLLM="0"
 ENV BUILD_TRITON="1"
 ENV BUILD_LLVM="0"
@@ -281,6 +289,7 @@ RUN ln -s ${ROCM_HOME} /opt/rocm
 # BUILD_TRITON=0 keeps the Triton installed above, which is the build AMD ships
 # with this SDK; the BUILD_TRITON=1 path installs a ROCm 7.2 wheel instead.
 FROM $BASE_IMAGE_942_ROCM1000 AS gfx942-rocm1000
+ENV SGLANG_USE_ROCM700A="1"
 ENV BUILD_VLLM="0"
 ENV BUILD_TRITON="0"
 ENV BUILD_LLVM="0"
@@ -295,6 +304,7 @@ RUN mkdir -p /etc/sglang/constraints && : > /etc/sglang/constraints/torch-rocm.t
 # ===============================
 # Base image 950 with ROCm 10.0.0 and args (Python 3.12 + torch 2.11)
 FROM $BASE_IMAGE_950_ROCM1000 AS gfx950-rocm1000
+ENV SGLANG_USE_ROCM700A="1"
 ENV BUILD_VLLM="0"
 ENV BUILD_TRITON="0"
 ENV BUILD_LLVM="0"
@@ -309,6 +319,7 @@ RUN mkdir -p /etc/sglang/constraints && : > /etc/sglang/constraints/torch-rocm.t
 # The gfx1250 build paths are keyed on GPU_ARCH_LIST=gfx1250 rather than the
 # flavor name, so they apply here unchanged.
 FROM $BASE_IMAGE_1250_ROCM1000 AS gfx1250-rocm1000
+ENV SGLANG_USE_ROCM700A="1"
 ENV BUILD_VLLM="0"
 # Unlike the gfx942/gfx950 images, this one replaces the SDK's Triton: the
 # revision below is what the MI45x bring-up ran on, and it carries a fix the
@@ -1174,7 +1185,6 @@ ENV SGLANG_ROCM_DISABLE_LINEARQUANT=0
 ENV SGLANG_ROCM_FUSED_DECODE_MLA=1
 ENV SGLANG_SET_CPU_AFFINITY=1
 ENV SGLANG_USE_AITER=1
-ENV SGLANG_USE_ROCM700A=1
 
 ENV NCCL_MIN_NCHANNELS=112
 ENV ROCM_QUICK_REDUCE_QUANTIZATION=INT8

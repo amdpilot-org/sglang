@@ -1351,9 +1351,15 @@ class OpenAIServingChat(OpenAIServingBase):
         template_content_format = self.template_manager.jinja_template_content_format
 
         # Try custom encoding first (override in subclass for custom renderers)
-        thinking_requested = (request.chat_template_kwargs or {}).get(
-            "thinking", envs.SGLANG_DEFAULT_THINKING.get()
-        )
+        template_kwargs = request.chat_template_kwargs or {}
+        if "thinking" in template_kwargs:
+            thinking_requested = template_kwargs["thinking"]
+        elif envs.SGLANG_DEFAULT_THINKING.is_set():
+            thinking_requested = envs.SGLANG_DEFAULT_THINKING.get()
+        else:
+            # DeepSeek-V4-Pro is a reasoning model. Keep the default local to
+            # its custom encoder rather than changing every served model.
+            thinking_requested = self.chat_encoding_spec == "dsv4"
         thinking_mode = (
             ThinkingMode.THINKING if thinking_requested else ThinkingMode.CHAT
         )
@@ -1428,6 +1434,8 @@ class OpenAIServingChat(OpenAIServingBase):
                     env_val = envs.SGLANG_DSV4_REASONING_EFFORT.get()
                     if env_val:
                         effort_source = env_val
+                    elif not envs.SGLANG_DSV4_REASONING_EFFORT.is_set():
+                        effort_source = "high"
                 reasoning_effort_profile = self._dsv4_reasoning_effort_profile
                 assert reasoning_effort_profile is not None
                 accepted_efforts = encoding_dsv4.REASONING_EFFORT_PROFILES[
