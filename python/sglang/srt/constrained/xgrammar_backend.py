@@ -58,6 +58,168 @@ logger = logging.getLogger(__name__)
 MAX_ROLLBACK_TOKENS = 200
 
 
+def has_xgrammar_unsupported_pattern_length_combination(schema: dict) -> bool:
+    """Return whether one subschema combines ``pattern`` and a length bound.
+
+    XGrammar 0.2.x accepts these keywords together but gives ``pattern``
+    precedence and silently drops ``minLength``/``maxLength``. Walk only
+    positions that contain subschemas so instance data and property names do
+    not produce false positives.
+    """
+
+    single_subschema_keywords = (
+        "additionalItems",
+        "additionalProperties",
+        "contains",
+        "contentSchema",
+        "else",
+        "if",
+        "items",
+        "not",
+        "propertyNames",
+        "then",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+    )
+    subschema_array_keywords = ("allOf", "anyOf", "oneOf", "prefixItems")
+    subschema_map_keywords = (
+        "$defs",
+        "definitions",
+        "dependentSchemas",
+        "patternProperties",
+        "properties",
+    )
+
+    def resolve_local_ref(ref: str):
+        if ref == "#":
+            return schema
+        if not ref.startswith("#/"):
+            return None
+
+        target = schema
+        for part in ref[2:].split("/"):
+            part = part.replace("~1", "/").replace("~0", "~")
+            if not isinstance(target, dict) or part not in target:
+                return None
+            target = target[part]
+        return target
+
+    def constraints_at_location(value, resolving_refs=frozenset()):
+        """Collect constraints joined at one instance location by allOf/$ref."""
+        if not isinstance(value, dict):
+            return False, False
+
+        has_pattern = "pattern" in value
+        has_length = "minLength" in value or "maxLength" in value
+
+        ref = value.get("$ref")
+        if isinstance(ref, str) and ref not in resolving_refs:
+            target = resolve_local_ref(ref)
+            ref_pattern, ref_length = constraints_at_location(
+                target, resolving_refs | {ref}
+            )
+            has_pattern |= ref_pattern
+            has_length |= ref_length
+
+        children = value.get("allOf")
+        if isinstance(children, list):
+            for child in children:
+                child_pattern, child_length = constraints_at_location(
+                    child, resolving_refs
+                )
+                has_pattern |= child_pattern
+                has_length |= child_length
+
+        return has_pattern, has_length
+
+    def conjunctive_properties(value, resolving_refs=frozenset()):
+        """Collect property schemas joined by object-level allOf/$ref."""
+        if not isinstance(value, dict):
+            return {}
+
+        result = {}
+        properties = value.get("properties")
+        if isinstance(properties, dict):
+            for name, child in properties.items():
+                if isinstance(child, dict):
+                    result.setdefault(name, []).append(child)
+
+        ref = value.get("$ref")
+        if isinstance(ref, str) and ref not in resolving_refs:
+            target = resolve_local_ref(ref)
+            for name, children in conjunctive_properties(
+                target, resolving_refs | {ref}
+            ).items():
+                result.setdefault(name, []).extend(children)
+
+        children = value.get("allOf")
+        if isinstance(children, list):
+            for child in children:
+                for name, property_schemas in conjunctive_properties(
+                    child, resolving_refs
+                ).items():
+                    result.setdefault(name, []).extend(property_schemas)
+
+        return result
+
+    def check_subschema(value) -> bool:
+        if not isinstance(value, dict):
+            return False
+
+        has_pattern, has_length = constraints_at_location(value)
+        if has_pattern and has_length:
+            return True
+
+        # Object-level allOf/$ref branches can contribute constraints to the
+        # same property even though the keywords are not adjacent in the
+        # schema tree. Treat those property schemas as one instance location.
+        for property_schemas in conjunctive_properties(value).values():
+            property_pattern = False
+            property_length = False
+            for property_schema in property_schemas:
+                child_pattern, child_length = constraints_at_location(property_schema)
+                property_pattern |= child_pattern
+                property_length |= child_length
+            if property_pattern and property_length:
+                return True
+
+        for keyword in single_subschema_keywords:
+            child = value.get(keyword)
+            if check_subschema(child):
+                return True
+            # Draft-07 permits tuple validation through an array-valued items.
+            if (
+                keyword == "items"
+                and isinstance(child, list)
+                and any(check_subschema(item) for item in child)
+            ):
+                return True
+
+        for keyword in subschema_array_keywords:
+            children = value.get(keyword)
+            if isinstance(children, list) and any(
+                check_subschema(child) for child in children
+            ):
+                return True
+
+        for keyword in subschema_map_keywords:
+            children = value.get(keyword)
+            if isinstance(children, dict) and any(
+                check_subschema(child) for child in children.values()
+            ):
+                return True
+
+        dependencies = value.get("dependencies")
+        if isinstance(dependencies, dict) and any(
+            check_subschema(child) for child in dependencies.values()
+        ):
+            return True
+
+        return False
+
+    return check_subschema(schema)
+
+
 def _allocate_token_bitmask(vocab_size: int, batch_size: int) -> torch.Tensor:
     # Pin where pinning exists, so the later H2D can be a genuine non_blocking
     # copy (a pageable source silently downgrades it).  MPS torch has no
@@ -339,6 +501,14 @@ class XGrammarGrammarBackend(BaseGrammarBackend):
                 # Note: This builtin JSON grammar includes *all* valid JSON (including, for example, arrays at the root)
                 ctx = self.grammar_compiler.compile_builtin_json_grammar()
             else:
+                schema = json.loads(key_string)
+                if isinstance(
+                    schema, dict
+                ) and has_xgrammar_unsupported_pattern_length_combination(schema):
+                    raise RuntimeError(
+                        "JSON schema combines pattern with minLength or maxLength, "
+                        "which xgrammar 0.2.x cannot enforce together"
+                    )
                 ctx = self.grammar_compiler.compile_json_schema(
                     schema=key_string, any_whitespace=self.any_whitespace
                 )
