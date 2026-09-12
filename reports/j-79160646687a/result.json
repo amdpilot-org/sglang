@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31103",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Exact candidate 454114868ff60985549c5602da2e440e41b78d3d fixes both independently reviewed freed-row counterexamples. On the recorded base, a freed overlap-lagged row gathered stale slot 101 instead of the -1 skip sentinel. The candidate returned -1 and also masked the corresponding non-track commit step. Candidate regressions and independent mixed, all-freed, explicit-position, live-row, and downstream-mask cases passed. This verifies the bounded scheduler/state-commit correction, but not the complete NVIDIA H20 Qwen3.6 serving incident.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-79160646687a/venv/bin/python - (independent stale-mapping reproducer on recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Imported /job/repo/python/sglang/srt/managers/schedule_batch.py at base 358c163 and executed on gfx950. Actual track slots were [101, 202], not safe expected [-1, 202]."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-79160646687a/venv/bin/python reports/j-4410e3d1f041/evidence/reproduce_candidate_counterexample.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact detached candidate 4541148, imported the helper from /job/repo and returned [-1, 202] on gfx950."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-79160646687a/venv/bin/python -m pytest -q test/registered/unit/managers/test_mamba_track_indices.py test/registered/unit/spec/test_ngram_mamba_verify_update.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 4541148, 18 focused scheduler and verify-update tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-79160646687a/venv/bin/python - (independent adversarial matrix)",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, explicit override with a freed row returned [-1, 201], a mixed live/freed default returned [101, -1], two freed rows returned [-1, -1], live rows remained [102, 201], and the downstream scatter received masked steps [-1, 4]."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..454114868ff60985549c5602da2e440e41b78d3d",
+      "exit_code": 2,
+      "what_was_measured": "Only captured pytest text under the candidate's report/evidence directory contains trailing whitespace; no production or test source whitespace error was reported. This is non-functional review evidence formatting."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Torch 2.11.0+rocm7.2 and ROCm 7.2.26015 executed the base failure and candidate passes on one AMD Instinct MI350X, gfx950:sramecc+:xnack-."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The original reporter used NVIDIA H20; only an AMD MI350X/gfx950 was assigned, so CUDA, NVIDIA FA3, and H20-specific execution were not tested.",
+    "Qwen3.6-35B-A3B-FP8 weights, the EAGLE draft model, the exact launch options, and the sustained two-request serving workload were unavailable.",
+    "No full-model HTTP-serving, semantic-accuracy, distributed, or soak claim is made. The deterministic tests qualify only the scheduler track-slot and recurrent-state commit boundaries.",
+    "No native rebuild was applicable: the candidate changes Python scheduler/backend code, Python tests, and reports only; it changes no native C++, CUDA, HIP, Triton, or FlyDSL source.",
+    "The recorded base already contains the earlier partial None-to-zero guard despite candidate 12863b77 not being an ancestor in this shallow prepared history. It avoids the reported TypeError but fails the stale-slot safety contract demonstrated here."
+  ]
+}
