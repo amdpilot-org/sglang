@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38580",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/577",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/576",
+  "candidate_commit": "3893cff8924af7d59701ab5a2861272fb3d366ed",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the narrower DSA padding-prediction divergence by aligning DSA's predicted row count to attn_tp_size, and its regression changes from failing on base to passing on the candidate. It does not enforce the original issue's backend-wide MATCHED-or-EXPLICITLY-COMPACT invariant. A non-replannable preplanned ForwardBatch can still grow from 3 to 4 rows while needs_forward_metadata_init() returns false, without a common rejection, declared compact execution extent, or validation that row metadata covers the real execution extent.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-c58f5aa5f2f8/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_dsa_padding_metadata.py (candidate test checked out over base source)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: base cal_padded_tokens returned 3 rather than the attention-TP-aligned physical row count 4."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-c58f5aa5f2f8/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_dsa_padding_metadata.py test/registered/unit/model_executor/test_forward_metadata_plan_record.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, 10 focused tests passed, covering the candidate DSA regression and existing metadata-plan record behavior."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-c58f5aa5f2f8/venv/bin/python - <<'PY' ... independent DSA alignment matrix and stale-plan assertion ... PY",
+      "exit_code": 0,
+      "what_was_measured": "GPU-resident DSA metadata matched independent ceil(real/tp)*tp references for (real,tp)=(1,2),(3,2),(5,4),(8,4). The same run demonstrated the remaining original-contract counterexample: a non-replannable plan recorded at 3 rows remained accepted after growth to 4 rows (needs_forward_metadata_init() == false)."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "PyTorch 2.11.0+rocm7.2 executed GPU tensor cases on AMD Instinct MI355X; rocminfo reported gfx950/amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-. Raw output is retained in /job/review-evidence-j-c58f5aa5f2f8/.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "For a ForwardBatch marked ready with replan_equivalent=false at batch/token shape 3, mutating the physical batch to shape 4 still makes needs_forward_metadata_init() return false. The candidate adds neither a common mismatch assertion nor an explicit compact execution extent.",
+    "Backends other than DSA remain subject to the original risk when they consume final query rows against smaller preplanned row metadata; the candidate only changes DSA's padding prediction.",
+    "The candidate test validates padded DSA cache sequence lengths but does not execute an attention backend or prove that attention, KV writes, and every row-indexed buffer use a consistently declared extent."
+  ],
+  "remaining_limitations": [
+    "No model-weight end-to-end speculative DSA workload was available or run.",
+    "The assigned architecture was AMD Instinct MI355X (gfx950) under ROCm 7.2; CUDA-only paths and other GPU architectures were not exercised.",
+    "No FlyDSL C++ or other native source changed in the candidate, and repository-environment.json records no separate native artifact, so a native rebuild was not applicable.",
+    "The candidate is a valid partial fix for the issue's explicitly noted DSA padding-calculation inconsistency, but it is not a full fix for the original backend contract."
+  ],
+  "evidence_paths": [
+    "/job/review-evidence-j-c58f5aa5f2f8/base-candidate-regression.log",
+    "/job/review-evidence-j-c58f5aa5f2f8/candidate-focused-tests.log",
+    "/job/review-evidence-j-c58f5aa5f2f8/candidate-adversarial.log",
+    "/job/review-evidence-j-c58f5aa5f2f8/candidate-pr.json",
+    "/job/review-evidence-j-c58f5aa5f2f8/mirror-issue.json"
+  ]
+}
