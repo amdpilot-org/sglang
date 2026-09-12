@@ -279,6 +279,7 @@ from sglang.srt.managers.utils import (
     validate_input_length,
 )
 from sglang.srt.mem_cache import kv_cache_builder
+from sglang.srt.mem_cache.allocation import KVCacheOOMError
 from sglang.srt.mem_cache.common import (
     maybe_cache_unfinished_req,
     release_kv_cache,
@@ -3979,7 +3980,23 @@ class Scheduler(
                 self.tree_cache.ready_to_load_host_cache()
             )
 
-        new_batch.prepare_for_extend()
+        try:
+            new_batch.prepare_for_extend()
+        except KVCacheOOMError as error:
+            logger.warning(
+                "Prefill allocation missed after admission for %d request(s); "
+                "returning them to the waiting queue. %s",
+                len(can_run_list),
+                error,
+            )
+            if self.chunked_req is not None:
+                self.chunked_req.inflight_middle_chunks -= 1
+                if self.chunked_req is adder.new_chunked_req:
+                    self.chunked_req = None
+            for req in can_run_list:
+                self._add_request_to_queue(req)
+            running_batch.batch_is_full = True
+            return None, running_batch
 
         if self.tp_worker.model_runner.prefill_aware_swa:
             for req in can_run_list:
