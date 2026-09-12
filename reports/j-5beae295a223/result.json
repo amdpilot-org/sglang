@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33187",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "40a488defc20fc508eb9f5d4e099ae869d2cbd9f",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate corrects abort-only sanitization for FP32 and consolidates cache/backend cleanup, but FP16 full-NaN rows still become all -inf and produce NaN softmax values before host-side request abort processing.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 prepared-python inline base reproduction",
+      "exit_code": 1,
+      "what_was_measured": "Recorded base reproduced uniform 163840-way sampling after sanitizing a full-NaN GPU row (p=6.1035157e-06); base lacks SGLANG_ABORT_ON_NAN_LOGITS, causing the final probe to raise AttributeError."
+    },
+    {
+      "command": "prepared-python -m pytest -vv test/registered/unit/utils/test_abort_on_nan_logits.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 6 passed, including FP32 abort-only sanitization and request marking."
+    },
+    {
+      "command": "prepared-python -m pytest -q test/registered/unit/managers/test_batch_result_processor_hidden_states.py",
+      "exit_code": 0,
+      "what_was_measured": "9 tests and 2 subtests passed; mocked comprehensive cleanup hooks were exercised."
+    },
+    {
+      "command": "prepared-python -m pytest -q test/registered/sampling/test_sampling_mask.py",
+      "exit_code": 0,
+      "what_was_measured": "Existing sampling-mask regression suite passed (with skips reported by the suite)."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 prepared-python inline dtype adversarial probe",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X, FP32 and BF16 abort-only rows became finite, but FP16 remained non-finite and softmax returned NaN. Full-row detection correctly distinguished a partial-NaN row."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X, ROCm/HIP 7.2.26015; real GPU tensors tested for float32, float16, and bfloat16."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With SGLANG_ABORT_ON_NAN_LOGITS=1 and SGLANG_SANITIZE_NAN_LOGITS=0, a fully-NaN FP16 GPU row is replaced by all -inf because -1e30 is outside FP16 range; softmax is still NaN before request-scoped abort processing.",
+    "Speculative decoding with a full-NaN mask still raises an assertion instead of performing request-scoped containment.",
+    "Hierarchical-cache write-through safety has mocked cleanup coverage but no live hierarchical-cache regression, so poisoned host-cache publication is not end-to-end verified."
+  ],
+  "remaining_limitations": [
+    "No Blackwell SM10x or Kimi-K3 weights/TP=8 environment was available; the qualified claim is limited to an MI350X numerical fixture and unit-level scheduler processing.",
+    "No live hierarchical-cache, multimodal, disaggregated-offload, HiSparse, or multi-node serving deployment was available.",
+    "No native rebuild was performed because the candidate changes only Python, documentation, tests, and reports."
+  ]
+}
