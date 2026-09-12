@@ -394,6 +394,8 @@ class Envs:
     # ===================================================================
     SGLANG_GRAMMAR_POLL_INTERVAL = EnvFloat(0.005)
     SGLANG_GRAMMAR_MAX_POLL_ITERATIONS = EnvInt(10000)
+    # 0 selects automatic sizing capped to limit scheduler CPU contention.
+    SGLANG_GRAMMAR_COMPILE_MAX_WORKERS = EnvInt(0)
     SGLANG_DISABLE_OUTLINES_DISK_CACHE = EnvBool(False)
 
     # ===================================================================

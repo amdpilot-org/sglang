@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32084",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the unbounded stdlib default on the prepared implementation: with os.cpu_count() reporting 384, BaseGrammarBackend created 32 workers. Automatic grammar compilation concurrency is now capped at max(1, min(cpu_count // 2, 8)), with SGLANG_GRAMMAR_COMPILE_MAX_WORKERS as a positive operator override and 0 selecting automatic sizing. The installed xgrammar API independently reports max_threads=8 by default, so limiting outer concurrency reduces the documented multiplier without changing xgrammar behavior.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-f189188a527c/venv/bin/python -m pytest test/registered/unit/constrained/test_base_grammar_backend.py -q (base implementation)",
+      "exit_code": 0,
+      "what_was_measured": "Baseline suite passed 33 tests and 17 subtests; a separate runtime probe recorded os.cpu_count()=384 and executor_max_workers=32. See raw/baseline_unit.txt and raw/before_environment.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f189188a527c/venv/bin/python -m pytest test/registered/unit/constrained/test_base_grammar_backend.py -q (new regression before source implementation)",
+      "exit_code": 1,
+      "what_was_measured": "The added regression failed before the implementation because the worker-sizing contract did not exist. See raw/regression_before.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f189188a527c/venv/bin/python -m pytest test/registered/unit/constrained/test_base_grammar_backend.py -q",
+      "exit_code": 0,
+      "what_was_measured": "39 tests and 22 subtests passed, covering the 384-CPU cap, low CPU boundaries, missing cpu_count, positive override, zero-as-auto, and actual executor construction. A runtime probe recorded executor_max_workers=8. See raw/regression_after.txt and raw/after_executor.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f189188a527c/venv/bin/python -m ruff check/format --check <changed Python files>",
+      "exit_code": 1,
+      "what_was_measured": "Formatting tool availability only: the prepared interpreter has no ruff module. No packages were replaced or installed."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The assigned single AMD Instinct MI350X/gfx950 was inventoried in raw/before_environment.txt, but this CPU thread-pool sizing change has no GPU numerical path. No model or serving workload was claimed.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The cgroup v1 CPU controller reports cpu.cfs_quota_us=-1 (no CFS quota), so production CFS throttling and decode TPOT degradation were not reproduced.",
+    "The change bounds outer compile concurrency but does not make CPU detection CFS-quota-aware.",
+    "xgrammar's default of 8 internal threads per compiler and duplicate submissions for identical in-flight uncached grammars remain unchanged.",
+    "No model weights were needed or used; no HTTP serving, semantic accuracy, full-model, or distributed-workload claim is made.",
+    "Ruff was unavailable in the prepared interpreter."
+  ]
+}

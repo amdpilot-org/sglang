@@ -16,6 +16,7 @@ Usage:
 """
 
 import json
+import os
 import unittest
 from concurrent.futures import Future
 from unittest.mock import MagicMock, patch
@@ -28,6 +29,7 @@ from sglang.srt.constrained.base_grammar_backend import (
     GrammarStats,
     InvalidGrammarObject,
     create_grammar_backend,
+    get_grammar_compile_max_workers,
     register_grammar_backend,
 )
 from sglang.srt.runtime_context import get_context  # noqa: E402
@@ -527,6 +529,40 @@ class TestNulByteGrammarRejection(unittest.TestCase):
                 self.backend._init_value_dispatch((key_type, key_string), False)
 
                 dispatch.assert_called_once_with(key_string)
+
+
+class TestGrammarCompileMaxWorkers(unittest.TestCase):
+    def test_auto_sizing_is_bounded_on_many_core_hosts(self):
+        self.assertEqual(get_grammar_compile_max_workers(384), 8)
+
+    def test_auto_sizing_boundaries(self):
+        for cpu_count, expected in [(1, 1), (2, 1), (4, 2), (16, 8), (17, 8)]:
+            with self.subTest(cpu_count=cpu_count):
+                self.assertEqual(
+                    get_grammar_compile_max_workers(cpu_count), expected
+                )
+
+    def test_missing_cpu_count_uses_one_worker(self):
+        with patch("os.cpu_count", return_value=None):
+            self.assertEqual(get_grammar_compile_max_workers(), 1)
+
+    def test_positive_env_override(self):
+        with patch.dict(
+            os.environ, {"SGLANG_GRAMMAR_COMPILE_MAX_WORKERS": "3"}
+        ):
+            self.assertEqual(get_grammar_compile_max_workers(384), 3)
+
+    def test_zero_env_override_selects_auto_sizing(self):
+        with patch.dict(
+            os.environ, {"SGLANG_GRAMMAR_COMPILE_MAX_WORKERS": "0"}
+        ):
+            self.assertEqual(get_grammar_compile_max_workers(384), 8)
+
+    def test_backend_uses_bounded_executor(self):
+        with patch("os.cpu_count", return_value=384):
+            backend = BaseGrammarBackend()
+        self.addCleanup(backend.executor.shutdown)
+        self.assertEqual(backend.executor._max_workers, 8)
 
 
 if __name__ == "__main__":
