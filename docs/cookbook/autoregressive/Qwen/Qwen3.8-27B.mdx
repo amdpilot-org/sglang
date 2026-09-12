@@ -78,7 +78,7 @@ target concurrency is read live from the Deploy panel and Playground selection;
 the balanced value is the per-request cost ratio:
 
 ```text Formula
-ratio = (S + D) x state_bytes / (L x kv_bytes_per_token)
+variable_ratio = S x state_bytes / (L x kv_bytes_per_token)
 ```
 
 - `S` — state slots per running request: `extra_buffer=5` (default),
@@ -86,7 +86,10 @@ ratio = (S + D) x state_bytes / (L x kv_bytes_per_token)
   `extra_buffer` strategies, `SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK=1` frees one
   slot, and `extra_buffer` frees one more with the overlap scheduler off; the
   calculator reads both knobs.
-- `D` — verify intermediate states under speculative decoding:
+- `D` — verify intermediate states under speculative decoding. These are
+  allocated in separate request-indexed buffers sized by the per-attention-DP
+  `max_running_requests` clamp (plus one padding request), so the calculator
+  adds their fixed bytes instead of treating them as allocator slots:
   `--speculative-num-draft-tokens` for EAGLE/MTP (4 at the recommended 3/1/4)
   and for DFLASH (8, DFlash2's block size);
   `--speculative-dspark-block-size + 1` for DSPARK, where the block size falls
@@ -101,11 +104,13 @@ ratio = (S + D) x state_bytes / (L x kv_bytes_per_token)
   32.8 KB at fp8, 65.5 KB at bf16.
 - `L` — average total request length in tokens: input + output.
 
-`--max-mamba-cache-size = target_concurrency x S` is the equivalent explicit
+`--max-mamba-cache-size = target_concurrency x S + 1` is the safe explicit
 pin and overrides the ratio; the calculator emits it alongside. `D` is not a
 term here: the engine divides the state pool by `S` alone and sizes the
-speculative verify buffer separately, so folding `D` into the pin would
-over-provision the pool. After boot, verify with the `max_running_requests`
+speculative verify buffer separately. The extra usable slot covers the
+chunk-boundary donation, which allocates before releasing the old state; the
+backing tensor's additional row 0 is padding and cannot cover it. After boot,
+verify with the `max_running_requests`
 line in the server log — it should not be capped below your target concurrency.
 
 </Accordion>

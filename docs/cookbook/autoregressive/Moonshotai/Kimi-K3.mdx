@@ -97,17 +97,22 @@ import { KimiK3MambaRatioCalculator } from "/src/snippets/_kimi_k3_mamba_ratio_c
 
 <Accordion title="How --mamba-full-memory-ratio is calculated">
 
-`--mamba-full-memory-ratio` is the ratio between the KDA state pool and the MLA KV pool. Every parameter below except `L` is read live from the Deploy panel and Playground selection; the balanced value is the per-request cost ratio:
+`--mamba-full-memory-ratio` is the ratio between the KDA state pool and the MLA KV pool. Every parameter below except `L` and target concurrency is read live from the Deploy panel and Playground selection. Concurrency matters under plain speculation because the separate verify buffers are request-indexed:
 
 ```text
-ratio = (S + D) x state_bytes / (L x (mla_kv_bytes / DCP + draft_kv_bytes))
+variable_ratio = S x state_bytes / (L x (mla_kv_bytes / DCP + draft_kv_bytes))
 ```
 
 - `S` — KDA state slots per request: `extra_buffer=5`, `extra_buffer_lazy=4`, `no_buffer=3`, disabled radix cache `=1`. `SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK` frees one slot on the extra-buffer strategies; with the overlap scheduler off (or `pp > 1`, which disables it) the track buffer costs one slot instead of two.
-- `D` — verify intermediate states under speculative decoding: `0` when disabled, otherwise DSPARK block size + 1 (`8` at the default 7). ReplaySSM (`--enable-linear-replayssm-spec`) folds them into a per-slot ring, returning `D` to `0`.
+- `D` — verify intermediate states under speculative decoding: `0` when disabled, otherwise DSPARK block size + 1 (`8` at the default 7). Plain spec allocates these outside the slot pool for `(max_running_requests / attention_dp_size) + 1` request rows, so the calculator adds them as fixed scratch. ReplaySSM skips the intermediate SSM buffer and uses its own ring allocation; it is not modeled as `D` slots.
 - `state_bytes` — one state slot's bytes, from K3's fixed geometry, the attention-TP width, and the SSM dtype.
 - `mla_kv_bytes` — one token's MLA latent KV bytes (KV-dtype dependent); DCP shards it across its ranks. The DSPARK draft model's KV (~1.4 KB per token) is replicated on every rank, so it enters flat — negligible without DCP, the same order as the sharded MLA share under DCP8.
 - `L` — average total request length in tokens: input + output.
+
+The allocator admission clamp remains `floor(max_mamba_cache_size / S)`. For an
+explicit pin, reserve one additional usable slot per attention-DP rank:
+`max_mamba_cache_size_per_rank = target_concurrency_per_rank x S + 1`. The
+backing tensor's row 0 is dummy padding and is not allocator capacity.
 
 </Accordion>
 
@@ -158,7 +163,7 @@ Capacity levers, all in the Playground. Each trades precision or cache behavior 
 | `--mem-fraction-static` 0.90–0.92 | cheapest first win when the boot log shows a large idle `avail mem` |
 | `SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK=1` | frees one more slot per request (experimental, under validation) |
 
-Speculation: DSPARK holds block size + 1 (= 8) intermediate states per request — the calculator folds this in — and an unset `--max-running-requests` resets to 48 under spec (the command panel reminds you; set it explicitly to raise).
+Speculation: DSPARK holds block size + 1 (= 8) intermediate states in a separate request-indexed buffer — the calculator uses target concurrency for this fixed deduction — and an unset `--max-running-requests` resets to 48 under spec (the command panel reminds you; set it explicitly to raise).
 
 **MoE runner.** Leave `--moe-runner-backend` unset on Blackwell: FlashInfer MXFP4 (W4A8, official trtllm-gen SiTU kernels) is selected; H100/H200 pin Marlin. The B200 Balanced and High-Throughput cells pin `flashinfer_mxfp4` explicitly because that is the shape they were brought up on.
 
