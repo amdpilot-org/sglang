@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/9674",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "7f23d0cd29dafc0637e85ac6c211752948711a29",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate provides a working string-based embedding JSONL workflow and offline encode path, but its advertised OpenAI-compatible loader rejects token-ID inputs accepted by SGLang's embedding API and accepts whitespace-only input rejected by that API. It is a meaningful partial fix, not a full resolution.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-af3a4aba4c00/venv/bin/python -m sglang.benchmark.serving --backend sglang-embedding --dataset-name embedding --dataset-path /tmp/nonexistent.jsonl --model dummy --num-prompts 1",
+      "exit_code": 2,
+      "what_was_measured": "At the recorded base, argparse rejected the missing embedding dataset mode, reproducing the original feature absence."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-af3a4aba4c00/venv/bin/python -m pytest test/registered/bench_fn/test_benchmark_datasets_api.py -q -k 'embedding_dataset or offline_embedding'",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate, all four focused added regressions passed, covering string payload preservation, malformed/short string workloads, offline encode dispatch, and rejection of online-only fields."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-af3a4aba4c00/venv/bin/python <independent adversarial loader script>",
+      "exit_code": 0,
+      "what_was_measured": "The candidate rejected valid List[int] and List[List[int]] embedding inputs accepted by SGLang's EmbeddingRequest, while accepting a whitespace-only string with zero tokens."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-af3a4aba4c00/venv/bin/python -m py_compile python/sglang/benchmark/datasets/embedding.py python/sglang/benchmark/offline_throughput.py python/sglang/benchmark/serving.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python implementation files compiled successfully from the candidate checkout."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..7f23d0cd29dafc0637e85ac6c211752948711a29",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff contained no whitespace errors."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The assigned AMD Instinct MI350X gfx950 was detected with Torch 2.11.0+rocm7.2 and HIP 7.2, but the candidate's cited model/runtime artifacts were absent and no model numerical run was repeated.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A JSONL embedding request with input [101, 102, 103] is valid under SGLang's EmbeddingRequest and OpenAI embedding input schema but the candidate loader raises ValueError.",
+    "A JSONL embedding request with input [[101, 102], [103]] is valid under SGLang's EmbeddingRequest but the candidate loader raises ValueError.",
+    "A JSONL embedding request with a whitespace-only string is accepted by the candidate loader with zero input tokens, then rejected by the serving layer as empty."
+  ],
+  "remaining_limitations": [
+    "The full 49-test module was externally terminated after six passing tests; the four changed focused tests passed independently.",
+    "The candidate's prior MI355X/Qwen numerical claims were not independently repeated because its private runtime/model artifacts were absent in this review environment.",
+    "vLLM server interoperability was not executed.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
