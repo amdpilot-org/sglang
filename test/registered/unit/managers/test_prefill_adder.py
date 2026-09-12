@@ -518,6 +518,35 @@ class TestPrefillAdder(CustomTestCase):
         self.assertEqual(adder2.rem_chunk_tokens, 0)  # 3 - 3 = 0
         self.assertEqual(result3, AddReqResult.OTHER)
 
+    def test_chunk_smaller_than_truncation_alignment_cannot_make_progress(self):
+        """Model the reported 129-token request with a 128-token chunk.
+
+        Scheduler initialization rejects this configuration. This lower-level
+        test preserves why: admission returns OTHER on every retry without
+        changing the request or adding it to the runnable batch.
+        """
+        self.mock_token_allocator.available_size.return_value = 100_000
+        self.mock_token_allocator.full_available_size.return_value = 100_000
+        adder = self.create_adder(
+            self.create_running_batch(), page_size=1, rem_chunk_tokens=128
+        )
+        req = self.create_mock_req("chunk-129", priority=0, max_new_tokens=1)
+        req.sampling_params.ignore_eos = False
+        req.full_untruncated_fill_ids = list(range(129))
+        req.last_node = MagicMock()
+
+        for _ in range(2):
+            self.assertIs(
+                adder.add_one_req(
+                    req,
+                    has_chunked_req=False,
+                    truncation_align_size=4096,
+                ),
+                AddReqResult.OTHER,
+            )
+            self.assertEqual(adder.can_run_list, [])
+            self.assertEqual(adder.rem_chunk_tokens, 128)
+
     def _build_hybrid_swa_chunked_req(
         self,
         *,

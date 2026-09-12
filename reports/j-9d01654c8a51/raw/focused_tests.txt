@@ -1,0 +1,124 @@
+.................F.............. [ 76%]
+..........                                                   [100%]
+=================================== FAILURES ===================================
+_ TestPrefillAdder.test_chunk_smaller_than_truncation_alignment_cannot_make_progress _
+
+self = <test_prefill_adder.TestPrefillAdder testMethod=test_chunk_smaller_than_truncation_alignment_cannot_make_progress>
+
+    def test_chunk_smaller_than_truncation_alignment_cannot_make_progress(self):
+        """Model the reported 129-token request with a 128-token chunk.
+    
+        Scheduler initialization rejects this configuration. This lower-level
+        test preserves why: admission returns OTHER on every retry without
+        changing the request or adding it to the runnable batch.
+        """
+        self.mock_token_allocator.available_size.return_value = 100_000
+        self.mock_token_allocator.full_available_size.return_value = 100_000
+        adder = self.create_adder(
+            self.create_running_batch(), page_size=1, rem_chunk_tokens=128
+        )
+        req = self.create_mock_req("chunk-129", priority=0, max_new_tokens=1)
+        req.full_untruncated_fill_ids = list(range(129))
+    
+        for _ in range(2):
+            self.assertIs(
+>               adder.add_one_req(
+                    req,
+                    has_chunked_req=False,
+                    truncation_align_size=4096,
+                ),
+                AddReqResult.OTHER,
+            )
+
+test/registered/unit/managers/test_prefill_adder.py:537: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.managers.schedule_policy.PrefillAdder object at 0x72c7be471d00>
+req = <MagicMock spec='Req' id='126202216397280'>, has_chunked_req = False
+truncation_align_size = 4096
+
+    def add_one_req(
+        self, req: Req, has_chunked_req: bool, truncation_align_size: Optional[int]
+    ):
+        if (x := self.prefill_max_requests) is not None and len(self.can_run_list) >= x:
+            return AddReqResult.OTHER
+    
+>       if req.sampling_params.ignore_eos and getattr(self.tree_cache, "disable", True):
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'types.SimpleNamespace' object has no attribute 'ignore_eos'
+
+python/sglang/srt/managers/schedule_policy.py:1272: AttributeError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x72c7be5aa0c0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x72d0a4f89bc0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/managers/test_prefill_adder.py", line 537, in test_chunk_smaller_than_truncation_alignment_cannot_make_progress
+    adder.add_one_req(
+  File "/job/repo/python/sglang/srt/managers/schedule_policy.py", line 1272, in add_one_req
+    if req.sampling_params.ignore_eos and getattr(self.tree_cache, "disable", True):
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'types.SimpleNamespace' object has no attribute 'ignore_eos'
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/managers/test_prefill_adder.py::TestPrefillAdder::test_chunk_smaller_than_truncation_alignment_cannot_make_progress
+1 failed, 41 passed, 17 warnings, 556 subtests passed in 9.21s

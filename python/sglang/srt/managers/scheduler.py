@@ -1694,6 +1694,18 @@ class Scheduler(
             get_int_env_var(env_var, default_size) if env_var else None
         )
 
+        if (
+            self.truncation_align_size is not None
+            and self.chunked_prefill_size is not None
+            and 0 < self.chunked_prefill_size < self.truncation_align_size
+        ):
+            raise ValueError(
+                "chunked_prefill_size must be at least the deterministic prefill "
+                f"alignment size ({self.truncation_align_size}) for the "
+                f"{prefill_backend} attention backend; got "
+                f"chunked_prefill_size={self.chunked_prefill_size}."
+            )
+
     def init_dsa_kpool_truncation_align(self):
         """Kpool compress-write asserts chunked extends start on pool boundaries.
         Use the LCM to preserve any existing deterministic-inference alignment."""
