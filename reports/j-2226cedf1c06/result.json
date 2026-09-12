@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34857",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that candidate 034ffd7a returned fp32 containers containing only bf16-rounded logits, then replaced the aiter cast-after-bf16 path with ROCm torch.mm fp32 output accumulation and added a numerical precision regression covering production, fallback, and skinny shapes. The prepared base's existing GLM-5.2 fp32 correction-bias fixes remain intact.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 AITER_CACHE_DIR=/tmp/amdpilot-repo-j-2226cedf1c06/cache /tmp/amdpilot-repo-j-2226cedf1c06/venv/bin/python -m pytest -q test/registered/unit/layers/test_aiter_router_gemm_dtype.py (candidate implementation)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression at exact candidate behavior: all production, fallback, and skinny subtests found zero output values carrying precision beyond bf16."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 AITER_CACHE_DIR=/tmp/amdpilot-repo-j-2226cedf1c06/cache /tmp/amdpilot-repo-j-2226cedf1c06/venv/bin/python -m pytest -q test/registered/unit/layers/test_aiter_router_gemm_dtype.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression: fp32 dtype, correct shape, finite values, non-bf16-representable logits, and error no worse than a bf16-rounded independent fp32 reference for three boundary shapes; 1 test and 3 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2226cedf1c06/venv/bin/python -m pytest -q test/registered/unit/models/test_glmmoedsa_correction_bias_fp32.py",
+      "exit_code": 0,
+      "what_was_measured": "Existing GLM-5.2 correction-bias allocation and routing boundary coverage; 9 tests passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-2226cedf1c06/venv/bin/python reports inline numerical comparison",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, corrected max absolute errors versus fp32-input F.linear were 7.16e-7, 4.77e-7, and 2.39e-7; corresponding bf16-rounded reference errors were 7.79e-3, 7.80e-3, and 7.49e-3."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2, HIP 7.2.26015; raw logs record the imported source as /job/repo/python/sglang/srt/layers/rocm_linear_utils.py."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No GLM-5.2 weights were available; no full-model semantic or accuracy run was performed.",
+    "Only one GPU was used; multi-GPU and multi-node behavior were not tested.",
+    "Performance against an available tuned aiter production entry was not evaluated; the correction deliberately bypasses aiter for router logits because the observed fallback computes in bf16 before widening.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
