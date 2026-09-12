@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37111",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Preserved the candidate's independently reproduced EagleDraftExtendInput row-width correction, but rejected it as a complete fix for the original silent-corruption issue because neither model-level eager/graph semantic gate nor the exact NVIDIA distributed configuration can be tested in this environment.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-c43231325f29/venv/bin/python < inline real EagleDraftExtendInput reproduction on prepared base",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: _speculative_max_row_length raised AttributeError because EagleDraftExtendInput has num_tokens_per_req and no draft_token_num."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c43231325f29/venv/bin/python -m pytest -q test/registered/kernel/qsa/test_qsa.py -k 'speculative_row_bound or cuda_graph_pads_dynamic_draft_extend_rows or cuda_graph_target_verify_ignores_capture_bucket_requests'",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after focused and boundary regression: 5 passed, 37 deselected."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c43231325f29/venv/bin/python -m pytest -q test/registered/kernel/qsa/test_qsa.py",
+      "exit_code": 0,
+      "what_was_measured": "Full QSA test file: 41 passed, 1 NVIDIA SM121-only test skipped."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c43231325f29/venv/bin/python -m pytest -q test/registered/kernel/qsa/test_qsa.py -k 'weight_free_mqa_logits_matches_explicit_formula or triton_block_expansion_matches_torch_reference or graph_metadata_kernels_match_legacy_host_path'",
+      "exit_code": 0,
+      "what_was_measured": "Three GPU numerical/kernel metadata comparisons passed on AMD Instinct MI350X gfx950."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-c43231325f29/evidence/environment.txt identifies one AMD Instinct MI350X gfx950; reports/j-c43231325f29/evidence/gfx950-numerics.txt records 3 passing GPU comparisons."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No 1,024-token Qwen3.8-Flash-Next-NVFP4 eager/decode-graph semantic comparison or punctuation-loop gate was run.",
+    "No approximately 25K-token four-marker eager/decode-graph model-level comparison or marker-loss/punctuation-degeneration gate was run.",
+    "The exact 2x NVIDIA GB10 SM121 TP2 over RoCEv2 configuration is unavailable: this host has one AMD gfx950 GPU, ROCm 7.2, and no NVIDIA runtime.",
+    "The required Qwen3.8-Flash-Next-NVFP4 model weights are absent from the prepared runtime.",
+    "No speculative fail-closed guard was added because unavailable architecture/model evidence cannot establish a correct guard scope."
+  ]
+}
