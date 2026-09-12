@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31243",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source already contains the issue-specific fix from upstream PR #32818 (merge e5c46ff07d7859ceee9d2e59cb03e1bc3ecff118): on SM100, asymmetric-K/V MHA models such as MiMo-V2.5 resolve to fa4 instead of the incompatible trtllm_mha backend. No duplicate runtime change was made.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-7347810f54e0/venv/bin/python < focused SM100 backend-resolution probe",
+      "exit_code": 0,
+      "what_was_measured": "Deterministic resolver assertions: asymmetric 192/128-style MHA -> fa4; symmetric MHA -> trtllm_mha; asymmetric MHA with speculative top-k 2 -> flashinfer. This simulated platform facts and did not execute SM100 kernels."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7347810f54e0/venv/bin/python -m pytest test/registered/unit/test_model_overrides.py -q -k 'mimo_v2'",
+      "exit_code": 0,
+      "what_was_measured": "Current MiMo model override declarations and SM100 FP8 MoE selection; 3 passed, 91 deselected."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-7347810f54e0/venv/bin/python -m pytest test/registered/unit/mem_cache/test_asymmetric_mha_pool.py -v",
+      "exit_code": 0,
+      "what_was_measured": "Real gfx950 execution of asymmetric KV allocation and fused cache writes, including MiMo 192/128, reversed and symmetric boundary cases; 8 tests and 9 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7347810f54e0/venv/bin/python -m pytest test/registered/unit/test_model_overrides.py -q",
+      "exit_code": 1,
+      "what_was_measured": "Broader diagnostic run: 90 passed and 4 unrelated platform-sensitive tests failed under ROCm. Raw failure output is retained and is not treated as issue evidence."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Assigned GPU was AMD Instinct MI355X, gfx950, ROCm 7.2. The asymmetric MHA pool device suite executed on GPU and passed; see raw/gpu_environment.txt and raw/test_asymmetric_mha_pool.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "MiMo-V2.5 weights were unavailable, so no full-model or accuracy validation was performed.",
+    "Only one AMD gfx950 GPU was assigned; the reported four-GPU NVIDIA SM100/SM103 TP=4 CUDA graph deployment could not be reproduced.",
+    "The real GPU evidence covers the relevant asymmetric cache path on ROCm, not the CUDA TRT-LLM or FA4 kernels.",
+    "The full model-override suite has four unrelated ROCm/platform-assumption failures; the issue-specific MiMo subset passes."
+  ]
+}
