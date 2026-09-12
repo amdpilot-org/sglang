@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30887",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/2416",
+  "candidate_commit": "0dbcbe1fea5b4d098832cd47dc5e0633e9e8b963",
+  "candidate_mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2344",
+  "review_mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2451",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The recorded base reproduces the reported gated NVFP4 MoE post-load assertion with Gemma-4 TP=2 dimensions. The exact candidate passes that regression and independent padding/layout checks, including GPU-resident tensors on gfx950. The patch is recommended for acceptance, but the original two-B300 TP=2 server/model contract remains locally unverified because the required NVIDIA architecture, second GPU, and model weights are unavailable.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-5831760f33bc/venv/bin/python -m pytest -xvv test/registered/unit/layers/quantization/test_modelopt_nvfp4_moe_padding.py::TestNvfp4MoeIntermediatePadding::test_process_weights_after_loading_pads_gemma4_tp2_before_swizzle",
+      "revision": "358c163250ad3b1f62939b01ce1314a0a31a0365 with only the candidate regression test materialized",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before execution through the real process_weights_after_loading method; observed the reported (1, 2816, 22) warning and original gated-padding assertion."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5831760f33bc/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_modelopt_nvfp4_moe_padding.py test/registered/unit/layers/quantization/test_modelopt_nvfp4_moe_scales.py",
+      "revision": "0dbcbe1fea5b4d098832cd47dc5e0633e9e8b963",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression plus adjacent ModelOpt NVFP4 MoE scale coverage: 17 tests and 38 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5831760f33bc/venv/bin/python /job/review-evidence-j-5831760f33bc/candidate/adversarial.py",
+      "revision": "0dbcbe1fea5b4d098832cd47dc5e0633e9e8b963",
+      "exit_code": 0,
+      "what_was_measured": "Independent tensor oracle across nine aligned/padded intermediate sizes, two experts, gate/up marker separation, zero padding, w2 and scale correspondence, no-op identity, malformed-layout rejection, and the 352-channel case on gfx950."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The independent 352-channel tensor padding oracle ran on AMD Instinct MI350X/gfx950 with ROCm 7.2 and produced w13=(2,768,16), scales=(2,768,2), w2=(2,32,192), and w2 scales=(2,32,24). This does not exercise NVIDIA FlashInfer CUTLASS kernels."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No tensor-level counterexample was observed; the original two-rank NVIDIA B300 server load and serving path remains unexecuted in this environment."
+  ],
+  "remaining_limitations": [
+    "Only one AMD Instinct MI350X/gfx950 GPU was assigned; the report requires two NVIDIA B300 GPUs.",
+    "The nvidia/Gemma-4-26B-A4B-NVFP4 weights were unavailable, so full model loading, generation, and TP=1 versus TP=2 semantic parity were not tested.",
+    "The real CUDA/FlashInfer CUTLASS swizzle and MoE execution kernels cannot run on this ROCm host; the focused regression uses a contract-faithful swizzle test double.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
