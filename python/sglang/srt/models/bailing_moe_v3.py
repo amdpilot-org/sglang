@@ -1337,6 +1337,7 @@ class BailingMoeV3ForCausalLM(nn.Module):
                     # in the logits processor. Accuracy-neutral on ling-v3.
                     params_dtype=torch.bfloat16,
                     quant_config=quant_config,
+                    prefix=add_prefix("lm_head", prefix),
                     use_attn_tp_group=get_parallel().enable_dp_lm_head,
                 )
             )
