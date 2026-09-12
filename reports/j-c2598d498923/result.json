@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38002",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/895",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/859",
+  "candidate_commit": "924a36e64c82d79df51d1609c0bda97dacc834e4",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the bug: stored foreground responses are accepted by cancel, and active foreground responses are even changed to cancelled with abort invoked. At the exact candidate commit, ResponsesResponse retains the request background value and cancel rejects every non-background response before status handling. Candidate regressions and an independent status/background matrix passed. Background cancellation/idempotency and unknown-ID behavior remain intact.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python:test/registered/unit/entrypoints/openai /tmp/amdpilot-repo-j-c2598d498923/venv/bin/python <independent base matrix script>",
+      "exit_code": 0,
+      "what_was_measured": "On base 358c163, protocol and serving modules imported from /job/repo/python/sglang/srt/entrypoints/openai. ResponsesResponse had no background field. Explicit-false and omitted-background terminal responses returned HTTP 200; queued/in_progress foreground responses returned HTTP 200, changed to cancelled, and invoked abort once."
+    },
+    {
+      "command": "PYTHONPATH=python:test/registered/unit/entrypoints/openai /tmp/amdpilot-repo-j-c2598d498923/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_responses_protocol.py test/registered/unit/entrypoints/openai/test_serving_responses.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 924a36e, 58 tests passed with 2 subtests passed, including the candidate foreground cancellation regression and preserved background behavior."
+    },
+    {
+      "command": "PYTHONPATH=python:test/registered/unit/entrypoints/openai /tmp/amdpilot-repo-j-c2598d498923/venv/bin/python <independent candidate matrix script>",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 924a36e, explicit-false and omitted background returned HTTP 400 without mutation or abort for queued, in_progress, completed, cancelled, failed, and incomplete. Background true queued/in_progress cancelled and aborted once; all tested terminal statuses returned unchanged with HTTP 200 and no abort. Unknown ID remained HTTP 404. A legacy response with background=None was rejected with HTTP 400. Imports resolved to the candidate checkout source."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU execution was used. The original report and candidate are confined to Pydantic response construction, in-memory response storage, and cancellation handler control flow with a mocked tokenizer manager; model execution is not part of this contract."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No live HTTP server or model was run; validation exercised the same request lifecycle and cancel handler directly, as in the original minimal reproduction.",
+    "No GPU, model architecture, semantic accuracy, distributed workload, or multi-node behavior was evaluated because none is involved in the reported defect.",
+    "No native rebuild was performed because the exact candidate changes only Python source, Python tests, and report files; it contains no native-code changes."
+  ]
+}
