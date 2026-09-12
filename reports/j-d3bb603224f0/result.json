@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33464",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1971",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1934",
+  "candidate_commit": "29464b24d07e3365cf8c15f3f7138d0b6053d9cd",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduced the original EXIF-orientation failure. At the exact candidate commit, CPU byte inputs and direct PIL inputs match Pillow's canonical exif_transpose result for all orientations 1-8, rotated JPEGs bypass both GPU decoder routes, and unrotated or invalid orientations retain the fast route. Independent malformed-metadata and multiframe cases also passed.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-d3bb603224f0/venv/bin/python < original issue reproducer on base 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: decoded size (24, 16) versus expected (16, 24), with unequal pixels."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d3bb603224f0/venv/bin/python /job/review-evidence/j-d3bb603224f0/review_cases.py on candidate 29464b24d07e3365cf8c15f3f7138d0b6053d9cd",
+      "exit_code": 0,
+      "what_was_measured": "Independent parity for orientations 1-8; direct-PIL orientation and size; bypass of mocked standard/fancy GPU routes for rotated JPEGs; preservation of the GPU fast route for absent, 1, and invalid orientations; identity preservation for a direct PIL image without EXIF."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d3bb603224f0/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_base_processor_image_decode.py on candidate 29464b24d07e3365cf8c15f3f7138d0b6053d9cd",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 17 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d3bb603224f0/venv/bin/python < independent malformed-EXIF and multiframe cases on candidate 29464b24d07e3365cf8c15f3f7138d0b6053d9cd",
+      "exit_code": 0,
+      "what_was_measured": "Direct PIL inputs survive getexif/tag-table exceptions unchanged, and an unrotated two-frame GIF retains object identity and both frames."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "One AMD Instinct MI350X (gfx950) was visible through ROCm 7.2, but sglang.srt.utils.common.is_cuda() was false because the affected fast paths are NVIDIA nvJPEG/nvImageCodec paths. Routing was verified deterministically with mocks; no NVIDIA decoder kernel executed.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": "Actual NVIDIA torchvision nvJPEG and nvImageCodec execution could not be tested on the assigned AMD gfx950 GPU. No model/server run was performed: the issue contract is deterministic image decoding and does not require weights, while the tiny Llama fixture cannot qualify VLM semantics. The candidate changes only Python and tests, so no native source changed and no native rebuild was applicable."
+}
