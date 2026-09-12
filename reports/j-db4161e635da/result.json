@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36935",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The recorded source already decouples donated prefill Mamba checkpoint spacing from chunked_prefill_size: checkpoint depths use lcm(mamba_cache_chunk_size, radix tree page). Focused scheduler/cache regressions pass, so no duplicate source fix was made.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-db4161e635da/venv/bin/python -m pytest -q test/registered/unit/managers/test_mamba_checkpoint_depth.py",
+      "exit_code": 0,
+      "what_was_measured": "Five deterministic scheduler/grid cases covering donated prefill checkpoint depth, widened and unwidened tree pages, and independent tracking interval boundaries; 5 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-db4161e635da/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_unittest.py -k mamba_lru_match_refreshes_only_used_node",
+      "exit_code": 0,
+      "what_was_measured": "Actual Mamba radix-cache LRU match behavior under two branched chains; confirms only the consumed checkpoint is refreshed; 1 passed."
+    },
+    {
+      "command": "rocm-smi --showproductname --showuniqueid",
+      "exit_code": 0,
+      "what_was_measured": "Recorded the single assigned GPU as AMD Instinct MI355X, gfx950; this is not the report's NVIDIA sm_120 platform."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The issue-specific checks are scheduler/cache control-flow tests and ran on CPU. The assigned single GPU was inventoried as AMD Instinct MI355X gfx950, but no relevant full-model GPU execution was possible without the reported Qwen3.8-27B-FP8 weights and NVIDIA sm_120 platform."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Qwen3.8-27B-FP8 weights were available.",
+    "The assigned AMD gfx950 GPU cannot reproduce the report's NVIDIA sm_120-specific environment.",
+    "No full HTTP serving, semantic-accuracy, or production-load reproduction is claimed.",
+    "Finite Mamba checkpoint pools can still evict old checkpoints; the verified resolution is specifically removal of chunked_prefill_size as the prefill checkpoint-density control."
+  ]
+}
