@@ -156,6 +156,12 @@ class Parallel(msgspec.Struct):
             choices=("zigzag", "interleave"),
         ),
     ] = None
+    prefill_cp_min_tokens: A[
+        int,
+        Arg(
+            help="Minimum number of input tokens processed by a forward batch before prefill context parallelism is used. Smaller prefill batches run on the replicated non-CP path. Set to 0 to preserve the legacy behavior of using CP whenever the selected strategy supports the batch.",
+        ),
+    ] = 0
     # Split DSA GPU KV/indexer cache layers across CP ranks.
     enable_dsa_cache_layer_split: A[
         bool,

@@ -132,7 +132,11 @@ def is_cp_active(forward_batch) -> bool:
     if input_ids is None:
         return False
 
-    return strategy.can_apply(len(input_ids), forward_batch)
+    # DP and graph runners may pad input_ids. The policy must use the logical
+    # work in this forward so padding cannot accidentally turn CP on.
+    extend_lens = _to_int_list(getattr(forward_batch, "extend_seq_lens_cpu", None))
+    num_tokens = sum(extend_lens) if extend_lens is not None else len(input_ids)
+    return strategy.can_apply(num_tokens, forward_batch)
 
 
 def is_mla_cp_enabled() -> bool:

@@ -310,6 +310,58 @@ class TestCPZigzagStrategy(CustomTestCase):
             self.assertTrue(is_cp_active(active_batch))
             self.assertFalse(is_cp_active(inactive_batch))
 
+    def test_is_cp_active_respects_runtime_token_threshold(self):
+        init_cp_strategy(
+            enable_prefill_cp=True,
+            cp_size=4,
+            cp_strategy="zigzag",
+            min_tokens=16,
+        )
+        below_threshold = SimpleNamespace(
+            input_ids=torch.arange(15),
+            forward_mode=_ExtendMode(),
+            extend_seq_lens_cpu=[15],
+        )
+        at_threshold = SimpleNamespace(
+            input_ids=torch.arange(16),
+            forward_mode=_ExtendMode(),
+            extend_seq_lens_cpu=[16],
+        )
+
+        self.assertFalse(is_cp_active(below_threshold))
+        self.assertTrue(is_cp_active(at_threshold))
+
+    def test_runtime_token_threshold_uses_processed_not_cached_tokens(self):
+        init_cp_strategy(
+            enable_prefill_cp=True,
+            cp_size=4,
+            cp_strategy="zigzag",
+            min_tokens=16,
+        )
+        cached_short_followup = SimpleNamespace(
+            input_ids=torch.arange(8),
+            forward_mode=_ExtendMode(),
+            seq_lens_cpu=[32776],
+            extend_seq_lens_cpu=[8],
+        )
+
+        self.assertFalse(is_cp_active(cached_short_followup))
+
+    def test_runtime_token_threshold_ignores_runner_padding(self):
+        init_cp_strategy(
+            enable_prefill_cp=True,
+            cp_size=4,
+            cp_strategy="zigzag",
+            min_tokens=16,
+        )
+        padded_short_batch = SimpleNamespace(
+            input_ids=torch.arange(32),
+            forward_mode=_ExtendMode(),
+            extend_seq_lens_cpu=[8],
+        )
+
+        self.assertFalse(is_cp_active(padded_short_batch))
+
     def _expected_metadata(self, *, rank, cp_size, seq_lens, extend_seq_lens):
         bs = len(extend_seq_lens)
         cp_segment_num = cp_size * 2
