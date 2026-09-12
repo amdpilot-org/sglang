@@ -5,7 +5,13 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from sglang.kernels.jit.utils import cache_once, load_jit, make_cpp_args
+from sglang.kernels.jit.utils import (
+    cache_once,
+    get_jit_cuda_arch,
+    is_hip_runtime,
+    load_jit,
+    make_cpp_args,
+)
 from sglang.kernels.kda_kernels import _cuda_source
 from sglang.srt.utils.custom_op import register_custom_op
 
@@ -18,8 +24,31 @@ _BIT_EXACT_DTYPES = (torch.float16, torch.bfloat16)
 _TRANSPOSE_TILE = 32
 _MAX_GRID_DIM = 65535
 _FAILED_RUNTIME_KEYS: set[tuple[int | None, torch.dtype]] = set()
+_LOGGED_PRE_AMPERE_SKIP = False
 
 logger = logging.getLogger(__name__)
+
+
+def _is_diffusion_cuda_jit_supported() -> bool:
+    """Avoid known-bad CUDA JIT probes on pre-Ampere devices.
+
+    HIP capability numbers are not CUDA SM versions, so ROCm keeps its existing
+    behavior.
+    """
+    global _LOGGED_PRE_AMPERE_SKIP
+    if is_hip_runtime():
+        return True
+    arch = get_jit_cuda_arch()
+    if arch.major >= 8:
+        return True
+    if not _LOGGED_PRE_AMPERE_SKIP:
+        logger.info(
+            "Skipping diffusion residual-gate CUDA JIT on unsupported sm_%s%s",
+            arch.major,
+            arch.minor,
+        )
+        _LOGGED_PRE_AMPERE_SKIP = True
+    return False
 
 
 @cache_once
@@ -129,7 +158,8 @@ def can_use_residual_gate_add_cuda(
     residual: torch.Tensor, update: torch.Tensor, gate: torch.Tensor
 ) -> bool:
     return (
-        residual.dtype in _SUPPORTED_DTYPES
+        _is_diffusion_cuda_jit_supported()
+        and residual.dtype in _SUPPORTED_DTYPES
         and residual.dtype == update.dtype
         and residual.dtype == gate.dtype
         and residual.is_cuda
