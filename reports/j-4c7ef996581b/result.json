@@ -1,0 +1,64 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30314",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "8b1804ecee27f2c877529f501f53d79a5c8ef1fc",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate correctly enables by default the existing safe decode-lock skip and passes its focused unit tests. This mitigates exhaustion caused specifically by redundant decode-held Mamba snapshots. It does not address the broader original contract of scheduler progress under unsatisfiable Mamba admission/eviction, and it supplies no serving-path responsiveness regression. Independent testing still finds a no-reclaim allocation failure when states remain admission-locked, so this is a partial fix rather than a full resolution.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-4c7ef996581b/venv/bin/python test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "Nine pre-existing boundary tests passed. A separate source import showed the base default and effective SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK values were False. Raw output: /job/review-evidence/base/mamba-ratio.log and /job/review-evidence/base/default-env.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4c7ef996581b/venv/bin/python test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py (candidate 8b1804e)",
+      "exit_code": 0,
+      "what_was_measured": "Ten tests passed, including the candidate's assertion that the option defaults on and existing locked-versus-evictable pool boundaries. Raw output: /job/review-evidence/candidate/mamba-ratio.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4c7ef996581b/venv/bin/python test/registered/unit/mem_cache/test_streaming_session_unit.py (candidate 8b1804e)",
+      "exit_code": 0,
+      "what_was_measured": "Nine streaming-session lock receipt and state lifecycle tests passed. Raw output: /job/review-evidence/candidate/streaming-session.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4c7ef996581b/venv/bin/python test/registered/unit/mem_cache/test_unified_radix_allocation_eviction.py (candidate 8b1804e)",
+      "exit_code": 0,
+      "what_was_measured": "Seventeen allocation-aware eviction tests passed. Raw output: /job/review-evidence/candidate/allocation-eviction.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4c7ef996581b/venv/bin/python /job/review-adversarial.py (candidate 8b1804e)",
+      "exit_code": 0,
+      "what_was_measured": "Independent boundary invocation: a 2x pool reclaimed a decode-evictable prefix, a 2x pool with admission-locked prefixes failed allocation after eviction was attempted, and a 3x locked pool succeeded. Raw output: /job/review-evidence/candidate/adversarial-boundaries.log"
+    },
+    {
+      "command": "SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK=0 ... python -c import-and-print-env (candidate 8b1804e)",
+      "exit_code": 0,
+      "what_was_measured": "A fresh process observed candidate default True and effective False, verifying the documented rollback escape hatch. Raw output: /job/review-evidence/candidate/override-zero.log"
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 8b1804ecee27f2c877529f501f53d79a5c8ef1fc",
+      "exit_code": 2,
+      "what_was_measured": "The candidate's committed streaming-session evidence log has trailing whitespace at line 29; source changes themselves showed no whitespace error."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The interpreter detected one AMD Instinct MI350X with ROCm gfx950 and imported the checked-out source. No GPU execution is claimed as issue evidence because the candidate changes CPU-side policy and the required H100 TP=8 hybrid-Mamba serving workload and weights were unavailable. Raw environment output: /job/review-evidence/candidate/import-and-gpu.log"
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "At candidate commit, a 2x Mamba pool with all prefix states admission-locked still cannot reclaim a slot and raises 'Can not alloc mamba cache' after eviction is attempted.",
+    "The candidate has no bounded-progress or fail-fast behavior for a request whose Mamba demand exceeds the pool, a case explicitly reported in the original issue discussion.",
+    "The post-flush case reported with zero running requests is not explained by redundant decode-held locks and has no candidate regression.",
+    "No test demonstrates that /health or completion handling stays responsive while admission cannot make progress.",
+    "Direct hierarchical-cache I/O blocking, the original 222-second TTFT, and TP=8 behavior remain untested."
+  ],
+  "remaining_limitations": [
+    "Qwen3.5-397B-A17B-FP8 weights were unavailable.",
+    "Only one AMD gfx950 GPU was available, not eight H100 80GB GPUs; CUDA, TP=8, production traffic, and multi-node behavior are unverified.",
+    "The deterministic tests cover cache allocation and lock-state mechanics, not full HTTP scheduler responsiveness, direct HiCache I/O latency, EAGLE, or model semantics.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
