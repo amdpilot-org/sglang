@@ -1354,6 +1354,17 @@ class HybridLinearAttnBackend(AttentionBackend):
         del req_pool_indices
         request_number = last_correct_step_indices.shape[0]
 
+        # A -1 track slot marks a freed request that lingered in an overlap-
+        # lagged verify batch. The main-state commit does not otherwise inspect
+        # track slots, so mask its step as well to avoid writing through stale
+        # but still in-range forward metadata.
+        if mamba_track_indices is not None:
+            last_correct_step_indices = torch.where(
+                mamba_track_indices[:request_number] < 0,
+                torch.full_like(last_correct_step_indices, -1),
+                last_correct_step_indices,
+            )
+
         # `mamba_track_indices` is VIRTUAL; the scatter writes physical views.
         if mamba_track_indices is not None:
             mamba_track_indices = self.linear_attn_backend._translate_mamba_indices(

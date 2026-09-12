@@ -2077,10 +2077,13 @@ def set_mamba_track_indices_from_reqs(
     all_buffers = req_to_token_pool.req_index_to_mamba_ping_pong_track_buffer_mapping[
         batch.req_pool_indices
     ]  # (bs, ping_pong_size), int64, on device
+    freed_rows = [
+        i for i, req in enumerate(batch.reqs) if req.kv.mamba_next_track_idx is None
+    ]
     if track_positions is None:
-        # Guard: mamba_next_track_idx may be None for requests that haven't
-        # gone through _alloc_ping_pong_buffer yet (e.g., spec v2 verify path).
-        # Default to 0 (first ping-pong slot) to avoid TypeError.
+        # A freed/retracted request can remain in TARGET_VERIFY for one overlap
+        # result-lag iteration. Use 0 only as a safe gather position; its output
+        # is replaced with the -1 scatter sentinel below.
         track_positions = [
             (
                 req.kv.mamba_next_track_idx
@@ -2102,6 +2105,10 @@ def set_mamba_track_indices_from_reqs(
     batch.mamba_track_indices = (
         torch.gather(all_buffers, 1, idx).squeeze(1).to(torch.int64)
     )
+    if freed_rows:
+        batch.mamba_track_indices[
+            torch.tensor(freed_rows, dtype=torch.int64, device=all_buffers.device)
+        ] = -1
 
 
 def release_req(
