@@ -3170,11 +3170,14 @@ class Scheduler(
             )
             req.time_stats.set_prefill_bootstrap_queue_entry_time()
         elif self.disaggregation_mode == DisaggregationMode.DECODE:
-            self.disagg_decode_prealloc_queue.add(
-                req,
-                is_retracted=is_retracted,
-                is_rebootstrap=is_rebootstrap,
-            )
+            if is_rebootstrap:
+                self.disagg_decode_prealloc_queue.add(
+                    req, is_retracted=is_retracted, is_rebootstrap=True
+                )
+            else:
+                self.disagg_decode_prealloc_queue.add(
+                    req, is_retracted=is_retracted
+                )
             if not is_retracted and not is_rebootstrap:
                 req.time_stats.set_decode_prealloc_queue_entry_time()
             else:
