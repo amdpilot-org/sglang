@@ -1,0 +1,428 @@
+--- /job/review-evidence/j-6887cc79907b/base/help.txt	2026-09-12 18:04:58.431474548 +0000
++++ /job/review-evidence/j-6887cc79907b/candidate/help.txt	2026-09-12 18:03:26.750601513 +0000
+@@ -1,59 +1,23 @@
+ SGLang Model Gateway - Rust-based inference gateway
+ 
+-Usage:
+-  smg launch [OPTIONS]     Launch router (short command)
+-  amg launch [OPTIONS]     Launch router (alternative)
+-  sglang-router [OPTIONS]  Launch router (full name)
+-
+-Examples:
+-  # Regular mode
+-  smg launch --worker-urls http://worker1:8000 http://worker2:8000
+-
+-  # PD disaggregated mode
+-  smg launch --pd-disaggregation \
+-    --prefill http://127.0.0.1:30001 9001 \
+-    --prefill http://127.0.0.2:30002 9002 \
+-    --decode http://127.0.0.3:30003 \
+-    --decode http://127.0.0.4:30004 \
+-    --policy cache_aware
+-
+-  # With different policies
+-  smg launch --pd-disaggregation \
+-    --prefill http://127.0.0.1:30001 9001 \
+-    --prefill http://127.0.0.2:30002 \
+-    --decode http://127.0.0.3:30003 \
+-    --decode http://127.0.0.4:30004 \
+-    --prefill-policy cache_aware --decode-policy power_of_two
+-
+-
+-
+-Usage: base-gateway [OPTIONS]
+-       base-gateway <COMMAND>
++Usage: candidate-gateway [OPTIONS]
++       candidate-gateway <COMMAND>
+ 
+ Commands:
+   launch  Launch the router (same as running without subcommand) [alias: start]
+   help    Print this message or the help of the given subcommand(s)
+ 
+ Options:
+-      --enable-mesh
+-          
+-
+-      --mesh-server-name <MESH_SERVER_NAME>
+-          
+-
+-      --mesh-host <MESH_HOST>
+-          [default: 0.0.0.0]
+-
+-      --mesh-port <MESH_PORT>
+-          [default: 39527]
+-
+-      --mesh-peer-urls [<MESH_PEER_URLS>...]
+-          
++      --version-verbose
++          Print detailed version information and exit
+ 
+   -h, --help
+           Print help (see a summary with '-h')
+ 
+-Worker Configuration:
++  -V, --version
++          Print version
++
++Server Configuration:
+       --host <HOST>
+           Host address to bind the router server
+           
+@@ -64,9 +28,40 @@
+           
+           [default: 30000]
+ 
++Request Handling:
++      --max-payload-size <MAX_PAYLOAD_SIZE>
++          Maximum payload size in bytes
++          
++          [default: 536870912]
++
++      --cors-allowed-origins [<CORS_ALLOWED_ORIGINS>...]
++          CORS allowed origins
++
++      --request-id-headers [<REQUEST_ID_HEADERS>...]
++          Custom HTTP headers to check for request IDs
++
++      --shutdown-grace-period-secs <SHUTDOWN_GRACE_PERIOD_SECS>
++          Grace period in seconds to wait for in-flight requests during shutdown
++          
++          [default: 180]
++
++Worker Configuration:
+       --worker-urls [<WORKER_URLS>...]
+           List of worker URLs (supports IPv4 and IPv6)
+ 
++      --api-key <API_KEY>
++          API key used to authorize requests to workers
++
++      --worker-startup-timeout-secs <WORKER_STARTUP_TIMEOUT_SECS>
++          Maximum time to wait for a worker to become reachable and register
++          
++          [default: 1800]
++
++      --worker-startup-check-interval <WORKER_STARTUP_CHECK_INTERVAL>
++          Interval in seconds between worker load and availability checks
++          
++          [default: 30]
++
+ Routing Policy:
+       --policy <POLICY>
+           Load balancing policy to use
+@@ -106,9 +101,13 @@
+ 
+       --assignment-mode <ASSIGNMENT_MODE>
+           Assignment mode for manual policy when encountering a new routing key
++
++          Possible values:
++          - random:    Random selection (default)
++          - min_load:  Select worker with minimum running requests
++          - min_group: Select worker with minimum active routing keys
+           
+           [default: random]
+-          [possible values: random, min_load, min_group]
+ 
+       --prefix-token-count <PREFIX_TOKEN_COUNT>
+           Number of prefix tokens to use for prefix_hash policy
+@@ -130,8 +129,11 @@
+       --pd-disaggregation
+           Enable PD (Prefill-Decode) disaggregated mode
+ 
++      --prefill <URL> [BOOTSTRAP_PORT]
++          Prefill server URL and optional bootstrap port; may be specified multiple times
++
+       --decode <DECODE>
+-          Decode server URLs (can be specified multiple times)
++          Decode server URLs; may be specified multiple times
+ 
+       --prefill-policy <PREFILL_POLICY>
+           Specific policy for prefill nodes in PD mode
+@@ -143,87 +145,38 @@
+           
+           [possible values: random, round_robin, cache_aware, power_of_two, prefix_hash, manual]
+ 
+-      --worker-startup-timeout-secs <WORKER_STARTUP_TIMEOUT_SECS>
+-          Timeout in seconds for worker startup and registration
+-          
+-          [default: 1800]
+-
+-      --worker-startup-check-interval <WORKER_STARTUP_CHECK_INTERVAL>
+-          Interval in seconds between worker startup checks
++Rate Limiting:
++      --max-concurrent-requests <MAX_CONCURRENT_REQUESTS>
++          Maximum concurrent requests (-1 to disable)
+           
+-          [default: 30]
+-
+-Service Discovery (Kubernetes):
+-      --service-discovery
+-          Enable Kubernetes service discovery
+-
+-      --selector [<SELECTOR>...]
+-          Label selector for Kubernetes service discovery (format: key=value)
++          [default: -1]
+ 
+-      --service-discovery-port <SERVICE_DISCOVERY_PORT>
+-          Port to use for discovered worker pods
++      --queue-size <QUEUE_SIZE>
++          Queue size for pending requests when limit reached
+           
+-          [default: 80]
+-
+-      --service-discovery-namespace <SERVICE_DISCOVERY_NAMESPACE>
+-          Kubernetes namespace to watch for pods
+-
+-      --prefill-selector [<PREFILL_SELECTOR>...]
+-          Label selector for prefill server pods in PD mode
+-
+-      --decode-selector [<DECODE_SELECTOR>...]
+-          Label selector for decode server pods in PD mode
+-
+-Logging:
+-      --log-dir <LOG_DIR>
+-          Directory to store log files
++          [default: 100]
+ 
+-      --log-level <LOG_LEVEL>
+-          Set the logging level
++      --queue-timeout-secs <QUEUE_TIMEOUT_SECS>
++          Maximum time in seconds a request can wait in queue
+           
+-          [default: info]
+-          [possible values: debug, info, warn, error]
+-
+-      --json-log
+-          Enable structured JSON log output instead of plain text
++          [default: 60]
+ 
+-Prometheus Metrics:
+-      --prometheus-port <PROMETHEUS_PORT>
+-          Port to expose Prometheus metrics
+-          
+-          [default: 29000]
++      --rate-limit-tokens-per-second <RATE_LIMIT_TOKENS_PER_SECOND>
++          Token bucket refill rate (tokens per second)
+ 
+-      --prometheus-host <PROMETHEUS_HOST>
+-          Host address to bind the Prometheus metrics server
++Backend:
++      --backend <BACKEND>
++          Backend runtime to use
+           
+-          [default: 0.0.0.0]
+-
+-      --prometheus-duration-buckets [<PROMETHEUS_DURATION_BUCKETS>...]
+-          Custom buckets for Prometheus duration metrics
+-
+-Request Handling:
+-      --request-id-headers [<REQUEST_ID_HEADERS>...]
+-          Custom HTTP headers to check for request IDs
++          [default: sglang]
++          [possible values: sglang, vllm, trtllm, openai, anthropic]
+ 
++HTTP Client:
+       --request-timeout-secs <REQUEST_TIMEOUT_SECS>
+           Request timeout in seconds
+           
+           [default: 1800]
+ 
+-      --shutdown-grace-period-secs <SHUTDOWN_GRACE_PERIOD_SECS>
+-          Grace period in seconds to wait for in-flight requests during shutdown
+-          
+-          [default: 180]
+-
+-      --max-payload-size <MAX_PAYLOAD_SIZE>
+-          Maximum payload size in bytes
+-          
+-          [default: 536870912]
+-
+-      --cors-allowed-origins [<CORS_ALLOWED_ORIGINS>...]
+-          CORS allowed origins
+-
+-HTTP Client:
+       --pool-idle-timeout-secs <POOL_IDLE_TIMEOUT_SECS>
+           Idle timeout in seconds for pooled upstream HTTP connections
+           
+@@ -248,25 +201,6 @@
+           [env: SMG_TCP_KEEPALIVE_SECS=]
+           [default: 30]
+ 
+-Rate Limiting:
+-      --max-concurrent-requests <MAX_CONCURRENT_REQUESTS>
+-          Maximum concurrent requests (-1 to disable)
+-          
+-          [default: -1]
+-
+-      --queue-size <QUEUE_SIZE>
+-          Queue size for pending requests when limit reached
+-          
+-          [default: 100]
+-
+-      --queue-timeout-secs <QUEUE_TIMEOUT_SECS>
+-          Maximum time in seconds a request can wait in queue
+-          
+-          [default: 60]
+-
+-      --rate-limit-tokens-per-second <RATE_LIMIT_TOKENS_PER_SECOND>
+-          Token bucket refill rate (tokens per second)
+-
+ Retry Configuration:
+       --retry-max-retries <RETRY_MAX_RETRIES>
+           Maximum number of retry attempts
+@@ -347,7 +281,7 @@
+           [default: /health]
+ 
+       --disable-health-check
+-          Disable all worker health checks at startup
++          Disable all worker health checks
+ 
+ Tokenizer:
+       --model-path <MODEL_PATH>
+@@ -382,25 +316,20 @@
+       --tool-call-parser <TOOL_CALL_PARSER>
+           Parser for tool-call interactions
+ 
++Extensions:
+       --mcp-config-path <MCP_CONFIG_PATH>
+           Path to MCP server configuration file
+ 
+-Backend:
+-      --backend <BACKEND>
+-          Backend runtime to use
+-          
+-          [default: sglang]
+-          [possible values: sglang, vllm, trtllm, openai, anthropic]
++      --enable-wasm
++          Enable WebAssembly support
+ 
++Storage:
+       --history-backend <HISTORY_BACKEND>
+           History storage backend
+           
+           [default: memory]
+           [possible values: memory, none, oracle, postgres, redis]
+ 
+-      --enable-wasm
+-          Enable WebAssembly support
+-
+ Oracle Database:
+       --oracle-wallet-path <ORACLE_WALLET_PATH>
+           Path to Oracle ATP wallet directory
+@@ -466,19 +395,7 @@
+       --tls-key-path <TLS_KEY_PATH>
+           Path to server TLS private key (PEM format)
+ 
+-Tracing (OpenTelemetry):
+-      --enable-trace
+-          Enable OpenTelemetry tracing
+-
+-      --otlp-traces-endpoint <OTLP_TRACES_ENDPOINT>
+-          OTLP collector endpoint (format: host:port)
+-          
+-          [default: localhost:4317]
+-
+ Control Plane Authentication:
+-      --api-key <API_KEY>
+-          API key for worker authorization
+-
+       --jwt-issuer <JWT_ISSUER>
+           JWT issuer URL for OIDC authentication
+           
+@@ -509,3 +426,97 @@
+ 
+       --disable-audit-logging
+           Disable audit logging for control plane operations
++
++Service Discovery (Kubernetes):
++      --service-discovery
++          Enable Kubernetes service discovery
++
++      --selector [<SELECTOR>...]
++          Label selector for Kubernetes service discovery (format: key=value)
++
++      --service-discovery-port <SERVICE_DISCOVERY_PORT>
++          Port to use for discovered worker pods
++          
++          [default: 80]
++
++      --service-discovery-namespace <SERVICE_DISCOVERY_NAMESPACE>
++          Kubernetes namespace to watch for pods
++
++      --prefill-selector [<PREFILL_SELECTOR>...]
++          Label selector for prefill server pods in PD mode
++
++      --decode-selector [<DECODE_SELECTOR>...]
++          Label selector for decode server pods in PD mode
++
++Mesh:
++      --enable-mesh
++          
++
++      --mesh-server-name <MESH_SERVER_NAME>
++          
++
++      --mesh-host <MESH_HOST>
++          [default: 0.0.0.0]
++
++      --mesh-port <MESH_PORT>
++          [default: 39527]
++
++      --mesh-peer-urls [<MESH_PEER_URLS>...]
++          
++
++Logging:
++      --log-dir <LOG_DIR>
++          Directory to store log files
++
++      --log-level <LOG_LEVEL>
++          Set the logging level
++          
++          [default: info]
++          [possible values: debug, info, warn, error]
++
++      --json-log
++          Enable structured JSON log output instead of plain text
++
++Prometheus Metrics:
++      --prometheus-host <PROMETHEUS_HOST>
++          Host address to bind the Prometheus metrics server
++          
++          [default: 0.0.0.0]
++
++      --prometheus-port <PROMETHEUS_PORT>
++          Port to expose the Prometheus metrics server
++          
++          [default: 29000]
++
++      --prometheus-duration-buckets [<PROMETHEUS_DURATION_BUCKETS>...]
++          Custom buckets for Prometheus duration metrics
++
++Tracing (OpenTelemetry):
++      --enable-trace
++          Enable OpenTelemetry tracing
++
++      --otlp-traces-endpoint <OTLP_TRACES_ENDPOINT>
++          OTLP collector endpoint (format: host:port)
++          
++          [default: localhost:4317]
++
++
++Examples:
++  # Regular mode
++  smg --worker-urls http://worker1:8000 http://worker2:8000
++
++  # PD disaggregated mode
++  smg --pd-disaggregation \
++    --prefill http://127.0.0.1:30001 9001 \
++    --prefill http://127.0.0.2:30002 9002 \
++    --decode http://127.0.0.3:30003 \
++    --decode http://127.0.0.4:30004 \
++    --policy cache_aware
++
++  # With different policies
++  smg --pd-disaggregation \
++    --prefill http://127.0.0.1:30001 9001 \
++    --prefill http://127.0.0.2:30002 \
++    --decode http://127.0.0.3:30003 \
++    --decode http://127.0.0.4:30004 \
++    --prefill-policy cache_aware --decode-policy power_of_two
