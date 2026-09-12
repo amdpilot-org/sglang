@@ -15,9 +15,10 @@ use crate::{
             UsageInfo,
         },
         responses::{
-            ResponseContentPart, ResponseInput, ResponseInputOutputItem, ResponseOutputItem,
-            ResponseReasoningContent::ReasoningText, ResponseStatus, ResponsesRequest,
-            ResponsesResponse, ResponsesUsage, StringOrContentParts, TextConfig, TextFormat,
+            ReasoningEffort, ResponseContentPart, ResponseInput, ResponseInputOutputItem,
+            ResponseOutputItem, ResponseReasoningContent::ReasoningText, ResponseStatus,
+            ResponsesRequest, ResponsesResponse, ResponsesUsage, StringOrContentParts, TextConfig,
+            TextFormat,
         },
         UNKNOWN_MODEL_ID,
     },
@@ -193,6 +194,16 @@ pub(crate) fn responses_to_chat(req: &ResponsesRequest) -> Result<ChatCompletion
         tools,
         tool_choice: req.tool_choice.clone(),
         response_format: map_text_to_response_format(&req.text),
+        reasoning_effort: req
+            .reasoning
+            .as_ref()
+            .and_then(|reasoning| reasoning.effort.as_ref())
+            .map(|effort| match effort {
+                ReasoningEffort::Minimal => "minimal".to_string(),
+                ReasoningEffort::Low => "low".to_string(),
+                ReasoningEffort::Medium => "medium".to_string(),
+                ReasoningEffort::High => "high".to_string(),
+            }),
         ..Default::default()
     })
 }
@@ -367,6 +378,7 @@ pub(crate) fn chat_to_responses(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocols::responses::ResponseReasoningParam;
 
     #[test]
     fn test_text_input_conversion() {
@@ -412,6 +424,27 @@ mod tests {
 
         let chat_req = responses_to_chat(&req).unwrap();
         assert_eq!(chat_req.messages.len(), 2); // user + assistant
+    }
+
+    #[test]
+    fn test_reasoning_effort_forwarding() {
+        for (effort, expected) in [
+            (ReasoningEffort::Minimal, "minimal"),
+            (ReasoningEffort::Low, "low"),
+            (ReasoningEffort::Medium, "medium"),
+            (ReasoningEffort::High, "high"),
+        ] {
+            let req = ResponsesRequest {
+                input: ResponseInput::Text("Hello".to_string()),
+                reasoning: Some(ResponseReasoningParam {
+                    effort: Some(effort),
+                    summary: None,
+                }),
+                ..Default::default()
+            };
+            let chat_req = responses_to_chat(&req).unwrap();
+            assert_eq!(chat_req.reasoning_effort.as_deref(), Some(expected));
+        }
     }
 
     #[test]
