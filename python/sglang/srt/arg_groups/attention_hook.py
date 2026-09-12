@@ -52,6 +52,14 @@ def handle_attention_backend_compatibility(server_args: Any):
 
     # Torch native and flex attention backends
     attention_backend = resolved_view(server_args).attention_backend
+    speculative_backends = attention_backends_of(resolved_view(server_args))
+    if cfg.speculative_algorithm is not None and "torch_native" in speculative_backends:
+        raise ValueError(
+            "Speculative decoding is currently not supported with the "
+            "torch_native attention backend. Choose a different attention "
+            "backend or disable speculative decoding."
+        )
+
     if attention_backend == "torch_native":
         logger.warning(
             "Cuda graph is disabled because of using torch native attention backend"

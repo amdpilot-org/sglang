@@ -1078,6 +1078,60 @@ class TestFa4PageSizeAutoForce(CustomTestCase):
         self.assertEqual(resolved_view(args).page_size, 128)
 
 
+class TestTorchNativeSpeculativeCompatibility(CustomTestCase):
+    @staticmethod
+    def _make_args(**overrides):
+        args = ServerArgs(model_path="dummy", **overrides)
+        args._model_config = MagicMock()
+        args._model_config.is_encoder_decoder = False
+        args._model_config.hf_config.architectures = ["LlamaForCausalLM"]
+        args._model_config.hf_config.dual_chunk_attention_config = None
+        args.cuda_graph_config = CudaGraphConfig()
+        return args
+
+    def test_ngram_with_torch_native_is_rejected(self):
+        args = self._make_args(
+            attention_backend="torch_native",
+            speculative_algorithm="NGRAM",
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Speculative decoding is currently not supported with the "
+            "torch_native attention backend",
+        ):
+            handle_attention_backend_compatibility(args)
+
+    def test_split_torch_native_backend_is_rejected(self):
+        for field in ("prefill_attention_backend", "decode_attention_backend"):
+            with self.subTest(field=field):
+                args = self._make_args(
+                    attention_backend="triton",
+                    speculative_algorithm="NGRAM",
+                    **{field: "torch_native"},
+                )
+
+                with self.assertRaisesRegex(ValueError, "torch_native"):
+                    handle_attention_backend_compatibility(args)
+
+    def test_torch_native_without_speculative_decoding_is_allowed(self):
+        args = self._make_args(attention_backend="torch_native")
+
+        handle_attention_backend_compatibility(args)
+
+        config = resolution_result(args, "cuda_graph_config")
+        self.assertEqual(config.decode.backend, Backend.DISABLED)
+        self.assertEqual(config.prefill.backend, Backend.DISABLED)
+
+    def test_ngram_with_supported_backend_is_allowed(self):
+        args = self._make_args(
+            attention_backend="triton",
+            speculative_algorithm="NGRAM",
+        )
+
+        handle_attention_backend_compatibility(args)
+
+
 class TestContextParallelServerArgs(CustomTestCase):
     def setUp(self):
         self.parser = server_args_module.argparse.ArgumentParser()
