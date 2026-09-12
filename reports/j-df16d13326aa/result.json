@@ -1,0 +1,32 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37478",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "unsupported_architecture",
+  "summary": "The underlying aiter >2 GiB logits compiler abort reproduces on gfx950, but the recorded SGLang base has no IndexerKPool aiter call path: it directly references an unavailable deep_gemm backend on HIP. No narrow source correction is justified without re-landing broader reverted ROCm KPool support.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-df16d13326aa/cache/triton /tmp/amdpilot-repo-j-df16d13326aa/venv/bin/python reports/j-df16d13326aa/reproduce_aiter_boundary.py 23168",
+      "exit_code": 0,
+      "what_was_measured": "Actual aiter fp8_mqa_logits on gfx950 returned a (23168, 23168) fp32 tensor of 2,147,024,896 bytes."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-df16d13326aa/cache/triton /tmp/amdpilot-repo-j-df16d13326aa/venv/bin/python reports/j-df16d13326aa/reproduce_aiter_boundary.py 23180",
+      "exit_code": 134,
+      "what_was_measured": "Actual aiter fp8_mqa_logits on gfx950 aborted in LLVM's iota_range assertion for a 2,149,249,600-byte logits tensor."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-df16d13326aa/venv/bin/python reports/j-df16d13326aa/check_source_reachability.py",
+      "exit_code": 0,
+      "what_was_measured": "The recorded IndexerKPool source has no aiter import or _fp8_mqa_logits wrapper, zero callers of its chunk helper, and two direct deep_gemm.fp8_mqa_logits calls."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Single assigned AMD Instinct MI350X, gfx950:sramecc+:xnack-, executed both aiter boundary cases; raw logs are retained under reports/j-df16d13326aa/raw.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "GLM-5.3-Flash weights were unavailable, so the full model and HTTP serving path were not exercised.",
+    "The tiny Llama fixture cannot qualify the GLM IndexerKPool architecture and was therefore not used.",
+    "No multi-rank or multi-node reproduction was attempted; only the assigned single GPU was used.",
+    "The checked-out ROCm KPool path references deep_gemm, which is not installed in the prepared ROCm environment, while the reported aiter wrapper is absent."
+  ]
+}
