@@ -1053,6 +1053,19 @@ class BenchmarkMetrics:
     max_concurrent_requests: int = 0
 
 
+def format_metric_scope_note() -> str:
+    """Explain why client latency metrics and scheduler rates can differ."""
+    return (
+        "Metric scope: TPOT is per-request client-side decode latency after the "
+        "first token. ITL measures intervals between nonempty stream events, "
+        "which need not map one-to-one to output tokens and may omit the terminal "
+        "response tail. The engine log's generation throughput is an aggregate "
+        "token rate over a recent reporting window, so it is not directly "
+        "comparable. Output token throughput is a whole-run client-side aggregate "
+        "with a different estimator and is not expected to match exactly."
+    )
+
+
 async def get_request(
     input_requests: List[DatasetRow],
     request_rate: float,
@@ -1708,6 +1721,7 @@ async def benchmark(
         "{:<40} {:<10.2f}".format("P99 E2E Latency (ms):", metrics.p99_e2e_latency_ms)
     )
     if not is_embedding:
+        print(format_metric_scope_note())
         print("{s:{c}^{n}}".format(s="Time to First Token", n=50, c="-"))
         print("{:<40} {:<10.2f}".format("Mean TTFT (ms):", metrics.mean_ttft_ms))
         print("{:<40} {:<10.2f}".format("Median TTFT (ms):", metrics.median_ttft_ms))
