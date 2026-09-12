@@ -188,5 +188,34 @@ class TestMixedPrecisionFormat(CustomTestCase):
         self.assertEqual(scheme.group_size, 128)
 
 
+class TestOptionalLinearFp8Config(CustomTestCase):
+    def test_missing_stays_disabled(self):
+        config = _mixed_precision_config(FP8_GROUP, NVFP4_GROUP)
+
+        quant_config = CompressedTensorsConfig.from_config(config)
+
+        self.assertIsNone(quant_config.linear_fp8_config)
+
+    def test_null_is_treated_as_missing(self):
+        config = _mixed_precision_config(FP8_GROUP, NVFP4_GROUP)
+        config["linear_fp8_config"] = None
+
+        quant_config = CompressedTensorsConfig.from_config(config)
+
+        self.assertIsNone(quant_config.linear_fp8_config)
+
+    def test_populated_config_is_preserved(self):
+        config = _mixed_precision_config(FP8_GROUP, NVFP4_GROUP)
+        config["linear_fp8_config"] = {
+            "quant_method": "fp8",
+            "activation_scheme": "dynamic",
+        }
+
+        quant_config = CompressedTensorsConfig.from_config(config)
+
+        self.assertIsNotNone(quant_config.linear_fp8_config)
+        self.assertTrue(quant_config.linear_fp8_config.is_checkpoint_fp8_serialized)
+
+
 if __name__ == "__main__":
     unittest.main()

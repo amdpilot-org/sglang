@@ -1,0 +1,263 @@
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+_______ TestGetHfTextConfig.test_null_text_config_is_treated_as_missing ________
+
+self = <test_hf_transformers.TestGetHfTextConfig testMethod=test_null_text_config_is_treated_as_missing>
+
+    def test_null_text_config_is_treated_as_missing(self):
+        cfg = MiniMaxVLBaseConfig()
+        self.assertIsNone(cfg.text_config)
+
+>       result = get_hf_text_config(cfg)
+                 ^^^^^^^^^^^^^^^^^^^^^^^
+
+test/registered/unit/utils/test_hf_transformers.py:492:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+config = MiniMaxVLBaseConfig {
+  "image_grid_pinpoints": null,
+  "image_seq_length": 576,
+  "image_token_index": 200025,
+  "img...en_index": 200026,
+  "vision_config": null,
+  "vision_feature_layer": -1,
+  "vision_feature_select_strategy": "full"
+}
+
+
+    def get_hf_text_config(config: PretrainedConfig):
+        """Get the "sub" config relevant to llm for multi modal models.
+        No op for pure text models.
+        """
+        if config.architectures is not None:
+            class_name = config.architectures[0]
+            if class_name.startswith("Llava") and class_name.endswith("ForCausalLM"):
+                # We support non-hf version of llava models, so we do not want to
+                # read the wrong values from the unused default text_config.
+                # NOTE(HandH1998): We set `torch_dtype` of config to `torch.float16` for the weights, as
+                # `torch.float16` is default used for image features in `python/sglang/srt/models/llava.py`.
+                setattr(config, "dtype", torch.float16)
+                return config
+
+        text_config = None
+
+        # Some models (e.g. DeepSeek-OCR) store sub-configs as plain dicts.
+        # Convert to PretrainedConfig early so hasattr() checks and asserts work.
+        parent_dtype = getattr(config, "dtype", None)
+        for _attr in ("text_config", "llm_config", "language_config", "thinker_config"):
+            _sub = getattr(config, _attr, None)
+            if isinstance(_sub, dict):
+                _converted = PretrainedConfig(**_sub)
+                if getattr(_converted, "dtype", None) is None and parent_dtype is not None:
+                    _converted.dtype = parent_dtype
+                setattr(config, _attr, _converted)
+            elif _sub is not None and parent_dtype is not None:
+                # transformers v5 multimodal configs (e.g. Mistral3Config) carry
+                # `dtype` only on the top-level config, leaving the sub-configs at
+                # None. Without this, _get_and_verify_dtype falls back to float32
+                # and then "auto" downcasts to float16, which overflows the Pixtral
+                # vision tower on real images and produces NaN features.
+                if getattr(_sub, "dtype", None) is None:
+                    _sub.dtype = parent_dtype
+
+        # Priority: thinker_config > llm_config > language_config > text_config
+        if hasattr(config, "thinker_config"):
+            # qwen2.5 omni
+            thinker_config = config.thinker_config
+            if hasattr(thinker_config, "text_config"):
+                setattr(
+                    thinker_config.text_config,
+                    "dtype",
+                    getattr(thinker_config, "dtype", None),
+                )
+                text_config = thinker_config.text_config
+            else:
+                text_config = thinker_config
+        elif hasattr(config, "llm_config"):
+            # PointsV1.5 Chat Model
+            assert hasattr(config.llm_config, "num_attention_heads")
+            text_config = config.llm_config
+        elif hasattr(config, "language_config"):
+            text_config = config.language_config
+        elif hasattr(config, "text_config"):
+            # The code operates under the assumption that text_config should have
+            # `num_attention_heads` (among others). Assert here to fail early
+            # if transformers config doesn't align with this assumption.
+>           assert hasattr(config.text_config, "num_attention_heads")
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AssertionError
+
+python/sglang/srt/utils/hf_transformers/common.py:554: AssertionError
+______ TestGetHfTextConfig.test_null_higher_priority_config_falls_through ______
+
+self = <test_hf_transformers.TestGetHfTextConfig testMethod=test_null_higher_priority_config_falls_through>
+
+    def test_null_higher_priority_config_falls_through(self):
+        text_cfg = PretrainedConfig()
+        text_cfg.num_attention_heads = 32
+        cfg = PretrainedConfig()
+        cfg.architectures = ["SomeModel"]
+        cfg.thinker_config = None
+        cfg.llm_config = None
+        cfg.language_config = None
+        cfg.text_config = text_cfg
+
+        result = get_hf_text_config(cfg)
+
+>       self.assertIs(result, text_cfg)
+E       AssertionError: PreTrainedConfig {
+E         "architectures": [
+E           "SomeModel"
+E         ],
+E         "language_config": null,
+E         "llm_config": null,
+E         "text_config": {
+E           "_name_or_path": "",
+E           "architectures": null,
+E           "chunk_size_feed_forward": 0,
+E           "dtype": null,
+E           "id2label": {
+E             "0": "LABEL_0",
+E             "1": "LABEL_1"
+E           },
+E           "is_encoder_decoder": false,
+E           "label2id": {
+E             "LABEL_0": 0,
+E             "LABEL_1": 1
+E           },
+E           "model_type": "",
+E           "num_attention_heads": 32,
+E           "output_attentions": false,
+E           "output_hidden_states": false,
+E           "problem_type": null,
+E           "return_dict": true
+E         },
+E         "thinker_config": null,
+E         "transformers_version": "5.12.1"
+E       }
+E        is not PreTrainedConfig {
+E         "num_attention_heads": 32,
+E         "transformers_version": "5.12.1"
+E       }
+
+test/registered/unit/utils/test_hf_transformers.py:508: AssertionError
+_________ TestOptionalLinearFp8Config.test_null_is_treated_as_missing __________
+
+self = <test_compressed_tensors_mixed_precision.TestOptionalLinearFp8Config testMethod=test_null_is_treated_as_missing>
+
+    def test_null_is_treated_as_missing(self):
+        config = _mixed_precision_config(FP8_GROUP, NVFP4_GROUP)
+        config["linear_fp8_config"] = None
+
+>       quant_config = CompressedTensorsConfig.from_config(config)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/registered/unit/layers/quantization/test_compressed_tensors_mixed_precision.py:196:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+cls = <class 'sglang.srt.layers.quantization.compressed_tensors.compressed_tensors.CompressedTensorsConfig'>
+config = {'config_groups': {'group_0': {'format': 'float-quantized', 'input_activations': {'dynamic': True, 'num_bits': 8, 'str...its': 4, 'strategy': 'tensor_group', ...}}}, 'format': 'mixed-precision', 'ignore': [], 'linear_fp8_config': None, ...}
+
+    @classmethod
+    def from_config(cls, config: Dict[str, Any]) -> CompressedTensorsConfig:
+        ignore: List[str] = cast(List[str], config.get("ignore", []))
+        quant_format = cast(str, config.get("format"))
+        target_scheme_map = cls._quantization_scheme_map_from_config(config=config)
+        sparsity_scheme_map, sparsity_ignore_list = cls._parse_sparsity_config(
+            config=config
+        )
+        packed_modules_mapping = config.get("packed_modules_mapping", {})
+
+        # Parse linear_fp8_config if present (for mixed quantization scenarios)
+        # Format: {"activation_scheme": "dynamic", "fmt": "e4m3",
+        #          "quant_method": "fp8", "weight_block_size": [128, 128]}
+        linear_fp8_config = None
+        if "linear_fp8_config" in config:
+            from sglang.srt.layers.quantization.fp8 import Fp8Config
+
+            fp8_cfg = config["linear_fp8_config"]
+            # Check if it's fp8 format based on quant_method field
+>           is_fp8 = fp8_cfg.get("quant_method") == "fp8"
+                     ^^^^^^^^^^^
+E           AttributeError: 'NoneType' object has no attribute 'get'
+
+python/sglang/srt/layers/quantization/compressed_tensors/compressed_tensors.py:292: AttributeError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f93fd496200>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f9c38dbe5c0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestOptionalLinearFp8Config.test_null_is_treated_as_missing
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/layers/quantization/test_compressed_tensors_mixed_precision.py", line 196, in test_null_is_treated_as_missing
+    quant_config = CompressedTensorsConfig.from_config(config)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/layers/quantization/compressed_tensors/compressed_tensors.py", line 292, in from_config
+    is_fp8 = fp8_cfg.get("quant_method") == "fp8"
+             ^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'get'
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/utils/test_hf_transformers.py::TestGetHfTextConfig::test_null_text_config_is_treated_as_missing
+FAILED test/registered/unit/utils/test_hf_transformers.py::TestGetHfTextConfig::test_null_higher_priority_config_falls_through
+FAILED test/registered/unit/layers/quantization/test_compressed_tensors_mixed_precision.py::TestOptionalLinearFp8Config::test_null_is_treated_as_missing
+3 failed, 17 warnings in 26.15s
