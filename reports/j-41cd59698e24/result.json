@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32200",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2984",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2952",
+  "candidate_commit": "34d861306b4fdce616d2260d9d9f52655d6ef145",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "Partial fix. The candidate repairs the two ncclConfig_t.create() compatibility regressions reported against a919f1c5af0c12fe6d9c94af9f70633b3780996f, and its focused CPU suite passes. However, the original window-handle surfacing contract is still broken: get_nccl_mem_pool() assigns _get_windows_func and _clear_windows_func without declaring them global. A real rebuild loads native symbols successfully, but the module globals remain None, so _collect_windows_for_comm() always returns [] and SymmetricMemoryContext.windows cannot expose registered window handles to RMA callers.",
+  "tests": [
+    {
+      "command": "At base 358c163250ad3b1f62939b01ce1314a0a31a0365: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-41cd59698e24/venv/bin/python <base contract probe>",
+      "exit_code": 0,
+      "what_was_measured": "Original issue reproduced structurally: no exported_functions_rma, no PyNcclCommunicator.put_signal, and no rma_communicator module. Raw log: /job/review-evidence-j-41cd59698e24/base-original-contract.log"
+    },
+    {
+      "command": "At a919f1c5af0c12fe6d9c94af9f70633b3780996f: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-41cd59698e24/venv/bin/python <configured-init and symmetric-constructor probes>",
+      "exit_code": 0,
+      "what_was_measured": "Independently reproduced both prior-review counterexamples: default NCCLLibrary.ncclCommInitRankConfig and symmetric PyNcclCommunicator construction each raised AttributeError because the replacement ncclConfig_t lacked create(). Raw log: /job/review-evidence-j-41cd59698e24/a919-counterexamples.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-41cd59698e24/venv/bin/python -m pytest -q test/registered/e2e/distributed/test_pynccl_rma.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate focused suite at exact commit 34d861306b4fdce616d2260d9d9f52655d6ef145: 18 passed, 2 GPU/NVLink tests skipped. This includes direct coverage of both formerly omitted ncclConfig_t.create() call sites."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python MASTER_ADDR=127.0.0.1 MASTER_PORT=29641 /tmp/amdpilot-repo-j-41cd59698e24/venv/bin/python <initialize gloo world-size 1 and call get_nccl_mem_pool()>",
+      "exit_code": 0,
+      "what_was_measured": "Rebuilt the changed embedded allocator C++ with the pinned ROCm toolchain and -lrccl, producing and loading /tmp/symm_allocator/nccl_allocator.so. Both new native accessor symbols were present."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python MASTER_ADDR=127.0.0.1 MASTER_PORT=29643 /tmp/amdpilot-repo-j-41cd59698e24/venv/bin/python <assert allocator module window accessor binding is installed>",
+      "exit_code": 1,
+      "what_was_measured": "Independent adversarial case after the native load: native accessor symbols exist, but pynccl_allocator._get_windows_func and _clear_windows_func remain None; _collect_windows_for_comm(0x1234) returns []. Assertion failed. Raw log: /job/review-evidence-j-41cd59698e24/candidate-adversarial-window-binding.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned node exposes one AMD Instinct MI355X under torch 2.11.0+rocm7.2. The candidate's actual RMA tests require two NVIDIA CUDA GPUs, NCCL >=2.30, and NVLink. No RMA operation or independent GPU numerical verification was possible."
+  },
+  "native_rebuilt": true,
+  "remaining_counterexamples": [
+    "After get_nccl_mem_pool() successfully builds and loads the changed native allocator, pynccl_allocator._get_windows_func is still None because get_nccl_mem_pool() omits it from its global declaration.",
+    "For the same scoping reason, pynccl_allocator._clear_windows_func remains None.",
+    "Because _collect_windows_for_comm() immediately returns [] when _get_windows_func is None, every SymmetricMemoryContext exits with windows=[], even when native ncclCommWindowRegister returned non-NULL handles. The original requirement to surface registered window handles is therefore not implemented in a usable path.",
+    "The real two-rank NCCL/NVLink ring put_signal/wait_signal handshake remains unverified in this AMD single-GPU environment."
+  ],
+  "remaining_limitations": [
+    "Only one AMD Instinct MI355X was assigned; NVIDIA NCCL and NVLink are unavailable.",
+    "The successful ROCm native rebuild validates the changed embedded C++ and exported accessor symbols on gfx950, but RCCL does not qualify NVIDIA NCCL 2.30 RMA behavior.",
+    "The candidate's two real-GPU tests were skipped because they require at least two CUDA GPUs; the success-path numerical handshake was not executed."
+  ]
+}
