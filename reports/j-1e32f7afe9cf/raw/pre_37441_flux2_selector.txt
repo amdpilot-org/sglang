@@ -1,0 +1,196 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ TestAttentionBackendFallback.test_flux2_explicit_sage_backend_bypasses_automatic_selection_set _
+ValueError: Attention backend 'sage_attn' is not supported by this attention layer; supported backends: ['aiter', 'aiter_sage', 'fa', 'torch_sdpa']
+
+The above exception was the direct cause of the following exception:
+
+self = <test_attention_backend_selector.TestAttentionBackendFallback testMethod=test_flux2_explicit_sage_backend_bypasses_automatic_selection_set>
+
+    def test_flux2_explicit_sage_backend_bypasses_automatic_selection_set(self):
+        self.assertNotIn(
+            AttentionBackendEnum.SAGE_ATTN,
+            Flux2Transformer2DModel._supported_attention_backends,
+        )
+    
+>       backend = self._resolve(
+            AttentionBackendEnum.SAGE_ATTN,
+            explicit=True,
+            is_cross_attention=False,
+            supported=Flux2Transformer2DModel._supported_attention_backends,
+        )
+
+python/sglang/multimodal_gen/test/unit/test_attention_backend_selector.py:265: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/multimodal_gen/test/unit/test_attention_backend_selector.py:173: in _resolve
+    return get_attn_backend(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+head_size = 128, dtype = torch.bfloat16
+supported_attention_backends = {<AttentionBackendEnum.AITER_SAGE: 15>, <AttentionBackendEnum.FA: 2>, <AttentionBackendEnum.AITER: 14>, <AttentionBackendEnum.TORCH_SDPA: 4>}
+selected_attention_backend = None, attention_requirements = None
+default_attention_backend = None, is_cross_attention = False
+
+    def get_attn_backend(
+        head_size: int,
+        dtype: torch.dtype,
+        supported_attention_backends: set[AttentionBackendEnum] | None = None,
+        selected_attention_backend: AttentionBackendEnum | None = None,
+        attention_requirements: AttentionRequirements | None = None,
+        default_attention_backend: AttentionBackendEnum | None = None,
+        is_cross_attention: bool = False,
+    ) -> type[AttentionBackend]:
+        """Resolve an attention backend for one layer.
+    
+        ``supported_attention_backends`` constrains automatic selection only. An
+        explicitly requested backend may be newer than a model's preference set;
+        it is admitted when the platform resolves it and the backend satisfies the
+        layer's semantic requirements.
+        """
+        requirements = attention_requirements or AttentionRequirements()
+        if supported_attention_backends is None:
+            be_tuple = tuple()
+        else:
+            # Sort the backend names to ensure consistent cache key
+            be_tuple = tuple(
+                sorted(list(supported_attention_backends), key=lambda b: b.name)
+            )
+    
+        selected_backend = selected_attention_backend
+        selected_from_global_cli = False
+        selection_is_explicit = selected_backend is not None
+        if selected_backend is None:
+            selected_backend = get_global_forced_attn_backend()
+            selection_is_explicit = selected_backend is not None
+        if selected_backend is None:
+            selected_backend = get_component_forced_attn_backend()
+            selection_is_explicit = selected_backend is not None
+        if selected_backend is None:
+            server_args = get_global_server_args()
+            if server_args.attention_backend is not None:
+                try:
+                    selected_backend = AttentionBackendEnum[
+                        server_args.attention_backend.upper()
+                    ]
+                except KeyError:
+                    raise ValueError(
+                        f"Invalid attention backend '{server_args.attention_backend}' specified via command line. "
+                        f"Available options are: {[e.name.lower() for e in AttentionBackendEnum]}"
+                    )
+                selection_is_explicit = isinstance(
+                    server_args, ServerArgs
+                ) and server_args.is_arg_explicitly_set("attention_backend")
+                selected_from_global_cli = selection_is_explicit
+    
+        if selected_backend is None:
+            selected_backend = default_attention_backend
+    
+        allowed_fallback_reason = None
+        if selected_backend is None:
+            allowed_fallback_reason = "platform default fallback"
+        elif is_cross_attention and selected_backend.is_sparse:
+            allowed_fallback_reason = "dense cross-attention fallback"
+        elif selected_from_global_cli and (
+            default_attention_backend is not None
+            or _component_allows_global_backend_fallback()
+        ):
+            # The global CLI backend is strict for DiT components. Auxiliary
+            # components may instead use a declared default or platform-compatible
+            # backend. A component-specific CLI override otherwise remains strict.
+            allowed_fallback_reason = "global backend fallback"
+        elif not selection_is_explicit:
+            allowed_fallback_reason = "platform default fallback"
+    
+        constraint_backend = None
+        if selected_backend is None and len(be_tuple) == 1:
+            constraint_backend = be_tuple[0].name.lower()
+    
+        candidate_backends = [selected_backend]
+        if allowed_fallback_reason is not None:
+            for candidate in (default_attention_backend, None, *be_tuple):
+                if candidate not in candidate_backends:
+                    candidate_backends.append(candidate)
+    
+        automatic_backends = set(be_tuple)
+        attention_backend_cls = None
+        fallback_reason = None
+        selection_error = None
+        unsupported_backend_name = None
+        unsupported_requirements = ()
+        for candidate_index, candidate in enumerate(candidate_backends):
+            try:
+                candidate_cls = _cached_get_attn_backend(
+                    head_size,
+                    dtype,
+                    be_tuple,
+                    candidate,
+                )
+            except ValueError as error:
+                if selection_error is None:
+                    selection_error = error
+                continue
+    
+            candidate_backend = candidate_cls.get_enum()
+            candidate_name = candidate_backend.name.lower()
+            if is_cross_attention and candidate_backend.is_sparse:
+                if selection_error is None:
+                    selection_error = ValueError(
+                        f"Sparse attention backend '{candidate_name}' cannot serve "
+                        "cross-attention"
+                    )
+                continue
+            if (
+                automatic_backends
+                and not _is_backend_supported(candidate_backend, automatic_backends)
+            ):
+                if selection_error is None:
+                    selection_error = ValueError(
+                        f"Attention backend '{candidate_name}' is not supported by this "
+                        f"attention layer; supported backends: "
+                        f"{[str(backend) for backend in be_tuple]}"
+                    )
+                continue
+    
+            missing_requirements = candidate_cls.unsupported_requirements(requirements)
+            if missing_requirements:
+                if not unsupported_requirements:
+                    unsupported_backend_name = candidate_name
+                    unsupported_requirements = missing_requirements
+                continue
+    
+            attention_backend_cls = candidate_cls
+            if candidate_index > 0:
+                fallback_reason = allowed_fallback_reason
+            break
+    
+        if attention_backend_cls is None:
+            component_name = get_component_attn_backend_name()
+            component_suffix = (
+                f" for component '{component_name}'" if component_name is not None else ""
+            )
+            if unsupported_requirements:
+                raise ValueError(
+                    f"Attention backend '{unsupported_backend_name}' does not implement "
+                    f"{', '.join(unsupported_requirements)}{component_suffix}"
+                )
+            if selection_error is not None:
+>               raise ValueError(
+                    f"{selection_error}{component_suffix}"
+                ) from selection_error
+E               ValueError: Attention backend 'sage_attn' is not supported by this attention layer; supported backends: ['aiter', 'aiter_sage', 'fa', 'torch_sdpa'] for component 'text_encoder'
+
+python/sglang/multimodal_gen/runtime/layers/attention/selector.py:359: ValueError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED python/sglang/multimodal_gen/test/unit/test_attention_backend_selector.py::TestAttentionBackendFallback::test_flux2_explicit_sage_backend_bypasses_automatic_selection_set
+1 failed, 27 deselected, 16 warnings in 0.48s

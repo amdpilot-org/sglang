@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39070",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "not_reproduced",
+  "summary": "The prepared base already contains upstream PR #37441, which admits an explicitly requested backend by platform and capability even when it is absent from a model's automatic-selection set. An issue-specific FLUX.2 regression passes on the base and fails with the exact reported whitelist error when the pre-#37441 membership check is restored.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1e32f7afe9cf/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_attention_backend_selector.py -k flux2",
+      "exit_code": 0,
+      "what_was_measured": "Three FLUX.2-specific selector cases passed: explicit SAGE_ATTN bypasses the model automatic-selection set, implicit selection still respects it, and missing backend capabilities still fail closed."
+    },
+    {
+      "command": "pre-#37441 selector membership check + pytest -q python/sglang/multimodal_gen/test/unit/test_attention_backend_selector.py -k flux2_explicit_sage_backend_bypasses",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: the same regression raised the reported ValueError because FLUX.2's set excludes sage_attn. The prepared-base selector was restored immediately afterward."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1e32f7afe9cf/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_attention_backend_selector.py",
+      "exit_code": 0,
+      "what_was_measured": "Complete selector unit suite: 28 tests and 4 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1e32f7afe9cf/venv/bin/python GPU/platform resolver probe",
+      "exit_code": 1,
+      "what_was_measured": "The assigned GPU was identified as AMD Instinct MI350X gfx950, and the real ROCm resolver rejected SAGE_ATTN as unsupported on ROCm."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The assigned single GPU is AMD Instinct MI350X gfx950, but SGLang's ROCm platform resolver raises 'SAGE_ATTN is not supported on rocm.' No relevant SageAttention GPU kernel was executed.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No CUDA Blackwell GPU was available, so the SageAttention CUDA resolver and kernel were not executed.",
+    "FLUX.2-klein-9b-kv weights were not available, so full model construction, serving startup, image generation, and semantic accuracy were not tested.",
+    "The regression validates the selector/model-whitelist boundary with a deterministic fake platform backend; it does not validate SageAttention numerical output."
+  ]
+}
