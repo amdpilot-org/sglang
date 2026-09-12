@@ -635,6 +635,34 @@ class DFlashDraftModel(nn.Module):
             )
         self.hidden_norm = RMSNorm(hidden_size, eps=rms_norm_eps)
 
+        # Existing DFlash2 checkpoints remain head-less and use selector-lattice
+        # confidence. Checkpoints that explicitly advertise a trained head get
+        # the same head/Markov feature implementation used by DSpark.
+        self.confidence_head: Optional[nn.Module] = None
+        self.markov_head: Optional[nn.Module] = None
+        if bool(getattr(config, "enable_confidence_head", False)):
+            from sglang.srt.models.dspark import (
+                DSparkConfidenceHead,
+                build_markov_head,
+            )
+
+            markov_rank = int(getattr(config, "markov_rank", 0))
+            with_markov = bool(
+                getattr(config, "confidence_head_with_markov", markov_rank > 0)
+            )
+            if with_markov and markov_rank <= 0:
+                raise ValueError(
+                    "DFLASH confidence_head_with_markov requires markov_rank > 0, "
+                    f"got markov_rank={markov_rank}."
+                )
+            if with_markov:
+                self.markov_head = build_markov_head(config)
+            self.confidence_head = DSparkConfidenceHead(
+                hidden_size=hidden_size,
+                markov_rank=markov_rank,
+                with_markov=with_markov,
+            )
+
         # The model loader calls load_weights() before set_block_size(). Build
         # Domino projector modules here so their parameters are present while
         # checkpoint weights are loaded.
@@ -860,6 +888,40 @@ class DFlashDraftModel(nn.Module):
                     "DFLASH Domino checkpoint is missing required projector weights: "
                     f"{sorted(missing)}."
                 )
+
+        if self.confidence_head is not None:
+            required = {
+                name
+                for name in params_dict
+                if name.startswith(("confidence_head.", "markov_head."))
+            }
+            missing = required - loaded_params
+            if missing:
+                raise ValueError(
+                    "DFLASH confidence head is enabled but the checkpoint is missing "
+                    f"required trained parameters: {sorted(missing)}."
+                )
+
+    def compute_confidence(
+        self,
+        *,
+        draft_hidden: torch.Tensor,
+        anchor_tokens: torch.Tensor,
+        sampled_tokens: torch.Tensor,
+    ) -> Optional[torch.Tensor]:
+        """Return calibrated selected-path survival estimates from the trained head."""
+        confidence_head = self.confidence_head
+        if confidence_head is None:
+            return None
+        markov_embed_stack = None
+        if confidence_head.with_markov:
+            assert self.markov_head is not None
+            previous_tokens = torch.cat(
+                [anchor_tokens.view(-1, 1), sampled_tokens[:, :-1]], dim=1
+            )
+            markov_embed_stack = self.markov_head.get_prev_embeddings(previous_tokens)
+        confidence_raw = confidence_head(draft_hidden, markov_embed_stack)
+        return confidence_head.apply_sts(confidence_raw)
 
 
 class DFlashLagunaAttention(DFlashAttention):

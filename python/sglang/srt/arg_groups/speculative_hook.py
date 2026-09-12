@@ -364,6 +364,12 @@ def _handle_dflash(server_args: ServerArgs) -> None:
                 "--speculative-dflash-confidence-sps-table-path must point to an "
                 f"existing SPS table JSON file, got {sps_table_path!r}."
             )
+        sts_path = cfg.speculative_dflash_confidence_sts_path
+        if sts_path and not os.path.isfile(sts_path):
+            raise ValueError(
+                "--speculative-dflash-confidence-sts-path must point to an "
+                f"existing STS calibration JSON file, got {sts_path!r}."
+            )
         if (
             cfg.speculative_dflash_confidence_align_verify_tokens_to_graph_tier
             and read_ragged_verify_mode() is not RaggedVerifyMode.COMPACT
