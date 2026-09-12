@@ -1,4 +1,5 @@
 import unittest
+from array import array
 from collections import deque
 from types import SimpleNamespace
 from typing import List, Optional
@@ -19,6 +20,8 @@ from sglang.srt.managers.io_struct import (
 from sglang.srt.managers.schedule_batch import Req, ScheduleBatch
 from sglang.srt.managers.scheduler import Scheduler
 from sglang.srt.managers.scheduler_components.pool_stats_observer import PoolStats
+from sglang.srt.mem_cache.base_prefix_cache import InsertParams, MatchPrefixParams
+from sglang.srt.mem_cache.radix_cache import RadixCache, RadixKey
 from sglang.srt.model_executor.forward_batch_info import ForwardMode
 from sglang.srt.runtime_context import publish, reset_context
 from sglang.srt.sampling.sampling_params import SamplingParams
@@ -429,6 +432,46 @@ class TestSchedulerPauseGeneration(unittest.TestCase):
         self.assertEqual(len(scheduler.waiting_queue), 0)
         self.assertEqual(scheduler.running_batch.reqs, [])
 
+    def test_retract_invalidates_finished_request_prefix_while_idle(self):
+        """Idle retract must clear reusable KV left by completed requests."""
+        scheduler = self._new_scheduler()
+        allocator = MagicMock()
+        allocator.device = torch.device("cpu")
+        scheduler.tree_cache = RadixCache.create_simulated(mock_allocator=allocator)
+        key = RadixKey(array("q", [1, 2, 3, 4]))
+        scheduler.tree_cache.insert(
+            InsertParams(key=key, value=torch.tensor([10, 11, 12, 13]))
+        )
+        self.assertEqual(
+            len(
+                scheduler.tree_cache.match_prefix(MatchPrefixParams(key=key))
+                .device_indices
+            ),
+            4,
+        )
+
+        scheduler.pause_generation(PauseGenerationReqInput(mode="retract"))
+
+        self.assertEqual(
+            len(
+                scheduler.tree_cache.match_prefix(MatchPrefixParams(key=key))
+                .device_indices
+            ),
+            0,
+        )
+        scheduler.token_to_kv_pool_allocator.clear.assert_called_once_with()
+
+    def test_retract_uses_reset_for_hierarchical_backing_state(self):
+        """A provenance boundary must reset, not write back through evict()."""
+        scheduler = self._new_scheduler()
+
+        scheduler.pause_generation(PauseGenerationReqInput(mode="retract"))
+
+        scheduler.tree_cache.reset.assert_called_once_with()
+        scheduler.tree_cache.evict.assert_not_called()
+        scheduler.req_to_token_pool.clear.assert_called_once_with()
+        scheduler.req_to_token_pool.reset_aux_cache_allocator.assert_called_once_with()
+
     def test_retract_disagg_prefill_keeps_live_chunked_req(self):
         """disagg-PREFILL retract must leave a live mid-chunk chunked_req untouched."""
         scheduler = self._new_scheduler()
@@ -446,6 +489,8 @@ class TestSchedulerPauseGeneration(unittest.TestCase):
         mock_retract_all.assert_not_called()
         scheduler._add_request_to_queue.assert_not_called()
         self.assertIs(scheduler.chunked_req, chunked_req)
+        scheduler.tree_cache.reset.assert_not_called()
+        scheduler.token_to_kv_pool_allocator.clear.assert_not_called()
 
     def test_retract_drains_overlap_queue(self):
         """retract with overlap enabled should drain the result_queue."""

@@ -1,0 +1,32 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33783",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the reviewed idle-prefix failure at candidate 7fe1b5433ded03af468fe10969159eae92792666 and moved retract invalidation to scheduler scope, using a complete cache reset and allocator clear so finished-request prefixes and hierarchical backing state are invalidated. The documented live disaggregated-prefill mid-chunk exception remains.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-b93267b61db1/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-b93267b61db1/review-evidence/test_adversarial_retract.py",
+      "exit_code": 1,
+      "what_was_measured": "Exact candidate failing-before: a completed-request four-token RadixCache prefix remained 4/4 matchable after an idle retract pause."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b93267b61db1/venv/bin/python -m pytest -q test/registered/unit/managers/test_retract_all_cache_release.py test/registered/unit/managers/test_scheduler_pause_generation.py test/registered/unit/mem_cache/test_decode_radix_lock_ref.py /tmp/amdpilot-repo-j-b93267b61db1/review-evidence/test_adversarial_retract.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after scheduler/cache behavior: 37 tests and 2 subtests passed, including the unchanged independent idle counterexample, full reset boundary, hierarchical reset-not-evict assertion, and retained disaggregated-prefill boundary."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b93267b61db1/venv/bin/python -c 'import torch; x=torch.tensor([1.0,2.0],device=\"cuda\"); print(torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0), x.sum().item())'",
+      "exit_code": 0,
+      "what_was_measured": "The assigned AMD Instinct MI355X/gfx950 was visible and returned 3.0 for a simple device sum; this was environment evidence, not a model reproduction."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-b93267b61db1/evidence/gpu-inventory.txt records one AMD Instinct MI355X, capability (9, 5), and a successful device sum. Issue-specific tests executed on CPU.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "A live mid-chunk request in disaggregated-prefill mode is deliberately retained because freeing its KV while the disaggregated sender is live is unsafe; stale-weight KV remains possible in that documented path until sender teardown is implemented.",
+    "The reported Qwen3-4B and Qwen3-4B-Instruct-2507 weights were unavailable, so no full-model weight-swap, logprob, or generated-text reproduction was performed.",
+    "No hierarchical-cache runtime fixture was available; the hierarchical correction is supported by source behavior and a scheduler boundary regression asserting reset rather than generic eviction.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
