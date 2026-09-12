@@ -1,0 +1,142 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ TestPrefetchCheckpoints.test_fastsafetensors_coordinates_gds_fallback_across_ranks _
+
+self = <test_prefetch_checkpoints.TestPrefetchCheckpoints testMethod=test_fastsafetensors_coordinates_gds_fallback_across_ranks>
+
+    def test_fastsafetensors_coordinates_gds_fallback_across_ranks(self):
+        with tempfile.TemporaryDirectory() as tmpdir, Manager() as manager:
+            attempts = manager.list()
+            mp.spawn(
+                _run_fastsafetensors_rank,
+                args=(2, os.path.join(tmpdir, "pg"), attempts),
+                nprocs=2,
+                join=True,
+            )
+
+            attempts = sorted(attempts)
+
+>       self.assertEqual(
+            attempts,
+            [(0, False), (0, True), (1, False), (1, True)],
+        )
+E       AssertionError: Lists differ: [(0, False), (1, False), (1, True)] != [(0, False), (0, True), (1, False), (1, True)]
+E
+E       First differing element 1:
+E       (1, False)
+E       (0, True)
+E
+E       Second list contains 1 additional elements.
+E       First extra element 3:
+E       (1, True)
+E
+E       - [(0, False), (1, False), (1, True)]
+E       + [(0, False), (0, True), (1, False), (1, True)]
+E       ?              +++++++++++
+
+test/registered/unit/model_loader/test_prefetch_checkpoints.py:456: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7b974e5942c0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7ba03204ca40>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestPrefetchCheckpoints.test_fastsafetensors_coordinates_gds_fallback_across_ranks
+----------------------------- Captured stderr call -----------------------------
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-d7571f403652/cache/aiter/module_aiter_core.so
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-d7571f403652/cache/aiter/module_aiter_core.so
+Loading safetensors using Fastsafetensor loader:   0%|   | 0/1 [00:00<?, ?it/s]Loading safetensors using Fastsafetensor loader: 100%|█| 1/1 [00:00<00:00, 828.
+Loading safetensors using Fastsafetensor loader:   0%|   | 0/1 [00:00<?, ?it/s]Fastsafetensors GDS loading is unavailable; retrying with the non-GDS fallback.
+Loading safetensors using Fastsafetensor loader: 100%|█| 1/1 [00:00<00:00, 704.
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/model_loader/test_prefetch_checkpoints.py", line 456, in test_fastsafetensors_coordinates_gds_fallback_across_ranks
+    self.assertEqual(
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1091, in assertListEqual
+    self.assertSequenceEqual(list1, list2, msg, seq_type=list)
+  File "/usr/lib/python3.12/unittest/case.py", line 1073, in assertSequenceEqual
+    self.fail(msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: Lists differ: [(0, False), (1, False), (1, True)] != [(0, False), (0, True), (1, False), (1, True)]
+
+First differing element 1:
+(1, False)
+(0, True)
+
+Second list contains 1 additional elements.
+First extra element 3:
+(1, True)
+
+- [(0, False), (1, False), (1, True)]
++ [(0, False), (0, True), (1, False), (1, True)]
+?              +++++++++++
+
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+registered/unit/model_loader/test_prefetch_checkpoints.py::TestPrefetchCheckpoints::test_fastsafetensors_coordinates_gds_fallback_across_ranks
+  /usr/lib/python3.12/multiprocessing/popen_fork.py:66: DeprecationWarning: This process (pid=2387) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/model_loader/test_prefetch_checkpoints.py::TestPrefetchCheckpoints::test_fastsafetensors_coordinates_gds_fallback_across_ranks
+1 failed, 18 warnings in 28.12s
