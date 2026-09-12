@@ -1,0 +1,238 @@
+F
+=================================== FAILURES ===================================
+________ TestModelOptModelLoader.test_calibration_workflow_integration _________
+
+self = <test_modelopt_loader.TestModelOptModelLoader testMethod=test_calibration_workflow_integration>
+
+    def setUp(self):
+        """Set up test fixtures."""
+        # Mock distributed functionality to avoid initialization errors
+        self.mock_tp_rank = patch(
+            "sglang.srt.distributed.parallel_state.get_tensor_model_parallel_rank",
+            return_value=0,
+        )
+        self.mock_tp_rank.start()
+
+        self.mock_rank0_log = patch("sglang.srt.model_loader.loader.rank0_log")
+        self.mock_rank0_log.start()
+
+        # Mock logger to avoid issues
+        self.mock_logger = patch("sglang.srt.model_loader.loader.logger")
+        self.mock_logger.start()
+
+        # Mock all distributed functions that might be called
+        self.mock_get_tp_group = patch(
+            "sglang.srt.distributed.parallel_state.get_tp_group"
+        )
+        self.mock_get_tp_group.start()
+
+        # Mock model parallel initialization check
+        self.mock_mp_is_initialized = patch(
+            "sglang.srt.distributed.parallel_state.model_parallel_is_initialized",
+            return_value=True,
+        )
+        self.mock_mp_is_initialized.start()
+
+        self.model_path = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+        self.load_config = LoadConfig()
+        self.device_config = DeviceConfig(device=get_device())
+
+        # Create a basic model config with unified quantization flag
+>       self.model_config = ModelConfig(
+            model_path=self.model_path,
+            quantization="modelopt_fp8",  # Use unified quantization approach
+        )
+
+test/registered/unit/model_loader/test_modelopt_loader.py:97:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+python/sglang/srt/configs/model_config.py:669: in __init__
+    self._verify_quantization()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sglang.srt.configs.model_config.ModelConfig object at 0x7f12a4172ff0>
+
+    def _verify_quantization(self) -> None:
+        supported_quantization = [*QUANTIZATION_METHODS]
+        rocm_supported_quantization = [
+            "awq",
+            "fp8",
+            "compressed_tensors",
+            "compressed-tensors",
+            "w8a8_fp8",
+            "petit_nvfp4",
+            "quark",
+            "mxfp4",
+            "mxfp8",
+            "auto-round",
+            "auto-round-int8",
+            "quark_int4fp8_moe",
+            "quark_mxfp4",
+        ]
+        optimized_quantization_methods = [
+            "fp8",
+            "marlin",
+            "modelopt_fp8",
+            "modelopt_fp4",
+            "modelopt_mixed",
+            "nvfp4_online",
+            "gptq_marlin_24",
+            "gptq_marlin",
+            "awq_marlin",
+            "compressed_tensors",
+            "compressed-tensors",
+            "experts_int8",
+            "w8a8_int8",
+            "w8a8_fp8",
+            "moe_wna16",
+            "w4afp8",
+            "petit_nvfp4",
+            "quark",
+            "modelslim",
+            "humming",
+            "quark_mxfp4",
+            "auto-round",
+        ]
+        compatible_quantization_methods = {
+            "modelopt_fp8": ["modelopt"],
+            # Keep explicit or inherited modelopt_fp4 for literal FP8 checkpoints
+            # so eligible MoE experts are requantized online.
+            "modelopt_fp4": ["modelopt", "fp8"],
+            "modelopt_mixed": ["modelopt"],
+            "nvfp4_online": ["fp8", "modelopt_fp8"],
+            "petit_nvfp4": ["modelopt"],
+            "w8a8_int8": ["compressed-tensors", "compressed_tensors"],
+            "w8a8_fp8": ["compressed-tensors", "compressed_tensors"],
+            "auto-round-int8": ["compressed-tensors", "compressed_tensors"],
+        }
+        if self.quantization is not None:
+            self.quantization = self.quantization.lower()
+
+        # Parse quantization method from the HF and ModelSlim model config, if available.
+        # Only one function should return config, other should return None.
+        cfg_list = []
+        hf_config = self._parse_quant_hf_config()
+        modelslim_config = self._find_quant_modelslim_config()
+        quant_config = modelslim_config or hf_config
+        if quant_config is not None:
+            cfg_list.append(quant_config)
+
+        # Filter out None values
+        cfg_list = [item for item in cfg_list if item is not None]
+        if len(cfg_list) > 1:
+            raise ValueError(
+                "Config list contains configs from 2 methods, must be only 1"
+            )
+        quant_cfg = cfg_list[0] if cfg_list else None
+
+        if quant_cfg is not None:
+            quant_method = quant_cfg.get(
+                "quant_method", "" if not self.quantization else self.quantization
+            ).lower()
+
+            # ModelOpt FP4 and mixed checkpoints can quantize only the target
+            # model; an embedded MTP draft may stay unquantized, so an explicit
+            # nvfp4_online opt-in for the draft wins over checkpoint detection.
+            # The online loader rejects already-packed weights at load time.
+            preserve_online_draft_quantization = (
+                self.is_draft_model
+                and self.quantization == "nvfp4_online"
+                and quant_method in ("modelopt_fp4", "modelopt_mixed")
+            )
+            # An explicit online-requantization request (e.g. quark_mxfp4 on top
+            # of an NVFP4/mixed checkpoint) must not be overridden back to the
+            # source format
+            if self.quantization not in REQUANTIZATION_METHODS:
+                # Detect which checkpoint is it
+                if not preserve_online_draft_quantization:
+                    for _, method in QUANTIZATION_METHODS.items():
+                        quantization_override = method.override_quantization_method(
+                            quant_cfg, self.quantization
+                        )
+                        if quantization_override:
+                            quant_method = quantization_override
+                            self.quantization = quantization_override
+                            break
+
+            # Verify quantization configurations.
+            if self.quantization is None:
+                self.quantization = quant_method
+            elif self.quantization != quant_method:
+                # Check if the CLI-specified quantization is compatible with HF config's quant_method
+                is_compatible = preserve_online_draft_quantization or (
+                    self.quantization in compatible_quantization_methods
+                    and quant_method
+                    in compatible_quantization_methods[self.quantization]
+                )
+                if is_compatible:
+                    # Keep the CLI-specified quantization (e.g., modelopt_fp4) even if
+                    # HF config says "modelopt" - they are compatible
+                    logger.info(
+                        f"Using CLI-specified quantization ({self.quantization}) which is "
+                        f"compatible with HF config quant_method ({quant_method})."
+                    )
+                elif self.is_draft_model and not (
+                    self.is_draft_quantization_explicit
+                    and self.quantization in REQUANTIZATION_METHODS
+                    and is_hip()
+                    and is_qwen3_5_mtp_draft(self.hf_config)
+                ):
+                    # Allow auto-detection of quantization from checkpoint for draft model
+                    # only if the CLI quantization is not compatible. An explicit
+                    # online-requantization request for the draft (e.g. quark_mxfp4
+                    # for an MTP stack the checkpoint left in bf16) is honored below.
+                    logger.info(
+                        f"Draft model quantization ({quant_method}) differs from "
+                        f"main model quantization ({self.quantization}). "
+                        f"Using draft model's detected quantization: {quant_method}"
+                    )
+                    self.quantization = quant_method
+                elif self.quantization in REQUANTIZATION_METHODS:
+                    logger.info_once(
+                        f"Requantizing from quant_method='{quant_method}' to the requested online quantization='{self.quantization}'. Beware that requantization may incur a loss in accuracy, the requantized model should be re-validated/re-evaluated. More details at https://docs.sglang.io/advanced_features/quantization.html#online-quantization."
+                    )
+                else:
+                    raise ValueError(
+                        "Quantization method specified in the model config "
+                        f"({quant_method}) does not match the quantization "
+                        f"method specified in the `quantization` argument "
+                        f"({self.quantization})."
+                    )
+
+        if self.quantization is not None:
+            if self.quantization not in supported_quantization:
+                raise ValueError(
+                    f"Unknown quantization method: {self.quantization}. Must "
+                    f"be one of {supported_quantization}."
+                )
+            if is_hip() and self.quantization not in rocm_supported_quantization:
+>               raise ValueError(
+                    f"{self.quantization} quantization is currently not "
+                    f"supported in ROCm."
+                )
+E               ValueError: modelopt_fp8 quantization is currently not supported in ROCm.
+
+python/sglang/srt/configs/model_config.py:1827: ValueError
+----------------------------- Captured stderr call -----------------------------
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+------------------------------ Captured log call -------------------------------
+WARNING  huggingface_hub.utils._http:_http.py:965 Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/model_loader/test_modelopt_loader.py::TestModelOptModelLoader::test_calibration_workflow_integration
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed, 17 warnings in 13.08s
