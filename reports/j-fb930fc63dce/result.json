@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31084",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "26cf569fbb512f4b6eca6d8fdba11983362874ee",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The candidate implements the original issue's accepted guard option across path load, tensor load, and unload. The recorded base reproduced worker-local behavior; the exact candidate rejects every dynamic mutation with tokenizer_worker_num > 1 before backend communication or local registry mutation, while preserving single-worker and startup-preload behavior.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-fb930fc63dce/venv/bin/python -m pytest test/registered/unit/managers/test_tokenizer_control_mixin.py -q (candidate test temporarily placed on unchanged base source)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: 4 failed, 2 passed. Both load forms succeeded under two tokenizer workers, and unload exposed a misleading local-registry error."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-fb930fc63dce/venv/bin/python -m pytest test/registered/unit/managers/test_tokenizer_control_mixin.py test/registered/unit/managers/test_lora_update_result_merge.py test/registered/unit/managers/test_multi_tokenizer_mixin.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Exact-candidate regression and related manager coverage: 16 passed; all dynamic entry points reject multi-worker use before backend/state changes, with single-worker and preload boundaries retained."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-fb930fc63dce/venv/bin/python -m pytest /job/review-evidence-j-fb930fc63dce/test_candidate_adversarial.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial coverage: 3 passed for three-worker fail-closed behavior on all endpoints, unchanged single-worker tensor loading, and disabled-LoRA error precedence."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-fb930fc63dce/venv/bin/python -c 'from sglang.test.test_utils import maybe_stub_sgl_kernel; maybe_stub_sgl_kernel(); import sglang; import sglang.srt.managers.tokenizer_control_mixin as m; print(sglang.__file__); print(m.__file__)'",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed source imports came from /job/repo/python/sglang and the exact checked-out tokenizer_control_mixin.py."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X was visible through Torch/ROCm, but no GPU execution was needed or claimed for this tokenizer-process control-plane guard. The assigned environment is not gfx950."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No model weights or full HTTP server were used; real-model serving transport and semantic accuracy were not tested.",
+    "No multi-node or distributed workload was tested.",
+    "The available single GPU was an AMD Instinct MI350X, not gfx950.",
+    "The candidate is a fail-fast mitigation and intentionally does not add cross-worker LoRA synchronization."
+  ]
+}
