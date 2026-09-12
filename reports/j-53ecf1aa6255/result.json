@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37912",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1074",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/923",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/1041",
+  "candidate_commit": "9e190f3070c97e9aa680919ed29d96ddf08239af",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced all three review counterexamples against candidate 9e190f3070c97e9aa680919ed29d96ddf08239af, retained its valid Harmony and conversion fixes, and backported the seven-tier ReasoningEffort enum onto the pinned openai-protocol 1.0.0 source so Responses requests deserialize and forward none, minimal, low, medium, high, xhigh, and max.",
+  "tests": [
+    {
+      "command": "minimal Rust reproducer with openai-protocol =1.0.0",
+      "exit_code": 0,
+      "what_was_measured": "Before correction, production ResponsesRequest deserialization independently rejected none, xhigh, and max; see candidate-three-counterexamples.log."
+    },
+    {
+      "command": "cargo test --lib test_all_reasoning_effort_tiers_deserialize_and_forward -- --nocapture (candidate)",
+      "exit_code": 101,
+      "what_was_measured": "At exact candidate commit, a production ResponsesRequest regression failed on none before conversion; see candidate-seven-tier-before.log."
+    },
+    {
+      "command": "cargo test --lib reasoning_effort -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "After correction, two tests passed, including seven-tier production request deserialization and exact Responses-to-Chat forwarding."
+    },
+    {
+      "command": "cargo test --lib harmony_effort -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Two Harmony tests passed, covering all seven tiers and the unknown-string fallback."
+    },
+    {
+      "command": "cargo test --test api_tests reasoning -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Seven existing reasoning-related API/parser tests passed."
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "exit_code": 0,
+      "what_was_measured": "Rust formatting check passed; stable rustfmt emitted only existing nightly-option warnings."
+    },
+    {
+      "command": "cargo tree -i openai-protocol --edges normal",
+      "exit_code": 0,
+      "what_was_measured": "The gateway, smg-grpc-client, smg-mcp, and tool-parser all resolve to the same patched openai-protocol 1.0.0 path crate."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "rocminfo exposed gfx950, but GPU execution was intentionally not used because the reproduced failure is CPU-side JSON deserialization before handler and engine execution.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No model-quality, model-architecture, weighted serving, multi-node, or distributed-workload claim is made.",
+    "The local protocol compatibility backport remains necessary until an API-compatible published openai-protocol release includes smg-project/smg#2410."
+  ]
+}
