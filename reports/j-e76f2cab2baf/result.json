@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31133",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "5c8df7c6487d30fc14449489e7c3e83972778e82",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "outcome": "candidate_verified",
+  "summary": "The recorded base reproduced stale-width top-k corruption on the assigned gfx950 GPU. The exact candidate derives score allocation width from live seq_lens when the caller snapshot is too small. Its registered regression and six independent block-boundary/output cases passed. This prevents the original undersized allocation even though the backend's stale metadata source remains observable through a warning.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e76f2cab2baf/venv/bin/python -m pytest -q -s /job/review-evidence-j-e76f2cab2baf/test_candidate.py (base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: stale max_seqlen_k=64 differed from correctly sized max_seqlen_k=4096 in 163/1040 top-k elements; two non-undersizing boundary controls passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e76f2cab2baf/venv/bin/python -m pytest -q -s test/registered/kernels/ops/attention/test_minimax_sparse_prefill_score_width.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression on the exact commit: stale/correct outputs matched an independent Torch reference and warning/boundary assertions passed (3 tests)."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e76f2cab2baf/venv/bin/python /job/review-evidence-j-e76f2cab2baf/adversarial.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Six independent cases covered zero-width caller, a 128-to-129 block crossing, one-column-short at 4096, same rounded width, oversized caller, and both attention output plus top-k. Every stale/edge call exactly matched its correctly sized reference."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Executed on one AMD Instinct MI350X, gfx950:sramecc+:xnack-, with torch 2.11.0+rocm7.2 and HIP 7.2.26015. Source import resolved to /job/repo/python/sglang/kernels/ops/attention/minimax_sparse/prefill/flash_with_topk_idx.py."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No native C++ or FlyDSL compiler source changed, so a native rebuild was not applicable.",
+    "The available architecture was AMD gfx950, not the reported NVIDIA GB200/SM100; CUDA compute-sanitizer, Xid 31, and CUDA-specific compiler/ISA behavior were not tested.",
+    "Only one GPU was assigned, so the production TP=4/NCCL watchdog failure and multi-node behavior were not reproduced.",
+    "MiniMax-M3 weights and the production mixed-chunk serving workload were unavailable; validation used deterministic kernel fixtures and does not establish model semantic accuracy.",
+    "The backend can still originate stale _max_seqlen_k metadata; the candidate safely enlarges the allocation and warns rather than eliminating that metadata divergence."
+  ]
+}
