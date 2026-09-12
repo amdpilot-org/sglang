@@ -1,0 +1,56 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31178",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2347",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2312",
+  "candidate_commit": "04848e4fa8f9196f9c20183d7f6b0dd805040528",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is valid test-only hardening for an issue-specific production guard already present in the recorded base. It adds no production or native changes. The guard rejects EAGLE draft CUDA-graph replay when the runtime num_tokens_per_req differs from captured_req_width, preventing the reported [2, 2048] source from being copied into a [1, 2048] graph buffer. Candidate tests passed, the new mismatch regression failed when only that guard was temporarily removed, independent admission boundary cases passed, and the exact PyTorch shape failure was reproduced on the assigned gfx950 GPU. The original GLM-5.2 TP16 two-node PD/Mooncake workload was not reproducible here, so an end-to-end claim remains unverified.",
+  "classification": "test-only hardening of a source fix already present at the recorded base",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-6ed1ffc67988/venv/bin/python -m pytest -q test/registered/unit/spec/test_eagle_draft_cuda_graph_runner.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "The three pre-existing focused tests passed from the prepared repository source path."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6ed1ffc67988/venv/bin/python -m pytest -q test/registered/unit/spec/test_eagle_draft_cuda_graph_runner.py (candidate 04848e4fa8f9196f9c20183d7f6b0dd805040528)",
+      "exit_code": 0,
+      "what_was_measured": "All six tests passed, including candidate mismatch, matching-width, and legacy-unset admission cases."
+    },
+    {
+      "command": "Temporarily remove only the existing width guard at candidate commit, then run TestEagleDraftCudaGraphAdmission::test_rejects_width_mismatch_before_replay",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before evidence: without the production guard, can_run_graph admitted actual width 2 into a graph captured at width 1. The exact candidate source was restored and verified clean afterward."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-6ed1ffc67988/venv/bin/python -c '<GPU tensor-copy reproduction>'",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X gfx950, copying [2, 2048] int32 into [1, 2048] raised the exact reported broadcast-shape error. A matching [1, 2048] copy produced checksum 2096128, equal to sum(range(2048))."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6ed1ffc67988/venv/bin/python -c '<independent can_run_graph adversarial matrix>'",
+      "exit_code": 0,
+      "what_was_measured": "Independent cases covered None/-1/0 legacy widths, matching and multiple mismatching positive widths, captured width 2, padding bounds, backend-controlled no-padding admission, TP-gather sizing, and MLP-sync gating. All expected results held."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "rocminfo identified gfx950 / AMD Instinct MI355X; torch 2.11.0+rocm7.2 with HIP 7.2.26015 saw exactly one device and reproduced the issue's tensor-copy error.",
+  "native_rebuilt": false,
+  "source_import_paths": {
+    "sglang": "/job/repo/python/sglang/__init__.py",
+    "runner": "/job/repo/python/sglang/srt/speculative/eagle_draft_cuda_graph_runner.py"
+  },
+  "native_import_paths": null,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "GLM-5.2-FP8 and its speculative draft-model weights were unavailable.",
+    "The reported TP16, two-node, PD-disaggregated Mooncake topology cannot be reproduced on the assigned single gfx950 GPU.",
+    "The GPU test verifies the precise tensor-shape failure mechanism, not GLM-5.2 semantic accuracy, speculative acceptance quality, Mooncake transport, or the full serving path.",
+    "No native files changed in the candidate, repository-environment.json provides no native artifact, and no native rebuild was applicable.",
+    "No independent logical counterexample was found for the guarded admission contract, but absence of the original model and topology prevents classifying the original deployment issue as fully resolved end to end."
+  ],
+  "evidence_directory": "/tmp/amdpilot-repo-j-6ed1ffc67988/evidence"
+}
