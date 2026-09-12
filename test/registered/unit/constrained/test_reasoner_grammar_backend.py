@@ -15,6 +15,7 @@ from sglang.srt.constrained.torch_ops.token_filter_torch_ops import (
 )
 from sglang.srt.function_call.kimik3_format import THINK_CLOSE
 from sglang.srt.parser.reasoning_parser import KimiK3Detector as KimiK3ReasoningDetector
+from sglang.srt.parser.reasoning_parser import ReasoningParser
 from sglang.test.ci.ci_register import register_cpu_ci
 
 register_cpu_ci(2.0, "base-a-test-cpu")
@@ -61,6 +62,30 @@ class _DummyGrammarBackend(BaseGrammarBackend):
 
     def _init_value_dispatch(self, key, reasoning):
         return self._dispatch_result
+
+
+class _RecordingGrammar:
+    def __init__(self):
+        self.mask_calls = 0
+        self.accepted = []
+
+    def accept_token(self, token):
+        self.accepted.append(token)
+
+    def fill_vocab_mask(self, vocab_mask, idx):
+        self.mask_calls += 1
+
+    def rollback(self, k):
+        del self.accepted[-k:]
+
+    def copy(self):
+        result = _RecordingGrammar()
+        result.mask_calls = self.mask_calls
+        result.accepted = list(self.accepted)
+        return result
+
+    def is_terminated(self):
+        return False
 
 
 def _allowed_token_ids(vocab_mask, token_ids):
@@ -141,14 +166,119 @@ class TestReasonerGrammarObject(unittest.TestCase):
 
 
 class TestReasonerGrammarBackend(unittest.TestCase):
+    EOM, START, MESSAGE = 200007, 200022, 200023
+    ASSISTANT, TO, EQ_USER, EQ_SELF = 140680, 328, 76976, 19669
+
     def setUp(self):
         self._prev_budget = os.environ.get("SGLANG_MAX_THINK_TOKENS")
+        self._prev_header_budget = os.environ.get("SGLANG_MAX_CHANNEL_HEADER_TOKENS")
 
     def tearDown(self):
         if self._prev_budget is None:
             os.environ.pop("SGLANG_MAX_THINK_TOKENS", None)
         else:
             os.environ["SGLANG_MAX_THINK_TOKENS"] = self._prev_budget
+        if self._prev_header_budget is None:
+            os.environ.pop("SGLANG_MAX_CHANNEL_HEADER_TOKENS", None)
+        else:
+            os.environ["SGLANG_MAX_CHANNEL_HEADER_TOKENS"] = self._prev_header_budget
+
+    def _make_muse_object(self):
+        tokenizer = _DummyTokenizer(
+            {
+                "<|eom|>": [self.EOM],
+                "<|message|>": [self.MESSAGE],
+                " to=self": [self.TO, self.EQ_SELF],
+            }
+        )
+        backend = _DummyGrammarBackend()
+        backend._dispatch_result = _RecordingGrammar()
+        wrapper = ReasonerGrammarBackend(
+            backend, ReasoningParser("muse", stream_reasoning=False), tokenizer
+        )
+        return wrapper._init_value_dispatch(("json", "{}"), reasoning=True)
+
+    def _masked_positions(self, obj, stream):
+        masked = []
+        for token in stream:
+            before = obj.grammar.mask_calls
+            obj.fill_vocab_mask(None, 0)
+            masked.append(obj.grammar.mask_calls > before)
+            obj.accept_token(token)
+        return masked
+
+    def test_muse_grammar_starts_at_answer_body_after_model_written_header(self):
+        reasoning_header = [self.TO, self.EQ_SELF, self.MESSAGE]
+        answer_header = [
+            self.START,
+            self.ASSISTANT,
+            self.TO,
+            self.EQ_USER,
+            self.MESSAGE,
+        ]
+        body = [2001, 2002]
+        stream = reasoning_header + [1001, 1002, self.EOM] + answer_header + body
+
+        masked = self._masked_positions(self._make_muse_object(), stream)
+
+        self.assertEqual(masked, [False] * (len(stream) - len(body)) + [True] * 2)
+
+    def test_second_reasoning_channel_keeps_grammar_suspended(self):
+        obj = self._make_muse_object()
+        stream = [
+            1001,
+            self.EOM,
+            self.START,
+            self.ASSISTANT,
+            self.TO,
+            self.EQ_SELF,
+            self.MESSAGE,
+            1002,
+            self.EOM,
+            self.START,
+            self.ASSISTANT,
+            self.TO,
+            self.EQ_USER,
+            self.MESSAGE,
+            2001,
+        ]
+
+        masked = self._masked_positions(obj, stream)
+
+        self.assertEqual(masked, [False] * (len(stream) - 1) + [True])
+        self.assertEqual(obj.grammar.accepted, [2001])
+
+    def test_unclosed_header_resumes_at_configured_fail_safe(self):
+        os.environ["SGLANG_MAX_CHANNEL_HEADER_TOKENS"] = "2"
+        obj = self._make_muse_object()
+
+        masked = self._masked_positions(obj, [1001, self.EOM, self.START, 999, 2001])
+
+        self.assertEqual(masked, [False, False, False, False, True])
+        self.assertEqual(obj.grammar.accepted, [2001])
+
+    def test_rollback_and_copy_preserve_channel_header_state(self):
+        obj = self._make_muse_object()
+        for token in [1001, self.EOM, self.START, self.ASSISTANT]:
+            obj.accept_token(token)
+        copied = obj.copy()
+
+        self.assertTrue(obj._is_channel_header())
+        self.assertTrue(copied._is_channel_header())
+        obj.rollback(2)
+        self.assertTrue(obj._is_channel_header())
+        obj.rollback(1)
+        self.assertTrue(obj._is_thinking())
+
+    def test_non_channel_detector_still_binds_immediately_after_think_end(self):
+        grammar = _RecordingGrammar()
+        obj = ReasonerGrammarObject(grammar=grammar, think_end_ids=[7])
+        obj.maybe_init_reasoning(True)
+
+        masked = self._masked_positions(obj, [10, 7, 20])
+
+        self.assertEqual(masked, [False, False, True])
+        self.assertEqual(grammar.accepted, [20])
 
     def _make_parser(self):
         detector = SimpleNamespace(
