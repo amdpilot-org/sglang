@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32124",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Independent review of amdpilot-org/sglang PR 3142 at exact commit e0642eaba6485b97fbd8f0003f30adb08f442146 found that it correctly fixes the concrete relocated-cache counterexample from PR 3062: DG_JIT_CACHE_DIR no longer enters the compatibility payload, while other DG_JIT_* compilation settings remain keyed. The prepared base repeats warmup after a cache copy, predecessor candidate 4c7768d36ecfa2fb078ad51cfed49932677dfda0 repeats it, and the exact reviewed candidate skips it. The marker protocol's source-level contract passed candidate and independent adversarial tests. Full original-issue resolution remains unverified because the assigned AMD/ROCm node cannot execute NVIDIA DeepGEMM, CUDA graphs, or the DeepSeek-V4-Pro TP=8 deployment.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-b6c16ce81df7/venv/bin/python /job/review-evidence/base/reproduce_redundant_warmup.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced the original redundant behavior with actual base dispatch: a representative compiled artifact was copied to a different cache root, no completion marker existed, and the all-M warmup dispatch was called twice. Evidence: /job/review-evidence/base/redundant-warmup.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b6c16ce81df7/venv/bin/python -m pytest -q /job/review-evidence/candidate/test_independent_marker_adversarial.py -k copy_to_different_absolute_root_reuses_but_setting_change_does_not (predecessor 4c7768d36ecfa2fb078ad51cfed49932677dfda0)",
+      "exit_code": 1,
+      "what_was_measured": "Independently reproduced PR 3062's exact remaining counterexample: after copying a completed cache to a different DG_JIT_CACHE_DIR, predecessor candidate 4c7768d repeated warmup (two calls). Evidence: /job/review-evidence/base/pr3016-relocation-failure.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b6c16ce81df7/venv/bin/python -m pytest -q test/registered/unit/deep_gemm/test_deep_gemm_warmup_marker.py (candidate e0642eaba6485b97fbd8f0003f30adb08f442146)",
+      "exit_code": 0,
+      "what_was_measured": "All 13 candidate regressions passed, covering relocated cache reuse, exact compatibility dimensions and M coverage, missing/corrupt/incomplete markers, failed and memory-reduced warmups, atomic publication, compile-mode restoration, and full DeepGEMM artifact identity. Evidence: /job/review-evidence/candidate/candidate-regression.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b6c16ce81df7/venv/bin/python -m pytest -q /job/review-evidence/candidate/test_independent_marker_adversarial.py (candidate e0642eaba6485b97fbd8f0003f30adb08f442146)",
+      "exit_code": 0,
+      "what_was_measured": "Three independent adversarial cases passed: copied cache reuse across unrelated absolute roots, invalidation when a non-location DG_JIT_* setting changes, rejection/replacement of an incomplete marker, and proof that cache-root spelling is absent from both payload and digest. Evidence: /job/review-evidence/candidate/independent-adversarial.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b6c16ce81df7/venv/bin/python -m compileall -q python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py python/sglang/srt/layers/deep_gemm_wrapper/warmup_marker.py && git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 e0642eaba6485b97fbd8f0003f30adb08f442146",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python sources compile and the exact candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "Read-only probing found one AMD Instinct MI355X, Torch 2.11.0+rocm7.2, HIP 7.2.26015, torch.version.cuda=None, and no deep_gemm module. No GPU kernel was run or represented as issue validation.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The central NVIDIA execution claim remains unverified: real DeepGEMM JIT artifacts were not compiled, copied, loaded, or numerically checked because this node is AMD/ROCm and deep_gemm is absent.",
+    "CUDA graph capture/instantiation and eager-forward parity remain unverified; source inspection shows the candidate only gates the all-M warmup path, but this architecture cannot execute the CUDA path.",
+    "DeepSeek-V4-Pro TP=8 startup-latency improvement, supported graph shapes, steady-state inference performance, and numerical parity remain unverified because the required model weights, NVIDIA architecture, and eight-GPU topology were unavailable.",
+    "No native C++, CUDA, or FlyDSL source changed, so a native rebuild was not applicable. Source imports were confirmed from /job/repo/python/sglang at the exact candidate checkout."
+  ]
+}
