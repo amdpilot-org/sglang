@@ -101,6 +101,7 @@ from sglang.srt.managers.multimodal_preprocessing_admission import (
     MultimodalPreprocessingBusy,
     MultimodalPreprocessingRequestTooLarge,
     count_preprocessed_multimodal_items,
+    get_mm_preprocessing_admission_lease,
 )
 from sglang.srt.managers.multimodal_processor import get_mm_processor, import_processors
 from sglang.srt.managers.schedule_batch import (
@@ -880,6 +881,35 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
         if admission is None:
             return None
         item_count = count_preprocessed_multimodal_items(obj)
+        lease = get_mm_preprocessing_admission_lease()
+        if lease is not None:
+            try:
+                lease.resize(item_count)
+            except MultimodalPreprocessingRequestTooLarge as error:
+                raise fastapi.HTTPException(
+                    status_code=HTTPStatus.BAD_REQUEST,
+                    detail=(
+                        f"The request needs {error.item_count} multimodal preprocessing "
+                        f"item slots, which exceeds the configured per-worker maximum "
+                        f"of {error.max_inflight_items}. Reduce the request's media "
+                        "items or increase "
+                        "--max-mm-preprocessing-inflight-items-per-worker."
+                    ),
+                ) from error
+            except MultimodalPreprocessingBusy as error:
+                raise fastapi.HTTPException(
+                    status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+                    detail=(
+                        "Multimodal preprocessing is at capacity: "
+                        f"the request needs {error.item_count} item slot(s), "
+                        f"with {error.inflight_items}/"
+                        f"{error.max_inflight_items} currently reserved."
+                    ),
+                ) from error
+            if item_count == 0:
+                lease.release()
+                return None
+            return lease
         if item_count == 0:
             return None
         try:

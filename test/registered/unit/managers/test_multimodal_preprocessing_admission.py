@@ -10,6 +10,7 @@ from sglang.srt.managers.multimodal_preprocessing_admission import (
     MultimodalPreprocessingBusy,
     MultimodalPreprocessingRequestTooLarge,
     count_preprocessed_multimodal_items,
+    get_mm_preprocessing_admission_lease,
 )
 from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import CustomTestCase
@@ -99,6 +100,37 @@ class TestMultimodalPreprocessingAdmission(CustomTestCase):
             self.assertEqual(admission.inflight_items, 2)
         finally:
             existing.release()
+
+    def test_provisional_lease_resizes_to_parsed_weight(self):
+        admission = MultimodalPreprocessingAdmission(max_inflight_items=4)
+        lease = admission.acquire(1)
+
+        with lease.activate():
+            self.assertIs(get_mm_preprocessing_admission_lease(), lease)
+            lease.resize(3)
+            self.assertEqual(admission.inflight_items, 3)
+
+        lease.resize(0)
+        self.assertEqual(admission.inflight_items, 0)
+        lease.release()
+
+    def test_resize_rejection_keeps_provisional_reservation(self):
+        admission = MultimodalPreprocessingAdmission(max_inflight_items=2)
+        first = admission.acquire(1)
+        second = admission.acquire(1)
+        try:
+            with self.assertRaises(MultimodalPreprocessingBusy):
+                first.resize(2)
+            self.assertEqual(first.item_count, 1)
+            self.assertEqual(admission.inflight_items, 2)
+
+            with self.assertRaises(MultimodalPreprocessingRequestTooLarge):
+                first.resize(3)
+            self.assertEqual(first.item_count, 1)
+            self.assertEqual(admission.inflight_items, 2)
+        finally:
+            first.release()
+            second.release()
 
     def test_owner_release_waits_for_tracked_background_future(self):
         async def drive():
