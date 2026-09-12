@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37772",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2724",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2710",
+  "candidate_commit": "ad222b0a04e766e3feb92b67bac9c7d98ce943cb",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate implements and mock-tests one server-wide fixed LoRA adapter for all DSpark draft requests. It does not implement the original per-task choice of draft adapter/model and collapses distinct task adapter identities at the draft forward boundary. The narrower path is partially verified, but real DSpark adapter execution is unavailable in this environment.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-2314e16252dd/venv/bin/python -m pytest -q /job/review-evidence/j-2314e16252dd/metadata/test_dspark_lora.py (on base)",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before reproduction: collection fails because the base has no sglang.srt.speculative.dspark_lora module or DSpark draft LoRA support."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-2314e16252dd/venv/bin/python -m pytest -q test/registered/unit/spec/test_dspark_lora.py test/registered/spec/dspark/test_dspark_draft_path_default.py (at exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 10 tests passed, covering mocked fixed-manager creation/routing, empty-path rejection, and existing DSpark defaults."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-2314e16252dd/venv/bin/python /job/review-evidence/j-2314e16252dd/metadata/adversarial_per_request.py (at exact candidate)",
+      "exit_code": 1,
+      "what_was_measured": "Independent original-contract counterexample: expected two distinct per-task draft adapter IDs; observed the same server-wide fixed adapter ID for both rows."
+    },
+    {
+      "command": "PYTHONPATH=python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-2314e16252dd/venv/bin/python -m pytest -q test/registered/unit/lora/test_lora_spec_verify_batch_info.py (at exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Three existing GPU tests passed for LoRA TARGET_VERIFY eager/CUDA-graph metadata on the assigned gfx950 GPU; this is supporting infrastructure evidence, not end-to-end DSpark proof."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 ad222b0a04e766e3feb92b67bac9c7d98ce943cb",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI355X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2 and HIP 7.2.26015. GPU tensor execution and three TARGET_VERIFY LoRA metadata tests passed.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Two tasks cannot select distinct DSpark draft adapters: both draft rows are forcibly assigned self.draft_model_runner.dspark_lora_id.",
+    "There is no request-level DSpark draft-adapter field or propagation separate from target-model lora_id/lora_path.",
+    "There is no multi-adapter DSpark draft registry, dynamic load/unload path, scheduler admission/draining policy, or mixed-adapter batch lifecycle.",
+    "The alternative of multiple draft models for one target model is not implemented."
+  ],
+  "remaining_limitations": [
+    "No compatible DSpark base checkpoint and stage-2 LoRA adapter were available, so end-to-end output numerics and acceptance-rate improvement were not measured.",
+    "DSpark CUDA-graph capture/replay with real adapter weights remains unverified; mocked routing and generic LoRA metadata tests do not establish it.",
+    "The tiny Llama fixture cannot qualify DSpark architecture or adapter semantics and was not used as substitute evidence.",
+    "No native source changed, so native rebuilding was not applicable.",
+    "Only one assigned AMD gfx950 GPU was used; distributed and other architecture paths were not tested."
+  ]
+}
