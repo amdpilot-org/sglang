@@ -1,0 +1,59 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34899",
+  "candidate_issue_url": "https://github.com/amdpilot-org/sglang/issues/2705",
+  "review_issue_url": "https://github.com/amdpilot-org/sglang/issues/2759",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2728",
+  "candidate_commit": "8ae549b1d88e2d33a945914af80a20efea8e63e1",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is plausible test-only hardening: it adds six correctly collected unified-memory exact-KL cases with appropriate runtime configuration checks. It does not verify the original issue because the Inkling FULL+SWA+MAMBA serving path cannot import on the assigned ROCm architecture, no KL was measured, and the required revert-then-red validation for a unified-memory reuse defect is absent.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a4b7fb79edb1/venv/bin/python -m pytest --collect-only -q test/registered/radix_cache/unified_radix_tree/test_unified_radix_cache_kl_hybrid_bitexact.py (base)",
+      "exit_code": 0,
+      "what_was_measured": "The recorded base collected 18 cases and contained no unified-memory exact-KL class."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a4b7fb79edb1/venv/bin/python -m pytest test/registered/e2e/models/test_inkling_unified.py::TestInklingUnifiedTriPool::test_input_output_logprobs_match -vv -s (base)",
+      "exit_code": 1,
+      "what_was_measured": "The existing approximate unified-memory Inkling path failed before inference: importing sglang.srt.models.inkling raised No module named 'cutlass', followed by model-registration failure. No KL value was measured."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a4b7fb79edb1/venv/bin/python -m pytest --collect-only -q test/registered/radix_cache/unified_radix_tree/test_unified_radix_cache_kl_hybrid_bitexact.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate collected 24 cases, including six new unified-memory cases covering three helpers on Python and Rust tree cores."
+    },
+    {
+      "command": "external importlib/unittest.mock structural adversarial script against the candidate module",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed required launch arguments, 32 samples, 1024 generated tokens, 1e-9 threshold, and that a server response claiming unified memory is disabled is rejected."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a4b7fb79edb1/venv/bin/python -m pytest test/registered/radix_cache/unified_radix_tree/test_unified_radix_cache_kl_hybrid_bitexact.py::TestUnifiedMemoryHybridBitExact::test_logprobs_match -vv -s",
+      "exit_code": 1,
+      "what_was_measured": "The candidate exact serving test resolved unified memory, deterministic inference, Triton, disabled prefill graphs, and track interval 128, but failed before weights/inference because Inkling's NVIDIA FA4/CUTLASS import is unavailable on ROCm. No KL value was measured."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a4b7fb79edb1/venv/bin/python -m pytest test/registered/unit/mem_cache/test_unified_mla_gpu_parity.py -vv -s",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X gfx950, existing unified MLA GPU reads/writes matched the independent stock-pool reference bit-for-bit: 3 tests and 4 subtests passed. This is component evidence, not execution of the candidate Inkling tests."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "Existing unified MLA parity kernels executed on one AMD Instinct MI355X gfx950 and matched a stock-pool reference bit-for-bit. The candidate's Inkling exact-KL path did not reach GPU inference because its NVIDIA CUTLASS dependency could not import.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No supported NVIDIA CUTLASS/FA4 run demonstrates exact zero KL for the candidate's baseline, prefill-cache-hit, or decode-cache-hit cases.",
+    "Neither the Python nor Rust unified radix tree candidate class completed an end-to-end Inkling request.",
+    "No revert-then-red or fault-injection run demonstrates that any new class turns red for a real unified-memory FULL, SWA, or MAMBA state-restoration defect.",
+    "The passing MLA pool parity test does not cover Inkling's combined FULL+SWA+MAMBA architecture or the new cache-hit test classes."
+  ],
+  "remaining_limitations": [
+    "Assigned hardware is AMD Instinct MI355X gfx950 with ROCm 7.2; Inkling's model module requires the NVIDIA FA4/CUTLASS Python dependency, which is absent.",
+    "No native sources changed, repository-environment.json declares native as null, and no native rebuild was applicable.",
+    "The tiny Llama fixture cannot qualify the requested architecture because it does not contain Inkling's combined FULL, SWA, and MAMBA state.",
+    "The base and candidate serving failures occurred before numerical execution, so they are environment blockers rather than evidence of a cache correctness pass or failure."
+  ]
+}
