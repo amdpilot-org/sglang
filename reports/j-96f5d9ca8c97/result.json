@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34786",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1640",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The exact candidate's helper tests pass and are valid but limited. The prepared base already contains the runtime guard and lazy speculative lifecycle, so no speculative source change was justified. This correction preserves the candidate tests, adds a GPU lifecycle regression covering fresh allocation, lazy speculative pending-slot allocation, TARGET_VERIFY gather, and confirmed-boundary promotion/freeing, and corrects the evidence and limitations.",
+  "tests": [
+    {
+      "command": "git switch --detach ccabba009ecd391d7f97d50a7c1ca52b7490ac95 && ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-96f5d9ca8c97/venv/bin/python -m pytest -q test/registered/unit/managers/test_mamba_track_indices.py",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate commit, all 3 GPU helper tests passed. They cover None-to-zero selection, mixed positions, and explicit plan override, but not allocation or boundary processing."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-96f5d9ca8c97/venv/bin/python reports/j-96f5d9ca8c97/reproduce_pre_fix.py",
+      "exit_code": 0,
+      "what_was_measured": "The pre-fix tensor expression independently raised TypeError for an unset mamba_next_track_idx and the reproducer treated that expected exception as success."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-96f5d9ca8c97/venv/bin/python -m pytest -q test/registered/unit/managers/test_mamba_track_indices.py",
+      "exit_code": 0,
+      "what_was_measured": "Four GPU tests passed: the candidate's 3 helper cases plus fresh allocation -> lazy speculative pending allocation -> TARGET_VERIFY gather -> confirmed boundary promotion/freeing, with exact slot values checked."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-96f5d9ca8c97/venv/bin/python -m pytest -q test/registered/unit/managers/test_schedule_batch_prepare_for_decode.py test/registered/unit/managers/test_batch_result_processor_mamba_boundary.py",
+      "exit_code": 0,
+      "what_was_measured": "Three adjacent lifecycle tests and two subtests passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "PyTorch 2.11.0+rocm7.2 reported AMD Instinct MI350X, gfx950:sramecc+:xnack-. The candidate and consolidated numerical tests ran with ROCR_VISIBLE_DEVICES=0."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No end-to-end fresh-request NEXTN TARGET_VERIFY serving run was performed on a hybrid-mamba model.",
+    "Qwen3.6-27B-FP8 weights and the reported two RTX 3090 GPUs were unavailable; NVIDIA and multi-GPU behavior remain unverified.",
+    "The added regression validates scheduler/cache allocation and boundary lifecycle with GPU tensors, not hybrid-mamba kernel semantics, model accuracy, HTTP serving, or distributed execution.",
+    "The tiny Llama fixture is not hybrid-mamba and was not used as issue evidence.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
