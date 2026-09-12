@@ -310,6 +310,46 @@ class TestChatCompletionRequest(unittest.TestCase):
         self.assertFalse(request.chat_template_kwargs.get("thinking"))
         self.assertFalse(request.chat_template_kwargs.get("enable_thinking"))
 
+    def test_chat_completion_minimax_thinking_disabled(self):
+        request = ChatCompletionRequest(
+            model="MiniMaxAI/MiniMax-M3",
+            messages=[{"role": "user", "content": "Hello"}],
+            thinking={"type": "disabled"},
+        )
+        self.assertEqual(request.thinking.type, "disabled")
+        self.assertEqual(request.chat_template_kwargs, {"thinking_mode": "disabled"})
+
+    def test_chat_completion_minimax_thinking_adaptive(self):
+        request = ChatCompletionRequest(
+            model="MiniMaxAI/MiniMax-M3",
+            messages=[{"role": "user", "content": "Hello"}],
+            thinking={"type": "adaptive"},
+        )
+        self.assertEqual(request.thinking.type, "adaptive")
+        self.assertEqual(request.chat_template_kwargs, {"thinking_mode": "enabled"})
+
+    def test_chat_completion_minimax_thinking_keeps_explicit_template_mode(self):
+        request = ChatCompletionRequest(
+            model="MiniMaxAI/MiniMax-M3",
+            messages=[{"role": "user", "content": "Hello"}],
+            thinking={"type": "adaptive"},
+            chat_template_kwargs={"thinking_mode": "disabled", "custom": True},
+        )
+        self.assertEqual(
+            request.chat_template_kwargs,
+            {"thinking_mode": "disabled", "custom": True},
+        )
+
+    def test_chat_completion_minimax_thinking_rejects_unknown_type(self):
+        from pydantic import ValidationError
+
+        with self.assertRaises(ValidationError):
+            ChatCompletionRequest(
+                model="MiniMaxAI/MiniMax-M3",
+                messages=[{"role": "user", "content": "Hello"}],
+                thinking={"type": "unsupported"},
+            )
+
     def test_chat_completion_extended_reasoning_effort_levels(self):
         """Extended effort levels work in both supported request forms."""
         from pydantic import ValidationError
