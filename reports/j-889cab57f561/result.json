@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31719",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/2280",
+  "candidate_commit": "4b0d2276a4cf6ce3e6ed5d2c7f66dce81416d0ac",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the first indexed-assignment failure for the primary FP16-activation/BF16-cache case, but is only a partial fix. Its tests stop at the extracted store helper. On gfx950, the original issue's BF16-activation/FP32-cache override proceeds past that helper and then fails in the immediately following production causal_conv1d_fn Triton compilation because mixed state types remain unsupported.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-889cab57f561/venv/bin/python direct torch indexed-assignment reproducer on base (CPU and cuda:0)",
+      "exit_code": 0,
+      "what_was_measured": "The original index_put dtype error reproduced for BF16/FP16, FP16/BF16, and FP32/BF16 destination/source pairs on CPU and the assigned gfx950 GPU; raw/index_put_repro.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-889cab57f561/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_gdn_prefill_backend_policy.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit 4b0d2276, all 17 tests and 27 subtests passed, including the candidate's helper-only dtype cases; raw/pytest_candidate.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-889cab57f561/venv/bin/python independent gfx950 _store_tracked_conv_states adversarial cases",
+      "exit_code": 0,
+      "what_was_measured": "Four cross-dtype combinations with non-contiguous sources exactly matched explicit source.to(cache_dtype) references and preserved unselected slots; raw/adversarial_gpu.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-889cab57f561/venv/bin/python independent gfx950 causal_conv1d_fn mixed-dtype boundary cases",
+      "exit_code": 0,
+      "what_was_measured": "FP16 activation/BF16 cache succeeded, while BF16 activation/FP32 cache and BF16 activation/FP16 cache produced Triton CompilationError mismatched-state-type failures; the script records expected per-case outcomes and exits zero; raw/production_conv_mixed_dtype.txt."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI355X gfx950 executed the base reproducer, candidate helper adversarial checks, and production causal-convolution boundary checks.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With BF16 activations and SGLANG_MAMBA_CONV_DTYPE=float32, the candidate's casted snapshot write succeeds but the immediately following ROCm Triton causal_conv1d_fn fails to compile due to FP32/BF16 new_conv_state branch type mismatch.",
+    "On the tested ROCm path, BF16 activations with an FP16 conv cache fail at the same causal-convolution boundary after the candidate helper succeeds."
+  ],
+  "remaining_limitations": [
+    "QuantTrio/Qwen3.6-27B-AWQ weights were unavailable, so full serving and semantic accuracy were not tested.",
+    "The available device was AMD Instinct MI355X gfx950 with ROCm 7.2, not the reporter's RTX 5090 SM120 with CUDA 13.3.",
+    "The deterministic tiny Llama serving fixture cannot qualify the qwen3_5 hybrid-GDN architecture and was therefore not substituted as proof.",
+    "No native source changed in the candidate, so no native rebuild was applicable.",
+    "No multi-node behavior was tested."
+  ]
+}
