@@ -1,0 +1,10 @@
+Revision: 8a63b907bc515192023000460e5c1fad23411535
+Runtime dtype: torch.float32 on CPU (the loader uses the configured runtime device)
+
+3.4028234663852886e+38: accepted as finite positive float32 tensor([3.4028e+38, 2.0000e+00])
+3.4028236e+38: rejected after conversion; prior head state unchanged
+1e+308: rejected after conversion; prior head state unchanged
+1e-50: ACCEPTED after conversion as tensor([0., 2.]); prior head state overwritten
+1.0: accepted as tensor([1., 2.])
+
+Remaining counterexample: `1e-50` is finite and positive in JSON/Python, so it passes DSparkStsCalibration.__post_init__. It underflows to zero in the runtime float32 tensor. The candidate checks only torch.isfinite and therefore installs zero despite the strictly-positive calibration contract. Applying confidence uses logits / sts_temperatures, so this introduces division by zero and saturates nonzero logits rather than providing a valid finite-temperature calibration.
