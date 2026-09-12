@@ -1,0 +1,27 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/2271",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Current source already contains two-stage split-KV flash decoding. Direct MI350X measurements at the reported Llama GQA shape were 60.7 us at context 200 and 68.4 us at 2,000; forcing one split was 126.6 us at 2,000 and degraded to 2,031.8 us at 32,768 versus 115.6 us with scheduled splitting. No additional kernel optimization was justified.",
+  "tests": [
+    {
+      "command": "TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-6d47a6865b8d/triton-cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6d47a6865b8d/venv/bin/python reports/j-6d47a6865b8d/benchmark_decode_attention.py --output reports/j-6d47a6865b8d/decode_attention_results.json --iters 50",
+      "exit_code": 0,
+      "what_was_measured": "Direct prepared Triton decode-attention latency, scheduler split counts, single-split control latency, finiteness, and correctness versus an independent float32 PyTorch reference for ten GQA/MHA, batch, long-context, gathered-index, heterogeneous-length, and masked-boundary cases on MI350X."
+    },
+    {
+      "command": "TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-6d47a6865b8d/triton-cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6d47a6865b8d/venv/bin/python -m pytest -q test/registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_decode_attention test/registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_grouped_decode_attention",
+      "exit_code": 0,
+      "what_was_measured": "Repository correctness coverage for the normal MHA and grouped GQA Triton decode paths; 2 tests passed."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "AMD Instinct MI350X gfx950, ROCm 7.2, torch 2.11.0+rocm7.2. Raw timings and numerical errors are in decode_attention_results.json; generated stage-1/stage-2 gfx950 AMDGCN paths and hashes are in compiler_artifacts.txt.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No gated Llama-3.1-8B weights or end-to-end serving throughput run; direct kernel results isolate decode attention.",
+    "No FlashInfer comparison and no access to the report's original NVIDIA hardware.",
+    "The newer Qwen3.5/speculative-serving report uses different architecture and workload shapes and remains unverified here.",
+    "No native/FlyDSL code was involved, so no native rebuild was applicable."
+  ]
+}
