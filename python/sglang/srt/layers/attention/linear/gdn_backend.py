@@ -51,6 +51,60 @@ _fused_decode_verify_real_tensors = (
 )
 
 
+def _store_tracked_conv_states(
+    conv_states: torch.Tensor,
+    slot_indices: torch.Tensor,
+    tracked_states: torch.Tensor,
+) -> None:
+    """Store a GDN conv snapshot in the cache's configured dtype.
+
+    The conv cache may intentionally differ from the activation dtype through
+    SGLANG_MAMBA_CONV_DTYPE. Indexed assignment requires equal dtypes, so
+    normalize the tracked activation at this cache boundary.
+    """
+    conv_states[slot_indices] = tracked_states.to(dtype=conv_states.dtype)
+
+
+def _causal_conv1d_with_cache_dtype(
+    mixed_qkv: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor,
+    *,
+    conv_states: torch.Tensor,
+    cache_indices: torch.Tensor,
+    **kwargs,
+) -> torch.Tensor:
+    """Run prefill conv with cache storage independent of activation dtype."""
+    if conv_states.dtype == mixed_qkv.dtype:
+        return causal_conv1d_fn(
+            mixed_qkv,
+            weight,
+            bias,
+            conv_states=conv_states,
+            cache_indices=cache_indices,
+            **kwargs,
+        )
+
+    # The Triton prefill kernel combines values loaded from conv_states with
+    # mixed_qkv and requires those branches to have one dtype. Convert only the
+    # active slots for computation, then preserve the configured cache dtype at
+    # the storage boundary.
+    kernel_conv_states = conv_states[cache_indices].to(mixed_qkv.dtype)
+    kernel_cache_indices = torch.arange(
+        cache_indices.shape[0], device=cache_indices.device, dtype=cache_indices.dtype
+    )
+    output = causal_conv1d_fn(
+        mixed_qkv,
+        weight,
+        bias,
+        conv_states=kernel_conv_states,
+        cache_indices=kernel_cache_indices,
+        **kwargs,
+    )
+    _store_tracked_conv_states(conv_states, cache_indices, kernel_conv_states)
+    return output
+
+
 class GDNMISMetadata(msgspec.Struct, frozen=True):
     query_token_indices: torch.Tensor
     query_cu_seqlens: torch.Tensor
@@ -908,11 +962,13 @@ class GDNAttnBackend(MambaAttnBackendBase):
                 mixed_qkv_to_track = mixed_qkv[
                     :, forward_metadata.track_conv_indices
                 ].transpose(0, 1)
-                conv_states[forward_metadata.conv_states_mask_indices] = (
-                    mixed_qkv_to_track
+                _store_tracked_conv_states(
+                    conv_states,
+                    forward_metadata.conv_states_mask_indices,
+                    mixed_qkv_to_track,
                 )
 
-            mixed_qkv = causal_conv1d_fn(
+            mixed_qkv = _causal_conv1d_with_cache_dtype(
                 mixed_qkv,
                 layer.conv_weights,
                 layer.bias,
