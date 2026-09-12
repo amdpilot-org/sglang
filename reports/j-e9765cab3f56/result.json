@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38167",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved PR 843's fatal accelerator classification and restart-required response, but replaced scheduler exit with a latched fatal state so subsequent requests fail immediately without GPU dispatch instead of blocking on an absent scheduler.",
+  "tests": [
+    {
+      "command": "git show eb279f4d0cdbb9d414576aab2530a34e9a494f3b:reports/j-e9765cab3f56/probe_fatal_scheduler_state.py | /tmp/amdpilot-repo-j-e9765cab3f56/venv/bin/python - (at candidate f0cb5a958e600a68ea16a35b98b877f781e2046a)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: the candidate stopped its RPC event loop after the fatal reply, violating the probe's requirement that later requests receive a fail-fast response."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e9765cab3f56/venv/bin/python reports/j-e9765cab3f56/probe_fatal_scheduler_state.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after: fatal state remained reachable over RPC and a later request was rejected without invoking its worker handler."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e9765cab3f56/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_scheduler_device_failure.py python/sglang/multimodal_gen/test/unit/test_warmup_probe_degradation.py python/sglang/multimodal_gen/test/unit/test_scheduler_client.py python/sglang/multimodal_gen/test/unit/test_launch_server_shutdown.py",
+      "exit_code": 0,
+      "what_was_measured": "34 focused unit tests passed, covering fatal classification/state, nonfatal boundaries, shutdown dispatch, RPC timeout behavior, warmup degradation, and worker shutdown."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The correction is scheduler control-flow behavior and was reproduced deterministically without model execution. No claim is made about the unavailable CUDA workload."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The RTX 5070 12 GB / WSL2 / CUDA 13.0 MiniMax-H3 workload, model weights, and reporter LoRA were unavailable on the prepared ROCm 7.2 system.",
+    "The initial 1344x768 failure was not proven to be resource exhaustion, so no insufficient-memory relabeling or resolution admission threshold was added.",
+    "Disaggregated role event loops use separate transport and exception paths; equivalent fatal-state behavior was not changed or claimed without a qualified reproduction."
+  ]
+}
