@@ -1,0 +1,29 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38561",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that the exported producer types cannot decode a mixed unsalted/salted BlockStored stream without either dropping cache_salt or rejecting a valid event. Added separate decoder-side BlockStoredView and KVEventBatchView types, preserving the existing producer structs and exact 7/8-element wire shapes, with documentation and a failing-before/passing-after regression for absent and nontrivial salts.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-648f2466ad7a/venv/bin/python - <<'PY' ... original mixed-stream reproduction ... PY",
+      "exit_code": 0,
+      "what_was_measured": "Before the change, verified the actual checkout emitted 7-element unsalted and 8-element salted BlockStored arrays; KVEventBatch dropped metadata, BlockStoredWithMetadata rejected the unsalted event, and their union was invalid."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/disaggregation/kv_events.py test/registered/unit/disaggregation/test_kv_events.py docs/docs/advanced_features/kv_events.mdx docs/docs.json",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, spelling, repository policy, and test-registry hooks passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-648f2466ad7a/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_kv_events.py",
+      "exit_code": 0,
+      "what_was_measured": "16 tests and 22 subtests passed, including a mixed batch made from the real producer structs, unchanged 7/8-element wire shapes, and recovery of None plus a Unicode/control-character salt through KVEventBatchView."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and fix are confined to msgspec CPU serialization types; no model, tensor operation, or accelerator path is involved. No unrelated GPU smoke was used as evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": "No live model server was launched and no ZMQ transport test was run. The regression exercises the exact msgpack payload produced by the checked-in BlockStored, BlockStoredWithMetadata, and KVEventBatch implementations, which is the wire-contract layer reported by the issue."
+}

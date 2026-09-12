@@ -8,14 +8,17 @@ the router can subscribe per replica (the `dp_size` it reads from
 """
 
 import unittest
+from typing import Union
 
 import msgspec
 
 from sglang.srt.disaggregation.kv_events import (
     BlockStored,
     BlockStoredMetadata,
+    BlockStoredView,
     BlockStoredWithMetadata,
     KVEventBatch,
+    KVEventBatchView,
     StorageMedium,
     ZmqEventPublisher,
     resolve_load_pub_range,
@@ -222,6 +225,51 @@ class TestBlockStoredWireFormat(CustomTestCase):
             msgspec.msgpack.encode(batch), type=KVEventBatch
         )
         self.assertEqual(round_tripped.events[0].block_hashes, [123])
+
+    def test_consumer_view_round_trips_mixed_real_producer_payload(self):
+        salt = "tenant/東京/\N{LOCK WITH INK PEN}:\x00:v2"
+        payload = msgspec.msgpack.encode(
+            KVEventBatch(
+                ts=1.0,
+                events=[
+                    self._event(),
+                    self._event(BlockStoredMetadata(cache_salt=salt)),
+                ],
+            )
+        )
+
+        raw_events = msgspec.msgpack.decode(payload)[1]
+        self.assertEqual([len(event) for event in raw_events], [7, 8])
+
+        decoded = msgspec.msgpack.decode(payload, type=KVEventBatchView)
+        self.assertEqual(
+            [type(event) for event in decoded.events],
+            [BlockStoredView, BlockStoredView],
+        )
+        self.assertEqual([event.cache_salt for event in decoded.events], [None, salt])
+        self.assertEqual(decoded.events[1].metadata.cache_salt, salt)
+
+    def test_producer_types_cannot_describe_a_mixed_stream(self):
+        payload = msgspec.msgpack.encode(
+            KVEventBatch(
+                ts=1.0,
+                events=[
+                    self._event(),
+                    self._event(BlockStoredMetadata(cache_salt="tenant-a")),
+                ],
+            )
+        )
+
+        class WithMetadata(KVEventBatch):
+            events: list[BlockStoredWithMetadata]
+
+        class Both(KVEventBatch):
+            events: list[Union[BlockStored, BlockStoredWithMetadata]]
+
+        with self.assertRaises(msgspec.ValidationError):
+            msgspec.msgpack.decode(payload, type=WithMetadata)
+        with self.assertRaises(TypeError):
+            msgspec.msgpack.Decoder(Both)
 
 
 if __name__ == "__main__":
