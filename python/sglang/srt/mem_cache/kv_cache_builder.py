@@ -76,6 +76,10 @@ def get_draft_kv_pool(
     if draft_worker is None or spec_algorithm.is_ngram():
         return None
 
+    get_worker_pool = getattr(draft_worker, "get_draft_kv_pool", None)
+    if get_worker_pool is not None:
+        return get_worker_pool()
+
     # V2 draft workers exist only on their hosting PP stage; other ranks own no
     # nested draft worker or draft KV pool.
     if draft_worker.draft_worker is None:

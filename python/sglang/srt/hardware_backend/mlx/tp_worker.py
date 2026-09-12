@@ -104,6 +104,21 @@ class MlxTpModelWorker(TpModelWorker):
             init_kwargs["pool_size"] = get_schedule().max_total_tokens
         self._mlx_runner = MlxModelRunner(**init_kwargs)
 
+        if self._mlx_runner.native_cache_fallback:
+            if not get_schedule().disable_overlap_schedule:
+                raise NotImplementedError(
+                    "Gemma 4 on MLX requires --disable-overlap-schedule."
+                )
+            if get_schedule().chunked_prefill_size != -1:
+                raise NotImplementedError(
+                    "Gemma 4 on MLX requires --chunked-prefill-size -1."
+                )
+            if self.model_config.context_len > self._mlx_runner.pool_size:
+                raise NotImplementedError(
+                    "Gemma 4 on MLX requires context length no larger than "
+                    "max total tokens (2048 is the validated Level-1 setting)."
+                )
+
         self._model_runner = MlxModelRunnerStub(
             model_config=self.model_config,
             mem_fraction_static=get_schedule().mem_fraction_static,
@@ -116,6 +131,7 @@ class MlxTpModelWorker(TpModelWorker):
             token_to_kv_pool_allocator=self.token_to_kv_pool_allocator,
             memory_pool_config=self.memory_pool_config,
             mlx_pool_size=self._mlx_runner.pool_size,
+            mlx_native_cache_fallback=self._mlx_runner.native_cache_fallback,
         )
 
         self._mlx_active_rids: set[str] = set()
@@ -173,6 +189,48 @@ class MlxTpModelWorker(TpModelWorker):
             # Prefer the just-snapshotted live auxiliary state for the final
             # insert. Any older tracked slot is released during component cleanup.
             req.kv.mamba_last_track_seqlen = None
+            if self._mlx_runner.native_cache_fallback:
+                self._mlx_runner.remove_request(req.rid)
+                self._mlx_active_rids.discard(req.rid)
+
+    def clear_cache_pool(self) -> None:
+        """Clear native request state; scheduler-owned stub pools clear separately."""
+
+        self._mlx_runner.clear()
+        self._mlx_active_rids.clear()
+
+    def forward_batch_generation_mtp_prefill(self, batch: ScheduleBatch):
+        """Run the BS=1 final prefill while retaining target hidden rows."""
+
+        from sglang.srt.layers.logits_processor import LogitsProcessorOutput
+
+        self._ensure_mlx_pool_initialized()
+        if not batch.forward_mode.is_extend() or len(batch.reqs) != 1:
+            raise ValueError("MLX Gemma 4 MTP prefill requires one extend request")
+        req = batch.reqs[0]
+        self._cleanup_stale_rids(batch.forward_mode, {req.rid})
+        if self._mlx_runner.has_request(req.rid):
+            raise ValueError("MLX Gemma 4 MTP does not support chunked prefill")
+
+        input_ids = batch.input_ids.cpu().tolist()
+        if len(input_ids) != int(batch.extend_lens[0]):
+            raise ValueError("MLX Gemma 4 MTP prefill input length is inconsistent")
+        token, target_output = self._mlx_runner.prefill_for_mtp(
+            req_id=req.rid,
+            new_token_ids=input_ids,
+            full_token_ids=list(req.get_fill_ids()),
+            prefix_slot_ids=req.prefix_indices.tolist(),
+            new_slot_ids=batch.out_cache_loc.cpu().tolist(),
+            req_pool_idx=req.req_pool_idx,
+            req=req,
+        )
+        self._mlx_active_rids.add(req.rid)
+        result = GenerationBatchResult(
+            logits_output=LogitsProcessorOutput(next_token_logits=None),
+            next_token_ids=torch.tensor([token], dtype=torch.long, device="cpu"),
+            can_run_cuda_graph=False,
+        )
+        return result, target_output
 
     def _route_extend_request(self, rid: str, decoding_rids: set[str]) -> str:
         """Classify a request within an extend / mixed batch.

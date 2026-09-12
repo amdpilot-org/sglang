@@ -235,6 +235,10 @@ pub struct SamplingParams {
     /// Set by `normalize`; tells the scheduler its own pass can early-return.
     #[serde(skip_deserializing)]
     pub is_normalized: bool,
+    /// Whether the client supplied exactly `temperature=0` before greedy
+    /// normalization rewrote it to `temperature=1, top_k=1`.
+    #[serde(skip_deserializing)]
+    pub temperature_was_zero: bool,
     /// API fields present in the request object. Serde defaults erase this
     /// distinction, but preferred sampling parameters must not overwrite an
     /// explicit request value, including an explicit default or null.
@@ -380,6 +384,7 @@ impl Default for SamplingParams {
             stop_str_max_len: 0,
             stop_regex_max_len: 0,
             is_normalized: false,
+            temperature_was_zero: false,
             explicit_fields: BTreeSet::new(),
         }
     }
@@ -407,6 +412,7 @@ impl SamplingParams {
         if self.is_normalized {
             return;
         }
+        self.temperature_was_zero = self.temperature == 0.0;
         // Moved out, not cloned: `normalize_stops` clears both aliases anyway.
         self.stop_strs = take_one_or_many(self.stop.take());
         self.stop_regex_strs = take_one_or_many(self.stop_regex.take());
@@ -831,6 +837,7 @@ mod tests {
         "stop_str_max_len",
         "stop_regex_max_len",
         "is_normalized",
+        "temperature_was_zero",
     ];
 
     /// Every field reaches the wire, at the position Python expects.
@@ -907,6 +914,7 @@ mod tests {
         // `normalize` outputs occupy the tail.
         assert!(arr[at("stop_strs")].is_array());
         assert_eq!(arr[at("is_normalized")].as_bool(), Some(false));
+        assert_eq!(arr[at("temperature_was_zero")].as_bool(), Some(false));
     }
 
     #[test]

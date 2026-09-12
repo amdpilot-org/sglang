@@ -180,6 +180,11 @@ class BaseSpecWorker(ABC):
         draft_runners = self._draft_model_runners()
         return draft_runners[0].token_to_kv_pool if draft_runners else None
 
+    def carries_draft_hidden_states(self) -> bool:
+        """Whether disaggregation may dereference a Torch draft runner."""
+
+        return True
+
     @property
     def target_worker(self) -> TpModelWorker:
         return self._target_worker

@@ -1,0 +1,56 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32264",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Consolidated candidate https://github.com/amdpilot-org/sglang/pull/2780 at exact commit 333b37951dfca5d98dffb77b25ee5a8e0801100b and corrected the architecture-independent admission defects reproduced by review https://github.com/amdpilot-org/sglang/pull/2868. Level 1 now rejects nonzero explicit temperature even with top_k=1, beam search, and any target or assistant repository/revision other than the two immutable pins. The candidate's other implementation remains intact. Apple Silicon/MLX runtime claims remain unverified on this Linux/ROCm host.",
+  "tests": [
+    {
+      "command": "direct Python admission probes against exact candidate commit 333b37951dfca5d98dffb77b25ee5a8e0801100b",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced successful admission for temperature=0.7 with top_k=1, beam_width=2, and arbitrary shape-compatible model/revision identities. Evidence: reports/j-861cd6d3373a/raw/failing-before.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-861cd6d3373a/venv/bin/python -m pytest -q test/registered/unit/hardware_backend/mlx/test_mlx_spec_guardrails.py",
+      "exit_code": 0,
+      "what_was_measured": "5 tests and 27 subtests passed, including the six failing-before adversarial admission cases. Evidence: reports/j-861cd6d3373a/raw/passing-after.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-861cd6d3373a/venv/bin/python -m pytest -q test/registered/unit/hardware_backend/mlx/test_mlx_spec_decode.py test/registered/unit/hardware_backend/mlx/test_gemma4_cache_transaction.py test/registered/unit/hardware_backend/mlx/test_gemma4_target_adapter.py test/registered/unit/hardware_backend/mlx/test_gemma4_mtp_assistant.py test/registered/unit/hardware_backend/mlx/test_gemma4_mtp_worker.py test/registered/unit/hardware_backend/mlx/test_mlx_spec_guardrails.py test/registered/unit/spec/test_spec_registry.py test/registered/unit/spec/test_decode_bookkeeping_ownership.py",
+      "exit_code": 0,
+      "what_was_measured": "38 passed, 11 MLX-gated skipped, and 32 subtests passed; preserves the candidate's architecture-independent Stage A coverage."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-861cd6d3373a/venv/bin/python -m pytest -q test/registered/unit/sampling/test_sampling_params.py",
+      "exit_code": 0,
+      "what_was_measured": "76 tests and 17 subtests passed, including Python/Rust positional SamplingParams schema lockstep."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-861cd6d3373a/venv/bin/python -m pytest -q test/registered/mlx/models_e2e/test_gemma4_mtp_mlx_correctness.py",
+      "exit_code": 0,
+      "what_was_measured": "The pinned Stage B test collected and skipped because Darwin arm64, MLX, and mlx-vlm are unavailable. Evidence: reports/j-861cd6d3373a/raw/platform-and-stage-b.txt"
+    },
+    {
+      "command": "python -m py_compile <all changed Python paths>; git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 --",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources compile and the complete consolidated diff has no whitespace errors."
+    },
+    {
+      "command": "cargo test -p sglang-server message::sampling --lib",
+      "exit_code": 127,
+      "what_was_measured": "Rust tests could not run because cargo is absent from the prepared environment; the Python schema lockstep test passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The available accelerator is AMD Instinct MI355X with torch 2.11.0+rocm7.2 on Linux x86_64. mlx and mlx_vlm are unavailable, and ROCm execution cannot qualify an Apple Silicon MLX feature."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Apple Silicon/Darwin arm64 host was available, so real target-only versus MTP numerical parity was not executed.",
+    "The pinned target and assistant weights were not downloaded or executed; MLX native-cache behavior, proposal and verification counters, cleanup, cache flush, and post-flush serving remain unverified.",
+    "Eleven MLX-dependent Stage A cases and the pinned Stage B test skip on this host.",
+    "Cargo is absent from the prepared environment, so the changed Rust SamplingParams mirror could not be compiled locally; Python's Rust-schema lockstep regression passed.",
+    "No C++, FlyDSL, or native MLX source changed, so a native rebuild was not applicable.",
+    "The source issue's concurrency, heterogeneous paged/radix KV, and performance/overlap follow-up tracks remain out of scope."
+  ]
+}

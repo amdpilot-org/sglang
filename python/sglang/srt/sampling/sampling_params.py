@@ -159,6 +159,7 @@ class SamplingParams(msgspec.Struct, kw_only=True, array_like=True):
     stop_str_max_len: int = 0  # set by normalize()
     stop_regex_max_len: int = 0  # set by normalize()
     is_normalized: bool = False  # set by normalize()
+    temperature_was_zero: bool = False
 
     def __post_init__(self):
         # For non-optional params, treat None as "use default" so that callers
@@ -169,6 +170,7 @@ class SamplingParams(msgspec.Struct, kw_only=True, array_like=True):
         if self.is_normalized:
             return
 
+        self.temperature_was_zero = self.temperature == 0
         self.stop_strs = self.stop
         if self.stop_token_ids:
             filtered = {int(t) for t in self.stop_token_ids if t is not None}

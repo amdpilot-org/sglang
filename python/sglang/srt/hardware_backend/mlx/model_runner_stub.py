@@ -124,9 +124,16 @@ class MlxModelRunnerStub(ModelRunner):
                 "--startup-weight-load-mode=overlap is not supported: CUDA only"
             )
 
-    def __init__(self, *args, mlx_pool_size: int | None = None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        mlx_pool_size: int | None = None,
+        mlx_native_cache_fallback: bool = False,
+        **kwargs,
+    ):
         self.validate_startup_weight_load_mode()
         self._mlx_pool_size = mlx_pool_size
+        self._mlx_native_cache_fallback = mlx_native_cache_fallback
         super().__init__(*args, **kwargs)
 
     def load_model(self):
@@ -195,7 +202,10 @@ class MlxModelRunnerStub(ModelRunner):
         requested = get_schedule().max_running_requests
         if requested is None:
             requested_per_worker = None
-            resolved = min(capacity_cap, 4096)
+            default_max_requests = (
+                1 if getattr(self, "_mlx_native_cache_fallback", False) else 4096
+            )
+            resolved = min(capacity_cap, default_max_requests)
         else:
             requested_per_worker = requested // self.ps.attn_dp_size
             resolved = min(requested_per_worker, capacity_cap)
