@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37111",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1111",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/1076",
+  "candidate_commit": "3b1f061a7a8c650318803e6ee46f6332557f56f7",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a valid partial fix for a related QSA/NEXTN draft-extend metadata crash: the base reads draft_token_num from EagleDraftExtendInput, where only num_tokens_per_req exists, and the candidate's canonical-width change fixes that failure. It does not reproduce, prevent, or verify resolution of the original GB10 TP2 HTTP-200 silent semantic corruption. It removes a crash and allows the unqualified graph path to proceed without a fail-closed guard or model-level eager/graph semantic evidence.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-59ee8384fc7b/venv/bin/python <base EagleDraftExtendInput reproduction>",
+      "exit_code": 1,
+      "what_was_measured": "At the exact recorded base, real draft-extend metadata raises AttributeError because EagleDraftExtendInput has no draft_token_num."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-59ee8384fc7b/venv/bin/python -m pytest -q test/registered/kernel/qsa/test_qsa.py -k 'speculative_row_bound or cuda_graph_pads_dynamic_draft_extend_rows or cuda_graph_target_verify_ignores_capture_bucket_requests'",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate commit, five focused candidate regressions passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-59ee8384fc7b/venv/bin/python <independent canonical-width boundary script>",
+      "exit_code": 0,
+      "what_was_measured": "Independent widths 1 and 4, differing verify canonical/legacy widths, no-speculation behavior, and a gfx950 tensor case returned the expected host bounds."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-59ee8384fc7b/venv/bin/python -m pytest -vv test/registered/kernel/qsa/test_qsa.py::test_qsa_triton_block_expansion_matches_torch_reference test/registered/kernel/qsa/test_qsa.py::test_qsa_graph_metadata_kernels_match_legacy_host_path test/registered/kernel/qsa/test_qsa.py::test_qsa_graph_layout_covers_speculative_rows_and_padded_tail",
+      "exit_code": 0,
+      "what_was_measured": "Three gfx950 GPU tests passed against independent Torch or legacy host references."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-59ee8384fc7b/venv/bin/python -m pytest -q test/registered/kernel/qsa/test_qsa.py",
+      "exit_code": 0,
+      "what_was_measured": "Full QSA unit file: 41 passed and one NVIDIA SM121-only test skipped."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X gfx950 with ROCm 7.2 executed three QSA GPU reference tests; this is not the issue's NVIDIA GB10/SM121 TP2 environment."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The reported decode-graph profile can still return corrupt 1,024-token punctuation-loop output; the candidate provides no semantic eager/graph result or fail-closed guard.",
+    "The reported approximately 25K-token ordered-marker retrieval can still lose markers and degenerate into punctuation; the candidate provides no model-level result.",
+    "The original 2x GB10 SM121 TP2/RoCEv2 Qwen3.8-Flash-Next-NVFP4 configuration remains untested."
+  ],
+  "remaining_limitations": [
+    "No NVIDIA GB10/SM121 GPU was available; the SM121-only test was skipped.",
+    "Only one AMD gfx950 GPU was assigned, so TP2, RoCEv2, dual-node, and CUDA graph behavior could not be exercised.",
+    "Qwen3.8-Flash-Next-NVFP4 weights were unavailable, so the original HTTP semantic qualification harness could not be run.",
+    "No native source changed; a native rebuild was not applicable.",
+    "The tiny Llama fixture was not used because it cannot qualify QSA/NEXTN model semantics."
+  ]
+}
