@@ -45,13 +45,33 @@ NATIVE_TEMPLATE = """
 """
 
 NATIVE_BRACKET_TEMPLATE = """
+{%- for tool in tools if not tool["function"]["defer_loading"] -%}
+{{ tool["function"]["name"] }}
+{%- endfor -%}
+{%- for message in messages if message["role"] == "tool" -%}
+{%- if message["content"] is not string and message["content"][0]["type"] == "tool_reference" -%}
+{{ message["content"][0]["name"] }}
+{%- endif -%}
+{%- endfor -%}
+"""
+
+UNRELATED_TYPE_COMPARE_TEMPLATE = """
 {%- for tool in tools if not tool.function.defer_loading -%}
 {{ tool.function.name }}
 {%- endfor -%}
-{%- for message in messages if message.role == "tool" -%}
-{%- if message.content is not string and message.content[0]["type"] == "tool_reference" -%}
-{{ message.content[0]["name"] }}
-{%- endif -%}
+{%- if telemetry.type == "tool_reference" -%}diagnostic{%- endif -%}
+{%- for message in messages -%}
+    {%- if message.content is string -%}
+        {{- message.content -}}
+    {%- else -%}
+        {%- for item in message.content -%}
+            {%- if item.type == "text" -%}
+                {{- item.text -}}
+            {%- else -%}
+                {{- raise_exception("Unexpected item type in content.") -}}
+            {%- endif -%}
+        {%- endfor -%}
+    {%- endif -%}
 {%- endfor -%}
 """
 
@@ -199,6 +219,11 @@ class TestTemplateCapabilityDetection(unittest.TestCase):
             template_supports_deferred_tool_loading(UNRELATED_REFERENCE_TEMPLATE)
         )
 
+    def test_unrelated_type_comparison_is_not_native_expansion(self):
+        self.assertFalse(
+            template_supports_deferred_tool_loading(UNRELATED_TYPE_COMPARE_TEMPLATE)
+        )
+
 
 class TestGenericTemplateDeferredTools(unittest.TestCase):
     def test_hides_deferred_tools_before_discovery(self):
@@ -239,6 +264,21 @@ class TestGenericTemplateDeferredTools(unittest.TestCase):
         environment.globals["raise_exception"] = _raise_exception
 
         prompt = environment.from_string(UNRELATED_REFERENCE_TEMPLATE).render(
+            messages=payload["messages"],
+            tools=payload["tools"],
+        )
+
+        self.assertIn("ToolSearch", prompt)
+        self.assertIn("Bash", prompt)
+        self.assertIn("[tool reference: Bash]", prompt)
+
+    def test_unrelated_type_comparison_uses_generic_path(self):
+        payload = _convert(UNRELATED_TYPE_COMPARE_TEMPLATE, references=["Bash"])
+        environment = Environment()
+        environment.globals["telemetry"] = {"type": "ordinary"}
+        environment.globals["raise_exception"] = _raise_exception
+
+        prompt = environment.from_string(UNRELATED_TYPE_COMPARE_TEMPLATE).render(
             messages=payload["messages"],
             tools=payload["tools"],
         )
@@ -293,6 +333,19 @@ class TestNativeTemplateDeferredTools(unittest.TestCase):
             payload["messages"][0]["content"],
             [{"type": "tool_reference", "name": "Bash"}],
         )
+
+    def test_bracketed_template_preserves_reference_and_deferred_metadata(self):
+        payload = _convert(NATIVE_BRACKET_TEMPLATE, references=["Bash"])
+
+        self.assertEqual(
+            payload["messages"][0]["content"],
+            [{"type": "tool_reference", "name": "Bash"}],
+        )
+        self.assertEqual(
+            [tool["function"]["name"] for tool in payload["tools"]],
+            ["ToolSearch", "Bash", "Read"],
+        )
+        self.assertTrue(payload["tools"][1]["function"]["defer_loading"])
 
 
 if __name__ == "__main__":

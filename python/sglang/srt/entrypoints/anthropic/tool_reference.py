@@ -40,18 +40,25 @@ def _is_tool_reference_type_check(node: jinja2.nodes.Compare) -> bool:
         for expression in expressions
     )
     has_type_access = any(
-        (
-            isinstance(expression, jinja2.nodes.Getattr)
-            and expression.attr == "type"
-        )
-        or (
-            isinstance(expression, jinja2.nodes.Getitem)
-            and isinstance(expression.arg, jinja2.nodes.Const)
-            and expression.arg.value == "type"
-        )
+        _access_path(expression)[-1:] == ["type"]
+        and "content" in _access_path(expression)
         for expression in expressions
     )
     return has_reference and has_type_access
+
+
+def _access_path(node: jinja2.nodes.Node) -> list[str]:
+    """Return attribute/string-key components from a chained Jinja access."""
+    path = []
+    while isinstance(node, (jinja2.nodes.Getattr, jinja2.nodes.Getitem)):
+        if isinstance(node, jinja2.nodes.Getattr):
+            path.append(node.attr)
+        elif isinstance(node.arg, jinja2.nodes.Const) and isinstance(
+            node.arg.value, str
+        ):
+            path.append(node.arg.value)
+        node = node.node
+    return list(reversed(path))
 
 
 def template_supports_deferred_tool_loading(chat_template: Any) -> bool:
@@ -67,12 +74,19 @@ def template_supports_deferred_tool_loading(chat_template: Any) -> bool:
             template_ast = compiled.environment.parse(source)
         except (jinja2.TemplateError, TypeError, ValueError):
             continue
-        attributes = {node.attr for node in template_ast.find_all(jinja2.nodes.Getattr)}
+        accesses = [
+            *template_ast.find_all(jinja2.nodes.Getattr),
+            *template_ast.find_all(jinja2.nodes.Getitem),
+        ]
+        handles_deferred_tools = any(
+            _access_path(node)[-2:] == ["function", "defer_loading"]
+            for node in accesses
+        )
         handles_reference_parts = any(
             _is_tool_reference_type_check(node)
             for node in template_ast.find_all(jinja2.nodes.Compare)
         )
-        if handles_reference_parts and "defer_loading" in attributes:
+        if handles_reference_parts and handles_deferred_tools:
             return True
     return False
 
