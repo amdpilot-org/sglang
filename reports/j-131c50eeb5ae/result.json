@@ -1,0 +1,26 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33207",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared source already routes the DeepSeek-V4 config alias to SGLang's native DeepseekV4ForCausalLM before Transformers fallback. The reported exception is reproducible only when Hugging Face AutoModelForCausalLM is forced directly with the parser alias, which is not the current automatic serving dispatch path. Added regression coverage for native routing and the independent unknown-architecture fallback boundary.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-131c50eeb5ae/venv/bin/python - <<'PY' # construct ModelConfig from the real downloaded DeepSeek-V4-Flash-0731 config and call get_model_architecture; also force AutoModelForCausalLM.from_config at the HF-only boundary\n...\nPY",
+      "exit_code": 0,
+      "what_was_measured": "The real checkpoint config loaded as _DeepseekV4ConfigAlias and automatic SGLang dispatch resolved sglang.srt.models.deepseek_v4.DeepseekV4ForCausalLM. A deliberately forced Hugging Face AutoModelForCausalLM call reproduced the reported ValueError, locating the exception outside current auto/native dispatch. Raw output: /tmp/amdpilot-repo-j-131c50eeb5ae/evidence/current-config-dispatch.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-131c50eeb5ae/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_deepseek_v4_dispatch.py",
+      "exit_code": 0,
+      "what_was_measured": "Two CPU regression cases passed: DeepSeek-V4 alias-to-native routing without Transformers fallback, and an independent unknown architecture continuing to use the Transformers fallback. Raw output: /tmp/amdpilot-repo-j-131c50eeb5ae/evidence/pytest-deepseek-v4-dispatch-passing.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The issue-specific defect is configuration parsing and model-class dispatch, which completes before GPU execution. The available single AMD gfx950 cannot reproduce the reported two-GPU NVIDIA B200/RTX environment, so no unrelated GPU smoke is presented as issue evidence.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No DeepSeek-V4 model weights were available or downloaded, so full model startup and output accuracy were not tested.",
+    "The assigned hardware is one AMD Instinct MI355X gfx950, not two NVIDIA B200 or RTX PRO 6000 Blackwell GPUs; tensor parallelism, CUDA 13.3, and FlashInfer MXFP4 were not validated.",
+    "The current source was verified at the configuration-to-native-model dispatch boundary; this is not a full serving-path or multi-node reproduction."
+  ]
+}
