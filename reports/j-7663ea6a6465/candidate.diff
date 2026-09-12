@@ -1,0 +1,306 @@
+diff --git a/python/sglang/srt/arg_groups/serving_hook.py b/python/sglang/srt/arg_groups/serving_hook.py
+index 404509b..2c750b2 100644
+--- a/python/sglang/srt/arg_groups/serving_hook.py
++++ b/python/sglang/srt/arg_groups/serving_hook.py
+@@ -547,12 +547,18 @@ def handle_other_validations(server_args: Any):
+ 
+         if isinstance(cfg.limit_mm_data_per_request, dict):
+             allowed_modalities = {"image", "video", "audio"}
+-            for modality in cfg.limit_mm_data_per_request.keys():
++            for modality, limit in cfg.limit_mm_data_per_request.items():
+                 if modality not in allowed_modalities:
+                     raise ValueError(
+                         f"Invalid modality '{modality}' in --limit-mm-data-per-request."
+                         f"Allowed modalities are: {list(allowed_modalities)}"
+                     )
++                if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
++                    raise ValueError(
++                        f"Invalid limit {limit!r} for modality '{modality}' in "
++                        "--limit-mm-data-per-request. Limits must be "
++                        "non-negative integers."
++                    )
+ 
+     # Validate preferred_sampling_params
+     if cfg.preferred_sampling_params:
+diff --git a/python/sglang/srt/managers/tokenizer_manager.py b/python/sglang/srt/managers/tokenizer_manager.py
+index 1069ced..fbe0ac8 100644
+--- a/python/sglang/srt/managers/tokenizer_manager.py
++++ b/python/sglang/srt/managers/tokenizer_manager.py
+@@ -1275,10 +1275,8 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
+     def _validate_mm_limits(
+         self, obj: Union[GenerateReqInput, EmbeddingReqInput]
+     ) -> None:
+-        if not get_mm().limit_mm_data_per_request:
+-            return
+-
+-        for modality, limit in get_mm().limit_mm_data_per_request.items():
++        configured_limits = get_mm().limit_mm_data_per_request or {}
++        for modality, limit in configured_limits.items():
+             data = getattr(obj, f"{modality}_data", None)
+             if data:
+                 count = len(data) if isinstance(data, list) else 1
+@@ -1287,6 +1285,13 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
+                         f"{modality.capitalize()} count {count} exceeds limit {limit} per request."
+                     )
+ 
++        # Every serving request passes this point before processor dispatch.
++        # This also covers processors that intentionally bypass load_mm_data().
++        if "image" not in configured_limits and self.mm_processor is not None:
++            self.mm_processor.validate_image_num_limitation(
++                getattr(obj, "image_data", None)
++            )
++
+     def _validate_for_matryoshka_dim(self, obj: EmbeddingReqInput) -> None:
+         """Validate the request for Matryoshka dim if it has the field set."""
+         if obj.dimensions is None:
+diff --git a/python/sglang/srt/multimodal/processors/base_processor.py b/python/sglang/srt/multimodal/processors/base_processor.py
+index a0d8926..d929e66 100644
+--- a/python/sglang/srt/multimodal/processors/base_processor.py
++++ b/python/sglang/srt/multimodal/processors/base_processor.py
+@@ -211,6 +211,10 @@ def _tokenizer_of(processor):
+ 
+ class BaseMultimodalProcessor(ABC):
+     models = []
++    # Default safety limit for decoded images in one request. Processors with a
++    # different supported image count can override this value. An explicit
++    # --limit-mm-data-per-request image entry takes precedence.
++    IMAGE_NUM_LIMITATION = 5
+     gpu_image_decode = True  # Enable GPU decoding by default
+     smart_rgb_conversion = False
+     video_preprocessing_device = None
+@@ -1191,6 +1195,37 @@ class BaseMultimodalProcessor(ABC):
+         BaseMultimodalProcessor._validate_one_modality(Modality.VIDEO, video_data)
+         BaseMultimodalProcessor._validate_one_modality(Modality.AUDIO, audio_data)
+ 
++    def get_image_num_limitation(self) -> Optional[int]:
++        """Return the effective per-request image limit for this processor."""
++        configured_limits = get_mm().limit_mm_data_per_request or {}
++        if "image" in configured_limits:
++            return configured_limits["image"]
++        return self.IMAGE_NUM_LIMITATION
++
++    def validate_image_num_limitation(self, image_data: Optional[list]) -> None:
++        """Reject oversized image batches before fetching or decoding images."""
++        if not image_data:
++            return
++
++        # Processor outputs and precomputed embeddings contain already-processed
++        # data, not a batch of source images that will consume decoder memory.
++        if len(image_data) == 1 and self._is_preprocessed_input(image_data[0]):
++            return
++
++        limit = self.get_image_num_limitation()
++        if limit is None:
++            return
++        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
++            raise ValueError(
++                "The image value in --limit-mm-data-per-request must be a "
++                "non-negative integer."
++            )
++        if len(image_data) > limit:
++            raise ValueError(
++                f"Image count {len(image_data)} exceeds limit {limit} per request. "
++                "Use --limit-mm-data-per-request to configure this limit."
++            )
++
+     def _process_loaded_mm_data(self, modality, raw_data, result):
+         images, videos, audios = [], [], []
+ 
+@@ -1223,6 +1258,7 @@ class BaseMultimodalProcessor(ABC):
+         audio_sample_rate: Optional[int] = None,
+     ) -> BaseMultiModalProcessorOutput:
+         BaseMultimodalProcessor.validate_mm_data(image_data, video_data, audio_data)
++        self.validate_image_num_limitation(image_data)
+ 
+         input_ids = prompt if isinstance(prompt, list) else None
+         if input_ids is not None and self._all_mm_data_is_preprocessed(
+diff --git a/python/sglang/srt/multimodal/processors/internvl.py b/python/sglang/srt/multimodal/processors/internvl.py
+index dcca667..c059ebf 100644
+--- a/python/sglang/srt/multimodal/processors/internvl.py
++++ b/python/sglang/srt/multimodal/processors/internvl.py
+@@ -34,6 +34,9 @@ class InternVLProcessor(BaseMultimodalProcessor):
+     IMAGENET_MEAN = [0.485, 0.456, 0.406]
+     IMAGENET_STD = [0.229, 0.224, 0.225]
+     IMAGE_MAX_NUM = 12
++    # IMAGE_MAX_NUM controls dynamic patches per image. This separate constant
++    # is the supported number of source images in one request.
++    IMAGE_NUM_LIMITATION = 12
+ 
+     DEFAULT_VIDEO_NUM_FRAMES = 32
+     VIDEO_MAX_NUM = 1
+diff --git a/test/registered/unit/multimodal/test_image_num_limitation.py b/test/registered/unit/multimodal/test_image_num_limitation.py
+new file mode 100644
+index 0000000..66e94b3
+--- /dev/null
++++ b/test/registered/unit/multimodal/test_image_num_limitation.py
+@@ -0,0 +1,170 @@
++"""Regression tests for per-processor image count limits."""
++
++from sglang.test.ci.ci_register import register_cpu_ci
++
++register_cpu_ci(est_time=10, suite="base-a-test-cpu")
++
++import asyncio
++import unittest
++from types import SimpleNamespace
++from unittest.mock import AsyncMock, patch
++
++from sglang.srt.arg_groups.serving_hook import handle_other_validations
++from sglang.srt.managers.tokenizer_manager import TokenizerManager
++from sglang.srt.multimodal.processors.base_processor import BaseMultimodalProcessor
++from sglang.srt.multimodal.processors.internvl import InternVLProcessor
++from sglang.srt.server_args import ServerArgs
++from sglang.test.test_utils import CustomTestCase
++
++
++class _Processor(BaseMultimodalProcessor):
++    async def process_mm_data_async(self, *args, **kwargs):
++        raise NotImplementedError
++
++
++class _HigherLimitProcessor(BaseMultimodalProcessor):
++    IMAGE_NUM_LIMITATION = 12
++
++    async def process_mm_data_async(self, *args, **kwargs):
++        raise NotImplementedError
++
++
++def _processor(cls=_Processor):
++    return cls.__new__(cls)
++
++
++def _images(count):
++    return [f"image-{index}" for index in range(count)]
++
++
++class TestImageNumLimitation(CustomTestCase):
++    def test_default_limit_and_boundary(self):
++        processor = _processor()
++        with patch(
++            "sglang.srt.multimodal.processors.base_processor.get_mm",
++            return_value=SimpleNamespace(limit_mm_data_per_request=None),
++        ):
++            processor.validate_image_num_limitation(_images(5))
++            with self.assertRaisesRegex(ValueError, "Image count 6 exceeds limit 5"):
++                processor.validate_image_num_limitation(_images(6))
++
++    def test_processor_override(self):
++        processor = _processor(_HigherLimitProcessor)
++        with patch(
++            "sglang.srt.multimodal.processors.base_processor.get_mm",
++            return_value=SimpleNamespace(limit_mm_data_per_request=None),
++        ):
++            processor.validate_image_num_limitation(_images(12))
++            with self.assertRaisesRegex(ValueError, "exceeds limit 12"):
++                processor.validate_image_num_limitation(_images(13))
++
++    def test_internvl_declares_image_count_not_patch_limit(self):
++        self.assertEqual(InternVLProcessor.IMAGE_NUM_LIMITATION, 12)
++        self.assertEqual(InternVLProcessor.IMAGE_MAX_NUM, 12)
++
++    def test_server_override_can_lower_raise_or_disable_default(self):
++        processor = _processor()
++        for limit, accepted, rejected in ((2, 2, 3), (8, 8, 9), (0, 0, 1)):
++            with (
++                self.subTest(limit=limit),
++                patch(
++                    "sglang.srt.multimodal.processors.base_processor.get_mm",
++                    return_value=SimpleNamespace(
++                        limit_mm_data_per_request={"image": limit}
++                    ),
++                ),
++            ):
++                processor.validate_image_num_limitation(_images(accepted))
++                with self.assertRaisesRegex(ValueError, f"exceeds limit {limit}"):
++                    processor.validate_image_num_limitation(_images(rejected))
++
++    def test_other_modality_override_preserves_default_image_limit(self):
++        processor = _processor()
++        with patch(
++            "sglang.srt.multimodal.processors.base_processor.get_mm",
++            return_value=SimpleNamespace(limit_mm_data_per_request={"video": 1}),
++        ):
++            with self.assertRaisesRegex(ValueError, "exceeds limit 5"):
++                processor.validate_image_num_limitation(_images(6))
++
++    def test_preprocessed_input_is_exempt(self):
++        processor = _processor()
++        with patch(
++            "sglang.srt.multimodal.processors.base_processor.get_mm",
++            return_value=SimpleNamespace(limit_mm_data_per_request=None),
++        ):
++            processor.validate_image_num_limitation(
++                [{"format": "precomputed_embedding", "embedding": object()}]
++            )
++
++    def test_malformed_runtime_limit_fails_closed(self):
++        processor = _processor()
++        for limit in (True, -1, 1.5, "5"):
++            with (
++                self.subTest(limit=limit),
++                patch(
++                    "sglang.srt.multimodal.processors.base_processor.get_mm",
++                    return_value=SimpleNamespace(
++                        limit_mm_data_per_request={"image": limit}
++                    ),
++                ),
++            ):
++                with self.assertRaisesRegex(ValueError, "non-negative integer"):
++                    processor.validate_image_num_limitation(_images(1))
++
++    def test_server_rejects_malformed_limits_at_startup(self):
++        for limit in (True, -1, 1.5, "5"):
++            with (
++                self.subTest(limit=limit),
++                self.assertRaisesRegex(ValueError, "non-negative integers"),
++            ):
++                handle_other_validations(
++                    ServerArgs(
++                        model_path="dummy",
++                        limit_mm_data_per_request={"image": limit},
++                    )
++                )
++
++    def test_load_mm_data_rejects_before_decode(self):
++        processor = _processor()
++        processor.fast_load_mm_data = AsyncMock(
++            side_effect=AssertionError("image decoding must not start")
++        )
++        processor.legacy_load_mm_data = AsyncMock(
++            side_effect=AssertionError("image decoding must not start")
++        )
++        with patch(
++            "sglang.srt.multimodal.processors.base_processor.get_mm",
++            return_value=SimpleNamespace(limit_mm_data_per_request=None),
++        ):
++            with self.assertRaisesRegex(ValueError, "exceeds limit 5"):
++                asyncio.run(
++                    processor.load_mm_data(
++                        prompt="irrelevant",
++                        multimodal_tokens=object(),
++                        image_data=_images(6),
++                    )
++                )
++        processor.fast_load_mm_data.assert_not_awaited()
++        processor.legacy_load_mm_data.assert_not_awaited()
++
++    def test_common_serving_validation_covers_processor_bypasses(self):
++        manager = TokenizerManager.__new__(TokenizerManager)
++        manager.mm_processor = _processor()
++        request = SimpleNamespace(image_data=_images(6))
++        with (
++            patch(
++                "sglang.srt.managers.tokenizer_manager.get_mm",
++                return_value=SimpleNamespace(limit_mm_data_per_request=None),
++            ),
++            patch(
++                "sglang.srt.multimodal.processors.base_processor.get_mm",
++                return_value=SimpleNamespace(limit_mm_data_per_request=None),
++            ),
++        ):
++            with self.assertRaisesRegex(ValueError, "exceeds limit 5"):
++                manager._validate_mm_limits(request)
++
++
++if __name__ == "__main__":
++    unittest.main()
