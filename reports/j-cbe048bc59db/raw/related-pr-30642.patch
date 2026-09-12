@@ -1,0 +1,60 @@
+From f2a1211ec0efe0eac519b71d106096ee6ebf4ce8 Mon Sep 17 00:00:00 2001
+From: liuyuhanalex <liuyuhanalex@gmail.com>
+Date: Thu, 9 Jul 2026 05:42:28 -0400
+Subject: [PATCH 1/2] [Bugfix][DSA] Fix num_splits (b+1) crash with
+ DP-attention + speculative decode
+
+---
+ python/sglang/srt/layers/attention/dsa/utils.py | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/python/sglang/srt/layers/attention/dsa/utils.py b/python/sglang/srt/layers/attention/dsa/utils.py
+index 21a684541e56..0cdd43cfa512 100644
+--- a/python/sglang/srt/layers/attention/dsa/utils.py
++++ b/python/sglang/srt/layers/attention/dsa/utils.py
+@@ -157,6 +157,9 @@ def cal_padded_tokens(forward_batch: "ForwardBatch"):
+     dp_padding_mode = DpPaddingMode.get_dp_padding_mode(
+         forward_batch.is_extend_in_batch, global_num_tokens
+     )
++    attn_tp_size = get_parallel().attn_tp_size
++    for i in range(sync_group_size):
++        global_num_tokens[i] = ceil_align(global_num_tokens[i], attn_tp_size)
+     if dp_padding_mode.is_max_len():
+         tokens = max(global_num_tokens)
+     elif len(global_num_tokens) > 1:
+
+From b36915b80881af5c7f5845e82c3ad1d8950e68e0 Mon Sep 17 00:00:00 2001
+From: liuyuhanalex <liuyuhanalex@gmail.com>
+Date: Thu, 9 Jul 2026 05:55:17 -0400
+Subject: [PATCH 2/2] [Bugfix][DSA] Fix num_splits (b+1) crash with
+ DP-attention + speculative decode
+
+---
+ python/sglang/srt/layers/attention/dsa/utils.py | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/python/sglang/srt/layers/attention/dsa/utils.py b/python/sglang/srt/layers/attention/dsa/utils.py
+index 0cdd43cfa512..64a83fb0640a 100644
+--- a/python/sglang/srt/layers/attention/dsa/utils.py
++++ b/python/sglang/srt/layers/attention/dsa/utils.py
+@@ -150,6 +150,10 @@ def cal_padded_tokens(forward_batch: "ForwardBatch"):
+     global_num_tokens = forward_batch.global_num_tokens_cpu.copy()
+     sync_group_size = len(global_num_tokens)
+     attn_cp_size = get_parallel().attn_cp_size
++    # Align to attn_tp_size then cp_align_size, matching prepare_mlp_sync_batch.
++    attn_tp_size = get_parallel().attn_tp_size
++    for i in range(sync_group_size):
++        global_num_tokens[i] = ceil_align(global_num_tokens[i], attn_tp_size)
+     # Must match the CP padding in ForwardBatch.prepare_mlp_sync_batch.
+     cp_align_size = get_cp_padding_align_size()
+     for i in range(sync_group_size):
+@@ -157,9 +161,6 @@ def cal_padded_tokens(forward_batch: "ForwardBatch"):
+     dp_padding_mode = DpPaddingMode.get_dp_padding_mode(
+         forward_batch.is_extend_in_batch, global_num_tokens
+     )
+-    attn_tp_size = get_parallel().attn_tp_size
+-    for i in range(sync_group_size):
+-        global_num_tokens[i] = ceil_align(global_num_tokens[i], attn_tp_size)
+     if dp_padding_mode.is_max_len():
+         tokens = max(global_num_tokens)
+     elif len(global_num_tokens) > 1:

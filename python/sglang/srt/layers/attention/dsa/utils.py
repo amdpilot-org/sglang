@@ -19,7 +19,7 @@ from sglang.srt.runtime_context import (
     process_model_config,
 )
 from sglang.srt.utils import get_bool_env_var, is_cuda, is_hip, is_musa, is_npu
-from sglang.srt.utils.common import ceil_div
+from sglang.srt.utils.common import ceil_align, ceil_div
 
 
 @lru_cache(maxsize=1)
@@ -189,6 +189,11 @@ def cal_padded_tokens(forward_batch: "ForwardBatch"):
         tokens = global_num_tokens[get_parallel().attn_dp_rank]
     else:
         tokens = global_num_tokens[0]
+    # Eagle can pre-plan DSA metadata before prepare_mlp_sync_batch aligns the
+    # query batch for attention-TP reduce-scatter. Apply the same alignment
+    # here so FlashMLA's num_splits is sized for the eventual padded query.
+    # This is idempotent when prepare_mlp_sync_batch has already run.
+    tokens = ceil_align(tokens, get_parallel().attn_tp_size)
     if can_dsa_prefill_cp_interleave(forward_batch):
         tokens = ceil_div(tokens, attn_cp_size)
     return tokens

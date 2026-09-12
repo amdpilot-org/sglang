@@ -1,0 +1,107 @@
+FFF.                                                                     [100%]
+=================================== FAILURES ===================================
+__________ TestDsaDpSpecPadding.test_max_len_uses_shared_padded_size ___________
+
+self = <test_dsa_dp_spec_padding.TestDsaDpSpecPadding testMethod=test_max_len_uses_shared_padded_size>
+get_parallel = <MagicMock name='get_parallel' id='140127847105600'>
+is_cp_active = <MagicMock name='is_cp_active' id='140127077226528'>
+can_cp_interleave = <MagicMock name='can_dsa_prefill_cp_interleave' id='140168200277216'>
+
+    @patch("sglang.srt.layers.attention.dsa.utils.can_dsa_prefill_cp_interleave")
+    @patch("sglang.srt.layers.cp.utils.is_cp_active")
+    @patch("sglang.srt.layers.attention.dsa.utils.get_parallel")
+    def test_max_len_uses_shared_padded_size(
+        self, get_parallel, is_cp_active, can_cp_interleave
+    ):
+        get_parallel.return_value = SimpleNamespace(
+            attn_cp_size=1, attn_dp_rank=1, attn_tp_size=4
+        )
+        is_cp_active.return_value = False
+        can_cp_interleave.return_value = False
+
+        batch = self._forward_batch([9, 6], DpPaddingMode.MAX_LEN)
+        padded = pad_dsa_cache_seqlens(batch, torch.arange(8, dtype=torch.int32))
+
+>       self.assertEqual(padded.shape, (12,))
+E       AssertionError: torch.Size([9]) != (12,)
+
+test/registered/unit/layers/attention/test_dsa_dp_spec_padding.py:77: AssertionError
+----------------------------- Captured stderr call -----------------------------
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-cbe048bc59db/cache/aiter/module_aiter_core.so
+__ TestDsaDpSpecPadding.test_spec_decode_uses_final_attention_tp_padded_size ___
+
+self = <test_dsa_dp_spec_padding.TestDsaDpSpecPadding testMethod=test_spec_decode_uses_final_attention_tp_padded_size>
+get_parallel = <MagicMock name='get_parallel' id='140168200283456'>
+is_cp_active = <MagicMock name='is_cp_active' id='140168200290176'>
+can_cp_interleave = <MagicMock name='can_dsa_prefill_cp_interleave' id='140127074995904'>
+
+    @patch("sglang.srt.layers.attention.dsa.utils.can_dsa_prefill_cp_interleave")
+    @patch("sglang.srt.layers.cp.utils.is_cp_active")
+    @patch("sglang.srt.layers.attention.dsa.utils.get_parallel")
+    def test_spec_decode_uses_final_attention_tp_padded_size(
+        self, get_parallel, is_cp_active, can_cp_interleave
+    ):
+        """FlashMLA num_splits must be one longer than the padded query batch."""
+        get_parallel.return_value = SimpleNamespace(
+            attn_cp_size=1, attn_dp_rank=0, attn_tp_size=4
+        )
+        is_cp_active.return_value = False
+        can_cp_interleave.return_value = False
+
+        # Eagle pre-plans metadata before prepare_mlp_sync_batch aligns this DP
+        # rank from 9 to 12. DSA must anticipate the eventual 12 query rows.
+        batch = self._forward_batch([9, 8], DpPaddingMode.SUM_LEN)
+        padded = pad_dsa_cache_seqlens(batch, torch.arange(9, dtype=torch.int32))
+
+>       self.assertEqual(padded.shape, (12,))
+E       AssertionError: torch.Size([9]) != (12,)
+
+test/registered/unit/layers/attention/test_dsa_dp_spec_padding.py:41: AssertionError
+__________ TestDsaDpSpecPadding.test_sum_len_selects_current_dp_rank ___________
+
+self = <test_dsa_dp_spec_padding.TestDsaDpSpecPadding testMethod=test_sum_len_selects_current_dp_rank>
+get_parallel = <MagicMock name='get_parallel' id='140127075001040'>
+is_cp_active = <MagicMock name='is_cp_active' id='140127075004976'>
+can_cp_interleave = <MagicMock name='can_dsa_prefill_cp_interleave' id='140127075057840'>
+
+    @patch("sglang.srt.layers.attention.dsa.utils.can_dsa_prefill_cp_interleave")
+    @patch("sglang.srt.layers.cp.utils.is_cp_active")
+    @patch("sglang.srt.layers.attention.dsa.utils.get_parallel")
+    def test_sum_len_selects_current_dp_rank(
+        self, get_parallel, is_cp_active, can_cp_interleave
+    ):
+        get_parallel.return_value = SimpleNamespace(
+            attn_cp_size=1, attn_dp_rank=1, attn_tp_size=4
+        )
+        is_cp_active.return_value = False
+        can_cp_interleave.return_value = False
+
+        batch = self._forward_batch([9, 6], DpPaddingMode.SUM_LEN)
+        padded = pad_dsa_cache_seqlens(batch, torch.arange(6, dtype=torch.int32))
+
+>       self.assertEqual(padded.shape, (8,))
+E       AssertionError: torch.Size([6]) != (8,)
+
+test/registered/unit/layers/attention/test_dsa_dp_spec_padding.py:60: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+registered/unit/layers/attention/test_dsa_dp_spec_padding.py: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+registered/unit/layers/attention/test_dsa_dp_spec_padding.py::TestDsaDpSpecPadding::test_max_len_uses_shared_padded_size
+registered/unit/layers/attention/test_dsa_dp_spec_padding.py::TestDsaDpSpecPadding::test_max_len_uses_shared_padded_size
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/layers/attention/test_dsa_dp_spec_padding.py::TestDsaDpSpecPadding::test_max_len_uses_shared_padded_size
+FAILED test/registered/unit/layers/attention/test_dsa_dp_spec_padding.py::TestDsaDpSpecPadding::test_spec_decode_uses_final_attention_tp_padded_size
+FAILED test/registered/unit/layers/attention/test_dsa_dp_spec_padding.py::TestDsaDpSpecPadding::test_sum_len_selects_current_dp_rank
+3 failed, 1 passed, 17 warnings in 10.76s
