@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32065",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "unsupported_architecture",
+  "summary": "The current migrated launcher source still lacked the open upstream fix. Added explicit 1..1024 thread-block checks and empty-grid no-op returns to both fused post-quant launchers, plus a source regression covering the masked and contiguous variants. The assigned gfx950 system cannot compile this CUDA-specific JIT source because cuda_fp8.h is unavailable under the prepared ROCm toolchain, so the candidate could not be executed or numerically validated here.",
+  "tests": [
+    {
+      "command": "SGLANG_SILU_MUL_POST_QUANT_SOURCE=/tmp/amdpilot-repo-j-b5df533cf10f/base_silu_and_mul_masked_post_quant.cuh /tmp/amdpilot-repo-j-b5df533cf10f/venv/bin/python -m pytest -q test/registered/unit/kernels/test_silu_mul_post_quant_launch_guards.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression against the recorded base source: both masked and contiguous launcher tests failed because the block-limit guard was absent. Raw output: reports/j-b5df533cf10f/raw/regression_before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b5df533cf10f/venv/bin/python -m pytest -q test/registered/unit/kernels/test_silu_mul_post_quant_launch_guards.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after source regression: both launchers bound the block to at most 1024 threads; masked zero-token/zero-topk and contiguous zero-token paths return after parameter validation and before LaunchKernel. Raw output: reports/j-b5df533cf10f/raw/regression_after.log"
+    },
+    {
+      "command": "TORCH_EXTENSIONS_DIR=/tmp/amdpilot-repo-j-b5df533cf10f/jit-cache /tmp/amdpilot-repo-j-b5df533cf10f/venv/bin/python reports/j-b5df533cf10f/reproduce_post_quant_launch.py contig --tokens 0 --hidden 512",
+      "exit_code": 1,
+      "what_was_measured": "Attempted the reported empty contiguous path on the assigned gfx950 GPU. The actual JIT compilation stopped before launch because hipcc could not find cuda_fp8.h. Raw output: reports/j-b5df533cf10f/raw/before_contig_tokens_0_hidden_512.log"
+    },
+    {
+      "command": "TORCH_EXTENSIONS_DIR=/tmp/amdpilot-repo-j-b5df533cf10f/jit-cache /tmp/amdpilot-repo-j-b5df533cf10f/venv/bin/python reports/j-b5df533cf10f/reproduce_post_quant_launch.py masked --tokens 0 --hidden 512 --topk 1",
+      "exit_code": 1,
+      "what_was_measured": "Attempted the reported empty masked path on gfx950; compilation stopped at the same CUDA-only header prerequisite. Raw output: reports/j-b5df533cf10f/raw/before_masked_tokens_0_hidden_512_topk_1.log"
+    },
+    {
+      "command": "TORCH_EXTENSIONS_DIR=/tmp/amdpilot-repo-j-b5df533cf10f/jit-cache /tmp/amdpilot-repo-j-b5df533cf10f/venv/bin/python reports/j-b5df533cf10f/reproduce_post_quant_launch.py masked --tokens 1 --hidden 512 --topk 0",
+      "exit_code": 1,
+      "what_was_measured": "Attempted the independent zero-topk masked boundary on gfx950; compilation stopped at cuda_fp8.h before launch. Raw output: reports/j-b5df533cf10f/raw/before_masked_tokens_1_hidden_512_topk_0.log"
+    },
+    {
+      "command": "TORCH_EXTENSIONS_DIR=/tmp/amdpilot-repo-j-b5df533cf10f/jit-cache /tmp/amdpilot-repo-j-b5df533cf10f/venv/bin/python reports/j-b5df533cf10f/reproduce_post_quant_launch.py contig --tokens 1 --hidden 8704",
+      "exit_code": 1,
+      "what_was_measured": "Attempted an oversized 1088-thread block on gfx950; compilation stopped at cuda_fp8.h before launch. Raw output: reports/j-b5df533cf10f/raw/before_contig_tokens_1_hidden_8704.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "PyTorch detected exactly one AMD Instinct MI350X (gfx950), allocated and initialized the CUDA-device tensors used by each reproduction, and invoked hipcc with --offload-arch=gfx950. The issue kernel itself did not execute because compilation failed first.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No CUDA GPU/toolchain was assigned. The CUDA-specific source includes cuda_fp8.h unconditionally, which is absent from the prepared ROCm 7.2 installation, so failing-before and passing-after kernel launches could not be observed.",
+    "No DeepSeek model weights or multi-rank environment were available; the reported DP-attention idle-rank serving path was not reproduced.",
+    "GPU numerical equivalence for non-empty inputs was not measured because the JIT module could not compile on gfx950.",
+    "The regression is a source-contract test, not a compiled CUDA execution test. CUDA CI should compile and execute the direct cases retained in reproduce_post_quant_launch.py."
+  ]
+}
