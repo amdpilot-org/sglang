@@ -202,6 +202,10 @@ class HiCacheHF3FS(HiCacheStorage):
         use_mock_client: bool = False,
         enable_storage_metrics: bool = False,
     ):
+        if bytes_per_page <= 0:
+            raise ValueError(
+                f"HF3FS bytes_per_page must be positive, got {bytes_per_page}"
+            )
         self.rank = rank
         self.file_path = file_path
         self.file_size = file_size
@@ -567,10 +571,13 @@ class HiCacheHF3FS(HiCacheStorage):
 
     def register_mem_pool_host(self, mem_pool_host: HostKVCache):
         super().register_mem_pool_host(mem_pool_host)
+        self._logical_anchor = getattr(mem_pool_host, "kv_buffer", 0) is None
         self.is_zero_copy = self.mem_pool_host.layout in [
             "page_first",
             "page_first_direct",
         ]
+        if self._logical_anchor:
+            self.is_zero_copy = False
         self.mha_zero_copy = self.is_zero_copy and not self.is_mla_model
 
         logger.info(f"{self.is_zero_copy=}, layout={self.mem_pool_host.layout}")
@@ -632,6 +639,12 @@ class HiCacheHF3FS(HiCacheStorage):
 
     def _batch_get_preprocess(self, keys, host_indices):
         page_num = len(host_indices) // self.mem_pool_host.page_size
+        if self._logical_anchor:
+            return keys, [
+                torch.empty(self.bytes_per_page, dtype=torch.uint8)
+                for _ in range(page_num)
+            ]
+
         # host_indices to kv_buffer
         flat = not self.is_zero_copy
         values = (
@@ -891,6 +904,12 @@ class HiCacheHF3FS(HiCacheStorage):
 
     def _batch_set_preprocess(self, keys, host_indices):
         page_num = len(host_indices) // self.mem_pool_host.page_size
+        if self._logical_anchor:
+            return keys, [
+                torch.ones(self.bytes_per_page, dtype=torch.uint8)
+                for _ in range(page_num)
+            ]
+
         # host_indices to kv_buffer
         flat = not self.is_zero_copy
         values = [
