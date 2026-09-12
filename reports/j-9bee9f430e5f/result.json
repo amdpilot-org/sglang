@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33199",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the DeepSeek-V4 EAGLE default-ordering defect (expected 48, observed 256) and changed the EAGLE and DSPARK speculative default gates to distinguish omitted operator input from the earlier model-provided default. Explicit user values retain precedence, while non-speculative DeepSeek-V4 retains 256.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-9bee9f430e5f/venv/bin/python -m pytest -q test/registered/unit/server_args/test_deepseek_v4_speculative_max_running_requests.py (before fix)",
+      "exit_code": 1,
+      "what_was_measured": "Issue-specific regression failed with AssertionError: 48 != 256; the two independent boundary cases passed. See failing-before.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9bee9f430e5f/venv/bin/python -m pytest -q test/registered/unit/server_args/test_deepseek_v4_speculative_max_running_requests.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "EAGLE and DSPARK omitted-input paths resolve to 48; explicit 96 remains 96; non-speculative DeepSeek-V4 remains 256; patch has no whitespace errors. See passing-after.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9bee9f430e5f/venv/bin/python -m pytest -q test/registered/unit/server_args/test_resolution_declarations.py test/registered/unit/server_args/test_deepseek_v4_speculative_max_running_requests.py",
+      "exit_code": 0,
+      "what_was_measured": "Resolution declaration invariants and the issue regression passed together."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9bee9f430e5f/venv/bin/python -m pytest -q test/registered/unit/server_args/test_server_args.py test/registered/unit/server_args/test_record_holds_the_raw_input.py test/registered/unit/server_args/test_deepseek_v4_speculative_max_running_requests.py",
+      "exit_code": 1,
+      "what_was_measured": "230 tests and 61 subtests passed; two unrelated context-parallel tests failed because this prepared HIP host rejects deprecated prefill CP before their expected CUDA-path validation. See broader-tests.txt."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and correction are deterministic argument-resolution behavior before engine or GPU execution; no model weights or GPU kernel execution were used."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No DeepSeek-V4 weights were available, so no full model serving run was attempted or claimed.",
+    "The broader server-argument suite has two unrelated HIP-specific context-parallel expectation failures documented in broader-tests.txt.",
+    "ruff is not installed in the prepared interpreter; git diff --check passed."
+  ]
+}
