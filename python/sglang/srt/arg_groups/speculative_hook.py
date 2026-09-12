@@ -514,6 +514,20 @@ def _target_checkpoint_bundles_dspark_draft(server_args: ServerArgs) -> bool:
     return checkpoint_bundles_dspark_draft(model_config_of(server_args).hf_config)
 
 
+def _max_running_requests_was_not_set(server_args: ServerArgs) -> bool:
+    """Whether the operator omitted the scheduling limit.
+
+    Model hooks can declare their own default before speculative decoding runs.
+    The raw-input snapshot distinguishes that earlier default from an explicit
+    operator value. Plain namespace fixtures have no snapshot, so retain the
+    legacy resolved-value check for them.
+    """
+    raw_input = getattr(server_args, "_raw_input", None)
+    if raw_input is not None:
+        return raw_input.get("max_running_requests") is None
+    return resolving_view(server_args).max_running_requests is None
+
+
 def _handle_dspark(server_args: ServerArgs) -> None:
     cfg = resolving_view(server_args)
     _is_npu = cfg.device.startswith("npu")
@@ -683,7 +697,7 @@ def _handle_dspark(server_args: ServerArgs) -> None:
             f"got {cfg.speculative_num_draft_tokens}."
         )
 
-    if cfg.max_running_requests is None:
+    if _max_running_requests_was_not_set(server_args):
         declare_resolution(
             server_args,
             "_handle_dspark",
@@ -823,7 +837,7 @@ def _handle_eagle_family(server_args: ServerArgs) -> None:
             "Currently standalone speculative decoding does not support dp attention."
         )
 
-    if cfg.max_running_requests is None:
+    if _max_running_requests_was_not_set(server_args):
         declare_resolution(
             server_args,
             "_handle_eagle_family",
