@@ -1,0 +1,27 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36669",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared base already contains merged upstream PR #36143, the only current issue-specific maintainer candidate. Reporter revision d6ab04bdf157d80aff9e850535921c58adace116 used fp32_acc=False in both TRT-LLM fused all-reduce paths; the base uses FP32 accumulation for TRT-LLM and preserves the MNNVL boundary. Focused regressions and an independent gfx950 numerical mechanism check passed. The original GLM-5.3-Flash 8xH20 serving failure could not be reproduced on the assigned single gfx950, so this is not claimed as an end-to-end confirmed fix.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-13f34e4d6698/venv/bin/python -m unittest test.registered.unit.layers.test_flashinfer_comm_fusion.TestFlashInferAllReduceFusion test.registered.unit.layers.test_flashinfer_comm_fusion.TestFlashInferAllReduceOnly",
+      "exit_code": 1,
+      "what_was_measured": "Invocation integrity only; repository test/ is not an importable package, so no tests ran. The failed invocation was retained rather than hidden."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-13f34e4d6698/venv/bin/python test/registered/unit/layers/test_flashinfer_comm_fusion.py",
+      "exit_code": 0,
+      "what_was_measured": "21 focused tests on gfx950, including TRT-LLM fp32_acc forwarding, the independent MNNVL backend boundary, allreduce-only FP32 forwarding, and shape/dtype/workspace/group guards."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-13f34e4d6698/venv/bin/python - <<'PY' ... eight-rank BF16 accumulation comparison ... PY",
+      "exit_code": 0,
+      "what_was_measured": "Independent GPU numerical mechanism: intermediate BF16 rounding produced 1 versus FP64 reference 4; FP32 accumulation followed by BF16 cast produced 4. Device was AMD Instinct MI350X, gfx950."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "reports/j-13f34e4d6698/raw/focused_flashinfer_tests.log and raw/gpu_numeric_evidence.log record execution on the assigned AMD Instinct MI350X gfx950. This does not reproduce the NVIDIA SM90 TRT-LLM kernel.",
+  "native_rebuilt": false,
+  "remaining_limitations": "No zai-org/GLM-5.3-Flash native FP8 weights and no 8x NVIDIA H20 SM90 TP=8/EP=8 topology were available. The original serving request, TRT-LLM CUDA collective, and repeated-! output remain unverified end to end. The tiny Llama fixture was intentionally not substituted because it cannot qualify GLM-5.3 architecture, FP8 semantics, or distributed SM90 numerics."
+}
