@@ -70,12 +70,6 @@ class DeepseekModelNextN(nn.Module):
         else:
             moe_quant_config_override = None
 
-        if quant_config is not None and quant_config.get_name() == "modelopt_fp4":
-            logger.debug(
-                "Overriding DeepseekV3ForCausalLMNextN quant config for modelopt_fp4 Deepseek model."
-            )
-            quant_config = None
-
         self.vocab_size = config.vocab_size
 
         self.embed_tokens = VocabParallelEmbedding(
@@ -259,7 +253,14 @@ class DeepseekV3ForCausalLMNextN(DeepseekV3ForCausalLM):
         return cls.hf_to_sglang_mapper
 
     def _resolve_nextn_quant_config(self, config, quant_config):
-        if quant_config is None or quant_config.get_name() != "quark":
+        if quant_config is None:
+            return None
+        if quant_config.get_name() == "modelopt_fp4":
+            logger.debug(
+                "Using unquantized NextN modules for a modelopt_fp4 DeepSeek model."
+            )
+            return None
+        if quant_config.get_name() != "quark":
             return quant_config
 
         from sglang.srt.layers.quantization.quark.utils import should_ignore_layer

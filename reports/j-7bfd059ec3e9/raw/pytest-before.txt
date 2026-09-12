@@ -1,0 +1,85 @@
+F.F                                                                      [100%]
+=================================== FAILURES ===================================
+______ test_glm5_builds_quantized_nextn_layer_for_modelopt_fp4_checkpoint ______
+
+    def test_glm5_builds_quantized_nextn_layer_for_modelopt_fp4_checkpoint():
+        quant_config = _ModelOptFp4Config()
+        model = object.__new__(Glm5NextForConditionalGenerationNextN)
+
+        resolved = model._resolve_nextn_quant_config(_config(), quant_config)
+
+        config = SimpleNamespace(
+            vocab_size=128,
+            hidden_size=64,
+            rms_norm_eps=1e-5,
+            qk_rope_head_dim=0,
+        )
+
+        class _Decoder(nn.Module):
+            def __init__(self, quant_config):
+                super().__init__()
+                self.received_quant_config = quant_config
+
+        with (
+            patch(
+                "sglang.srt.models.deepseek_nextn.VocabParallelEmbedding",
+                side_effect=lambda *args, **kwargs: nn.Identity(),
+            ),
+            patch(
+                "sglang.srt.models.deepseek_nextn.RMSNorm",
+                side_effect=lambda *args, **kwargs: nn.Identity(),
+            ),
+            patch(
+                "sglang.srt.models.deepseek_nextn.DeepseekV2DecoderLayer",
+                side_effect=lambda *args, **kwargs: _Decoder(kwargs["quant_config"]),
+            ),
+            patch(
+                "sglang.srt.models.deepseek_nextn.get_embedding_tp_kwargs",
+                return_value={},
+            ),
+            patch("sglang.srt.models.deepseek_nextn._is_cuda", False),
+            patch("sglang.srt.models.deepseek_nextn._is_npu", False),
+        ):
+            nextn = DeepseekModelNextN(config, resolved)
+
+>       assert nextn.decoder.received_quant_config is quant_config
+E       assert None is <test_glm5_nextn_quant_config._ModelOptFp4Config object at 0x72aa84c99010>
+E        +  where None = _Decoder().received_quant_config
+E        +    where _Decoder() = DeepseekModelNextN(\n  (embed_tokens): Identity()\n  (enorm): Identity()\n  (hnorm): Identity()\n  (eh_proj): Linear(in_features=128, out_features=64, bias=False)\n  (decoder): _Decoder()\n  (shared_head): Module(\n    (norm): Identity()\n  )\n).decoder
+
+test/registered/unit/models/test_glm5_nextn_quant_config.py:68: AssertionError
+_____ test_deepseek_retains_legacy_unquantized_modelopt_fp4_nextn_behavior _____
+
+    def test_deepseek_retains_legacy_unquantized_modelopt_fp4_nextn_behavior():
+        quant_config = _ModelOptFp4Config()
+        model = object.__new__(DeepseekV3ForCausalLMNextN)
+
+        resolved = model._resolve_nextn_quant_config(_config(), quant_config)
+
+>       assert resolved is None
+E       assert <test_glm5_nextn_quant_config._ModelOptFp4Config object at 0x72aa84ce57c0> is None
+
+test/registered/unit/models/test_glm5_nextn_quant_config.py:87: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+<frozen abc>:106
+  <frozen abc>:106: DeprecationWarning: MultiPlatformOp is deprecated; subclass sglang.kernels.fused_op.BaseFusedOp instead (RFC #29630).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/models/test_glm5_nextn_quant_config.py::test_glm5_builds_quantized_nextn_layer_for_modelopt_fp4_checkpoint
+FAILED test/registered/unit/models/test_glm5_nextn_quant_config.py::test_deepseek_retains_legacy_unquantized_modelopt_fp4_nextn_behavior
+2 failed, 1 passed, 18 warnings in 8.84s

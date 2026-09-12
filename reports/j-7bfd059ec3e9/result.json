@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36653",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced that GLM-5.3's checkpoint-aware NextN resolver retains modelopt_fp4 but DeepseekModelNextN unconditionally discards it before constructing the decoder. Moved the legacy DeepSeek exception into the base resolver so quantized GLM NextN layers retain FP4 while checkpoint-declared BF16 GLM layers and legacy DeepSeek behavior remain unquantized.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-7bfd059ec3e9/venv/bin/python -m pytest -q test/registered/unit/models/test_glm5_nextn_quant_config.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: the constructed NextN decoder received quant_config=None for a quantized GLM ModelOpt FP4 checkpoint; the legacy DeepSeek policy was also not represented by the resolver. One independent BF16-ignore boundary passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7bfd059ec3e9/venv/bin/python -m pytest -q test/registered/unit/models/test_glm5_nextn_quant_config.py",
+      "exit_code": 0,
+      "what_was_measured": "Three passing cases: quantized GLM NextN reaches decoder construction with ModelOpt FP4, checkpoint-declared BF16 GLM NextN resolves to unquantized modules, and legacy DeepSeek ModelOpt FP4 NextN remains unquantized."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7bfd059ec3e9/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_nextn_mm_embed.py test/registered/unit/models/test_glm5_nextn_quant_config.py",
+      "exit_code": 0,
+      "what_was_measured": "Five related NextN unit tests passed, including existing multimodal embedding behavior and the new quantization boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7bfd059ec3e9/venv/bin/python -m compileall -q python/sglang/srt/models/deepseek_nextn.py python/sglang/srt/models/glm5_next_nextn.py test/registered/unit/models/test_glm5_nextn_quant_config.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source and regression test compile successfully."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "rocminfo identifies the assigned GPU as gfx950. The reported checkpoint uses NVIDIA ModelOpt NVFP4 and requires two sm_121 nodes; those weights and that topology were unavailable, so an unrelated AMD smoke was not treated as issue validation."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No access to LibertAIDAI/GLM-5.3-Flash-NVFP4 weights in a two-node NVIDIA sm_121 TP=2 environment.",
+    "No full server startup, weight-load, generation, semantic-accuracy, or distributed-workload validation was performed.",
+    "The open upstream PR https://github.com/sgl-project/sglang/pull/37322 contains broader generic exclusion-prefix remapping that is outside this issue-specific patch and remains under upstream review.",
+    "ruff and black were not installed in the prepared interpreter; git diff --check and compileall succeeded instead."
+  ]
+}
