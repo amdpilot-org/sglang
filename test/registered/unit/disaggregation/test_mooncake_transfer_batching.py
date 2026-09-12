@@ -6,12 +6,18 @@ from unittest.mock import MagicMock, call
 import numpy as np
 
 from sglang.srt.disaggregation.mooncake.conn import MooncakeKVManager
+from sglang.srt.environ import envs
 from sglang.test.ci.ci_register import register_cpu_ci
 
 register_cpu_ci(est_time=1, suite="base-a-test-cpu")
 
 
 class TestMooncakeTransferBatching(unittest.TestCase):
+    def test_default_bounds_long_synchronous_transfers(self):
+        self.assertEqual(
+            envs.SGLANG_MOONCAKE_MAX_TRANSFER_BATCH_INDICES.get(), 1024
+        )
+
     @staticmethod
     def _make_manager(
         side_effect=None, enable_custom_mem_pool=False, max_batch_indices=0
