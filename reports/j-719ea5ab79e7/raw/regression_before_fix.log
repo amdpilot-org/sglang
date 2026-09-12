@@ -1,0 +1,155 @@
+F.                                                                       [100%]
+=================================== FAILURES ===================================
+________ TestDeepseekNextNMmEmbed.test_mm_sentinel_ids_do_not_cause_oob ________
+
+self = <test_deepseek_nextn_mm_embed.TestDeepseekNextNMmEmbed testMethod=test_mm_sentinel_ids_do_not_cause_oob>
+
+    def test_mm_sentinel_ids_do_not_cause_oob(self):
+        """input_ids containing MM_PAD_SHIFT_VALUE+hash must not reach embed_tokens."""
+        num_tokens = 10
+        mm_start, mm_end = 3, 7  # MM sentinel positions
+    
+        input_ids = torch.arange(num_tokens, dtype=torch.long)
+        # Insert MM sentinel values
+        for i in range(mm_start, mm_end):
+            input_ids[i] = MM_PAD_SHIFT_VALUE + i
+    
+        # Build mm_input_embeds matching the target-produced embeddings
+        mm_embeds = torch.randn(num_tokens, HIDDEN_SIZE)
+        extend_seq_lens = torch.tensor([num_tokens])
+        extend_start_loc = torch.tensor([0])
+    
+        fb = _make_forward_batch(
+            input_ids,
+            mm_input_embeds=mm_embeds.clone(),
+            extend_seq_lens=extend_seq_lens,
+            extend_start_loc=extend_start_loc,
+        )
+    
+        model = _make_model_nextn(VOCAB_SIZE, HIDDEN_SIZE)
+    
+        # Use MagicMock to track embed_tokens calls
+        mock_embed = MagicMock(side_effect=model.embed_tokens)
+        object.__setattr__(model, "embed_tokens", mock_embed)
+    
+        with (
+            patch(
+                "sglang.srt.models.deepseek_nextn.fused_eh_norm",
+                side_effect=lambda h, p, ew, hw, eps: torch.cat(
+                    [model.enorm(h), model.hnorm(p)], dim=-1
+                ),
+            ),
+            patch(
+                "sglang.srt.models.deepseek_nextn.get_global_expert_distribution_recorder"
+            ),
+            patch("sglang.srt.models.deepseek_nextn.is_cuda", False),
+            patch("sglang.srt.models.deepseek_nextn.is_npu", False),
+            patch("sglang.srt.models.deepseek_nextn.envs") as mock_envs,
+            patch("sglang.srt.models.deepseek_nextn.get_model") as mock_get_model,
+            patch("sglang.srt.models.deepseek_nextn.get_parallel") as mock_get_parallel,
+            patch("sglang.srt.models.deepseek_nextn.get_spec") as mock_get_spec,
+        ):
+            mock_envs.SGLANG_NPU_USE_MULTI_STREAM.get.return_value = False
+            mock_get_model.return_value.quantization = None
+    
+            positions = torch.arange(num_tokens, dtype=torch.long)
+            try:
+                model.forward(input_ids, positions, fb)
+            except Exception:
+                pass  # We only care about embed_tokens call args
+    
+        # embed_tokens should only be called for last_indices (the appended
+        # next-token), not with the full input_ids containing MM sentinels.
+        for call in mock_embed.call_args_list:
+            call_ids = call[0][0]
+            max_id = call_ids.max().item()
+>           self.assertLess(
+                max_id,
+                VOCAB_SIZE,
+                f"embed_tokens was called with id {max_id} >= vocab_size "
+                f"{VOCAB_SIZE}. MM sentinel values (MM_PAD_SHIFT_VALUE+hash) "
+                f"must not reach embed_tokens.",
+            )
+E           AssertionError: 1000006 not less than 154880 : embed_tokens was called with id 1000006 >= vocab_size 154880. MM sentinel values (MM_PAD_SHIFT_VALUE+hash) must not reach embed_tokens.
+
+test/registered/unit/models/test_deepseek_nextn_mm_embed.py:125: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7efce59c85e0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f05c87019e0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestDeepseekNextNMmEmbed.test_mm_sentinel_ids_do_not_cause_oob
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/models/test_deepseek_nextn_mm_embed.py", line 125, in test_mm_sentinel_ids_do_not_cause_oob
+    self.assertLess(
+  File "/usr/lib/python3.12/unittest/case.py", line 1257, in assertLess
+    self.fail(self._formatMessage(msg, standardMsg))
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: 1000006 not less than 154880 : embed_tokens was called with id 1000006 >= vocab_size 154880. MM sentinel values (MM_PAD_SHIFT_VALUE+hash) must not reach embed_tokens.
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+registered/unit/models/test_deepseek_nextn_mm_embed.py::TestDeepseekNextNMmEmbed::test_mm_sentinel_ids_do_not_cause_oob
+  <frozen abc>:106: DeprecationWarning: MultiPlatformOp is deprecated; subclass sglang.kernels.fused_op.BaseFusedOp instead (RFC #29630).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/models/test_deepseek_nextn_mm_embed.py::TestDeepseekNextNMmEmbed::test_mm_sentinel_ids_do_not_cause_oob
+1 failed, 1 passed, 18 warnings in 12.49s
