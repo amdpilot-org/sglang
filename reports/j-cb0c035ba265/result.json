@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34000",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1942",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1908",
+  "candidate_commit": "ac20ceff67d42304ddaeb80b1800097b9c5b4cce",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate fixes the original rollout=True multi-output collapse and raw provided-latent preparation; grouped residency was already fixed on the prepared base. A narrower environment-capture-without-log-probabilities case remains outside the original contract.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-cb0c035ba265/venv/bin/python -m pytest -q /job/review-evidence/j-cb0c035ba265/test_multi_output_rollout_trajectory.py (on base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: merged rollout log-probabilities stayed shape (1, 4), and incomplete groups retained output 0. Two failed, one passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-cb0c035ba265/venv/bin/python -m pytest -q /job/review-evidence/j-cb0c035ba265/test_pipeline_residency_manager_install.py /job/review-evidence/j-cb0c035ba265/test_provided_latents_preparation.py (on base)",
+      "exit_code": 1,
+      "what_was_measured": "The residency-manager regression passed on the prepared base; two raw provided-latent assertions failed because latent IDs and packing were absent."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-cb0c035ba265/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_multi_output_rollout_trajectory.py python/sglang/multimodal_gen/test/unit/test_pipeline_residency_manager_install.py python/sglang/multimodal_gen/test/unit/test_provided_latents_preparation.py python/sglang/multimodal_gen/test/unit/test_rollout_api.py (on candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite and related HTTP slicing coverage: 41 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-cb0c035ba265/venv/bin/python /job/review-evidence/j-cb0c035ba265/adversarial_candidate.py (on candidate)",
+      "exit_code": 1,
+      "what_was_measured": "GPU original-contract tags passed for guidance, nested conditioning tensors, and DiT latents; the independent environment-only/no-log-probabilities boundary then failed because every result retained all K environment rows."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cb0c035ba265/venv/bin/python -m py_compile python/sglang/multimodal_gen/runtime/entrypoints/diffusion_generator.py python/sglang/multimodal_gen/runtime/managers/gpu_worker.py python/sglang/multimodal_gen/runtime/pipelines_core/stages/latent_preparation.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source compiled successfully."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X (gfx950), Torch 2.11.0+rocm7.2/HIP 7.2.26015; actual candidate merge and selection ran on CUDA/HIP tensors and produced per-output tags 1, 2, 3."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "When RolloutTrajectoryData has a K-row denoising_env (and optionally a DiT trajectory) but rollout_log_probs is None, _select_output_rollout_trajectory uses batch_size=1. Each GenerationResult therefore receives the full K-row guidance and nested conditioning tensors rather than its own row."
+  ],
+  "remaining_limitations": [
+    "No SD3 or FLUX.2 model weights were available, so no full server/model, semantic image, or GRPO convergence run was performed.",
+    "No NVIDIA H20, distributed, multi-GPU, or multi-node equivalence was tested.",
+    "Provided-latent validation used the actual stage implementation with a packed-model configuration stub.",
+    "No native code changed, so native rebuilding was not applicable."
+  ]
+}
