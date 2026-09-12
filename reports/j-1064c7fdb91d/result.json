@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34259",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared main source already contains the request-isolation correction described by related issue #32089, introduced by upstream PR #30177 after the affected 0.5.17 release. Full hidden-state capture now advances the packed-row offset for requests that do not themselves return hidden states and uses each request's snapshotted forwarded-row count. Added direct regression and boundary coverage; no production source change was needed.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-1064c7fdb91d/venv/bin/python -m pytest -q test/registered/unit/managers/test_batch_result_processor_hidden_states.py",
+      "exit_code": 0,
+      "what_was_measured": "All nine unit tests passed, including the mixed false/true request regression, cached-prefix/zero-forward-row boundaries, and the existing middle-chunk/full-vs-last cases."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-1064c7fdb91d/venv/bin/python -m pytest -q test/registered/unit/managers/test_batch_result_processor_hidden_states.py::TestPrefillHiddenStateOffsets::test_non_requesting_request_still_advances_full_capture_offset (with the old skip-without-advance behavior temporarily restored)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before proof: the packed offset was 3 instead of 8, demonstrating that the old behavior selects an earlier request's rows. The temporary source modification was reverted before final validation."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-1064c7fdb91d/venv/bin/python -m pytest -q test/registered/unit/managers/test_batch_result_processor_hidden_states.py::TestPrefillHiddenStateOffsets",
+      "exit_code": 0,
+      "what_was_measured": "Final-source validation: three offset regression methods passed, with two full/last subcases."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-1064c7fdb91d/venv/bin/python <gfx950 hidden-state offset numerical script>",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI350X gfx950, a device-resident 8-row tensor produced offset 8 and selected rows [[20], [21], [22]] for the requesting request, matching an independent literal reference."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Kimi-K3 weights were not available, so the random production symptom was not reproduced with that model.",
+    "The source report used eight NVIDIA B300 GPUs; this environment provides one AMD gfx950 GPU. No claim is made about B300, tensor parallelism, multi-node execution, Kimi-K3 semantic accuracy, or the complete serving workload.",
+    "The GPU fixture validates the identified packed hidden-state isolation mechanism only; it is not a full HTTP/model reproduction.",
+    "Issue #34259 contains no deterministic reproducer. The reporter stated that the symptom was seen on 0.5.17 but not on main, which is consistent with PR #30177 landing afterward, but does not prove that this was the only possible cause."
+  ]
+}
