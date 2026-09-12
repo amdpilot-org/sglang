@@ -25,6 +25,25 @@ from sglang.srt.utils.runai_utils import is_runai_obj_uri
 logger = logging.getLogger(__name__)
 
 
+def validate_ngram_capacity(server_args: Any) -> None:
+    cfg = resolving_view(server_args)
+    if (
+        cfg.speculative_algorithm is not None
+        and cfg.speculative_algorithm.upper() == "NGRAM"
+    ):
+        if (
+            cfg.speculative_ngram_capacity
+            <= cfg.speculative_ngram_max_trie_depth
+        ):
+            raise ValueError(
+                "speculative_ngram_capacity must be greater than "
+                "speculative_ngram_max_trie_depth because the trie root also "
+                "occupies one node. Got "
+                f"capacity={cfg.speculative_ngram_capacity}, "
+                f"max_trie_depth={cfg.speculative_ngram_max_trie_depth}."
+            )
+
+
 def check_server_args(server_args: Any):
     from sglang.srt.arg_groups.lora_hook import check_lora_server_args
 
@@ -117,6 +136,8 @@ def check_server_args(server_args: Any):
             "enable_mixed_chunk is not supported with "
             f"speculative_algorithm={cfg.speculative_algorithm}"
         )
+
+        validate_ngram_capacity(server_args)
 
     # Check chunked prefill
     # Skip validation if chunked prefill is disabled (i.e., size <= 0).

@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36495",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the capacity-equals-depth invalid free in the native NGRAM trie and added early serving-argument plus native-constructor validation requiring capacity > max_trie_depth. The root consumes one capacity slot, so equality cannot hold a maximum-depth path. Added equality, below-boundary, minimum-valid-boundary, and non-NGRAM regressions.",
+  "tests": [
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-def5ca41f1c9/cache PYTHONPATH=/job/repo/python timeout 300 /tmp/amdpilot-repo-j-def5ca41f1c9/venv/bin/python -u < direct capacity=4,max_trie_depth=4 reproducer",
+      "exit_code": 134,
+      "what_was_measured": "Before the fix, construction succeeded and one four-token batch_put aborted in Trie::squeeze with 'munmap_chunk(): invalid pointer'. Raw log: reports/j-def5ca41f1c9/raw/before_capacity_equal.log"
+    },
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-def5ca41f1c9/cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-def5ca41f1c9/venv/bin/python -u < direct capacity=4,max_trie_depth=4 constructor check",
+      "exit_code": 0,
+      "what_was_measured": "After the fix, the rebuilt native extension rejects equality synchronously with a descriptive RuntimeError and does not start the insertion worker. Raw log: reports/j-def5ca41f1c9/raw/after_capacity_equal.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-def5ca41f1c9/venv/bin/python -m pytest -q test/registered/unit/spec/test_ngram_server_args.py",
+      "exit_code": 0,
+      "what_was_measured": "4 validation tests passed: equality and below-depth rejection, depth+1 acceptance, and non-NGRAM isolation."
+    },
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-def5ca41f1c9/cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-def5ca41f1c9/venv/bin/python -m pytest -q test/registered/unit/spec/test_ngram_corpus.py",
+      "exit_code": 0,
+      "what_was_measured": "45 native-backed NGRAM corpus tests passed, including constructor boundary checks and a real insertion at capacity=max_trie_depth+1."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "The Qwen3-4B HTTP reproducer from the NVIDIA report was not run because those model weights and CUDA hardware were not available. The direct production NgramCorpus native path reproduced the same invalid free with the issue's 4/4 boundary.",
+    "The reproduced fault and correction are in the CPU-only C++ trie/JIT extension; no GPU kernel executes in this path. The cache target was gfx950, but that is not claimed as GPU execution.",
+    "No semantic model accuracy or distributed workload was tested.",
+    "Rebuilt native library: /tmp/amdpilot-repo-j-def5ca41f1c9/cache/gfx950/sgl_kernel_jit_ngram_corpus/build-f977ae1b18709294/deps-f7007fddf719da23/sgl_kernel_jit_ngram_corpus.so"
+  ]
+}

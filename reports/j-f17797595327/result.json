@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36495",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 1247's native capacity guard, documentation, and boundary tests, then corrected its serving-argument validator so invalid NGRAM capacity/depth configurations are rejected even when Python assertions are disabled with -O.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f17797595327/venv/bin/python -O -c '<construct resolved NGRAM ServerArgs at capacity=4/depth=4; call validate_ngram_capacity>' (exact candidate before correction)",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate printed OPTIMIZED_ACCEPTED, independently reproducing review PR 1337's remaining counterexample."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f17797595327/venv/bin/python -O -c '<construct resolved NGRAM ServerArgs at capacity=4/depth=4; call validate_ngram_capacity>' (after correction)",
+      "exit_code": 1,
+      "what_was_measured": "The serving-argument validator raised ValueError with the capacity/depth diagnostic under optimized Python."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f17797595327/venv/bin/python -m pytest -q test/registered/unit/spec/test_ngram_server_args.py",
+      "exit_code": 0,
+      "what_was_measured": "Five server-validation tests passed, including equality, below-boundary, minimum-valid, non-NGRAM, and a subprocess regression under python -O."
+    },
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-f17797595327/ngram-cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f17797595327/venv/bin/python -m pytest -q test/registered/unit/spec/test_ngram_corpus.py",
+      "exit_code": 0,
+      "what_was_measured": "All 45 production JIT-backed NGRAM corpus tests passed against a freshly built native library, preserving the candidate's native equality/below-boundary rejection and depth+1 acceptance."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "The consolidated patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The corrected validator and NGRAM trie extension exercised here are CPU-side. No GPU kernel or model serving execution is claimed."
+  },
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "The original NVIDIA L40S/CUDA/Qwen3-4B HTTP reproduction was not run: the prepared environment provides AMD ROCm and not the reported model weights.",
+    "No model semantic-accuracy, HTTP transport, NVIDIA-specific, or distributed-workload claim is made.",
+    "The prepared interpreter does not include the ruff module; attempted ruff check/format commands and their exit codes are retained as raw evidence."
+  ]
+}
