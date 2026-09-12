@@ -50,6 +50,8 @@ class Glm5NextForConditionalGenerationNextN(DeepseekV3ForCausalLMNextN):
                 nextn_layer_pattern,
             )
             return None
+        if quant_config is not None and quant_config.get_name() == "modelopt_fp4":
+            return quant_config
         return super()._resolve_nextn_quant_config(config, quant_config)
 
     def __init__(self, config, quant_config=None, prefix: str = "") -> None:
