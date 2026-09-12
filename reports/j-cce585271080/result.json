@@ -1,0 +1,28 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31599",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared base already contains the issue-specific correction. Req.update_finish_state checks invalid-token, stop-string, and stop-token finishes before max_new_tokens, then _cap_finished_len_at_max_new_tokens demotes only stops beyond the budget. The exact six-token issue replay finishes as FINISH_MATCHED_STR at finished_len=3 and emits [10, 11, STOP]. Upstream PR https://github.com/sgl-project/sglang/pull/33758 merged the effective fix as b2f9603f93ea8ee3f921557c95e5a8c4c3ce720a; the issue-referenced PR https://github.com/sgl-project/sglang/pull/31569 remains open.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-cce585271080/venv/bin/python reports/j-cce585271080/replay_issue_31599.py",
+      "exit_code": 0,
+      "what_was_measured": "Real Req.update_finish_state behavior for the reported in-budget stop plus independent exact-cap, beyond-cap, and no-stop overshoot boundaries; all four assertions passed. Raw output: reports/j-cce585271080/raw/replay_issue_31599.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cce585271080/venv/bin/python -m pytest -q test/registered/unit/managers/test_finish_length_speculative.py test/registered/unit/managers/test_stop_str_speculative.py test/registered/unit/managers/test_grammar_stop_speculative.py",
+      "exit_code": 0,
+      "what_was_measured": "Twenty real scheduler unit tests covering speculative stop/EOS versus length precedence, post-EOS bonus-token trimming, stop beyond budget, exact-cap ties, no-stop length finish, grammar stop boundaries, and stop-string/regex chunk boundaries. Raw output: reports/j-cce585271080/raw/focused_pytest.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and fix are deterministic CPU-side Req.update_finish_state ordering and output slicing. The replay and registered tests execute the real method without launching a GPU kernel. No model weights or serving-path run was used, so no GPU, model-semantic, or distributed-workload claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No full model-serving or speculative-decoding engine run was performed; the evidence directly exercises the production request finish-state implementation with deterministic token chunks.",
+    "No GPU numerical result is relevant to this Python control-flow defect, and none is claimed.",
+    "Because the prepared base was already fixed, this PR adds investigation artifacts and an executable replay rather than changing production source."
+  ]
+}
