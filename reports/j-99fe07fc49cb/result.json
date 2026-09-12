@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34113",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2050",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1925",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/2019",
+  "candidate_commit": "13901903c9cf5d6f7ffe304888a189f41dbf7ec6",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Independent reproduction confirms that the candidate fixes a real pre-normalization streaming cleanup AttributeError, and this correction preserves that narrow fix with single, batch, active, and empty boundary coverage. It does not fix the reported public /abort_request path: that endpoint directly dispatches TokenizerManager.abort_request, never calls create_abort_task, and still has no downstream completion acknowledgement. Identical live GPU probes aborted cleanly on base and corrected code, so no speculative endpoint protocol change was made.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-99fe07fc49cb/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-99fe07fc49cb/review-evidence/test_candidate.py -k TestCreateAbortTask (candidate parent/base)",
+      "exit_code": 1,
+      "what_was_measured": "The exact candidate regression failed before the fix: three cases raised AttributeError for missing is_single and one normalized batch case passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-99fe07fc49cb/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py -k TestCreateAbortTask (exact candidate 13901903c9cf5d6f7ffe304888a189f41dbf7ec6)",
+      "exit_code": 0,
+      "what_was_measured": "All four exact candidate cleanup regression cases passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-99fe07fc49cb/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py -k TestCreateAbortTask (consolidated correction)",
+      "exit_code": 0,
+      "what_was_measured": "Four cleanup boundaries passed: inactive single, active unnormalized single, active normalized batch, and empty batch."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-99fe07fc49cb/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py",
+      "exit_code": 0,
+      "what_was_measured": "The complete related file passed: 30 tests and 3 subtests."
+    },
+    {
+      "command": "run_http_abort.py against prepared base with the qualified deterministic tiny Llama fixture",
+      "exit_code": 0,
+      "what_was_measured": "Public /abort_request returned HTTP 200 and the live stream ended with finish_reason.type=abort after three tokens; the server log contained no claimed AttributeError."
+    },
+    {
+      "command": "run_http_abort.py against consolidated correction with the same fixture",
+      "exit_code": 0,
+      "what_was_measured": "Public /abort_request returned HTTP 200 and the live stream ended with finish_reason.type=abort after four tokens; the server log contained no claimed AttributeError."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Both HTTP probes performed real generation on one AMD Instinct MI350X/gfx950 using Torch 2.11.0+rocm7.2 and deterministic tiny-Llama weights with SHA-256 6632fab7c351a0bd85518d80a89ec673f68139587f5ad3fa8d5ab38fad87e75f."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original meta-llama/Llama-3.2-1B-Instruct weights were unavailable.",
+    "The report used RTX 4090/CUDA; reproduction used one AMD MI350X/gfx950 with ROCm 7.2.",
+    "The tiny random Llama fixture validates transport and engine execution only, not semantic accuracy, the original model configuration, or distributed behavior.",
+    "HTTP 200 still acknowledges successful local dispatch, not confirmed scheduler cancellation. The current path exposes no downstream completion acknowledgement, and the reported endpoint failure was not reproduced, so no speculative protocol change was made.",
+    "Both owned server process groups exceeded the 30-second graceful shutdown window, were killed, and had their descendants reaped.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
