@@ -222,6 +222,9 @@ class GenerateReqInput:
     video_config: Optional[Dict[str, Any]] = None
     # The sampling_params. See descriptions below.
     sampling_params: Optional[Union[List[Dict[str, Any]], Dict[str, Any]]] = None
+    # Sampling keys explicitly supplied by an API client. None preserves the
+    # legacy native-request precedence; an empty list means all values are defaults.
+    sampling_params_explicit_keys: Optional[List[str]] = None
     # Whether to return logprobs.
     return_logprob: Optional[Union[List[bool], bool]] = None
     # If return logprobs, the start location in the prompt for returning logprobs.
@@ -897,6 +900,7 @@ class GenerateReqInput:
                 else None
             ),
             sampling_params=self.sampling_params[i],
+            sampling_params_explicit_keys=self.sampling_params_explicit_keys,
             return_logprob=self.return_logprob[i],
             logprob_start_len=self.logprob_start_len[i],
             top_logprobs_num=self.top_logprobs_num[i],
