@@ -189,11 +189,10 @@ def tiny_router_gemm_max_tokens(
     shape or the device rules it out. Doubles as the kernel's compile-time
     max_m, so keep it as tight as the measurements allow.
     """
-    if not _is_cuda or _device_sm < 90 or weight_dtype != torch.bfloat16:
-        return -1
+    from sglang.srt.layers.moe.router_gate import tiny_router_gemm_max_tokens as impl
 
-    from sglang.kernels.ops.gemm.tiny_gemm import can_use_tiny_gemm
-
-    if not can_use_tiny_gemm(num_experts, hidden_size, max_m=16):
-        return -1
-    return 16
+    return impl(
+        num_experts=num_experts,
+        hidden_size=hidden_size,
+        weight_dtype=weight_dtype,
+    )

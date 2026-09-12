@@ -18,7 +18,6 @@ import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
-import torch.nn.functional as F
 from torch import nn
 
 from sglang.srt.batch_overlap.two_batch_overlap import model_forward_maybe_tbo
@@ -49,10 +48,10 @@ from sglang.srt.layers.linear import (
 from sglang.srt.layers.logits_processor import LogitsProcessor
 from sglang.srt.layers.moe import (
     get_moe_a2a_backend,
-    get_moe_runner_backend,
     should_skip_post_experts_all_reduce,
 )
 from sglang.srt.layers.moe.ep_moe.layer import DeepEPMoE, get_moe_impl_class
+from sglang.srt.layers.moe.router_gate import RouterGate
 from sglang.srt.layers.moe.topk import TopK, TopKOutputFormat
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
 from sglang.srt.layers.radix_attention import RadixAttention
@@ -336,7 +335,7 @@ class MiMoV2MLP(nn.Module):
         return x
 
 
-class MoEGate(nn.Module):
+class MoEGate(RouterGate):
     def __init__(
         self,
         config,
@@ -344,30 +343,13 @@ class MoEGate(nn.Module):
         prefix: str = "",
         is_nextn: bool = False,
     ):
-        super().__init__()
-        self.is_nextn = is_nextn
-        self.dtype = torch.float32
-        self.weight = nn.Parameter(
-            torch.empty((config.n_routed_experts, config.hidden_size), dtype=self.dtype)
+        super().__init__(
+            config.hidden_size,
+            config.n_routed_experts,
+            fp32_compute=False,
+            has_correction_bias=config.topk_method == "noaux_tc",
         )
-        if config.topk_method == "noaux_tc":
-            correction_bias_dtype = (
-                torch.bfloat16
-                if quant_config is not None
-                and quant_config.get_name() == "modelopt_fp4"
-                and get_moe_runner_backend().is_flashinfer_trtllm()
-                else self.dtype
-            )
-            self.e_score_correction_bias = nn.Parameter(
-                torch.empty((config.n_routed_experts), dtype=correction_bias_dtype)
-            )
-        else:
-            self.e_score_correction_bias = None
-
-    def forward(self, hidden_states):
-        logits = F.linear(hidden_states.to(self.dtype), self.weight, None)
-
-        return logits
+        self.is_nextn = is_nextn
 
 
 class MiMoV2MoE(nn.Module):
