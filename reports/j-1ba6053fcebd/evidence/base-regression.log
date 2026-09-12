@@ -1,0 +1,586 @@
+F.FF..FF.F                                                               [100%]
+=================================== FAILURES ===================================
+_ TestGetNewBatchPrefillChunkedSlot.test_beam_width_uses_credit_adjusted_available_rows _
+
+self = <test_candidate.TestGetNewBatchPrefillChunkedSlot testMethod=test_beam_width_uses_credit_adjusted_available_rows>
+
+    def test_beam_width_uses_credit_adjusted_available_rows(self):
+        s = _make_scheduler(
+            ceiling=16,
+            running_bs=12,
+            pool_avail=3,
+            chunked_req=MagicMock(name="chunked"),
+            waiting_queue=[],
+        )
+    
+        with get_context().override_server_args(pp_max_micro_batch_size=16):
+>           num_allocatable = s.get_num_allocatable_reqs(
+                12,
+                beam_width=2,
+                running_batch=s.running_batch,
+                chunked_req_in_batch=True,
+            )
+E           TypeError: Scheduler.get_num_allocatable_reqs() got an unexpected keyword argument 'chunked_req_in_batch'
+
+/tmp/j-1ba6053fcebd-review-evidence/test_candidate.py:335: TypeError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f4f86c0bce0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f586ffa2660>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestGetNewBatchPrefillChunkedSlot.test_beam_width_uses_credit_adjusted_available_rows
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/tmp/j-1ba6053fcebd-review-evidence/test_candidate.py", line 335, in test_beam_width_uses_credit_adjusted_available_rows
+    num_allocatable = s.get_num_allocatable_reqs(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: Scheduler.get_num_allocatable_reqs() got an unexpected keyword argument 'chunked_req_in_batch'
+_ TestGetNewBatchPrefillChunkedSlot.test_chunked_slot_added_back_so_queued_req_is_issued _
+
+self = <test_candidate.TestGetNewBatchPrefillChunkedSlot testMethod=test_chunked_slot_added_back_so_queued_req_is_issued>
+
+    def test_chunked_slot_added_back_so_queued_req_is_issued(self):
+        # Live-trace scenario: ceiling 16, 14 decoding, a chunk in flight holding
+        # the 15th slot, exactly one free req_to_token_pool slot, one queued req.
+        #   buggy: min(16-14, 1)     = 1 -> can_run_list 1 >= 1 -> FULL, parked at 15
+        #   fixed: min(16-14, 1 + 1) = 2 -> can_run_list 1 <  2 -> issue queued -> 16
+        q = MagicMock(name="queued")
+        chunk = MagicMock(name="chunked")
+        s = _make_scheduler(
+            ceiling=16,
+            running_bs=14,
+            pool_avail=1,
+            chunked_req=chunk,
+            waiting_queue=[q],
+        )
+    
+        batch, adder = _run_prefill(s)
+    
+>       self.assertIn(q, adder.can_run_list)  # the queued request was issued
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: <MagicMock name='queued' id='139979535090416'> not found in [<MagicMock name='chunked' id='139979535094256'>]
+
+/tmp/j-1ba6053fcebd-review-evidence/test_candidate.py:203: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f4f86a9fec0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f586ffa2660>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestGetNewBatchPrefillChunkedSlot.test_chunked_slot_added_back_so_queued_req_is_issued
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/tmp/j-1ba6053fcebd-review-evidence/test_candidate.py", line 203, in test_chunked_slot_added_back_so_queued_req_is_issued
+    self.assertIn(q, adder.can_run_list)  # the queued request was issued
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 1152, in assertIn
+    self.fail(self._formatMessage(msg, standardMsg))
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: <MagicMock name='queued' id='139979535090416'> not found in [<MagicMock name='chunked' id='139979535094256'>]
+_ TestGetNewBatchPrefillChunkedSlot.test_final_chunk_still_receives_held_slot_credit _
+
+self = <test_candidate.TestGetNewBatchPrefillChunkedSlot testMethod=test_final_chunk_still_receives_held_slot_credit>
+
+    def test_final_chunk_still_receives_held_slot_credit(self):
+        q = MagicMock(name="queued")
+        chunk = MagicMock(name="final_chunk")
+        s = _make_scheduler(
+            ceiling=16,
+            running_bs=14,
+            pool_avail=1,
+            chunked_req=chunk,
+            waiting_queue=[q],
+            chunk_continues=False,
+        )
+    
+        _, adder = _run_prefill(s)
+    
+>       self.assertEqual(adder.can_run_list, [chunk, q])
+E       AssertionError: Lists differ: [<Mag[33 chars]979539112032'>] != [<Mag[33 chars]979539112032'>, <MagicMock name='queued' id='139979539119616'>]
+E       
+E       Second list contains 1 additional elements.
+E       First extra element 1:
+E       <MagicMock name='queued' id='139979539119616'>
+E       
+E       - [<MagicMock name='final_chunk' id='139979539112032'>]
+E       ?                                                     ^
+E       
+E       + [<MagicMock name='final_chunk' id='139979539112032'>,
+E       ?                                                     ^
+E       
+E       +  <MagicMock name='queued' id='139979539119616'>]
+
+/tmp/j-1ba6053fcebd-review-evidence/test_candidate.py:282: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f4f86a9fc40>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f586ffa2660>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestGetNewBatchPrefillChunkedSlot.test_final_chunk_still_receives_held_slot_credit
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/tmp/j-1ba6053fcebd-review-evidence/test_candidate.py", line 282, in test_final_chunk_still_receives_held_slot_credit
+    self.assertEqual(adder.can_run_list, [chunk, q])
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1091, in assertListEqual
+    self.assertSequenceEqual(list1, list2, msg, seq_type=list)
+  File "/usr/lib/python3.12/unittest/case.py", line 1073, in assertSequenceEqual
+    self.fail(msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: Lists differ: [<Mag[33 chars]979539112032'>] != [<Mag[33 chars]979539112032'>, <MagicMock name='queued' id='139979539119616'>]
+
+Second list contains 1 additional elements.
+First extra element 1:
+<MagicMock name='queued' id='139979539119616'>
+
+- [<MagicMock name='final_chunk' id='139979539112032'>]
+?                                                     ^
+
++ [<MagicMock name='final_chunk' id='139979539112032'>,
+?                                                     ^
+
++  <MagicMock name='queued' id='139979539119616'>]
+_ TestGetNewBatchPrefillChunkedSlot.test_pd_prefill_pool_gate_also_adds_back_chunked_slot _
+
+self = <test_candidate.TestGetNewBatchPrefillChunkedSlot testMethod=test_pd_prefill_pool_gate_also_adds_back_chunked_slot>
+
+    def test_pd_prefill_pool_gate_also_adds_back_chunked_slot(self):
+        q = MagicMock(name="queued")
+        chunk = MagicMock(name="chunked")
+        s = _make_scheduler(
+            ceiling=16,
+            running_bs=14,
+            pool_avail=1,
+            chunked_req=chunk,
+            waiting_queue=[q],
+            disaggregation_mode=DisaggregationMode.PREFILL,
+        )
+    
+        _, adder = _run_prefill(s)
+    
+>       self.assertEqual(adder.can_run_list, [chunk, q])
+E       AssertionError: Lists differ: [<Mag[29 chars]979534193856'>] != [<Mag[29 chars]979534193856'>, <MagicMock name='queued' id='139979535433072'>]
+E       
+E       Second list contains 1 additional elements.
+E       First extra element 1:
+E       <MagicMock name='queued' id='139979535433072'>
+E       
+E       - [<MagicMock name='chunked' id='139979534193856'>]
+E       ?                                                 ^
+E       
+E       + [<MagicMock name='chunked' id='139979534193856'>,
+E       ?                                                 ^
+E       
+E       +  <MagicMock name='queued' id='139979535433072'>]
+
+/tmp/j-1ba6053fcebd-review-evidence/test_candidate.py:264: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f4f86828360>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f586ffa2660>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestGetNewBatchPrefillChunkedSlot.test_pd_prefill_pool_gate_also_adds_back_chunked_slot
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/tmp/j-1ba6053fcebd-review-evidence/test_candidate.py", line 264, in test_pd_prefill_pool_gate_also_adds_back_chunked_slot
+    self.assertEqual(adder.can_run_list, [chunk, q])
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1091, in assertListEqual
+    self.assertSequenceEqual(list1, list2, msg, seq_type=list)
+  File "/usr/lib/python3.12/unittest/case.py", line 1073, in assertSequenceEqual
+    self.fail(msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: Lists differ: [<Mag[29 chars]979534193856'>] != [<Mag[29 chars]979534193856'>, <MagicMock name='queued' id='139979535433072'>]
+
+Second list contains 1 additional elements.
+First extra element 1:
+<MagicMock name='queued' id='139979535433072'>
+
+- [<MagicMock name='chunked' id='139979534193856'>]
+?                                                 ^
+
++ [<MagicMock name='chunked' id='139979534193856'>,
+?                                                 ^
+
++  <MagicMock name='queued' id='139979535433072'>]
+_ TestGetNewBatchPrefillChunkedSlot.test_pending_beam_rows_are_still_reserved_after_slot_credit _
+
+self = <test_candidate.TestGetNewBatchPrefillChunkedSlot testMethod=test_pending_beam_rows_are_still_reserved_after_slot_credit>
+
+    def test_pending_beam_rows_are_still_reserved_after_slot_credit(self):
+        s = _make_scheduler(
+            ceiling=16,
+            running_bs=14,
+            pool_avail=1,
+            chunked_req=MagicMock(name="chunked"),
+            waiting_queue=[],
+        )
+        s.beam_coordinator.pending_member_rows.return_value = 1
+    
+        with get_context().override_server_args(pp_max_micro_batch_size=16):
+>           num_allocatable = s.get_num_allocatable_reqs(
+                14,
+                running_batch=s.running_batch,
+                chunked_req_in_batch=True,
+            )
+E           TypeError: Scheduler.get_num_allocatable_reqs() got an unexpected keyword argument 'chunked_req_in_batch'
+
+/tmp/j-1ba6053fcebd-review-evidence/test_candidate.py:315: TypeError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f4f86829260>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f586ffa2660>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestGetNewBatchPrefillChunkedSlot.test_pending_beam_rows_are_still_reserved_after_slot_credit
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/tmp/j-1ba6053fcebd-review-evidence/test_candidate.py", line 315, in test_pending_beam_rows_are_still_reserved_after_slot_credit
+    num_allocatable = s.get_num_allocatable_reqs(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: Scheduler.get_num_allocatable_reqs() got an unexpected keyword argument 'chunked_req_in_batch'
+_ TestGetNewBatchPrefillChunkedSlot.test_width_two_request_uses_exactly_two_free_rows_beside_width_one_chunk _
+
+self = <test_candidate.TestGetNewBatchPrefillChunkedSlot testMethod=test_width_two_request_uses_exactly_two_free_rows_beside_width_one_chunk>
+
+    def test_width_two_request_uses_exactly_two_free_rows_beside_width_one_chunk(self):
+        q = MagicMock(name="queued_width_2")
+        chunk = MagicMock(name="chunked_width_1")
+        s = _make_scheduler(
+            ceiling=16,
+            running_bs=12,
+            pool_avail=2,
+            chunked_req=chunk,
+            waiting_queue=[q],
+        )
+        q.beam_group = SimpleNamespace(beam_width=2)
+    
+        _, adder = _run_prefill(s)
+    
+>       self.assertEqual(adder.can_run_list, [chunk, q])
+E       AssertionError: Lists differ: [<Mag[45 chars]4640'>] != [<Mag[45 chars]4640'>, <MagicMock name='queued_width_2' id='139979536056784'>]
+E       
+E       Second list contains 1 additional elements.
+E       First extra element 1:
+E       <MagicMock name='queued_width_2' id='139979536056784'>
+E       
+E       - [<MagicMock name='chunked_width_1' id='139979535464640'>]
+E       ?                                                         ^
+E       
+E       + [<MagicMock name='chunked_width_1' id='139979535464640'>,
+E       ?                                                         ^
+E       
+E       +  <MagicMock name='queued_width_2' id='139979536056784'>]
+
+/tmp/j-1ba6053fcebd-review-evidence/test_candidate.py:360: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f4f86829a80>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f586ffa2660>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestGetNewBatchPrefillChunkedSlot.test_width_two_request_uses_exactly_two_free_rows_beside_width_one_chunk
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/tmp/j-1ba6053fcebd-review-evidence/test_candidate.py", line 360, in test_width_two_request_uses_exactly_two_free_rows_beside_width_one_chunk
+    self.assertEqual(adder.can_run_list, [chunk, q])
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1091, in assertListEqual
+    self.assertSequenceEqual(list1, list2, msg, seq_type=list)
+  File "/usr/lib/python3.12/unittest/case.py", line 1073, in assertSequenceEqual
+    self.fail(msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: Lists differ: [<Mag[45 chars]4640'>] != [<Mag[45 chars]4640'>, <MagicMock name='queued_width_2' id='139979536056784'>]
+
+Second list contains 1 additional elements.
+First extra element 1:
+<MagicMock name='queued_width_2' id='139979536056784'>
+
+- [<MagicMock name='chunked_width_1' id='139979535464640'>]
+?                                                         ^
+
++ [<MagicMock name='chunked_width_1' id='139979535464640'>,
+?                                                         ^
+
++  <MagicMock name='queued_width_2' id='139979536056784'>]
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../../tmp/j-1ba6053fcebd-review-evidence/test_candidate.py::TestGetNewBatchPrefillChunkedSlot::test_beam_width_uses_credit_adjusted_available_rows
+FAILED ../../tmp/j-1ba6053fcebd-review-evidence/test_candidate.py::TestGetNewBatchPrefillChunkedSlot::test_chunked_slot_added_back_so_queued_req_is_issued
+FAILED ../../tmp/j-1ba6053fcebd-review-evidence/test_candidate.py::TestGetNewBatchPrefillChunkedSlot::test_final_chunk_still_receives_held_slot_credit
+FAILED ../../tmp/j-1ba6053fcebd-review-evidence/test_candidate.py::TestGetNewBatchPrefillChunkedSlot::test_pd_prefill_pool_gate_also_adds_back_chunked_slot
+FAILED ../../tmp/j-1ba6053fcebd-review-evidence/test_candidate.py::TestGetNewBatchPrefillChunkedSlot::test_pending_beam_rows_are_still_reserved_after_slot_credit
+FAILED ../../tmp/j-1ba6053fcebd-review-evidence/test_candidate.py::TestGetNewBatchPrefillChunkedSlot::test_width_two_request_uses_exactly_two_free_rows_beside_width_one_chunk
+6 failed, 4 passed, 16 warnings in 28.82s

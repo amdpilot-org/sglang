@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38118",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1864",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1861",
+  "candidate_commit": "6bcff2549ebf675043710280d4ad4702ff77ef67",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review verified the candidate's scheduler correction at the exact requested commit. The recorded base reproduces the chunked-prefill under-admission: a held width-1 chunk plus one free row leaves the queued request parked. The candidate credits the held row only when the chunk is actually scheduled, accounts heterogeneous beam row costs separately from the PP request-count ceiling, and admits the reported width-2 exact-capacity counterexample. Candidate and independent boundary tests pass. The original eight-B200 GLM-5-FP8 serving workload could not be rerun on this single AMD gfx950 host, so deployment-level reproduction remains an explicit architecture/model limitation rather than proof supplied by a smoke test.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1ba6053fcebd/venv/bin/python -m pytest -q /tmp/j-1ba6053fcebd-review-evidence/test_candidate.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "The unchanged candidate behavioral suite failed 6 of 10 cases on the recorded base, including the original width-1 held-chunk underfill and the review's width-2 exact-capacity counterexample. Four safety/boundary cases passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1ba6053fcebd/venv/bin/python -m pytest -q test/registered/unit/managers/test_get_new_batch_prefill_chunked_slot.py test/registered/unit/managers/test_scheduler_chunked_req_gate.py test/registered/unit/managers/test_scheduler_chunked_abort_race.py (candidate 6bcff2549ebf675043710280d4ad4702ff77ef67)",
+      "exit_code": 0,
+      "what_was_measured": "15 focused scheduler tests passed, covering original underfill, exact-capacity width-2 admission, insufficient capacity, PP ceiling, PD-prefill, final/parked chunks, pending Beam reservations, and adjacent lifecycle/abort behavior."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1ba6053fcebd/venv/bin/python -m pytest -q /tmp/j-1ba6053fcebd-review-evidence/test_adversarial.py (candidate 6bcff2549ebf675043710280d4ad4702ff77ef67)",
+      "exit_code": 0,
+      "what_was_measured": "Four independent adversarial cases passed: mixed beam widths exactly filling three free rows, order-sensitive no-overadmission, pending-member reservation, and a PP ceiling that counts requests rather than beam rows."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1ba6053fcebd/venv/bin/python -m pre_commit run --files python/sglang/srt/managers/scheduler.py test/registered/unit/managers/test_get_new_batch_prefill_chunked_slot.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, source-safety, and registered-test validation hooks passed on the candidate files."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1ba6053fcebd/venv/bin/python source import and 4096-element GPU arithmetic check",
+      "exit_code": 0,
+      "what_was_measured": "sglang and scheduler imported from /job/repo/python; Torch 2.11.0+rocm7.2 executed on AMD Instinct MI350X gfx950 and matched the CPU numerical reference with max_abs_diff=0.0. This establishes environment/device access only, not the scheduler fix."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A deterministic arithmetic check ran on the assigned AMD Instinct MI350X gfx950 with max_abs_diff=0.0. Scheduler admission itself is host-side, and this is not a substitute for the unavailable eight-B200 serving workload."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The reported GLM-5-FP8 weights were unavailable.",
+    "The source workload requires eight NVIDIA B200 GPUs, CUDA/TRT-LLM NSA backends, and DP=8; this environment provides one AMD Instinct MI350X gfx950 with ROCm 7.2, so the complete serving benchmark and per-rank plateau measurement were not rerun.",
+    "The deterministic tests verify the scheduler admission contract and do not qualify GLM-5 semantics, NVIDIA backend behavior, distributed synchronization, or throughput.",
+    "No native source changed, so a native rebuild was not applicable."
+  ],
+  "evidence_directory": "/tmp/j-1ba6053fcebd-review-evidence"
+}
