@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38573",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Independent review of amdpilot-org/sglang PR 769 at 3fb9e346d437e25b07aa699613d7a1eceb751410 verified that the prepared base silently accepts compressed-tensors W4A8 MoE group_size=64 while all six CUTLASS call sites use chunk_size=128. The candidate adds an initialization-time fail-closed check: group_size=128 remains accepted and non-128 values are rejected before weights can load or inference can serve silently mis-scaled output.",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-e54e0fc27feb/venv/bin/python /job/review-evidence-j-e54e0fc27feb/independent_contract.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "The actual scheme constructor accepted group_size values 128, 64, 1, 127, 129, 256, and -64. This independently reproduces the issue's silent acceptance precondition, including the reported group_size=64 case."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e54e0fc27feb/venv/bin/python /job/review-evidence-j-e54e0fc27feb/independent_contract.py (candidate 3fb9e346d437e25b07aa699613d7a1eceb751410)",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate imported from /job/repo/python, accepted group_size=128, and raised the documented ValueError for independent adversarial values 64, 1, 127, 129, 256, and -64."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e54e0fc27feb/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_w4afp8_moe.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 4 passed; supported 128 constructs and tested unsupported 64, 127, and 256 reject."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e54e0fc27feb/venv/bin/python -m pytest -q test/registered/unit/layers/moe/test_w4afp8_deepep_post_reorder.py",
+      "exit_code": 0,
+      "what_was_measured": "Related mocked DeepEP W4A8 MoE path remained passing: 1 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e54e0fc27feb/venv/bin/python -m pytest -q python/sglang/kernels/aot/tests/test_cutlass_w4a8_moe_mm.py",
+      "exit_code": 0,
+      "what_was_measured": "Architecture qualification only: all 605 CUTLASS numerical cases skipped on AMD gfx950 because they require NVIDIA sm90."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e54e0fc27feb/venv/bin/python -m compileall -q python/sglang/srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_w4a8_fp8_moe.py test/registered/unit/layers/quantization/test_compressed_tensors_w4afp8_moe.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source and candidate regression compile successfully."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "Assigned hardware was one AMD Instinct MI350X (gfx950), Torch 2.11.0+rocm7.2. The affected CUTLASS kernel requires NVIDIA Hopper sm90; issue-relevant GPU execution was therefore unsupported.",
+  "native_rebuilt": false,
+  "remaining_limitations": "No H100/sm90 GPU and no affected compressed-tensors W4A8 MoE model weights were available, so full-model serving, semantic accuracy, direct CUTLASS numerical output, and the issue's secondary K-per-rank TP/EP observation were not reproduced. The candidate intentionally rejects every non-128 group size; it does not implement group_size=64 kernel support. No native source changed, so rebuilding native code was not required."
+}
