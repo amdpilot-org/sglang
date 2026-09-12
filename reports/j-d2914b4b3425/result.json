@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31924",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "reject",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is test-only hardening for fused ModelOpt-style QKV shard routing. It changes no runtime source and tests a hypothesis the original BF16 issue explicitly ruled out. The real reload path still passes a mapped, differently laid-out tensor unchanged to an ordinary two-argument loader and raises the same empty AssertionError on the base and candidate.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-d2914b4b3425/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_flux2_weight_reload.py (at f112ca15d33b84559c5e7ca3372cf38d8a771b5c)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's two fused-QKV fixture tests pass; this confirms its test behavior but not the original BF16 layout mismatch."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d2914b4b3425/venv/bin/python <base mapped-layout mismatch fixture>",
+      "exit_code": 0,
+      "what_was_measured": "At the recorded base, img_in.weight mapped to x_embedder.weight and a (2,3) disk tensor passed unchanged to a (3,2) ordinary loader, reproducing the empty AssertionError. The script treats observing that expected failure as success."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d2914b4b3425/venv/bin/python <candidate adversarial BF16/layout fixture> (at f112ca15d33b84559c5e7ca3372cf38d8a771b5c)",
+      "exit_code": 0,
+      "what_was_measured": "The same mapped layout mismatch remains on the exact candidate. A separate exact-name Q projection loaded by identity, demonstrating that BF16 separate-QKV parameters bypass the fused mapping tested by the candidate."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d2914b4b3425/venv/bin/python <candidate GPU mapped-layout mismatch fixture>",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, GPU-resident mapped tensors still reached the ordinary loader without reconciliation and produced the empty AssertionError."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Single GPU execution reported AMD Instinct MI350X and gfx950:sramecc+:xnack-. Both parameter and loaded tensor were on cuda:0; the remaining bare AssertionError was observed. See raw/gpu-adversarial.log."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A diffusers/BFL name such as img_in.weight maps to x_embedder.weight, but any required transpose or reshape is still not applied before the ordinary two-argument weight_loader.",
+    "BF16 FLUX.2 separate to_q/to_k/to_v parameters use the exact-name identity path; they do not exercise or benefit from the candidate's fused-QKV regression.",
+    "The secondary text-encoder reload problem and real-checkpoint silent drops are not covered by the candidate.",
+    "The ROCm update_weights_from_disk test remains explicitly skipped pending issue 31924."
+  ],
+  "remaining_limitations": [
+    "Qwen-Image and FLUX.2-klein-base-4B weights were unavailable, so no full-model boot or HTTP 400 replay was performed.",
+    "The focused fixture establishes the unchanged mapping/layout failure contract but cannot identify the exact historical checkpoint tensor.",
+    "No tensor-parallel, offload, FSDP, multi-GPU, or multi-node path was exercised.",
+    "The candidate changes no native source, so a native rebuild was not applicable."
+  ]
+}
