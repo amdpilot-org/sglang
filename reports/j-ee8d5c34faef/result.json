@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35987",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "ee5f9f9b83040ce90406872a74557bc439dfab67",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a substantial partial implementation with passing focused tests and correct reduced-width ROCm GEMM arithmetic, but it does not implement the paper's phase-level Equation 2 scoring and uses round instead of floor for top-k cardinality. Independent adversarial inputs change the selected neuron and retained count, so the original BWAP contract is not fully resolved.",
+  "tests": [
+    {
+      "command": "base source import/CLI search at 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before reproduction: sglang imported from /job/repo/python, sglang.srt.bwap raised ModuleNotFoundError, and no BWAP server argument or source existed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ee8d5c34faef/venv/bin/python -m pytest -q test/registered/unit/bwap/test_bwap_manager.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite at the exact reviewed commit: 20 tests and 3 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ee8d5c34faef/venv/bin/python /job/review-evidence-j-ee8d5c34faef/adversarial_review.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial contract checks and GPU reference. Equation 2 phase pooling selected neuron 0 while candidate max-over-time scoring selected neuron 1. At D_FF=3 and rho=0.5 the specified floor retained 1 neuron while candidate round retained 2. On MI350X, a separate FP16 dense masked PyTorch reference and the candidate gathered GEMM agreed exactly for shape [7,96], D_FF=256, k=83."
+    },
+    {
+      "command": "candidate source-import and native-diff inspection at ee5f9f9b83040ce90406872a74557bc439dfab67",
+      "exit_code": 0,
+      "what_was_measured": "sglang.srt.bwap and bwap_manager resolved under /job/repo/python; BWAP remained default-off; zero native-source files changed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Independent FP16 numerical reference executed on one AMD Instinct MI350X (gfx950), Torch 2.11.0+rocm7.2 / HIP 7.2.26015; max_abs=0 and mean_abs=0. See evidence/adversarial-output.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Exploration rows [[0.8,0,0.6],[0.8,0,0.6],[0.8,0,0.6],[0,1,0]]: Equation 2 phase score is approximately [0.6928,0.5,0.5196] and selects neuron 0, while candidate per-token maximum memory is [0.8,1.0,0.6] and selects neuron 1.",
+    "For D_FF=3 and sparsity 0.5, the original method's floor formula retains k=1 but candidate build_topk_mask retains k=2 via round."
+  ],
+  "remaining_limitations": [
+    "Production-model semantic accuracy, batch-invariance, and throughput were not independently measured because suitable reasoning-model weights and corpus were unavailable.",
+    "The assigned architecture was AMD Instinct MI350X gfx950; NVIDIA CUDA behavior and other GPU architectures were not tested.",
+    "Quantized, biased, tensor-parallel, speculative-decode, and unsupported model-architecture paths remain unverified or explicitly fall back without the promised compute saving.",
+    "No native source changed, so a native rebuild was not applicable. The installed AITER native module was loaded from /tmp/amdpilot-repo-j-ee8d5c34faef/cache/aiter/module_aiter_core.so."
+  ]
+}
