@@ -1,0 +1,1322 @@
+diff --git a/python/sglang/srt/managers/scheduler.py b/python/sglang/srt/managers/scheduler.py
+index f0914b1..e43e8cc 100644
+--- a/python/sglang/srt/managers/scheduler.py
++++ b/python/sglang/srt/managers/scheduler.py
+@@ -3720,9 +3720,11 @@ class Scheduler(
+             if self.enable_hicache_storage:
+                 self._retry_missed_storage_prefetches()
+ 
+-        if self.enable_priority_preemption or self.is_hybrid_swa:
+-            # Reset batch_is_full to try preemption with a prefill adder.
+-            running_batch.batch_is_full = False
++        # batch_is_full is an admission result from the previous pass, not a
++        # persistent capacity state. In particular, the final chunked-prefill
++        # pass can set it while the continuing request temporarily occupies the
++        # last slot. Recompute it below from the current pools and batch shape.
++        running_batch.batch_is_full = False
+ 
+         if (
+             running_batch.batch_is_full or len(self.waiting_queue) == 0
+diff --git a/reports/j-17cb28bd130f/README.md b/reports/j-17cb28bd130f/README.md
+new file mode 100644
+index 0000000..f15f892
+--- /dev/null
++++ b/reports/j-17cb28bd130f/README.md
+@@ -0,0 +1,36 @@
++# Investigation report: issue 35537
++
++The checked-out scheduler still treated `ScheduleBatch.batch_is_full` as sticky
++state for ordinary (non-hybrid, non-priority-preemption) generation. A focused
++reproduction initialized the state produced by the final chunked-prefill pass:
++three running requests, one waiting request, one currently allocatable slot, and
++`batch_is_full=True`. Before the fix, `_get_new_batch_prefill_raw` returned
++before consulting current capacity or the waiting queue.
++
++The correction resets the previous pass's admission hint before the early return.
++The existing slot and token-budget checks then derive current fullness. Regression
++coverage also verifies that genuine zero capacity re-latches the flag and stops
++admission, and that an empty waiting queue performs no capacity/admission work.
++
++Upstream PR https://github.com/sgl-project/sglang/pull/35609 was inspected before
++implementation. It proposes the same reset but remains open and is absent from
++base `358c163250ad3b1f62939b01ce1314a0a31a0365`.
++
++## Evidence
++
++- `raw/regression-before.txt`: all three new tests fail on the original source.
++- `raw/regression-after.txt`: the complete scheduler test file passes (6 tests).
++- `raw/gpu-serving/server.log`: a real gfx950 server log showing 32-token
++  chunked-prefill passes and the queue changing from one waiting request to zero
++  while prior requests still run.
++- `raw/gpu-serving/probe.json`: four staggered 72-token prompts each complete 30
++  generated tokens; load samples reach four running and zero waiting requests.
++- `raw/gpu-info.txt` and `raw/gpu-after.txt`: assigned GPU identity and cleanup.
++
++The GPU fixture is a deterministic two-layer random Llama created outside the
++worktree from the qualified PR649 scripts at commit
++`f1d603677ca76a9ea21124a544e405c5b0cbd315`. It validates this non-hybrid HTTP
++and engine path only. The reported Qwen3.8-27B-NVFP4 hybrid GDN/mamba model,
++NEXTN speculation, FP8 KV cache, WSL2/Docker environment, semantic accuracy,
++and long production latency were not reproduced because those weights and that
++environment were unavailable.
+diff --git a/reports/j-17cb28bd130f/probe_chunked_prefill.py b/reports/j-17cb28bd130f/probe_chunked_prefill.py
+new file mode 100644
+index 0000000..46d2d5c
+--- /dev/null
++++ b/reports/j-17cb28bd130f/probe_chunked_prefill.py
+@@ -0,0 +1,72 @@
++#!/usr/bin/env python3
++"""Exercise four staggered chunked-prefill requests and sample scheduler load."""
++
++import concurrent.futures
++import json
++import sys
++import threading
++import time
++import urllib.request
++from pathlib import Path
++
++base_url, output_arg = sys.argv[1:]
++output = Path(output_arg)
++stop = threading.Event()
++loads = []
++
++
++def get_json(path, body=None):
++    data = None if body is None else json.dumps(body).encode()
++    request = urllib.request.Request(
++        base_url + path,
++        data=data,
++        headers={"Content-Type": "application/json"},
++    )
++    with urllib.request.urlopen(request, timeout=120) as response:
++        return json.load(response)
++
++
++def sample_loads():
++    while not stop.is_set():
++        try:
++            loads.append({"time": time.time(), "load": get_json("/v1/loads")})
++        except Exception as error:
++            loads.append({"time": time.time(), "error": repr(error)})
++        stop.wait(0.05)
++
++
++words = ["alpha", "beta", "gamma", "delta", "red", "blue", "green"]
++prompt = " ".join(words * 10)
++
++
++def call(index, delay):
++    time.sleep(delay)
++    started = time.time()
++    response = get_json(
++        "/v1/completions",
++        {
++            "model": "tiny-random-llama",
++            "prompt": f"request tok{index:03d} {prompt}",
++            "max_tokens": 30,
++            "temperature": 0,
++        },
++    )
++    return {
++        "index": index,
++        "delay": delay,
++        "started": started,
++        "finished": time.time(),
++        "usage": response.get("usage"),
++    }
++
++
++thread = threading.Thread(target=sample_loads, daemon=True)
++thread.start()
++with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
++    results = list(executor.map(call, range(4), (0, 0.05, 0.1, 0.2)))
++stop.set()
++thread.join()
++
++document = {"requests": results, "load_samples": loads}
++output.write_text(json.dumps(document, indent=2) + "\n")
++print(json.dumps(document, indent=2))
+diff --git a/reports/j-17cb28bd130f/raw/fixture-create.txt b/reports/j-17cb28bd130f/raw/fixture-create.txt
+new file mode 100644
+index 0000000..dcf2468
+--- /dev/null
++++ b/reports/j-17cb28bd130f/raw/fixture-create.txt
+@@ -0,0 +1 @@
++{"fixture": "/tmp/amdpilot-repo-j-17cb28bd130f/tiny-random-llama", "weight_sha256": "6632fab7c351a0bd85518d80a89ec673f68139587f5ad3fa8d5ab38fad87e75f"}
+diff --git a/reports/j-17cb28bd130f/raw/gpu-after.txt b/reports/j-17cb28bd130f/raw/gpu-after.txt
+new file mode 100644
+index 0000000..b748e2d
+--- /dev/null
++++ b/reports/j-17cb28bd130f/raw/gpu-after.txt
+@@ -0,0 +1 @@
++0 0
+diff --git a/reports/j-17cb28bd130f/raw/gpu-info.txt b/reports/j-17cb28bd130f/raw/gpu-info.txt
+new file mode 100644
+index 0000000..4356dd6
+--- /dev/null
++++ b/reports/j-17cb28bd130f/raw/gpu-info.txt
+@@ -0,0 +1 @@
++{"available": true, "count": 1, "name": "AMD Instinct MI350X", "arch": "gfx950:sramecc+:xnack-"}
+diff --git a/reports/j-17cb28bd130f/raw/gpu-serving-run.txt b/reports/j-17cb28bd130f/raw/gpu-serving-run.txt
+new file mode 100644
+index 0000000..fe8d1ee
+--- /dev/null
++++ b/reports/j-17cb28bd130f/raw/gpu-serving-run.txt
+@@ -0,0 +1,52 @@
++{
++  "command": [
++    "/tmp/amdpilot-repo-j-17cb28bd130f/venv/bin/python",
++    "-m",
++    "sglang.launch_server",
++    "--model-path",
++    "/tmp/amdpilot-repo-j-17cb28bd130f/tiny-random-llama",
++    "--tokenizer-path",
++    "/tmp/amdpilot-repo-j-17cb28bd130f/tiny-random-llama",
++    "--served-model-name",
++    "tiny-random-llama",
++    "--host",
++    "127.0.0.1",
++    "--port",
++    "40527",
++    "--attention-backend",
++    "triton",
++    "--dtype",
++    "float16",
++    "--context-length",
++    "128",
++    "--max-total-tokens",
++    "512",
++    "--max-running-requests",
++    "4",
++    "--chunked-prefill-size",
++    "32",
++    "--max-prefill-tokens",
++    "128",
++    "--mem-fraction-static",
++    "0.01",
++    "--disable-cuda-graph"
++  ],
++  "port": 40527,
++  "ready": true,
++  "pid": 4663,
++  "probe_returncode": 0,
++  "probe_stdout": "{\n  \"requests\": [\n    {\n      \"index\": 0,\n      \"delay\": 0,\n      \"started\": 1789246783.4511096,\n      \"finished\": 1789246783.7461205,\n      \"usage\": {\n        \"prompt_tokens\": 72,\n        \"total_tokens\": 102,\n        \"completion_tokens\": 30,\n        \"prompt_tokens_details\": null,\n        \"reasoning_tokens\": 0\n      }\n    },\n    {\n      \"index\": 1,\n      \"delay\": 0.05,\n      \"started\": 1789246783.501624,\n      \"finished\": 1789246783.7479475,\n      \"usage\": {\n        \"prompt_tokens\": 72,\n        \"total_tokens\": 102,\n        \"completion_tokens\": 30,\n        \"prompt_tokens_details\": null,\n        \"reasoning_tokens\": 0\n      }\n    },\n    {\n      \"index\": 2,\n      \"delay\": 0.1,\n      \"started\": 1789246783.5518405,\n      \"finished\": 1789246783.7507703,\n      \"usage\": {\n        \"prompt_tokens\": 72,\n        \"total_tokens\": 102,\n        \"completion_tokens\": 30,\n        \"prompt_tokens_details\": null,\n        \"reasoning_tokens\": 0\n      }\n    },\n    {\n      \"index\": 3,\n      \"delay\": 0.2,\n      \"started\": 1789246783.652039,\n      \"finished\": 1789246783.750846,\n      \"usage\": {\n        \"prompt_tokens\": 72,\n        \"total_tokens\": 102,\n        \"completion_tokens\": 30,\n        \"prompt_tokens_details\": null,\n        \"reasoning_tokens\": 0\n      }\n    }\n  ],\n  \"load_samples\": [\n    {\n      \"time\": 1789246783.449377,\n      \"load\": {\n        \"timestamp\": \"2026-09-12T20:59:43.487348+00:00\",\n        \"version\": \"0.5.19.dev20260908+g554f817948\",\n        \"accelerator\": \"AMD Instinct MI350X\",\n        \"num_accelerators\": 1,\n        \"loads\": [\n          {\n            \"timestamp\": 1789246783.4858575,\n            \"dp_rank\": 0,\n            \"num_running_reqs\": 0,\n            \"num_waiting_reqs\": 0,\n            \"num_waiting_uncached_tokens\": 0,\n            \"num_used_tokens\": 0,\n            \"num_total_tokens\": 0,\n            \"num_active_tokens\": 0,\n            \"num_prealloc_ready_tokens\": 0,\n            \"max_total_num_tokens\": 512,\n            \"max_running_requests\": 4,\n            \"token_usage\": 0.0,\n            \"gen_throughput\": 0.0,\n            \"cache_hit_rate\": 0.0,\n            \"utilization\": 0.0,\n            \"total_prefill_uncached_tokens\": 0,\n            \"total_prefill_busy_us\": 0,\n            \"decode_moments\": [\n              6.0,\n              6.0,\n              14441.0,\n              6.0,\n              14441.0,\n              6.0\n            ],\n            \"memory\": {\n              \"weight_gb\": 0.033,\n              \"kv_cache_gb\": 0.0,\n              \"graph_gb\": 0.0,\n              \"token_capacity\": 512\n            },\n            \"disaggregation\": {\n              \"mode\": \"null\",\n              \"prefill_bootstrap_queue_reqs\": 0,\n              \"prefill_inflight_queue_reqs\": 0,\n              \"decode_prealloc_queue_reqs\": 0,\n              \"decode_transfer_queue_reqs\": 0,\n              \"decode_retracted_queue_reqs\": 0,\n              \"kv_transfer_speed_gb_s\": 0.0,\n              \"kv_transfer_latency_ms\": 0.0\n            },\n            \"queues\": {\n              \"waiting\": 0,\n              \"grammar\": 0,\n              \"paused\": 0,\n              \"retracted\": 0,\n              \"prealloc_ready\": 0\n            }\n          }\n        ]\n      }\n    },\n    {\n      \"time\": 1789246783.5382743,\n      \"load\": {\n        \"timestamp\": \"2026-09-12T20:59:43.539308+00:00\",\n        \"version\": \"0.5.19.dev20260908+g554f817948\",\n        \"accelerator\": \"AMD Instinct MI350X\",\n        \"num_accelerators\": 1,\n        \"loads\": [\n          {\n            \"timestamp\": 1789246783.5109088,\n            \"dp_rank\": 0,\n            \"num_running_reqs\": 1,\n            \"num_waiting_reqs\": 0,\n            \"num_waiting_uncached_tokens\": 0,\n            \"num_used_tokens\": 144,\n            \"num_total_tokens\": 144,\n            \"num_active_tokens\": 144,\n            \"num_prealloc_ready_tokens\": 0,\n            \"max_total_num_tokens\": 512,\n            \"max_running_requests\": 4,\n            \"token_usage\": 0.2812,\n            \"gen_throughput\": 0.0,\n            \"cache_hit_rate\": 0.0,\n            \"utilization\": 0.0,\n            \"total_prefill_uncached_tokens\": 39,\n            \"total_prefill_busy_us\": 10670,\n            \"decode_moments\": [\n              6.0,\n              6.0,\n              14441.0,\n              6.0,\n              14441.0,\n              6.0\n            ],\n            \"memory\": {\n              \"weight_gb\": 0.033,\n              \"kv_cache_gb\": 0.0,\n              \"graph_gb\": 0.0,\n              \"token_capacity\": 512\n            },\n            \"disaggregation\": {\n              \"mode\": \"null\",\n              \"prefill_bootstrap_queue_reqs\": 0,\n              \"prefill_inflight_queue_reqs\": 0,\n              \"decode_prealloc_queue_reqs\": 0,\n              \"decode_transfer_queue_reqs\": 0,\n              \"decode_retracted_queue_reqs\": 0,\n              \"kv_transfer_speed_gb_s\": 0.0,\n              \"kv_transfer_latency_ms\": 0.0\n            },\n            \"queues\": {\n              \"waiting\": 0,\n              \"grammar\": 0,\n              \"paused\": 0,\n              \"retracted\": 0,\n              \"prealloc_ready\": 0\n            }\n          }\n        ]\n      }\n    },\n    {\n      \"time\": 1789246783.5900557,\n      \"load\": {\n        \"timestamp\": \"2026-09-12T20:59:43.591105+00:00\",\n        \"version\": \"0.5.19.dev20260908+g554f817948\",\n        \"accelerator\": \"AMD Instinct MI350X\",\n        \"num_accelerators\": 1,\n        \"loads\": [\n          {\n            \"timestamp\": 1789246783.5109088,\n            \"dp_rank\": 0,\n            \"num_running_reqs\": 1,\n            \"num_waiting_reqs\": 0,\n            \"num_waiting_uncached_tokens\": 0,\n            \"num_used_tokens\": 144,\n            \"num_total_tokens\": 144,\n            \"num_active_tokens\": 144,\n            \"num_prealloc_ready_tokens\": 0,\n            \"max_total_num_tokens\": 512,\n            \"max_running_requests\": 4,\n            \"token_usage\": 0.2812,\n            \"gen_throughput\": 0.0,\n            \"cache_hit_rate\": 0.0,\n            \"utilization\": 0.0,\n            \"total_prefill_uncached_tokens\": 39,\n            \"total_prefill_busy_us\": 10670,\n            \"decode_moments\": [\n              6.0,\n              6.0,\n              14441.0,\n              6.0,\n              14441.0,\n              6.0\n            ],\n            \"memory\": {\n              \"weight_gb\": 0.033,\n              \"kv_cache_gb\": 0.0,\n              \"graph_gb\": 0.0,\n              \"token_capacity\": 512\n            },\n            \"disaggregation\": {\n              \"mode\": \"null\",\n              \"prefill_bootstrap_queue_reqs\": 0,\n              \"prefill_inflight_queue_reqs\": 0,\n              \"decode_prealloc_queue_reqs\": 0,\n              \"decode_transfer_queue_reqs\": 0,\n              \"decode_retracted_queue_reqs\": 0,\n              \"kv_transfer_speed_gb_s\": 0.0,\n              \"kv_transfer_latency_ms\": 0.0\n            },\n            \"queues\": {\n              \"waiting\": 0,\n              \"grammar\": 0,\n              \"paused\": 0,\n              \"retracted\": 0,\n              \"prealloc_ready\": 0\n            }\n          }\n        ]\n      }\n    },\n    {\n      \"time\": 1789246783.6419804,\n      \"load\": {\n        \"timestamp\": \"2026-09-12T20:59:43.643017+00:00\",\n        \"version\": \"0.5.19.dev20260908+g554f817948\",\n        \"accelerator\": \"AMD Instinct MI350X\",\n        \"num_accelerators\": 1,\n        \"loads\": [\n          {\n            \"timestamp\": 1789246783.6081033,\n            \"dp_rank\": 0,\n            \"num_running_reqs\": 2,\n            \"num_waiting_reqs\": 0,\n            \"num_waiting_uncached_tokens\": 0,\n            \"num_used_tokens\": 146,\n            \"num_total_tokens\": 146,\n            \"num_active_tokens\": 146,\n            \"num_prealloc_ready_tokens\": 0,\n            \"max_total_num_tokens\": 512,\n            \"max_running_requests\": 4,\n            \"token_usage\": 0.2852,\n            \"gen_throughput\": 0.0,\n            \"cache_hit_rate\": 0.0,\n            \"utilization\": 0.0,\n            \"total_prefill_uncached_tokens\": 71,\n            \"total_prefill_busy_us\": 13188,\n            \"decode_moments\": [\n              6.0,\n              6.0,\n              14441.0,\n              6.0,\n              14441.0,\n              6.0\n            ],\n            \"memory\": {\n              \"weight_gb\": 0.033,\n              \"kv_cache_gb\": 0.0,\n              \"graph_gb\": 0.0,\n              \"token_capacity\": 512\n            },\n            \"disaggregation\": {\n              \"mode\": \"null\",\n              \"prefill_bootstrap_queue_reqs\": 0,\n              \"prefill_inflight_queue_reqs\": 0,\n              \"decode_prealloc_queue_reqs\": 0,\n              \"decode_transfer_queue_reqs\": 0,\n              \"decode_retracted_queue_reqs\": 0,\n              \"kv_transfer_speed_gb_s\": 0.0,\n              \"kv_transfer_latency_ms\": 0.0\n            },\n            \"queues\": {\n              \"waiting\": 0,\n              \"grammar\": 0,\n              \"paused\": 0,\n              \"retracted\": 0,\n              \"prealloc_ready\": 0\n            }\n          }\n        ]\n      }\n    },\n    {\n      \"time\": 1789246783.6937275,\n      \"load\": {\n        \"timestamp\": \"2026-09-12T20:59:43.694595+00:00\",\n        \"version\": \"0.5.19.dev20260908+g554f817948\",\n        \"accelerator\": \"AMD Instinct MI350X\",\n        \"num_accelerators\": 1,\n        \"loads\": [\n          {\n            \"timestamp\": 1789246783.6908414,\n            \"dp_rank\": 0,\n            \"num_running_reqs\": 4,\n            \"num_waiting_reqs\": 0,\n            \"num_waiting_uncached_tokens\": 0,\n            \"num_used_tokens\": 292,\n            \"num_total_tokens\": 292,\n            \"num_active_tokens\": 292,\n            \"num_prealloc_ready_tokens\": 0,\n            \"max_total_num_tokens\": 512,\n            \"max_running_requests\": 4,\n            \"token_usage\": 0.5703,\n            \"gen_throughput\": 0.0,\n            \"cache_hit_rate\": 0.0,\n            \"utilization\": 0.0,\n            \"total_prefill_uncached_tokens\": 181,\n            \"total_prefill_busy_us\": 28290,\n            \"decode_moments\": [\n              6.0,\n              6.0,\n              14441.0,\n              6.0,\n              14441.0,\n              6.0\n            ],\n            \"memory\": {\n              \"weight_gb\": 0.033,\n              \"kv_cache_gb\": 0.0,\n              \"graph_gb\": 0.0,\n              \"token_capacity\": 512\n            },\n            \"disaggregation\": {\n              \"mode\": \"null\",\n              \"prefill_bootstrap_queue_reqs\": 0,\n              \"prefill_inflight_queue_reqs\": 0,\n              \"decode_prealloc_queue_reqs\": 0,\n              \"decode_transfer_queue_reqs\": 0,\n              \"decode_retracted_queue_reqs\": 0,\n              \"kv_transfer_speed_gb_s\": 0.0,\n              \"kv_transfer_latency_ms\": 0.0\n            },\n            \"queues\": {\n              \"waiting\": 0,\n              \"grammar\": 0,\n              \"paused\": 0,\n              \"retracted\": 0,\n              \"prealloc_ready\": 0\n            }\n          }\n        ]\n      }\n    },\n    {\n      \"time\": 1789246783.7452714,\n      \"load\": {\n        \"timestamp\": \"2026-09-12T20:59:43.746501+00:00\",\n        \"version\": \"0.5.19.dev20260908+g554f817948\",\n        \"accelerator\": \"AMD Instinct MI350X\",\n        \"num_accelerators\": 1,\n        \"loads\": [\n          {\n            \"timestamp\": 1789246783.7206838,\n            \"dp_rank\": 0,\n            \"num_running_reqs\": 4,\n            \"num_waiting_reqs\": 0,\n            \"num_waiting_uncached_tokens\": 0,\n            \"num_used_tokens\": 352,\n            \"num_total_tokens\": 352,\n            \"num_active_tokens\": 352,\n            \"num_prealloc_ready_tokens\": 0,\n            \"max_total_num_tokens\": 512,\n            \"max_running_requests\": 4,\n            \"token_usage\": 0.6875,\n            \"gen_throughput\": 0.0,\n            \"cache_hit_rate\": 0.0,\n            \"utilization\": 0.0,\n            \"total_prefill_uncached_tokens\": 188,\n            \"total_prefill_busy_us\": 30949,\n            \"decode_moments\": [\n              19.0,\n              58.0,\n              41019.0,\n              214.0,\n              120753.0,\n              58.0\n            ],\n            \"memory\": {\n              \"weight_gb\": 0.033,\n              \"kv_cache_gb\": 0.0,\n              \"graph_gb\": 0.0,\n              \"token_capacity\": 512\n            },\n            \"disaggregation\": {\n              \"mode\": \"null\",\n              \"prefill_bootstrap_queue_reqs\": 0,\n              \"prefill_inflight_queue_reqs\": 0,\n              \"decode_prealloc_queue_reqs\": 0,\n              \"decode_transfer_queue_reqs\": 0,\n              \"decode_retracted_queue_reqs\": 0,\n              \"kv_transfer_speed_gb_s\": 0.0,\n              \"kv_transfer_latency_ms\": 0.0\n            },\n            \"queues\": {\n              \"waiting\": 0,\n              \"grammar\": 0,\n              \"paused\": 0,\n              \"retracted\": 0,\n              \"prealloc_ready\": 0\n            }\n          }\n        ]\n      }\n    }\n  ]\n}\n",
++  "probe_stderr": "",
++  "returncode": -9,
++  "elapsed_seconds": 46.529,
++  "reaped_descendants": [
++    {
++      "pid": 4844,
++      "wait_status": 9
++    },
++    {
++      "pid": 4846,
++      "wait_status": 15
++    }
++  ]
++}
+diff --git a/reports/j-17cb28bd130f/raw/gpu-serving/probe.json b/reports/j-17cb28bd130f/raw/gpu-serving/probe.json
+new file mode 100644
+index 0000000..90dcb4d
+--- /dev/null
++++ b/reports/j-17cb28bd130f/raw/gpu-serving/probe.json
+@@ -0,0 +1,424 @@
++{
++  "requests": [
++    {
++      "index": 0,
++      "delay": 0,
++      "started": 1789246783.4511096,
++      "finished": 1789246783.7461205,
++      "usage": {
++        "prompt_tokens": 72,
++        "total_tokens": 102,
++        "completion_tokens": 30,
++        "prompt_tokens_details": null,
++        "reasoning_tokens": 0
++      }
++    },
++    {
++      "index": 1,
++      "delay": 0.05,
++      "started": 1789246783.501624,
++      "finished": 1789246783.7479475,
++      "usage": {
++        "prompt_tokens": 72,
++        "total_tokens": 102,
++        "completion_tokens": 30,
++        "prompt_tokens_details": null,
++        "reasoning_tokens": 0
++      }
++    },
++    {
++      "index": 2,
++      "delay": 0.1,
++      "started": 1789246783.5518405,
++      "finished": 1789246783.7507703,
++      "usage": {
++        "prompt_tokens": 72,
++        "total_tokens": 102,
++        "completion_tokens": 30,
++        "prompt_tokens_details": null,
++        "reasoning_tokens": 0
++      }
++    },
++    {
++      "index": 3,
++      "delay": 0.2,
++      "started": 1789246783.652039,
++      "finished": 1789246783.750846,
++      "usage": {
++        "prompt_tokens": 72,
++        "total_tokens": 102,
++        "completion_tokens": 30,
++        "prompt_tokens_details": null,
++        "reasoning_tokens": 0
++      }
++    }
++  ],
++  "load_samples": [
++    {
++      "time": 1789246783.449377,
++      "load": {
++        "timestamp": "2026-09-12T20:59:43.487348+00:00",
++        "version": "0.5.19.dev20260908+g554f817948",
++        "accelerator": "AMD Instinct MI350X",
++        "num_accelerators": 1,
++        "loads": [
++          {
++            "timestamp": 1789246783.4858575,
++            "dp_rank": 0,
++            "num_running_reqs": 0,
++            "num_waiting_reqs": 0,
++            "num_waiting_uncached_tokens": 0,
++            "num_used_tokens": 0,
++            "num_total_tokens": 0,
++            "num_active_tokens": 0,
++            "num_prealloc_ready_tokens": 0,
++            "max_total_num_tokens": 512,
++            "max_running_requests": 4,
++            "token_usage": 0.0,
++            "gen_throughput": 0.0,
++            "cache_hit_rate": 0.0,
++            "utilization": 0.0,
++            "total_prefill_uncached_tokens": 0,
++            "total_prefill_busy_us": 0,
++            "decode_moments": [
++              6.0,
++              6.0,
++              14441.0,
++              6.0,
++              14441.0,
++              6.0
++            ],
++            "memory": {
++              "weight_gb": 0.033,
++              "kv_cache_gb": 0.0,
++              "graph_gb": 0.0,
++              "token_capacity": 512
++            },
++            "disaggregation": {
++              "mode": "null",
++              "prefill_bootstrap_queue_reqs": 0,
++              "prefill_inflight_queue_reqs": 0,
++              "decode_prealloc_queue_reqs": 0,
++              "decode_transfer_queue_reqs": 0,
++              "decode_retracted_queue_reqs": 0,
++              "kv_transfer_speed_gb_s": 0.0,
++              "kv_transfer_latency_ms": 0.0
++            },
++            "queues": {
++              "waiting": 0,
++              "grammar": 0,
++              "paused": 0,
++              "retracted": 0,
++              "prealloc_ready": 0
++            }
++          }
++        ]
++      }
++    },
++    {
++      "time": 1789246783.5382743,
++      "load": {
++        "timestamp": "2026-09-12T20:59:43.539308+00:00",
++        "version": "0.5.19.dev20260908+g554f817948",
++        "accelerator": "AMD Instinct MI350X",
++        "num_accelerators": 1,
++        "loads": [
++          {
++            "timestamp": 1789246783.5109088,
++            "dp_rank": 0,
++            "num_running_reqs": 1,
++            "num_waiting_reqs": 0,
++            "num_waiting_uncached_tokens": 0,
++            "num_used_tokens": 144,
++            "num_total_tokens": 144,
++            "num_active_tokens": 144,
++            "num_prealloc_ready_tokens": 0,
++            "max_total_num_tokens": 512,
++            "max_running_requests": 4,
++            "token_usage": 0.2812,
++            "gen_throughput": 0.0,
++            "cache_hit_rate": 0.0,
++            "utilization": 0.0,
++            "total_prefill_uncached_tokens": 39,
++            "total_prefill_busy_us": 10670,
++            "decode_moments": [
++              6.0,
++              6.0,
++              14441.0,
++              6.0,
++              14441.0,
++              6.0
++            ],
++            "memory": {
++              "weight_gb": 0.033,
++              "kv_cache_gb": 0.0,
++              "graph_gb": 0.0,
++              "token_capacity": 512
++            },
++            "disaggregation": {
++              "mode": "null",
++              "prefill_bootstrap_queue_reqs": 0,
++              "prefill_inflight_queue_reqs": 0,
++              "decode_prealloc_queue_reqs": 0,
++              "decode_transfer_queue_reqs": 0,
++              "decode_retracted_queue_reqs": 0,
++              "kv_transfer_speed_gb_s": 0.0,
++              "kv_transfer_latency_ms": 0.0
++            },
++            "queues": {
++              "waiting": 0,
++              "grammar": 0,
++              "paused": 0,
++              "retracted": 0,
++              "prealloc_ready": 0
++            }
++          }
++        ]
++      }
++    },
++    {
++      "time": 1789246783.5900557,
++      "load": {
++        "timestamp": "2026-09-12T20:59:43.591105+00:00",
++        "version": "0.5.19.dev20260908+g554f817948",
++        "accelerator": "AMD Instinct MI350X",
++        "num_accelerators": 1,
++        "loads": [
++          {
++            "timestamp": 1789246783.5109088,
++            "dp_rank": 0,
++            "num_running_reqs": 1,
++            "num_waiting_reqs": 0,
++            "num_waiting_uncached_tokens": 0,
++            "num_used_tokens": 144,
++            "num_total_tokens": 144,
++            "num_active_tokens": 144,
++            "num_prealloc_ready_tokens": 0,
++            "max_total_num_tokens": 512,
++            "max_running_requests": 4,
++            "token_usage": 0.2812,
++            "gen_throughput": 0.0,
++            "cache_hit_rate": 0.0,
++            "utilization": 0.0,
++            "total_prefill_uncached_tokens": 39,
++            "total_prefill_busy_us": 10670,
++            "decode_moments": [
++              6.0,
++              6.0,
++              14441.0,
++              6.0,
++              14441.0,
++              6.0
++            ],
++            "memory": {
++              "weight_gb": 0.033,
++              "kv_cache_gb": 0.0,
++              "graph_gb": 0.0,
++              "token_capacity": 512
++            },
++            "disaggregation": {
++              "mode": "null",
++              "prefill_bootstrap_queue_reqs": 0,
++              "prefill_inflight_queue_reqs": 0,
++              "decode_prealloc_queue_reqs": 0,
++              "decode_transfer_queue_reqs": 0,
++              "decode_retracted_queue_reqs": 0,
++              "kv_transfer_speed_gb_s": 0.0,
++              "kv_transfer_latency_ms": 0.0
++            },
++            "queues": {
++              "waiting": 0,
++              "grammar": 0,
++              "paused": 0,
++              "retracted": 0,
++              "prealloc_ready": 0
++            }
++          }
++        ]
++      }
++    },
++    {
++      "time": 1789246783.6419804,
++      "load": {
++        "timestamp": "2026-09-12T20:59:43.643017+00:00",
++        "version": "0.5.19.dev20260908+g554f817948",
++        "accelerator": "AMD Instinct MI350X",
++        "num_accelerators": 1,
++        "loads": [
++          {
++            "timestamp": 1789246783.6081033,
++            "dp_rank": 0,
++            "num_running_reqs": 2,
++            "num_waiting_reqs": 0,
++            "num_waiting_uncached_tokens": 0,
++            "num_used_tokens": 146,
++            "num_total_tokens": 146,
++            "num_active_tokens": 146,
++            "num_prealloc_ready_tokens": 0,
++            "max_total_num_tokens": 512,
++            "max_running_requests": 4,
++            "token_usage": 0.2852,
++            "gen_throughput": 0.0,
++            "cache_hit_rate": 0.0,
++            "utilization": 0.0,
++            "total_prefill_uncached_tokens": 71,
++            "total_prefill_busy_us": 13188,
++            "decode_moments": [
++              6.0,
++              6.0,
++              14441.0,
++              6.0,
++              14441.0,
++              6.0
++            ],
++            "memory": {
++              "weight_gb": 0.033,
++              "kv_cache_gb": 0.0,
++              "graph_gb": 0.0,
++              "token_capacity": 512
++            },
++            "disaggregation": {
++              "mode": "null",
++              "prefill_bootstrap_queue_reqs": 0,
++              "prefill_inflight_queue_reqs": 0,
++              "decode_prealloc_queue_reqs": 0,
++              "decode_transfer_queue_reqs": 0,
++              "decode_retracted_queue_reqs": 0,
++              "kv_transfer_speed_gb_s": 0.0,
++              "kv_transfer_latency_ms": 0.0
++            },
++            "queues": {
++              "waiting": 0,
++              "grammar": 0,
++              "paused": 0,
++              "retracted": 0,
++              "prealloc_ready": 0
++            }
++          }
++        ]
++      }
++    },
++    {
++      "time": 1789246783.6937275,
++      "load": {
++        "timestamp": "2026-09-12T20:59:43.694595+00:00",
++        "version": "0.5.19.dev20260908+g554f817948",
++        "accelerator": "AMD Instinct MI350X",
++        "num_accelerators": 1,
++        "loads": [
++          {
++            "timestamp": 1789246783.6908414,
++            "dp_rank": 0,
++            "num_running_reqs": 4,
++            "num_waiting_reqs": 0,
++            "num_waiting_uncached_tokens": 0,
++            "num_used_tokens": 292,
++            "num_total_tokens": 292,
++            "num_active_tokens": 292,
++            "num_prealloc_ready_tokens": 0,
++            "max_total_num_tokens": 512,
++            "max_running_requests": 4,
++            "token_usage": 0.5703,
++            "gen_throughput": 0.0,
++            "cache_hit_rate": 0.0,
++            "utilization": 0.0,
++            "total_prefill_uncached_tokens": 181,
++            "total_prefill_busy_us": 28290,
++            "decode_moments": [
++              6.0,
++              6.0,
++              14441.0,
++              6.0,
++              14441.0,
++              6.0
++            ],
++            "memory": {
++              "weight_gb": 0.033,
++              "kv_cache_gb": 0.0,
++              "graph_gb": 0.0,
++              "token_capacity": 512
++            },
++            "disaggregation": {
++              "mode": "null",
++              "prefill_bootstrap_queue_reqs": 0,
++              "prefill_inflight_queue_reqs": 0,
++              "decode_prealloc_queue_reqs": 0,
++              "decode_transfer_queue_reqs": 0,
++              "decode_retracted_queue_reqs": 0,
++              "kv_transfer_speed_gb_s": 0.0,
++              "kv_transfer_latency_ms": 0.0
++            },
++            "queues": {
++              "waiting": 0,
++              "grammar": 0,
++              "paused": 0,
++              "retracted": 0,
++              "prealloc_ready": 0
++            }
++          }
++        ]
++      }
++    },
++    {
++      "time": 1789246783.7452714,
++      "load": {
++        "timestamp": "2026-09-12T20:59:43.746501+00:00",
++        "version": "0.5.19.dev20260908+g554f817948",
++        "accelerator": "AMD Instinct MI350X",
++        "num_accelerators": 1,
++        "loads": [
++          {
++            "timestamp": 1789246783.7206838,
++            "dp_rank": 0,
++            "num_running_reqs": 4,
++            "num_waiting_reqs": 0,
++            "num_waiting_uncached_tokens": 0,
++            "num_used_tokens": 352,
++            "num_total_tokens": 352,
++            "num_active_tokens": 352,
++            "num_prealloc_ready_tokens": 0,
++            "max_total_num_tokens": 512,
++            "max_running_requests": 4,
++            "token_usage": 0.6875,
++            "gen_throughput": 0.0,
++            "cache_hit_rate": 0.0,
++            "utilization": 0.0,
++            "total_prefill_uncached_tokens": 188,
++            "total_prefill_busy_us": 30949,
++            "decode_moments": [
++              19.0,
++              58.0,
++              41019.0,
++              214.0,
++              120753.0,
++              58.0
++            ],
++            "memory": {
++              "weight_gb": 0.033,
++              "kv_cache_gb": 0.0,
++              "graph_gb": 0.0,
++              "token_capacity": 512
++            },
++            "disaggregation": {
++              "mode": "null",
++              "prefill_bootstrap_queue_reqs": 0,
++              "prefill_inflight_queue_reqs": 0,
++              "decode_prealloc_queue_reqs": 0,
++              "decode_transfer_queue_reqs": 0,
++              "decode_retracted_queue_reqs": 0,
++              "kv_transfer_speed_gb_s": 0.0,
++              "kv_transfer_latency_ms": 0.0
++            },
++            "queues": {
++              "waiting": 0,
++              "grammar": 0,
++              "paused": 0,
++              "retracted": 0,
++              "prealloc_ready": 0
++            }
++          }
++        ]
++      }
++    }
++  ]
++}
+diff --git a/reports/j-17cb28bd130f/raw/gpu-serving/run-metadata.json b/reports/j-17cb28bd130f/raw/gpu-serving/run-metadata.json
+new file mode 100644
+index 0000000..fe8d1ee
+--- /dev/null
++++ b/reports/j-17cb28bd130f/raw/gpu-serving/run-metadata.json
+@@ -0,0 +1,52 @@
++{
++  "command": [
++    "/tmp/amdpilot-repo-j-17cb28bd130f/venv/bin/python",
++    "-m",
++    "sglang.launch_server",
++    "--model-path",
++    "/tmp/amdpilot-repo-j-17cb28bd130f/tiny-random-llama",
++    "--tokenizer-path",
++    "/tmp/amdpilot-repo-j-17cb28bd130f/tiny-random-llama",
++    "--served-model-name",
++    "tiny-random-llama",
++    "--host",
++    "127.0.0.1",
++    "--port",
++    "40527",
++    "--attention-backend",
++    "triton",
++    "--dtype",
++    "float16",
++    "--context-length",
++    "128",
++    "--max-total-tokens",
++    "512",
++    "--max-running-requests",
++    "4",
++    "--chunked-prefill-size",
++    "32",
++    "--max-prefill-tokens",
++    "128",
++    "--mem-fraction-static",
++    "0.01",
++    "--disable-cuda-graph"
++  ],
++  "port": 40527,
++  "ready": true,
++  "pid": 4663,
++  "probe_returncode": 0,
++  "probe_stdout": "{\n  \"requests\": [\n    {\n      \"index\": 0,\n      \"delay\": 0,\n      \"started\": 1789246783.4511096,\n      \"finished\": 1789246783.7461205,\n      \"usage\": {\n        \"prompt_tokens\": 72,\n        \"total_tokens\": 102,\n        \"completion_tokens\": 30,\n        \"prompt_tokens_details\": null,\n        \"reasoning_tokens\": 0\n      }\n    },\n    {\n      \"index\": 1,\n      \"delay\": 0.05,\n      \"started\": 1789246783.501624,\n      \"finished\": 1789246783.7479475,\n      \"usage\": {\n        \"prompt_tokens\": 72,\n        \"total_tokens\": 102,\n        \"completion_tokens\": 30,\n        \"prompt_tokens_details\": null,\n        \"reasoning_tokens\": 0\n      }\n    },\n    {\n      \"index\": 2,\n      \"delay\": 0.1,\n      \"started\": 1789246783.5518405,\n      \"finished\": 1789246783.7507703,\n      \"usage\": {\n        \"prompt_tokens\": 72,\n        \"total_tokens\": 102,\n        \"completion_tokens\": 30,\n        \"prompt_tokens_details\": null,\n        \"reasoning_tokens\": 0\n      }\n    },\n    {\n      \"index\": 3,\n      \"delay\": 0.2,\n      \"started\": 1789246783.652039,\n      \"finished\": 1789246783.750846,\n      \"usage\": {\n        \"prompt_tokens\": 72,\n        \"total_tokens\": 102,\n        \"completion_tokens\": 30,\n        \"prompt_tokens_details\": null,\n        \"reasoning_tokens\": 0\n      }\n    }\n  ],\n  \"load_samples\": [\n    {\n      \"time\": 1789246783.449377,\n      \"load\": {\n        \"timestamp\": \"2026-09-12T20:59:43.487348+00:00\",\n        \"version\": \"0.5.19.dev20260908+g554f817948\",\n        \"accelerator\": \"AMD Instinct MI350X\",\n        \"num_accelerators\": 1,\n        \"loads\": [\n          {\n            \"timestamp\": 1789246783.4858575,\n            \"dp_rank\": 0,\n            \"num_running_reqs\": 0,\n            \"num_waiting_reqs\": 0,\n            \"num_waiting_uncached_tokens\": 0,\n            \"num_used_tokens\": 0,\n            \"num_total_tokens\": 0,\n            \"num_active_tokens\": 0,\n            \"num_prealloc_ready_tokens\": 0,\n            \"max_total_num_tokens\": 512,\n            \"max_running_requests\": 4,\n            \"token_usage\": 0.0,\n            \"gen_throughput\": 0.0,\n            \"cache_hit_rate\": 0.0,\n            \"utilization\": 0.0,\n            \"total_prefill_uncached_tokens\": 0,\n            \"total_prefill_busy_us\": 0,\n            \"decode_moments\": [\n              6.0,\n              6.0,\n              14441.0,\n              6.0,\n              14441.0,\n              6.0\n            ],\n            \"memory\": {\n              \"weight_gb\": 0.033,\n              \"kv_cache_gb\": 0.0,\n              \"graph_gb\": 0.0,\n              \"token_capacity\": 512\n            },\n            \"disaggregation\": {\n              \"mode\": \"null\",\n              \"prefill_bootstrap_queue_reqs\": 0,\n              \"prefill_inflight_queue_reqs\": 0,\n              \"decode_prealloc_queue_reqs\": 0,\n              \"decode_transfer_queue_reqs\": 0,\n              \"decode_retracted_queue_reqs\": 0,\n              \"kv_transfer_speed_gb_s\": 0.0,\n              \"kv_transfer_latency_ms\": 0.0\n            },\n            \"queues\": {\n              \"waiting\": 0,\n              \"grammar\": 0,\n              \"paused\": 0,\n              \"retracted\": 0,\n              \"prealloc_ready\": 0\n            }\n          }\n        ]\n      }\n    },\n    {\n      \"time\": 1789246783.5382743,\n      \"load\": {\n        \"timestamp\": \"2026-09-12T20:59:43.539308+00:00\",\n        \"version\": \"0.5.19.dev20260908+g554f817948\",\n        \"accelerator\": \"AMD Instinct MI350X\",\n        \"num_accelerators\": 1,\n        \"loads\": [\n          {\n            \"timestamp\": 1789246783.5109088,\n            \"dp_rank\": 0,\n            \"num_running_reqs\": 1,\n            \"num_waiting_reqs\": 0,\n            \"num_waiting_uncached_tokens\": 0,\n            \"num_used_tokens\": 144,\n            \"num_total_tokens\": 144,\n            \"num_active_tokens\": 144,\n            \"num_prealloc_ready_tokens\": 0,\n            \"max_total_num_tokens\": 512,\n            \"max_running_requests\": 4,\n            \"token_usage\": 0.2812,\n            \"gen_throughput\": 0.0,\n            \"cache_hit_rate\": 0.0,\n            \"utilization\": 0.0,\n            \"total_prefill_uncached_tokens\": 39,\n            \"total_prefill_busy_us\": 10670,\n            \"decode_moments\": [\n              6.0,\n              6.0,\n              14441.0,\n              6.0,\n              14441.0,\n              6.0\n            ],\n            \"memory\": {\n              \"weight_gb\": 0.033,\n              \"kv_cache_gb\": 0.0,\n              \"graph_gb\": 0.0,\n              \"token_capacity\": 512\n            },\n            \"disaggregation\": {\n              \"mode\": \"null\",\n              \"prefill_bootstrap_queue_reqs\": 0,\n              \"prefill_inflight_queue_reqs\": 0,\n              \"decode_prealloc_queue_reqs\": 0,\n              \"decode_transfer_queue_reqs\": 0,\n              \"decode_retracted_queue_reqs\": 0,\n              \"kv_transfer_speed_gb_s\": 0.0,\n              \"kv_transfer_latency_ms\": 0.0\n            },\n            \"queues\": {\n              \"waiting\": 0,\n              \"grammar\": 0,\n              \"paused\": 0,\n              \"retracted\": 0,\n              \"prealloc_ready\": 0\n            }\n          }\n        ]\n      }\n    },\n    {\n      \"time\": 1789246783.5900557,\n      \"load\": {\n        \"timestamp\": \"2026-09-12T20:59:43.591105+00:00\",\n        \"version\": \"0.5.19.dev20260908+g554f817948\",\n        \"accelerator\": \"AMD Instinct MI350X\",\n        \"num_accelerators\": 1,\n        \"loads\": [\n          {\n            \"timestamp\": 1789246783.5109088,\n            \"dp_rank\": 0,\n            \"num_running_reqs\": 1,\n            \"num_waiting_reqs\": 0,\n            \"num_waiting_uncached_tokens\": 0,\n            \"num_used_tokens\": 144,\n            \"num_total_tokens\": 144,\n            \"num_active_tokens\": 144,\n            \"num_prealloc_ready_tokens\": 0,\n            \"max_total_num_tokens\": 512,\n            \"max_running_requests\": 4,\n            \"token_usage\": 0.2812,\n            \"gen_throughput\": 0.0,\n            \"cache_hit_rate\": 0.0,\n            \"utilization\": 0.0,\n            \"total_prefill_uncached_tokens\": 39,\n            \"total_prefill_busy_us\": 10670,\n            \"decode_moments\": [\n              6.0,\n              6.0,\n              14441.0,\n              6.0,\n              14441.0,\n              6.0\n            ],\n            \"memory\": {\n              \"weight_gb\": 0.033,\n              \"kv_cache_gb\": 0.0,\n              \"graph_gb\": 0.0,\n              \"token_capacity\": 512\n            },\n            \"disaggregation\": {\n              \"mode\": \"null\",\n              \"prefill_bootstrap_queue_reqs\": 0,\n              \"prefill_inflight_queue_reqs\": 0,\n              \"decode_prealloc_queue_reqs\": 0,\n              \"decode_transfer_queue_reqs\": 0,\n              \"decode_retracted_queue_reqs\": 0,\n              \"kv_transfer_speed_gb_s\": 0.0,\n              \"kv_transfer_latency_ms\": 0.0\n            },\n            \"queues\": {\n              \"waiting\": 0,\n              \"grammar\": 0,\n              \"paused\": 0,\n              \"retracted\": 0,\n              \"prealloc_ready\": 0\n            }\n          }\n        ]\n      }\n    },\n    {\n      \"time\": 1789246783.6419804,\n      \"load\": {\n        \"timestamp\": \"2026-09-12T20:59:43.643017+00:00\",\n        \"version\": \"0.5.19.dev20260908+g554f817948\",\n        \"accelerator\": \"AMD Instinct MI350X\",\n        \"num_accelerators\": 1,\n        \"loads\": [\n          {\n            \"timestamp\": 1789246783.6081033,\n            \"dp_rank\": 0,\n            \"num_running_reqs\": 2,\n            \"num_waiting_reqs\": 0,\n            \"num_waiting_uncached_tokens\": 0,\n            \"num_used_tokens\": 146,\n            \"num_total_tokens\": 146,\n            \"num_active_tokens\": 146,\n            \"num_prealloc_ready_tokens\": 0,\n            \"max_total_num_tokens\": 512,\n            \"max_running_requests\": 4,\n            \"token_usage\": 0.2852,\n            \"gen_throughput\": 0.0,\n            \"cache_hit_rate\": 0.0,\n            \"utilization\": 0.0,\n            \"total_prefill_uncached_tokens\": 71,\n            \"total_prefill_busy_us\": 13188,\n            \"decode_moments\": [\n              6.0,\n              6.0,\n              14441.0,\n              6.0,\n              14441.0,\n              6.0\n            ],\n            \"memory\": {\n              \"weight_gb\": 0.033,\n              \"kv_cache_gb\": 0.0,\n              \"graph_gb\": 0.0,\n              \"token_capacity\": 512\n            },\n            \"disaggregation\": {\n              \"mode\": \"null\",\n              \"prefill_bootstrap_queue_reqs\": 0,\n              \"prefill_inflight_queue_reqs\": 0,\n              \"decode_prealloc_queue_reqs\": 0,\n              \"decode_transfer_queue_reqs\": 0,\n              \"decode_retracted_queue_reqs\": 0,\n              \"kv_transfer_speed_gb_s\": 0.0,\n              \"kv_transfer_latency_ms\": 0.0\n            },\n            \"queues\": {\n              \"waiting\": 0,\n              \"grammar\": 0,\n              \"paused\": 0,\n              \"retracted\": 0,\n              \"prealloc_ready\": 0\n            }\n          }\n        ]\n      }\n    },\n    {\n      \"time\": 1789246783.6937275,\n      \"load\": {\n        \"timestamp\": \"2026-09-12T20:59:43.694595+00:00\",\n        \"version\": \"0.5.19.dev20260908+g554f817948\",\n        \"accelerator\": \"AMD Instinct MI350X\",\n        \"num_accelerators\": 1,\n        \"loads\": [\n          {\n            \"timestamp\": 1789246783.6908414,\n            \"dp_rank\": 0,\n            \"num_running_reqs\": 4,\n            \"num_waiting_reqs\": 0,\n            \"num_waiting_uncached_tokens\": 0,\n            \"num_used_tokens\": 292,\n            \"num_total_tokens\": 292,\n            \"num_active_tokens\": 292,\n            \"num_prealloc_ready_tokens\": 0,\n            \"max_total_num_tokens\": 512,\n            \"max_running_requests\": 4,\n            \"token_usage\": 0.5703,\n            \"gen_throughput\": 0.0,\n            \"cache_hit_rate\": 0.0,\n            \"utilization\": 0.0,\n            \"total_prefill_uncached_tokens\": 181,\n            \"total_prefill_busy_us\": 28290,\n            \"decode_moments\": [\n              6.0,\n              6.0,\n              14441.0,\n              6.0,\n              14441.0,\n              6.0\n            ],\n            \"memory\": {\n              \"weight_gb\": 0.033,\n              \"kv_cache_gb\": 0.0,\n              \"graph_gb\": 0.0,\n              \"token_capacity\": 512\n            },\n            \"disaggregation\": {\n              \"mode\": \"null\",\n              \"prefill_bootstrap_queue_reqs\": 0,\n              \"prefill_inflight_queue_reqs\": 0,\n              \"decode_prealloc_queue_reqs\": 0,\n              \"decode_transfer_queue_reqs\": 0,\n              \"decode_retracted_queue_reqs\": 0,\n              \"kv_transfer_speed_gb_s\": 0.0,\n              \"kv_transfer_latency_ms\": 0.0\n            },\n            \"queues\": {\n              \"waiting\": 0,\n              \"grammar\": 0,\n              \"paused\": 0,\n              \"retracted\": 0,\n              \"prealloc_ready\": 0\n            }\n          }\n        ]\n      }\n    },\n    {\n      \"time\": 1789246783.7452714,\n      \"load\": {\n        \"timestamp\": \"2026-09-12T20:59:43.746501+00:00\",\n        \"version\": \"0.5.19.dev20260908+g554f817948\",\n        \"accelerator\": \"AMD Instinct MI350X\",\n        \"num_accelerators\": 1,\n        \"loads\": [\n          {\n            \"timestamp\": 1789246783.7206838,\n            \"dp_rank\": 0,\n            \"num_running_reqs\": 4,\n            \"num_waiting_reqs\": 0,\n            \"num_waiting_uncached_tokens\": 0,\n            \"num_used_tokens\": 352,\n            \"num_total_tokens\": 352,\n            \"num_active_tokens\": 352,\n            \"num_prealloc_ready_tokens\": 0,\n            \"max_total_num_tokens\": 512,\n            \"max_running_requests\": 4,\n            \"token_usage\": 0.6875,\n            \"gen_throughput\": 0.0,\n            \"cache_hit_rate\": 0.0,\n            \"utilization\": 0.0,\n            \"total_prefill_uncached_tokens\": 188,\n            \"total_prefill_busy_us\": 30949,\n            \"decode_moments\": [\n              19.0,\n              58.0,\n              41019.0,\n              214.0,\n              120753.0,\n              58.0\n            ],\n            \"memory\": {\n              \"weight_gb\": 0.033,\n              \"kv_cache_gb\": 0.0,\n              \"graph_gb\": 0.0,\n              \"token_capacity\": 512\n            },\n            \"disaggregation\": {\n              \"mode\": \"null\",\n              \"prefill_bootstrap_queue_reqs\": 0,\n              \"prefill_inflight_queue_reqs\": 0,\n              \"decode_prealloc_queue_reqs\": 0,\n              \"decode_transfer_queue_reqs\": 0,\n              \"decode_retracted_queue_reqs\": 0,\n              \"kv_transfer_speed_gb_s\": 0.0,\n              \"kv_transfer_latency_ms\": 0.0\n            },\n            \"queues\": {\n              \"waiting\": 0,\n              \"grammar\": 0,\n              \"paused\": 0,\n              \"retracted\": 0,\n              \"prealloc_ready\": 0\n            }\n          }\n        ]\n      }\n    }\n  ]\n}\n",
++  "probe_stderr": "",
++  "returncode": -9,
++  "elapsed_seconds": 46.529,
++  "reaped_descendants": [
++    {
++      "pid": 4844,
++      "wait_status": 9
++    },
++    {
++      "pid": 4846,
++      "wait_status": 15
++    }
++  ]
++}
+diff --git a/reports/j-17cb28bd130f/raw/gpu-serving/server.log b/reports/j-17cb28bd130f/raw/gpu-serving/server.log
+new file mode 100644
+index 0000000..7b4103c
+--- /dev/null
++++ b/reports/j-17cb28bd130f/raw/gpu-serving/server.log
+@@ -0,0 +1,84 @@
++/job/repo/python/sglang/launch_server.py:63: UserWarning: 'python -m sglang.launch_server' is still supported, but 'sglang serve' is the recommended entrypoint.
++  Example: sglang serve --model-path <model> [options]
++  warnings.warn(
++[1;33m'--disable-cuda-graph' is deprecated and will be removed in a future release. Use '--cuda-graph-backend-{decode,prefill}=disabled' instead.[0m
++[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
++[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-17cb28bd130f/cache/aiter/module_aiter_core.so
++[2026-09-12 20:59:15] server_args={'model_path': '/tmp/amdpilot-repo-j-17cb28bd130f/tiny-random-llama', 'tokenizer_path': '/tmp/amdpilot-repo-j-17cb28bd130f/tiny-random-llama', 'tokenizer_mode': 'auto', 'tokenizer_backend': 'huggingface', 'tokenizer_worker_num': 1, 'detokenizer_worker_num': 1, 'skip_tokenizer_init': False, 'load_format': 'auto', 'model_loader_extra_config': '{}', 'trust_remote_code': False, 'context_length': 128, 'is_embedding': False, 'enable_multimodal': None, 'revision': None, 'model_impl': 'auto', 'model_config_parser': 'auto', 'json_model_override_args': '{}', 'dtype': 'float16', 'quantization': None, 'quantization_param_path': None, 'kv_cache_dtype': 'auto', 'enable_fp32_lm_head': False, 'modelopt_quant': None, 'modelopt_checkpoint_restore_path': None, 'modelopt_checkpoint_save_path': None, 'modelopt_export_path': None, 'quantize_and_serve': False, 'rl_quant_profile': None, 'enable_tf32_matmul': False, 'mem_fraction_static': 0.01, 'max_running_requests': 4, 'max_queued_requests': None, 'max_total_tokens': 512, 'chunked_prefill_size': 32, 'prefill_decode_interval': 0, 'enable_dynamic_chunking': False, 'max_prefill_tokens': 128, 'prefill_max_requests': None, 'schedule_policy': 'fcfs', 'enable_priority_scheduling': False, 'disable_priority_preemption': False, 'default_priority_value': None, 'abort_on_priority_when_disabled': False, 'schedule_low_priority_values_first': False, 'priority_scheduling_preemption_threshold': 10, 'retraction_policy': 'length', 'schedule_conservativeness': 1.0, 'page_size': 1, 'c128_page_size': 16, 'swa_full_tokens_ratio': 0.8, 'disable_hybrid_swa_memory': False, 'radix_eviction_policy': 'lru', 'radix_eviction_policy_config': None, 'prefill_only_disable_kv_cache': False, 'disable_radix_cache': False, 'enable_page_major_kv_layout': False, 'enable_unified_memory': False, 'disable_chunked_prefix_cache': False, 'disable_overlap_schedule': False, 'num_continuous_decode_steps': 1, 'scheduler_recv_interval': 1, 'enable_mixed_chunk': False, 'nccl_port': None, 'dist_timeout': None, 'dist_init_addr': None, 'gated_launch_port': None, 'nnodes': 1, 'node_rank': 0, 'tp_size': 1, 'dcp_size': 1, 'pp_size': 1, 'pp_max_micro_batch_size': None, 'pp_async_batch_depth': 0, 'dp_size': 1, 'load_balance_method': 'round_robin', 'attn_cp_size': 1, 'moe_dp_size': 1, 'dwdp_size': 1, 'dcp_comm_backend': 'ag_rs', 'dcp_replicate_q_proj': None, 'enable_prefill_cp': False, 'cp_strategy': None, 'enable_dsa_cache_layer_split': False, 'enable_cp_decode_attn_tp': False, 'enable_dp_attention': False, 'enable_dp_attention_local_control_broadcast': False, 'enable_dp_lm_head': False, 'enable_tp_lm_head_all_to_all': False, 'enable_attn_tp_input_scattered': False, 'enable_shared_experts_attn_tp': False, 'enable_dense_mlp_attn_tp': False, 'enable_layernorm_sp': False, 'disable_attn_tp_gather': False, 'enable_p2p_check': False, 'device': 'cuda', 'base_gpu_id': 0, 'gpu_id_step': 1, 'random_seed': 897650785, 'mlx_enable_sampling': False, 'watchdog_timeout': 300, 'soft_watchdog_timeout': None, 'sleep_on_idle': False, 'use_ray': False, 'custom_sigquit_handler': None, 'numa_node': None, 'gc_threshold': None, 'host': '127.0.0.1', 'port': 40527, 'fastapi_root_path': '', 'smg_grpc_mode': False, 'grpc_mode': False, 'grpc_port': None, 'grpc_worker_threads': 4, 'sidecar': None, 'sidecar_args': None, 'skip_server_warmup': False, 'warmups': None, 'enable_http2': False, 'http2_max_concurrent_streams': 200, 'http2_initial_connection_window_size': 1048576, 'ssl_keyfile': None, 'ssl_certfile': None, 'ssl_ca_certs': None, 'ssl_keyfile_password': None, 'enable_ssl_refresh': False, 'api_key': None, 'admin_api_key': None, 'served_model_name': 'tiny-random-llama', 'weight_version': 'default', 'chat_template': None, 'hf_chat_template_name': None, 'completion_template': None, 'file_storage_path': 'sglang_storage', 'enable_cache_report': False, 'return_input_ids': False, 'return_output_ids': False, 'reasoning_parser': None, 'default_chat_template_kwargs': None, 'strip_thinking_cache': False, 'enable_strict_thinking': False, 'tool_call_parser': None, 'tool_server': None, 'sampling_defaults': 'model', 'asr_max_buffer_seconds': 60, 'asr_max_concurrent_sessions': 32, 'preferred_sampling_params': None, 'allow_auto_truncate': False, 'stream_interval': 1, 'batch_notify_size': 16, 'stream_response_default_include_usage': False, 'incremental_streaming_output': False, 'enable_streaming_session': False, 'enable_session_radix_cache': False, 'log_level': 'info', 'log_level_http': None, 'log_requests': False, 'log_requests_level': 2, 'log_requests_format': 'text', 'log_requests_target': None, 'uvicorn_access_log_exclude_prefixes': [], 'crash_dump_folder': None, 'show_time_cost': False, 'enable_metrics': False, 'smg_http_sidecar_port': None, 'enable_mfu_metrics': False, 'enable_metrics_for_all_schedulers': False, 'load_snapshot_publish_interval': 15, 'tokenizer_metrics_custom_labels_header': 'x-custom-labels', 'tokenizer_metrics_allowed_custom_labels': None, 'extra_metric_labels': None, 'bucket_time_to_first_token': None, 'bucket_inter_token_latency': None, 'bucket_e2e_request_latency': None, 'prompt_tokens_buckets': None, 'generation_tokens_buckets': None, 'gc_warning_threshold_secs': 0.0, 'decode_log_interval': 40, 'enable_request_time_stats_logging': False, 'kv_events_config': None, 'load_publish_endpoint': None, 'enable_forward_pass_metrics': False, 'forward_pass_metrics_worker_id': '', 'forward_pass_metrics_ipc_name': None, 'enable_trace': False, 'trace_modules': 'request', 'otlp_traces_endpoint': 'localhost:4317', 'export_metrics_to_file': False, 'export_metrics_to_file_dir': None, 'stat_loggers': None, 'constrained_json_whitespace_pattern': None, 'constrained_json_disable_any_whitespace': False, 'attention_backend': 'triton', 'decode_attention_backend': None, 'enable_lean_attention': None, 'prefill_attention_backend': None, 'sampling_backend': 'pytorch', 'grammar_backend': 'xgrammar', 'radix_cache_backend': None, 'mm_attention_backend': None, 'fp8_gemm_runner_backend': 'auto', 'fp4_gemm_runner_backend': 'auto', 'bf16_gemm_backend': 'auto', 'dsa_prefill_backend': None, 'dsv4_prefill_backend': 'auto', 'dsa_decode_backend': None, 'dsa_paged_mqa_logits_backend': 'auto', 'dsa_topk_backend': 'sgl-kernel', 'disable_flashinfer_autotune': False, 'flashinfer_autotune_skip_ops': None, 'mamba_backend': 'triton', 'cuda_graph_config': {'decode': {'backend': 'disabled', 'max_bs': 512, 'bs': [1, 2, 4, 8, 12, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128, 136, 144, 152, 160, 168, 176, 184, 192, 200, 208, 216, 224, 232, 240, 248, 256, 272, 288, 304, 320, 336, 352, 368, 384, 400, 416, 432, 448, 464, 480, 496, 512], 'tc_compiler': 'eager', 'full_prefill_max_req': None, 'full_prefill_prefix_chunk_tokens': None}, 'prefill': {'backend': 'disabled', 'max_bs': 32, 'bs': [4, 8, 12, 16, 20, 24, 28, 32], 'tc_compiler': 'eager', 'full_prefill_max_req': None, 'full_prefill_prefix_chunk_tokens': None}}, 'cuda_graph_backend_decode': None, 'cuda_graph_backend_prefill': None, 'cuda_graph_max_bs_decode': None, 'cuda_graph_max_bs_prefill': None, 'cuda_graph_bs_decode': None, 'cuda_graph_bs_prefill': None, 'cuda_graph_tc_compiler': None, 'disable_prefill_cuda_graph': False, 'disable_decode_cuda_graph': False, 'disable_cuda_graph': True, 'disable_cuda_graph_padding': False, 'enable_profile_cuda_graph': False, 'enable_cudagraph_gc': False, 'debug_cuda_graph': False, 'enable_layerwise_nvtx_marker': False, 'enable_nccl_nvls': False, 'enable_symm_mem': False, 'triton_attention_reduce_in_fp32': False, 'triton_attention_num_kv_splits': 16, 'triton_attention_split_tile_size': None, 'flashinfer_mla_disable_ragged': False, 'enable_fused_qk_norm_rope': False, 'enable_precise_embedding_interpolation': False, 'enable_fused_moe_sum_all_reduce': False, 'enable_deepseek_v4_fp4_indexer': False, 'disable_custom_all_reduce': False, 'enable_mscclpp': False, 'enable_torch_symm_mem': False, 'enable_scattered_sconv': False, 'pre_warm_nccl': False, 'enable_quant_communications': False, 'enable_flashinfer_allreduce_fusion': False, 'enforce_disable_flashinfer_allreduce_fusion': False, 'flashinfer_allreduce_fusion_backend': None, 'enable_aiter_allreduce_fusion': False, 'enable_torch_compile': False, 'enable_torch_compile_debug_mode': False, 'torch_compile_max_bs': 32, 'speculative_algorithm': None, 'uno_lora_path': None, 'speculative_draft_model_path': None, 'speculative_draft_model_revision': None, 'speculative_draft_load_format': None, 'speculative_num_steps': None, 'speculative_eagle_topk': None, 'speculative_num_draft_tokens': None, 'speculative_dflash_block_size': None, 'speculative_dspark_block_size': None, 'speculative_dspark_sps_table_path': None, 'speculative_dspark_confidence_sts_path': None, 'speculative_dspark_align_verify_tokens_to_graph_tier': False, 'speculative_accept_threshold_single': 1.0, 'speculative_accept_threshold_acc': 1.0, 'speculative_use_rejection_sampling': False, 'speculative_token_map': None, 'speculative_attention_mode': 'prefill', 'speculative_draft_attention_backend': None, 'speculative_dsa_topk_backend': 'sgl-kernel', 'speculative_draft_kv_cache_dtype': None, 'speculative_draft_window_size': None, 'speculative_moe_runner_backend': 'auto', 'speculative_moe_a2a_backend': None, 'speculative_draft_model_quantization': None, '_speculative_draft_quantization_explicitly_set': False, 'speculative_skip_dp_mlp_sync': False, 'enable_multi_layer_eagle': False, 'speculative_adaptive': False, 'speculative_adaptive_config': None, 'decoupled_spec_bind_endpoint': None, 'decoupled_spec_connect_endpoints': None, 'decoupled_spec_rank': None, 'decoupled_spec_role': 'null', 'spec_trace_dir': None, 'speculative_ngram_min_bfs_breadth': 1, 'speculative_ngram_max_bfs_breadth': 10, 'speculative_ngram_match_type': 'BFS', 'speculative_ngram_max_trie_depth': 18, 'speculative_ngram_capacity': 10000000, 'speculative_ngram_external_corpus_path': None, 'speculative_ngram_external_sam_budget': 0, 'speculative_ngram_external_corpus_max_tokens': 10000000, 'ep_size': 1, 'moe_a2a_backend': 'none', 'enable_w4a4_mxfp4_megamoe': False, 'deepep_v2_mode': 'direct', 'moe_runner_backend': 'auto', 'flashinfer_mxfp4_moe_precision': 'default', 'deepep_mode': 'auto', 'fuseep_mode': 2, 'deepep_dispatcher_output_dtype': 'auto', 'ep_num_redundant_experts': 0, 'ep_dispatch_algorithm': None, 'init_expert_location': 'trivial', 'enable_eplb': False, 'eplb_algorithm': 'auto', 'eplb_rebalance_num_iterations': 1000, 'eplb_rebalance_layers_per_chunk': None, 'eplb_min_rebalancing_utilization_threshold': 1.0, 'expert_distribution_recorder_mode': None, 'expert_distribution_recorder_buffer_size': 1000, 'expert_balancedness_report_mode': 'off', 'deepep_config': None, 'moe_dense_tp_size': None, 'elastic_ep_backend': None, 'enable_elastic_expert_backup': False, 'mooncake_ib_device': None, 'enable_waterfill': False, 'ep_join_mode': None, 'ep_join_rank_offset': 0, 'elastic_ep_initial_size': None, 'max_ep_size': None, 'elastic_ep_scale_timeout': 600, 'elastic_ep_rejoin': False, 'disable_flashinfer_cutlass_moe_fp4_allgather': False, 'disable_shared_experts_fusion': False, 'enforce_shared_experts_fusion': False, 'max_mamba_cache_size': None, 'mamba_ssm_dtype': None, 'mamba_max_states_per_path': -1, 'enable_mamba_cache_stochastic_rounding': False, 'mamba_cache_philox_rounds': 0, 'mamba_full_memory_ratio': 0.9, 'mamba_radix_cache_strategy': 'auto', 'uses_mamba_radix_cache': False, 'mamba_track_interval': 256, 'enable_int8_mamba_checkpoint': False, 'int8_mamba_ckpt_size': None, 'linear_attn_backend': 'triton', 'linear_attn_decode_backend': None, 'linear_attn_prefill_backend': None, 'linear_attn_verify_backend': None, 'enable_linear_replayssm': False, 'linear_replayssm_cache_len': 16, 'enable_linear_replayssm_spec': False, 'enable_hierarchical_cache': False, 'hicache_host_memory_mode': 'cache', 'hicache_ratio': 2.0, 'hicache_size': 0, 'hicache_write_policy': 'write_through', 'hicache_io_backend': 'kernel', 'hicache_mem_layout': 'page_first', 'hicache_storage_backend': None, 'hicache_storage_prefetch_policy': 'timeout', 'hicache_storage_backend_extra_config': None, 'hicache_storage_prefetch_retry_poll_interval': 0, 'hicache_storage_prefetch_retry_max_attempts': 4, 'enable_unified_cache_external_linker': False, 'unified_cache_external_linker_backend': 'mooncake', 'enable_hisparse': False, 'hisparse_config': None, 'enable_broadcast_mm_inputs_process': False, 'enable_prefix_mm_cache': False, 'mm_enable_dp_encoder': False, 'mm_process_config': {}, 'mm_processor_worker_num': 0, 'mm_io_worker_num': 0, 'allowed_media_domains': [], 'media_url_max_file_size_mb': 64, 'mm_preprocess_cache_size_mb': None, 'trust_mm_content_hashes': False, 'limit_mm_data_per_request': None, 'enable_mm_global_cache': False, 'image_processor_backend': 'auto', 'mm_global_cache_backend': 'mooncake', 'disable_fast_image_processor': False, 'mm_feature_transport': 'cpu', 'keep_mm_feature_on_device': False, 'enable_lora': None, 'enable_lora_overlap_loading': None, 'max_lora_rank': None, 'lora_target_modules': None, 'lora_paths': None, 'max_loaded_loras': None, 'max_loras_per_batch': 8, 'lora_eviction_policy': 'lru', 'lora_backend': 'csgmv', 'max_lora_chunk_size': 16, 'experts_shared_outer_loras': None, 'lora_use_virtual_experts': False, 'lora_strict_loading': False, 'lora_drain_wait_threshold': 0.0, 'enable_two_batch_overlap': False, 'enable_single_batch_overlap': False, 'tbo_token_distribution_threshold': 0.48, 'cpu_offload_gb': 0, 'offload_group_size': -1, 'offload_num_in_group': 1, 'offload_prefetch_step': 1, 'offload_mode': 'cpu', 'enable_lmcache': False, 'lmcache_config_file': None, 'enable_flexkv': False, 'flexkv_config_file': None, 'kt_weight_path': None, 'kt_method': 'AMXINT4', 'kt_cpuinfer': None, 'kt_threadpool_count': 2, 'kt_num_gpu_experts': None, 'kt_max_deferred_experts_per_token': None, 'dllm_algorithm': None, 'dllm_algorithm_config': None, 'dllm_fdfo': True, 'disaggregation_mode': 'null', 'disaggregation_transfer_backend': 'mooncake', 'disaggregation_bootstrap_port': 8998, 'disaggregation_ib_device': None, 'disaggregation_decode_enable_radix_cache': False, 'disaggregation_decode_enable_offload_kvcache': False, 'disaggregation_decode_retraction_backup': None, 'num_reserved_decode_tokens': 512, 'disaggregation_decode_extra_slots': None, 'disaggregation_decode_polling_interval': 1, 'optimistic_prefill_attempts': 0, 'encoder_only': False, 'language_only': False, 'language_model_only': False, 'encoder_transfer_backend': 'zmq_to_scheduler', 'encoder_urls': [], 'encoder_bootstrap_port': 8997, 'encoder_register_urls': [], 'enable_adaptive_dispatch_to_encoder': False, 'enable_pdmux': False, 'pdmux_config_path': None, 'sm_group_num': 8, 'startup_weight_load_mode': 'serial', 'custom_weight_loader': [], 'weight_loader_disable_mmap': False, 'weight_loader_prefetch_checkpoints': False, 'weight_loader_prefetch_num_threads': 4, 'weight_loader_drop_cache_after_load': False, 'remote_instance_weight_loader_seed_instance_ip': None, 'remote_instance_weight_loader_seed_instance_service_port': None, 'remote_instance_weight_loader_send_weights_group_ports': None, 'remote_instance_weight_loader_backend': 'nccl', 'remote_instance_weight_loader_start_seed_via_transfer_engine': False, 'engine_info_bootstrap_port': 6789, 'modelexpress_config': None, 'download_dir': None, 'model_checksum': None, 'delete_ckpt_after_loading': False, 'decrypted_config_file': None, 'decrypted_draft_config_file': None, 'checkpoint_engine_wait_weights_before_ready': False, 'enable_prefill_delayer': False, 'prefill_delayer_max_delay_passes': 30, 'prefill_delayer_token_usage_low_watermark': None, 'prefill_delayer_forward_passes_buckets': None, 'prefill_delayer_wait_seconds_buckets': None, 'prefill_delayer_queue_min_ratio': None, 'prefill_delayer_max_delay_ms': None, 'min_free_slots_delay': None, 'enable_deterministic_inference': False, 'rl_on_policy_target': None, 'kv_canary': 'none', 'kv_canary_real_data': 'none', 'kv_canary_sweep_interval': 0, 'enable_dynamic_batch_tokenizer': False, 'dynamic_batch_tokenizer_batch_size': 32, 'dynamic_batch_tokenizer_batch_timeout': 0.002, 'enable_tokenizer_batch_encode': False, 'disable_tokenizer_batch_decode': False, 'debug_tensor_dump_output_folder': None, 'debug_tensor_dump_layers': None, 'debug_tensor_dump_input_file': None, 'enable_memory_saver': False, 'enable_weights_cpu_backup': False, 'enable_draft_weights_cpu_backup': False, 'enable_custom_logit_processor': False, 'enable_return_hidden_states': False, 'return_hidden_states_mode': None, 'enable_return_routed_experts': False, 'enable_return_indexer_topk': False, 'sampling_mask_max_tokens': 4096, 'disable_outlines_disk_cache': False, 'enable_mis': False, 'weight_cache_mode': 'off', 'weight_cache_socket': None, 'weight_cache_timeout': 1800, 'forward_hooks': None, 'msprobe_dump_config': None, 'ple_offload_embedding': None, 'speculative_domino_candidate_pool_size': 2048, 'flashinfer_a2a_dispatch_type': None, 'dsv4_attn_backend': 'auto'}
++[2026-09-12 20:59:15] No HuggingFace chat template found
++[2026-09-12 20:59:15] No chat template found, defaulting to 'string' content format
++[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
++[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-17cb28bd130f/cache/aiter/module_aiter_core.so
++[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
++[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-17cb28bd130f/cache/aiter/module_aiter_core.so
++[2026-09-12 20:59:26] Init torch distributed begin.
++[2026-09-12 20:59:26] Init torch distributed ends. elapsed=0.29 s, mem usage=0.15 GB
++/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
++  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
++[2026-09-12 20:59:27] Ignore import error when loading sglang.srt.models.inkling: No module named 'cutlass'
++[2026-09-12 20:59:28] Load weight begin. avail mem=251.22 GB
++Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:00<00:00, 1008.25it/s]
++[2026-09-12 20:59:28] Load weight end. elapsed=0.46 s, type=LlamaForCausalLM, avail mem=251.19 GB, mem usage=0.03 GB.
++[2026-09-12 20:59:29] KV Cache is allocated. dtype: torch.float16, #tokens: 512, K size: 0.00 GB, V size: 0.00 GB
++[2026-09-12 20:59:29] Memory pool end. avail mem=251.19 GB
++[2026-09-12 20:59:30] Disable prefill CUDA graph because cuda_graph_config resolved prefill.backend='disabled' (e.g. via --cuda-graph-backend-prefill=disabled or auto-disable rules).
++[2026-09-12 20:59:30] max_total_num_tokens=512, chunked_prefill_size=32, max_prefill_tokens=128, max_running_requests=4, context_len=128, available_gpu_mem=250.89 GB
++[2026-09-12 20:59:30] Init Unified Radix Cache. Components: (<ComponentType.FULL: 0>,). Tree Core: UnifiedTreeCore
++[2026-09-12 20:59:30] Tree cache initialized: source=default impl=UnifiedRadixCache hybrid_swa=False hybrid_ssm=False hicache_attached=False streaming_wrapped=False
++[20:59:30] /project/cpp/tokenizer_info.cc:144: Warning: Vocab type detection failed: (hf_tokenizer_obj.count("decoder") && hf_tokenizer_obj.at("decoder").is<picojson::object>()) is false: Decoder field is not found in tokenizer.json. Using RAW VocabType by default.
++[2026-09-12 20:59:30] Engine startup timings (s): load_weight=0.46, kv_cache_allocation=0.44, scheduler_e2e=4.20, cuda_graph={prefill=0.00, decode=0.00, target_verify=0.00, draft_prefill=0.00, draft_decode=0.00, draft_extend=0.00}, tokenizer_e2e=15.42
++[2026-09-12 20:59:30] INFO:     Started server process [4663]
++[2026-09-12 20:59:30] INFO:     Waiting for application startup.
++[2026-09-12 20:59:30] INFO:     Application startup complete.
++[2026-09-12 20:59:30] INFO:     Uvicorn running on http://127.0.0.1:40527 (Press CTRL+C to quit)
++[2026-09-12 20:59:31] INFO:     127.0.0.1:38770 - "GET /health HTTP/1.1" 503 Service Unavailable
++[2026-09-12 20:59:31] INFO:     127.0.0.1:38780 - "GET /model_info HTTP/1.1" 200 OK
++[2026-09-12 20:59:32] INFO:     127.0.0.1:38792 - "GET /health HTTP/1.1" 503 Service Unavailable
++[2026-09-12 20:59:33] INFO:     127.0.0.1:38804 - "GET /health HTTP/1.1" 503 Service Unavailable
++[2026-09-12 20:59:34] INFO:     127.0.0.1:38814 - "GET /health HTTP/1.1" 503 Service Unavailable
++[2026-09-12 20:59:35] INFO:     127.0.0.1:40720 - "GET /health HTTP/1.1" 503 Service Unavailable
++[2026-09-12 20:59:36] INFO:     127.0.0.1:40728 - "GET /health HTTP/1.1" 503 Service Unavailable
++[2026-09-12 20:59:37] INFO:     127.0.0.1:40732 - "GET /health HTTP/1.1" 503 Service Unavailable
++/opt/venv/lib/python3.12/site-packages/triton/backends/amd/compiler.py:100: UserWarning: kpack is deprecated starting from gfx950 and will be removed in later releases. So for now kpack = 2 will be overwritten to 1 to make transitioning easier.
++  warnings.warn(
++[2026-09-12 20:59:38] INFO:     127.0.0.1:40734 - "GET /health HTTP/1.1" 503 Service Unavailable
++[2026-09-12 20:59:39] INFO:     127.0.0.1:40750 - "GET /health HTTP/1.1" 503 Service Unavailable
++[2026-09-12 20:59:40] INFO:     127.0.0.1:40760 - "GET /health HTTP/1.1" 503 Service Unavailable
++[2026-09-12 20:59:41] INFO:     127.0.0.1:40774 - "GET /health HTTP/1.1" 503 Service Unavailable
++/opt/venv/lib/python3.12/site-packages/triton/backends/amd/compiler.py:100: UserWarning: kpack is deprecated starting from gfx950 and will be removed in later releases. So for now kpack = 2 will be overwritten to 1 to make transitioning easier.
++  warnings.warn(
++[2026-09-12 20:59:41] Prefill batch, #new-seq: 1, #new-token: 6, #cached-token: 0, token usage: 0.01, #running-req: 0, #queue-req: 0, #pending-token: 0, cuda graph: False, input throughput (token/s): 0.52
++[2026-09-12 20:59:41] INFO:     127.0.0.1:38782 - "POST /generate HTTP/1.1" 200 OK
++[2026-09-12 20:59:42] INFO:     127.0.0.1:40778 - "POST /freeze_gc HTTP/1.1" 200 OK
++[2026-09-12 20:59:42] The server is fired up and ready to roll!
++[2026-09-12 20:59:42] Prefill batch, #new-seq: 1, #new-token: 1, #cached-token: 0, token usage: 0.00, #running-req: 0, #queue-req: 0, #pending-token: 0, cuda graph: False, input throughput (token/s): 2.23
++[2026-09-12 20:59:43] INFO:     127.0.0.1:40792 - "GET /health HTTP/1.1" 200 OK
++[2026-09-12 20:59:43] INFO:     127.0.0.1:40818 - "GET /v1/loads HTTP/1.1" 200 OK
++[2026-09-12 20:59:43] Prefill batch, #new-seq: 1, #new-token: 32, #cached-token: 1, token usage: 0.13, #running-req: 0, #queue-req: 0, #pending-token: 39, cuda graph: False, input throughput (token/s): 29.30
++[2026-09-12 20:59:43] Prefill batch, #new-seq: 1, #new-token: 32, #cached-token: 0, token usage: 0.14, #running-req: 0, #queue-req: 0, #pending-token: 7, cuda graph: False, input throughput (token/s): 9783.63
++[2026-09-12 20:59:43] Prefill batch, #new-seq: 1, #new-token: 7, #cached-token: 0, token usage: 0.14, #running-req: 0, #queue-req: 0, #pending-token: 0, cuda graph: False, input throughput (token/s): 2774.59
++[2026-09-12 20:59:43] Prefill batch, #new-seq: 1, #new-token: 32, #cached-token: 1, token usage: 0.27, #running-req: 1, #queue-req: 0, #pending-token: 39, cuda graph: False, input throughput (token/s): 6125.75
++[2026-09-12 20:59:43] Prefill batch, #new-seq: 1, #new-token: 32, #cached-token: 0, token usage: 0.28, #running-req: 1, #queue-req: 0, #pending-token: 7, cuda graph: False, input throughput (token/s): 11993.84
++[2026-09-12 20:59:43] INFO:     127.0.0.1:40836 - "GET /v1/loads HTTP/1.1" 200 OK
++[2026-09-12 20:59:43] INFO:     127.0.0.1:40842 - "GET /v1/loads HTTP/1.1" 200 OK
++[2026-09-12 20:59:43] Prefill batch, #new-seq: 1, #new-token: 7, #cached-token: 0, token usage: 0.29, #running-req: 1, #queue-req: 0, #pending-token: 0, cuda graph: False, input throughput (token/s): 71.69
++[2026-09-12 20:59:43] INFO:     127.0.0.1:40850 - "GET /v1/loads HTTP/1.1" 200 OK
++[2026-09-12 20:59:43] Prefill batch, #new-seq: 1, #new-token: 32, #cached-token: 1, token usage: 0.41, #running-req: 2, #queue-req: 1, #pending-token: 39, cuda graph: False, input throughput (token/s): 466.85
++[2026-09-12 20:59:43] Prefill batch, #new-seq: 1, #new-token: 32, #cached-token: 0, token usage: 0.42, #running-req: 2, #queue-req: 1, #pending-token: 79, cuda graph: False, input throughput (token/s): 11705.68
++[2026-09-12 20:59:43] Prefill batch, #new-seq: 1, #new-token: 7, #cached-token: 0, token usage: 0.49, #running-req: 2, #queue-req: 0, #pending-token: 72, cuda graph: False, input throughput (token/s): 2421.36
++[2026-09-12 20:59:43] Prefill batch, #new-seq: 1, #new-token: 32, #cached-token: 1, token usage: 0.55, #running-req: 3, #queue-req: 0, #pending-token: 39, cuda graph: False, input throughput (token/s): 12190.78
++[2026-09-12 20:59:43] Prefill batch, #new-seq: 1, #new-token: 32, #cached-token: 0, token usage: 0.56, #running-req: 3, #queue-req: 0, #pending-token: 7, cuda graph: False, input throughput (token/s): 12273.92
++[2026-09-12 20:59:43] Prefill batch, #new-seq: 1, #new-token: 7, #cached-token: 0, token usage: 0.57, #running-req: 3, #queue-req: 0, #pending-token: 0, cuda graph: False, input throughput (token/s): 2250.83
++[2026-09-12 20:59:43] INFO:     127.0.0.1:40872 - "GET /v1/loads HTTP/1.1" 200 OK
++[2026-09-12 20:59:43] INFO:     127.0.0.1:40802 - "POST /v1/completions HTTP/1.1" 200 OK
++[2026-09-12 20:59:43] INFO:     127.0.0.1:40874 - "GET /v1/loads HTTP/1.1" 200 OK
++[2026-09-12 20:59:43] INFO:     127.0.0.1:40820 - "POST /v1/completions HTTP/1.1" 200 OK
++[2026-09-12 20:59:43] Decode batch, #running-req: 3, #token: 0, token usage: 0.00, cuda graph: False, gen throughput (token/s): 9.59, #queue-req: 0
++[2026-09-12 20:59:43] INFO:     127.0.0.1:40840 - "POST /v1/completions HTTP/1.1" 200 OK
++[2026-09-12 20:59:43] INFO:     127.0.0.1:40864 - "POST /v1/completions HTTP/1.1" 200 OK
++[2026-09-12 20:59:43] SIGTERM received. signum=None frame=None. Draining requests and shutting down...
++[2026-09-12 20:59:44] Subprocess scheduler_0 (pid=4845) crashed with exit code -15. Triggering SIGQUIT for cleanup...
++[2026-09-12 20:59:44] SIGQUIT received. signum=None, frame=None. It usually means one child failed.
++[2026-09-12 20:59:44] Sleeping 5 seconds before crash diagnostics to let GPU activity settle.
++[2026-09-12 20:59:49] No live scheduler processes found; skipping py-spy and CUDA coredump.
++[2026-09-12 20:59:49] kill_process_tree called: parent_pid=4663, include_parent=True, pid=4663
+diff --git a/reports/j-17cb28bd130f/raw/regression-after.txt b/reports/j-17cb28bd130f/raw/regression-after.txt
+new file mode 100644
+index 0000000..3874fc0
+--- /dev/null
++++ b/reports/j-17cb28bd130f/raw/regression-after.txt
+@@ -0,0 +1,18 @@
++......                                                                   [100%]
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++  
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++6 passed, 17 warnings in 12.47s
+diff --git a/reports/j-17cb28bd130f/raw/regression-before.txt b/reports/j-17cb28bd130f/raw/regression-before.txt
+new file mode 100644
+index 0000000..55180c6
+--- /dev/null
++++ b/reports/j-17cb28bd130f/raw/regression-before.txt
+@@ -0,0 +1,257 @@
++FFF                                                                      [100%]
++=================================== FAILURES ===================================
++_ TestChunkedPrefillBatchFullReset.test_empty_waiting_queue_clears_stale_hint_without_admission _
++
++self = <test_scheduler_chunked_req_gate.TestChunkedPrefillBatchFullReset testMethod=test_empty_waiting_queue_clears_stale_hint_without_admission>
++
++    def test_empty_waiting_queue_clears_stale_hint_without_admission(self):
++        scheduler = self._make_scheduler(waiting=False)
++        running_batch = MagicMock(batch_is_full=True, reqs=[MagicMock()] * 3)
++    
++        batch, returned_running_batch = self._run(scheduler, running_batch)
++    
++        self.assertIsNone(batch)
++        self.assertIs(returned_running_batch, running_batch)
++>       self.assertFalse(running_batch.batch_is_full)
++E       AssertionError: True is not false
++
++test/registered/unit/managers/test_scheduler_chunked_req_gate.py:239: AssertionError
++
++During handling of the above exception, another exception occurred:
++python/sglang/test/test_utils.py:2194: in _callTestMethod
++    retry(
++_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
++
++fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f2ed06611c0>
++max_retry = 0, initial_delay = 2.0, max_delay = 60.0
++should_retry = <function <lambda> at 0x7f37b449a700>
++
++    def retry(
++        fn,
++        max_retry: int,
++        initial_delay: float = 2.0,
++        max_delay: float = 60.0,
++        should_retry: Callable[[Any], bool] = lambda e: True,
++    ):
++        for try_index in itertools.count():
++            try:
++                return fn()
++            except SkipTest:
++                # Do NOT retry skipped tests - used in CI and unittest
++                raise
++            except _ShouldStop:
++                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
++                # when a subtest fails/skips and `result.failfast` is True
++                # (CI invokes `python3 file.py -f`). It signals the outer
++                # `testPartExecutor` to stop the test method cleanly; do
++                # NOT retry, just propagate so unittest handles it.
++                raise
++            except Exception as e:
++                traceback.print_exc()
++    
++                if try_index >= max_retry:
++>                   raise Exception(f"retry() exceed maximum number of retries.")
++E                   Exception: retry() exceed maximum number of retries.
++
++python/sglang/srt/utils/common.py:3529: Exception
++----------------------------- Captured stdout call -----------------------------
++[CI Test Method] TestChunkedPrefillBatchFullReset.test_empty_waiting_queue_clears_stale_hint_without_admission
++----------------------------- Captured stderr call -----------------------------
++Traceback (most recent call last):
++  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
++    return fn()
++           ^^^^
++  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
++    lambda: super(CustomTestCase, self)._callTestMethod(method),
++            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
++    if method() is not None:
++       ^^^^^^^^
++  File "/job/repo/test/registered/unit/managers/test_scheduler_chunked_req_gate.py", line 239, in test_empty_waiting_queue_clears_stale_hint_without_admission
++    self.assertFalse(running_batch.batch_is_full)
++  File "/usr/lib/python3.12/unittest/case.py", line 721, in assertFalse
++    raise self.failureException(msg)
++AssertionError: True is not false
++_ TestChunkedPrefillBatchFullReset.test_no_capacity_is_rechecked_and_relatches_batch_full _
++
++self = <test_scheduler_chunked_req_gate.TestChunkedPrefillBatchFullReset testMethod=test_no_capacity_is_rechecked_and_relatches_batch_full>
++
++    def test_no_capacity_is_rechecked_and_relatches_batch_full(self):
++        scheduler = self._make_scheduler(allocatable=0)
++        running_batch = MagicMock(batch_is_full=True, reqs=[MagicMock()] * 4)
++    
++        batch, returned_running_batch = self._run(scheduler, running_batch)
++    
++        self.assertIsNone(batch)
++        self.assertIs(returned_running_batch, running_batch)
++>       scheduler.get_num_allocatable_reqs.assert_called_once_with(
++            4, running_batch=running_batch
++        )
++
++test/registered/unit/managers/test_scheduler_chunked_req_gate.py:225: 
++_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
++
++self = <MagicMock id='139839046456512'>, args = (4,)
++kwargs = {'running_batch': <MagicMock id='139839044919872'>}
++msg = "Expected 'mock' to be called once. Called 0 times."
++
++    def assert_called_once_with(self, /, *args, **kwargs):
++        """assert that the mock was called exactly once and that that call was
++        with the specified arguments."""
++        if not self.call_count == 1:
++            msg = ("Expected '%s' to be called once. Called %s times.%s"
++                   % (self._mock_name or 'mock',
++                      self.call_count,
++                      self._calls_repr()))
++>           raise AssertionError(msg)
++E           AssertionError: Expected 'mock' to be called once. Called 0 times.
++
++/usr/lib/python3.12/unittest/mock.py:955: AssertionError
++
++During handling of the above exception, another exception occurred:
++python/sglang/test/test_utils.py:2194: in _callTestMethod
++    retry(
++_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
++
++fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f2ed0700ea0>
++max_retry = 0, initial_delay = 2.0, max_delay = 60.0
++should_retry = <function <lambda> at 0x7f37b449a700>
++
++    def retry(
++        fn,
++        max_retry: int,
++        initial_delay: float = 2.0,
++        max_delay: float = 60.0,
++        should_retry: Callable[[Any], bool] = lambda e: True,
++    ):
++        for try_index in itertools.count():
++            try:
++                return fn()
++            except SkipTest:
++                # Do NOT retry skipped tests - used in CI and unittest
++                raise
++            except _ShouldStop:
++                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
++                # when a subtest fails/skips and `result.failfast` is True
++                # (CI invokes `python3 file.py -f`). It signals the outer
++                # `testPartExecutor` to stop the test method cleanly; do
++                # NOT retry, just propagate so unittest handles it.
++                raise
++            except Exception as e:
++                traceback.print_exc()
++    
++                if try_index >= max_retry:
++>                   raise Exception(f"retry() exceed maximum number of retries.")
++E                   Exception: retry() exceed maximum number of retries.
++
++python/sglang/srt/utils/common.py:3529: Exception
++----------------------------- Captured stdout call -----------------------------
++[CI Test Method] TestChunkedPrefillBatchFullReset.test_no_capacity_is_rechecked_and_relatches_batch_full
++----------------------------- Captured stderr call -----------------------------
++Traceback (most recent call last):
++  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
++    return fn()
++           ^^^^
++  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
++    lambda: super(CustomTestCase, self)._callTestMethod(method),
++            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
++    if method() is not None:
++       ^^^^^^^^
++  File "/job/repo/test/registered/unit/managers/test_scheduler_chunked_req_gate.py", line 225, in test_no_capacity_is_rechecked_and_relatches_batch_full
++    scheduler.get_num_allocatable_reqs.assert_called_once_with(
++  File "/usr/lib/python3.12/unittest/mock.py", line 955, in assert_called_once_with
++    raise AssertionError(msg)
++AssertionError: Expected 'mock' to be called once. Called 0 times.
++_ TestChunkedPrefillBatchFullReset.test_stale_batch_full_reconsiders_waiting_request _
++
++self = <test_scheduler_chunked_req_gate.TestChunkedPrefillBatchFullReset testMethod=test_stale_batch_full_reconsiders_waiting_request>
++
++    def test_stale_batch_full_reconsiders_waiting_request(self):
++        scheduler = self._make_scheduler()
++        scheduler.policy.calc_priority.side_effect = RuntimeError("admission attempted")
++        running_batch = MagicMock(batch_is_full=True, reqs=[MagicMock()] * 3)
++    
++>       with self.assertRaisesRegex(RuntimeError, "admission attempted"):
++E       AssertionError: RuntimeError not raised
++
++test/registered/unit/managers/test_scheduler_chunked_req_gate.py:214: AssertionError
++
++During handling of the above exception, another exception occurred:
++python/sglang/test/test_utils.py:2194: in _callTestMethod
++    retry(
++_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
++
++fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f2ef7da3560>
++max_retry = 0, initial_delay = 2.0, max_delay = 60.0
++should_retry = <function <lambda> at 0x7f37b449a700>
++
++    def retry(
++        fn,
++        max_retry: int,
++        initial_delay: float = 2.0,
++        max_delay: float = 60.0,
++        should_retry: Callable[[Any], bool] = lambda e: True,
++    ):
++        for try_index in itertools.count():
++            try:
++                return fn()
++            except SkipTest:
++                # Do NOT retry skipped tests - used in CI and unittest
++                raise
++            except _ShouldStop:
++                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
++                # when a subtest fails/skips and `result.failfast` is True
++                # (CI invokes `python3 file.py -f`). It signals the outer
++                # `testPartExecutor` to stop the test method cleanly; do
++                # NOT retry, just propagate so unittest handles it.
++                raise
++            except Exception as e:
++                traceback.print_exc()
++    
++                if try_index >= max_retry:
++>                   raise Exception(f"retry() exceed maximum number of retries.")
++E                   Exception: retry() exceed maximum number of retries.
++
++python/sglang/srt/utils/common.py:3529: Exception
++----------------------------- Captured stdout call -----------------------------
++[CI Test Method] TestChunkedPrefillBatchFullReset.test_stale_batch_full_reconsiders_waiting_request
++----------------------------- Captured stderr call -----------------------------
++Traceback (most recent call last):
++  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
++    return fn()
++           ^^^^
++  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
++    lambda: super(CustomTestCase, self)._callTestMethod(method),
++            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
++    if method() is not None:
++       ^^^^^^^^
++  File "/job/repo/test/registered/unit/managers/test_scheduler_chunked_req_gate.py", line 214, in test_stale_batch_full_reconsiders_waiting_request
++    with self.assertRaisesRegex(RuntimeError, "admission attempted"):
++  File "/usr/lib/python3.12/unittest/case.py", line 263, in __exit__
++    self._raiseFailure("{} not raised".format(exc_name))
++  File "/usr/lib/python3.12/unittest/case.py", line 200, in _raiseFailure
++    raise self.test_case.failureException(msg)
++AssertionError: RuntimeError not raised
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++  
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++=========================== short test summary info ============================
++FAILED test/registered/unit/managers/test_scheduler_chunked_req_gate.py::TestChunkedPrefillBatchFullReset::test_empty_waiting_queue_clears_stale_hint_without_admission
++FAILED test/registered/unit/managers/test_scheduler_chunked_req_gate.py::TestChunkedPrefillBatchFullReset::test_no_capacity_is_rechecked_and_relatches_batch_full
++FAILED test/registered/unit/managers/test_scheduler_chunked_req_gate.py::TestChunkedPrefillBatchFullReset::test_stale_batch_full_reconsiders_waiting_request
++3 failed, 3 deselected, 17 warnings in 28.84s
+diff --git a/reports/j-17cb28bd130f/result.json b/reports/j-17cb28bd130f/result.json
+new file mode 100644
+index 0000000..c9f46f9
+--- /dev/null
++++ b/reports/j-17cb28bd130f/result.json
+@@ -0,0 +1,31 @@
++{
++  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35537",
++  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
++  "outcome": "fixed",
++  "summary": "Reproduced the stale batch_is_full early return in the checked-out scheduler and reset the per-pass admission hint before current capacity is evaluated. Added a failing-before/passing-after regression plus zero-capacity and empty-queue boundary cases. A real single-gfx950 tiny-Llama serving probe admitted all four staggered chunked-prefill requests, including the fourth while earlier requests remained active.",
++  "tests": [
++    {
++      "command": "/tmp/amdpilot-repo-j-17cb28bd130f/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunked_req_gate.py -k ChunkedPrefillBatchFullReset",
++      "exit_code": 1,
++      "what_was_measured": "Before-fix reproduction: stale fullness skipped current capacity/admission; all three new regression and boundary tests failed. Raw output: reports/j-17cb28bd130f/raw/regression-before.txt"
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-17cb28bd130f/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunked_req_gate.py",
++      "exit_code": 0,
++      "what_was_measured": "After-fix scheduler regression suite: 6 passed, including stale-state reconsideration, real zero-capacity re-latching, and empty-queue behavior. Raw output: reports/j-17cb28bd130f/raw/regression-after.txt"
++    },
++    {
++      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-17cb28bd130f/venv/bin/python reports/j-17cb28bd130f/run_chunked_prefill_probe.py /tmp/amdpilot-repo-j-17cb28bd130f/tiny-random-llama reports/j-17cb28bd130f/raw/gpu-serving",
++      "exit_code": 0,
++      "what_was_measured": "Real HTTP/engine execution on one gfx950 GPU: four staggered 72-token prompts used 32-token chunked prefill and each generated 30 tokens; load evidence reached 4 running, 0 waiting, and the server log shows a transient queued request admitted while earlier requests remained active. The owned server process group was terminated and GPU allocations returned to zero."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-17cb28bd130f/venv/bin/python -m py_compile reports/j-17cb28bd130f/*.py && git diff --check",
++      "exit_code": 0,
++      "what_was_measured": "Probe scripts compile and the patch has no whitespace errors."
++    }
++  ],
++  "gpu_execution": true,
++  "native_rebuilt": false,
++  "remaining_limitations": "The qualified random tiny Llama validates transport, scheduler admission, and GPU engine execution only. Qwen3.8-27B-NVFP4 weights and its hybrid GDN/linear-attention, mamba-state, NEXTN speculative decoding, FP8 KV, Docker/WSL2, semantic accuracy, and multi-minute production workload were unavailable and remain unverified. No native C++ or FlyDSL source changed, so no native rebuild was applicable. The server required SIGKILL after its 30-second graceful-shutdown timeout; the subreaper collected descendants and a fresh Torch process reported zero allocated/reserved GPU bytes."
++}
+diff --git a/reports/j-17cb28bd130f/run_chunked_prefill_probe.py b/reports/j-17cb28bd130f/run_chunked_prefill_probe.py
+new file mode 100644
+index 0000000..0f3524c
+--- /dev/null
++++ b/reports/j-17cb28bd130f/run_chunked_prefill_probe.py
+@@ -0,0 +1,114 @@
++#!/usr/bin/env python3
++"""Launch and safely reap a tiny-model server for the issue-specific probe."""
++
++import ctypes
++import json
++import os
++import signal
++import socket
++import subprocess
++import sys
++import time
++import urllib.request
++from pathlib import Path
++
++fixture, output_arg = sys.argv[1:]
++output = Path(output_arg)
++output.mkdir(parents=True, exist_ok=True)
++ctypes.CDLL(None).prctl(36, 1, 0, 0, 0)  # PR_SET_CHILD_SUBREAPER
++with socket.socket() as sock:
++    sock.bind(("127.0.0.1", 0))
++    port = sock.getsockname()[1]
++
++command = [
++    sys.executable,
++    "-m",
++    "sglang.launch_server",
++    "--model-path",
++    fixture,
++    "--tokenizer-path",
++    fixture,
++    "--served-model-name",
++    "tiny-random-llama",
++    "--host",
++    "127.0.0.1",
++    "--port",
++    str(port),
++    "--attention-backend",
++    "triton",
++    "--dtype",
++    "float16",
++    "--context-length",
++    "128",
++    "--max-total-tokens",
++    "512",
++    "--max-running-requests",
++    "4",
++    "--chunked-prefill-size",
++    "32",
++    "--max-prefill-tokens",
++    "128",
++    "--mem-fraction-static",
++    "0.01",
++    "--disable-cuda-graph",
++]
++metadata = {"command": command, "port": port, "ready": False}
++with (output / "server.log").open("wb") as log:
++    process = subprocess.Popen(
++        command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True
++    )
++    metadata["pid"] = process.pid
++    started = time.time()
++    try:
++        deadline = started + 420
++        while time.time() < deadline and process.poll() is None:
++            try:
++                with urllib.request.urlopen(
++                    f"http://127.0.0.1:{port}/health", timeout=2
++                ) as response:
++                    metadata["ready"] = response.status == 200
++                    if metadata["ready"]:
++                        break
++            except Exception:
++                time.sleep(1)
++        if metadata["ready"]:
++            probe = Path(__file__).with_name("probe_chunked_prefill.py")
++            run = subprocess.run(
++                [
++                    sys.executable,
++                    str(probe),
++                    f"http://127.0.0.1:{port}",
++                    str(output / "probe.json"),
++                ],
++                text=True,
++                capture_output=True,
++                timeout=300,
++            )
++            metadata.update(
++                probe_returncode=run.returncode,
++                probe_stdout=run.stdout,
++                probe_stderr=run.stderr,
++            )
++    finally:
++        if process.poll() is None:
++            os.killpg(process.pid, signal.SIGTERM)
++            try:
++                process.wait(timeout=30)
++            except subprocess.TimeoutExpired:
++                os.killpg(process.pid, signal.SIGKILL)
++                process.wait(timeout=30)
++        metadata["returncode"] = process.returncode
++        metadata["elapsed_seconds"] = round(time.time() - started, 3)
++        metadata["reaped_descendants"] = []
++        while True:
++            try:
++                child, status = os.waitpid(-1, os.WNOHANG)
++            except ChildProcessError:
++                break
++            if not child:
++                break
++            metadata["reaped_descendants"].append({"pid": child, "wait_status": status})
++
++(output / "run-metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
++print(json.dumps(metadata, indent=2))
++sys.exit(0 if metadata["ready"] and metadata.get("probe_returncode") == 0 else 1)
+diff --git a/test/registered/unit/managers/test_scheduler_chunked_req_gate.py b/test/registered/unit/managers/test_scheduler_chunked_req_gate.py
+index d13655d..e515a0f 100644
+--- a/test/registered/unit/managers/test_scheduler_chunked_req_gate.py
++++ b/test/registered/unit/managers/test_scheduler_chunked_req_gate.py
+@@ -3,7 +3,7 @@
+ import unittest
+ from array import array
+ from types import SimpleNamespace
+-from unittest.mock import MagicMock
++from unittest.mock import MagicMock, patch
+ 
+ import torch
+ 
+@@ -179,5 +179,68 @@ class TestStashGatePreservesPrefixIndices(CustomTestCase):
+         self.assertIsNone(s.chunked_req)
+ 
+ 
++class TestChunkedPrefillBatchFullReset(CustomTestCase):
++    def _make_scheduler(self, *, waiting=True, allocatable=1):
++        scheduler = Scheduler.__new__(Scheduler)
++        scheduler.grammar_manager = MagicMock()
++        scheduler.grammar_manager.has_waiting_grammars.return_value = False
++        scheduler.enable_hierarchical_cache = False
++        scheduler.enable_unified_cache_external_linker = False
++        scheduler.enable_priority_preemption = False
++        scheduler.is_hybrid_swa = False
++        scheduler.waiting_queue = [MagicMock()] if waiting else []
++        scheduler.chunked_req = None
++        scheduler.min_free_slots_delayer = None
++        scheduler.get_num_allocatable_reqs = MagicMock(return_value=allocatable)
++        scheduler.policy = MagicMock()
++        scheduler.processed_tokens_counter = 0
++        return scheduler
++
++    def _run(self, scheduler, running_batch):
++        with patch(
++            "sglang.srt.managers.scheduler.get_memory",
++            return_value=SimpleNamespace(enable_flexkv=False),
++        ):
++            return Scheduler._get_new_batch_prefill_raw(
++                scheduler,
++                prefill_delayer_single_pass=None,
++                running_batch=running_batch,
++            )
++
++    def test_stale_batch_full_reconsiders_waiting_request(self):
++        scheduler = self._make_scheduler()
++        scheduler.policy.calc_priority.side_effect = RuntimeError("admission attempted")
++        running_batch = MagicMock(batch_is_full=True, reqs=[MagicMock()] * 3)
++
++        with self.assertRaisesRegex(RuntimeError, "admission attempted"):
++            self._run(scheduler, running_batch)
++
++    def test_no_capacity_is_rechecked_and_relatches_batch_full(self):
++        scheduler = self._make_scheduler(allocatable=0)
++        running_batch = MagicMock(batch_is_full=True, reqs=[MagicMock()] * 4)
++
++        batch, returned_running_batch = self._run(scheduler, running_batch)
++
++        self.assertIsNone(batch)
++        self.assertIs(returned_running_batch, running_batch)
++        scheduler.get_num_allocatable_reqs.assert_called_once_with(
++            4, running_batch=running_batch
++        )
++        self.assertTrue(running_batch.batch_is_full)
++        scheduler.policy.calc_priority.assert_not_called()
++
++    def test_empty_waiting_queue_clears_stale_hint_without_admission(self):
++        scheduler = self._make_scheduler(waiting=False)
++        running_batch = MagicMock(batch_is_full=True, reqs=[MagicMock()] * 3)
++
++        batch, returned_running_batch = self._run(scheduler, running_batch)
++
++        self.assertIsNone(batch)
++        self.assertIs(returned_running_batch, running_batch)
++        self.assertFalse(running_batch.batch_is_full)
++        scheduler.get_num_allocatable_reqs.assert_not_called()
++        scheduler.policy.calc_priority.assert_not_called()
++
++
+ if __name__ == "__main__":
+     unittest.main()
