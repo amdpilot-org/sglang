@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35987",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced both independent-review counterexamples at candidate ee5f9f9b83040ce90406872a74557bc439dfab67, then corrected decode scoring to pool each request's full exploration phase with Equation 2 before Equation 3/activation-memory max and changed mask plus graph widths from round to floor.",
+  "tests": [
+    {
+      "command": "exact-candidate counterexample script with /tmp/amdpilot-repo-j-70dc28cfff3a/venv/bin/python",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before evidence: Equation 2 selected neuron 0 while candidate max-over-token selected neuron 1; floor k was 1 while candidate retained 2."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-70dc28cfff3a/venv/bin/python -m pytest -q test/registered/unit/bwap/test_bwap_manager.py",
+      "exit_code": 0,
+      "what_was_measured": "21 focused unit/integration tests and 3 adversarial subtests, including both reviewed regressions."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 pinned-Python independent dense masked reference versus fused_pruned_mlp at D_FF=255",
+      "exit_code": 0,
+      "what_was_measured": "MI350X gfx950 execution retained floor(127.5)=127 neurons and the gathered FP16 output matched the independent dense masked PyTorch output with max_abs=0.0."
+    },
+    {
+      "command": "qualified subreaper server runner with deterministic tiny Llama, --enable-bwap --bwap-fused --bwap-t-init 2 --bwap-t-explore 1 --bwap-t-prune 2 and decode graphs for batch sizes 1,2",
+      "exit_code": 0,
+      "what_was_measured": "Real source-checkout graph server readiness, four HTTP serving surfaces, fused selection for 2/2 layers, graph buffer registration, and repeated adaptive 64-of-128 mask refreshes."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-70dc28cfff3a/venv/bin/python -m pre_commit run --files python/sglang/srt/bwap/bwap_manager.py test/registered/unit/bwap/test_bwap_manager.py",
+      "exit_code": 0,
+      "what_was_measured": "Formatting, lint, syntax, spelling, test registry, and repository policy checks."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X (gfx950); independent odd-D_FF numerical comparison and a graph-enabled tiny-Llama serving run are retained under evidence/.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The deterministic tiny-Llama fixture uses random weights and validates transport and engine execution only, not semantic accuracy.",
+    "Production reasoning-model weights and benchmark data were unavailable, so production semantic accuracy and throughput remain unverified.",
+    "NVIDIA, quantized, biased, TP>1, speculative-decode, and unsupported model-architecture paths were not qualified.",
+    "No native source changed; the installed AITER module was exercised and no native rebuild was applicable."
+  ]
+}
