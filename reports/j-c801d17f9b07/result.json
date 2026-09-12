@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35705",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1372",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1343",
+  "candidate_commit": "8fe83674054f07a8976e1b2b8b0a465a021ce661",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the reported AttributeError when next_token_token_ids_logprobs_val contains a host list. The exact candidate guards conversion in both the reported prefill path and the duplicated decode normalization path. Its regression passes, and independent mixed host-list/gfx950 tensor cases match a NumPy CPU reference. The candidate changes Python and tests only; it does not change native code.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c801d17f9b07/venv/bin/python - <base reproduction fixture>",
+      "exit_code": 0,
+      "what_was_measured": "At base 358c163250ad3b1f62939b01ce1314a0a31a0365, direct calls to move_logprobs_to_cpu and _normalize_decode_outputs raised AttributeError for host-list and mixed list/tensor values, while the tensor-only control passed. The fixture catches and records each exception, so its process exit is zero."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c801d17f9b07/venv/bin/python -m pytest -q test/registered/unit/managers/test_batch_result_processor_logprob_conversion.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 8fe83674054f07a8976e1b2b8b0a465a021ce661, all four candidate regressions passed, covering empty host lists, tensor-only values, mixed values, and decode normalization."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-c801d17f9b07/venv/bin/python - <independent GPU fixture>",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI355X gfx950 GPU, prefill and decode conversion accepted mixed empty/non-empty host lists and real device tensors. Converted float32 values equaled an independent NumPy CPU reference and host-list identity was preserved."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c801d17f9b07/venv/bin/python -m pytest -q test/registered/unit/hardware_backend/mlx/test_mlx_sampling.py -k logprob",
+      "exit_code": 0,
+      "what_was_measured": "The selected MLX logprob tests were unavailable on this ROCm host: five were skipped and 21 deselected. This is recorded as an architecture limitation, not positive proof."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "candidate-independent-gpu.txt records AMD Instinct MI355X, gfx950:sramecc+:xnack-, actual device tensors, NumPy reference values, and PASS."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No model weights or original server launch/request were supplied, so this review does not claim a full serving/model reproduction, semantic model validation, or distributed execution.",
+    "GPU validation used one assigned gfx950 device and a focused scheduler conversion fixture, not a full model.",
+    "MLX-specific tests skipped on the ROCm host; MLX architecture behavior was not independently executed.",
+    "No native source changed between the recorded base and candidate, so no native rebuild was applicable.",
+    "The adjacent next_token_top_logprobs_val/idx conversion still assumes tensor entries. Upstream PR 35052 guards that neighboring field too, but it is not the next_token_token_ids_logprobs_val failure reported in issue 35705."
+  ]
+}
