@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36616",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1209",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1176",
+  "candidate_commit": "d06735d4c13c4b56b17717aefbbc1203af5ee06b",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Accept as test-only hardening. The exact candidate adds a sensitive regression and valid boundary tests for production behavior already present on the recorded base. It verifies the proximate reported loader failure but, without the reported checkpoint/container, does not establish a full original-issue resolution.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-87e275cc8334/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen4_exp_weight_loading.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate d06735d4c13c4b56b17717aefbbc1203af5ee06b, all three candidate regressions passed (reported non-unit PLE scale load, shape mismatch rejection, and unrelated helper-name rejection)."
+    },
+    {
+      "command": "Same focused reported-value pytest after temporarily removing only weight_scale from the existing PLE buffer allowlist",
+      "exit_code": 1,
+      "what_was_measured": "Sensitivity/counterfactual failing-before: the unchanged candidate regression reached the actual load_weights generic assertion with the exact reported tensor name and value. The edit was reverted; the unmodified recorded base itself did not reproduce the bug."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-87e275cc8334/venv/bin/python <independent inline load_weights GPU and negative-boundary check>",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, the reported FP32 value copied to a GPU BF16 destination exactly matched an independent CPU BF16 reference and was marked loaded; unrelated non-unit scale and missing-destination cases were rejected through load_weights."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 d06735d4c13c4b56b17717aefbbc1203af5ee06b",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI355X, gfx950:sramecc+:xnack-. GPU BF16 destination value 0.00019931793212890625 equaled the independent CPU BF16 reference; the exact reported checkpoint name was returned in the loaded set.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The original reported Qwen 3.8 checkpoint/container was unavailable, so an incompatibility in another checkpoint tensor or full model construction remains possible.",
+    "The unmodified recorded base already contains the loader behavior, so the historical failing implementation was not available as the prepared-base comparison; failure was reproduced only by a narrowly scoped counterfactual removal.",
+    "No full HTTP serving, semantic-accuracy, or distributed-workload validation was performed."
+  ],
+  "remaining_limitations": "No reported Qwen 3.8 weights or original container were available. The review validates the exact loader contract and GPU copy only, not a complete model load or serving workload. No native code changed, so native rebuild was not applicable."
+}
