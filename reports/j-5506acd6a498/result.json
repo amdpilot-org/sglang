@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39096",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/784",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/753",
+  "candidate_commit": "bcbb219ef7d4c2a9a6d121928faec7f87d7b7ce0",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes omitted chat sampler fields and preserves concrete explicit values, but it still bypasses preferred sampling parameters when nullable sampler fields are explicitly encoded as JSON null. Those fields are converted to generation-config/default values and then incorrectly classified as explicit. This is a partial request-path fix, not a full resolution.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5506acd6a498/venv/bin/python < original omitted-field reproducer on prepared base >",
+      "exit_code": 1,
+      "what_was_measured": "Confirmed the original failure: omitted temperature/top_p/top_k/presence_penalty resolved to 1.0/1.0/-1/0.0 instead of 0.7/0.8/20/1.5. The imported protocol module was /job/repo/python/sglang/srt/entrypoints/openai/protocol.py."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5506acd6a498/venv/bin/python -m pytest -q test/registered/unit/managers/test_chat_preferred_sampling_params.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit bcbb219ef7d4c2a9a6d121928faec7f87d7b7ce0, all five candidate regression tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5506acd6a498/venv/bin/python < independent omitted and explicit precedence probe >",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate, omitted sampler fields used server preferences despite generation config, and concrete explicit client values won. Imports resolved to protocol.py and tokenizer_manager.py under /job/repo/python/sglang."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5506acd6a498/venv/bin/python < independent JSON-null adversarial probe >",
+      "exit_code": 1,
+      "what_was_measured": "temperature/top_p/top_k/min_p/repetition_penalty supplied as null were classified as explicit after conversion; generation-config values 0.2/0.3/3/0.04/1.2 won instead of preferred values 0.7/0.8/20/0.05/1.1."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The issue and counterexample are deterministic CPU-only request conversion and dictionary precedence behavior. No model execution or architecture-specific numerical claim was used."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "For nullable chat sampler fields temperature, top_p, top_k, min_p, and repetition_penalty, a client payload containing JSON null leaves the field in model_fields_set. get_param() replaces null with generation_config/OpenAI defaults, and get_explicit_sampling_keys() then marks that fallback as explicit, causing it to override --preferred-sampling-params."
+  ],
+  "remaining_limitations": [
+    "No GPU or model weights were used because the reviewed contract is entirely in the CPU request-to-params path; therefore no model architecture, semantic output quality, or distributed serving behavior was qualified.",
+    "No native files differ between the prepared base and candidate, repository-environment.json records native as null, and the imported code came from the checkout; no native rebuild was applicable.",
+    "The candidate's live-server artifact was not accepted as proof. Independent validation covered the conversion and tokenizer-manager merge directly, including a failing adversarial payload."
+  ]
+}
