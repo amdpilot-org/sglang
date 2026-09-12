@@ -78,6 +78,41 @@ class TestConvertToGenAiSpanAttrs(CustomTestCase):
         )
 
 
+class TestRequestMetricsOutput(CustomTestCase):
+    def test_calculates_only_defined_generation_metrics(self):
+        stats = rts.APIServerReqTimeStats()
+        stats.created_time = 10.0
+        stats.first_token_time = 10.5
+        stats.finished_time = 12.5
+
+        metrics = stats.convert_to_output_meta_info(completion_tokens=5)
+
+        self.assertAlmostEqual(metrics["time_to_first_token"], 0.5)
+        self.assertAlmostEqual(metrics["generation_time"], 2.0)
+        self.assertAlmostEqual(metrics["e2e_latency"], 2.5)
+        self.assertAlmostEqual(metrics["mean_inter_token_latency"], 0.5)
+        self.assertAlmostEqual(metrics["output_token_throughput"], 2.0)
+
+    def test_single_output_token_omits_interval_metrics(self):
+        stats = rts.APIServerReqTimeStats()
+        stats.created_time = 10.0
+        stats.first_token_time = 10.5
+        stats.finished_time = 11.0
+
+        metrics = stats.convert_to_output_meta_info(completion_tokens=1)
+
+        self.assertNotIn("mean_inter_token_latency", metrics)
+        self.assertNotIn("output_token_throughput", metrics)
+
+    def test_opt_in_timing_transport_does_not_enable_global_metrics(self):
+        stats = rts.APIServerReqTimeStats(has_timing_data=True)
+        restored = pickle.loads(pickle.dumps(stats))
+        scheduler_stats = rts.SchedulerReqTimeStats.new_from_obj(restored)
+
+        self.assertTrue(scheduler_stats.has_timing_data)
+        self.assertFalse(scheduler_stats.enable_metrics)
+
+
 class TestSetFinishedTimeSpanAttrs(CustomTestCase):
     def _tracing_stats(self) -> rts.APIServerReqTimeStats:
         stats = rts.APIServerReqTimeStats()

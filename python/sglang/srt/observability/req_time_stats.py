@@ -228,6 +228,7 @@ class RequestStage:
 @dataclass
 class ReqTimeStatsBase:
     enable_metrics: bool = False
+    has_timing_data: bool = False
     metrics_collector: Optional[
         Union[
             SchedulerMetricsCollector,
@@ -338,6 +339,7 @@ class ReqTimeStatsBase:
         return {
             "disagg_mode": self.disagg_mode.value if self.disagg_mode else None,
             "enable_metrics": False,
+            "has_timing_data": self.has_timing_data,
             "trace_ctx": trace_ctx_state,
             "diff_realtime_monotonic": global_diff_realtime_monotonic,
         }
@@ -513,8 +515,24 @@ class APIServerReqTimeStats(ReqTimeStatsBase):
             )
 
         decode_latency = self.get_decode_latency()
+        first_token_latency = self.get_first_token_latency()
+        e2e_latency = self.get_e2e_latency()
+        if first_token_latency > 0.0:
+            meta_info["time_to_first_token"] = first_token_latency
+        if decode_latency > 0.0:
+            meta_info["generation_time"] = decode_latency
+        if e2e_latency > 0.0:
+            meta_info["e2e_latency"] = e2e_latency
         if decode_latency > 0.0 and completion_tokens > 1:
-            meta_info["decode_throughput"] = (completion_tokens - 1) / decode_latency
+            generated_intervals = completion_tokens - 1
+            # Preserve the existing native /generate metadata name.
+            meta_info["decode_throughput"] = generated_intervals / decode_latency
+            meta_info["mean_inter_token_latency"] = (
+                decode_latency / generated_intervals
+            )
+            meta_info["output_token_throughput"] = (
+                generated_intervals / decode_latency
+            )
         return meta_info
 
     def convert_to_gen_ai_span_attrs(self):
@@ -645,8 +663,6 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
     # other
     transfer_speed_gb_s: float = 0.0
     transfer_total_mb: float = 0.0
-
-    has_timing_data: bool = False
 
     def __getstate__(self) -> object:
         # send to detokenizer/tokenizer
