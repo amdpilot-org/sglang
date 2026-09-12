@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34572",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1673",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1639",
+  "candidate_commit": "aae252eb457f1f0358ae4b98897f3a8fa6eda50d",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a substantive partial scheduler fix: it prevents local KVPoll.Failed queue deletion, freezes ordered bootstrap decisions, orders forwarded aborts, reserves metadata before reporting readiness, and folds HiCache readiness into consensus. It does not fully satisfy the original contract because a repeated sequence with a divergent payload is silently ignored rather than rejected, and it omits the original issue's router replay fix.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3aab1e38297c/venv/bin/python -m pytest -q /tmp/test_pp_abort_consensus_candidate.py (at base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before collection: the recorded base lacks PPBootstrapDecision; related source inspection confirms the pre-fix protocol paths."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3aab1e38297c/venv/bin/python -m pytest -q test/registered/unit/managers/test_pp_abort_consensus.py test/registered/unit/managers/test_pp_hicache_prefetch_consensus.py (at candidate aae252eb457f1f0358ae4b98897f3a8fa6eda50d)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regressions: 24 tests passed with 4 parameterized subtests."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3aab1e38297c/venv/bin/python -m pytest -q /tmp/test_candidate_adversarial.py (at candidate aae252eb457f1f0358ae4b98897f3a8fa6eda50d)",
+      "exit_code": 1,
+      "what_was_measured": "Independent adversarial contract test: a duplicate sequence carrying a different good/bad payload was silently ignored; the sequence-gap control case passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3aab1e38297c/venv/bin/python -m py_compile python/sglang/srt/disaggregation/prefill.py python/sglang/srt/managers/io_struct.py python/sglang/srt/managers/scheduler.py python/sglang/srt/managers/scheduler_pp_mixin.py (at candidate aae252eb457f1f0358ae4b98897f3a8fa6eda50d)",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python source modules compile."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "One gfx950 GPU was visible, but the original failure requires PP=8 and production disaggregated components. No single-GPU smoke is represented as evidence for that contract.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "After applying PPBootstrapDecision(0, ('rid-good',), ()), the same stage accepts PPBootstrapDecision(0, (), ('rid-good',)) as a duplicate instead of raising on payload divergence.",
+    "The candidate contains no router change preventing auto-replay of a request that may already have been dispatched, which is the third fix tracked by the original issue."
+  ],
+  "remaining_limitations": [
+    "No PP=8 multi-GPU or multi-node reproduction was possible with the assigned single gfx950 GPU.",
+    "Mooncake, production model weights, HiCache L2-only 32K shared-prefix traffic, cancellation storms, and the reported soak were not available.",
+    "Deterministic unit simulations validate protocol state transitions only; they do not validate full-model semantics or production NCCL behavior."
+  ]
+}
