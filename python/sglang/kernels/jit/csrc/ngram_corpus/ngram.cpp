@@ -10,6 +10,12 @@ namespace sglang {
 namespace ngram {
 
 Ngram::Ngram(size_t capacity, const Param& param) : param_(param) {
+  if (!(capacity > param_.max_trie_depth)) {
+    throw std::runtime_error(
+        "capacity must be greater than max_trie_depth because the trie root "
+        "also occupies one node, current capacity: " +
+        std::to_string(capacity) + ", max_trie_depth: " + std::to_string(param_.max_trie_depth));
+  }
   if (!(param_.max_trie_depth > 1)) {
     throw std::runtime_error(
         "param_.max_trie_depth must be greater than 1, current value: " + std::to_string(param_.max_trie_depth));
