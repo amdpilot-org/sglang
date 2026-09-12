@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34023",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3374",
+  "candidate_commit": "41a98abfdc81dee12010be10ba4805638645f7ff",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact recorded base reproduces the checkpoint-gamma reshape failure for runtime gamma 1, 3, and 7 while gamma 5 passes. The exact candidate derives runtime gamma from x_post_hc and uses it consistently for the Markov context. Its regression passes, and independent gfx950 numerical cases across multiple batch sizes, windows, and both Markov branches match an independent reference exactly.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-52eb99d4b47f/venv/bin/python <independent base reproduction script>",
+      "exit_code": 0,
+      "what_was_measured": "At base 358c163, checkpoint gamma 5: runtime gamma 1, 3, and 7 raised invalid reshape RuntimeError; runtime gamma 5 returned shape (2, 5)."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-52eb99d4b47f/venv/bin/python -m pytest -q test/registered/spec/dspark/test_deepseek_v4_dspark_confidence.py",
+      "exit_code": 0,
+      "what_was_measured": "At candidate 41a98ab, all 3 candidate regression tests passed for runtime gamma 3, 5, and 7 against checkpoint gamma 5."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-52eb99d4b47f/venv/bin/python <independent adversarial GPU script>",
+      "exit_code": 0,
+      "what_was_measured": "On one gfx950 GPU, batch sizes 1/2/4, runtime gamma 1/2/3/6/7/9, and Markov on/off matched an independent tensor reference exactly (max_abs_error 0.0); malformed non-divisible input was rejected."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "candidate-adversarial-gpu.log records one AMD Instinct MI350X with gcnArchName gfx950:sramecc+:xnack- and exact GPU tensor equality for 36 cases."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_reason": "Not applicable: the candidate changes Python source, Python tests, and reports only; no native source or native build input changed.",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 weights were unavailable, so full model loading, decode-graph capture, serving, and semantic output were not exercised.",
+    "The environment had one AMD Instinct MI350X/gfx950 GPU, not four NVIDIA RTX PRO 6000/SM120 GPUs; the reporter's SM120 corruption screen and distributed setup were not reproduced.",
+    "The review verifies the original reshape and Markov-window contract with direct execution, but does not claim architecture-specific CUDA graph behavior."
+  ]
+}
