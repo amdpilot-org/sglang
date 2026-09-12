@@ -279,6 +279,9 @@ class UnifiedRadixCache(BasePrefixCache):
             "revoked_insufficient": 0,
             "revoked_full_miss": 0,
             "l3_demand_requests": 0,
+            "l3_hit_requests": 0,
+            "l3_partial_hit_requests": 0,
+            "l3_miss_requests": 0,
             "l3_miss_tokens": 0,
             "l1l2_miss_tokens": 0,
         }
@@ -2142,10 +2145,19 @@ class UnifiedRadixCache(BasePrefixCache):
             )
         else:
             self.prefetch_loaded_storage_start_by_reqid.pop(req_id, None)
+        if insert_result.host_insert_dropped:
+            prefetch_result = "dropped"
+        elif completed_tokens == 0:
+            prefetch_result = "failed"
+        elif completed_tokens < operation.storage_hit_count:
+            prefetch_result = "partial"
+        else:
+            prefetch_result = "success"
         logger.info(
-            "HiCache prefetch %s req=%s completed=%d matched=%d loaded=%d occupied=%d",
-            "dropped" if insert_result.host_insert_dropped else "success",
+            "[HICACHE] rid=%s event=storage_prefetch tier=l3_to_l2 result=%s "
+            "completed_tokens=%d matched_tokens=%d loaded_tokens=%d occupied_tokens=%d",
             req_id,
+            prefetch_result,
             completed_tokens,
             insert_result.prefix_len,
             loaded_from_storage,
@@ -2450,8 +2462,26 @@ class UnifiedRadixCache(BasePrefixCache):
                 stats["revoked_full_miss"] += 1
         miss = requested - hit
         stats["l3_demand_requests"] += 1
+        if hit == requested:
+            stats["l3_hit_requests"] += 1
+            query_result = "hit"
+        elif hit > 0:
+            stats["l3_partial_hit_requests"] += 1
+            query_result = "partial_hit"
+        else:
+            stats["l3_miss_requests"] += 1
+            query_result = "miss"
         stats["l1l2_miss_tokens"] += requested
         stats["l3_miss_tokens"] += miss
+        logger.info(
+            "[HICACHE] rid=%s event=storage_query tier=l3 result=%s "
+            "requested_tokens=%d hit_tokens=%d miss_tokens=%d",
+            operation.request_id,
+            query_result,
+            requested,
+            hit,
+            miss,
+        )
 
     def prefetch_outcome_stats_snapshot(self) -> dict:
         return self._prefetch_outcome_stats.copy()
@@ -3126,8 +3156,7 @@ class UnifiedRadixCache(BasePrefixCache):
             storage_metrics = self.cache_controller.storage_backend.get_stats()
             if storage_metrics is None:
                 storage_metrics = StorageMetrics()
-            if not hasattr(storage_metrics, "prefetch_stats"):
-                storage_metrics.prefetch_stats = self.prefetch_outcome_stats_snapshot()
+            storage_metrics.prefetch_stats = self.prefetch_outcome_stats_snapshot()
             self.storage_metrics_collector.log_storage_metrics(storage_metrics)
 
     def ready_to_load_host_cache(self) -> int:

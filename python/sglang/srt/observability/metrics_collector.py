@@ -1897,6 +1897,7 @@ class StorageMetrics:
     backup_pgs: List[int] = field(default_factory=list)
     prefetch_bandwidth: List[float] = field(default_factory=list)
     backup_bandwidth: List[float] = field(default_factory=list)
+    prefetch_stats: Dict[str, float] = field(default_factory=dict)
 
 
 class StorageMetricsCollector(_StatLoggerDIMixin):
@@ -1913,6 +1914,28 @@ class StorageMetricsCollector(_StatLoggerDIMixin):
         Histogram = self._histogram_cls or _PromHistogram
 
         self.labels = labels
+        self._last_prefetch_stats: Dict[str, float] = {}
+
+        self.prefetch_outcomes_total = Counter(
+            name="sglang:hicache_prefetch_outcomes_total",
+            documentation="HiCache storage-prefetch lifecycle outcomes. The "
+            "outcome label is a fixed implementation-defined set and never "
+            "contains request IDs or backend error text.",
+            labelnames=[*labels.keys(), "outcome"],
+        )
+        self.storage_requests_total = Counter(
+            name="sglang:hicache_storage_requests_total",
+            documentation="L3 storage query results by request: full hit, "
+            "partial hit, or miss.",
+            labelnames=[*labels.keys(), "result"],
+        )
+        self.storage_query_tokens_total = Counter(
+            name="sglang:hicache_storage_query_tokens_total",
+            documentation="Tokens queried from L3 storage, classified as "
+            "present (hit) or absent (miss). A later read failure is reported "
+            "by storage_prefetch_unfulfilled_tokens_total.",
+            labelnames=[*labels.keys(), "result"],
+        )
 
         self.prefetched_tokens_total = Counter(
             name="sglang:prefetched_tokens_total",
@@ -2054,6 +2077,70 @@ class StorageMetricsCollector(_StatLoggerDIMixin):
     def _log_histogram(self, histogram, data: Union[int, float]):
         histogram.labels(**self.labels).observe(data)
 
+    def _prefetch_stat_delta(
+        self, stats: Dict[str, float], key: str, epoch_reset: bool
+    ) -> float:
+        """Return a monotonic delta even if the cache starts a new epoch."""
+        current = max(float(stats.get(key, 0)), 0.0)
+        previous = self._last_prefetch_stats.get(key, 0.0)
+        return current if epoch_reset else current - previous
+
+    def log_prefetch_outcomes(self, stats: Dict[str, float]) -> None:
+        outcomes = (
+            "attempts",
+            "issued",
+            "declined_too_short",
+            "declined_rate_limited",
+            "declined_anchor_lost",
+            "declined_device_covered",
+            "revoked_insufficient",
+            "revoked_full_miss",
+        )
+        tracked = (
+            *outcomes,
+            "l3_hit_requests",
+            "l3_partial_hit_requests",
+            "l3_miss_requests",
+            "l1l2_miss_tokens",
+            "l3_miss_tokens",
+        )
+        epoch_reset = any(
+            max(float(stats.get(key, 0)), 0.0) < self._last_prefetch_stats.get(key, 0.0)
+            for key in tracked
+        )
+        for outcome in outcomes:
+            increment = self._prefetch_stat_delta(stats, outcome, epoch_reset)
+            if increment > 0:
+                self.prefetch_outcomes_total.labels(**self.labels, outcome=outcome).inc(
+                    increment
+                )
+
+        for stat, result in (
+            ("l3_hit_requests", "hit"),
+            ("l3_partial_hit_requests", "partial_hit"),
+            ("l3_miss_requests", "miss"),
+        ):
+            increment = self._prefetch_stat_delta(stats, stat, epoch_reset)
+            if increment > 0:
+                self.storage_requests_total.labels(**self.labels, result=result).inc(
+                    increment
+                )
+
+        demand_delta = self._prefetch_stat_delta(stats, "l1l2_miss_tokens", epoch_reset)
+        miss_delta = self._prefetch_stat_delta(stats, "l3_miss_tokens", epoch_reset)
+        hit_delta = max(demand_delta - miss_delta, 0.0)
+        if hit_delta > 0:
+            self.storage_query_tokens_total.labels(**self.labels, result="hit").inc(
+                hit_delta
+            )
+        if miss_delta > 0:
+            self.storage_query_tokens_total.labels(**self.labels, result="miss").inc(
+                miss_delta
+            )
+
+        for key in tracked:
+            self._last_prefetch_stats[key] = max(float(stats.get(key, 0)), 0.0)
+
     def log_storage_metrics(self, storage_metrics: Optional[StorageMetrics] = None):
         if storage_metrics is None:
             return
@@ -2068,6 +2155,7 @@ class StorageMetricsCollector(_StatLoggerDIMixin):
             self._log_histogram(self.histogram_prefetch_bandwidth, v)
         for v in storage_metrics.backup_bandwidth:
             self._log_histogram(self.histogram_backup_bandwidth, v)
+        self.log_prefetch_outcomes(storage_metrics.prefetch_stats)
 
 
 class ExpertDispatchCollector(_StatLoggerDIMixin):
