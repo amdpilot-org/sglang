@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38589",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced that Qwen4Exp ignored selected DFlash capture flags and returned the widened hyper-connection stream in the only auxiliary slot. After inspecting upstream PR 38642 and its hardware correction, the candidate captures the input of each selected layer (the completed output of the preceding target layer), contracts it with that layer's learned attention hyper-connection mix rather than a semantically wrong uniform mean, preserves the raw HC stream separately for existing consumers, and prevents the outer conditional-generation wrapper from overwriting DFlash auxiliary tensors with HC tensors.",
+  "tests": [
+    {
+      "command": "load qwen4_exp.py from base commit 358c163 with importlib and run Qwen4ExpModel.forward using a selected deterministic layer",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: return arity was 2, the second value was a width-6 Tensor HC stream, and the selected capture flag produced no auxiliary list. The assertion requiring a separate capture result failed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0c8ee8fc6d1e/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen4_exp_dflash_capture.py test/registered/unit/models/test_glm5_next_dflash_capture.py test/registered/unit/configs/test_model_config.py",
+      "exit_code": 0,
+      "what_was_measured": "11 tests and 4 subtests passed. Qwen4Exp tests exercised the real model forward/setter paths with deterministic HC layer tensors, independently computed each selected layer's non-uniform learned-mix reference, checked hidden-size contraction and tap order, proved the result differs from a uniform branch mean, checked HC preservation, checked the outer return-slot collision, and checked unchanged ordinary/idle return shapes."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0c8ee8fc6d1e/venv/bin/python GPU GatedResidual.mix numerical check",
+      "exit_code": 0,
+      "what_was_measured": "On assigned AMD Instinct MI350X, the real GatedResidual.mix over deterministic 2x8 float32 tensors and fixed learned weights exactly matched an independent RMS normalization, two-linear-layer gate, sigmoid, and gated branch reduction reference; max_abs_diff was 0.0. The learned result differed from a uniform branch mean by 2.2364285."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0c8ee8fc6d1e/venv/bin/python -m compileall -q python/sglang/srt/models/qwen4_exp.py test/registered/unit/models/test_qwen4_exp_dflash_capture.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python files compile and the patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "torch 2.11.0+rocm7.2 reported HIP 7.2.26015 and device 0 AMD Instinct MI350X; real GatedResidual.mix matched an independently expanded learned-gate reference with max_abs_diff=0.0 and differed materially from uniform averaging."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No real Qwen3.8-Flash-Next checkpoint or DFlash/DSpark draft checkpoint was available locally, so full target/drafter generation and acceptance were not measured.",
+    "The focused model-forward regression uses the actual Qwen4ExpModel capture and return paths with small deterministic stand-in decoder layers; it does not execute attention, MoE, PLE, tensor parallelism, or pipeline parallelism.",
+    "The possible sample_from_anchor layout mismatch described in the source issue was not changed or validated because it is separate from hidden-state capture.",
+    "No native code changed, so no native rebuild was applicable."
+  ]
+}
