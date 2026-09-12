@@ -47,6 +47,14 @@ class GetWeightsChecksumReqInput:
 
 
 @dataclass
+class CompareWeightsWithDiskReqInput:
+    """Compare loaded module weights with their effective on-disk values."""
+
+    model_path: str
+    module_names: list[str] | None = None
+
+
+@dataclass
 class ReleaseMemoryOccupationReqInput:
     """Request to release (sleep) GPU memory occupation for the diffusion engine."""
 

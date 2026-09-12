@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Request
 
 from sglang.multimodal_gen.runtime.entrypoints.post_training.io_struct import (
+    CompareWeightsWithDiskReqInput,
     GetWeightsChecksumReqInput,
     ReleaseMemoryOccupationReqInput,
     ResumeMemoryOccupationReqInput,
@@ -153,6 +154,44 @@ async def get_weights_checksum(request: Request):
         return orjson_response({"error": str(e)}, status_code=500)
 
     return orjson_response(response.output, status_code=200)
+
+
+@router.post("/compare_weights_with_disk")
+async def compare_weights_with_disk(request: Request):
+    """Compare live weights with a checkpoint using the module's load mapping."""
+    body = await request.json()
+    model_path = body.get("model_path")
+    if not model_path:
+        return orjson_response(
+            {"success": False, "message": "model_path is required"},
+            status_code=400,
+        )
+
+    module_names = body.get("module_names")
+    if module_names is not None and (
+        not isinstance(module_names, list)
+        or not module_names
+        or not all(isinstance(name, str) and name for name in module_names)
+    ):
+        return orjson_response(
+            {
+                "success": False,
+                "message": "module_names must be a non-empty list of names",
+            },
+            status_code=400,
+        )
+
+    req = CompareWeightsWithDiskReqInput(
+        model_path=model_path,
+        module_names=module_names,
+    )
+    try:
+        response = await async_scheduler_client.forward(req)
+    except Exception as e:
+        return orjson_response({"success": False, "message": str(e)}, status_code=500)
+
+    result = response.output
+    return orjson_response(result, status_code=200 if result["success"] else 409)
 
 
 @router.post("/release_memory_occupation")
