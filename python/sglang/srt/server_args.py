@@ -114,6 +114,7 @@ from sglang.srt.arg_groups.choices import (  # noqa: F401
     add_rl_on_policy_target_choices,
 )
 from sglang.srt.arg_groups.fields import collect_input_fields
+from sglang.srt.arg_groups.fields.bwap import Bwap
 from sglang.srt.arg_groups.fields.device import (
     Device,
 )
@@ -518,6 +519,7 @@ _INPUT_NAMESPACES = [
     ExecDllm,
     ExecOffload,
     ExecOverlap,
+    Bwap,
     Lora,
     Disagg,
     Spec,
