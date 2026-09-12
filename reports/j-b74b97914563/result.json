@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32158",
+  "candidate_mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2123",
+  "review_mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2259",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2220",
+  "candidate_commit": "3c6d8d65e5445df04576fb1bec215ea28d044b27",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The base's real SchedulerLoadInquirer.get_loads() counts only the currently selected running_batch and reports 1 for four unique requests retained across PP slots. The exact candidate exposes all PP running_mbs and counts unique request IDs, reports 4 in the same full-snapshot fixture, preserves singleton non-PP behavior, and passes independent duplicate-ID and empty-slot boundaries. No scheduler-accounting counterexample was found.",
+  "tests": [
+    {
+      "command": "EXPECTED_RUNNING=4 /tmp/amdpilot-repo-j-b74b97914563/venv/bin/python reports/j-b74b97914563/evidence/full_snapshot_contract.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before execution of the actual get_loads method: observed num_running_reqs=1 while four unique request IDs were retained across three representative PP slots. See evidence/base-full-snapshot-contract.log."
+    },
+    {
+      "command": "EXPECTED_RUNNING=4 /tmp/amdpilot-repo-j-b74b97914563/venv/bin/python reports/j-b74b97914563/evidence/full_snapshot_contract.py (candidate 3c6d8d65e5445df04576fb1bec215ea28d044b27)",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after execution of the actual get_loads method: observed all four unique request IDs across PP slots. See evidence/candidate-full-snapshot-contract.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b74b97914563/venv/bin/python -m pytest --import-mode=importlib -q test/registered/unit/managers/scheduler_components/test_load_inquirer.py reports/j-b74b97914563/evidence/independent_pp_load_cases.py test/registered/unit/managers/test_load_inquirer.py test/registered/unit/entrypoints/test_v1_loads_aggregate.py",
+      "exit_code": 0,
+      "what_was_measured": "16 tests passed on the exact candidate, covering its regression, independent four-slot phase coverage, cross-slot duplicate IDs represented by distinct objects, singleton non-PP and all-empty boundaries, existing waiting-token behavior, and /v1/loads response behavior. See evidence/candidate-focused-and-adversarial-importlib.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b74b97914563/venv/bin/python -m py_compile python/sglang/srt/managers/scheduler.py python/sglang/srt/managers/scheduler_components/load_inquirer.py",
+      "exit_code": 0,
+      "what_was_measured": "Both changed Python source files compile successfully."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "Environment inventory found one AMD Instinct MI350X with gfx950:sramecc+:xnack-. The original TP=2, PP=4 reproduction requires eight GPUs and NVIDIA H20 was not available. The corrected code is CPU scheduler bookkeeping; no GPU kernel was executed or claimed. See evidence/base-environment-and-imports.log.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The original 16-request TP=2, PP=4 HTTP serving workload was not run because only one gfx950 GPU was assigned and model weights were not supplied.",
+    "The review verifies the actual scheduler snapshot path with representative PP slot state, but not multi-GPU pipeline communication, full-model execution, NVIDIA H20 behavior, or end-to-end HTTP timing.",
+    "No native source changed, so no native rebuild was applicable or performed.",
+    "A combined pytest run without --import-mode=importlib encountered an existing duplicate module basename collection collision between two test_load_inquirer.py files; the recorded importlib-mode rerun passed all 16 tests."
+  ]
+}
