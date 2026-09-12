@@ -189,8 +189,10 @@ class Olmo2Attention(nn.Module):
             q = q_by_last.view(q_shape)
             k = k_by_last.view(k_shape)
         else:
-            q = self.q_norm.forward_native(q)
-            k = self.k_norm.forward_native(k)
+            q_shape = q.shape
+            k_shape = k.shape
+            q = self.q_norm(q.reshape(-1, q_shape[-1])).view(q_shape)
+            k = self.k_norm(k.reshape(-1, k_shape[-1])).view(k_shape)
 
         if self.tp_size > 1:
             splitter = partial(split_tensor_along_last_dim, num_partitions=self.tp_size)
