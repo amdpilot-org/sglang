@@ -161,6 +161,29 @@ _MLX_QUANTIZATION_PRESETS: dict[str, tuple[int, int]] = {
     "mlx_q8": (8, 64),
 }
 _MLX_KV_FLOAT_DTYPES = {mx.float16, mx.bfloat16, mx.float32}
+_NATIVE_CACHE_FALLBACK_MODEL_TYPES = frozenset({"gemma4", "gemma4_text"})
+_NATIVE_CACHE_FALLBACK_DEFAULT_POOL_SIZE = 2048
+
+
+def _mlx_model_type(model: Any) -> str | None:
+    for candidate in (model, getattr(model, "language_model", None)):
+        if candidate is None:
+            continue
+        model_type = getattr(candidate, "model_type", None)
+        if model_type:
+            return str(model_type)
+        args = getattr(candidate, "args", None)
+        model_type = getattr(args, "model_type", None)
+        if model_type:
+            return str(model_type)
+    return None
+
+
+def _mlx_text_model_args(model: Any) -> Any | None:
+    language_model = getattr(model, "language_model", None)
+    if language_model is not None and getattr(language_model, "args", None) is not None:
+        return language_model.args
+    return getattr(model, "args", None)
 
 
 class MlxModelRunner:
@@ -228,7 +251,15 @@ class MlxModelRunner:
             logger.info(f"MLX buffer cache limit set to {cache_limit_gb:.1f} GB")
 
         self._load_model()
+        self._native_cache_fallback = (
+            _mlx_model_type(self.model) in _NATIVE_CACHE_FALLBACK_MODEL_TYPES
+        )
         self._target_adapter = None
+        if self._native_cache_fallback and not self.disable_radix_cache:
+            raise NotImplementedError(
+                "Gemma 4 on MLX requires --disable-radix-cache because its "
+                "heterogeneous, shared native caches cannot use the uniform pool."
+            )
 
         # Pin MLX allocations to prevent OS paging
         device_info = mx.device_info()
@@ -237,7 +268,8 @@ class MlxModelRunner:
             mx.set_wired_limit(max_wired)
             logger.info(f"Wired memory limit set to {max_wired / (1024**3):.1f} GB")
 
-        patch_model_attention(self.model)
+        if not self._native_cache_fallback:
+            patch_model_attention(self.model)
 
         layer_list, attn_attrs = find_attention_layers(self.model)
         self._cache_layout = MlxModelCacheLayout.from_attention_discovery(
@@ -264,7 +296,7 @@ class MlxModelRunner:
                 "MLX runner does not support models with both auxiliary "
                 "cache state and sliding-window attention layers."
             )
-        if self._cache_layout.has_auxiliary_state:
+        if self._cache_layout.has_auxiliary_state and not self._native_cache_fallback:
             self._model_embed, self._model_norm, self._model_lm_head = (
                 self._extract_model_components()
             )
@@ -306,6 +338,8 @@ class MlxModelRunner:
 
     def _new_cache_skeleton(self) -> list[Any]:
         """Create a model-shaped cache list before attention cache wiring."""
+        if self.native_cache_fallback:
+            return list(self.model.make_cache())
         if self._cache_layout.has_auxiliary_state:
             cache = self.model.make_cache()
             if len(cache) != self._cache_layout.num_layers:
@@ -320,6 +354,8 @@ class MlxModelRunner:
     def _new_native_cache(self) -> list[Any]:
         """Create a model-shaped cache list with attention KV adapters."""
         cache = self._new_cache_skeleton()
+        if self.native_cache_fallback:
+            return cache
         for layer_idx in self._cache_layout.attention_layer_indices:
             window = self._cache_layout.window_size(layer_idx)
             cache[layer_idx] = (
@@ -331,6 +367,8 @@ class MlxModelRunner:
 
     def _acquire_cache(self) -> list[Any]:
         """Get a reusable cache list from the pool, or create a new one."""
+        if self.native_cache_fallback:
+            return self._new_native_cache()
         if not self._cache_layout.has_auxiliary_state and self._cache_pool:
             cache = self._cache_pool.pop()
             for c in cache:
@@ -340,6 +378,8 @@ class MlxModelRunner:
 
     def _release_cache(self, cache: list[Any]) -> None:
         """Return a cache list to the pool for reuse."""
+        if self.native_cache_fallback:
+            return
         if not self._cache_layout.has_auxiliary_state:
             self._cache_pool.append(cache)
 
@@ -696,6 +736,12 @@ class MlxModelRunner:
         """Determine pool slot count (auto-size from available memory if needed)."""
         if explicit_size is not None:
             return explicit_size
+        if self.native_cache_fallback:
+            args = _mlx_text_model_args(self.model)
+            return min(
+                int(getattr(args, "max_position_embeddings", 4096)),
+                _NATIVE_CACHE_FALLBACK_DEFAULT_POOL_SIZE,
+            )
         n_kv_heads, head_dim, dtype = self._get_attn_config()
         # Only full-attention layers occupy pool slots. All-SWA models have no
         # pool at all and fall back to the all-layer formula purely to keep the
@@ -731,8 +777,14 @@ class MlxModelRunner:
     def pool_size(self) -> int:
         return self._pool_size
 
+    @property
+    def native_cache_fallback(self) -> bool:
+        return getattr(self, "_native_cache_fallback", False)
+
     def _build_aot_kernels(self) -> MlxAOTKernelSet:
         """Build model-level set of optional registered AOT kernels."""
+        if self.native_cache_fallback:
+            return MlxAOTKernelSet()
         if self._cache_layout.num_attention_layers == 0:
             return MlxAOTKernelSet()
         layer_idx = self._cache_layout.first_attention_layer_index
@@ -1768,7 +1820,12 @@ class MlxModelRunner:
         last_tokens = [self._req_token_ids[rid][-1] for rid in req_ids]
         batched_input = mx.array(last_tokens, dtype=mx.int32)[:, None]
 
-        if self._cache_layout.has_auxiliary_state:
+        if self.native_cache_fallback:
+            last_logits = self._decode_with_native_cache(
+                caches,
+                [batched_input[i : i + 1] for i in range(len(caches))],
+            )
+        elif self._cache_layout.has_auxiliary_state:
             last_logits = self._decode_with_hybrid_batching(
                 caches, batched_input, list(req_ids)
             )
@@ -1826,7 +1883,12 @@ class MlxModelRunner:
         # So layer-0 offsets reflect the position the NEW token will
         # be written at in step N+1 (and equivalently the RoPE offset).
         batched_input = prev.lazy_tokens[:, None]
-        if self._cache_layout.has_auxiliary_state:
+        if self.native_cache_fallback:
+            last_logits = self._decode_with_native_cache(
+                caches,
+                [batched_input[i : i + 1] for i in range(len(caches))],
+            )
+        elif self._cache_layout.has_auxiliary_state:
             last_logits = self._decode_with_hybrid_batching(
                 caches, batched_input, prev.req_ids
             )
