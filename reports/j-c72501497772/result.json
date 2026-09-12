@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37606",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/792",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/768",
+  "candidate_commit": "ca540bbde8b079c53aa63885931b6d2c950c5127",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The prepared base reproduces shared-pool reuse and reverse clobbering in the actual BreakableCUDAGraph eager-break bridge. At the exact candidate commit, strong references prevent reuse and preserve both the earlier bridge and later bucket buffers for three shapes. The candidate regression and the complete model-free BCG unit class pass. This verifies the reported bridge-lifetime defect, but not the unavailable Hy4/GLM large-model manifestations or performance claims.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-c72501497772/venv/bin/python /job/review-evidence-j-c72501497772/shared_pool_reproducer.py (base)",
+      "exit_code": 0,
+      "what_was_measured": "For shapes (64,2048), (128,1024), and (257,511), weak references reused the exact pointer, corrupted the bridge to -999, and were reverse-clobbered to 7; strong-reference controls showed none of those effects."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c72501497772/venv/bin/python /job/review-evidence-j-c72501497772/actual_bridge_case.py (base)",
+      "exit_code": 0,
+      "what_was_measured": "The checked-out SGLang BreakableCUDAGraph bridge pointer was reused for all three shapes and replay clobbered the later bucket buffer from -999 to 11."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c72501497772/venv/bin/python /job/review-evidence-j-c72501497772/actual_bridge_case.py (candidate ca540bb)",
+      "exit_code": 0,
+      "what_was_measured": "No pointer reuse or reverse clobbering for all three shapes; deterministic replay output remained 22 and later bucket buffers remained -999."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c72501497772/venv/bin/python -m pytest -q test/registered/cuda_graph/breakable/test_breakable_cuda_graph.py::TestBreakableCUDAGraphBasic::test_break_inputs_survive_later_capture_into_shared_pool",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression passed with two subtests on the assigned GPU."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c72501497772/venv/bin/python -m pytest -q test/registered/cuda_graph/breakable/test_breakable_cuda_graph.py::TestBreakableCUDAGraphBasic",
+      "exit_code": 0,
+      "what_was_measured": "10 tests passed, including two candidate regression subtests; existing break/replay behavior remained intact."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "All allocator and BCG replay cases ran on one AMD Instinct MI355X (gfx950), Torch 2.11.0+rocm7.2, HIP 7.2.26015."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No B300/CUDA system or tencent/Hy4-preview-FP8 weights/TP8 allocation was available, so the reported wrong greedy-token end-to-end manifestation was not rerun.",
+    "GLM-5.3-Flash/KDA illegal-memory-access and Kimi-K3 layout claims were not tested.",
+    "The reported 0.81 GB to 1.85 GB capture-memory change and throughput impact were not measured.",
+    "The candidate changes Python only; no native source changed, repository-environment.json declares native and wheel as null, so no native rebuild was applicable."
+  ]
+}
