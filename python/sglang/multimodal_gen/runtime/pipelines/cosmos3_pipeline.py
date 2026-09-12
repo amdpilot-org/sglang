@@ -8,6 +8,7 @@ cross-attends to the cached UND K/V at each denoising step.
 
 import os
 
+from sglang.multimodal_gen.runtime.candidate_trajectory import ActionCandidateCapability
 from sglang.multimodal_gen.runtime.pipelines_core.composed_pipeline_base import (
     ComposedPipelineBase,
 )
@@ -39,6 +40,15 @@ class Cosmos3Pipeline(LoRAPipeline, ComposedPipelineBase):
     # back-compat alias below).
     pipeline_name = "Cosmos3OmniPipeline"
     is_video_pipeline = True
+    action_candidate_capability = ActionCandidateCapability(
+        tensor="action_latents",
+        reduction_order="after_denormalization",
+        reducers=("none", "mean"),
+        output_dtype="float32",
+        output_shape="[action_horizon, raw_action_dim]",
+        candidate_invariant_conditioning=("prompt", "image", "domain"),
+        auxiliary_branch_required=False,
+    )
 
     _required_config_modules = [
         "text_tokenizer",

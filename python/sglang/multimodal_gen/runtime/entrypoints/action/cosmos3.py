@@ -10,6 +10,7 @@ import numpy as np
 from PIL import Image
 
 from sglang.multimodal_gen.configs.sample.cosmos3 import Cosmos3SamplingParams
+from sglang.multimodal_gen.runtime.candidate_trajectory import CandidateTrajectorySpec
 from sglang.multimodal_gen.runtime.server_args import ServerArgs
 
 
@@ -60,7 +61,14 @@ def cosmos3_action_metadata(server_args: ServerArgs) -> dict[str, Any]:
             "batch_inputs": max_batch_size > 1,
             "max_batch_size": max_batch_size,
             "batched_action_modes": ["policy"],
-            "multiple_candidates": False,
+            "multiple_candidates": True,
+            "candidate_trajectory": {
+                "reducers": ["mean"],
+                "reduction_order": "after_denormalization",
+                "seed_policy": "per_candidate",
+                "return_candidates": True,
+                "auxiliary_video_required": False,
+            },
         },
     }
 
@@ -131,6 +139,9 @@ def build_cosmos3_action_sampling_params(
     sampling_params_cls: type[Cosmos3SamplingParams],
 ) -> Cosmos3SamplingParams:
     parameters = dict(payload.get("parameters") or {})
+    candidate_spec = CandidateTrajectorySpec.from_value(
+        parameters.get("candidate_trajectory", payload.get("candidate_trajectory"))
+    )
     options = {**observation, **parameters}
     action_mode = str(options.get("action_mode", "policy")).strip().lower()
     if action_mode == "forward_dynamics":
@@ -177,11 +188,22 @@ def build_cosmos3_action_sampling_params(
     if images and video_path is not None:
         raise ValueError("Cosmos3 action requests accept either an image or a video")
     batch_size = len(images) if images else 1
+    if candidate_spec is not None and batch_size != 1:
+        raise ValueError(
+            "candidate_trajectory currently accepts exactly one conditioning "
+            "observation per logical request"
+        )
     max_batch_size = max(1, int(getattr(server_args, "batching_max_size", 1)))
     if batch_size > max_batch_size:
         raise ValueError(
             f"Cosmos3 action batch size {batch_size} exceeds "
             f"--batching-max-size={max_batch_size}"
+        )
+    physical_batch_size = batch_size * (candidate_spec.count if candidate_spec else 1)
+    if physical_batch_size > max_batch_size:
+        raise ValueError(
+            f"candidate group requires {physical_batch_size} atomic batch slots, "
+            f"which exceeds --batching-max-size={max_batch_size}"
         )
     image_path = None if not images else images[0] if batch_size == 1 else images
 
@@ -219,6 +241,8 @@ def build_cosmos3_action_sampling_params(
         "num_inference_steps": int(options.get("num_inference_steps", 35)),
         "guidance_scale": float(options.get("guidance_scale", 1.0)),
         "seed": int(options.get("seed", 42)),
+        "num_outputs_per_prompt": candidate_spec.count if candidate_spec else 1,
+        "candidate_trajectory": candidate_spec,
         "flow_shift": options.get("flow_shift"),
         "max_sequence_length": options.get("max_sequence_length"),
         "condition_frame_indexes": options.get("condition_frame_indexes"),

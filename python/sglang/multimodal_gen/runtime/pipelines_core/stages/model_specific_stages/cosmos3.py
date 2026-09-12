@@ -19,6 +19,7 @@ import PIL.Image
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from diffusers.utils.torch_utils import randn_tensor
 
 from sglang.multimodal_gen.configs.sample.sampling_params import DataType
 from sglang.multimodal_gen.runtime.distributed import get_local_torch_device
@@ -712,10 +713,10 @@ class Cosmos3LatentPreparationStage(PipelineStage):
         height_latent = batch.height // vae_scale_factor_spatial
         width_latent = batch.width // vae_scale_factor_spatial
 
-        if batch.preprocessed_image is not None:
-            batch_dim = int(batch.preprocessed_image.shape[0])
-        else:
-            batch_dim = 1
+        # Conditioning stays one item per prompt, while candidate trajectories
+        # are samples of that shared condition. Use the effective sample batch;
+        # the condition assignment below broadcasts a single encoded image.
+        batch_dim = int(batch.batch_size)
 
         shape = (
             batch_dim,
@@ -744,7 +745,16 @@ class Cosmos3LatentPreparationStage(PipelineStage):
             # The rollout SDE step draws its variance noise from this generator.
             batch.generator = generator
 
-        noise = torch.randn(shape, generator=generator, device=device, dtype=dtype)
+        if isinstance(generator, list) and len(generator) != batch_dim:
+            raise ValueError(
+                "You have passed a list of generators of length "
+                f"{len(generator)}, but requested an effective batch size of "
+                f"{batch_dim}."
+            )
+
+        noise = randn_tensor(
+            shape, generator=generator, device=device, dtype=dtype
+        )
 
         uses_visual_latents = batch.data_type in (DataType.VIDEO, DataType.ACTION)
         has_image_cond = batch.preprocessed_image is not None and uses_visual_latents
@@ -818,8 +828,12 @@ class Cosmos3LatentPreparationStage(PipelineStage):
                 )
             sound_latent_fps = self.transformer.sound_latent_fps
             sound_latent_frames = max(1, round(sound_duration * sound_latent_fps))
-            sound_shape = (1, self.transformer.sound_dim, sound_latent_frames)
-            batch.audio_latents = torch.randn(
+            sound_shape = (
+                batch_dim,
+                self.transformer.sound_dim,
+                sound_latent_frames,
+            )
+            batch.audio_latents = randn_tensor(
                 sound_shape, generator=generator, device=device, dtype=dtype
             )
             self.log_info(f"Prepared sound latents with shape {sound_shape}")
@@ -957,10 +971,8 @@ class Cosmos3LatentPreparationStage(PipelineStage):
         if mode == ACTION_MODE_FORWARD_DYNAMICS:
             condition_mask[:] = 1.0
 
-        noise = torch.randn(
-            batch_dim,
-            action_chunk_size,
-            action_dim,
+        noise = randn_tensor(
+            (batch_dim, action_chunk_size, action_dim),
             generator=generator,
             device=device,
             dtype=dtype,
@@ -2414,9 +2426,54 @@ class Cosmos3DecodingStage(PipelineStage):
         if batch.data_type == DataType.ACTION:
             if action_pred is None:
                 raise RuntimeError("Cosmos3 action request produced no action tensor")
-            payload_actions = (
-                action_pred[0] if action_pred.shape[0] == 1 else action_pred
+            candidate_spec = getattr(
+                batch.sampling_params, "candidate_trajectory", None
             )
+            candidate_payload = None
+            if candidate_spec is not None:
+                from sglang.multimodal_gen.runtime.candidate_trajectory import (
+                    CandidateTrajectorySpec,
+                    reduce_action_candidates,
+                )
+                from sglang.multimodal_gen.runtime.pipelines.cosmos3_pipeline import (
+                    Cosmos3Pipeline,
+                )
+
+                candidate_spec = CandidateTrajectorySpec.from_value(candidate_spec)
+                reduced_action = reduce_action_candidates(
+                    action_pred,
+                    candidate_spec,
+                    Cosmos3Pipeline.action_candidate_capability,
+                )
+                if candidate_spec.return_candidates:
+                    seeds = [int(batch.seed) + i for i in range(candidate_spec.count)]
+                    raw_candidates = batch.action_latents.float().cpu()
+                    if raw_action_dim is not None:
+                        raw_candidates = raw_candidates[:, :, :raw_action_dim]
+                    stats_path = getattr(
+                        batch.sampling_params, "action_stats_path", None
+                    )
+                    if stats_path is not None:
+                        method = getattr(
+                            batch.sampling_params,
+                            "action_normalization",
+                            "quantile",
+                        )
+                        raw_candidates = denormalize_action(
+                            raw_candidates, method, load_action_stats(stats_path)
+                        )
+                    candidate_payload = [
+                        {"candidate_id": i, "seed": seed, "actions": value.numpy()}
+                        for i, (seed, value) in enumerate(zip(seeds, raw_candidates))
+                    ]
+                # OutputBatch retains a batch axis for scheduler slicing, while
+                # the public logical action result does not expose one.
+                action_pred = reduced_action.unsqueeze(0)
+                payload_actions = reduced_action
+            else:
+                payload_actions = (
+                    action_pred[0] if action_pred.shape[0] == 1 else action_pred
+                )
             payload = {
                 "request_id": batch.request_id,
                 "actions": payload_actions.numpy(),
@@ -2428,6 +2485,16 @@ class Cosmos3DecodingStage(PipelineStage):
                     "num_frames": batch.num_frames,
                 },
             }
+            if candidate_spec is not None:
+                payload["candidate_group"] = {
+                    "request_id": batch.request_id,
+                    "candidate_ids": list(range(candidate_spec.count)),
+                    "reducer": candidate_spec.reducer,
+                    "seed_policy": candidate_spec.seed_policy,
+                    "physical_batch_size": candidate_spec.count,
+                }
+                if candidate_payload is not None:
+                    payload["candidates"] = candidate_payload
             return OutputBatch(
                 output=[payload],
                 action_pred=action_pred,
