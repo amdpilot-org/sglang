@@ -33,6 +33,8 @@ from typing import Optional, Tuple
 import msgspec
 import torch
 
+from sglang.srt.environ import envs
+
 
 class _Handoff(msgspec.Struct):
     # staged by the model layer: the activation rows the runner will quantize
@@ -76,7 +78,11 @@ def try_route_quant_fused(
     staged request covers it. Returns (weights, ids) on a hit, None otherwise
     (caller falls through to the unfused router)."""
     x = _handoff.request_x
-    if x is None or num_fused_shared_experts != 0:
+    if (
+        x is None
+        or num_fused_shared_experts != 0
+        or envs.SGLANG_DISABLE_KIMI_K3_ROUTE_QUANT_FUSION.get()
+    ):
         return None
 
     from sglang.kernels.ops.moe import moe_route_quant_fused
