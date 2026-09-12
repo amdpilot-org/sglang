@@ -9,7 +9,6 @@ import torch
 
 from sglang.srt.environ import envs
 from sglang.srt.layers.attention.dsa.utils import (
-    MQA_LOGITS_MIN_ROWS_PER_CHUNK,
     mqa_logits_budget_bytes,
     mqa_logits_row_bytes,
     mqa_logits_rows_per_chunk,
@@ -57,19 +56,27 @@ class TestMqaLogitsBudgetArithmetic(CustomTestCase):
                 num_rows=64, row_bytes=row_bytes, budget_bytes=budget
             )
         )
-        # A budget below one row floors at the minimum chunk, not 1-row launches.
+        # A budget below one row uses the smallest possible useful launch.
         self.assertEqual(
             mqa_logits_rows_per_chunk(
                 num_rows=4096, row_bytes=row_bytes, budget_bytes=1
             ),
-            MQA_LOGITS_MIN_ROWS_PER_CHUNK,
+            1,
         )
         self.assertIsNone(
             mqa_logits_rows_per_chunk(
-                num_rows=MQA_LOGITS_MIN_ROWS_PER_CHUNK,
+                num_rows=128,
                 row_bytes=row_bytes,
-                budget_bytes=1,
+                budget_bytes=128 * row_bytes,
             )
+        )
+        self.assertEqual(
+            mqa_logits_rows_per_chunk(
+                num_rows=129,
+                row_bytes=row_bytes,
+                budget_bytes=128 * row_bytes,
+            ),
+            128,
         )
 
     def test_plan_combines_sm120_cap_with_budget(self):
