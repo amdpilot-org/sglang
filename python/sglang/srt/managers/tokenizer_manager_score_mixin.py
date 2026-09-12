@@ -245,6 +245,13 @@ class TokenizerManagerScoreMixin:
                         torch.as_tensor(embedding), dim=-1
                     ).tolist()
 
+                # CrossEncodingPooler squeezes a single-label classification head's
+                # trailing dimension, so its embedding is a scalar rather than a
+                # one-element vector. Keep one score row per item as required by
+                # ScoringResponse.scores.
+                if isinstance(embedding, (int, float)):
+                    embedding = [float(embedding)]
+
                 # The classification head produces per-token logits, which the pooler reduces
                 # into a single vector per input. That vector is returned in the `.embeddings`
                 # field — not as semantic embeddings, but as pooled classification logits.
