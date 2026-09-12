@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33454",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2160",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2126",
+  "candidate_commit": "27b843774fe9c6d5c6c4a90bc14c0b2e430f13f9",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the DSpark position overflow. The exact candidate clamps verification by remaining context and generation budgets, keeps padded draft positions legal, forces compact ragged verification when clipped, and fixes the prior invalid registered-test location. No remaining source-level or single-gfx950 counterexample was found.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bea849ccb808/venv/bin/python - <base reproduction>",
+      "exit_code": 0,
+      "what_was_measured": "On base, seq_len 1048574 plus six offsets produced positions through 1048579, with four positions outside context length 1048576."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bea849ccb808/venv/bin/python -m pytest -q test/registered/unit/dspark/test_dspark_context_boundary.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate boundary regression: 4 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bea849ccb808/venv/bin/python -m pytest -q test/registered/unit/dspark/test_dspark_context_boundary.py test/registered/spec/dspark/test_dspark_scheduler.py test/registered/spec/dspark/test_ragged_verify.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate and related DSpark suites: 39 passed and 18 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bea849ccb808/venv/bin/python scripts/lint/check_registered_tests.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate regression is accepted by the registered-test taxonomy validator."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bea849ccb808/venv/bin/python - <independent gfx950 adversarial boundary case>",
+      "exit_code": 0,
+      "what_was_measured": "Mixed context/generation budgets yielded lengths [6,2,1,1,2], maximum position 1048575, and qo_indptr [0,6,8,9,10,12]."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..27b843774fe9c6d5c6c4a90bc14c0b2e430f13f9",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Independent tensor arithmetic and the real ragged-layout GPU kernel ran on one AMD Instinct MI355X (gfx950), ROCm 7.2."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 weights were unavailable.",
+    "The prepared host has one AMD Instinct MI355X with ROCm 7.2 rather than two NVIDIA B300 GPUs with CUDA 13.",
+    "The full-model TP2 CUDA illegal-address crash, DeepSeek-V4-Flash semantic accuracy, and distributed execution were not reproduced.",
+    "No native rebuild was applicable because the candidate changes only Python and test/report files."
+  ]
+}
