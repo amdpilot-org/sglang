@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 
 _SHM_DIR = Path("/dev/shm")
 _SGL_SHM_PREFIX = "sgl_shm"
+# macOS limits POSIX shared-memory names to 31 characters including the
+# leading slash that multiprocessing.shared_memory adds internally.
+_SHM_NAME_MAX_LENGTH = 30
 
 _ORPHAN_PREFIXES = (
     "sglang_loads_",  # managers/load_snapshot.py slot files
@@ -30,7 +33,11 @@ _ORPHAN_PREFIXES = (
 
 def make_shm_name(kind: str) -> str:
     """Pid-stamped name (sgl_shm_<kind>_<pid>_<rand>) the sweep can reclaim."""
-    return f"{_SGL_SHM_PREFIX}_{kind}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
+    pid = str(os.getpid())
+    random_suffix = uuid.uuid4().hex[:8]
+    fixed_length = len(_SGL_SHM_PREFIX) + len(pid) + len(random_suffix) + 3
+    kind = kind[: max(0, _SHM_NAME_MAX_LENGTH - fixed_length)]
+    return f"{_SGL_SHM_PREFIX}_{kind}_{pid}_{random_suffix}"
 
 
 def _creator_pid(filename: str) -> int | None:

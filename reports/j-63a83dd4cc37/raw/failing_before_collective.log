@@ -1,0 +1,49 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+____ TestSameNodeShmFailure.test_source_shm_creation_failure_is_collective _____
+
+self = <test_same_node_shm_failure.TestSameNodeShmFailure testMethod=test_source_shm_creation_failure_is_collective>
+
+    def test_source_shm_creation_failure_is_collective(self):
+        ctx = get_context("spawn")
+        with ctx.Manager() as manager:
+            results = manager.dict()
+            processes = [
+                ctx.Process(target=_run_same_node_probe, args=(rank, 2, _free_port(), results))
+                for rank in range(2)
+            ]
+            # All ranks must use the same rendezvous port.
+            port = _free_port()
+            processes = [
+                ctx.Process(target=_run_same_node_probe, args=(rank, 2, port, results))
+                for rank in range(2)
+            ]
+            for process in processes:
+                process.start()
+            for process in processes:
+                process.join(10)
+            for process in processes:
+                if process.is_alive():
+                    process.terminate()
+                    process.join()
+    
+>           self.assertEqual(dict(results), {0: [False, False], 1: [False, False]})
+E           AssertionError: {0: 'RuntimeError: [/pytorch/third_party/gloo[133 chars]ure'} != {0: [False, False], 1: [False, False]}
+E           + {0: [False, False], 1: [False, False]}
+E           - {0: 'RuntimeError: [/pytorch/third_party/gloo/gloo/transport/tcp/pair.cc:547] '
+E           -     'Connection closed by peer [127.0.0.1]:60064',
+E           -  1: 'RuntimeError: Application timeout caused pair closure'}
+
+test/registered/distributed/test_same_node_shm_failure.py:73: AssertionError
+----------------------------- Captured stderr call -----------------------------
+Error ignored in is_in_the_same_node: [/pytorch/third_party/gloo/gloo/transport/tcp/unbound_buffer.cc:78] Timed out waiting 3000ms for recv operation to complete
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/distributed/test_same_node_shm_failure.py::TestSameNodeShmFailure::test_source_shm_creation_failure_is_collective
+1 failed, 1 warning in 10.96s
