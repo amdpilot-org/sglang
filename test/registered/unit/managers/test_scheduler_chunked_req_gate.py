@@ -3,7 +3,7 @@
 import unittest
 from array import array
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import torch
 
@@ -177,6 +177,69 @@ class TestStashGatePreservesPrefixIndices(CustomTestCase):
             s, running_batch=s.running_batch, last_batch=s.last_batch
         )
         self.assertIsNone(s.chunked_req)
+
+
+class TestChunkedPrefillBatchFullReset(CustomTestCase):
+    def _make_scheduler(self, *, waiting=True, allocatable=1):
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.grammar_manager = MagicMock()
+        scheduler.grammar_manager.has_waiting_grammars.return_value = False
+        scheduler.enable_hierarchical_cache = False
+        scheduler.enable_unified_cache_external_linker = False
+        scheduler.enable_priority_preemption = False
+        scheduler.is_hybrid_swa = False
+        scheduler.waiting_queue = [MagicMock()] if waiting else []
+        scheduler.chunked_req = None
+        scheduler.min_free_slots_delayer = None
+        scheduler.get_num_allocatable_reqs = MagicMock(return_value=allocatable)
+        scheduler.policy = MagicMock()
+        scheduler.processed_tokens_counter = 0
+        return scheduler
+
+    def _run(self, scheduler, running_batch):
+        with patch(
+            "sglang.srt.managers.scheduler.get_memory",
+            return_value=SimpleNamespace(enable_flexkv=False),
+        ):
+            return Scheduler._get_new_batch_prefill_raw(
+                scheduler,
+                prefill_delayer_single_pass=None,
+                running_batch=running_batch,
+            )
+
+    def test_stale_batch_full_reconsiders_waiting_request(self):
+        scheduler = self._make_scheduler()
+        scheduler.policy.calc_priority.side_effect = RuntimeError("admission attempted")
+        running_batch = MagicMock(batch_is_full=True, reqs=[MagicMock()] * 3)
+
+        with self.assertRaisesRegex(RuntimeError, "admission attempted"):
+            self._run(scheduler, running_batch)
+
+    def test_no_capacity_is_rechecked_and_relatches_batch_full(self):
+        scheduler = self._make_scheduler(allocatable=0)
+        running_batch = MagicMock(batch_is_full=True, reqs=[MagicMock()] * 4)
+
+        batch, returned_running_batch = self._run(scheduler, running_batch)
+
+        self.assertIsNone(batch)
+        self.assertIs(returned_running_batch, running_batch)
+        scheduler.get_num_allocatable_reqs.assert_called_once_with(
+            4, running_batch=running_batch
+        )
+        self.assertTrue(running_batch.batch_is_full)
+        scheduler.policy.calc_priority.assert_not_called()
+
+    def test_empty_waiting_queue_clears_stale_hint_without_admission(self):
+        scheduler = self._make_scheduler(waiting=False)
+        running_batch = MagicMock(batch_is_full=True, reqs=[MagicMock()] * 3)
+
+        batch, returned_running_batch = self._run(scheduler, running_batch)
+
+        self.assertIsNone(batch)
+        self.assertIs(returned_running_batch, running_batch)
+        self.assertFalse(running_batch.batch_is_full)
+        scheduler.get_num_allocatable_reqs.assert_not_called()
+        scheduler.policy.calc_priority.assert_not_called()
 
 
 if __name__ == "__main__":

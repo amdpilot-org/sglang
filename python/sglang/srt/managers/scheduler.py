@@ -3720,9 +3720,11 @@ class Scheduler(
             if self.enable_hicache_storage:
                 self._retry_missed_storage_prefetches()
 
-        if self.enable_priority_preemption or self.is_hybrid_swa:
-            # Reset batch_is_full to try preemption with a prefill adder.
-            running_batch.batch_is_full = False
+        # batch_is_full is an admission result from the previous pass, not a
+        # persistent capacity state. In particular, the final chunked-prefill
+        # pass can set it while the continuing request temporarily occupies the
+        # last slot. Recompute it below from the current pools and batch shape.
+        running_batch.batch_is_full = False
 
         if (
             running_batch.batch_is_full or len(self.waiting_queue) == 0
