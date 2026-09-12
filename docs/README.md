@@ -145,6 +145,37 @@ smoke test.
 - Use consistent terminology
 - Include concrete examples and code snippets
 
+### Localizing the Cookbook
+
+Localized Cookbook pages live under a language-code directory such as `ko/cookbook/` and
+are exposed through Mintlify's language selector. Localization is intentionally incremental:
+only add a page to a language's navigation after the complete page has been translated.
+Readers can switch to English for pages that are not translated yet.
+
+Each translated page must include these frontmatter fields:
+
+```yaml
+translation_of: cookbook/autoregressive/Google/EmbeddingGemma.mdx
+translation_source_commit: 358c163250ad3b1f62939b01ce1314a0a31a0365
+```
+
+`translation_of` points to the English source. `translation_source_commit` is the full commit
+reviewed by the translator. When the source changes after that commit, the localization check
+fails until a contributor reviews the change, updates the translation, and advances the SHA.
+
+- Translate the whole page, including headings, callouts, and image alt text.
+- Keep commands, code blocks, model IDs, API fields, and configuration values unchanged.
+- Preserve links to shared English reference pages when no localized reference exists.
+- Request review from a fluent speaker. Machine translation may assist, but does not replace
+  technical and native-language review.
+- Add the page under the matching language in `docs.json`, then run:
+
+```bash
+node scripts/check_localizations.mjs
+node scripts/test_check_localizations.mjs
+mint broken-links --check-anchors --check-redirects
+```
+
 ## Acknowledgements
 
 Thank you to all the authors who contributed to the original documentation in `sglang/docs/` and the original cookbook in [`sgl-cookbook`](https://github.com/sgl-project/sgl-cookbook). The migration to the new Mintlify-based documentation was led by the following [ACM-VIT](https://github.com/ACM-VIT) students:

@@ -23,6 +23,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkLocalizations } from "./check_localizations.mjs";
+import "./test_check_localizations.mjs";
 
 const SNIPPETS = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "snippets");
 const CONFIGS = join(SNIPPETS, "configs");
@@ -503,4 +505,5 @@ if (failures.length) {
   for (const f of failures) console.error("  - " + f);
   process.exit(1);
 }
+checkLocalizations();
 console.log("cookbook config check: OK");

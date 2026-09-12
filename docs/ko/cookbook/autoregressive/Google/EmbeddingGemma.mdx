@@ -1,0 +1,84 @@
+---
+title: EmbeddingGemma
+description: Google의 EmbeddingGemma 텍스트 임베딩 모델을 SGLang으로 서빙합니다.
+translation_of: cookbook/autoregressive/Google/EmbeddingGemma.mdx
+translation_source_commit: 358c163250ad3b1f62939b01ce1314a0a31a0365
+---
+
+## 개요
+
+[EmbeddingGemma](https://huggingface.co/google/embeddinggemma-300m)는 Google이 공개한 3억 파라미터 규모의 텍스트 임베딩 모델입니다. SGLang은 양방향 Gemma 3 인코더를 감지하고 정규화된 평균 풀링을 적용한 뒤, OpenAI 호환 `/v1/embeddings` 엔드포인트를 통해 임베딩을 제공합니다.
+
+NVIDIA CUDA 환경에서 SGLang은 기본적으로 전체 프리필에 breakable CUDA graph(BCG)를 사용합니다. 또한 이 양방향 인코더와 호환되지 않는 prefix caching과 chunked prefill을 비활성화합니다.
+
+## 사전 요구 사항
+
+- NVIDIA CUDA GPU
+- [EmbeddingGemma 라이선스](https://huggingface.co/google/embeddinggemma-300m)에 동의한 Hugging Face 계정
+- Hugging Face 액세스 토큰. 서버가 제한된 체크포인트를 다운로드할 수 있도록 시작 전에 토큰을 내보내세요.
+
+```bash
+export HF_TOKEN=<your-hugging-face-token>
+```
+
+EmbeddingGemma 지원이 포함된 SGLang 빌드를 설치합니다.
+
+```bash
+pip install 'git+https://github.com/sgl-project/sglang.git#subdirectory=python'
+```
+
+## 서버 시작
+
+표준 구성은 EmbeddingGemma를 감지하고 embedding mode, BCG, 체크포인트의 BF16 dtype을 자동으로 활성화합니다.
+
+```bash
+sglang serve \
+  --model-path google/embeddinggemma-300m \
+  --host 0.0.0.0
+```
+
+### Hopper 성능 기본값
+
+H100과 H200에서 SGLang은 FA3를 자동으로 선택하고 16,384 토큰까지 BCG를 캡처합니다. 따라서 한 번의 replay로 2K 임베딩 요청 8개를 처리할 수 있습니다. 이 워크로드에는 추가 성능 플래그가 필요하지 않습니다.
+
+더 큰 전체 프리필을 캡처하려면 BCG 범위를 명시적으로 늘리세요.
+
+```bash
+sglang serve \
+  --model-path google/embeddinggemma-300m \
+  --cuda-graph-max-bs-prefill 32768 \
+  --host 0.0.0.0
+```
+
+EmbeddingGemma는 여러 문자열이 포함된 임베딩 요청에 batch tokenization을 자동으로 활성화하므로 별도의 tokenizer batching 플래그를 추가하지 마세요.
+
+## 임베딩 생성
+
+문자열 하나 또는 문자열 배치를 OpenAI 호환 엔드포인트로 전송합니다.
+
+```bash
+curl http://127.0.0.1:30000/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "google/embeddinggemma-300m",
+    "input": [
+      "A short guide to serving text embeddings.",
+      "Vector search retrieves semantically similar documents."
+    ],
+    "encoding_format": "float"
+  }'
+```
+
+Python과 OpenAI 클라이언트 예제는 [OpenAI 호환 임베딩 API](/docs/basic_usage/openai_api_embeddings)를 참고하세요.
+
+## 배포 동작
+
+EmbeddingGemma는 전체 입력에 양방향 attention을 수행합니다. 따라서 prefix KV cache를 재사용하거나 입력을 여러 chunked prefill로 나누면 잘못된 attention state가 생성됩니다. SGLang은 필요한 설정을 자동으로 적용합니다.
+
+- RadixAttention prefix caching을 비활성화합니다.
+- chunked prefill을 비활성화합니다.
+- 임베딩 전용 모델이므로 decode CUDA graph를 비활성화합니다.
+- CUDA prefill에 BCG를 사용합니다.
+- 지원되는 Hopper 및 Blackwell CUDA GPU에서 prefill backend가 FA3 또는 FA4이면 FlashAttention raw-K/V 경로를 사용합니다.
+
+이 레시피에는 prefill CUDA graph override가 필요하지 않습니다. 최적화된 EmbeddingGemma 경로를 사용하려면 BCG를 활성화한 상태로 유지하세요.
