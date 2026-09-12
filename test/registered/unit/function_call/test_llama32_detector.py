@@ -100,6 +100,32 @@ class TestLlama32Detector(CustomTestCase):
         self.assertEqual(result.calls[0].name, "get_weather")
         self.assertEqual(result.calls[1].name, "search")
 
+    def test_unmarked_json_content_is_preserved_without_a_tool_call(self):
+        texts = [
+            "{}",
+            '{"a": 1} is a dict',
+            '{"status": "ok", "count": 3}',
+            '{"name": "not_a_registered_tool", "arguments": {}}',
+        ]
+        for text in texts:
+            with self.subTest(text=text):
+                result = self.detector.detect_and_parse(text, self.tools)
+                self.assertEqual(result.calls, [])
+                self.assertEqual(result.normal_text, text)
+
+    def test_unmarked_valid_tool_call_is_still_extracted(self):
+        text = '{"name": "get_weather", "arguments": {"city": "Beijing"}}'
+        result = self.detector.detect_and_parse(text, self.tools)
+        self.assertEqual(len(result.calls), 1)
+        self.assertEqual(result.calls[0].name, "get_weather")
+        self.assertEqual(result.normal_text, "")
+
+    def test_marked_non_tool_json_keeps_existing_marker_semantics(self):
+        text = '<|python_tag|>{"a": 1}'
+        result = self.detector.detect_and_parse(text, self.tools)
+        self.assertEqual(result.calls, [])
+        self.assertEqual(result.normal_text, "")
+
     def test_tool_call_with_multiple_arguments(self):
         text = '<|python_tag|>{"name": "get_weather", "arguments": {"city": "London", "unit": "celsius"}}'
         result = self.detector.detect_and_parse(text, self.tools)
