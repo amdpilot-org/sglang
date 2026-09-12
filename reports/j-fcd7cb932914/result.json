@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37834",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the reported missing ReplaySSM cursor reset at the extra_buffer ping-pong ownership boundaries, reset recycled cursors on initial allocation and replacement installation, and permit extra_buffer only for GDN while retaining the KDA safety guard.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-fcd7cb932914/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_replayssm_ping_pong_cursor.py (source fix temporarily reversed)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: initial recycled cursors remained [5, 7] and the donation replacement cursor remained 9; 2 failed, 1 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fcd7cb932914/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_replayssm_ping_pong_cursor.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression and boundaries: allocation reset, donation replacement reset, non-ReplaySSM behavior, GDN extra_buffer admission, and KDA extra_buffer rejection; 5 passed."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-fcd7cb932914/venv/bin/python < GPU cursor-reset fixture",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X gfx950, actual device-tensor advanced indexing changed recycled slot 5's ReplaySSM cursor from 9 to 0 and synchronized successfully."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fcd7cb932914/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_kda_helion_dispatcher.py test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py",
+      "exit_code": 1,
+      "what_was_measured": "17 nearby tests passed; one unrelated CUDA-only CuTeDSL import test was blocked on this ROCm host by missing cuda.bindings."
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files python/sglang/srt/arg_groups/attention_hook.py python/sglang/srt/mem_cache/memory_pool.py test/registered/unit/mem_cache/test_replayssm_ping_pong_cursor.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, AST, CI registry, and policy hooks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "gpu-cursor-check.txt records AMD Instinct MI355X, gfx950:sramecc+:xnack-, and write_pos [0, 0, 0, 5, 7, 0] after resetting recycled slot 5."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Qwen/Qwen3.8-27B weights and an NVIDIA H200 are unavailable, so the reported end-to-end cached_tokens and TTFT measurements were not repeated.",
+    "The gfx950 fixture validates the corrected device-tensor ownership/reset operation, not Qwen3.8 semantic accuracy or H200 performance.",
+    "KDA extra_buffer remains intentionally unsupported because KDA does not force-flush pending ReplaySSM ring entries at radix tracking boundaries.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable.",
+    "One nearby CUDA-only test could not import cuda.bindings in the prepared ROCm environment."
+  ]
+}
