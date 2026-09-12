@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/26399",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared main revision already removes the synchronous GPU Tensor.tolist() calls from EAGLE verification. run_eagle_verify returns device tensors, and GenerationBatchResult.copy_to_cpu stages token IDs and accept lengths into pinned host buffers with nonblocking D2H. A regression test verifies the source invariant and the real gfx950 copy path for empty and multi-request results. No additional runtime correction was justified.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f2862992c228/venv/bin/python -m pytest -q test/registered/spec/test_eagle_verify_result_d2h.py",
+      "exit_code": 0,
+      "what_was_measured": "Three tests passed: no cpu/tolist/numpy conversion in run_eagle_verify; pinned asynchronous device-to-host copies preserve multi-request token IDs and accept lengths on gfx950; zero-length results are handled correctly."
+    },
+    {
+      "command": "gh api 'repos/sgl-project/sglang/contents/python/sglang/srt/speculative/eagle_info.py?ref=v0.5.12' --jq .content | base64 -d; rg -n -C 3 'def verify|tolist\\('",
+      "exit_code": 0,
+      "what_was_measured": "The reported v0.5.12 implementation contains synchronous accept_index.tolist(), predict.tolist(), num_correct_drafts_cpu.tolist(), and num_accept_tokens_cpu.tolist() calls in EagleVerifyInput.verify, establishing that the regression would fail on the reported source."
+    },
+    {
+      "command": "rocm-smi --showproductname --showuniqueid --showmeminfo vram",
+      "exit_code": 0,
+      "what_was_measured": "The assigned device is one AMD Instinct MI355X, gfx950, unique ID 0x91222c17f0f648d7."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The regression executed real ROCm tensor creation, nonblocking GPU-to-pinned-host copies, CUDA/HIP event synchronization, and exact host-value comparison on HIP_VISIBLE_DEVICES=0 (gfx950)."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported GLM-5.1 FP8 weights were unavailable.",
+    "The assigned environment has one gfx950 AMD GPU, not eight H200 GPUs, so TP8, CUDA/H200 behavior, 80K-160K prompts, near-full KV pressure, and the original watchdog hang were not reproduced.",
+    "The test qualifies the corrected EAGLE result-transfer boundary and transport values only; it does not qualify GLM-5.1 model semantics or a distributed workload.",
+    "On HIP, the scheduler currently performs this pinned asynchronous copy on the forward stream by design; the regression verifies absence of Python-side Tensor.tolist() in run_eagle_verify and correct pinned D2H, not CUDA copy-stream overlap."
+  ]
+}
