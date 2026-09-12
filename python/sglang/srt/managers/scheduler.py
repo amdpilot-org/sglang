@@ -2084,7 +2084,9 @@ class Scheduler(
             if get_mm().mm_feature_transport == "cuda_vmm":
                 vmm_errors = self._materialize_cuda_vmm_inputs(recv_req)
 
-            # Skip health check when server is busy — ongoing requests already carry health info.
+            # A busy scheduler can use its next completed forward as health
+            # evidence. When fully idle, admit the probe so /health_generate
+            # still exercises the model/device path and produces a real token.
             if is_health_check_generate_req(recv_req) and not self.is_fully_idle(
                 for_health_check=True
             ):

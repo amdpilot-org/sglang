@@ -1,0 +1,27 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35241",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/813",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Preserved the candidate's dedicated DP health routing, which isolates user round-robin and load-budget state, but rejected its synthetic idle success. Idle /health_generate probes again enter generation admission so success requires a model result; busy probes still piggyback without admission. The candidate's MagicMock scheduler test was corrected to test this contract and is not presented as distributed PrefillDelayer evidence.",
+  "tests": [
+    {
+      "command": "source inspection and regression comparison at f8853833a75e992e618a9e5d74efe493c3bfefe2",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: candidate process_input_requests appends an idle probe IPC, calls maybe_send_health_check_signal immediately, and continues before _request_dispatcher; therefore HTTP success requires no generation/model forward. The revised idle-admission regression has the opposite required assertion."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9d0d17124c3c/venv/bin/python -m pytest test/registered/unit/managers/test_scheduler_health_check_admission.py test/registered/unit/managers/test_data_parallel_controller.py -q",
+      "exit_code": 0,
+      "what_was_measured": "28 passed: idle probe enters generation admission; busy probe bypasses it; health routing does not consume user round-robin state or refresh user load budgets."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "No GPU claim was needed for the deterministic control-flow correction. The assigned environment is one AMD Instinct MI355X/gfx950, not 8 NVIDIA B30Z, and DeepSeek-V4-Pro weights are unavailable.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No TP8/DP8 DeepSeek-V4-Pro run on 8x NVIDIA B30Z was possible, so elimination of the reported LOW throughput regime, 16,384-token divergence, persistent mixed/delay state, and running-request collapse remains unverified.",
+    "An idle real generation probe can participate in scheduler admission and therefore cannot simultaneously be claimed to leave all real distributed PrefillDelayer state unchanged. The change only proves DP routing-state isolation and preserves genuine model/device health coverage.",
+    "The focused test uses a mocked dispatcher only to establish admission versus bypass and makes no distributed synchronization claim."
+  ]
+}

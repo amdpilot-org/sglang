@@ -663,10 +663,11 @@ async def validate_json_request(raw_request: Request):
 @app.get("/health_generate")
 async def health_generate(request: Request) -> Response:
     """
-    Check the health of the inference server by sending a special request to generate one token.
+    Check the health of the inference server by generating one token when idle.
 
-    If the server is running something, this request will be ignored, so it creates zero overhead.
-    If the server is not running anything, this request will be run, so we know whether the server is healthy.
+    A busy scheduler replies after its next model result. An idle scheduler runs
+    the probe, preserving coverage of the model/device execution path. DP routing
+    uses probe-only state so this request does not consume user routing state.
     """
 
     if _global_state.tokenizer_manager.gracefully_exit:
