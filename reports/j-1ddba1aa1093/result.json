@@ -1,0 +1,32 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/7433",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source already contains the issue-specific fix from upstream PR https://github.com/sgl-project/sglang/pull/32118: Kimi-VL MoonViT uses SGLang VisionAttention with packed sequence metadata instead of the former local SDPA path that materialized a dense mask over all packed image tokens. Added regression coverage for single-image and uneven multi-image boundaries. On the assigned gfx950, the actual Triton packed-attention backend matched independent per-sequence PyTorch SDPA and avoided the removed path's measured quadratic transient allocation.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-1ddba1aa1093/venv/bin/python -m pytest -q test/registered/unit/models/test_kimi_vl.py",
+      "exit_code": 0,
+      "what_was_measured": "Five focused Kimi-VL unit tests passed, including two new boundary subtests proving MoonVitEncoderLayer forwards exact cumulative sequence lengths, max sequence length, and shared VisionAttention metadata for a single image and uneven packed images. The regression fails against the removed implementation because that layer had no VisionAttention module and did not accept forward_metadata."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-1ddba1aa1093/venv/bin/python reports/j-1ddba1aa1093/kimi_vl_attention_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI355X (gfx950), SGLang's VisionTritonAttention matched independent per-sequence torch SDPA for lengths [17] and [11,23,7] with max absolute difference 0.0078125 and finite outputs. For packed lengths [1024,1536], current-vs-legacy output max difference was 0.0009765625; the current path had 0 allocator-visible intermediate bytes after output allocation, while the reconstructed removed dense SDPA path peaked at 261237248 extra bytes and its boolean mask alone was 6553600 bytes."
+    },
+    {
+      "command": "pre-commit run --files test/registered/unit/models/test_kimi_vl.py reports/j-1ddba1aa1093/kimi_vl_attention_probe.py reports/j-1ddba1aa1093/result.json reports/j-1ddba1aa1093/README.md reports/j-1ddba1aa1093/gpu_probe.log reports/j-1ddba1aa1093/unit_test.log",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository formatting, lint, safety, spelling, and registered-test validation hooks passed."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-1ddba1aa1093/gpu_probe.log records execution on AMD Instinct MI355X with torch 2.11.0+rocm7.2 and HIP 7.2.26015.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported moonshotai/Kimi-VL-A3B-Thinking-2506 weights and MMMU dataset were not available, so no full-model semantic or benchmark accuracy claim is made.",
+    "The reporter used four NVIDIA H100 GPUs with CUDA and concurrency 8; this job had one AMD gfx950 GPU. The GPU probe validates the packed-attention mechanism and gfx950 Triton execution only, not H100 FA3 behavior or a distributed serving workload.",
+    "The original 0.4.7.post1 server was not launched. Failing-before evidence is the removed implementation in upstream PR #32118 plus the reconstructed legacy dense-SDPA calculation in the retained probe; the current checkout is already post-fix.",
+    "No native library rebuild was needed because no native or production source was changed."
+  ]
+}
