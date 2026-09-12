@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36841",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the Transformers 5.12.1 deprecation from the actual Dots3Config torch_dtype getter, changed the DOTS-3 MoE dispatcher argument to config.dtype, and added a failing-before/passing-after regression covering default, float16, bfloat16, and float32 propagation through Dots3MoE and the real MaybeTboDeepEPDispatcher wrapper.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-b0083b3f376f/venv/bin/python - <<'PY' (construct Dots3Config for default, float16, bfloat16, and float32; read torch_dtype and dtype) PY",
+      "exit_code": 0,
+      "what_was_measured": "Pinned Transformers 5.12.1 emitted '[transformers] `torch_dtype` is deprecated! Use `dtype` instead!' and both attributes returned identical values for all four cases. Raw output: reports/j-b0083b3f376f/raw/config_access.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b0083b3f376f/venv/bin/python -m pytest -q test/registered/unit/models/test_dots3_dispatcher_dtype.py (before source change)",
+      "exit_code": 1,
+      "what_was_measured": "All four cases reached the dispatcher with the expected dtype but failed because Dots3MoE called Transformers logger.warning_once for the deprecated torch_dtype getter. Raw output: reports/j-b0083b3f376f/raw/pytest_before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b0083b3f376f/venv/bin/python -m pytest -q test/registered/unit/models/test_dots3_dispatcher_dtype.py",
+      "exit_code": 0,
+      "what_was_measured": "Four cases passed. The actual Dots3MoE constructor and MaybeTboDeepEPDispatcher wrapper propagated None, float16, bfloat16, and float32 unchanged to a captured DeepEPDispatcher boundary without invoking the deprecated getter. Raw output: reports/j-b0083b3f376f/raw/pytest_after.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU execution was needed for this configuration-property compatibility fix. Heavyweight expert/kernel objects and the DeepEP transport boundary were replaced while exercising the actual Dots3MoE constructor and MaybeTboDeepEPDispatcher wrapper."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No DOTS-3 model weights were available, so full model initialization and distributed DeepEP transport were not executed.",
+    "The reported future removal of torch_dtype was not tested because the frozen environment uses Transformers 5.12.1; only its current deprecation behavior was measured.",
+    "The focused test verifies dtype propagation into the real dispatcher wrapper, with the final heavyweight DeepEPDispatcher implementation replaced by a capture module to avoid requiring a distributed runtime."
+  ]
+}
