@@ -630,6 +630,7 @@ mod tests {
             server_args: Arc::new(crate::message::config::ServerArgs::default()),
             chat_formatter: None,
             response_activity: Default::default(),
+            load_snapshots: Default::default(),
             startup_readiness: Default::default(),
         });
 

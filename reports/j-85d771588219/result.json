@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/11186",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 2993 and corrected its remaining Rust-generation-egress omission by carrying LoadSnapshot in the batch wire, caching newest-per-rank snapshots in the Rust frontend, and exposing the cache through Rust /v1/loads. Candidate and review parent PRs: https://github.com/amdpilot-org/sglang/pull/2993 and https://github.com/amdpilot-org/sglang/pull/3080.",
+  "tests": [
+    {
+      "command": "git show d0666577d91c31b154d6492cdb4eaacef2fddb1c:python/sglang/srt/rust_server/server.py | python -c '<check push_generation for payload.load_snapshot>'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: the exact candidate Rust generation encoder did not reference or serialize payload.load_snapshot (printed False)."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-85d771588219/venv/bin/python -m pytest -q test/registered/unit/managers/test_piggyback_load.py test/registered/unit/managers/test_multi_tokenizer_mixin.py test/registered/unit/managers/test_loadstat_wire.py",
+      "exit_code": 0,
+      "what_was_measured": "45 tests and 19 subtests passed, including the new Rust wire snapshot regression and the candidate's Python cache/fanout compatibility coverage."
+    },
+    {
+      "command": "cargo test -p sglang-server --no-default-features",
+      "exit_code": 0,
+      "what_was_measured": "All 265 Rust unit tests passed, including newest-per-rank piggyback cache behavior and all existing positional batch-wire compatibility tests."
+    },
+    {
+      "command": "SGLANG_BUILD_RUST_EXTS=server python setup.py build_rust --inplace",
+      "exit_code": 0,
+      "what_was_measured": "Built the optimized PyO3 sglang-server extension from the changed Rust source using pinned Rust 1.92 and copied it into the source package."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python python -c 'import sglang.srt.rust_extensions._server as m; print(m.__file__)'",
+      "exit_code": 0,
+      "what_was_measured": "Imported the rebuilt native extension from /job/repo/python/sglang/srt/rust_extensions/_server.cpython-312-x86_64-linux-gnu.so."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and correction are scheduler-to-Rust transport/cache behavior and were validated without model weights or GPU execution; no architecture or numerical claim is made."
+  },
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "No live model-serving run was performed; the deterministic wire, cache, HTTP source, complete Rust unit suite, and rebuilt extension were validated instead.",
+    "Rust /v1/loads exposes JSON only; Prometheus format remains unsupported.",
+    "Rust launch configuration does not currently carry accelerator name or per-DP-rank accelerator count, so those response metadata fields are null rather than guessed.",
+    "Multi-rank and multi-node serving were not exercised."
+  ]
+}
