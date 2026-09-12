@@ -36,6 +36,21 @@ class _RecordingDelayer:
         return self.allow
 
 
+class _UnifiedMambaAllocatorStub:
+    def __init__(self, *, available_tokens: int, schedulable_mamba_slots: int):
+        self._available_tokens = available_tokens
+        self.mamba_allocator = MagicMock()
+        self.mamba_allocator.schedulable_available_size.return_value = (
+            schedulable_mamba_slots
+        )
+
+    def available_size(self):
+        return self._available_tokens
+
+    def mamba_slot_full_token_cost(self):
+        return 8
+
+
 class TestPrefillAdder(CustomTestCase):
     def setUp(self):
         set_global_server_args_for_scheduler(ServerArgs(model_path="dummy"))
@@ -124,6 +139,69 @@ class TestPrefillAdder(CustomTestCase):
         )
         defaults.update(kwargs)
         return PrefillAdder(**defaults)
+
+    def create_unified_mamba_adder(
+        self,
+        *,
+        available_tokens: int,
+        schedulable_mamba_slots: int,
+        full_evictable_tokens: int,
+        mamba_evictable_slots: int,
+        supports_mamba: bool = True,
+    ) -> PrefillAdder:
+        tree_cache = self.create_tree_cache(
+            full_evictable_size=full_evictable_tokens
+        )
+        tree_cache.supports_mamba.return_value = supports_mamba
+        tree_cache.mamba_evictable_size.return_value = mamba_evictable_slots
+        allocator = _UnifiedMambaAllocatorStub(
+            available_tokens=available_tokens,
+            schedulable_mamba_slots=schedulable_mamba_slots,
+        )
+        with patch.object(
+            schedule_policy,
+            "UnifiedMambaTokenToKVPoolAllocator",
+            _UnifiedMambaAllocatorStub,
+        ):
+            return self.create_adder(
+                self.create_running_batch(),
+                tree_cache=tree_cache,
+                token_to_kv_pool_allocator=allocator,
+            )
+
+    def test_unified_mamba_admission_rejects_full_only_evictable_capacity(self):
+        """Full-attention radix space cannot fund a new Mamba state slot."""
+        adder = self.create_unified_mamba_adder(
+            available_tokens=57,
+            schedulable_mamba_slots=0,
+            full_evictable_tokens=8_062_720,
+            mamba_evictable_slots=0,
+        )
+
+        self.assertGreater(adder.rem_total_tokens, 0)
+        self.assertEqual(adder.budget_state(), AddReqResult.NO_TOKEN)
+
+    def test_unified_mamba_admission_credits_mamba_evictable_slot(self):
+        adder = self.create_unified_mamba_adder(
+            available_tokens=57,
+            schedulable_mamba_slots=0,
+            full_evictable_tokens=8_062_720,
+            mamba_evictable_slots=1,
+        )
+
+        self.assertEqual(adder.budget_state(), AddReqResult.CONTINUE)
+
+    def test_unified_mamba_chunk_cache_still_gates_state_slots(self):
+        """ChunkCache does not advertise Mamba radix support, but shares its pool."""
+        adder = self.create_unified_mamba_adder(
+            available_tokens=100,
+            schedulable_mamba_slots=0,
+            full_evictable_tokens=0,
+            mamba_evictable_slots=100,
+            supports_mamba=False,
+        )
+
+        self.assertEqual(adder.budget_state(), AddReqResult.NO_TOKEN)
 
     def test_storage_prefetch_fulfillment_resolves_at_admission(self):
         adder = self.create_adder(self.create_running_batch())
