@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32521",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "PR 2313 fixes the reproduced MLX architecture-resolution path and source-level Hunyuan shared-KV attention contract, but this Linux/gfx950 host cannot execute MLX/Metal. No real Hunyuan launch or token-equivalence result could be independently obtained.",
+  "tests": [
+    {
+      "command": "python -m pytest -q /tmp/amdpilot-repo-j-9a4f9747ac86/evidence/test_mlx_model_impl.py (on base 358c1632)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction of the original MLX architecture-resolution mechanism: the MLX case invoked get_model_architecture and raised the Hunyuan resolution error; two non-MLX boundary cases passed."
+    },
+    {
+      "command": "python /tmp/amdpilot-repo-j-9a4f9747ac86/evidence/reproduce_decode_contract.py /tmp/amdpilot-repo-j-9a4f9747ac86/evidence/pr2194-attention-wrapper.py",
+      "exit_code": 1,
+      "what_was_measured": "Independent reproduction against exact parent candidate 7bdae6c8: Hunyuan's fourth positional shared-KV argument raised TypeError."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/model_loader/test_mlx_model_impl.py test/registered/unit/model_loader/test_transformers_fallback.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 246dbf49, five CPU regressions passed for the MLX bypass and non-MLX/cached/fallback boundaries."
+    },
+    {
+      "command": "python reports/j-b43cd9e8bcc3/reproduce_decode_contract.py python/sglang/srt/hardware_backend/mlx/kv_cache/attention_wrapper.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 246dbf49, Hunyuan's shared-KV positional argument routed to delegated decode while preserving return arity."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/hardware_backend/mlx/test_attention_patching.py -rs",
+      "exit_code": 0,
+      "what_was_measured": "39 MLX attention tests collected but all skipped because mlx/Metal is unavailable; this is collection evidence, not runtime validation."
+    },
+    {
+      "command": "python -m compileall -q python/sglang/srt/hardware_backend/mlx/kv_cache/attention_wrapper.py python/sglang/srt/model_loader/utils.py && git diff --check 358c1632 246dbf49",
+      "exit_code": 0,
+      "what_was_measured": "Candidate source compilation and patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The visible GPU is AMD Instinct MI350X gfx950 under ROCm 7.2. MLX requires Apple Silicon/Metal, and importlib found no mlx module."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No independent end-to-end launch_server result exists for mlx-community/Hunyuan-7B-Instruct-4bit at candidate commit 246dbf49 because MLX/Metal and Apple Silicon are unavailable.",
+    "No independent real-model batched-decode token-equivalence result against mlx_lm exists at the candidate commit; the candidate's MLX tests all skipped on this host."
+  ],
+  "remaining_limitations": [
+    "Linux x86_64 and AMD gfx950 cannot execute the Apple MLX/Metal backend.",
+    "Hunyuan model weights were not downloaded.",
+    "The tiny Llama transport fixture cannot validate Hunyuan architecture semantics and was not used as substitute evidence.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
