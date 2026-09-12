@@ -526,10 +526,10 @@ class ComponentLoader(ABC):
                 trust_remote_code=server_args.trust_remote_code,
                 revision=server_args.revision,
             )
+            resolved_component_name = component_name or "component"
             if uses_native_transformers_quantization(
-                config, component_name or "component"
+                config, resolved_component_name
             ):
-                resolved_component_name = component_name or "component"
                 explicit_residency = server_args.explicit_residency_mode(
                     resolved_component_name
                 )
@@ -545,6 +545,17 @@ class ComponentLoader(ABC):
                 )
                 load_kwargs["device_map"] = {
                     "": self.target_device(component_starts_on_cpu=False)
+                }
+                self._native_load_manages_placement = True
+            elif (
+                component_name is not None
+                and server_args.should_start_component_on_cpu(resolved_component_name)
+            ):
+                # Native Transformers loading must honor CPU residency while
+                # weights are materialized, not only after from_pretrained
+                # returns. Otherwise fallback can exceed GPU memory first.
+                load_kwargs["device_map"] = {
+                    "": self.target_device(component_starts_on_cpu=True)
                 }
                 self._native_load_manages_placement = True
             model_class = self.resolve_native_transformers_model_class(config)

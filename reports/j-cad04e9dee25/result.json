@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34772",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Current main had removed the reported should_offload(model_config=None) call, but non-quant native Transformers fallback still ignored should_start_component_on_cpu while from_pretrained materialized weights. The fix passes a CPU device_map during native loading when CPU start is requested, preventing peak GPU allocation before final placement. Resident and existing Transformers-managed quantized loading behavior are unchanged.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-cad04e9dee25/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_text_encoder_loader.py -k 'native_load_honors_cpu_start_during_from_pretrained or native_load_does_not_force_device_map_without_cpu_start'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: CPU-start was never queried and no CPU device_map was passed; the non-offload boundary passed. Raw output: reports/j-cad04e9dee25/raw/failing_before.log and failing_before_detailed.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cad04e9dee25/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_text_encoder_loader.py -k 'native_load_honors_cpu_start_during_from_pretrained or native_load_does_not_force_device_map_without_cpu_start or bitsandbytes_native_load_requires_resident_encoder'",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression plus independent resident/non-offload and existing quantized-resident boundary cases: 3 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cad04e9dee25/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_transformer_loader_fallback.py python/sglang/multimodal_gen/test/unit/test_component_loader_identity.py",
+      "exit_code": 0,
+      "what_was_measured": "Related fallback and component identity coverage: 11 passed and 12 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cad04e9dee25/venv/bin/python < inline tiny local T5 native-load placement check",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI350X (ROCm 7.2.26015), all loaded parameters were on CPU and torch GPU memory remained 0 bytes before and after native from_pretrained. Raw output: reports/j-cad04e9dee25/raw/gpu_native_cpu_placement.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cad04e9dee25/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_text_encoder_loader.py",
+      "exit_code": 1,
+      "what_was_measured": "Broader file run: 47 passed, 3 skipped, 4 failed. The four parametrizations are unrelated existing tests whose customized loader requires an initialized distributed world group in this environment; raw traceback retained in passing_after_text_encoder.log."
+    },
+    {
+      "command": "git diff --check && /tmp/amdpilot-repo-j-cad04e9dee25/venv/bin/python -m py_compile python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py python/sglang/multimodal_gen/test/unit/test_text_encoder_loader.py",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace and Python syntax."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "A tiny local T5 fixture was loaded through the changed native Transformers path on the assigned AMD Instinct MI350X/gfx950 GPU environment. GPU allocation stayed at 0 bytes and parameters remained on CPU. This is a placement check, not a full diffusion-model reproduction.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers and Efficient-Large-Model/Sana_600M_512px_diffusers weights were unavailable, so no full model load or denoising run was performed.",
+    "The reporter used an 8GB NVIDIA RTX 4070 Laptop under CUDA/WSL2; the assigned device is a much larger AMD Instinct MI350X under ROCm, so the exact CUDA OOM was not reproduced.",
+    "The tiny T5 fixture validates native Transformers placement and GPU-allocation behavior only; it does not validate model architecture semantics or generation accuracy.",
+    "Transformers-managed quantized components retain their existing GPU-resident contract and are outside this narrow non-quant fix.",
+    "The complete text-encoder unit file has four environment-sensitive pre-existing failures caused by an uninitialized distributed world group; focused and related tests pass."
+  ]
+}

@@ -1,0 +1,101 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0 -- /tmp/amdpilot-repo-j-cad04e9dee25/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /job/repo/python
+configfile: pyproject.toml
+plugins: hypothesis-6.155.0, anyio-4.15.1
+collecting ... collected 1 item
+
+python/sglang/multimodal_gen/test/unit/test_text_encoder_loader.py::TestMiniMaxH3CheckpointFilter::test_native_load_honors_cpu_start_during_from_pretrained FAILED [100%]
+
+=================================== FAILURES ===================================
+_ TestMiniMaxH3CheckpointFilter.test_native_load_honors_cpu_start_during_from_pretrained _
+
+self = <test_text_encoder_loader.TestMiniMaxH3CheckpointFilter testMethod=test_native_load_honors_cpu_start_during_from_pretrained>
+
+    def test_native_load_honors_cpu_start_during_from_pretrained(self):
+        loaded_encoder = nn.Linear(1, 1)
+        transformers_model_class = SimpleNamespace(
+            from_pretrained=mock.Mock(return_value=loaded_encoder)
+        )
+        server_args = SimpleNamespace(
+            component_precisions={},
+            pipeline_config=SimpleNamespace(text_encoder_precisions=["bf16"]),
+            should_start_component_on_cpu=mock.Mock(return_value=True),
+            revision=None,
+            trust_remote_code=False,
+        )
+        component_config = SimpleNamespace()
+    
+        loader = TextEncoderLoader()
+        with (
+            mock.patch.object(
+                TextEncoderLoader,
+                "resolve_native_transformers_model_class",
+                return_value=transformers_model_class,
+            ),
+            mock.patch.object(
+                loader,
+                "target_device",
+                side_effect=lambda component_starts_on_cpu: (
+                    torch.device("cpu")
+                    if component_starts_on_cpu
+                    else torch.device("cuda:0")
+                ),
+            ),
+            mock.patch(
+                "sglang.multimodal_gen.runtime.loader.component_loaders."
+                "component_loader.get_hf_config",
+                return_value=component_config,
+            ),
+            mock.patch(
+                "sglang.multimodal_gen.runtime.loader.component_loaders."
+                "component_loader.uses_native_transformers_quantization",
+                return_value=False,
+            ),
+        ):
+            encoder = loader.load_native(
+                "/model/text_encoder",
+                server_args,
+                "transformers",
+                "text_encoder",
+            )
+    
+        self.assertIs(encoder, loaded_encoder)
+>       server_args.should_start_component_on_cpu.assert_called_once_with(
+            "text_encoder"
+        )
+
+python/sglang/multimodal_gen/test/unit/test_text_encoder_loader.py:501: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Mock id='140020544357584'>, args = ('text_encoder',), kwargs = {}
+msg = "Expected 'mock' to be called once. Called 0 times."
+
+    def assert_called_once_with(self, /, *args, **kwargs):
+        """assert that the mock was called exactly once and that that call was
+        with the specified arguments."""
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to be called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'mock' to be called once. Called 0 times.
+
+/usr/lib/python3.12/unittest/mock.py:955: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED python/sglang/multimodal_gen/test/unit/test_text_encoder_loader.py::TestMiniMaxH3CheckpointFilter::test_native_load_honors_cpu_start_during_from_pretrained - AssertionError: Expected 'mock' to be called once. Called 0 times.
+======================== 1 failed, 16 warnings in 0.62s ========================

@@ -448,6 +448,117 @@ class TestTextEncoderClassResolution(unittest.TestCase):
         )
 
 
+class TestNativeTextEncoderPlacement(unittest.TestCase):
+    def test_native_load_honors_cpu_start_during_from_pretrained(self):
+        loaded_encoder = nn.Linear(1, 1)
+        transformers_model_class = SimpleNamespace(
+            from_pretrained=mock.Mock(return_value=loaded_encoder)
+        )
+        server_args = SimpleNamespace(
+            component_precisions={},
+            pipeline_config=SimpleNamespace(text_encoder_precisions=["bf16"]),
+            should_start_component_on_cpu=mock.Mock(return_value=True),
+            revision=None,
+            trust_remote_code=False,
+        )
+        component_config = SimpleNamespace()
+
+        loader = TextEncoderLoader()
+        with (
+            mock.patch.object(
+                TextEncoderLoader,
+                "resolve_native_transformers_model_class",
+                return_value=transformers_model_class,
+            ),
+            mock.patch.object(
+                loader,
+                "target_device",
+                side_effect=lambda component_starts_on_cpu: (
+                    torch.device("cpu")
+                    if component_starts_on_cpu
+                    else torch.device("cuda:0")
+                ),
+            ),
+            mock.patch(
+                "sglang.multimodal_gen.runtime.loader.component_loaders."
+                "component_loader.get_hf_config",
+                return_value=component_config,
+            ),
+            mock.patch(
+                "sglang.multimodal_gen.runtime.loader.component_loaders."
+                "component_loader.uses_native_transformers_quantization",
+                return_value=False,
+            ),
+        ):
+            encoder = loader.load_native(
+                "/model/text_encoder",
+                server_args,
+                "transformers",
+                "text_encoder",
+            )
+
+        self.assertIs(encoder, loaded_encoder)
+        server_args.should_start_component_on_cpu.assert_called_once_with(
+            "text_encoder"
+        )
+        transformers_model_class.from_pretrained.assert_called_once_with(
+            "/model/text_encoder",
+            config=component_config,
+            trust_remote_code=False,
+            revision=None,
+            torch_dtype=torch.bfloat16,
+            device_map={"": torch.device("cpu")},
+        )
+
+    def test_native_load_does_not_force_device_map_without_cpu_start(self):
+        loaded_encoder = nn.Linear(1, 1)
+        transformers_model_class = SimpleNamespace(
+            from_pretrained=mock.Mock(return_value=loaded_encoder)
+        )
+        server_args = SimpleNamespace(
+            component_precisions={},
+            pipeline_config=SimpleNamespace(text_encoder_precisions=["bf16"]),
+            should_start_component_on_cpu=mock.Mock(return_value=False),
+            revision=None,
+            trust_remote_code=False,
+        )
+        component_config = SimpleNamespace()
+
+        loader = TextEncoderLoader()
+        with (
+            mock.patch.object(
+                TextEncoderLoader,
+                "resolve_native_transformers_model_class",
+                return_value=transformers_model_class,
+            ),
+            mock.patch(
+                "sglang.multimodal_gen.runtime.loader.component_loaders."
+                "component_loader.get_hf_config",
+                return_value=component_config,
+            ),
+            mock.patch(
+                "sglang.multimodal_gen.runtime.loader.component_loaders."
+                "component_loader.uses_native_transformers_quantization",
+                return_value=False,
+            ),
+        ):
+            encoder = loader.load_native(
+                "/model/text_encoder",
+                server_args,
+                "transformers",
+                "text_encoder",
+            )
+
+        self.assertIs(encoder, loaded_encoder)
+        transformers_model_class.from_pretrained.assert_called_once_with(
+            "/model/text_encoder",
+            config=component_config,
+            trust_remote_code=False,
+            revision=None,
+            torch_dtype=torch.bfloat16,
+        )
+
+
 class TestMiniMaxH3CheckpointFilter(unittest.TestCase):
     def test_only_known_unconsumed_weights_are_filtered(self):
         encoder = MiniMaxH3Qwen3VLEncoder.__new__(MiniMaxH3Qwen3VLEncoder)
