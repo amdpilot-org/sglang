@@ -73,6 +73,9 @@ from sglang.srt.layers.attention.dsa.kpool_plan import (
     KPoolExtendPlan,
     KPoolWritePlan,
 )
+from sglang.srt.layers.attention.dsa.trtllm_utils import (
+    validate_trtllm_mla_batch_size,
+)
 from sglang.srt.layers.attention.dsa.utils import (
     can_dsa_prefill_cp_interleave,
     compute_dsa_seqlens,
@@ -3540,6 +3543,11 @@ class DeepseekSparseAttnBackend(
 
         batch_size = page_table_1.shape[0]
         _, num_heads, head_dim = q_all.shape
+
+        # TRT-LLM maps this flattened query-row dimension onto gridDim.z. Its
+        # wrapper only logs an invalid launch, so validate before allocating the
+        # launch buffers rather than silently returning uninitialized attention.
+        validate_trtllm_mla_batch_size(batch_size)
 
         self._multi_ctas_kv_counter_buffer = (
             grow_multi_ctas_kv_counter_buffer_if_needed(
