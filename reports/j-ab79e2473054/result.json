@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33186",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2006",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1966",
+  "candidate_commit": "a8b9c0fe45a4cc298d8ed84e52f8e956d5ae0f88",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "prepared_main_difference": "origin/main was a207786205bff0919eb2c8c9126c67f302ccff34 at review time; review comparisons used the required recorded base",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a partial fix. It corrects the issue's two explicit two-increment reproductions and split-marker handling, but still drops trailing text when a complete tool call and its suffix arrive in the final increment. FunctionCallParser.parse_stream_end() cannot recover the suffix because MiMoDetector inherits the no-op BaseFormatDetector.finish().",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ab79e2473054/venv/bin/python /job/review-evidence-j-ab79e2473054/adversarial_mimo.py (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "Direct reproduction showed trailing text retained forever, split marker markup leaked, and one-character chunking failed to detect the call. Assertions were evaluated from emitted results and detector buffer state."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ab79e2473054/venv/bin/python -m pytest -q test/registered/unit/function_call/test_mimo_detector.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 4 tests and all 10 marker-split subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ab79e2473054/venv/bin/python /job/review-evidence-j-ab79e2473054/adversarial_mimo.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent chunk-boundary matrix. Reported examples and one-character chunks passed, but final call-plus-text retained the text, and two calls in the final chunk emitted only the first."
+    },
+    {
+      "command": "FunctionCallParser.parse_stream_chunk(CALL + 'After.'); FunctionCallParser.parse_stream_end() (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Actual public serving parser path: parse_stream_chunk emitted the call while buffering 'After.'; parse_stream_end returned no text/calls and left the buffer unchanged."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and remaining counterexamples are deterministic CPU-only string parser behavior. No GPU claim was needed or made."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A final stream increment equal to COMPLETE_TOOL_CALL + 'After.' emits the call but never emits 'After.', including after FunctionCallParser.parse_stream_end().",
+    "A final stream increment containing COMPLETE_TOOL_CALL + inter-call text + COMPLETE_TOOL_CALL + trailing text emits only the first call and strands the remainder.",
+    "MiMo detect_and_parse itself omits normal text after tool-call blocks, so the issue's stated one-shot/streaming accumulated-text equivalence remains unmet."
+  ],
+  "remaining_limitations": [
+    "No MiMo model weights or HTTP server were used; model semantics and tokenizer chunk production were not validated.",
+    "No GPU execution was performed because the reviewed implementation is pure Python parsing.",
+    "No native code changed, so a native rebuild was not applicable.",
+    "The review used one prepared x86_64/ROCm environment and makes no multi-node or alternate-architecture claim."
+  ]
+}
