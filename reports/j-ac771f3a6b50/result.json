@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38552",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "unsupported_architecture",
+  "summary": "Reproduced the explicit NIXL guard for heterogeneous-TP non-MLA SWA state transfer. Current mirror main still has the guard. The ordinary heterogeneous-TP KV path has head-slice transfer planning, but the SWA extra-state path only has whole-item generic transfer, so removing the guard is not a valid fix.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ac771f3a6b50/venv/bin/python reports/j-ac771f3a6b50/reproduce_heterogeneous_swa_guard.py",
+      "exit_code": 0,
+      "what_was_measured": "Actual NixlKVManager.maybe_send_extra dispatch: reproduced non-MLA SWA TP 2-to-4 rejection and independently verified equal-TP non-MLA and heterogeneous-TP MLA accepted boundaries."
+    },
+    {
+      "command": "git fetch origin main; compare the NIXL guard at recorded base and origin/main",
+      "exit_code": 0,
+      "what_was_measured": "The same unsupported heterogeneous-TP non-MLA SWA guard exists at base 358c163250ad3b1f62939b01ce1314a0a31a0365 and current mirror main bd45cd50ca900dd821f829ca9adfbf9aa3336bda."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ac771f3a6b50/venv/bin/python device discovery using torch.cuda",
+      "exit_code": 0,
+      "what_was_measured": "Exactly one visible AMD Instinct MI350X gfx950 device; insufficient to execute heterogeneous tensor-parallel ranks."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Device discovery found one gfx950 GPU, but no GPU kernel or multi-rank transfer was executed; heterogeneous TP cannot be reproduced on one assigned GPU."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one gfx950 GPU was assigned; heterogeneous TP and multi-rank NIXL transfer were not executable.",
+    "GPT-OSS-120B weights were unavailable, so the reported full model and P/D deployment were not run.",
+    "The deterministic tiny Llama fixture cannot qualify GPT-OSS hybrid SWA state transfer and was therefore not substituted for the reported architecture.",
+    "Supporting this architecture requires a destination-rank-aware SWA head slicing/gather/scatter design across transfer backends, not removal of the capability guard."
+  ]
+}
