@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31404",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2631",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2626",
+  "candidate_commit": "080ee781e6e6e43d2b6588546d91341139ee8be8",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes the reproduced Python HTTP chat/completions contract, including explicit empty model IDs, but its Rust gateway change could not be built or executed because the prepared image has no Rust toolchain.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c48c9fe0220e/venv/bin/python /job/review-evidence/base/probe_base.py",
+      "exit_code": 0,
+      "what_was_measured": "On the recorded base, an explicit bogus CompletionRequest reached the conversion sentinel instead of returning model_not_found; the active source import was /job/repo/python/sglang/srt/entrypoints/openai/serving_base.py."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c48c9fe0220e/venv/bin/python /job/review-evidence/http-fixture/run_server_probe.py --fixture /tmp/amdpilot-repo-j-c48c9fe0220e/tiny-random-llama --output /job/review-evidence/base/http",
+      "exit_code": 0,
+      "what_was_measured": "Recorded base real HTTP/engine execution: unknown chat and completion model IDs returned 200 and echoed gpt-nonexistent-999; served-model controls returned 200."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c48c9fe0220e/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_model_validation.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit: 5 tests and 2 subtests passed, including exact 404 body, explicit empty model, omission, LoRA boundaries, and pre-conversion rejection."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c48c9fe0220e/venv/bin/python /job/review-evidence/candidate/probe_candidate.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent chat/completion cases: bogus and empty explicit models returned 404 model_not_found before conversion; omitted model fields retained the existing implicit-default path. Explicit null was separately observed to fail Pydantic string validation."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c48c9fe0220e/venv/bin/python /job/review-evidence/http-fixture/run_server_probe.py --fixture /tmp/amdpilot-repo-j-c48c9fe0220e/tiny-random-llama --output /job/review-evidence/candidate/http",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate real HTTP/engine execution: unknown chat and completion model IDs returned 404 with code model_not_found; served-model controls returned 200."
+    },
+    {
+      "command": "cargo test -p sglang-router resolve_model_id --manifest-path sgl-model-gateway/Cargo.toml",
+      "exit_code": 127,
+      "what_was_measured": "Not executed: cargo is absent from the prepared environment, so the changed Rust gateway source was not compiled or behaviorally verified."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Both base and candidate HTTP servers loaded and generated with the deterministic tiny Llama fixture on the assigned gfx950 GPU; candidate server logs include the Triton gfx950 compiler path."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The changed Rust model-gateway path was source-reviewed only; cargo and rustfmt are unavailable, so compilation and runtime behavior remain unverified.",
+    "The random tiny-Llama fixture validates HTTP transport, validation ordering, and engine execution only; it does not validate semantic accuracy, other model architectures, full-size weights, or distributed/multi-node operation.",
+    "No C/C++/HIP/FlyDSL source changed, so a FlyDSL/native extension rebuild was not applicable."
+  ],
+  "evidence_root": "/job/review-evidence"
+}
