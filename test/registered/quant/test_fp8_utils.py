@@ -163,7 +163,10 @@ class TestApplyFp8LinearScaleDispatch(CustomTestCase):
                         return_value=SimpleNamespace(**capabilities),
                     ),
                     patch.object(
-                        fp8_utils, "fp8_scaled_mm", side_effect=fake_fp8_scaled_mm
+                        fp8_utils,
+                        "fp8_scaled_mm",
+                        side_effect=fake_fp8_scaled_mm,
+                        create=True,
                     ),
                     patch.object(fp8_utils, "get_exec", return_value=exec_config),
                 ):
@@ -228,7 +231,12 @@ class TestApplyFp8LinearScaleDispatch(CustomTestCase):
                     is_sm120=False,
                 ),
             ),
-            patch.object(fp8_utils, "fp8_scaled_mm", side_effect=fake_fp8_scaled_mm),
+            patch.object(
+                fp8_utils,
+                "fp8_scaled_mm",
+                side_effect=fake_fp8_scaled_mm,
+                create=True,
+            ),
         ):
             fp8_utils.apply_fp8_linear(
                 input,
@@ -281,6 +289,49 @@ class TestApplyFp8LinearScaleDispatch(CustomTestCase):
                 (m, n),
                 bias,
                 torch.float16,
+            )
+
+        self.assertEqual(output.dtype, torch.float16)
+        torch.testing.assert_close(output, reference)
+
+    def test_per_tensor_unsupported_cuda_falls_back_without_scaled_mm(self):
+        import sglang.srt.layers.quantization.fp8_utils as fp8_utils
+
+        torch.manual_seed(11)
+        m, k, n = 5, 16, 7
+        input = torch.randn(m, k, dtype=torch.float16)
+        weight = torch.randn(k, n).to(torch.float8_e4m3fn)
+        input_scale = torch.tensor([0.25], dtype=torch.float32)
+        weight_scale = torch.tensor(0.5, dtype=torch.float32)
+        qinput = (
+            (input / input_scale)
+            .clamp(min=fp8_utils.fp8_min, max=fp8_utils.fp8_max)
+            .to(torch.float8_e4m3fn)
+        )
+        reference = (
+            torch.mm(qinput.float(), weight.float()) * input_scale * weight_scale
+        ).to(torch.float16)
+
+        with (
+            patch.object(fp8_utils, "_is_hip", False),
+            patch.object(
+                fp8_utils,
+                "static_quant_fp8",
+                return_value=(qinput, input_scale),
+            ),
+            patch.object(
+                torch,
+                "_scaled_mm",
+                side_effect=RuntimeError("native FP8 GEMM is unavailable"),
+            ),
+        ):
+            output = fp8_utils.apply_fp8_linear(
+                input,
+                weight,
+                weight_scale,
+                input_scale=input_scale,
+                cutlass_fp8_supported=False,
+                pad_output=False,
             )
 
         self.assertEqual(output.dtype, torch.float16)

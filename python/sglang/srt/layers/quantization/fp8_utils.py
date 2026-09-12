@@ -2071,7 +2071,9 @@ def apply_fp8_linear(
             )
             return _process_scaled_mm_output(output, input_2d.shape, output_shape)
 
-    if per_tensor_weights and per_tensor_activations:
+    if per_tensor_weights and per_tensor_activations and (
+        cutlass_fp8_supported or _is_hip
+    ):
         # Fused GEMM_DQ; _scaled_mm with torch.compile requires len(weight_scale.shape) == len(x_scale.shape)
         if weight_scale.ndim == 0 and x_scale.ndim == 1:
             weight_scale = weight_scale.unsqueeze(0)
@@ -2085,8 +2087,9 @@ def apply_fp8_linear(
         )
         return _process_scaled_mm_output(output, input_2d.shape, output_shape)
 
-    # Fallback for channelwise case, where we use unfused DQ
-    # due to limitations with scaled_mm
+    # Software fallback for scale layouts unsupported by scaled_mm, and for
+    # CUDA devices before SM89 where PyTorch has no native FP8 GEMM. Keep the
+    # ROCm per-tensor path above because hipBLASLt provides its scaled_mm.
 
     # Symmetric quantized GEMM by definition computes the following:
     #   C = (s_x * X) (s_w * W) + bias
