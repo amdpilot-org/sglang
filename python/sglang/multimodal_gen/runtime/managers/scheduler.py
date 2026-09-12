@@ -108,11 +108,18 @@ class Scheduler(SchedulerWarmupMixin, SchedulerPostTrainingMixin, SchedulerDisag
                 f"{message}. The accelerator entered an unrecoverable state; "
                 "restart the server before submitting more requests."
             )
-            # The caller still returns this request's reply before the event
-            # loop observes the flag and shuts down.
-            self._running = False
+            # Keep the RPC loop alive so later callers receive the same
+            # actionable failure instead of blocking on an absent scheduler.
+            # No further request may reach the worker once this is set.
+            self._fatal_error_message = message
             logger.critical(message)
         return OutputBatch(error=message)
+
+    def _fatal_state_result(self, req: Any) -> OutputBatch | None:
+        """Reject work after a fatal accelerator error without touching the device."""
+        if self._fatal_error_message is None or isinstance(req, ShutdownReq):
+            return None
+        return OutputBatch(error=self._fatal_error_message)
 
     def __init__(
         self,
@@ -168,6 +175,7 @@ class Scheduler(SchedulerWarmupMixin, SchedulerPostTrainingMixin, SchedulerDisag
         self.gpu_id = gpu_id
         self._show_warmup_progress = gpu_id == 0
         self._running = True
+        self._fatal_error_message: str | None = None
 
         self.request_handlers = {
             SetLoraReq: self._handle_set_lora,
@@ -279,7 +287,13 @@ class Scheduler(SchedulerWarmupMixin, SchedulerPostTrainingMixin, SchedulerDisag
         return reqs
 
     def _dispatch_single_request(self, req_or_group: Any) -> OutputBatch:
+        fatal_result = self._fatal_state_result(req_or_group)
+        if fatal_result is not None:
+            return fatal_result
         if isinstance(req_or_group, list):
+            fatal_result = self._fatal_state_result(req_or_group[0] if req_or_group else None)
+            if fatal_result is not None:
+                return fatal_result
             if not all(isinstance(req, Req) for req in req_or_group):
                 return OutputBatch(
                     error=f"Unknown request group type: {type(req_or_group)}"
