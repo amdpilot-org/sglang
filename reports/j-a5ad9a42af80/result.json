@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31240",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared main snapshot already contains the issue's proposed model_name URI resolution in get_processor() and an issue-specific regression. Removing only that resolution makes the regression fail because AutoConfig receives the raw s3:// URI; restoring the base source makes it pass. No additional source correction is justified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a5ad9a42af80/venv/bin/python -m pytest -q test/registered/unit/utils/test_hf_transformers.py::TestGetProcessor::test_resolves_model_name_before_loading_config test/registered/unit/test_runai_utils.py",
+      "exit_code": 0,
+      "what_was_measured": "Current source routes resolved model_name to AutoConfig; independent URI recognition boundaries cover s3, gs, az, uppercase schemes, local and relative paths, Hugging Face repository IDs, unsupported schemes, pathlib values, and deterministic cache paths. Ten tests passed. Raw output: reports/j-a5ad9a42af80/raw/current_fix_tests.log"
+    },
+    {
+      "command": "Temporarily remove only the model_name resolve_runai_obj_uri block, then run /tmp/amdpilot-repo-j-a5ad9a42af80/venv/bin/python -m pytest -q test/registered/unit/utils/test_hf_transformers.py::TestGetProcessor::test_resolves_model_name_before_loading_config",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: expected AutoConfig.from_pretrained('/cache/model', ...) but observed AutoConfig.from_pretrained('s3://bucket/model', ...). The base source was restored immediately afterward. Raw output: reports/j-a5ad9a42af80/raw/failing_before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a5ad9a42af80/venv/bin/python -m pytest -q test/registered/unit/utils/test_hf_transformers.py::TestGetProcessor::test_resolves_model_name_before_loading_config",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after restoration of the prepared base implementation; one test passed. Raw output: reports/j-a5ad9a42af80/raw/passing_after_restore.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect occurs during CPU-side processor configuration path resolution before model loading or GPU execution. Running an unrelated GPU smoke would not measure this issue."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No credentials or endpoint for the reporter's object store were provided, so an actual RunAI streamer object-store download was not performed.",
+    "Qwen3.5 weights were not available, so full multimodal server startup and semantic inference were not reproduced.",
+    "The prepared checkout is a grafted single-commit snapshot, so local git history cannot identify the earlier commit that introduced the already-present fix."
+  ]
+}

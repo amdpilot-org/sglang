@@ -1,0 +1,88 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_______ TestGetProcessor.test_resolves_model_name_before_loading_config ________
+
+self = <test_hf_transformers.TestGetProcessor testMethod=test_resolves_model_name_before_loading_config>
+
+    def test_resolves_model_name_before_loading_config(self):
+        remote_model = "s3://bucket/model"
+        local_model = "/cache/model"
+        config = SimpleNamespace(model_type="clip", auto_map={})
+        loaded_processor = MagicMock()
+        loaded_processor.tokenizer.chat_template = "template"
+        auto_config = MagicMock()
+        auto_config.from_pretrained.return_value = config
+        auto_processor = MagicMock()
+        auto_processor.from_pretrained.return_value = loaded_processor
+
+        def resolve_uri(path):
+            return local_model if path == remote_model else path
+
+        with patch.multiple(
+            processor_utils,
+            resolve_runai_obj_uri=MagicMock(side_effect=resolve_uri),
+            AutoConfig=auto_config,
+            AutoProcessor=auto_processor,
+        ):
+            processor = processor_utils.get_processor(
+                "local-tokenizer",
+                model_name=remote_model,
+            )
+
+        self.assertIs(processor, loaded_processor)
+>       auto_config.from_pretrained.assert_called_once_with(
+            local_model,
+            trust_remote_code=False,
+            revision=None,
+        )
+
+test/registered/unit/utils/test_hf_transformers.py:135:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/usr/lib/python3.12/unittest/mock.py:956: in assert_called_once_with
+    return self.assert_called_with(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <MagicMock name='mock.from_pretrained' id='139738711310064'>
+args = ('/cache/model',)
+kwargs = {'revision': None, 'trust_remote_code': False}
+expected = call('/cache/model', trust_remote_code=False, revision=None)
+actual = call('s3://bucket/model', trust_remote_code=False, revision=None)
+_error_message = <function NonCallableMock.assert_called_with.<locals>._error_message at 0x7f1a5b0fd300>
+cause = None
+
+    def assert_called_with(self, /, *args, **kwargs):
+        """assert that the last call was made with the specified arguments.
+
+        Raises an AssertionError if the args and keyword args passed in are
+        different to the last call to the mock."""
+        if self.call_args is None:
+            expected = self._format_mock_call_signature(args, kwargs)
+            actual = 'not called.'
+            error_message = ('expected call not found.\nExpected: %s\n  Actual: %s'
+                    % (expected, actual))
+            raise AssertionError(error_message)
+
+        def _error_message():
+            msg = self._format_mock_failure_message(args, kwargs)
+            return msg
+        expected = self._call_matcher(_Call((args, kwargs), two=True))
+        actual = self._call_matcher(self.call_args)
+        if actual != expected:
+            cause = expected if isinstance(expected, Exception) else None
+>           raise AssertionError(_error_message()) from cause
+E           AssertionError: expected call not found.
+E           Expected: from_pretrained('/cache/model', trust_remote_code=False, revision=None)
+E             Actual: from_pretrained('s3://bucket/model', trust_remote_code=False, revision=None)
+
+/usr/lib/python3.12/unittest/mock.py:944: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/utils/test_hf_transformers.py::TestGetProcessor::test_resolves_model_name_before_loading_config
+1 failed, 1 warning in 4.99s
