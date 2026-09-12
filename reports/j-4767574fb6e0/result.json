@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38589",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/797",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/773",
+  "candidate_commit": "4a7bd3437e120c2cd10a66c0e8fae4540362b814",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The prepared base reproducibly ignored selected Qwen4Exp capture flags and returned only the HC-wide stream. The exact candidate fixes capture ordering, applies the selected layer's learned HC contraction, preserves the ordinary and idle return contracts, and prevents the outer wrapper from overwriting auxiliary tensors. Focused regressions, independent routing checks, and an independent numerical check of the real GatedResidual implementation passed. Full target/drafter serving and acceptance remain unverified without checkpoints.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-4767574fb6e0/venv/bin/python - (base deterministic actual Qwen4ExpModel forward reproducer)",
+      "exit_code": 1,
+      "what_was_measured": "Selected capture flags still produced tuple arity 2 on base: final hidden shape (2,3) and HC stream shape (2,6); assertion requiring a distinct capture list failed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4767574fb6e0/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen4_exp_dflash_capture.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: selected learned contractions and ordering, unchanged ordinary/idle behavior, and wrapper non-overwrite behavior; 3 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4767574fb6e0/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen4_exp_dflash_capture.py test/registered/unit/models/test_glm5_next_dflash_capture.py test/registered/unit/configs/test_model_config.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate plus precedent/config regressions; 11 passed and 4 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4767574fb6e0/venv/bin/python - (independent MI355X GatedResidual formula check)",
+      "exit_code": 0,
+      "what_was_measured": "Actual GPU GatedResidual.mix output shape (3,8), max absolute difference 2.9802322387695312e-08 versus independently expanded RMSNorm/gate/reduction formula, and 1.8565452098846436 versus incorrect uniform averaging."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4767574fb6e0/venv/bin/python - (public setter and internal flag routing adversarial check)",
+      "exit_code": 0,
+      "what_was_measured": "Public target layer IDs [0,3] route to internal capture layers [1,4], enable outer auxiliary routing and internal dflash_capture, and set only the intended layer flags."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI355X, gfx950:sramecc+:xnack-, executing the real sglang.srt.layers.hyperconnection.GatedResidual implementation under torch 2.11.0+rocm7.2."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Full Qwen3.8-Flash-Next target plus DFlash/DSpark drafter generation, decoding, and acceptance were not measured because model and drafter checkpoints were unavailable.",
+    "The focused model test substitutes deterministic decoder bodies; the learned HC contraction itself was independently exercised through the real GatedResidual class on GPU.",
+    "Attention, MoE, PLE, tensor/pipeline parallelism, graph capture, and distributed serving were not exercised.",
+    "The separately reported sample_from_anchor block-layout concern is outside this candidate and remains unverified.",
+    "No C++ or other native source changed, so no native rebuild was applicable."
+  ]
+}
