@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33783",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2121",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/2088",
+  "candidate_commit": "fe3b1d60e9c3f1c5e535606e0765f1efa272064f",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes idle RadixCache retention and the happy-path live disaggregated-PREFILL fixture, but sender-cleanup can be skipped for a chunk already present in retract_reqs and an abort exception escapes before the cache/pool release boundary. This is a partial original-issue fix.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7356641494e2/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-7356641494e2/review-evidence/test_candidate_pause.py::TestSchedulerPauseGeneration::test_retract_invalidates_finished_request_prefix_while_idle /tmp/amdpilot-repo-j-7356641494e2/review-evidence/test_candidate_pause.py::TestSchedulerPauseGeneration::test_retract_disagg_prefill_restarts_live_chunk_without_old_kv",
+      "exit_code": 1,
+      "what_was_measured": "Recorded base failed both candidate regressions: idle radix prefix remained matchable 4/4 and live PREFILL sender teardown was absent."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7356641494e2/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_pause_generation.py test/registered/unit/managers/test_retract_all_cache_release.py test/registered/unit/mem_cache/test_decode_radix_lock_ref.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate focused regression suite: 36 passed and 2 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7356641494e2/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-7356641494e2/review-evidence/test_adversarial_candidate.py",
+      "exit_code": 1,
+      "what_was_measured": "Independent boundary suite: inherited candidate coverage passed, while two adversarial cases failed because sender cleanup was skipped for a live chunk already in running_batch and abort exceptions prevented cache/pool reset."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7356641494e2/venv/bin/python -c 'import torch; x=torch.tensor([1.,2.,3.],device=\"cuda\"); print((x*x).sum().item())'",
+      "exit_code": 0,
+      "what_was_measured": "One assigned AMD Instinct MI350X gfx950 executed a Torch GPU tensor operation and returned 14.0."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Torch 2.11.0+rocm7.2 / HIP 7.2 detected one AMD Instinct MI350X (gfx950); tensor sum-of-squares was 14.0. Issue-specific tests were CPU-side."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "If a live disaggregated-PREFILL chunked_req is already in retract_reqs (for example also represented in running_batch), the candidate's guard skips pending-send cleanup, sender abort, and metadata release, yet retracts the request and resets the cache/pools.",
+    "If disagg_kv_sender.abort() raises, pause_generation exits before retract_all and before tree_cache/request-pool/token-allocator reset, so no complete KV-release boundary is established."
+  ],
+  "remaining_limitations": [
+    "No Qwen model weights were available; old/new-weight logprob and generated-text divergence were not reproduced.",
+    "No multi-node disaggregated deployment was available; live NIXL/Mooncake/MORI transfer cancellation was not validated end to end.",
+    "The running_batch/chunked_req overlap was tested as a deterministic scheduler invariant boundary, not observed in a live normal scheduling loop.",
+    "No native source changed and repository-environment.json specifies no native artifact, so no native rebuild was applicable."
+  ]
+}

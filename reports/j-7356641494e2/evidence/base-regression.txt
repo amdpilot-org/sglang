@@ -1,0 +1,93 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_ TestSchedulerPauseGeneration.test_retract_invalidates_finished_request_prefix_while_idle _
+
+self = <test_candidate_pause.TestSchedulerPauseGeneration testMethod=test_retract_invalidates_finished_request_prefix_while_idle>
+
+    def test_retract_invalidates_finished_request_prefix_while_idle(self):
+        """Idle retract must clear reusable KV left by completed requests."""
+        scheduler = self._new_scheduler()
+        allocator = MagicMock()
+        allocator.device = torch.device("cpu")
+        scheduler.tree_cache = RadixCache.create_simulated(mock_allocator=allocator)
+        key = RadixKey(array("q", [1, 2, 3, 4]))
+        scheduler.tree_cache.insert(
+            InsertParams(key=key, value=torch.tensor([10, 11, 12, 13]))
+        )
+        self.assertEqual(
+            len(
+                scheduler.tree_cache.match_prefix(MatchPrefixParams(key=key))
+                .device_indices
+            ),
+            4,
+        )
+    
+        scheduler.pause_generation(PauseGenerationReqInput(mode="retract"))
+    
+>       self.assertEqual(
+            len(
+                scheduler.tree_cache.match_prefix(MatchPrefixParams(key=key))
+                .device_indices
+            ),
+            0,
+        )
+E       AssertionError: 4 != 0
+
+/tmp/amdpilot-repo-j-7356641494e2/review-evidence/test_candidate_pause.py:456: AssertionError
+_ TestSchedulerPauseGeneration.test_retract_disagg_prefill_restarts_live_chunk_without_old_kv _
+
+self = <test_candidate_pause.TestSchedulerPauseGeneration testMethod=test_retract_disagg_prefill_restarts_live_chunk_without_old_kv>
+
+    def test_retract_disagg_prefill_restarts_live_chunk_without_old_kv(self):
+        """A live disagg-PREFILL chunk is re-bootstrapped after releasing its KV."""
+        scheduler = self._new_scheduler()
+        scheduler.disaggregation_mode = DisaggregationMode.PREFILL
+        scheduler._add_request_to_queue = MagicMock()
+        scheduler.clear_pending_chunk_send = MagicMock()
+        scheduler.last_batch = None
+    
+        chunked_req = self._make_req("chunked")
+        chunked_req.disagg_kv_sender = MagicMock()
+        chunked_req.metadata_buffer_index = 7
+        chunked_req.pending_bootstrap = False
+        scheduler.chunked_req = chunked_req
+    
+        with patch("sglang.srt.managers.scheduler.retract_all") as mock_retract_all:
+            scheduler.pause_generation(PauseGenerationReqInput(mode="retract"))
+    
+>       scheduler.clear_pending_chunk_send.assert_called_once_with(chunked_req)
+
+/tmp/amdpilot-repo-j-7356641494e2/review-evidence/test_candidate_pause.py:493: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock id='139610175707792'>
+args = (Req(rid=chunked, input_ids=[1, 2, 3], output_ids=array('q'), self.grammar=None, self.sampling_params=SamplingParams(m...om_params=None, stop_strs=None, stop_regex_strs=None, stop_str_max_len=0, stop_regex_max_len=0, is_normalized=False)),)
+kwargs = {}, msg = "Expected 'mock' to be called once. Called 0 times."
+
+    def assert_called_once_with(self, /, *args, **kwargs):
+        """assert that the mock was called exactly once and that that call was
+        with the specified arguments."""
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to be called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'mock' to be called once. Called 0 times.
+
+/usr/lib/python3.12/unittest/mock.py:955: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../../tmp/amdpilot-repo-j-7356641494e2/review-evidence/test_candidate_pause.py::TestSchedulerPauseGeneration::test_retract_invalidates_finished_request_prefix_while_idle
+FAILED ../../tmp/amdpilot-repo-j-7356641494e2/review-evidence/test_candidate_pause.py::TestSchedulerPauseGeneration::test_retract_disagg_prefill_restarts_live_chunk_without_old_kv
+2 failed, 16 warnings in 27.09s

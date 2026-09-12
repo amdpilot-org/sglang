@@ -1,0 +1,104 @@
+............................F..................F                     [100%]
+=================================== FAILURES ===================================
+_ TestAdversarialCandidate.test_live_chunk_already_in_running_batch_still_retires_sender _
+
+self = <test_adversarial_candidate.TestAdversarialCandidate testMethod=test_live_chunk_already_in_running_batch_still_retires_sender>
+
+    def test_live_chunk_already_in_running_batch_still_retires_sender(self):
+        scheduler = self._new_scheduler()
+        scheduler.disaggregation_mode = DisaggregationMode.PREFILL
+        scheduler._add_request_to_queue = MagicMock()
+        scheduler.clear_pending_chunk_send = MagicMock()
+        scheduler.last_batch = None
+    
+        req = self._make_req("chunked-in-running")
+        req.disagg_kv_sender = MagicMock()
+        req.metadata_buffer_index = 7
+        scheduler.chunked_req = req
+        scheduler.running_batch.reqs = [req]
+    
+        with patch("sglang.srt.managers.scheduler.retract_all"):
+            scheduler.pause_generation(PauseGenerationReqInput(mode="retract"))
+    
+>       scheduler.clear_pending_chunk_send.assert_called_once_with(req)
+
+/tmp/amdpilot-repo-j-7356641494e2/review-evidence/test_adversarial_candidate.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock id='140446521606608'>
+args = (Req(rid=chunked-in-running, input_ids=[1, 2, 3], output_ids=array('q'), self.grammar=None, self.sampling_params=Sampl...om_params=None, stop_strs=None, stop_regex_strs=None, stop_str_max_len=0, stop_regex_max_len=0, is_normalized=False)),)
+kwargs = {}, msg = "Expected 'mock' to be called once. Called 0 times."
+
+    def assert_called_once_with(self, /, *args, **kwargs):
+        """assert that the mock was called exactly once and that that call was
+        with the specified arguments."""
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to be called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'mock' to be called once. Called 0 times.
+
+/usr/lib/python3.12/unittest/mock.py:955: AssertionError
+_ TestAdversarialCandidate.test_sender_abort_failure_does_not_skip_cache_boundary _
+
+self = <test_adversarial_candidate.TestAdversarialCandidate testMethod=test_sender_abort_failure_does_not_skip_cache_boundary>
+
+    def test_sender_abort_failure_does_not_skip_cache_boundary(self):
+        scheduler = self._new_scheduler()
+        scheduler.disaggregation_mode = DisaggregationMode.PREFILL
+        scheduler._add_request_to_queue = MagicMock()
+        scheduler.clear_pending_chunk_send = MagicMock()
+        scheduler.last_batch = None
+    
+        req = self._make_req("abort-fails")
+        req.disagg_kv_sender = MagicMock()
+        req.disagg_kv_sender.abort.side_effect = RuntimeError("transport unavailable")
+        req.metadata_buffer_index = 7
+        scheduler.chunked_req = req
+    
+        with patch("sglang.srt.managers.scheduler.retract_all"):
+>           scheduler.pause_generation(PauseGenerationReqInput(mode="retract"))
+
+/tmp/amdpilot-repo-j-7356641494e2/review-evidence/test_adversarial_candidate.py:51: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/srt/managers/scheduler.py:5381: in pause_generation
+    self.chunked_req.disagg_kv_sender.abort()
+/usr/lib/python3.12/unittest/mock.py:1134: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1138: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock name='mock.abort' id='140446520765584'>, args = ()
+kwargs = {}, effect = RuntimeError('transport unavailable')
+
+    def _execute_mock_call(self, /, *args, **kwargs):
+        # separate from _increment_mock_call so that awaited functions are
+        # executed separately from their call, also AsyncMock overrides this method
+    
+        effect = self.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+>               raise effect
+E               RuntimeError: transport unavailable
+
+/usr/lib/python3.12/unittest/mock.py:1193: RuntimeError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../../tmp/amdpilot-repo-j-7356641494e2/review-evidence/test_adversarial_candidate.py::TestAdversarialCandidate::test_live_chunk_already_in_running_batch_still_retires_sender
+FAILED ../../tmp/amdpilot-repo-j-7356641494e2/review-evidence/test_adversarial_candidate.py::TestAdversarialCandidate::test_sender_abort_failure_does_not_skip_cache_boundary
+2 failed, 46 passed, 16 warnings, 4 subtests passed in 12.88s

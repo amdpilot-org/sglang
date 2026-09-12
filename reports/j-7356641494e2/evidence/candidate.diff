@@ -1,0 +1,223 @@
+diff --git a/python/sglang/srt/managers/schedule_batch.py b/python/sglang/srt/managers/schedule_batch.py
+index efde185..3c1ec3d 100755
+--- a/python/sglang/srt/managers/schedule_batch.py
++++ b/python/sglang/srt/managers/schedule_batch.py
+@@ -2154,7 +2154,6 @@ def retract_all(
+             offload_kv=offload_kv,
+         )
+ 
+-
+ def compute_extend_logprob_start_len(
+     *,
+     logprob_start_len: int,
+diff --git a/python/sglang/srt/managers/scheduler.py b/python/sglang/srt/managers/scheduler.py
+index f0914b1..95051ea 100644
+--- a/python/sglang/srt/managers/scheduler.py
++++ b/python/sglang/srt/managers/scheduler.py
+@@ -5371,8 +5371,18 @@ class Scheduler(
+             self.chunked_req is not None
+             and not self.chunked_req.finished()
+             and self.chunked_req not in retract_reqs
+-            and self.disaggregation_mode != DisaggregationMode.PREFILL
+         ):
++            if self.disaggregation_mode == DisaggregationMode.PREFILL:
++                # A live sender may still read the request's KV asynchronously.
++                # Retire that transport ownership before retract_all frees the KV;
++                # _add_request_to_queue below creates a fresh sender/bootstrap so
++                # the request restarts from token IDs after the pause.
++                self.clear_pending_chunk_send(self.chunked_req)
++                self.chunked_req.disagg_kv_sender.abort()
++                maybe_release_metadata_buffer(
++                    self.chunked_req, self.req_to_metadata_buffer_idx_allocator
++                )
++                self.chunked_req.pending_bootstrap = False
+             retract_reqs.append(self.chunked_req)
+ 
+         self.last_batch = None
+@@ -5391,6 +5401,16 @@ class Scheduler(
+                 hisparse_coordinator=self.hisparse_coordinator,
+                 offload_kv=False,
+             )
++
++        # Retract is used as a KV-provenance boundary around weight updates.
++        # Reset the complete cache namespace even when there were no active
++        # requests: finished requests can leave reusable prefixes behind.
++        # reset(), unlike pressure eviction, also clears hierarchical host
++        # backing state instead of potentially staging device entries there.
++        self.tree_cache.reset()
++        self.req_to_token_pool.clear()
++        self.token_to_kv_pool_allocator.clear()
++        self.req_to_token_pool.reset_aux_cache_allocator()
+         self.running_batch.reqs = []
+         for req in retract_reqs:
+             if self.disaggregation_mode == DisaggregationMode.DECODE:
+@@ -5402,14 +5422,7 @@ class Scheduler(
+             else:
+                 self._add_request_to_queue(req)
+         self.running_batch.batch_is_full = False
+-        # In disagg-PREFILL, keep a live mid-chunk chunked_req rather than retract it:
+-        # freeing its KV under a live disagg KV-sender crashes pop_bootstrapped or
+-        # sends freed/reused KV to decode. Kept, it resumes prefill after the pause.
+-        # TODO(disagg-prefill-retract): tear the sender down (abort + release metadata
+-        # buffer + reset pending_bootstrap) before freeing KV, then retract for real.
+-        # Until then a weight-update pause leaves stale-weight prefix KV (off-policy).
+-        if self.disaggregation_mode != DisaggregationMode.PREFILL:
+-            self.chunked_req = None
++        self.chunked_req = None
+ 
+         # Surface the paused state to dashboards immediately. The scheduler
+         # event loop short-circuits before reaching ``on_idle`` while paused,
+diff --git a/test/registered/unit/managers/test_retract_all_cache_release.py b/test/registered/unit/managers/test_retract_all_cache_release.py
+new file mode 100644
+index 0000000..e7fa804
+--- /dev/null
++++ b/test/registered/unit/managers/test_retract_all_cache_release.py
+@@ -0,0 +1,40 @@
++import unittest
++from unittest.mock import MagicMock, patch
++
++from sglang.srt.managers.schedule_batch import retract_all
++from sglang.test.ci.ci_register import register_cpu_ci
++
++
++register_cpu_ci(est_time=2, suite="base-a-test-cpu")
++
++
++class TestRetractAllCacheRelease(unittest.TestCase):
++    def _retract(self, tree_cache, reqs=None):
++        retract_all(
++            reqs=[MagicMock(), MagicMock()] if reqs is None else reqs,
++            req_to_token_pool=MagicMock(),
++            token_to_kv_pool_allocator=MagicMock(),
++            tree_cache=tree_cache,
++            hisparse_coordinator=None,
++            offload_kv=False,
++        )
++
++    @patch("sglang.srt.managers.schedule_batch.release_req")
++    def test_retracts_every_request(self, release_req):
++        tree_cache = MagicMock()
++
++        self._retract(tree_cache)
++
++        self.assertEqual(release_req.call_count, 2)
++
++    @patch("sglang.srt.managers.schedule_batch.release_req")
++    def test_empty_request_list_is_a_noop(self, release_req):
++        tree_cache = MagicMock()
++
++        self._retract(tree_cache, reqs=[])
++
++        release_req.assert_not_called()
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/test/registered/unit/managers/test_scheduler_pause_generation.py b/test/registered/unit/managers/test_scheduler_pause_generation.py
+index 716c59e..965d7de 100644
+--- a/test/registered/unit/managers/test_scheduler_pause_generation.py
++++ b/test/registered/unit/managers/test_scheduler_pause_generation.py
+@@ -1,4 +1,5 @@
+ import unittest
++from array import array
+ from collections import deque
+ from types import SimpleNamespace
+ from typing import List, Optional
+@@ -19,6 +20,8 @@ from sglang.srt.managers.io_struct import (
+ from sglang.srt.managers.schedule_batch import Req, ScheduleBatch
+ from sglang.srt.managers.scheduler import Scheduler
+ from sglang.srt.managers.scheduler_components.pool_stats_observer import PoolStats
++from sglang.srt.mem_cache.base_prefix_cache import InsertParams, MatchPrefixParams
++from sglang.srt.mem_cache.radix_cache import RadixCache, RadixKey
+ from sglang.srt.model_executor.forward_batch_info import ForwardMode
+ from sglang.srt.runtime_context import publish, reset_context
+ from sglang.srt.sampling.sampling_params import SamplingParams
+@@ -68,6 +71,7 @@ class TestSchedulerPauseGeneration(unittest.TestCase):
+         )
+         scheduler.disaggregation_mode = DisaggregationMode.NULL
+         scheduler.hisparse_coordinator = None
++        scheduler.req_to_metadata_buffer_idx_allocator = MagicMock()
+         scheduler.server_args = MagicMock()
+         scheduler.waiting_queue = []
+         # pause_generation zeros gen_throughput and flushes KV events.
+@@ -429,23 +433,73 @@ class TestSchedulerPauseGeneration(unittest.TestCase):
+         self.assertEqual(len(scheduler.waiting_queue), 0)
+         self.assertEqual(scheduler.running_batch.reqs, [])
+ 
+-    def test_retract_disagg_prefill_keeps_live_chunked_req(self):
+-        """disagg-PREFILL retract must leave a live mid-chunk chunked_req untouched."""
++    def test_retract_invalidates_finished_request_prefix_while_idle(self):
++        """Idle retract must clear reusable KV left by completed requests."""
++        scheduler = self._new_scheduler()
++        allocator = MagicMock()
++        allocator.device = torch.device("cpu")
++        scheduler.tree_cache = RadixCache.create_simulated(mock_allocator=allocator)
++        key = RadixKey(array("q", [1, 2, 3, 4]))
++        scheduler.tree_cache.insert(
++            InsertParams(key=key, value=torch.tensor([10, 11, 12, 13]))
++        )
++        self.assertEqual(
++            len(
++                scheduler.tree_cache.match_prefix(MatchPrefixParams(key=key))
++                .device_indices
++            ),
++            4,
++        )
++
++        scheduler.pause_generation(PauseGenerationReqInput(mode="retract"))
++
++        self.assertEqual(
++            len(
++                scheduler.tree_cache.match_prefix(MatchPrefixParams(key=key))
++                .device_indices
++            ),
++            0,
++        )
++        scheduler.token_to_kv_pool_allocator.clear.assert_called_once_with()
++
++    def test_retract_uses_reset_for_hierarchical_backing_state(self):
++        """A provenance boundary must reset, not write back through evict()."""
++        scheduler = self._new_scheduler()
++
++        scheduler.pause_generation(PauseGenerationReqInput(mode="retract"))
++
++        scheduler.tree_cache.reset.assert_called_once_with()
++        scheduler.tree_cache.evict.assert_not_called()
++        scheduler.req_to_token_pool.clear.assert_called_once_with()
++        scheduler.req_to_token_pool.reset_aux_cache_allocator.assert_called_once_with()
++
++    def test_retract_disagg_prefill_restarts_live_chunk_without_old_kv(self):
++        """A live disagg-PREFILL chunk is re-bootstrapped after releasing its KV."""
+         scheduler = self._new_scheduler()
+         scheduler.disaggregation_mode = DisaggregationMode.PREFILL
+         scheduler._add_request_to_queue = MagicMock()
++        scheduler.clear_pending_chunk_send = MagicMock()
+         scheduler.last_batch = None
+ 
+-        chunked_req = MagicMock()
+-        chunked_req.finished.return_value = False
++        chunked_req = self._make_req("chunked")
++        chunked_req.disagg_kv_sender = MagicMock()
++        chunked_req.metadata_buffer_index = 7
++        chunked_req.pending_bootstrap = False
+         scheduler.chunked_req = chunked_req
+ 
+         with patch("sglang.srt.managers.scheduler.retract_all") as mock_retract_all:
+             scheduler.pause_generation(PauseGenerationReqInput(mode="retract"))
+ 
+-        mock_retract_all.assert_not_called()
+-        scheduler._add_request_to_queue.assert_not_called()
+-        self.assertIs(scheduler.chunked_req, chunked_req)
++        scheduler.clear_pending_chunk_send.assert_called_once_with(chunked_req)
++        chunked_req.disagg_kv_sender.abort.assert_called_once_with()
++        scheduler.req_to_metadata_buffer_idx_allocator.free.assert_called_once_with(7)
++        self.assertEqual(chunked_req.metadata_buffer_index, -1)
++        mock_retract_all.assert_called_once()
++        self.assertEqual(mock_retract_all.call_args.kwargs["reqs"], [chunked_req])
++        scheduler.tree_cache.reset.assert_called_once_with()
++        scheduler.token_to_kv_pool_allocator.clear.assert_called_once_with()
++        scheduler._add_request_to_queue.assert_called_once_with(chunked_req)
++        self.assertIsNone(scheduler.chunked_req)
+ 
+     def test_retract_drains_overlap_queue(self):
+         """retract with overlap enabled should drain the result_queue."""
