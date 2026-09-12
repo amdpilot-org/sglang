@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35437",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1491",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1455",
+  "candidate_commit": "df5991303c19a1854c4010e9d03b24dcdf9da8b2",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a verified partial fix for the breakable prefill graph OOM-boundary capture path: its regression fails on the recorded base, passes at the exact candidate, and independent boundary checks confirm safe replay-grid pruning. It does not change or verify the separate Full-backend DFLASH state-index failure, and the reported CUDA/SM120/model stack was unavailable.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-92c3008dc27e/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_prefill_cuda_graph_runner.py -k 'capture_stops_before_low_memory_bucket or capture_fails_cleanly_when_first_bucket_has_low_memory or capture_allows_exact_memory_boundary' (candidate tests temporarily applied to recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: 2 failed and 1 passed. The base did not stop after free memory fell to 0.29 GiB and did not raise before the first low-memory bucket."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-92c3008dc27e/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_prefill_cuda_graph_runner.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after focused suite: 13 tests and 7 subtests passed, including all three candidate memory-boundary regressions."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-92c3008dc27e/venv/bin/python - (independent mocked boundary and chunked-prefix assertions at exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "A 0.299999 GiB sample pruned the replay grid to the two completed buckets; a chunked-prefix bucket was retained only after all prefix variants returned."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-92c3008dc27e/venv/bin/python -m pytest -q reports/j-6a298a97f0f9/test_gfx950_graph_smoke.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "One HIP graph FP32 matrix-multiplication smoke passed against a CPU reference; this measured only the available gfx950 graph runtime."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "One assigned AMD Instinct MI350X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2. The candidate's HIP graph numerical smoke passed, but no DFLASH/NVFP4 serving workload ran.",
+  "native_rebuilt": false,
+  "native_rebuild_reason": "The candidate diff contains no C/C++/CUDA/HIP/native files; the reviewed change is Python-only.",
+  "remaining_counterexamples": [
+    "The original --cuda-graph-backend-prefill full first-request path can still index state_indices_list[bs - 1]; the candidate does not change hybrid_linear_attn_backend.py or DFLASH padding/state-index construction.",
+    "The guard checks memory before a bucket, but the reported PyTorch 2.13 CUDA allocator/capture failure and the sufficiency of the fixed 0.3 GiB margin were not executable on gfx950 ROCm.",
+    "No end-to-end Qwen3.8 NVFP4 target plus DFlash2 draft request was run, so startup, first-request behavior, TTFT, acceptance length, and semantic output remain unverified."
+  ],
+  "remaining_limitations": [
+    "Available architecture was AMD gfx950 ROCm, not RTX 5090 SM120 CUDA 13.",
+    "Available Torch was 2.11.0+rocm7.2, not the reported 2.13.0+cu130 allocator implementation.",
+    "The RadixArk/Qwen3.8-27B-NVFP4 target and incoai/Qwen3.8-27B-DFlash2 draft weights were unavailable.",
+    "The GPU smoke is unrelated to DFLASH, NVFP4, BCG allocator bookkeeping, Full-backend state indices, and model semantics.",
+    "No native rebuild was needed because there was no native source change."
+  ]
+}
