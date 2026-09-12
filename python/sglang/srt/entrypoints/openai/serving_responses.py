@@ -244,6 +244,10 @@ class OpenAIServingResponses(OpenAIServingChat):
         if not self.tokenizer_manager:
             return self.create_error_response("Model not loaded")
 
+        model_error = self.validate_served_model(request)
+        if model_error is not None:
+            return model_error
+
         # FIXME: If the engine is dead, raise an error
         # This is required for the streaming case
 
