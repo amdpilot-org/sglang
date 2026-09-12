@@ -12,7 +12,7 @@ use tracing::{debug, info, warn};
 /// All subsequent workers of the same model use the established policy.
 /// When the last worker of a model is removed, the policy mapping is cleaned up.
 use super::{BucketPolicy, CacheAwarePolicy, LoadBalancingPolicy, PolicyFactory};
-use crate::{config::types::PolicyConfig, core::Worker};
+use crate::{config::PolicyConfig, core::Worker};
 
 /// Registry for managing model-to-policy mappings
 #[derive(Clone)]

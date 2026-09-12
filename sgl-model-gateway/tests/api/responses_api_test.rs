@@ -2,7 +2,6 @@
 
 use axum::http::StatusCode;
 use smg::{
-    config::RouterConfig,
     protocols::{
         common::{GenerationRequest, ToolChoice, ToolChoiceValue, UsageInfo},
         responses::{
@@ -43,7 +42,7 @@ async fn test_non_streaming_mcp_minimal_e2e_with_persistence() {
     let worker_url = worker.start().await.expect("start worker");
 
     // Build router config (HTTP OpenAI mode)
-    let router_cfg = RouterConfig::builder()
+    let router_cfg = crate::common::TestGatewayConfigBuilder::new()
         .openai_mode(vec![worker_url])
         .random_policy()
         .host("127.0.0.1")
@@ -222,7 +221,7 @@ async fn test_non_streaming_mcp_minimal_e2e_with_persistence() {
 #[tokio::test]
 async fn test_conversations_crud_basic() {
     // Router in OpenAI mode (no actual upstream calls in these tests)
-    let router_cfg = RouterConfig::builder()
+    let router_cfg = crate::common::TestGatewayConfigBuilder::new()
         .openai_mode(vec!["http://localhost".to_string()])
         .random_policy()
         .host("127.0.0.1")
@@ -536,7 +535,7 @@ async fn test_multi_turn_loop_with_mcp() {
     let worker_url = worker.start().await.expect("start worker");
 
     // Build router config
-    let router_cfg = RouterConfig::builder()
+    let router_cfg = crate::common::TestGatewayConfigBuilder::new()
         .openai_mode(vec![worker_url])
         .random_policy()
         .host("127.0.0.1")
@@ -688,7 +687,7 @@ async fn test_max_tool_calls_limit() {
     });
     let worker_url = worker.start().await.expect("start worker");
 
-    let router_cfg = RouterConfig::builder()
+    let router_cfg = crate::common::TestGatewayConfigBuilder::new()
         .openai_mode(vec![worker_url])
         .random_policy()
         .host("127.0.0.1")
@@ -806,7 +805,7 @@ async fn setup_streaming_mcp_test() -> (
     });
     let worker_url = worker.start().await.expect("start worker");
 
-    let router_cfg = RouterConfig::builder()
+    let router_cfg = crate::common::TestGatewayConfigBuilder::new()
         .openai_mode(vec![worker_url])
         .random_policy()
         .host("127.0.0.1")
@@ -1226,7 +1225,7 @@ async fn test_streaming_multi_turn_with_mcp() {
 #[tokio::test]
 async fn test_conversation_items_create_and_get() {
     // Test creating items and getting a specific item
-    let router_cfg = RouterConfig::builder()
+    let router_cfg = crate::common::TestGatewayConfigBuilder::new()
         .openai_mode(vec!["http://localhost".to_string()])
         .random_policy()
         .host("127.0.0.1")
@@ -1312,7 +1311,7 @@ async fn test_conversation_items_create_and_get() {
 #[tokio::test]
 async fn test_conversation_items_delete() {
     // Test deleting an item from a conversation
-    let router_cfg = RouterConfig::builder()
+    let router_cfg = crate::common::TestGatewayConfigBuilder::new()
         .openai_mode(vec!["http://localhost".to_string()])
         .random_policy()
         .host("127.0.0.1")
@@ -1420,7 +1419,7 @@ async fn test_conversation_items_delete() {
 #[tokio::test]
 async fn test_conversation_items_max_limit() {
     // Test that creating > 20 items returns error
-    let router_cfg = RouterConfig::builder()
+    let router_cfg = crate::common::TestGatewayConfigBuilder::new()
         .openai_mode(vec!["http://localhost".to_string()])
         .random_policy()
         .host("127.0.0.1")
@@ -1477,7 +1476,7 @@ async fn test_conversation_items_max_limit() {
 #[tokio::test]
 async fn test_conversation_items_unsupported_type() {
     // Test that unsupported item types return error
-    let router_cfg = RouterConfig::builder()
+    let router_cfg = crate::common::TestGatewayConfigBuilder::new()
         .openai_mode(vec!["http://localhost".to_string()])
         .random_policy()
         .host("127.0.0.1")
@@ -1533,7 +1532,7 @@ async fn test_conversation_items_unsupported_type() {
 #[tokio::test]
 async fn test_conversation_items_multi_conversation_sharing() {
     // Test that items can be shared across conversations via soft delete
-    let router_cfg = RouterConfig::builder()
+    let router_cfg = crate::common::TestGatewayConfigBuilder::new()
         .openai_mode(vec!["http://localhost".to_string()])
         .random_policy()
         .host("127.0.0.1")

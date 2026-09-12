@@ -25,7 +25,7 @@ use mock_worker::{MockWorker, MockWorkerConfig};
 use serde_json::json;
 use smg::{
     app_context::AppContext,
-    config::{RouterConfig, RoutingMode},
+    config::{GatewayConfig, RoutingMode},
     core::{
         BasicWorkerBuilder, Job, LoadMonitor, ModelCard, RuntimeType, Worker, WorkerRegistry,
         WorkerType,
@@ -39,7 +39,7 @@ use smg::{
     tool_parser::ParserFactory as ToolParserFactory,
 };
 #[allow(unused_imports)]
-pub use test_config::{TestRouterConfig, TestWorkerConfig};
+pub use test_config::{TestGatewayConfig, TestGatewayConfigBuilder, TestWorkerConfig};
 
 /// Test context for directly testing mock workers without full router setup.
 pub struct WorkerTestContext {
@@ -163,30 +163,21 @@ impl WorkerTestContext {
 pub struct AppTestContext {
     pub workers: Vec<MockWorker>,
     pub router: Arc<dyn RouterTrait>,
-    pub config: RouterConfig,
+    pub config: GatewayConfig,
     pub app_context: Arc<AppContext>,
 }
 
 impl AppTestContext {
     pub async fn new(worker_configs: Vec<MockWorkerConfig>) -> Self {
-        let config = RouterConfig::builder()
-            .regular_mode(vec![])
-            .random_policy()
-            .host("127.0.0.1")
-            .port(3002)
-            .max_payload_size(256 * 1024 * 1024)
-            .request_timeout_secs(600)
-            .worker_startup_timeout_secs(1)
-            .worker_startup_check_interval_secs(1)
-            .max_concurrent_requests(64)
-            .queue_timeout_secs(60)
-            .build_unchecked();
+        let mut config = TestGatewayConfig::random(3002);
+        config.workers.startup_timeout_secs = 1;
+        config.workers.startup_check_interval_secs = 1;
 
         Self::new_with_config(config, worker_configs).await
     }
 
     pub async fn new_with_config(
-        mut config: RouterConfig,
+        mut config: GatewayConfig,
         worker_configs: Vec<MockWorkerConfig>,
     ) -> Self {
         let mut workers = Vec::new();
@@ -203,7 +194,7 @@ impl AppTestContext {
             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
         }
 
-        match &mut config.mode {
+        match &mut config.routing.mode {
             RoutingMode::Regular {
                 worker_urls: ref mut urls,
             } => {
@@ -229,7 +220,7 @@ impl AppTestContext {
                 .get()
                 .expect("JobQueue should be initialized");
             let job = Job::InitializeWorkersFromConfig {
-                router_config: Box::new(config.clone()),
+                gateway_config: Box::new(config.clone()),
             };
             job_queue
                 .submit(job)
@@ -288,14 +279,15 @@ impl AppTestContext {
 }
 
 /// Helper function to create AppContext for tests
-pub async fn create_test_context(config: RouterConfig) -> Arc<AppContext> {
+pub async fn create_test_context(config: GatewayConfig) -> Arc<AppContext> {
     let client = reqwest::Client::new();
 
     // Initialize rate limiter
-    let rate_limiter = match config.max_concurrent_requests {
+    let rate_limiter = match config.routing.max_concurrent_requests {
         n if n <= 0 => None,
         n => {
             let rate_limit_tokens = config
+                .routing
                 .rate_limit_tokens_per_second
                 .filter(|&t| t > 0)
                 .unwrap_or(n);
@@ -308,7 +300,7 @@ pub async fn create_test_context(config: RouterConfig) -> Arc<AppContext> {
 
     // Initialize registries
     let worker_registry = Arc::new(WorkerRegistry::new());
-    let policy_registry = Arc::new(PolicyRegistry::new(config.policy.clone()));
+    let policy_registry = Arc::new(PolicyRegistry::new(config.routing.policy.clone()));
 
     // Initialize storage backends (Memory for tests)
     let response_storage = Arc::new(MemoryResponseStorage::new());
@@ -320,7 +312,7 @@ pub async fn create_test_context(config: RouterConfig) -> Arc<AppContext> {
         worker_registry.clone(),
         policy_registry.clone(),
         client.clone(),
-        config.worker_startup_check_interval_secs,
+        config.workers.startup_check_interval_secs,
     )));
 
     // Create empty OnceLock for worker job queue, workflow engines, and mcp manager
@@ -330,7 +322,7 @@ pub async fn create_test_context(config: RouterConfig) -> Arc<AppContext> {
 
     let app_context = Arc::new(
         AppContext::builder()
-            .router_config(config.clone())
+            .gateway_config(config.clone())
             .client(client)
             .rate_limiter(rate_limiter)
             .tokenizer_registry(Arc::new(TokenizerRegistry::new())) // tokenizer
@@ -366,7 +358,7 @@ pub async fn create_test_context(config: RouterConfig) -> Arc<AppContext> {
         .expect("WorkflowEngines should only be initialized once");
 
     // Register external workers for OpenAI mode
-    if let RoutingMode::OpenAI { worker_urls, .. } = &config.mode {
+    if let RoutingMode::OpenAI { worker_urls, .. } = &config.routing.mode {
         for url in worker_urls {
             // Create a worker that supports common test models
             let models = vec![
@@ -407,14 +399,15 @@ pub async fn create_test_context(config: RouterConfig) -> Arc<AppContext> {
 }
 
 /// Helper function to create AppContext for tests with parser factories initialized
-pub async fn create_test_context_with_parsers(config: RouterConfig) -> Arc<AppContext> {
+pub async fn create_test_context_with_parsers(config: GatewayConfig) -> Arc<AppContext> {
     let client = reqwest::Client::new();
 
     // Initialize rate limiter
-    let rate_limiter = match config.max_concurrent_requests {
+    let rate_limiter = match config.routing.max_concurrent_requests {
         n if n <= 0 => None,
         n => {
             let rate_limit_tokens = config
+                .routing
                 .rate_limit_tokens_per_second
                 .filter(|&t| t > 0)
                 .unwrap_or(n);
@@ -428,7 +421,7 @@ pub async fn create_test_context_with_parsers(config: RouterConfig) -> Arc<AppCo
     // Initialize registries
     let tokenizer_registry = Arc::new(TokenizerRegistry::new());
     let worker_registry = Arc::new(WorkerRegistry::new());
-    let policy_registry = Arc::new(PolicyRegistry::new(config.policy.clone()));
+    let policy_registry = Arc::new(PolicyRegistry::new(config.routing.policy.clone()));
 
     // Initialize storage backends (Memory for tests)
     let response_storage = Arc::new(MemoryResponseStorage::new());
@@ -440,7 +433,7 @@ pub async fn create_test_context_with_parsers(config: RouterConfig) -> Arc<AppCo
         worker_registry.clone(),
         policy_registry.clone(),
         client.clone(),
-        config.worker_startup_check_interval_secs,
+        config.workers.startup_check_interval_secs,
     )));
 
     // Create empty OnceLock for worker job queue, workflow engines, and mcp manager
@@ -454,7 +447,7 @@ pub async fn create_test_context_with_parsers(config: RouterConfig) -> Arc<AppCo
 
     let app_context = Arc::new(
         AppContext::builder()
-            .router_config(config.clone())
+            .gateway_config(config.clone())
             .client(client)
             .rate_limiter(rate_limiter)
             .tokenizer_registry(tokenizer_registry)
@@ -490,7 +483,7 @@ pub async fn create_test_context_with_parsers(config: RouterConfig) -> Arc<AppCo
         .expect("WorkflowEngines should only be initialized once");
 
     // Register external workers for OpenAI mode
-    if let RoutingMode::OpenAI { worker_urls, .. } = &config.mode {
+    if let RoutingMode::OpenAI { worker_urls, .. } = &config.routing.mode {
         for url in worker_urls {
             // Create a worker that supports common test models
             let models = vec![
@@ -532,7 +525,7 @@ pub async fn create_test_context_with_parsers(config: RouterConfig) -> Arc<AppCo
 
 /// Helper function to create AppContext for tests with MCP config from file
 pub async fn create_test_context_with_mcp_config(
-    config: RouterConfig,
+    config: GatewayConfig,
     mcp_config_path: &str,
 ) -> Arc<AppContext> {
     use smg_mcp::{McpConfig, McpManager};
@@ -540,10 +533,11 @@ pub async fn create_test_context_with_mcp_config(
     let client = reqwest::Client::new();
 
     // Initialize rate limiter
-    let rate_limiter = match config.max_concurrent_requests {
+    let rate_limiter = match config.routing.max_concurrent_requests {
         n if n <= 0 => None,
         n => {
             let rate_limit_tokens = config
+                .routing
                 .rate_limit_tokens_per_second
                 .filter(|&t| t > 0)
                 .unwrap_or(n);
@@ -556,7 +550,7 @@ pub async fn create_test_context_with_mcp_config(
 
     // Initialize registries
     let worker_registry = Arc::new(WorkerRegistry::new());
-    let policy_registry = Arc::new(PolicyRegistry::new(config.policy.clone()));
+    let policy_registry = Arc::new(PolicyRegistry::new(config.routing.policy.clone()));
 
     // Initialize storage backends (Memory for tests)
     let response_storage = Arc::new(MemoryResponseStorage::new());
@@ -568,7 +562,7 @@ pub async fn create_test_context_with_mcp_config(
         worker_registry.clone(),
         policy_registry.clone(),
         client.clone(),
-        config.worker_startup_check_interval_secs,
+        config.workers.startup_check_interval_secs,
     )));
 
     // Create empty OnceLock for worker job queue, workflow engines, and mcp manager
@@ -578,7 +572,7 @@ pub async fn create_test_context_with_mcp_config(
 
     let app_context = Arc::new(
         AppContext::builder()
-            .router_config(config.clone())
+            .gateway_config(config.clone())
             .client(client)
             .rate_limiter(rate_limiter)
             .tokenizer_registry(Arc::new(TokenizerRegistry::new())) // tokenizer
@@ -614,7 +608,7 @@ pub async fn create_test_context_with_mcp_config(
         .expect("WorkflowEngines should only be initialized once");
 
     // Register external workers for OpenAI mode
-    if let RoutingMode::OpenAI { worker_urls, .. } = &config.mode {
+    if let RoutingMode::OpenAI { worker_urls, .. } = &config.routing.mode {
         for url in worker_urls {
             // Create a worker that supports common test models
             let models = vec![

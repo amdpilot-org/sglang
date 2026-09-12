@@ -38,7 +38,7 @@ use wfaas::{BackoffStrategy, FailureAction, RetryPolicy, StepDefinition, Workflo
 use super::shared::{ActivateWorkersStep, RegisterWorkersStep, UpdatePoliciesStep};
 use crate::{
     app_context::AppContext,
-    config::RouterConfig,
+    config::WorkerConfig,
     core::{
         steps::workflow_data::{
             LocalWorkerWorkflowData, WorkerRemovalWorkflowData, WorkerUpdateWorkflowData,
@@ -74,9 +74,9 @@ pub(crate) fn find_workers_by_url(
 }
 
 pub fn create_local_worker_workflow(
-    router_config: &RouterConfig,
+    worker_pool_config: &WorkerConfig,
 ) -> WorkflowDefinition<LocalWorkerWorkflowData> {
-    let detect_timeout = Duration::from_secs(router_config.worker_startup_timeout_secs);
+    let detect_timeout = Duration::from_secs(worker_pool_config.startup_timeout_secs);
 
     // Calculate max_attempts based on timeout
     let timeout_secs = detect_timeout.as_secs() as f64;

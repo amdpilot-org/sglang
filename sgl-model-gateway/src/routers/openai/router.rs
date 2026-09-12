@@ -27,7 +27,7 @@ use super::{
 };
 use crate::{
     app_context::AppContext,
-    config::types::RetryConfig,
+    config::RetryConfig,
     core::{
         is_retryable_status, model_type::Endpoint, ModelCard, ProviderType, RetryExecutor,
         RuntimeType, Worker, WorkerRegistry,
@@ -176,7 +176,7 @@ impl OpenAIRouter {
             healthy: AtomicBool::new(true),
             shared_components,
             responses_components,
-            retry_config: ctx.router_config.effective_retry_config(),
+            retry_config: ctx.gateway_config.workers.effective_retry_config(),
         })
     }
 
@@ -332,7 +332,19 @@ impl OpenAIRouter {
                 arr.iter()
                     .filter_map(|item| {
                         serde_json::from_value::<ResponseInputOutputItem>(item.clone())
-                            .map_err(|e| warn!("Failed to deserialize item: {}. Item: {}", e, item))
+                            .map_err(|error| {
+                                warn!(
+                                    error = %error,
+                                    item_type = item
+                                        .get("type")
+                                        .and_then(serde_json::Value::as_str)
+                                        .unwrap_or("unknown"),
+                                    item_field_count = item
+                                        .as_object()
+                                        .map_or(0, serde_json::Map::len),
+                                    "failed to deserialize response item"
+                                )
+                            })
                             .ok()
                     })
                     .collect()

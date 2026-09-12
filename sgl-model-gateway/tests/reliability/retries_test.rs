@@ -8,10 +8,10 @@ use axum::{
     http::{header::CONTENT_TYPE, StatusCode},
 };
 use serde_json::json;
-use smg::config::{RetryConfig, RouterConfig};
+use smg::config::RetryConfig;
 use tower::ServiceExt;
 
-use crate::common::{AppTestContext, TestRouterConfig, TestWorkerConfig};
+use crate::common::{AppTestContext, TestGatewayConfig, TestWorkerConfig};
 
 #[cfg(test)]
 mod retry_tests {
@@ -26,7 +26,7 @@ mod retry_tests {
             max_backoff_ms: 100,
             ..Default::default()
         };
-        let config = TestRouterConfig::round_robin_with_retry(3300, retry_config);
+        let config = TestGatewayConfig::round_robin_with_retry(3300, retry_config);
 
         let ctx = AppTestContext::new_with_config(
             config,
@@ -65,7 +65,7 @@ mod retry_tests {
     /// Test that retries are disabled when configured
     #[tokio::test]
     async fn test_retries_disabled() {
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -119,7 +119,7 @@ mod retry_tests {
             max_backoff_ms: 50,
             ..Default::default()
         };
-        let config = TestRouterConfig::round_robin_with_retry(3302, retry_config);
+        let config = TestGatewayConfig::round_robin_with_retry(3302, retry_config);
 
         let ctx = AppTestContext::new_with_config(
             config,
@@ -175,7 +175,7 @@ mod retry_tests {
             max_backoff_ms: 50,
             ..Default::default()
         };
-        let config = TestRouterConfig::round_robin_with_retry(3303, retry_config);
+        let config = TestGatewayConfig::round_robin_with_retry(3303, retry_config);
 
         let ctx = AppTestContext::new_with_config(
             config,

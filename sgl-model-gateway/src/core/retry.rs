@@ -4,7 +4,7 @@ use axum::{http::StatusCode, response::Response};
 use rand::Rng;
 use tracing::debug;
 
-use crate::config::types::RetryConfig;
+use crate::config::RetryConfig;
 
 /// Check if an HTTP status code indicates a retryable error
 pub fn is_retryable_status(status: StatusCode) -> bool {

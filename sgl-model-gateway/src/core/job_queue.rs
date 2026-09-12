@@ -17,7 +17,7 @@ use wfaas::WorkflowId;
 
 use crate::{
     app_context::AppContext,
-    config::{RouterConfig, RoutingMode},
+    config::{GatewayConfig, RoutingMode},
     core::steps::{
         create_external_worker_workflow_data, create_local_worker_workflow_data,
         create_mcp_workflow_data, create_tokenizer_workflow_data,
@@ -43,7 +43,7 @@ pub enum Job {
         url: String,
     },
     InitializeWorkersFromConfig {
-        router_config: Box<RouterConfig>,
+        gateway_config: Box<GatewayConfig>,
     },
     InitializeMcpServers {
         mcp_config: Box<McpConfig>,
@@ -265,7 +265,7 @@ impl JobQueue {
             JobStatus::processing(job_type, &worker_url),
         );
 
-        debug!("Processing job: type={}, worker={}", job_type, worker_url);
+        debug!(job_type, resource = %worker_url, "processing job");
 
         // Execute job
         match context.upgrade() {
@@ -281,8 +281,9 @@ impl JobQueue {
                     JobStatus::failed(job_type, &worker_url, error_msg),
                 );
                 error!(
-                    "AppContext dropped, cannot process job: type={}, worker={}",
-                    job_type, worker_url
+                    job_type,
+                    resource = %worker_url,
+                    "AppContext dropped; cannot process job"
                 );
             }
         }
@@ -300,7 +301,7 @@ impl JobQueue {
                     .ok_or_else(|| "Workflow engines not initialized".to_string())?;
 
                 let timeout_duration =
-                    Duration::from_secs(context.router_config.worker_startup_timeout_secs + 30);
+                    Duration::from_secs(context.gateway_config.workers.startup_timeout_secs + 30);
 
                 // Select workflow based on runtime field
                 match config.runtime.as_deref() {
@@ -402,7 +403,7 @@ impl JobQueue {
 
                 let workflow_data = create_worker_removal_workflow_data(
                     url.to_string(),
-                    context.router_config.dp_aware,
+                    context.gateway_config.routing.dp_aware,
                     Arc::clone(context),
                 );
 
@@ -493,12 +494,12 @@ impl JobQueue {
                     )
                     .await
             }
-            Job::InitializeWorkersFromConfig { router_config } => {
-                let api_key = router_config.api_key.clone();
+            Job::InitializeWorkersFromConfig { gateway_config } => {
+                let api_key = gateway_config.security.api_key.clone();
                 let mut worker_count = 0;
 
                 // Create iterator of (url, worker_type, bootstrap_port) tuples based on mode
-                let workers: Vec<(String, &str, Option<u16>)> = match &router_config.mode {
+                let workers: Vec<(String, &str, Option<u16>)> = match &gateway_config.routing.mode {
                     RoutingMode::Regular { worker_urls } => worker_urls
                         .iter()
                         .map(|url| (url.clone(), "regular", None))
@@ -520,7 +521,7 @@ impl JobQueue {
                     RoutingMode::OpenAI { worker_urls } => {
                         // OpenAI mode: submit AddWorker jobs with runtime: "external"
                         // The external_worker_registration workflow handles model discovery
-                        let api_key = router_config.api_key.clone();
+                        let api_key = gateway_config.security.api_key.clone();
                         let mut submitted_count = 0;
 
                         for url in worker_urls {
@@ -537,22 +538,30 @@ impl JobQueue {
                                 tokenizer_path: None,
                                 reasoning_parser: None,
                                 tool_parser: None,
-                                chat_template: router_config.chat_template.clone(),
+                                chat_template: gateway_config.model.chat_template.clone(),
                                 bootstrap_port: None,
-                                health_check_timeout_secs: router_config.health_check.timeout_secs,
-                                health_check_interval_secs: router_config
+                                health_check_timeout_secs: gateway_config
+                                    .workers
+                                    .health_check
+                                    .timeout_secs,
+                                health_check_interval_secs: gateway_config
+                                    .workers
                                     .health_check
                                     .check_interval_secs,
-                                health_success_threshold: router_config
+                                health_success_threshold: gateway_config
+                                    .workers
                                     .health_check
                                     .success_threshold,
-                                health_failure_threshold: router_config
+                                health_failure_threshold: gateway_config
+                                    .workers
                                     .health_check
                                     .failure_threshold,
-                                disable_health_check: router_config
+                                disable_health_check: gateway_config
+                                    .workers
                                     .health_check
                                     .disable_health_check,
-                                max_connection_attempts: router_config
+                                max_connection_attempts: gateway_config
+                                    .workers
                                     .health_check
                                     .success_threshold
                                     * 10,
@@ -608,15 +617,31 @@ impl JobQueue {
                         tokenizer_path: None,
                         reasoning_parser: None,
                         tool_parser: None,
-                        chat_template: router_config.chat_template.clone(),
+                        chat_template: gateway_config.model.chat_template.clone(),
                         bootstrap_port,
-                        health_check_timeout_secs: router_config.health_check.timeout_secs,
-                        health_check_interval_secs: router_config.health_check.check_interval_secs,
-                        health_success_threshold: router_config.health_check.success_threshold,
-                        health_failure_threshold: router_config.health_check.failure_threshold,
-                        disable_health_check: router_config.health_check.disable_health_check,
-                        max_connection_attempts: router_config.health_check.success_threshold * 10,
-                        dp_aware: router_config.dp_aware,
+                        health_check_timeout_secs: gateway_config.workers.health_check.timeout_secs,
+                        health_check_interval_secs: gateway_config
+                            .workers
+                            .health_check
+                            .check_interval_secs,
+                        health_success_threshold: gateway_config
+                            .workers
+                            .health_check
+                            .success_threshold,
+                        health_failure_threshold: gateway_config
+                            .workers
+                            .health_check
+                            .failure_threshold,
+                        disable_health_check: gateway_config
+                            .workers
+                            .health_check
+                            .disable_health_check,
+                        max_connection_attempts: gateway_config
+                            .workers
+                            .health_check
+                            .success_threshold
+                            * 10,
+                        dp_aware: gateway_config.routing.dp_aware,
                     };
 
                     let job = Job::AddWorker {
@@ -748,7 +773,7 @@ impl JobQueue {
     fn record_job_completion(
         job_type: &'static str,
         worker_url: &str,
-        _duration: Duration,
+        duration: Duration,
         result: &Result<String, String>,
         status_map: &Arc<DashMap<String, JobStatus>>,
     ) {
@@ -756,8 +781,11 @@ impl JobQueue {
             Ok(message) => {
                 status_map.remove(worker_url);
                 debug!(
-                    "Completed job: type={}, worker={}, result={}",
-                    job_type, worker_url, message
+                    job_type,
+                    resource = %worker_url,
+                    duration_ms = duration.as_millis() as u64,
+                    result_message = %message,
+                    "job completed"
                 );
             }
             Err(error) => {
@@ -766,8 +794,11 @@ impl JobQueue {
                     JobStatus::failed(job_type, worker_url, error.clone()),
                 );
                 warn!(
-                    "Failed job: type={}, worker={}, error={}",
-                    job_type, worker_url, error
+                    job_type,
+                    resource = %worker_url,
+                    duration_ms = duration.as_millis() as u64,
+                    error = %error,
+                    "job failed"
                 );
             }
         }

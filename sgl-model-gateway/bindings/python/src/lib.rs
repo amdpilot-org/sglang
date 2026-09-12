@@ -462,9 +462,12 @@ impl Router {
         core::ConnectionMode::Http
     }
 
-    pub fn to_router_config(&self) -> config::ConfigResult<config::RouterConfig> {
+    pub fn to_gateway_config(&self) -> config::ConfigResult<config::GatewayConfig> {
         use config::{
-            DiscoveryConfig, MetricsConfig, PolicyConfig as ConfigPolicyConfig, RoutingMode,
+            CircuitBreakerConfig, DiscoveryConfig, ExtensionConfig, HealthCheckConfig,
+            HttpServerConfig, ModelConfig, ObservabilityConfig, PolicyConfig as ConfigPolicyConfig,
+            RetryConfig, RoutingConfig, RoutingMode, SecurityConfig, ServerTlsConfig,
+            StorageConfig, TokenizerCacheConfig, WorkerConfig,
         };
 
         let convert_policy = |policy: &PolicyType| -> ConfigPolicyConfig {
@@ -529,33 +532,18 @@ impl Router {
 
         let discovery = if self.service_discovery {
             Some(DiscoveryConfig {
-                enabled: true,
                 namespace: self.service_discovery_namespace.clone(),
                 port: self.service_discovery_port,
-                check_interval_secs: 60,
                 selector: self.selector.clone(),
                 prefill_selector: self.prefill_selector.clone(),
                 decode_selector: self.decode_selector.clone(),
                 bootstrap_port_annotation: self.bootstrap_port_annotation.clone(),
                 router_selector: HashMap::new(),
-                router_mesh_port_annotation: "sglang.ai/mesh-port".to_string(),
+                ..Default::default()
             })
         } else {
             None
         };
-
-        let metrics = match (self.prometheus_port, self.prometheus_host.as_ref()) {
-            (Some(port), Some(host)) => Some(MetricsConfig {
-                port,
-                host: host.clone(),
-            }),
-            _ => None,
-        };
-
-        let trace_config = Some(config::TraceConfig {
-            enable_trace: self.enable_trace,
-            otlp_traces_endpoint: self.otlp_traces_endpoint.clone(),
-        });
 
         let history_backend = match self.history_backend {
             HistoryBackendType::Memory => config::HistoryBackend::Memory,
@@ -587,84 +575,190 @@ impl Router {
             None
         };
 
-        config::RouterConfig::builder()
-            .mode(mode)
-            .policy(policy)
-            .host(&self.host)
-            .port(self.port)
-            .connection_mode(self.connection_mode.clone())
-            .max_payload_size(self.max_payload_size)
-            .request_timeout_secs(self.request_timeout_secs)
-            .worker_startup_timeout_secs(self.worker_startup_timeout_secs)
-            .worker_startup_check_interval_secs(self.worker_startup_check_interval)
-            .max_concurrent_requests(self.max_concurrent_requests)
-            .queue_size(self.queue_size)
-            .queue_timeout_secs(self.queue_timeout_secs)
-            .cors_allowed_origins(self.cors_allowed_origins.clone())
-            .retry_config(config::RetryConfig {
-                max_retries: self.retry_max_retries,
-                initial_backoff_ms: self.retry_initial_backoff_ms,
-                max_backoff_ms: self.retry_max_backoff_ms,
-                backoff_multiplier: self.retry_backoff_multiplier,
-                jitter_factor: self.retry_jitter_factor,
+        let client_identity = match (&self.client_cert_path, &self.client_key_path) {
+            (Some(cert_path), Some(key_path)) => {
+                let mut identity = std::fs::read(cert_path).map_err(|error| {
+                    config::ConfigError::ValidationFailed {
+                        reason: format!(
+                            "Failed to read client certificate from {cert_path}: {error}"
+                        ),
+                    }
+                })?;
+                let key = std::fs::read(key_path).map_err(|error| {
+                    config::ConfigError::ValidationFailed {
+                        reason: format!("Failed to read client key from {key_path}: {error}"),
+                    }
+                })?;
+                if !identity.ends_with(b"\n") {
+                    identity.push(b'\n');
+                }
+                identity.extend_from_slice(&key);
+                if !identity.ends_with(b"\n") {
+                    identity.push(b'\n');
+                }
+                Some(identity)
+            }
+            (None, None) => None,
+            _ => {
+                return Err(config::ConfigError::ValidationFailed {
+                    reason: "Both client_cert_path and client_key_path must be specified together"
+                        .to_string(),
+                });
+            }
+        };
+
+        let ca_certificates = self
+            .ca_cert_paths
+            .iter()
+            .map(|path| {
+                std::fs::read(path).map_err(|error| config::ConfigError::ValidationFailed {
+                    reason: format!("Failed to read CA certificate from {path}: {error}"),
+                })
             })
-            .circuit_breaker_config(config::CircuitBreakerConfig {
-                failure_threshold: self.cb_failure_threshold,
-                success_threshold: self.cb_success_threshold,
-                timeout_duration_secs: self.cb_timeout_duration_secs,
-                window_duration_secs: self.cb_window_duration_secs,
+            .collect::<config::ConfigResult<Vec<_>>>()?;
+
+        let server_tls = match (&self.server_cert_path, &self.server_key_path) {
+            (Some(cert_path), Some(key_path)) => Some(ServerTlsConfig {
+                certificate: std::fs::read(cert_path).map_err(|error| {
+                    config::ConfigError::ValidationFailed {
+                        reason: format!(
+                            "Failed to read server certificate from {cert_path}: {error}"
+                        ),
+                    }
+                })?,
+                private_key: std::fs::read(key_path).map_err(|error| {
+                    config::ConfigError::ValidationFailed {
+                        reason: format!("Failed to read server key from {key_path}: {error}"),
+                    }
+                })?,
+            }),
+            (None, None) => None,
+            _ => {
+                return Err(config::ConfigError::ValidationFailed {
+                    reason: "Both server_cert_path and server_key_path must be specified together"
+                        .to_string(),
+                });
+            }
+        };
+
+        let mcp_config = self
+            .mcp_config_path
+            .as_ref()
+            .map(|path| {
+                let contents = std::fs::read_to_string(path).map_err(|error| {
+                    config::ConfigError::ValidationFailed {
+                        reason: format!("Failed to read MCP config from {path}: {error}"),
+                    }
+                })?;
+                serde_yaml::from_str(&contents).map_err(|error| {
+                    config::ConfigError::ValidationFailed {
+                        reason: format!("Failed to parse MCP config from {path}: {error}"),
+                    }
+                })
             })
-            .health_check_config(config::HealthCheckConfig {
-                failure_threshold: self.health_failure_threshold,
-                success_threshold: self.health_success_threshold,
-                timeout_secs: self.health_check_timeout_secs,
-                check_interval_secs: self.health_check_interval_secs,
-                endpoint: self.health_check_endpoint.clone(),
-                disable_health_check: self.disable_health_check,
-            })
-            .tokenizer_cache(config::TokenizerCacheConfig {
-                enable_l0: self.tokenizer_cache_enable_l0,
-                l0_max_entries: self.tokenizer_cache_l0_max_entries,
-                enable_l1: self.tokenizer_cache_enable_l1,
-                l1_max_memory: self.tokenizer_cache_l1_max_memory,
-            })
-            .history_backend(history_backend)
-            .maybe_api_key(self.api_key.as_ref())
-            .maybe_discovery(discovery)
-            .maybe_metrics(metrics)
-            .maybe_trace(trace_config)
-            .maybe_log_dir(self.log_dir.as_ref())
-            .maybe_log_level(self.log_level.as_ref())
-            .maybe_request_id_headers(self.request_id_headers.clone())
-            .maybe_rate_limit_tokens_per_second(self.rate_limit_tokens_per_second)
-            .maybe_model_path(self.model_path.as_ref())
-            .maybe_tokenizer_path(self.tokenizer_path.as_ref())
-            .maybe_chat_template(self.chat_template.as_ref())
-            .maybe_oracle(oracle)
-            .maybe_postgres(postgres_config)
-            .maybe_redis(redis_config)
-            .maybe_reasoning_parser(self.reasoning_parser.as_ref())
-            .maybe_tool_call_parser(self.tool_call_parser.as_ref())
-            .maybe_mcp_config_path(self.mcp_config_path.as_ref())
-            .dp_aware(self.dp_aware)
-            .retries(!self.disable_retries)
-            .circuit_breaker(!self.disable_circuit_breaker)
-            .igw(self.enable_igw)
-            .pool_idle_timeout_secs(self.pool_idle_timeout_secs)
-            .connect_timeout_secs(self.connect_timeout_secs)
-            .pool_max_idle_per_host(self.pool_max_idle_per_host)
-            .tcp_keepalive_secs(self.tcp_keepalive_secs)
-            .enable_wasm(self.enable_wasm)
-            .maybe_client_cert_and_key(
-                self.client_cert_path.as_ref(),
-                self.client_key_path.as_ref(),
-            )
-            .add_ca_certificates(self.ca_cert_paths.clone())
-            .maybe_server_cert_and_key(
-                self.server_cert_path.as_ref(),
-                self.server_key_path.as_ref(),
-            )
-            .build()
+            .transpose()?;
+
+        Ok(config::GatewayConfig {
+            server: HttpServerConfig {
+                host: self.host.clone(),
+                port: self.port,
+                max_payload_size: self.max_payload_size,
+                cors_allowed_origins: self.cors_allowed_origins.clone(),
+                request_id_headers: self.request_id_headers.clone(),
+                shutdown_grace_period_secs: self.shutdown_grace_period_secs,
+            },
+            routing: RoutingConfig {
+                mode,
+                policy,
+                dp_aware: self.dp_aware,
+                enable_igw: self.enable_igw,
+                max_concurrent_requests: self.max_concurrent_requests,
+                queue_size: self.queue_size,
+                queue_timeout_secs: self.queue_timeout_secs,
+                rate_limit_tokens_per_second: self.rate_limit_tokens_per_second,
+            },
+            workers: WorkerConfig {
+                connection_mode: self.connection_mode.clone(),
+                request_timeout_secs: self.request_timeout_secs,
+                startup_timeout_secs: self.worker_startup_timeout_secs,
+                startup_check_interval_secs: self.worker_startup_check_interval,
+                pool_idle_timeout_secs: self.pool_idle_timeout_secs,
+                connect_timeout_secs: self.connect_timeout_secs,
+                pool_max_idle_per_host: self.pool_max_idle_per_host,
+                tcp_keepalive_secs: self.tcp_keepalive_secs,
+                retry: RetryConfig {
+                    max_retries: self.retry_max_retries,
+                    initial_backoff_ms: self.retry_initial_backoff_ms,
+                    max_backoff_ms: self.retry_max_backoff_ms,
+                    backoff_multiplier: self.retry_backoff_multiplier,
+                    jitter_factor: self.retry_jitter_factor,
+                },
+                circuit_breaker: CircuitBreakerConfig {
+                    failure_threshold: self.cb_failure_threshold,
+                    success_threshold: self.cb_success_threshold,
+                    timeout_duration_secs: self.cb_timeout_duration_secs,
+                    window_duration_secs: self.cb_window_duration_secs,
+                },
+                disable_retries: self.disable_retries,
+                disable_circuit_breaker: self.disable_circuit_breaker,
+                health_check: HealthCheckConfig {
+                    failure_threshold: self.health_failure_threshold,
+                    success_threshold: self.health_success_threshold,
+                    timeout_secs: self.health_check_timeout_secs,
+                    check_interval_secs: self.health_check_interval_secs,
+                    endpoint: self.health_check_endpoint.clone(),
+                    disable_health_check: self.disable_health_check,
+                },
+            },
+            model: ModelConfig {
+                model_path: self.model_path.clone(),
+                tokenizer_path: self.tokenizer_path.clone(),
+                chat_template: self.chat_template.clone(),
+                tokenizer_cache: TokenizerCacheConfig {
+                    enable_l0: self.tokenizer_cache_enable_l0,
+                    l0_max_entries: self.tokenizer_cache_l0_max_entries,
+                    enable_l1: self.tokenizer_cache_enable_l1,
+                    l1_max_memory: self.tokenizer_cache_l1_max_memory,
+                },
+                reasoning_parser: self.reasoning_parser.clone(),
+                tool_call_parser: self.tool_call_parser.clone(),
+            },
+            storage: StorageConfig {
+                history_backend,
+                oracle,
+                postgres: postgres_config,
+                redis: redis_config,
+            },
+            extensions: ExtensionConfig {
+                mcp_config,
+                enable_wasm: self.enable_wasm,
+            },
+            observability: ObservabilityConfig {
+                log_dir: self.log_dir.clone(),
+                log_level: self.log_level.clone(),
+                json_log: self.json_log,
+                prometheus_host: self
+                    .prometheus_host
+                    .clone()
+                    .unwrap_or_else(|| "127.0.0.1".to_string()),
+                prometheus_port: self.prometheus_port.unwrap_or(29000),
+                prometheus_duration_buckets: self.prometheus_duration_buckets.clone(),
+                enable_trace: self.enable_trace,
+                otlp_traces_endpoint: self.otlp_traces_endpoint.clone(),
+            },
+            security: SecurityConfig {
+                api_key: self.api_key.clone(),
+                control_plane_auth: self
+                    .control_plane_auth
+                    .as_ref()
+                    .map(|config| config.to_auth_control_plane_config()),
+                server_tls,
+                client_identity,
+                ca_certificates,
+            },
+            discovery,
+            mesh: None,
+        })
     }
 }
 
@@ -963,74 +1057,29 @@ impl Router {
     }
 
     fn start(&self) -> PyResult<()> {
-        use observability::metrics::PrometheusConfig;
-
-        let router_config = self.to_router_config().map_err(|e| {
+        let gateway_config = self.to_gateway_config().map_err(|e| {
             pyo3::exceptions::PyValueError::new_err(format!("Configuration error: {}", e))
         })?;
 
-        router_config.validate().map_err(|e| {
+        gateway_config.validate().map_err(|e| {
             pyo3::exceptions::PyValueError::new_err(format!(
                 "Configuration validation failed: {}",
                 e
             ))
         })?;
 
-        let service_discovery_config = if self.service_discovery {
-            let config = service_discovery::ServiceDiscoveryConfig {
-                enabled: true,
-                selector: self.selector.clone(),
-                check_interval: std::time::Duration::from_secs(60),
-                port: self.service_discovery_port,
-                namespace: self.service_discovery_namespace.clone(),
-                pd_mode: self.pd_disaggregation,
-                prefill_selector: self.prefill_selector.clone(),
-                decode_selector: self.decode_selector.clone(),
-                bootstrap_port_annotation: self.bootstrap_port_annotation.clone(),
-                router_selector: HashMap::new(),
-                router_mesh_port_annotation: "sglang.ai/mesh-port".to_string(),
-                igw_mode: self.enable_igw,
-            };
-            config.warn_if_misconfigured();
-            Some(config)
-        } else {
-            None
-        };
-
-        let prometheus_config = Some(PrometheusConfig {
-            port: self.prometheus_port.unwrap_or(29000),
-            host: self
-                .prometheus_host
-                .clone()
-                .unwrap_or_else(|| "127.0.0.1".to_string()),
-            duration_buckets: self.prometheus_duration_buckets.clone(),
-        });
-
         let runtime = tokio::runtime::Runtime::new()
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
 
         runtime.block_on(async move {
-            server::startup(server::ServerConfig {
-                host: self.host.clone(),
-                port: self.port,
-                router_config,
-                max_payload_size: self.max_payload_size,
-                log_dir: self.log_dir.clone(),
-                log_level: self.log_level.clone(),
-                json_log: self.json_log,
-                service_discovery_config,
-                prometheus_config,
-                request_timeout_secs: self.request_timeout_secs,
-                request_id_headers: self.request_id_headers.clone(),
-                shutdown_grace_period_secs: self.shutdown_grace_period_secs,
-                control_plane_auth: self
-                    .control_plane_auth
-                    .as_ref()
-                    .map(|c| c.to_auth_control_plane_config()),
-                mesh_server_config: None,
-            })
-            .await
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+            let log_guard = server::init_tracing(&gateway_config.observability)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+            let server_result = server::startup(gateway_config).await;
+            let shutdown_result = server::shutdown_tracing(log_guard).await;
+
+            server_result.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            shutdown_result.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
         })
     }
 }

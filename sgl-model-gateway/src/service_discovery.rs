@@ -485,18 +485,39 @@ async fn handle_pod_event(
                 reasoning_parser: None,
                 tool_parser: None,
                 chat_template: None,
-                api_key: app_context.router_config.api_key.clone(),
-                health_check_timeout_secs: app_context.router_config.health_check.timeout_secs,
+                api_key: app_context.gateway_config.security.api_key.clone(),
+                health_check_timeout_secs: app_context
+                    .gateway_config
+                    .workers
+                    .health_check
+                    .timeout_secs,
                 health_check_interval_secs: app_context
-                    .router_config
+                    .gateway_config
+                    .workers
                     .health_check
                     .check_interval_secs,
-                health_success_threshold: app_context.router_config.health_check.success_threshold,
-                health_failure_threshold: app_context.router_config.health_check.failure_threshold,
-                disable_health_check: app_context.router_config.health_check.disable_health_check,
-                max_connection_attempts: app_context.router_config.health_check.success_threshold
+                health_success_threshold: app_context
+                    .gateway_config
+                    .workers
+                    .health_check
+                    .success_threshold,
+                health_failure_threshold: app_context
+                    .gateway_config
+                    .workers
+                    .health_check
+                    .failure_threshold,
+                disable_health_check: app_context
+                    .gateway_config
+                    .workers
+                    .health_check
+                    .disable_health_check,
+                max_connection_attempts: app_context
+                    .gateway_config
+                    .workers
+                    .health_check
+                    .success_threshold
                     * 20,
-                dp_aware: app_context.router_config.dp_aware,
+                dp_aware: app_context.gateway_config.routing.dp_aware,
             };
 
             let job = Job::AddWorker {
@@ -840,13 +861,12 @@ mod tests {
 
     async fn create_test_app_context() -> Arc<AppContext> {
         use crate::{
-            config::RouterConfig, core::WorkerService, middleware::TokenBucket,
+            config::GatewayConfig, core::WorkerService, middleware::TokenBucket,
             observability::inflight_tracker::InFlightRequestTracker,
         };
 
-        let router_config = RouterConfig::builder()
-            .worker_startup_timeout_secs(1)
-            .build_unchecked();
+        let mut gateway_config = GatewayConfig::default();
+        gateway_config.workers.startup_timeout_secs = 1;
 
         let worker_registry = Arc::new(crate::core::WorkerRegistry::new());
         let worker_job_queue = Arc::new(std::sync::OnceLock::new());
@@ -855,15 +875,14 @@ mod tests {
         // Jobs submitted during tests will queue but not be processed
         Arc::new(AppContext {
             client: reqwest::Client::new(),
-            router_config: router_config.clone(),
+            gateway_config: gateway_config.clone(),
             rate_limiter: Some(Arc::new(TokenBucket::new(1000, 1000))),
             worker_registry: worker_registry.clone(),
             policy_registry: Arc::new(crate::policies::PolicyRegistry::new(
-                router_config.policy.clone(),
+                gateway_config.routing.policy.clone(),
             )),
             reasoning_parser_factory: None,
             tool_parser_factory: None,
-            router_manager: None,
             response_storage: Arc::new(data_connector::MemoryResponseStorage::new()),
             conversation_storage: Arc::new(data_connector::MemoryConversationStorage::new()),
             conversation_item_storage: Arc::new(
@@ -880,7 +899,7 @@ mod tests {
             worker_service: Arc::new(WorkerService::new(
                 worker_registry,
                 worker_job_queue,
-                router_config,
+                gateway_config,
             )),
             inflight_tracker: InFlightRequestTracker::new(),
         })

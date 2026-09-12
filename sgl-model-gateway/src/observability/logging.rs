@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use anyhow::{Context, Result};
 use tracing::Level;
 use tracing_appender::{
     non_blocking::WorkerGuard,
@@ -13,7 +14,7 @@ use tracing_subscriber::{
 };
 
 use super::otel_trace::get_otel_layer;
-use crate::config::TraceConfig;
+use crate::config::ObservabilityConfig;
 
 const TIME_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 const TIME_FORMAT_MS: &str = "%Y-%m-%d %H:%M:%S%.3f";
@@ -34,6 +35,26 @@ pub struct LoggingConfig {
     pub colorize: bool,
     pub log_file_name: String,
     pub log_targets: Option<Vec<String>>,
+}
+
+impl LoggingConfig {
+    // Init LoggingConfig by ObservabilityConfig.
+    pub fn from_config(config: &ObservabilityConfig) -> Self {
+        let level = config
+            .log_level
+            .as_deref()
+            .and_then(|value| value.parse::<Level>().ok())
+            .unwrap_or(Level::INFO);
+
+        Self {
+            level: level,
+            json_format: config.json_log,
+            log_dir: config.log_dir.clone(),
+            colorize: true,
+            log_file_name: "smg".to_string(),
+            log_targets: None,
+        }
+    }
 }
 
 impl Default for LoggingConfig {
@@ -87,7 +108,13 @@ fn build_filter_string(targets: &[String], level_filter: &str) -> String {
     filter_string
 }
 
-pub fn init_logging(config: LoggingConfig, otel_layer_config: Option<TraceConfig>) -> LogGuard {
+pub fn init_logging(
+    config: LoggingConfig,
+    otel_layer_config: Option<&ObservabilityConfig>,
+) -> Result<LogGuard> {
+    // The host process may already have installed a logger or subscriber.
+    // Preserve the legacy embedded-Python behavior: use the existing global
+    // subscriber instead of rejecting a subsequent Router.start() call.
     let _ = LogTracer::init();
 
     let level_filter = level_to_str(config.level);
@@ -119,9 +146,13 @@ pub fn init_logging(config: LoggingConfig, otel_layer_config: Option<TraceConfig
         .with_timer(ChronoUtc::new(time_fmt.to_string()));
 
     let stdout_layer = if config.json_format {
-        stdout_layer.json().flatten_event(true).boxed()
+        stdout_layer
+            .json()
+            .flatten_event(true)
+            .with_filter(env_filter.clone())
+            .boxed()
     } else {
-        stdout_layer.boxed()
+        stdout_layer.with_filter(env_filter.clone()).boxed()
     };
 
     layers.push(stdout_layer);
@@ -132,10 +163,8 @@ pub fn init_logging(config: LoggingConfig, otel_layer_config: Option<TraceConfig
         let log_dir = PathBuf::from(log_dir);
 
         if !log_dir.exists() {
-            if let Err(e) = std::fs::create_dir_all(&log_dir) {
-                eprintln!("Failed to create log directory: {}", e);
-                return LogGuard { _file_guard: None };
-            }
+            std::fs::create_dir_all(&log_dir)
+                .with_context(|| format!("create log directory {}", log_dir.display()))?;
         }
 
         let file_appender =
@@ -152,33 +181,40 @@ pub fn init_logging(config: LoggingConfig, otel_layer_config: Option<TraceConfig
             .with_writer(non_blocking);
 
         let file_layer = if config.json_format {
-            file_layer.json().flatten_event(true).boxed()
+            file_layer
+                .json()
+                .flatten_event(true)
+                .with_filter(env_filter.clone())
+                .boxed()
         } else {
-            file_layer.boxed()
+            file_layer.with_filter(env_filter.clone()).boxed()
         };
 
         layers.push(file_layer);
     }
 
-    if let Some(otel_layer_config) = &otel_layer_config {
+    let mut otel_enabled = false;
+    if let Some(otel_layer_config) = otel_layer_config {
         if otel_layer_config.enable_trace {
-            match get_otel_layer() {
-                Ok(otel_layer) => {
-                    layers.push(otel_layer);
-                }
-                Err(e) => {
-                    eprintln!("Failed to initialize OpenTelemetry: {}", e);
-                }
-            }
+            let otel_layer = get_otel_layer().context("create OpenTelemetry tracing layer")?;
+            layers.push(otel_layer);
+            otel_enabled = true;
         }
     }
 
-    let _ = tracing_subscriber::registry()
-        .with(env_filter)
-        .with(layers)
-        .try_init();
+    let subscriber = tracing_subscriber::registry().with(layers);
 
-    LogGuard {
-        _file_guard: file_guard,
+    if otel_enabled {
+        subscriber
+            .try_init()
+            .context("initialize tracing subscriber with OpenTelemetry")?;
+    } else {
+        // Embedded callers, such as Python, may start the router more than
+        // once in one process after a global subscriber is already installed.
+        let _ = subscriber.try_init();
     }
+
+    Ok(LogGuard {
+        _file_guard: file_guard,
+    })
 }

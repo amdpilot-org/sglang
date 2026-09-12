@@ -15,7 +15,7 @@ use super::{
     LocalWorkerWorkflowData, McpWorkflowData, TokenizerWorkflowData, WasmRegistrationWorkflowData,
     WasmRemovalWorkflowData, WorkerRemovalWorkflowData, WorkerUpdateWorkflowData,
 };
-use crate::config::RouterConfig;
+use crate::config::GatewayConfig;
 
 /// Type alias for local worker workflow engine
 pub type LocalWorkerEngine =
@@ -74,11 +74,11 @@ pub struct WorkflowEngines {
 
 impl WorkflowEngines {
     /// Create and initialize all workflow engines with their workflow definitions
-    pub fn new(router_config: &RouterConfig) -> Self {
+    pub fn new(gateway_config: &GatewayConfig) -> Self {
         // Create local worker engine
         let local_worker = WorkflowEngine::new();
         local_worker
-            .register_workflow(create_local_worker_workflow(router_config))
+            .register_workflow(create_local_worker_workflow(&gateway_config.workers))
             .expect("local_worker_registration workflow should be valid");
 
         // Create external worker engine

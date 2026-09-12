@@ -10,6 +10,7 @@ use std::{
 
 use axum::{body::Body, extract::Request, http::StatusCode};
 use common::mock_worker::{HealthStatus, MockWorker, MockWorkerConfig, WorkerType};
+use opentelemetry::trace::TraceContextExt;
 use opentelemetry_proto::tonic::collector::trace::v1::{
     trace_service_server::{TraceService, TraceServiceServer},
     ExportTraceServiceRequest, ExportTraceServiceResponse,
@@ -18,7 +19,6 @@ use portpicker::pick_unused_port;
 use serde_json::json;
 use serial_test::serial;
 use smg::{
-    config::{RouterConfig, TraceConfig},
     core::Job,
     observability::{logging, otel_trace},
     routers::RouterFactory,
@@ -28,6 +28,7 @@ use tonic::metadata::MetadataMap;
 use tonic_v12::{transport::Server, Request as TonicRequest, Response, Status};
 use tower::ServiceExt;
 use tracing::info_span;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::prelude::*;
 
 #[derive(Clone)]
@@ -102,7 +103,9 @@ async fn test_router_with_tracing() {
     let collector = start_collector(port, shutdown_rx)
         .await
         .expect("Failed to start collector");
-    let collector_endpoint = format!("0.0.0.0:{}", port);
+    // `0.0.0.0` is valid for the collector to bind, but not for the OTLP
+    // client to connect. Use an explicit loopback address for exporting spans.
+    let collector_endpoint = format!("127.0.0.1:{}", port);
     println!("OTLP Collector started on: {}", collector_endpoint);
 
     // 2. create the mock worker
@@ -119,7 +122,7 @@ async fn test_router_with_tracing() {
     println!("Mock worker started on: {}", worker_url);
 
     // 3. create router config and enable tracing
-    let router_config = RouterConfig::builder()
+    let router_config = common::TestGatewayConfigBuilder::new()
         .regular_mode(vec![worker_url.clone()])
         .random_policy()
         .host("0.0.0.0")
@@ -150,10 +153,6 @@ async fn test_router_with_tracing() {
         false
     };
 
-    let trace_config = TraceConfig {
-        enable_trace: true,
-        otlp_traces_endpoint: collector_endpoint.clone(),
-    };
     let _log_guard = logging::init_logging(
         logging::LoggingConfig {
             level: tracing::Level::INFO,
@@ -163,14 +162,21 @@ async fn test_router_with_tracing() {
             log_file_name: "test-otel".to_string(),
             log_targets: Some(vec!["smg".to_string()]),
         },
-        Some(trace_config),
+        Some(&router_config.observability),
     );
     println!("Logging initialized with OTEL layer");
 
     // 5. Create a span and sleep for a while
-    let _span = info_span!(target: "smg::otel-trace", "test_router_with_tracing");
+    let span = info_span!(target: "smg::otel-trace", "test_router_with_tracing");
+    {
+        let _span_guard = span.enter();
+        assert!(
+            span.context().span().span_context().is_valid(),
+            "OpenTelemetry layer should attach a valid trace context to an allowed span"
+        );
+    }
     tokio::time::sleep(Duration::from_secs(1)).await;
-    drop(_span);
+    drop(span);
 
     // 6. create app context and router
     let app_context = common::create_test_context(router_config.clone()).await;
@@ -182,7 +188,7 @@ async fn test_router_with_tracing() {
         .expect("JobQueue should be initialized");
 
     let job = Job::InitializeWorkersFromConfig {
-        router_config: Box::new(router_config.clone()),
+        gateway_config: Box::new(router_config.clone()),
     };
 
     job_queue

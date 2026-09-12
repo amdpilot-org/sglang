@@ -283,7 +283,12 @@ impl CircuitBreaker {
 
             let from = old_state.as_str();
             let to = new_state.as_str();
-            info!("Circuit breaker state transition: {} -> {}", from, to);
+            info!(
+                circuit_breaker = %self.metric_label,
+                from_state = from,
+                to_state = to,
+                "circuit breaker state changed"
+            );
             Metrics::record_worker_cb_transition(&self.metric_label, from, to);
             Metrics::set_worker_cb_state(&self.metric_label, new_state.to_int());
             self.publish_gauge_metrics();

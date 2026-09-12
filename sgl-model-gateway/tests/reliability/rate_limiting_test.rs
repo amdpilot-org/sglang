@@ -13,10 +13,9 @@ use axum::{
     http::{header::CONTENT_TYPE, StatusCode},
 };
 use serde_json::json;
-use smg::config::RouterConfig;
 use tower::ServiceExt;
 
-use crate::common::{AppTestContext, TestRouterConfig, TestWorkerConfig};
+use crate::common::{AppTestContext, TestGatewayConfig, TestWorkerConfig};
 
 #[cfg(test)]
 mod rate_limiting_tests {
@@ -25,7 +24,7 @@ mod rate_limiting_tests {
     /// Test that concurrent requests are handled within limits
     #[tokio::test]
     async fn test_concurrent_requests_within_limit() {
-        let config = TestRouterConfig::with_concurrency(3400, 10);
+        let config = TestGatewayConfig::with_concurrency(3400, 10);
 
         let ctx =
             AppTestContext::new_with_config(config, vec![TestWorkerConfig::slow(19300, 50)]).await;
@@ -80,7 +79,7 @@ mod rate_limiting_tests {
     /// Test rate limit tokens per second
     #[tokio::test]
     async fn test_rate_limit_tokens() {
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![])
             .random_policy()
             .host("127.0.0.1")
@@ -133,7 +132,7 @@ mod rate_limiting_tests {
     /// Test unlimited concurrent requests when set to 0
     #[tokio::test]
     async fn test_unlimited_concurrent_requests() {
-        let config = TestRouterConfig::with_concurrency(3402, 0); // Unlimited
+        let config = TestGatewayConfig::with_concurrency(3402, 0); // Unlimited
 
         let ctx =
             AppTestContext::new_with_config(config, vec![TestWorkerConfig::slow(19302, 10)]).await;
@@ -187,7 +186,7 @@ mod rate_limiting_tests {
     /// Test queue behavior when requests exceed capacity
     #[tokio::test]
     async fn test_queue_behavior() {
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![])
             .random_policy()
             .host("127.0.0.1")

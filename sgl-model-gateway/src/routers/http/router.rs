@@ -13,7 +13,7 @@ use tracing::{debug, error};
 
 use crate::{
     app_context::AppContext,
-    config::types::RetryConfig,
+    config::RetryConfig,
     core::{
         is_retryable_status, AttachedBody, ConnectionMode, RetryExecutor, Worker, WorkerLoadGuard,
         WorkerRegistry, WorkerType, UNKNOWN_MODEL_ID,
@@ -73,9 +73,9 @@ impl Router {
             worker_registry: ctx.worker_registry.clone(),
             policy_registry: ctx.policy_registry.clone(),
             client: ctx.client.clone(),
-            dp_aware: ctx.router_config.dp_aware,
-            enable_igw: ctx.router_config.enable_igw,
-            retry_config: ctx.router_config.effective_retry_config(),
+            dp_aware: ctx.gateway_config.routing.dp_aware,
+            enable_igw: ctx.gateway_config.routing.enable_igw,
+            retry_config: ctx.gateway_config.workers.effective_retry_config(),
         })
     }
 
@@ -859,9 +859,8 @@ mod tests {
     fn create_test_regular_router() -> Router {
         // Create registries
         let worker_registry = Arc::new(WorkerRegistry::new());
-        let policy_registry = Arc::new(PolicyRegistry::new(
-            crate::config::types::PolicyConfig::RoundRobin,
-        ));
+        let policy_registry =
+            Arc::new(PolicyRegistry::new(crate::config::PolicyConfig::RoundRobin));
 
         // Register test workers
         let worker1 = BasicWorkerBuilder::new("http://worker1:8080")

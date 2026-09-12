@@ -1,6 +1,6 @@
 //! Worker metadata discovery integration tests.
 
-use smg::{config::RouterConfig, core::Job};
+use smg::core::Job;
 
 use crate::common::{
     create_test_context,
@@ -40,7 +40,7 @@ mod worker_discovery_tests {
         let mut worker = OpenAiOnlyMockWorker::new("my-model");
         let url = worker.start().await.unwrap();
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .regular_mode(vec![url.clone()])
             .random_policy()
             .host("127.0.0.1")
@@ -61,7 +61,7 @@ mod worker_discovery_tests {
             .expect("JobQueue should be initialized");
         job_queue
             .submit(Job::InitializeWorkersFromConfig {
-                router_config: Box::new(config),
+                gateway_config: Box::new(config),
             })
             .await
             .expect("Failed to submit worker initialization job");

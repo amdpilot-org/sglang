@@ -315,10 +315,10 @@ pub(super) async fn execute_tool_loop(
             // Execute all MCP tools
             for tool_call in mcp_tool_calls {
                 trace!(
-                    "Calling MCP tool '{}' (call_id: {}) with args: {}",
-                    tool_call.name,
-                    tool_call.call_id,
-                    tool_call.arguments
+                    tool_name = %tool_call.name,
+                    call_id = %tool_call.call_id,
+                    argument_bytes = tool_call.arguments.len(),
+                    "calling MCP tool"
                 );
 
                 let tool_start = Instant::now();

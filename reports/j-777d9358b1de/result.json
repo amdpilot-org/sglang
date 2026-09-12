@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36858",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Ported the complete seven-commit sgl-model-gateway proposal from calvin0327/sglang commit 0832be69911baba0ee8648e61a8a6e0119023567 onto the prepared base: unified GatewayConfig and CLI conversion, simplified main, decomposed startup, owned background-service shutdown, and structured logging. Added CLI compatibility/adversarial coverage and fixed a reproduced shutdown regression where the health checker waited for its polling interval until the server's 10-second fallback timeout.",
+  "tests": [
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-777d9358b1de/cargo-target CARGO_HOME=/job/.cargo /job/.cargo/bin/cargo test --lib",
+      "exit_code": 0,
+      "what_was_measured": "All 344 gateway library tests passed, including direct-vs-launch CLI equivalence, legacy defaults, invalid PD bootstrap ports, OpenAI transport compatibility, and immediate health-checker shutdown. Raw output: reports/j-777d9358b1de/raw/cargo-test-lib.log"
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-777d9358b1de/cargo-target CARGO_HOME=/job/.cargo /job/.cargo/bin/cargo test --test otel_tracing_test test_router_with_tracing -- --exact",
+      "exit_code": 0,
+      "what_was_measured": "The focused OpenTelemetry integration test passed against a mock HTTP worker and collector, exercising request/response structured logging and trace propagation. Raw output: reports/j-777d9358b1de/raw/cargo-test-otel-focused.log"
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-777d9358b1de/cargo-target CARGO_HOME=/job/.cargo /job/.cargo/bin/cargo test --test otel_tracing_test",
+      "exit_code": 101,
+      "what_was_measured": "Nine tests passed; the unrelated redis fixture test failed because redis-server could not be executed (Permission denied). The target tracing tests passed. Raw output: reports/j-777d9358b1de/raw/cargo-test-otel.log"
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-777d9358b1de/cargo-target CARGO_HOME=/job/.cargo /job/.cargo/bin/cargo build --release --bin sgl-model-gateway",
+      "exit_code": 0,
+      "what_was_measured": "A fresh optimized native gateway binary was built with the repository-pinned rustc 1.90.0 at /tmp/amdpilot-repo-j-777d9358b1de/cargo-target/release/sgl-model-gateway. Build identity is retained in reports/j-777d9358b1de/raw/version.log"
+    },
+    {
+      "command": "timeout --signal=INT --kill-after=25s 3s <rebuilt-binary> --host 127.0.0.1 --port 31993 --prometheus-host 127.0.0.1 --prometheus-port 31994 --log-level info",
+      "exit_code": 124,
+      "what_was_measured": "Failing-before regression: after SIGINT the proposed code waited 10 seconds and logged 'Worker health checker did not stop before timeout' (13 seconds total). Raw output: reports/j-777d9358b1de/raw/graceful-shutdown-before.log"
+    },
+    {
+      "command": "timeout --signal=INT --kill-after=10s 3s <rebuilt-binary> --host 127.0.0.1 --port 31995 --prometheus-host 127.0.0.1 --prometheus-port 31996 --log-level info",
+      "exit_code": 124,
+      "what_was_measured": "Passing-after regression: the rebuilt server accepted SIGINT and completed shutdown immediately at the 3-second trigger, without the health-checker timeout warning. timeout returns 124 when it initiates the signal. Raw output: reports/j-777d9358b1de/raw/graceful-shutdown-after.log"
+    },
+    {
+      "command": "CARGO_HOME=/job/.cargo /job/.cargo/bin/cargo fmt -- --check && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Rust formatting and patch whitespace validation passed. rustfmt emitted only the repository's existing stable-channel warnings for nightly-only formatting options."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "No Kubernetes service-discovery cluster, multi-node mesh, TLS deployment, or production model worker was available; those paths compile and are covered by existing unit tests but were not exercised end-to-end here.",
+    "The full otel_tracing_test binary had one unrelated environment failure because redis-server was present but not executable; the focused tracing test passed independently.",
+    "No GPU/model validation was performed because it is not applicable to this control-plane refactor; the startup smoke validates the rebuilt gateway lifecycle only, not model semantics or distributed workloads."
+  ]
+}

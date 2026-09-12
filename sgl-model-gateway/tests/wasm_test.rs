@@ -20,11 +20,11 @@ use data_connector::{
 };
 use smg::{
     app_context::AppContext,
-    config::RouterConfig,
+    app_state::AppState,
+    config::GatewayConfig,
     core::{LoadMonitor, WorkerRegistry},
     policies::PolicyRegistry,
-    routers::RouterFactory,
-    server::{build_app, AppState},
+    routers::{app::build_app, RouterFactory},
     tokenizer::TokenizerRegistry,
     wasm::{
         module::{
@@ -41,7 +41,7 @@ use uuid::Uuid;
 
 /// Create a test AppContext with WASM manager initialized
 async fn create_test_context_with_wasm() -> Arc<AppContext> {
-    let config = RouterConfig::default();
+    let config = GatewayConfig::default();
 
     // Initialize WASM manager first
     let wasm_manager = Arc::new(
@@ -53,7 +53,7 @@ async fn create_test_context_with_wasm() -> Arc<AppContext> {
 
     let tokenizer_registry = Arc::new(TokenizerRegistry::new());
     let worker_registry = Arc::new(WorkerRegistry::new());
-    let policy_registry = Arc::new(PolicyRegistry::new(config.policy.clone()));
+    let policy_registry = Arc::new(PolicyRegistry::new(config.routing.policy.clone()));
 
     // Initialize storage backends
     let response_storage = Arc::new(MemoryResponseStorage::new());
@@ -65,7 +65,7 @@ async fn create_test_context_with_wasm() -> Arc<AppContext> {
         worker_registry.clone(),
         policy_registry.clone(),
         client.clone(),
-        config.worker_startup_check_interval_secs,
+        config.workers.startup_check_interval_secs,
     )));
 
     // Create empty OnceLock for worker job queue, workflow engines, and mcp manager
@@ -76,7 +76,7 @@ async fn create_test_context_with_wasm() -> Arc<AppContext> {
 
     let app_context = Arc::new(
         AppContext::builder()
-            .router_config(config.clone())
+            .gateway_config(config.clone())
             .client(client)
             .rate_limiter(None)
             .tokenizer_registry(tokenizer_registry)

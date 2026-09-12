@@ -13,7 +13,6 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use serde_json::json;
-use smg::config::RouterConfig;
 use tower::ServiceExt;
 
 use crate::common::{
@@ -23,7 +22,7 @@ use crate::common::{
         set_slow_stream_chunks, set_stream_error_after_chunks, wait_for_stream_finish,
         StreamTrackingState, MOCK_STREAM_BUFFER,
     },
-    AppTestContext, TestRouterConfig, TestWorkerConfig,
+    AppTestContext, TestGatewayConfig, TestWorkerConfig,
 };
 
 /// Read up to `max_chunks` data frames from a streaming response body.
@@ -135,7 +134,7 @@ mod upstream_cancel_tests {
         reset_stream_tracker(worker_port);
         set_slow_stream_chunks(worker_port, total_chunks);
 
-        let config = TestRouterConfig::round_robin(4250);
+        let config = TestGatewayConfig::round_robin(4250);
         let ctx =
             AppTestContext::new_with_config(config, vec![TestWorkerConfig::slow(worker_port, 50)])
                 .await;
@@ -195,7 +194,7 @@ mod upstream_cancel_tests {
         reset_stream_tracker(worker_port);
         set_slow_stream_chunks(worker_port, total_chunks);
 
-        let config = TestRouterConfig::round_robin(4251);
+        let config = TestGatewayConfig::round_robin(4251);
         let ctx =
             AppTestContext::new_with_config(config, vec![TestWorkerConfig::slow(worker_port, 10)])
                 .await;
@@ -235,7 +234,7 @@ mod upstream_cancel_tests {
     /// Test that a non-streaming request is not affected by cancel logic.
     #[tokio::test]
     async fn test_non_streaming_request_unaffected() {
-        let config = TestRouterConfig::round_robin(4252);
+        let config = TestGatewayConfig::round_robin(4252);
         let ctx =
             AppTestContext::new_with_config(config, vec![TestWorkerConfig::healthy(20252)]).await;
         let app = ctx.create_app().await;
@@ -276,7 +275,7 @@ mod upstream_cancel_tests {
         reset_stream_tracker(worker_port);
         set_slow_stream_chunks(worker_port, total_chunks);
 
-        let config = TestRouterConfig::round_robin(4253);
+        let config = TestGatewayConfig::round_robin(4253);
         let ctx = AppTestContext::new_with_config(
             // 200ms per-chunk delay; the very first chunk takes the
             // full 200ms because the worker sleeps before emitting.
@@ -327,7 +326,7 @@ mod upstream_cancel_tests {
         reset_stream_tracker(worker_port);
         set_slow_stream_chunks(worker_port, total_chunks);
 
-        let config = TestRouterConfig::round_robin(4254);
+        let config = TestGatewayConfig::round_robin(4254);
         let ctx =
             AppTestContext::new_with_config(config, vec![TestWorkerConfig::slow(worker_port, 5)])
                 .await;
@@ -378,7 +377,7 @@ mod upstream_cancel_tests {
         set_slow_stream_chunks(worker_a, total_a);
         set_slow_stream_chunks(worker_b, total_b);
 
-        let config = TestRouterConfig::round_robin(4255);
+        let config = TestGatewayConfig::round_robin(4255);
         let ctx = AppTestContext::new_with_config(
             config,
             vec![
@@ -483,7 +482,7 @@ mod upstream_cancel_tests {
         set_slow_stream_chunks(worker_port, total_chunks);
         set_stream_error_after_chunks(worker_port, error_after);
 
-        let config = TestRouterConfig::round_robin(4256);
+        let config = TestGatewayConfig::round_robin(4256);
         let ctx =
             AppTestContext::new_with_config(config, vec![TestWorkerConfig::slow(worker_port, 10)])
                 .await;
@@ -565,7 +564,7 @@ mod upstream_cancel_tests {
         reset_stream_tracker(decode_port);
         set_slow_stream_chunks(decode_port, total_chunks);
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .prefill_decode_mode(
                 vec![(format!("http://127.0.0.1:{}", prefill_port), None)],
                 vec![format!("http://127.0.0.1:{}", decode_port)],
@@ -642,7 +641,7 @@ mod upstream_cancel_tests {
         reset_stream_tracker(worker_port);
         set_slow_stream_chunks(worker_port, total_chunks);
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .openai_mode(vec![format!("http://127.0.0.1:{}", worker_port)])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -712,7 +711,7 @@ mod upstream_cancel_tests {
         reset_stream_tracker(worker_port);
         set_slow_stream_chunks(worker_port, total_chunks);
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .openai_mode(vec![format!("http://127.0.0.1:{}", worker_port)])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -813,7 +812,7 @@ mod upstream_cancel_tests {
         set_stream_error_after_chunks(worker_port, error_after);
         let _guard = StreamInjectionGuard(worker_port);
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .openai_mode(vec![format!("http://127.0.0.1:{}", worker_port)])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -907,7 +906,7 @@ mod upstream_cancel_tests {
         reset_stream_tracker(worker_port);
         set_slow_stream_chunks(worker_port, total_chunks);
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .openai_mode(vec![format!("http://127.0.0.1:{}", worker_port)])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -1006,7 +1005,7 @@ mod upstream_cancel_tests {
         // probes its health.
         tokio::time::sleep(Duration::from_millis(200)).await;
 
-        let router_cfg = RouterConfig::builder()
+        let router_cfg = crate::common::TestGatewayConfigBuilder::new()
             .openai_mode(vec![worker_url])
             .random_policy()
             .host("127.0.0.1")
@@ -1145,7 +1144,7 @@ mod upstream_cancel_tests {
         let worker_url = worker.start().await.expect("start worker");
         tokio::time::sleep(Duration::from_millis(200)).await;
 
-        let router_cfg = RouterConfig::builder()
+        let router_cfg = crate::common::TestGatewayConfigBuilder::new()
             .openai_mode(vec![worker_url])
             .random_policy()
             .host("127.0.0.1")
@@ -1257,7 +1256,7 @@ mod upstream_cancel_tests {
         let worker_url = worker.start().await.expect("start worker");
         tokio::time::sleep(Duration::from_millis(200)).await;
 
-        let router_cfg = RouterConfig::builder()
+        let router_cfg = crate::common::TestGatewayConfigBuilder::new()
             .openai_mode(vec![worker_url.clone()])
             .random_policy()
             .host("127.0.0.1")
@@ -1383,7 +1382,7 @@ mod upstream_cancel_tests {
         set_slow_stream_chunks(worker_port, total_chunks);
         set_stream_error_after_chunks(worker_port, error_after);
 
-        let config = TestRouterConfig::round_robin_with_circuit_breaker(
+        let config = TestGatewayConfig::round_robin_with_circuit_breaker(
             4265,
             CircuitBreakerConfig {
                 failure_threshold,
@@ -1503,7 +1502,7 @@ mod upstream_cancel_tests {
         reset_stream_tracker(worker_port);
         set_slow_stream_chunks(worker_port, total_chunks);
 
-        let config = TestRouterConfig::round_robin(4270);
+        let config = TestGatewayConfig::round_robin(4270);
         let ctx =
             AppTestContext::new_with_config(config, vec![TestWorkerConfig::slow(worker_port, 50)])
                 .await;
@@ -1563,7 +1562,7 @@ mod upstream_cancel_tests {
         reset_stream_tracker(worker_port);
         set_slow_stream_chunks(worker_port, total_chunks);
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .openai_mode(vec![format!("http://127.0.0.1:{}", worker_port)])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -1638,7 +1637,7 @@ mod upstream_cancel_tests {
         reset_stream_tracker(decode_port);
         set_slow_stream_chunks(decode_port, total_chunks);
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .prefill_decode_mode(
                 vec![(format!("http://127.0.0.1:{}", prefill_port), None)],
                 vec![format!("http://127.0.0.1:{}", decode_port)],
@@ -1734,7 +1733,7 @@ mod upstream_cancel_tests {
         reset_stream_tracker(worker_port);
         set_slow_stream_chunks(worker_port, total_chunks);
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .openai_mode(vec![format!("http://127.0.0.1:{}", worker_port)])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -1809,7 +1808,7 @@ mod upstream_cancel_tests {
         set_slow_stream_chunks(worker_port, total_chunks);
         set_stream_error_after_chunks(worker_port, error_after);
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .openai_mode(vec![format!("http://127.0.0.1:{}", worker_port)])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -1884,7 +1883,7 @@ mod upstream_cancel_tests {
         set_slow_stream_chunks(worker_port, total_chunks);
         set_stream_error_after_chunks(worker_port, error_after);
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .openai_mode(vec![format!("http://127.0.0.1:{}", worker_port)])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -1949,7 +1948,7 @@ mod upstream_cancel_tests {
     #[tokio::test]
     async fn test_http_chat_streaming_5xx_records_failure() {
         let worker_port = 20290;
-        let config = TestRouterConfig::round_robin(4290);
+        let config = TestGatewayConfig::round_robin(4290);
         let ctx = AppTestContext::new_with_config(
             config,
             vec![TestWorkerConfig::flaky(worker_port, 1.0)],
@@ -1997,7 +1996,7 @@ mod upstream_cancel_tests {
     #[tokio::test]
     async fn test_openai_chat_streaming_5xx_records_failure() {
         let worker_port = 20291;
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .openai_mode(vec![format!("http://127.0.0.1:{}", worker_port)])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -2059,7 +2058,7 @@ mod upstream_cancel_tests {
     async fn test_pd_decode_streaming_5xx_records_failure() {
         let prefill_port = 20292;
         let decode_port = 20293;
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .prefill_decode_mode(
                 vec![(format!("http://127.0.0.1:{}", prefill_port), None)],
                 vec![format!("http://127.0.0.1:{}", decode_port)],
@@ -2150,7 +2149,7 @@ mod upstream_cancel_tests {
         // of the default 500.
         set_fail_status_code(decode_port, 400);
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .prefill_decode_mode(
                 vec![(format!("http://127.0.0.1:{}", prefill_port), None)],
                 vec![format!("http://127.0.0.1:{}", decode_port)],
@@ -2234,7 +2233,7 @@ mod upstream_cancel_tests {
     #[tokio::test]
     async fn test_responses_simple_streaming_5xx_records_failure() {
         let worker_port = 20294;
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .openai_mode(vec![format!("http://127.0.0.1:{}", worker_port)])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -2300,7 +2299,7 @@ mod upstream_cancel_tests {
         reset_stream_tracker(worker_port);
         set_slow_stream_chunks(worker_port, total_chunks);
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .openai_mode(vec![format!("http://127.0.0.1:{}", worker_port)])
             .round_robin_policy()
             .host("127.0.0.1")
@@ -2367,7 +2366,7 @@ mod upstream_cancel_tests {
         reset_stream_tracker(decode_port);
         set_slow_stream_chunks(decode_port, total_chunks);
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .prefill_decode_mode(
                 vec![(format!("http://127.0.0.1:{}", prefill_port), None)],
                 vec![format!("http://127.0.0.1:{}", decode_port)],
@@ -2449,7 +2448,7 @@ mod upstream_cancel_tests {
         let prefill_port = 20298;
         let decode_port = 20299;
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .prefill_decode_mode(
                 vec![(format!("http://127.0.0.1:{}", prefill_port), None)],
                 vec![format!("http://127.0.0.1:{}", decode_port)],
@@ -2538,7 +2537,7 @@ mod upstream_cancel_tests {
 
         // max_retries=1 keeps the assertion exact: one attempt → one
         // failure tick. Any larger value just multiplies the count.
-        let config = TestRouterConfig::round_robin_with_retry(
+        let config = TestGatewayConfig::round_robin_with_retry(
             4310,
             RetryConfig {
                 max_retries: 1,
@@ -2617,7 +2616,7 @@ mod upstream_cancel_tests {
         let prefill_port = 20311;
         let decode_port = 20312;
 
-        let config = RouterConfig::builder()
+        let config = crate::common::TestGatewayConfigBuilder::new()
             .prefill_decode_mode(
                 vec![(format!("http://127.0.0.1:{}", prefill_port), None)],
                 vec![format!("http://127.0.0.1:{}", decode_port)],

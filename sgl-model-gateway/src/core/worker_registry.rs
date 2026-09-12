@@ -644,13 +644,7 @@ impl WorkerRegistry {
     /// Start a health checker for all workers in the registry
     /// This should be called once after the registry is populated with workers
     pub(crate) fn start_health_checker(&self, check_interval_secs: u64) -> HealthChecker {
-        use std::sync::{
-            atomic::{AtomicBool, Ordering},
-            Arc,
-        };
-
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let shutdown_clone = shutdown.clone();
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let workers_ref = self.workers.clone();
 
         let handle = tokio::spawn(async move {
@@ -658,12 +652,12 @@ impl WorkerRegistry {
                 tokio::time::interval(tokio::time::Duration::from_secs(check_interval_secs));
 
             loop {
-                interval.tick().await;
-
-                // Check for shutdown signal
-                if shutdown_clone.load(Ordering::Acquire) {
-                    tracing::debug!("Registry health checker shutting down");
-                    break;
+                tokio::select! {
+                    _ = interval.tick() => {}
+                    _ = &mut shutdown_rx => {
+                        tracing::debug!("Registry health checker shutting down");
+                        break;
+                    }
                 }
 
                 // Get all workers from registry
@@ -688,7 +682,7 @@ impl WorkerRegistry {
             }
         });
 
-        HealthChecker::new(handle, shutdown)
+        HealthChecker::new(handle, shutdown_tx)
     }
 }
 
@@ -831,5 +825,18 @@ mod tests {
         let llama_workers_after = registry.get_by_model("llama-3");
         assert_eq!(llama_workers_after.len(), 1);
         assert_eq!(llama_workers_after[0].url(), "http://worker2:8080");
+    }
+
+    #[tokio::test]
+    async fn health_checker_shutdown_does_not_wait_for_next_interval() {
+        let registry = WorkerRegistry::new();
+        let health_checker = registry.start_health_checker(60 * 60);
+
+        tokio::time::timeout(
+            std::time::Duration::from_millis(250),
+            health_checker.shutdown(),
+        )
+        .await
+        .expect("health checker shutdown should wake the background task immediately");
     }
 }

@@ -16,7 +16,7 @@ use serde_json::json;
 use smg::config::{CircuitBreakerConfig, RetryConfig};
 use tower::ServiceExt;
 
-use crate::common::{AppTestContext, TestRouterConfig, TestWorkerConfig};
+use crate::common::{AppTestContext, TestGatewayConfig, TestWorkerConfig};
 
 #[cfg(test)]
 mod fault_tolerance_tests {
@@ -25,7 +25,7 @@ mod fault_tolerance_tests {
     /// Test that requests are rerouted when a worker fails
     #[tokio::test]
     async fn test_worker_failure_reroute() {
-        let config = TestRouterConfig::round_robin_with_reliability(
+        let config = TestGatewayConfig::round_robin_with_reliability(
             4100,
             RetryConfig {
                 max_retries: 3,
@@ -80,7 +80,7 @@ mod fault_tolerance_tests {
     /// Test behavior when all workers are temporarily unavailable
     #[tokio::test]
     async fn test_all_workers_temporarily_failing() {
-        let config = TestRouterConfig::round_robin_with_retry(
+        let config = TestGatewayConfig::round_robin_with_retry(
             4101,
             RetryConfig {
                 max_retries: 2,
@@ -128,7 +128,7 @@ mod fault_tolerance_tests {
     /// Test graceful handling of slow workers
     #[tokio::test]
     async fn test_slow_worker_handling() {
-        let config = TestRouterConfig::round_robin(4102);
+        let config = TestGatewayConfig::round_robin(4102);
 
         let ctx = AppTestContext::new_with_config(
             config,
@@ -188,7 +188,7 @@ mod fault_tolerance_tests {
     /// Test circuit breaker prevents cascading failures
     #[tokio::test]
     async fn test_circuit_breaker_prevents_cascade() {
-        let config = TestRouterConfig::round_robin_with_reliability(
+        let config = TestGatewayConfig::round_robin_with_reliability(
             4103,
             RetryConfig {
                 max_retries: 3,
@@ -249,7 +249,7 @@ mod fault_tolerance_tests {
     /// Test recovery after worker comes back online (simulated via healthy worker)
     #[tokio::test]
     async fn test_system_stability_under_partial_failure() {
-        let config = TestRouterConfig::round_robin_with_reliability(
+        let config = TestGatewayConfig::round_robin_with_reliability(
             4104,
             RetryConfig {
                 max_retries: 2,

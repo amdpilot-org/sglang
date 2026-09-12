@@ -28,12 +28,12 @@ use tracing::{debug, error, field::Empty, info, info_span, warn, Span};
 
 pub use crate::core::token_bucket::TokenBucket;
 use crate::{
+    app_state::AppState,
     observability::{
         inflight_tracker::InFlightRequestTracker,
         metrics::{method_to_static_str, metrics_labels, Metrics},
     },
     routers::error::extract_error_code_from_response,
-    server::AppState,
     wasm::{
         module::{MiddlewareAttachPoint, WasmModuleAttachPoint},
         spec::{
@@ -764,7 +764,7 @@ pub async fn wasm_middleware(
     next: Next,
 ) -> Result<Response, StatusCode> {
     // Check if WASM is enabled
-    if !app_state.context.router_config.enable_wasm {
+    if !app_state.context.gateway_config.extensions.enable_wasm {
         return Ok(next.run(request).await);
     }
 
