@@ -54,7 +54,11 @@ if _HAS_MLX:
         SchedulerBatchResultProcessor,
     )
     from sglang.srt.managers.utils import GenerationBatchResult
-    from sglang.srt.mem_cache.base_prefix_cache import InsertParams, InsertResult
+    from sglang.srt.mem_cache.base_prefix_cache import (
+        InsertParams,
+        InsertResult,
+        MatchPrefixParams,
+    )
     from sglang.srt.server_args import ServerArgs, set_global_server_args_for_scheduler
 
 
@@ -933,6 +937,92 @@ class TestMlxAuxiliaryStateRunnerCache(unittest.TestCase):
         self.assertIsNone(req.kv.mamba_pool_idx)
         self.assertEqual(pool.available_size(), 2)
         self.assertEqual(pool.auxiliary_state_pool.available_size(), 4)
+
+    def test_auxiliary_state_component_initializes_inherited_radix_contract(self):
+        _set_dummy_server_args_for_auxiliary_state_tests()
+        pool = MlxAuxiliaryStateReqToTokenPool(
+            size=2,
+            max_context_len=8,
+            device="cpu",
+            enable_memory_saver=False,
+            auxiliary_state_size=4,
+        )
+        component = MlxAuxiliaryStateComponent(
+            SimpleNamespace(req_to_token_pool=pool),
+            SimpleNamespace(enable_mamba_extra_buffer=False, page_size=1),
+        )
+
+        self.assertEqual(component.mamba_cache_chunk_size, 64)
+        self.assertEqual(component.mamba_checkpoint_grid, 64)
+        self.assertIsInstance(component.mamba_max_states_per_path, int)
+
+    def test_auxiliary_state_component_applies_prefix_cow_to_request_slot(self):
+        _set_dummy_server_args_for_auxiliary_state_tests()
+        pool = MlxAuxiliaryStateReqToTokenPool(
+            size=2,
+            max_context_len=8,
+            device="cpu",
+            enable_memory_saver=False,
+            auxiliary_state_size=4,
+        )
+        req = FakeRequest()
+        pool.alloc([req])
+        src = pool.auxiliary_state_pool.alloc(1)
+        pool.auxiliary_state_pool.store_cache(
+            src[0], [FakeNativeCache(mx.array([7.0]))], [0]
+        )
+        component = MlxAuxiliaryStateComponent(
+            SimpleNamespace(req_to_token_pool=pool),
+            SimpleNamespace(enable_mamba_extra_buffer=False, page_size=1),
+        )
+        component.tree_core = SimpleNamespace(
+            get_component_device_value=lambda node, component_type: src
+        )
+        result = SimpleNamespace(best_match_node=object())
+
+        component.finalize_match_result_in_cache(
+            MatchPrefixParams(key=None, cow_mamba=True, req=req), result
+        )
+
+        restored = [FakeNativeCache()]
+        self.assertTrue(
+            pool.auxiliary_state_pool.restore_cache(
+                req.kv.mamba_pool_idx, restored, [0]
+            )
+        )
+        self.assertEqual(restored[0].state[0].tolist(), [7.0])
+        self.assertIsNone(req.kv.mamba_cow_src_index)
+
+    def test_auxiliary_state_component_does_not_copy_when_cow_is_disabled(self):
+        _set_dummy_server_args_for_auxiliary_state_tests()
+        pool = MlxAuxiliaryStateReqToTokenPool(
+            size=2,
+            max_context_len=8,
+            device="cpu",
+            enable_memory_saver=False,
+            auxiliary_state_size=4,
+        )
+        req = FakeRequest()
+        pool.alloc([req])
+        src = pool.auxiliary_state_pool.alloc(1)
+        pool.auxiliary_state_pool.store_cache(
+            src[0], [FakeNativeCache(mx.array([7.0]))], [0]
+        )
+        component = MlxAuxiliaryStateComponent(
+            SimpleNamespace(req_to_token_pool=pool),
+            SimpleNamespace(enable_mamba_extra_buffer=False, page_size=1),
+        )
+        component.tree_core = SimpleNamespace(
+            get_component_device_value=lambda node, component_type: src
+        )
+
+        component.finalize_match_result_in_cache(
+            MatchPrefixParams(key=None, cow_mamba=False, req=req),
+            SimpleNamespace(best_match_node=object()),
+        )
+
+        self.assertFalse(pool.auxiliary_state_pool.has_snapshot(req.kv.mamba_pool_idx))
+        self.assertIsNone(req.kv.mamba_cow_src_index)
 
     def test_auxiliary_state_req_pool_can_keep_tracked_auxiliary_slot(self):
         pool = MlxAuxiliaryStateReqToTokenPool(

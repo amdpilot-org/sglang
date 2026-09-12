@@ -21,6 +21,11 @@ from sglang.srt.mem_cache.unified_cache.components.mamba_component import (
     MambaComponent,
 )
 from sglang.srt.mem_cache.unified_cache.components.tree_component import TreeComponent
+from sglang.srt.runtime_context import (
+    get_exec,
+    mamba_cache_chunk_size,
+    mamba_checkpoint_grid,
+)
 
 _CACHE_ATTRS = ("offset", "lengths", "left_padding")
 _MISSING = object()
@@ -343,7 +348,29 @@ class MlxAuxiliaryStateComponent(MambaComponent):
             )
         TreeComponent.__init__(self, cache, params)
         self.enable_mamba_extra_buffer = False
+        # MambaComponent's inherited tree finalizers require these fields, but
+        # its constructor cannot be used with the MLX request pool.
+        self.mamba_cache_chunk_size = mamba_cache_chunk_size()
+        self.mamba_checkpoint_grid = mamba_checkpoint_grid(
+            getattr(params, "page_size", 1)
+        )
+        self.mamba_max_states_per_path = get_exec().mamba.mamba_max_states_per_path
         self._mamba_pool_host = None
+
+    def finalize_match_result_in_cache(self, params, result):
+        result = super().finalize_match_result_in_cache(params, result)
+        req = params.req
+        if req is None or req.kv.mamba_cow_src_index is None:
+            return result
+
+        # CUDA consumes the staged indices in ModelRunner.  The MLX runner
+        # restores directly from the request slot, so populate that slot now.
+        self.cache.req_to_token_pool.auxiliary_state_pool.copy_from(
+            req.kv.mamba_cow_src_index,
+            req.kv.mamba_pool_idx.unsqueeze(0),
+        )
+        req.kv.mamba_cow_src_index = None
+        return result
 
     @staticmethod
     def _tracked_value(req) -> tuple[object | None, bool]:
