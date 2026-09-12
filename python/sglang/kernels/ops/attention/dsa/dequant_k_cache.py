@@ -233,6 +233,79 @@ def dequantize_k_cache_paged(
     return output
 
 
+def dequantize_k_cache_paged_selective(
+    quant_k_cache: torch.Tensor,
+    page_table_1_flattened: torch.Tensor,
+    topk_indices: torch.Tensor,
+    *,
+    max_unique_ratio: float = 0.75,
+    min_tokens_saved: int = 256,
+    min_full_tokens: int = 131072,
+) -> tuple[torch.Tensor, torch.Tensor, bool]:
+    """Dequantize only the union of logical KV rows selected by sparse prefill.
+
+    ``topk_indices`` addresses the logical, request-concatenated KV sequence
+    described by ``page_table_1_flattened``.  Valid indices are translated to
+    physical cache slots, deduplicated there (so shared-prefix aliases are only
+    dequantized once), and dequantized into a compact buffer.  The returned
+    indices address that buffer. Invalid and ``-1`` entries remain ``-1``.
+
+    Deduplication/remapping has a fixed cost, so the compact result is used only
+    for prefixes with at least ``min_full_tokens`` rows, when it saves both
+    ``min_tokens_saved`` rows and the fraction selected is no greater than
+    ``max_unique_ratio``.  Otherwise this falls back to the full flattened
+    dequantization and returns the original indices.
+    """
+    assert 0.0 <= max_unique_ratio <= 1.0
+    assert min_tokens_saved >= 0
+    assert min_full_tokens >= 0
+    assert page_table_1_flattened.ndim == 1
+
+    num_logical = page_table_1_flattened.numel()
+    if num_logical < min_full_tokens:
+        return (
+            dequantize_k_cache_paged(quant_k_cache, page_table_1_flattened),
+            topk_indices,
+            False,
+        )
+
+    flat_topk = topk_indices.reshape(-1)
+    remapped_flat = torch.full_like(flat_topk, -1)
+    valid_logical = (flat_topk >= 0) & (flat_topk < num_logical)
+    safe_logical = torch.where(valid_logical, flat_topk, torch.zeros_like(flat_topk))
+    selected_physical = page_table_1_flattened[safe_logical.to(torch.int64)]
+    kv_token_capacity = quant_k_cache.numel() // quant_k_cache.shape[-1]
+    valid = (
+        valid_logical
+        & (selected_physical >= 0)
+        & (selected_physical < kv_token_capacity)
+    )
+
+    unique_physical, inverse = torch.unique(
+        selected_physical[valid], sorted=True, return_inverse=True
+    )
+    num_unique = unique_physical.numel()
+    use_selective = (
+        num_logical - num_unique >= min_tokens_saved
+        and num_unique <= num_logical * max_unique_ratio
+    )
+    if not use_selective:
+        return (
+            dequantize_k_cache_paged(quant_k_cache, page_table_1_flattened),
+            torch.where(valid_logical.view_as(topk_indices), topk_indices, -1),
+            False,
+        )
+
+    compact_kv = dequantize_k_cache_paged(quant_k_cache, unique_physical)
+    # FlashMLA requires an addressable KV row even when every top-k entry is
+    # invalid; all indices remain -1, so this zero row is never attended to.
+    if compact_kv.shape[0] == 0:
+        compact_kv = compact_kv.new_zeros((1, *compact_kv.shape[1:]))
+
+    remapped_flat[valid] = inverse.to(topk_indices.dtype)
+    return compact_kv, remapped_flat.view_as(topk_indices), True
+
+
 @triton.jit
 def _dequantize_k_cache_paged_kernel(
     output_ptr,
