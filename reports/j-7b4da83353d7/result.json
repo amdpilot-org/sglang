@@ -1,0 +1,27 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36616",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source already routes Qwen 3.8 PLE weight_scale checkpoint tensors into their registered buffers before the generic non-unit unknown-scale assertion. A regression using the reported tensor name and value verifies that behavior; no duplicate production fix was added.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-7b4da83353d7/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen4_exp_weight_loading.py::test_loads_non_unit_ple_embedding_weight_scale (with weight_scale temporarily removed from the PLE buffer allowlist)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before sensitivity: the actual load_weights path reproduced the issue's exact AssertionError and value when the current PLE scale routing was removed (1 failed)."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-7b4da83353d7/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen4_exp_weight_loading.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after/current-source regression and independent boundaries: exact reported non-unit scale copy/loaded bookkeeping, mismatched-shape rejection, and unrelated-scale non-claiming (3 passed)."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-7b4da83353d7/venv/bin/python <inline Qwen4ExpForConditionalGeneration._load_qwen4_exp_ple_buffer GPU check>",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, the loader copied the reported FP32 value to a GPU BF16 buffer; its value exactly equaled an independent CPU BF16 conversion and the buffer was marked loaded."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X, gfx950:sramecc+:xnack-; GPU value 0.00019931793212890625 equaled the independent CPU BF16 reference and the checkpoint name was marked loaded.",
+  "native_rebuilt": false,
+  "remaining_limitations": "The Qwen 3.8 checkpoint weights were unavailable, so no full model load, serving, semantic-accuracy, or distributed reproduction was performed. The tiny Llama fixture cannot qualify this Qwen-specific loader path. No native code changed."
+}
