@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38580",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 664's attention-TP padding and eager fail-closed boundary, independently reproduced review PR 3252's exact stale DSA token-metadata acceptance at candidate commit 183f57d6899bbb1df7a273383fa779ad94bffae7, and extended the DSA physical-extent contract to every directly token-indexed metadata buffer used by the indexer/top-k paths.",
+  "tests": [
+    {
+      "command": "Candidate 183f57d adversarial ForwardBatch/DeepseekSparseAttnBackend reproduction",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate accepted physical_tokens=4 with dsa_seqlens_expanded, token_to_batch_idx, and both indexer range arrays retaining only 3 rows."
+    },
+    {
+      "command": "Corrected adversarial ForwardBatch/DeepseekSparseAttnBackend reproduction",
+      "exit_code": 0,
+      "what_was_measured": "The corrected validator rejected the same metadata before model attention/KV side effects and reported all observed extents."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-eb78fc3d1053/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_eager_metadata_extent.py test/registered/kernel/attention/test_dsa_padding_metadata.py test/registered/unit/model_executor/test_forward_metadata_plan_record.py",
+      "exit_code": 0,
+      "what_was_measured": "14 focused tests passed, covering actual ForwardBatch plan tracking, eager runner rejection, corrected DSA tokenwise extent validation, and GPU DSA padding."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-eb78fc3d1053/venv/bin/python reports/j-04c9f1d479a7/gpu_reference.py",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X, GPU metadata [11, 12, 13, 0] matched an independent attention-TP ceiling-alignment reference for four physical rows."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The DSA padding kernel-facing tensor calculation executed on AMD Instinct MI350X with ROCm 7.2.26015 and matched the independent reference."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": "No DeepSeek DSA model weights or qualified end-to-end speculative DSA fixture were available, so full model-level attention/indexer/schedule/KV execution remains unverified. The provided tiny Llama fixture cannot qualify the different DSA architecture and was not treated as evidence. No C++/FlyDSL source changed, so a native rebuild was not applicable. CUDA-only and distributed paths were not exercised."
+}
