@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34718",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared main checkout already contains the merged PR #34167 correction for the SM90a CUDA 13.1+ top-k v2 address-space mislowering that can corrupt indices before fp8_paged_mqa_logits. No additional code change was justified. Focused gfx950 boundary tests passed, but ROCm compiles out the implicated CUDA cluster/DSMEM branch.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-3d33447f4aba/venv/bin/python -m pytest test/registered/kernels/ops/attention/test_topk_v2.py --collect-only -q",
+      "exit_code": 0,
+      "what_was_measured": "Collected the current 278-case top-k v2 regression suite and confirmed explicit dispatch/boundary coverage is present."
+    },
+    {
+      "command": "TVM_FFI_CACHE_DIR=/tmp/amdpilot-repo-j-3d33447f4aba/tvm-cache /tmp/amdpilot-repo-j-3d33447f4aba/venv/bin/python -m pytest -q 'test/registered/kernels/ops/attention/test_topk_v2.py::test_topk_v2_output_indices[4-65536-512]' 'test/registered/kernels/ops/attention/test_topk_v2.py::test_topk_v2_output_indices[1-65537-512]' 'test/registered/kernels/ops/attention/test_topk_v2.py::test_topk_v2_output_indices[8-98304-512]' 'test/registered/kernels/ops/attention/test_topk_v2.py::test_topk_v2_output_indices[2-131072-512]' 'test/registered/kernels/ops/attention/test_topk_v2.py::test_topk_v2_ragged_window[long_ctx-rows6-0-512]'",
+      "exit_code": 0,
+      "what_was_measured": "Five gfx950 GPU cases passed against the independent torch.topk numerical reference, including both sides of the 65536 boundary and long-context lengths through 131072."
+    },
+    {
+      "command": "git fetch --no-tags https://github.com/sgl-project/sglang.git accc51c6dbe5ad59110b0fc405a979be9b61fd68; inspect current TopKCluster scatter implementation",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the current source retains PR #34167's separate CTA-local and DSMEM scatter branches and its compiler-mislowering guard comment."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X gfx950 ran five numerical top-k boundary tests; reports/j-3d33447f4aba/raw/gfx950_topk_boundaries.log records 5 passed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The assigned gfx950 ROCm device does not execute the CUDA-only TopKCluster distributed-shared-memory branch implicated by the report.",
+    "No H100/H200, CUDA 13.1+ compiler/runtime, compute-sanitizer, DeepSeek-V4-Flash-0731 weights, or TP=8 topology was available.",
+    "The original 80K-130K serving failure was not reproduced locally; the result relies on current-source inspection, merged PR #34167's issue-specific H200 before/after evidence, and portable gfx950 boundary checks.",
+    "No full-model, HTTP-serving, semantic-accuracy, or distributed-workload claim is made."
+  ]
+}
