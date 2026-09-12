@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38029",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Confirmed that EAGLE creates DSA draft-decode children and a draft-extend backend after ModelRunner's generic KVIndexTranslator binding pass. On the recorded base, both forms retained AttentionBackend.kv_index_translator=None. DeepseekSparseAttnBackend now copies the owning runner's translator during construction, covering the FP8 ROCm MHA prefix-read dereference and static-pool passthrough behavior.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-828b4d5abce5/venv/bin/python -m pytest -q test/registered/amd/test_eagle_dsa_kv_index_translator.py (with the binding line temporarily removed to reproduce the recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression on one gfx950: the late-created draft-extend backend and both multi-step draft-decode children had kv_index_translator=None. Raw output: reports/j-828b4d5abce5/evidence/regression-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-828b4d5abce5/venv/bin/python -m pytest -q test/registered/amd/test_eagle_dsa_kv_index_translator.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression on one gfx950: the late-created draft-extend backend and two multi-step draft-decode children share the runner's exact translator; static-pool read translation preserves non-empty prefix ids. 2 tests passed. Raw output: reports/j-828b4d5abce5/evidence/regression-after.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-828b4d5abce5/venv/bin/python -m py_compile test/registered/amd/test_eagle_dsa_kv_index_translator.py",
+      "exit_code": 0,
+      "what_was_measured": "Regression test syntax/import compilation."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The focused regression allocated the repository's real FP8 DSATokenToKVPool and CUDA tensors on the assigned AMD Instinct MI350X (gfx950). Environment capture: reports/j-828b4d5abce5/evidence/gpu-environment.log"
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported four-GPU TP/EP GLM-5.3 EAGLE server workload was not run because only one GPU was assigned and the model weights/configuration were not available.",
+    "The focused fixture verifies the concrete backend lifecycle, translator identity, non-empty read-index passthrough, and FP8 DSA pool allocation; it does not claim full-model semantic accuracy or distributed behavior.",
+    "No native source changed, so no native rebuild was applicable.",
+    "ruff was unavailable in the prepared interpreter and on PATH; py_compile and git diff --check were used for focused static validation."
+  ]
+}
