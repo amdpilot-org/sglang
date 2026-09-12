@@ -9,9 +9,6 @@ import msgspec
 
 from sglang.srt.configs.model_config import ModelImpl
 from sglang.srt.distributed import get_world_group
-from sglang.srt.distributed.device_communicators.pynccl_allocator import (
-    prealloc_symmetric_memory_pool,
-)
 from sglang.srt.environ import envs
 from sglang.srt.hardware_backend.npu.graph_runner.npu_graph_runner import NPUGraphRunner
 from sglang.srt.hardware_backend.xpu.graph_runner.xpu_graph_runner import XPUGraphRunner
@@ -285,13 +282,6 @@ def capture_cuda_graphs(
     # hooks anyway).
     if get_observability().forward_hooks:
         register_forward_hooks(model_runner.model, get_observability().forward_hooks)
-
-    prealloc_symmetric_memory_pool(
-        is_draft_worker=model_runner.is_draft_worker,
-        enable_symm_mem=get_exec().comm.enable_symm_mem,
-        device=model_runner.device,
-        forward_stream=model_runner.forward_stream,
-    )
 
     if model_runner.canary_manager is not None and not model_runner.is_draft_worker:
         model_runner.canary_manager.mark_init_finished()

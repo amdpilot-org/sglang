@@ -1,0 +1,120 @@
+F..F                                                                     [100%]
+=================================== FAILURES ===================================
+______________ test_all_to_all_single_temporarily_enables_pynccl _______________
+
+    def test_all_to_all_single_temporarily_enables_pynccl():
+        group = object.__new__(GroupCoordinator)
+        group.pynccl_comm = _FakePyNccl(disabled=True)
+    
+>       group._all_to_all_single(object(), object())
+
+test/registered/unit/test_dcp_a2a_and_symm_mem_init.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <[AttributeError("'GroupCoordinator' object has no attribute 'ranks'") raised in repr()] GroupCoordinator object at 0x7f23ad0f52b0>
+output = <object object at 0x7f23ad764540>
+input = <object object at 0x7f23ad764550>
+
+    def _all_to_all_single(self, output: torch.Tensor, input: torch.Tensor) -> None:
+        # pynccl path keeps the a2a exchange CUDA-graph-capturable (DCP a2a backend).
+        pynccl_comm = self.pynccl_comm
+        if pynccl_comm is not None and not pynccl_comm.disabled:
+            pynccl_comm.all_to_all_single(output, input)
+        else:
+>           torch.distributed.all_to_all_single(output, input, group=self.device_group)
+                                                                     ^^^^^^^^^^^^^^^^^
+E           AttributeError: 'GroupCoordinator' object has no attribute 'device_group'
+
+python/sglang/srt/distributed/parallel_state.py:1154: AttributeError
+_________ test_symmetric_pool_is_reserved_before_kv_budget_is_profiled _________
+
+    def test_symmetric_pool_is_reserved_before_kv_budget_is_profiled():
+        calls = []
+        result = SimpleNamespace(
+            max_total_num_tokens=128,
+            max_running_requests=16,
+            req_to_token_pool=object(),
+            token_to_kv_pool=object(),
+            token_to_kv_pool_allocator=object(),
+            memory_pool_config=object(),
+            unified_memory_pool=None,
+        )
+        runner = object.__new__(ModelRunner)
+        runner.memory_pool_config = None
+        runner.is_draft_worker = False
+        runner.device = "cuda"
+        runner.forward_stream = object()
+        runner.pre_model_load_memory = 1.0
+        runner.is_hybrid_swa = False
+        runner.init_kv_cache_configurator = lambda: setattr(
+            runner,
+            "kv_cache_configurator",
+            SimpleNamespace(configure=lambda **kwargs: calls.append("profile") or result),
+        )
+        runner._init_post_memory_pool_components = lambda: None
+    
+        exec_config = SimpleNamespace(comm=SimpleNamespace(enable_symm_mem=True))
+>       with (
+            patch(
+                "sglang.srt.model_executor.model_runner.get_exec",
+                return_value=exec_config,
+            ),
+            patch(
+                "sglang.srt.model_executor.model_runner.prealloc_symmetric_memory_pool",
+                side_effect=lambda **kwargs: calls.append("reserve"),
+            ) as reserve,
+        ):
+
+test/registered/unit/test_dcp_a2a_and_symm_mem_init.py:87: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/usr/lib/python3.12/unittest/mock.py:1458: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <unittest.mock._patch object at 0x7f23ad0fd3d0>
+
+    def get_original(self):
+        target = self.getter()
+        name = self.attribute
+    
+        original = DEFAULT
+        local = False
+    
+        try:
+            original = target.__dict__[name]
+        except (AttributeError, KeyError):
+            original = getattr(target, name, DEFAULT)
+        else:
+            local = True
+    
+        if name in _builtins and isinstance(target, ModuleType):
+            self.create = True
+    
+        if not self.create and original is DEFAULT:
+>           raise AttributeError(
+                "%s does not have the attribute %r" % (target, name)
+            )
+E           AttributeError: <module 'sglang.srt.model_executor.model_runner' from '/job/repo/python/sglang/srt/model_executor/model_runner.py'> does not have the attribute 'prealloc_symmetric_memory_pool'
+
+/usr/lib/python3.12/unittest/mock.py:1431: AttributeError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/test_dcp_a2a_and_symm_mem_init.py::test_all_to_all_single_temporarily_enables_pynccl
+FAILED test/registered/unit/test_dcp_a2a_and_symm_mem_init.py::test_symmetric_pool_is_reserved_before_kv_budget_is_profiled
+2 failed, 2 passed, 17 warnings in 27.20s
