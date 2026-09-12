@@ -1,0 +1,60 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32521",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2194",
+  "candidate_commit": "7bdae6c8600db987d8605c7b7ca8f9a798d16355",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a correct partial fix for the reported MLX auto_map startup crash: it bypasses model implementation resolution when MLX is active, and focused plus independent boundary tests pass. It does not fully resolve the original Hunyuan serving issue because the actual Apple MLX path was unavailable and the independently documented Hunyuan batched-decode attention mismatch remains unchanged.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-4ccd342a74b2/venv/bin/python /tmp/amdpilot-repo-j-4ccd342a74b2/base_repro.py (at recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "The real base architecture-resolution chain emitted the failed auto_map warning and propagated the issue-specific HunYuanForCausalLM ValueError."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4ccd342a74b2/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_mlx_model_impl.py (at candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: MLX bypass, non-MLX resolution, and non-MLX cached implementation; 3 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4ccd342a74b2/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_transformers_fallback.py (at candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Existing Transformers fallback coverage remained green; 2 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4ccd342a74b2/venv/bin/python /tmp/amdpilot-repo-j-4ccd342a74b2/adversarial_candidate.py (at candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Six independent assertions covered resolver bypass, call count, cached Transformers state under MLX, preserved non-MLX caching, and preserved non-MLX failures."
+    },
+    {
+      "command": "SGLANG_USE_MLX=1 /tmp/amdpilot-repo-j-4ccd342a74b2/venv/bin/python -c 'from sglang.srt.hardware_backend.mlx.runtime import use_mlx; print(use_mlx())'",
+      "exit_code": 1,
+      "what_was_measured": "The actual prepared runtime cannot activate MLX because MLX is not installed; this is an environment limitation, not fix evidence."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned device is AMD Instinct MI350X gfx950 on Linux/ROCm. It cannot execute or qualify the Apple MLX/Metal backend, so no GPU result is claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Hunyuan batched decode remains a functional counterexample: upstream PR https://github.com/sgl-project/sglang/pull/37721 reports that the existing MLX hand-rolled decode assumes bare-array attention output, q_norm/k_norm naming, and norm-before-RoPE, while Hunyuan returns shared-KV state and applies qk-norm after RoPE.",
+    "No passing end-to-end launch_server or token-equivalence result exists for mlx-community/Hunyuan-7B-Instruct-4bit at this candidate commit."
+  ],
+  "remaining_limitations": [
+    "No Apple Silicon, Metal, MPS, MLX, or mlx_lm runtime was available.",
+    "The original server command and Hunyuan weight loading were not run.",
+    "Generation, batched-decode correctness, and numerical or semantic equivalence to raw mlx_lm remain unverified.",
+    "No native rebuild was needed because the candidate contains no native-code changes."
+  ],
+  "evidence_paths": [
+    "/tmp/amdpilot-repo-j-4ccd342a74b2/evidence/base_repro.log",
+    "/tmp/amdpilot-repo-j-4ccd342a74b2/evidence/candidate_regression.log",
+    "/tmp/amdpilot-repo-j-4ccd342a74b2/evidence/transformers_fallback.log",
+    "/tmp/amdpilot-repo-j-4ccd342a74b2/evidence/adversarial_candidate.log",
+    "/tmp/amdpilot-repo-j-4ccd342a74b2/evidence/actual_mlx_gate.log",
+    "/tmp/amdpilot-repo-j-4ccd342a74b2/evidence/import_paths.log"
+  ]
+}
