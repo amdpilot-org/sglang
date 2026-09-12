@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/28157",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 3300's metrics subprocess isolation and exposition fixes, reproduced review PR 3331's two repeated-header counterexamples at exact candidate commit a5b60944c1762c4b9196fec907c2a72a58e9143b, and corrected the endpoint to comma-join all Accept and Accept-Encoding field values before Prometheus negotiation.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-d69a23fb61c4/venv/bin/python reports/j-d69a23fb61c4/reproduce_duplicate_headers.py (at a5b60944c1762c4b9196fec907c2a72a58e9143b)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before comparison with prometheus_client.make_asgi_app: the candidate returned Prometheus 0.0.4 instead of OpenMetrics for two Accept fields and omitted gzip for two Accept-Encoding fields."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d69a23fb61c4/venv/bin/python reports/j-d69a23fb61c4/reproduce_duplicate_headers.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after comparison: candidate and reference both selected OpenMetrics and gzip for the repeated-field cases."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d69a23fb61c4/venv/bin/python -m pytest -q test/registered/unit/utils/test_common.py -k PrometheusMetricsExporter",
+      "exit_code": 0,
+      "what_was_measured": "Five focused exporter tests passed, including subprocess isolation, overload, timeout, cancellation, ordinary negotiation, and both repeated-header regressions."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d69a23fb61c4/venv/bin/python reports/j-14d3f4918cd1/reproduce_candidate_contracts.py && /tmp/amdpilot-repo-j-d69a23fb61c4/venv/bin/python reports/j-6481c627b918/reproduce_metrics_health_isolation.py",
+      "exit_code": 0,
+      "what_was_measured": "Preserved name filtering, gzip, OpenMetrics, singleflight 503, and nonblocking event-loop behavior; measured event-loop lag was 0.001 seconds."
+    },
+    {
+      "command": "git diff --check && /tmp/amdpilot-repo-j-d69a23fb61c4/venv/bin/python -m py_compile python/sglang/srt/utils/common.py test/registered/unit/utils/test_common.py reports/j-d69a23fb61c4/reproduce_duplicate_headers.py",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace and changed Python syntax validation."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and reference behavior are CPU-side ASGI header negotiation; GPU execution would not add relevant evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original eight-H100 multi-node single-tokenizer PD deployment, sustained scrape pressure, bootstrap read timeouts, and decode-side connection-loss logs were unavailable.",
+    "This correction validates the deterministic HTTP exposition contract and preserves the candidate's synthetic isolation evidence; it does not claim a full distributed/model reproduction."
+  ]
+}

@@ -1,8 +1,17 @@
+import asyncio
+import os
+import subprocess
+import sys
+import tempfile
 import unittest
 from array import array
+from unittest.mock import patch
 
+import httpx
 import torch
+from fastapi import FastAPI
 
+from sglang.srt.utils import common
 from sglang.srt.utils.common import (
     flatten_arrays_to_int64_tensor,
     get_device_sm_nvidia_smi,
@@ -13,6 +22,200 @@ from sglang.test.test_utils import CustomTestCase
 
 register_cuda_ci(est_time=10, stage="base-b", runner_config="1-gpu-small")
 register_amd_ci(est_time=5, stage="stage-b", runner_config="1-gpu-small-amd")
+
+
+class _FakeMetricsProcess:
+    def __init__(self, communicate, returncode=0):
+        self.communicate = communicate
+        self.returncode = returncode
+        self.killed = False
+        self.input = None
+
+    def kill(self):
+        self.killed = True
+
+
+class TestPrometheusMetricsExporter(unittest.IsolatedAsyncioTestCase):
+    async def test_http_negotiation_and_name_filtering(self):
+        with tempfile.TemporaryDirectory() as multiproc_dir:
+            env = os.environ.copy()
+            env["PROMETHEUS_MULTIPROC_DIR"] = multiproc_dir
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "from prometheus_client import Gauge;"
+                    "Gauge('alpha_total','alpha').set(1);"
+                    "Gauge('beta_total','beta').set(2)",
+                ],
+                env=env,
+                check=True,
+            )
+            with patch.dict(
+                os.environ, {"PROMETHEUS_MULTIPROC_DIR": multiproc_dir}
+            ):
+                app = FastAPI()
+                common.add_prometheus_middleware(app)
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app),
+                    base_url="http://test",
+                ) as client:
+                    filtered = await client.get(
+                        "/metrics?name[]=alpha_total",
+                        headers={"Accept-Encoding": "identity"},
+                    )
+                    compressed = await client.get(
+                        "/metrics", headers={"Accept-Encoding": "gzip"}
+                    )
+                    openmetrics = await client.get(
+                        "/metrics",
+                        headers={
+                            "Accept": "application/openmetrics-text",
+                            "Accept-Encoding": "identity",
+                        },
+                    )
+                    duplicate_accept = await client.get(
+                        "/metrics",
+                        headers=[
+                            ("Accept", "application/json"),
+                            ("Accept", "application/openmetrics-text"),
+                            ("Accept-Encoding", "identity"),
+                        ],
+                    )
+                    duplicate_accept_encoding = await client.get(
+                        "/metrics",
+                        headers=[
+                            ("Accept", "text/plain"),
+                            ("Accept-Encoding", "identity;q=0"),
+                            ("Accept-Encoding", "gzip"),
+                        ],
+                    )
+
+        self.assertNotIn("beta_total", filtered.text)
+        self.assertEqual(compressed.headers["content-encoding"], "gzip")
+        self.assertIn("alpha_total", compressed.text)
+        self.assertTrue(
+            openmetrics.headers["content-type"].startswith(
+                "application/openmetrics-text"
+            )
+        )
+        self.assertTrue(
+            duplicate_accept.headers["content-type"].startswith(
+                "application/openmetrics-text"
+            )
+        )
+        self.assertEqual(
+            duplicate_accept_encoding.headers["content-encoding"], "gzip"
+        )
+
+    async def test_slow_scrape_does_not_block_loop_and_concurrent_scrape_fails_fast(
+        self,
+    ):
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def communicate(input=None):
+            process.input = input
+            started.set()
+            await release.wait()
+            return (
+                b'{"status": 200, "headers": [["Content-Type", "text/plain"]]}'
+                b"\nsglang_test_metric 1\n",
+                b"",
+            )
+
+        process = _FakeMetricsProcess(communicate)
+        exporter = common._PrometheusMetricsExporter("/tmp/prom", 8)
+        with patch.object(
+            asyncio, "create_subprocess_exec", return_value=process
+        ) as create_process:
+            first_scrape = asyncio.create_task(
+                exporter.generate(
+                    query_string="name[]=sglang_test_metric",
+                    accept="application/openmetrics-text",
+                    accept_encoding="gzip",
+                )
+            )
+            await asyncio.wait_for(started.wait(), timeout=1)
+
+            # This yield represents unrelated work such as a /health handler.
+            await asyncio.wait_for(asyncio.sleep(0), timeout=0.1)
+            self.assertEqual(
+                await exporter.generate(),
+                (
+                    503,
+                    common._PROMETHEUS_ERROR_HEADERS,
+                    b"Prometheus metrics collection already in progress\n",
+                ),
+            )
+            release.set()
+            self.assertEqual(
+                await first_scrape,
+                (200, [["Content-Type", "text/plain"]], b"sglang_test_metric 1\n"),
+            )
+            create_process.assert_called_once()
+            self.assertEqual(
+                common.json.loads(process.input),
+                {
+                    "query_string": "name[]=sglang_test_metric",
+                    "accept": "application/openmetrics-text",
+                    "accept_encoding": "gzip",
+                },
+            )
+
+    async def test_collection_timeout_kills_child(self):
+        async def communicate(input=None):
+            if process.killed:
+                return b"", b""
+            await asyncio.Event().wait()
+
+        process = _FakeMetricsProcess(communicate)
+        exporter = common._PrometheusMetricsExporter("/tmp/prom", 0.01)
+        with patch.object(asyncio, "create_subprocess_exec", return_value=process):
+            self.assertEqual(
+                await exporter.generate(),
+                (
+                    504,
+                    common._PROMETHEUS_ERROR_HEADERS,
+                    b"Prometheus metrics collection timed out\n",
+                ),
+            )
+        self.assertTrue(process.killed)
+
+    async def test_collection_failure_does_not_expose_child_stderr(self):
+        async def communicate(input=None):
+            return b"partial", b"private child failure"
+
+        process = _FakeMetricsProcess(communicate, returncode=1)
+        exporter = common._PrometheusMetricsExporter("/tmp/prom", 8)
+        with patch.object(asyncio, "create_subprocess_exec", return_value=process):
+            self.assertEqual(
+                await exporter.generate(),
+                (
+                    500,
+                    common._PROMETHEUS_ERROR_HEADERS,
+                    b"Prometheus metrics collection failed\n",
+                ),
+            )
+
+    async def test_cancelled_scrape_kills_child(self):
+        started = asyncio.Event()
+
+        async def communicate(input=None):
+            if process.killed:
+                return b"", b""
+            started.set()
+            await asyncio.Event().wait()
+
+        process = _FakeMetricsProcess(communicate)
+        exporter = common._PrometheusMetricsExporter("/tmp/prom", 8)
+        with patch.object(asyncio, "create_subprocess_exec", return_value=process):
+            scrape = asyncio.create_task(exporter.generate())
+            await asyncio.wait_for(started.wait(), timeout=1)
+            scrape.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await scrape
+        self.assertTrue(process.killed)
 
 
 @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
