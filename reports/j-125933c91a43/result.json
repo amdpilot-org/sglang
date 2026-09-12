@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38452",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/629",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/542",
+  "candidate_commit": "4728bc00c490439134d4ddcc2782ad291effb5d9",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "reject",
+  "fully_resolves_original": false,
+  "summary": "The candidate is test-only and does not change the scheduler, UnifiedRadixCache, or UnifiedTreeCore. Its regression passes on the candidate, but it explicitly validates the already-working path after host eviction deletes the suffix: it directly invokes prefetch_from_storage from a live L2 prefix or root, lowers the threshold to 1, and bypasses scheduler _prefetch_kvcache. The original backup-only-stub state cannot be produced by the prepared base because backuped is derived from a non-null Full host_value and host-leaf eviction frees all component layers and removes the leaf. Therefore the original issue was not reproduced on this architecture/revision, and the candidate neither fixes nor tests the original contract.",
+  "tests": [
+    {
+      "command": "SGLANG_UNIFIED_RADIX_TREE_CORE_BACKEND=python /tmp/amdpilot-repo-j-125933c91a43/venv/bin/python test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py Test_FULL_ps4.test_hicache_host_leaf_eviction",
+      "exit_code": 0,
+      "what_was_measured": "Prepared-base GPU execution confirmed the current invariant: host leaf eviction succeeds and removes the leaf rather than retaining an L3-only backuped stub. One test passed."
+    },
+    {
+      "command": "SGLANG_UNIFIED_RADIX_TREE_CORE_BACKEND=python /tmp/amdpilot-repo-j-125933c91a43/venv/bin/python test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py Test_FULL_ps1.test_hicache_l3_prefetch_after_device_and_host_eviction Test_FULL_ps4.test_hicache_l3_prefetch_after_device_and_host_eviction Test_FULL_ps128.test_hicache_l3_prefetch_after_device_and_host_eviction Test_FULL_ps4.test_hicache_l3_prefetch Test_FULL_ps4.test_hicache_host_leaf_eviction",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, five GPU tests passed in 3.344s. The added test restored marker values 23/24 from file storage and checked an unavailable key, but manually called prefetch_from_storage after asserting the suffix node had been deleted; it did not traverse scheduler _prefetch_kvcache or a matched backup-only stub."
+    },
+    {
+      "command": "git diff --name-status 358c163250ad3b1f62939b01ce1314a0a31a0365 4728bc00c490439134d4ddcc2782ad291effb5d9 -- python",
+      "exit_code": 0,
+      "what_was_measured": "No production Python files changed. The full candidate contains only one unit-test modification and two prior-job report artifacts; no native files changed."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "torch.cuda reported one AMD Instinct MI355X (gfx950) under torch 2.11.0+rocm7.2. Focused tests loaded /tmp/amdpilot-repo-j-125933c91a43/cache/aiter/module_aiter_core.so, allocated GPU KV pools, and the candidate regression compared restored device tensors with independent constant tensors 23 and 24.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The candidate never constructs a node that remains evicted && backuped after host eviction; it asserts the opposite by requiring last_host_node == best_match_node after the suffix leaf is removed.",
+    "The partial case is a live-L2-prefix plus absent suffix storage lookup, not a matched backup-only-stub span. It manually supplies only the missing suffix to prefetch_from_storage.",
+    "The complete case anchors at root after the tree path is deleted, which is the already-known post-flush/fresh-tree path from the issue report.",
+    "The test bypasses scheduler._prefetch_kvcache, so it cannot detect the reported empty new_input_tokens slice caused by counting stubs in matched_len.",
+    "The test sets prefetch_threshold=1 and uses short synthetic sequences; it does not validate the reported default threshold behavior with a prefix exceeding 256 tokens.",
+    "There is no before-failing/after-passing production change: candidate and base production sources are identical."
+  ],
+  "remaining_limitations": "The exact source-issue state is unsupported by the prepared base's current tree semantics, so the original NVIDIA L40S/CUDA server-scale failure was not reproducible here. Review hardware was AMD Instinct MI355X gfx950 with ROCm 7.2, not NVIDIA L40S/CUDA 13. No server/model-scale metrics reproduction was run because the prerequisite backup-only-stub state is absent. No native source changed, so no native rebuild was applicable; the prepared AITER library was imported from the runtime cache."
+}
