@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31309",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "33d5cbedbb2bcbe0c551016f432978688de2fc43",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the exact Forward Pass Metrics TypeError when a pure decode batch has seq_lens_cpu=None. The exact candidate falls back to req.seqlen, passes its complete 21-test FPM suite, and passes independent adversarial checks for a missing mirror, a populated torch.int64 CPU mirror that must remain authoritative, and an empty decode batch. The source change fully resolves the scheduler-side contract in the original issue; deployment-specific B200/GLM/NSA/TRTLLM and Gloo cascade behavior was not reproduced.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-eb81f1e65884/venv/bin/python -m pytest -q test/registered/unit/observability/test_forward_pass_metrics.py -k 'decode_batch_falls_back or decode_batch_prefers or empty_decode_batch' (candidate test file on base commit)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction through _emit_forward_pass_metrics: the base raised TypeError while iterating batch.seq_lens_cpu=None; 2 failed and the populated-mirror control passed. See base-regression.log.gz."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-eb81f1e65884/venv/bin/python -m pytest -q test/registered/unit/observability/test_forward_pass_metrics.py (exact candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "All 21 Forward Pass Metrics unit tests passed on candidate commit 33d5cbedbb2bcbe0c551016f432978688de2fc43. See candidate-full-test.log.gz."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-eb81f1e65884/venv/bin/python /job/review-evidence-j-eb81f1e65884/independent_adversarial.py (exact candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Reviewer-owned cases verified req.seqlen fallback statistics, preservation of an authoritative real torch.int64 CPU tensor, and zero metrics for an empty missing-mirror decode batch. See independent_adversarial.py and candidate-adversarial.log.gz."
+    },
+    {
+      "command": "git diff --check (exact candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The exact failure is CPU-side metric aggregation and was exercised through the real SchedulerMetricsReporter emit path without a GPU kernel. The assigned host exposes one gfx950 AMD Instinct MI355X, whereas the report used 8 NVIDIA B200 GPUs. No GPU or distributed execution is claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The original 8x NVIDIA B200, GLM-5.1, NSA/TRTLLM, DP-attention distributed deployment was unavailable, so the full serving workload was not reproduced.",
+    "The downstream multi-rank Gloo failure cascade was not reproduced on the assigned single gfx950 AMD Instinct MI355X.",
+    "No native source changed; a native rebuild was not applicable.",
+    "The review verifies the precise scheduler-side missing-seq_lens_cpu contract and does not claim model semantic or backend-specific validation."
+  ]
+}
