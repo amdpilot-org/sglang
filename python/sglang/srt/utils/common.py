@@ -91,7 +91,6 @@ import torch.distributed as dist
 import triton
 from packaging import version as pkg_version
 from PIL import Image, ImageOps, UnidentifiedImageError
-from starlette.routing import Mount
 from torch import nn
 from torch.library import Library
 from torch.utils._contextlib import _DecoratorContextManager
@@ -2614,17 +2613,88 @@ def set_prometheus_multiproc_dir():
     logger.debug(f"PROMETHEUS_MULTIPROC_DIR: {os.environ['PROMETHEUS_MULTIPROC_DIR']}")
 
 
+_PROMETHEUS_GENERATION_TIMEOUT_SECONDS = 8.0
+_PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
+
+
+class _PrometheusMetricsExporter:
+    """Generate multiprocess metrics without blocking the server event loop."""
+
+    def __init__(self, multiproc_dir: str, timeout_seconds: float):
+        self._multiproc_dir = multiproc_dir
+        self._timeout_seconds = timeout_seconds
+        self._generation_lock = asyncio.Lock()
+
+    async def generate(self) -> Tuple[int, bytes]:
+        # A backlog defeats the isolation: once the active collection completes,
+        # queued scrapes would immediately start more expensive collections.
+        if self._generation_lock.locked():
+            return 503, b"Prometheus metrics collection already in progress\n"
+
+        async with self._generation_lock:
+            env = os.environ.copy()
+            env["PROMETHEUS_MULTIPROC_DIR"] = self._multiproc_dir
+            script = (
+                "from prometheus_client import CollectorRegistry, multiprocess;"
+                "from prometheus_client.exposition import generate_latest;"
+                "r=CollectorRegistry();multiprocess.MultiProcessCollector(r);"
+                "import sys;sys.stdout.buffer.write(generate_latest(r))"
+            )
+            process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-c",
+                script,
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=self._timeout_seconds
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.communicate()
+                logger.warning(
+                    "Prometheus metrics collection exceeded %.1f seconds",
+                    self._timeout_seconds,
+                )
+                return 504, b"Prometheus metrics collection timed out\n"
+            except asyncio.CancelledError:
+                process.kill()
+                await asyncio.shield(process.communicate())
+                raise
+
+            if process.returncode != 0:
+                logger.warning(
+                    "Prometheus metrics collection failed: %s",
+                    stderr.decode("utf-8", errors="replace").strip(),
+                )
+                return 500, b"Prometheus metrics collection failed\n"
+            return 200, stdout
+
+
 def add_prometheus_middleware(app):
-    # We need to import prometheus_client after setting the env variable `PROMETHEUS_MULTIPROC_DIR`
-    from prometheus_client import CollectorRegistry, make_asgi_app, multiprocess
+    # The multiprocess files can be expensive to aggregate. Generate them in a
+    # child process so a slow scrape cannot starve health checks on this loop.
+    from starlette.responses import Response
+    from starlette.routing import Route
 
-    registry = CollectorRegistry()
-    multiprocess.MultiProcessCollector(registry)
-    metrics_route = Mount("/metrics", make_asgi_app(registry=registry))
+    exporter = _PrometheusMetricsExporter(
+        os.environ["PROMETHEUS_MULTIPROC_DIR"],
+        _PROMETHEUS_GENERATION_TIMEOUT_SECONDS,
+    )
 
-    # Workaround for 307 Redirect for /metrics
-    metrics_route.path_regex = re.compile("^/metrics(?P<path>.*)$")
-    app.routes.append(metrics_route)
+    async def metrics_endpoint(request):
+        status_code, content = await exporter.generate()
+        return Response(
+            content=content,
+            status_code=status_code,
+            headers={"Content-Type": _PROMETHEUS_CONTENT_TYPE},
+        )
+
+    app.routes.append(Route("/metrics", metrics_endpoint, methods=["GET"]))
+    app.routes.append(Route("/metrics/", metrics_endpoint, methods=["GET"]))
 
 
 class RefCountedGauge:

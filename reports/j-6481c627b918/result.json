@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/28157",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The checked-out ASGI metrics app aggregated Prometheus multiprocess files synchronously on the server event loop. A deterministic 350 ms collector stall produced 331 ms of event-loop lag. Metrics generation now runs in a bounded child process, permits one active collection, and immediately returns 503 to concurrent scrapes. The same fixture produced 0 ms measured event-loop lag after the change.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-6481c627b918/venv/bin/python -m pytest -q test/registered/unit/utils/test_common.py -k PrometheusMetricsExporter",
+      "exit_code": 0,
+      "what_was_measured": "Four focused cases covering slow isolated collection and singleflight rejection, timeout child cleanup, failed-child response behavior, and cancelled-request child cleanup; 4 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6481c627b918/venv/bin/python reports/j-6481c627b918/reproduce_metrics_health_isolation.py",
+      "exit_code": 0,
+      "what_was_measured": "A 350 ms metrics child delay left the ASGI event loop responsive (0.000 s measured lag), the active scrape returned 200, and a concurrent scrape returned 503."
+    },
+    {
+      "command": "PROMETHEUS_MULTIPROC_DIR=<private-runtime>/prom-data /tmp/amdpilot-repo-j-6481c627b918/venv/bin/python <real multiprocess counter/exporter check>",
+      "exit_code": 0,
+      "what_was_measured": "The real subprocess collector read a multiprocess counter from disk and returned sglang_isolation_test_total 7.0 with status 200."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6481c627b918/venv/bin/python -m py_compile python/sglang/srt/utils/common.py test/registered/unit/utils/test_common.py reports/j-6481c627b918/reproduce_metrics_health_isolation.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python files compiled and the patch had no whitespace errors. Ruff and Black were unavailable in the prepared interpreter."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No GPU was used because the corrected failure mechanism is confined to CPU-side ASGI scheduling and Prometheus multiprocess-file aggregation; GPU execution would not exercise it.",
+    "The original multi-node, single-tokenizer PD deployment on NVIDIA H100 hardware and its decode-side connection-loss logs were not reproduced in this single-gfx950 environment.",
+    "The deterministic regression validates the reported shared-event-loop starvation mechanism and HTTP overload behavior, not full-model semantics or a distributed workload.",
+    "The removed prototype commit was unavailable by its pinned hash; a surviving prototype branch was inspected and had a broader cached-snapshot design, which was not copied."
+  ]
+}
