@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36207",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "reproduced",
+  "summary": "The SGLang-owned MLA writers are already fixed in the prepared source and their ROCm-focused regressions pass, but the current fused AITER GLM writer still overwrites reserved slot 0. The required caller-defined pad_slot_id API is proposed by open, unmerged ROCm/aiter PR #5010, so no compatible SGLang call-site correction can yet be validated with the prepared dependency.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-fbe78461ef43/venv/bin/python reports/j-fbe78461ef43/probe_aiter_fused_mla_slot0.py",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, a NaN padding row mapped to slot 0 changed all 576 BF16 elements of the finite sentinel slot to NaN; the independent positive destination slot 1 remained finite. The probe asserts this currently reproduced behavior."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-fbe78461ef43/venv/bin/python -m pytest -q test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py",
+      "exit_code": 0,
+      "what_was_measured": "5 ROCm-applicable SGLang-owned MLA writer tests passed and 58 CUDA-only or locally deselected matrix cases skipped; coverage includes int32/int64 BF16 reserved-slot guards, explicit opt-out, FP8 quantized, scale buffer, and valid positive-slot writes."
+    },
+    {
+      "command": "curl -L --silent --show-error https://api.github.com/repos/ROCm/aiter/pulls/5010",
+      "exit_code": 0,
+      "what_was_measured": "The required AITER pad_slot_id API change was open and unmerged; the response is retained at reports/j-fbe78461ef43/raw/aiter_pr_5010.json."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-fbe78461ef43/raw/aiter_fused_slot0_probe.log records AMD Instinct MI350X, gfx950:sramecc+:xnack-, 576 NaNs in slot 0, and a finite valid slot 1."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "ROCm/aiter PR #5010 is not merged and the prepared AITER function has no pad_slot_id parameter; the downstream SGLang integration cannot be made and validated compatibly yet.",
+    "The reported GLM-5.2-MXFP4 weights were unavailable, so model semantic accuracy and the original real-weight output corruption were not tested.",
+    "Only one assigned gfx950 GPU was used; TP8, DP4, EP8, MTP, multi-node, and eight-GPU behavior remain unverified.",
+    "CUDA TMA/JIT writer execution was unavailable on AMD hardware; its existing source regression was skipped as designed."
+  ]
+}
