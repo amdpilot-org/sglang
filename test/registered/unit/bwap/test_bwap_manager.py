@@ -159,14 +159,16 @@ class TestBWAPServerArgs(CustomTestCase):
 
 
 class TestBWAPScoreReduction(CustomTestCase):
-    def test_decode_scores_are_batch_max_of_normalized_rows(self):
-        # Two active sequences with disjoint large neurons: the shared
-        # batch-aggregated score (Eq. 3, element-wise max) keeps both.
-        z = torch.tensor([[10.0, 0.0], [0.0, 10.0]])
+    def test_decode_scores_pool_the_whole_phase(self):
+        z = torch.tensor(
+            [[0.8, 0.0, 0.6], [0.8, 0.0, 0.6], [0.8, 0.0, 0.6], [0.0, 1.0, 0.0]]
+        )
         scores = compute_decode_scores(z)
-        torch.testing.assert_close(scores, torch.ones(2))
+        expected = torch.tensor([0.6928203, 0.5, 0.5196152])
+        torch.testing.assert_close(scores, expected)
+        self.assertEqual(int(torch.topk(scores, 1).indices.item()), 0)
 
-    def test_topk_mask_keeps_round_1_minus_sparsity_of_dim(self):
+    def test_topk_mask_keeps_floor_1_minus_sparsity_of_dim(self):
         scores = torch.arange(10, dtype=torch.float32)
         mask = build_topk_mask(scores, sparsity=0.5)
         self.assertEqual(int(mask.sum().item()), 5)
@@ -174,8 +176,28 @@ class TestBWAPScoreReduction(CustomTestCase):
         self.assertTrue(bool((mask[5:] == 1.0).all()))
         self.assertTrue(bool((mask[:5] == 0.0).all()))
 
+        odd_mask = build_topk_mask(torch.tensor([3.0, 2.0, 1.0]), sparsity=0.5)
+        self.assertEqual(int(odd_mask.sum().item()), 1)
+
 
 class TestBWAPSchedule(CustomTestCase):
+    def test_decode_phase_is_pooled_before_memory_max(self):
+        manager = _make_manager(t_init=4, t_explore=1, t_prune=2)
+        key = "mlp.act_fn"
+        _extend(manager, req_ids=[0], prompt_len=5)
+        rows = torch.tensor(
+            [[0.8, 0.0, 0.6], [0.8, 0.0, 0.6], [0.8, 0.0, 0.6], [0.0, 1.0, 0.0]]
+        )
+        for step, row in enumerate(rows):
+            _decode(manager, req_ids=[0], seq_lens=[5 + step])
+            manager._process_activation(key, row.unsqueeze(0))
+
+        # Crossing into prune finalizes Eq. 2 over all four exploration tokens.
+        _decode(manager, req_ids=[0], seq_lens=[9])
+        expected = torch.tensor([0.6928203, 0.5, 0.5196152])
+        torch.testing.assert_close(manager.mem_scores[key], expected)
+        self.assertEqual(int(torch.topk(manager.mem_scores[key], 1).indices.item()), 0)
+
     def test_single_request_three_phase_schedule(self):
         # Derived property: one request's decode steps 0..7 follow T_init(2)
         # explore steps, then cycles of [prune, prune, explore] (t_p=2, t_e=1).

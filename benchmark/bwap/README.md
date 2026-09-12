@@ -2,9 +2,9 @@
 
 BWAP (`--enable-bwap`, arXiv:2608.14003) is an opt-in, default-off,
 training-free FFN-neuron-pruning mode for gated-MLP models. It scores each
-layer's `SiluAndMul` output, periodically builds a shared top-k mask from the
-maximum score across exploring batch rows, and applies that mask during each
-request's prune phase.
+layer's `SiluAndMul` output, pools each request's full exploration phase with
+Equation 2, takes the element-wise maximum of those per-request phase scores,
+and periodically applies a shared top-k mask during each request's prune phase.
 
 The default schedule is eight initial dense decode steps, then cycles of 16
 prune steps followed by four dense exploration steps. Scheduling is per request,
