@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31206",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "not_reproduced",
+  "summary": "The production implementation at the prepared main commit already prevents the reported decode-only dispatch. PD pair selection chooses an available prefill worker before selecting decode, and availability includes circuit-breaker eligibility. Added focused regression coverage: an open but healthy prefill breaker returns 503 within a bounded client timeout; after cooldown, two successful half-open probes close the breaker; an open decode breaker also fails the pair. A mutation removing both circuit-breaker selection gates reproduced the bad result as HTTP 200 instead of 503, proving the regression is sensitive to the existing fix.",
+  "tests": [
+    {
+      "command": "cargo test --test routing_tests pd_circuit_breaker -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Actual HTTP PD routing through 1-prefill/1-decode mock workers: open prefill returns 503, recovered half-open prefill receives successful probes and reaches Closed after success_threshold=2, and open decode returns 503. Three tests passed. Raw output: reports/j-a2da92fa6a60/passing-after.txt"
+    },
+    {
+      "command": "mutation: change PD/router and policy availability filters to health-only; cargo test --test routing_tests open_prefill_breaker_fails_whole_request_fast -- --nocapture",
+      "exit_code": 101,
+      "what_was_measured": "Failing-before sensitivity check. With both existing breaker gates temporarily removed, the decisive regression returned HTTP 200 instead of expected 503. The mutation was reverted. Raw output: reports/j-a2da92fa6a60/mutation-failing-before.txt"
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "exit_code": 0,
+      "what_was_measured": "Rust formatting of the gateway workspace. The pinned stable toolchain reports existing warnings that nightly-only rustfmt options are ignored."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "This is router control-plane behavior and the deterministic integration harness uses HTTP mock prefill/decode workers; no model kernels or GPU execution are involved. The assigned gfx950 was therefore not used and no GPU/model claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No full SGLang engine, model weights, Mooncake/KV transport, or multi-node 1P1D deployment was run; the regression qualifies router dispatch and breaker recovery only.",
+    "The reporter's exact gateway-v0.2.4 binary was not rebuilt in this prepared checkout. The issue discussion confirms that release was the affected router while current main contains the availability gates.",
+    "Upstream PR https://github.com/sgl-project/sglang/pull/31933 independently proposed similar test-only coverage but was closed without merge; this PR adds current-tree coverage adapted to the present APIs."
+  ]
+}
