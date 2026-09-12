@@ -69,6 +69,42 @@ class OpenAIServingBase(ABC):
         # Fall back to explicit lora_path
         return explicit_lora_path
 
+    def validate_served_model(
+        self, request: OpenAIServingRequest
+    ) -> Optional[ORJSONResponse]:
+        """Return an OpenAI-compatible 404 for an explicitly unknown model."""
+        if "model" not in request.model_fields_set:
+            return None
+
+        model = getattr(request, "model", None)
+        if not model:
+            return None
+
+        served_model = self.tokenizer_manager.served_model_name
+        if model == served_model:
+            return None
+
+        base_model, adapter = self._parse_model_parameter(model)
+        if (
+            adapter is not None
+            and base_model == served_model
+            and self.tokenizer_manager.server_args.enable_lora
+            and adapter in self.tokenizer_manager.lora_registry.get_all_adapters()
+        ):
+            return None
+
+        return ORJSONResponse(
+            status_code=404,
+            content={
+                "error": {
+                    "message": f"The model '{model}' does not exist",
+                    "type": "invalid_request_error",
+                    "param": "model",
+                    "code": "model_not_found",
+                }
+            },
+        )
+
     async def handle_request(
         self, request: OpenAIServingRequest, raw_request: Request
     ) -> Union[Any, StreamingResponse, ErrorResponse]:
@@ -78,6 +114,10 @@ class OpenAIServingBase(ABC):
         received_time = monotonic_time()
 
         try:
+            model_error = self.validate_served_model(request)
+            if model_error is not None:
+                return model_error
+
             # Validate request
             error_msg = self._validate_request(request)
             if error_msg:
