@@ -1070,6 +1070,7 @@ class TestForwardFlags(_IsolatedServerArgs):
     def test_mlp_comm_forward_flags(self):
         """Decoder-published MLP collective flags: scoped restore + skip helpers."""
         from sglang.srt.layers.moe.utils import (
+            should_defer_post_experts_all_reduce,
             should_skip_mlp_all_reduce,
             should_skip_post_experts_all_reduce,
         )
@@ -1085,6 +1086,7 @@ class TestForwardFlags(_IsolatedServerArgs):
         with fwd.scoped(fuse_mlp_allreduce=True):
             self.assertTrue(fwd.fuse_mlp_allreduce)
             self.assertTrue(should_skip_mlp_all_reduce())
+            self.assertTrue(should_defer_post_experts_all_reduce())
             # Fusion alone is enough to skip post-experts AR.
             self.assertTrue(should_skip_post_experts_all_reduce(is_tp_path=True))
         self.assertFalse(fwd.fuse_mlp_allreduce)

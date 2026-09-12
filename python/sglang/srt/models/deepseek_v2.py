@@ -95,6 +95,7 @@ from sglang.srt.layers.logits_processor import LogitsProcessor
 from sglang.srt.layers.moe import (
     get_moe_a2a_backend,
     get_moe_runner_backend,
+    should_defer_post_experts_all_reduce,
     should_skip_post_experts_all_reduce,
     should_use_flashinfer_cutlass_moe_fp4_allgather,
 )
@@ -1027,13 +1028,27 @@ class DeepseekV2MoE(nn.Module):
                 self.routed_scaling_factor,
             )
 
-        if self.tp_size > 1 and not should_skip_post_experts_all_reduce(
-            is_tp_path=True,
-        ):
+        return self._reduce_and_add_tp1_shared_output(
+            final_hidden_states, shared_output
+        )
+
+    def _reduce_and_add_tp1_shared_output(
+        self,
+        final_hidden_states: torch.Tensor,
+        shared_output: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        """Reduce routed output and add a replicated shared-expert result.
+
+        When the local all-reduce is deferred to a downstream cross-rank SUM,
+        each rank contributes the same TP1 shared output. Scale that output so
+        the deferred SUM contributes it exactly once.
+        """
+        skip_post_all_reduce = should_skip_post_experts_all_reduce(is_tp_path=True)
+        if self.tp_size > 1 and not skip_post_all_reduce:
             final_hidden_states = tensor_model_parallel_all_reduce(final_hidden_states)
-        # TP1 shared experts are replicated, so add them after all-reduce to
-        # avoid summing the same shared output once per TP rank.
-        if self._shared_expert_tp1:
+        if shared_output is not None and self._shared_expert_tp1:
+            if self.tp_size > 1 and should_defer_post_experts_all_reduce():
+                shared_output = shared_output / self.moe_ep_size
             final_hidden_states += shared_output
         return final_hidden_states
 
@@ -1167,15 +1182,9 @@ class DeepseekV2MoE(nn.Module):
             self.routed_scaling_factor,
         )
 
-        if self.tp_size > 1 and not should_skip_post_experts_all_reduce(
-            is_tp_path=True,
-        ):
-            final_hidden_states = tensor_model_parallel_all_reduce(final_hidden_states)
-        # TP1 shared experts are replicated, so add them after all-reduce to
-        # avoid summing the same shared output once per TP rank.
-        if shared_output is not None and self._shared_expert_tp1:
-            final_hidden_states += shared_output
-        return final_hidden_states
+        return self._reduce_and_add_tp1_shared_output(
+            final_hidden_states, shared_output
+        )
 
     def forward_cpu(
         self,

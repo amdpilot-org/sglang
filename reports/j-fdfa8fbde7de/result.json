@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31475",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared base still added a replicated TP1 shared-expert output at full scale before a deferred downstream SUM. The correction pre-scales that output by moe_ep_size only when the post-experts all-reduce is skipped, and shares the logic between normal and dual-stream forwards. A deterministic regression failed on the base and passes after the change.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-fdfa8fbde7de/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v2_shared_expert_tp1.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression; all five cases failed because the prepared base lacked the corrected reduction/add path. Raw output: reports/j-fdfa8fbde7de/failing-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fdfa8fbde7de/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v2_shared_expert_tp1.py",
+      "exit_code": 0,
+      "what_was_measured": "Five passing cases covering skipped reduction, an independent downstream-SUM reference, executed all-reduce, flag-off/single-rank boundaries, and gfx950 GPU arithmetic. Raw output: reports/j-fdfa8fbde7de/passing-after.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fdfa8fbde7de/venv/bin/python -m pytest -q test/registered/unit/test_runtime_context.py test/registered/unit/layers/test_layer_communicator_fusion_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "99 related tests and 140 subtests passed for reduction-skip context and communicator fusion gates. Raw output: reports/j-fdfa8fbde7de/related-tests.log"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/models/deepseek_v2.py test/registered/unit/models/test_deepseek_v2_shared_expert_tp1.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, test-registration, and static checks passed. Raw output: reports/j-fdfa8fbde7de/pre-commit.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "On the assigned AMD Instinct MI350X (gfx950), an independent float64 CPU reference showed max absolute error 15.59580647945404 for the unscaled replicated contribution and 5.401670932769775e-07 after 1/8 scaling. Raw output: reports/j-fdfa8fbde7de/gpu-evidence.log"
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one gfx950 GPU was assigned, so the actual eight-rank NCCL/RCCL reduce-scatterv serving topology was not reproduced.",
+    "DeepSeek-V2-Lite-Chat and GLM-5.2 weights were unavailable; no full-model generation or semantic-accuracy claim is made.",
+    "The GPU check validates the per-rank arithmetic and downstream SUM invariant, not transport behavior or a distributed workload.",
+    "Two related upstream PRs remain open (https://github.com/sgl-project/sglang/pull/31476 and https://github.com/sgl-project/sglang/pull/35535); the latter addresses broader CP/DP model paths outside this narrow issue fix."
+  ]
+}
