@@ -1,0 +1,195 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_ TestDecodeQueueCleanup.test_dp_rank_query_throttle_is_independent_per_bootstrap _
+
+self = <candidate-test_decode_queue_cleanup.TestDecodeQueueCleanup testMethod=test_dp_rank_query_throttle_is_independent_per_bootstrap>
+
+    def test_dp_rank_query_throttle_is_independent_per_bootstrap(self):
+        queue = DecodePreallocQueue.__new__(DecodePreallocQueue)
+        queue._dp_rank_query_last_attempt_time = {}
+        queue._dp_rank_query_interval = 0.01
+
+        with patch(
+            "sglang.srt.disaggregation.decode.time.monotonic",
+            side_effect=[1.0, 1.001, 1.002],
+        ):
+>           self.assertTrue(queue._can_query_prefill_dp_ranks("prefill-a:8998"))
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AttributeError: 'DecodePreallocQueue' object has no attribute '_can_query_prefill_dp_ranks'. Did you mean: '_resolve_prefill_dp_rank'?
+
+../review-evidence-j-0660ea8a546f/candidate-test_decode_queue_cleanup.py:384: AttributeError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7e6dfddf5c60>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7e76e4715b20>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/review-evidence-j-0660ea8a546f/candidate-test_decode_queue_cleanup.py", line 384, in test_dp_rank_query_throttle_is_independent_per_bootstrap
+    self.assertTrue(queue._can_query_prefill_dp_ranks("prefill-a:8998"))
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'DecodePreallocQueue' object has no attribute '_can_query_prefill_dp_ranks'. Did you mean: '_resolve_prefill_dp_rank'?
+_ TestDecodeQueueCleanup.test_unresolved_prefill_dp_rank_queries_are_rate_limited _
+
+self = <candidate-test_decode_queue_cleanup.TestDecodeQueueCleanup testMethod=test_unresolved_prefill_dp_rank_queries_are_rate_limited>
+
+    def test_unresolved_prefill_dp_rank_queries_are_rate_limited(self):
+        addr = "127.0.0.1:11500"
+        decode_req = SimpleNamespace(
+            req=SimpleNamespace(
+                bootstrap_host="127.0.0.1",
+                bootstrap_port=11500,
+                bootstrap_room=7,
+            ),
+            kv_receiver=MagicMock(),
+        )
+        queue = DecodePreallocQueue.__new__(DecodePreallocQueue)
+        queue.pending_reqs = [decode_req]
+        queue._prefill_dp_rank_queries = {}
+        queue._dp_rank_query_last_attempt_time = {}
+        queue._dp_rank_query_interval = 0.01
+        executor = MagicMock()
+
+        def completed_query(*args):
+            future = Future()
+            future.set_result({})
+            return future
+
+        executor.submit.side_effect = completed_query
+        queue.kv_manager = SimpleNamespace(
+            prefill_info_table={addr: object()},
+            _ensure_prefill_recompute_executor=lambda: executor,
+        )
+        queue._resolve_prefill_dp_rank = MagicMock(return_value=None)
+        queue._ensure_prefill_info = lambda groups: (groups, [])
+
+        with (
+            patch(
+                "sglang.srt.disaggregation.decode.time.monotonic",
+                side_effect=[1.0, 1.001, 1.001, 1.011],
+            ),
+            patch(
+                "sglang.srt.disaggregation.decode.CommonKVReceiver.query_prefill_dp_ranks"
+            ) as direct_query,
+        ):
+            for _ in range(3):
+                queue.prefetch_prefill_dp_rank_queries()
+                queue._resolve_pending_reqs()
+
+>       self.assertEqual(executor.submit.call_count, 2)
+E       AssertionError: 3 != 2
+
+../review-evidence-j-0660ea8a546f/candidate-test_decode_queue_cleanup.py:371: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7e6dfddf7240>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7e76e4715b20>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/review-evidence-j-0660ea8a546f/candidate-test_decode_queue_cleanup.py", line 371, in test_unresolved_prefill_dp_rank_queries_are_rate_limited
+    self.assertEqual(executor.submit.call_count, 2)
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 878, in _baseAssertEqual
+    raise self.failureException(msg)
+AssertionError: 3 != 2
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../review-evidence-j-0660ea8a546f/candidate-test_decode_queue_cleanup.py::TestDecodeQueueCleanup::test_dp_rank_query_throttle_is_independent_per_bootstrap
+FAILED ../review-evidence-j-0660ea8a546f/candidate-test_decode_queue_cleanup.py::TestDecodeQueueCleanup::test_unresolved_prefill_dp_rank_queries_are_rate_limited
+2 failed, 9 deselected, 16 warnings in 9.47s
