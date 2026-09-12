@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38821",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The base resolves the official GLM-5.3-Flash checkpoint to a tokenizer-only object because pinned Transformers 5.12.1 lacks Glm5NextProcessor. Added and registered the upstream-derived image processor compatibility layer; the same loading path now returns a multimodal processor, and a JPEG data URL reaches deterministic GLM vision preprocessing.",
+  "tests": [
+    {
+      "command": "HF_HOME=/tmp/amdpilot-repo-j-fd2f4859cc84/hf-cache PYTHONPATH=python /tmp/amdpilot-repo-j-fd2f4859cc84/venv/bin/python < base get_processor probe",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before behavior: get_processor('zai-org/GLM-5.3-Flash') returned TokenizersBackend and had no image_processor. See raw/base_sglang_get_processor.txt."
+    },
+    {
+      "command": "HF_HOME=/tmp/amdpilot-repo-j-fd2f4859cc84/hf-cache PYTHONPATH=python /tmp/amdpilot-repo-j-fd2f4859cc84/venv/bin/python < fixed get_processor probe",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after behavior: the same checkpoint resolves to Glm5NextProcessor with Glm5NextImageProcessor. See raw/fixed_sglang_get_processor.txt."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-fd2f4859cc84/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_glm5_next_processor.py",
+      "exit_code": 0,
+      "what_was_measured": "Six CPU regressions passed: processor registration, JPEG data-URL decoding into finite GLM patches, three resize boundaries, and impossible-budget rejection."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-fd2f4859cc84/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_glm4v_mixed_offsets.py test/registered/unit/multimodal/test_glm5_next_processor.py",
+      "exit_code": 0,
+      "what_was_measured": "Nine tests passed, combining the new GLM-5.3 regressions with existing GLM mixed image/video offset boundary coverage."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/configs/glm5_next.py python/sglang/srt/configs/glm5_next_processing.py test/registered/unit/multimodal/test_glm5_next_processor.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable changed-file formatting, static, secret, and CI-registration checks passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fd2f4859cc84/venv/bin/python < GPU inventory probe",
+      "exit_code": 0,
+      "what_was_measured": "One assigned AMD Instinct MI355X gfx950 was visible; inventory only, not counted as issue-path GPU execution."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": "The private GLM-5.3-Flash-sglang0907-128k-0907t3 weights, the exact JPEG, and the original 8x NVIDIA H20 topology were unavailable. The patch is verified through real checkpoint processor resolution and deterministic JPEG preprocessing, but the reported bird output and model semantic accuracy remain unverified."
+}
