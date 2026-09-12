@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19090",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3008",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2906",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/2976",
+  "candidate_commit": "7f6725c124ac107fbc06daa0810757488cb6ea28",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved the candidate's DiffGenerator sleep, wake, and refit API and corrected its concrete transport counterexample: exceptions raised by sync_scheduler_client.forward are now normalized to lifecycle-specific RuntimeError instances with the original exception chained as the cause.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-463dc759f415/venv/bin/python -m pytest -vv -x python/sglang/multimodal_gen/test/unit/test_diffusion_generator_lifecycle.py::test_diffusion_generator_lifecycle_normalizes_transport_failures",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction against exact candidate 7f6725c124ac107fbc06daa0810757488cb6ea28 with only the regression added: ConnectionError escaped _send_lifecycle_request unchanged."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-463dc759f415/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_diffusion_generator_lifecycle.py python/sglang/multimodal_gen/test/unit/test_diffusion_generator_shutdown.py python/sglang/multimodal_gen/test/unit/test_component_residency.py::test_snapshot_offload_sleep_uses_existing_host_storage python/sglang/multimodal_gen/test/unit/test_weight_snapshot.py::test_sleep_keeps_the_pin_lease_and_existing_pins_are_reused",
+      "exit_code": 0,
+      "what_was_measured": "13 tests passed after correction, including ConnectionError and TimeoutError normalization and the candidate's prior lifecycle and compatibility coverage."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/multimodal_gen/runtime/entrypoints/diffusion_generator.py python/sglang/multimodal_gen/test/unit/test_diffusion_generator_lifecycle.py reports/j-463dc759f415/README.md reports/j-463dc759f415/result.json reports/j-463dc759f415/raw/failing_before.txt reports/j-463dc759f415/raw/passing_after.txt",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, spelling, syntax, and repository policy hooks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU execution was used as evidence for this transport-only correction. The candidate and review GPU round trips exercised MemoryOccupationController code already present in the base, not the new DiffGenerator transport surface with a real diffusion model."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No real diffusion checkpoint was available, so model-specific sleep, wake, generation, refit, and memory behavior remain unverified.",
+    "No end-to-end sleep+wake+refit versus kill-and-relaunch timing comparison was possible without a qualifying diffusion checkpoint.",
+    "FSDP inference sleep/wake remains explicitly unsupported.",
+    "The corrected transport surface was tested deterministically with scheduler-forward failures, not end to end through a real diffusion scheduler and checkpoint.",
+    "The tiny Llama fixture cannot qualify diffusion architecture behavior and was not used."
+  ]
+}
