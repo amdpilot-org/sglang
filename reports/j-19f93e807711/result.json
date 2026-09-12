@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34719",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1619",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1581",
+  "candidate_commit": "0a016c8b5c0d352f95c37f7830247ab404f634ca",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "The recorded base reproduces the mixed tensor/list AttributeError. The exact candidate guards all six affected prefill/decode consumer conversions and passes candidate, independent isolated-field, neighboring, and real gfx950 device-tensor checks.",
+  "tests": [
+    {
+      "command": "python -m pytest -q /job/review-evidence-j-19f93e807711/test_candidate.py (on recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before comparison: 3 mixed/host-list cases raised AttributeError at the two actual consumer sites; 1 homogeneous-tensor control passed."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/managers/test_batch_result_processor_mixed_logprobs.py (on exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 4 passed."
+    },
+    {
+      "command": "python /job/review-evidence-j-19f93e807711/adversarial_review.py (on exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent isolation of token-ID values, top-logprob values, and top-logprob indices in both prefill and decode consumers; all six passed and list placeholders retained identity."
+    },
+    {
+      "command": "inline Python device-tensor adversarial check (on exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Both consumers converted mixed gfx950 tensors/list placeholders to the exact expected host values and indices."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/managers/test_batch_result_processor_mixed_logprobs.py test/registered/unit/managers/test_batch_result_processor_hidden_states.py",
+      "exit_code": 0,
+      "what_was_measured": "11 tests passed and 2 subtests passed across focused and neighboring scheduler behavior."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X, capability (9, 5)/gfx950, executed mixed device-tensor conversions for both paths; see raw/gpu_adversarial.txt and raw/import_and_gpu.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No full HTTP/model-serving reproduction was repeated during this independent review.",
+    "No Qwen3.5-9B-derived weights, NVIDIA B200/CUDA validation, or distributed workload was available.",
+    "The Python-only candidate changed no native source, and the prepared environment specified no native rebuild target."
+  ]
+}
