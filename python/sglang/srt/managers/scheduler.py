@@ -3724,6 +3724,11 @@ class Scheduler(
             # Reset batch_is_full to try preemption with a prefill adder.
             running_batch.batch_is_full = False
 
+        # check_prefetch_progress() may synchronize TP ranks.  Snapshot every
+        # request before any local capacity check can return or break so all ranks
+        # issue the same sequence of collectives for the broadcast waiting queue.
+        prefetch_progress = self._check_waiting_queue_prefetch_progress()
+
         if (
             running_batch.batch_is_full or len(self.waiting_queue) == 0
         ) and self.chunked_req is None:
@@ -3852,7 +3857,7 @@ class Scheduler(
                     break
 
             if self.enable_hicache_storage:
-                prefetch_done = self.tree_cache.check_prefetch_progress(req.rid)
+                prefetch_done = prefetch_progress[req.rid]
                 if not prefetch_done:
                     # skip staging requests that are ongoing prefetch
                     continue
@@ -4033,6 +4038,14 @@ class Scheduler(
             new_batch.decoding_reqs = None
 
         return new_batch, running_batch
+
+    def _check_waiting_queue_prefetch_progress(self) -> Optional[dict[str, bool]]:
+        if not self.enable_hicache_storage:
+            return None
+        return {
+            req.rid: self.tree_cache.check_prefetch_progress(req.rid)
+            for req in self.waiting_queue
+        }
 
     def _can_schedule_lora_req(
         self, req: Req, running_loras: set[Optional[str]]
