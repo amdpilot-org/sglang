@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36127",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 2861's valid DFlash2 dynamic-verification implementation, independently reproduced review PR 2947's finite JSON to float32 infinity STS counterexample at exact candidate commit cdd6ac7f5940e15c97cafbee61c0baf3ce4a9603, and rejected calibration temperatures that are non-finite after conversion to the runtime float32 dtype.",
+  "tests": [
+    {
+      "command": "exact-candidate inline reproduction using /tmp/amdpilot-repo-j-e6997da4e658/venv/bin/python with /tmp/amdpilot-candidate-j-e6997da4e658/python first on sys.path",
+      "exit_code": 1,
+      "what_was_measured": "At cdd6ac7f5940e15c97cafbee61c0baf3ce4a9603, STS temperatures [1e308, 2.0] became tensor([inf, 2.]) and calibrated confidence became [0.5, 0.7311]; the finite-runtime assertion failed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e6997da4e658/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_confidence.py::TestDFlashConfidence::test_dflash_sts_loader_rejects_float32_overflow",
+      "exit_code": 0,
+      "what_was_measured": "The new regression verifies oversized finite JSON calibration values are rejected after float32 conversion and the existing head calibration remains unchanged."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e6997da4e658/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_confidence.py test/registered/unit/spec/test_dflash_logits.py test/registered/spec/dspark/test_dspark_scheduler.py test/registered/spec/dspark/test_dspark_sts.py",
+      "exit_code": 0,
+      "what_was_measured": "75 tests passed for DFlash confidence/configuration, logits compatibility, shared scheduler behavior, and STS parsing/application."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e6997da4e658/venv/bin/python -m pytest -q test/registered/spec/dspark/test_dspark_kernel_parity.py",
+      "exit_code": 0,
+      "what_was_measured": "One ROCm GPU test and 22 parameterized subtests passed against independent PyTorch references for the shared scheduling and verification kernels."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e6997da4e658/venv/bin/python -m compileall -q python/sglang/srt/speculative/dflash_worker_v2.py test/registered/unit/spec/test_dflash_confidence.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Modified Python compiled and the patch was whitespace-clean."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "HIP_VISIBLE_DEVICES=0 ran the shared DSpark/DFlash scheduling kernel parity suite; 1 GPU test and 22 independent numerical-reference subtests passed. See gpu-kernel-parity.log."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No compatible DFlash2 checkpoint with a trained survival head was supplied or cached, so enable_confidence_head naming, real tensor shapes, bias, dtype, optional Markov schema, and checkpoint loading remain unverified against an actual artifact.",
+    "No compatible DFlash2 target/draft pair was supplied or cached, so lossless end-to-end semantics across sampling, grammar, continuous batching, overlap relay, and live compact graph replay remain unverified.",
+    "Mixed-quality concurrent-workload throughput remains unmeasured in live DFlash2 serving.",
+    "The qualified tiny Llama fixture was not used because it validates transport and engine execution only and cannot qualify DFlash2 architecture, semantics, or throughput.",
+    "No native C/C++/CUDA/HIP/FlyDSL source changed, so no native rebuild was applicable."
+  ]
+}

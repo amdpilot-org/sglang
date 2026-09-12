@@ -1685,6 +1685,11 @@ class DFlashWorkerV2(BaseSpecWorker):
         temperatures = torch.tensor(
             calibration.temperatures, dtype=torch.float32, device=self.device
         )
+        if not torch.isfinite(temperatures).all():
+            raise ValueError(
+                "DFLASH STS calibration temperatures must remain finite after "
+                "conversion to the runtime float32 dtype."
+            )
         gamma = int(self.block_size) - 1
         if temperatures.numel() != gamma:
             raise ValueError(

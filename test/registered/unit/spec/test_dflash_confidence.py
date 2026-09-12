@@ -124,6 +124,28 @@ class TestDFlashConfidence(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "requires a DFlash2 checkpoint"):
             worker._load_confidence_sts_calibration()
 
+    def test_dflash_sts_loader_rejects_float32_overflow(self):
+        worker = object.__new__(DFlashWorkerV2)
+        worker.block_size = 3
+        worker.device = torch.device("cpu")
+        worker.ps = SimpleNamespace(tp_rank=0)
+        head = DSparkConfidenceHead(
+            hidden_size=2, markov_rank=0, with_markov=False
+        )
+        initial_temperatures = head.sts_temperatures.clone()
+        worker.draft_model = SimpleNamespace(confidence_head=head)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as calibration:
+            calibration.write('{"temperatures":[1e308,2.0]}')
+            calibration.flush()
+            worker.server_args = SimpleNamespace(
+                speculative_dflash_confidence_sts_path=calibration.name
+            )
+            with self.assertRaisesRegex(
+                ValueError, "remain finite after conversion to.*float32"
+            ):
+                worker._load_confidence_sts_calibration()
+        torch.testing.assert_close(head.sts_temperatures, initial_temperatures)
+
     def test_trained_head_overrides_selector_lattice_confidence(self):
         worker = object.__new__(DFlashWorkerV2)
         worker.block_size = 3
