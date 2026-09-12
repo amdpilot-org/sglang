@@ -1554,6 +1554,32 @@ class TokenizerMetricsCollector(_StatLoggerDIMixin):
             labelnames=[*labels.keys(), "phase"],
             multiprocess_mode="mostrecent",
         )
+        self.mm_media_download_seconds = Histogram(
+            name="sglang:mm_media_download_seconds",
+            documentation="HTTP(S) multimodal media download latency per item.",
+            labelnames=[*labels.keys(), "modality"],
+        )
+        self.mm_media_download_bytes = Histogram(
+            name="sglang:mm_media_download_bytes",
+            documentation="Downloaded multimodal media size in bytes per item.",
+            labelnames=[*labels.keys(), "modality"],
+            buckets=(1_024, 10_240, 102_400, 1_048_576, 10_485_760, 104_857_600),
+        )
+        self.mm_media_load_seconds = Histogram(
+            name="sglang:mm_media_load_seconds",
+            documentation="Full multimodal media fetch and decode latency per item.",
+            labelnames=[*labels.keys(), "modality"],
+        )
+        self.mm_load_data_seconds = Histogram(
+            name="sglang:mm_load_data_seconds",
+            documentation="Per-request multimodal media loading stage latency.",
+            labelnames=labels.keys(),
+        )
+        self.mm_processor_seconds = Histogram(
+            name="sglang:mm_processor_seconds",
+            documentation="Per-request multimodal processor call latency.",
+            labelnames=labels.keys(),
+        )
 
         self.prompt_tokens_total = Counter(
             name="sglang:prompt_tokens_total",
@@ -1845,6 +1871,27 @@ class TokenizerMetricsCollector(_StatLoggerDIMixin):
         self.histogram_time_to_first_token.labels(
             **labels, is_streaming="true" if stream else "false"
         ).observe(value)
+
+    def observe_mm_media_load(
+        self,
+        *,
+        modality: str,
+        load_seconds: float,
+        download_seconds: Optional[float],
+        download_bytes: Optional[int],
+    ) -> None:
+        labels = {**self.labels, "modality": modality}
+        self.mm_media_load_seconds.labels(**labels).observe(load_seconds)
+        if download_seconds is not None:
+            self.mm_media_download_seconds.labels(**labels).observe(download_seconds)
+        if download_bytes is not None:
+            self.mm_media_download_bytes.labels(**labels).observe(download_bytes)
+
+    def observe_mm_load_data(self, seconds: float) -> None:
+        self.mm_load_data_seconds.labels(**self.labels).observe(seconds)
+
+    def observe_mm_processor(self, seconds: float) -> None:
+        self.mm_processor_seconds.labels(**self.labels).observe(seconds)
 
     def check_time_to_first_token_straggler(self, value: float) -> bool:
         # Injected backends (e.g. Ray) route metrics out of process and can't
