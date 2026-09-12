@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30015",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced corruption in the checked-out GroupCoordinator with TP-rank-distinct tensors, then restricted the PP send-allgather optimization to the known TP-replicated hidden_states and residual keys. Other proxy and auxiliary tensors are now sent whole to the matching pipeline rank.",
+  "tests": [
+    {
+      "command": "SGLANG_ONE_VISIBLE_DEVICE_PER_PROCESS=1 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-300a724a2692/venv/bin/python -m torch.distributed.run --standalone --nproc-per-node=4 reports/j-300a724a2692/repro_pp_tp_tensor_dict.py (before fix)",
+      "exit_code": 1,
+      "what_was_measured": "Actual GroupCoordinator send_tensor_dict/recv_tensor_dict behavior. Both receiving TP ranks got [1,1,1,1,2,2,2,2], matching neither rank-local sender; the replicated boundary case passed. Raw output: reports/j-300a724a2692/raw/repro_before.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-300a724a2692/venv/bin/python -m pytest -q test/registered/unit/distributed/test_parallel_state.py",
+      "exit_code": 0,
+      "what_was_measured": "7 unit tests passed, including allowlisted divisible tensors being sliced, non-allowlisted divisible tensors remaining whole, and allowlisted non-divisible tensors remaining whole. Raw output: reports/j-300a724a2692/raw/unit_parallel_state_full.log"
+    },
+    {
+      "command": "SGLANG_ONE_VISIBLE_DEVICE_PER_PROCESS=1 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-300a724a2692/venv/bin/python -m torch.distributed.run --standalone --nproc-per-node=4 reports/j-300a724a2692/repro_pp_tp_tensor_dict.py (after fix)",
+      "exit_code": 0,
+      "what_was_measured": "Both receiving TP ranks exactly matched their rank-local sharded sender while the replicated tensor still round-tripped through send-allgather. Raw output: reports/j-300a724a2692/raw/repro_after_final.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-300a724a2692/venv/bin/python reports/j-300a724a2692/gpu_send_allowlist.py",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI355X (gfx950), actual send_tensor_dict selection kept an 8-element sharded CUDA tensor whole and sliced an 8-element allowlisted replicated CUDA tensor to 4 elements. Raw output: reports/j-300a724a2692/raw/gpu_send_allowlist.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-300a724a2692/venv/bin/python -m py_compile python/sglang/srt/distributed/parallel_state.py python/sglang/srt/managers/scheduler_pp_mixin.py",
+      "exit_code": 0,
+      "what_was_measured": "Modified Python modules compile successfully."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The send-side allowlist logic ran on CUDA tensors on the assigned AMD Instinct MI355X/gfx950; see raw/gpu_send_allowlist.log. The four-rank topology reproduction used Gloo and CPU payloads because only one GPU was assigned."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No 4-GPU RCCL tp=2/pp=2 run was possible with the assigned single GPU; the exact four-rank communication path was instead reproduced with Gloo using the actual GroupCoordinator implementation.",
+    "No RWKV-7 weights or model-specific implementation were available, so model semantics and greedy decoding were not tested.",
+    "The qualified tiny Llama serving fixture was not used because it cannot create the model-specific TP-sharded PPProxyTensors needed to validate this defect.",
+    "No native code changed, so no native rebuild was applicable."
+  ]
+}

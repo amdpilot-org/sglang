@@ -41,6 +41,7 @@ from contextlib import nullcontext
 from unittest.mock import Mock, patch
 
 import pytest
+import torch
 
 from sglang.test.ci.ci_register import register_cpu_ci
 
@@ -48,6 +49,39 @@ register_cpu_ci(est_time=11, suite="base-a-test-cpu")
 
 # Import the actual parallel_state module
 parallel_state = pytest.importorskip("sglang.srt.distributed.parallel_state")
+
+
+def test_send_tensor_dict_all_gather_key_allowlist():
+    coordinator = parallel_state.GroupCoordinator.__new__(
+        parallel_state.GroupCoordinator
+    )
+    coordinator.world_size = 2
+    coordinator.rank_in_group = 0
+    coordinator.ranks = [0, 1]
+    coordinator.device_group = object()
+    coordinator.cpu_group = object()
+    coordinator.send_object = Mock(return_value=[])
+
+    all_gather_group = Mock(world_size=2, rank_in_group=1)
+    replicated = torch.arange(8.0)
+    sharded = torch.arange(8.0) + 10
+    indivisible = torch.arange(7.0)
+
+    with patch.object(parallel_state.torch.distributed, "send") as send:
+        coordinator.send_tensor_dict(
+            {
+                "replicated": replicated,
+                "sharded": sharded,
+                "indivisible": indivisible,
+            },
+            all_gather_group=all_gather_group,
+            all_gather_keys={"replicated", "indivisible"},
+        )
+
+    sent_tensors = [call.args[0] for call in send.call_args_list]
+    assert torch.equal(sent_tensors[0], replicated.reshape(2, -1)[1])
+    assert torch.equal(sent_tensors[1], sharded)
+    assert torch.equal(sent_tensors[2], indivisible)
 
 
 def test_custom_allreduce_precedes_symmetric_memory_pynccl():
