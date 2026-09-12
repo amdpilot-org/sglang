@@ -1,0 +1,47 @@
+Candidate: c1723a1a501e1241bfaceaac0480c6ae86d2fdff
+Candidate PR: https://github.com/amdpilot-org/sglang/pull/3210
+Independent review PR: https://github.com/amdpilot-org/sglang/pull/3265
+Pinned SageAttention: d9704247a5139ab4c03bf7fc6b35cc0e2cbb5ea4
+
+The missing comma is real. Python evaluates the setup.py assignment as:
+
+  SUPPORTED_ARCHS = ['10.012.0', '8.0', '8.6', '8.9', '9.0']
+
+However, an AST use-site audit of that exact setup.py found:
+
+  assignment_lines = [47]
+  load_lines = []
+
+Therefore SUPPORTED_ARCHS is dead data at this revision and cannot reject an
+SM120 source install. The active setup.py path independently has a
+capability.startswith("12.0") branch which selects sm_120a, and the public
+sageattn dispatcher has an arch == "sm120" branch. The review's claimed SM120
+source-install rejection was not reproduced. No SM120 compiler or runtime
+claim is made because this node has no NVIDIA architecture or CUDA toolkit.
+
+Prepared environment:
+
+  torch 2.11.0+rocm7.2
+  HIP 7.2.26015
+  device AMD Instinct MI355X
+  reported capability (9, 5)
+  sageattention import: ModuleNotFoundError
+
+Focused candidate regression after consolidation:
+
+  PYTHONPATH=/job/repo/python \
+    /tmp/amdpilot-repo-j-c6b3d3f5f8d9/venv/bin/python -m pytest -q \
+    test/registered/unit/layers/test_sage_attention_backend.py \
+    test/registered/unit/server_args/test_server_args.py \
+    -k 'sage or SageAttentionAdmission'
+
+  10 passed, 226 deselected
+
+The parametrized adapter test executed on the AMD GPU, but its injected
+callable is PyTorch scaled_dot_product_attention. It verifies SGLang tensor
+layout, GQA expansion, scale and causal argument plumbing only. It does not
+import SageAttention or execute an INT8 Q/K kernel.
+
+The candidate's existing failing-before/passing-after evidence for the real
+SM100 defect is retained at reports/j-34b50045c618/. The pinned public
+dispatcher has no sm100 branch, so rejecting SM100 remains justified.
