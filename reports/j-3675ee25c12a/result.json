@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19090",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared base already contained the HTTP diffusion sleep/wake implementation from upstream PR #22659. This contribution restores the missing DiffGenerator local/offline lifecycle contract by adding sleep, wake, and disk-refit methods with consistent error handling, tests the complete client request sequence, adds a real GPU offload/wake numerical regression, and documents the supported workflow and limitations.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-3675ee25c12a/venv/bin/python -c '<assert DiffGenerator lifecycle methods exist>'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: release_memory_occupation, resume_memory_occupation, and update_weights_from_disk were all absent from DiffGenerator. Raw output: reports/j-3675ee25c12a/raw/baseline_diffgenerator_lifecycle.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3675ee25c12a/venv/bin/python -m pytest -q -s python/sglang/multimodal_gen/test/unit/test_diffusion_generator_lifecycle.py",
+      "exit_code": 0,
+      "what_was_measured": "Six lifecycle tests passed, covering sleep/wake/refit request construction, scheduler and payload failures, empty refit paths, idempotent calls, device transitions, and post-wake numerical equivalence to an independently computed CPU linear reference. Raw output: reports/j-3675ee25c12a/raw/test_diffusion_generator_lifecycle.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3675ee25c12a/venv/bin/python <reports/j-3675ee25c12a GPU numerical round-trip script>",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X with torch 2.11.0+rocm7.2/HIP 7.2.26015, a 4096x4096 Linear module released 67108864 allocated GPU bytes during sleep and matched the independent CPU reference after wake with max absolute error 1.519918441772461e-06. Raw output: reports/j-3675ee25c12a/raw/gpu_numerical_roundtrip.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3675ee25c12a/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_component_residency.py::test_snapshot_offload_sleep_uses_existing_host_storage python/sglang/multimodal_gen/test/unit/test_weight_snapshot.py::test_sleep_keeps_the_pin_lease_and_existing_pins_are_reused",
+      "exit_code": 0,
+      "what_was_measured": "Two existing GPU regressions passed for compatibility with snapshot offload, mmap/pinned host storage reuse, and host pin leases. Raw output: reports/j-3675ee25c12a/raw/test_existing_sleep_compatibility.txt"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/multimodal_gen/runtime/entrypoints/diffusion_generator.py python/sglang/multimodal_gen/test/unit/test_diffusion_generator_lifecycle.py docs/docs/sglang-diffusion/sleep_and_wake.mdx docs/docs/sglang-diffusion/index.mdx docs/docs.json",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, syntax, and policy hooks passed for all changed source and documentation files. Raw output: reports/j-3675ee25c12a/raw/precommit.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Qwen-Image, Z-Image, or other diffusion checkpoint was available locally, so model-level HTTP generation before/after wake and semantic image accuracy were not run.",
+    "The requested sleep+wake+refit versus kill-and-relaunch timing comparison requires a real diffusion checkpoint and was not measured; the new Python API makes that full sequence callable but does not supply unsupported benchmark claims.",
+    "FSDP inference is explicitly unsupported by the existing MemoryOccupationController and was not changed.",
+    "Distributed diffusion sleep/wake and layerwise-offloaded full-model execution were not exercised; only the existing focused GPU compatibility tests were run.",
+    "The implementation is coarse-grained CPU offload, not virtual-address-preserving torch_memory_saver behavior, and does not preserve CUDA graphs.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable."
+  ]
+}

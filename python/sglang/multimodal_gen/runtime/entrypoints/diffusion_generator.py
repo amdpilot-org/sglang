@@ -26,6 +26,11 @@ from sglang.multimodal_gen.runtime.entrypoints.control_requests import (
     ShutdownReq,
     UnmergeLoraWeightsReq,
 )
+from sglang.multimodal_gen.runtime.entrypoints.post_training.io_struct import (
+    ReleaseMemoryOccupationReqInput,
+    ResumeMemoryOccupationReqInput,
+    UpdateWeightFromDiskReqInput,
+)
 from sglang.multimodal_gen.runtime.entrypoints.utils import (
     GenerationResult,
     expand_request_outputs,
@@ -558,6 +563,63 @@ class DiffGenerator:
         Sends a request to the scheduler and waits for a response.
         """
         return sync_scheduler_client.forward(batch)
+
+    def _send_lifecycle_request(self, req: Any, operation: str) -> dict[str, Any]:
+        """Send a sleep, wake, or refit request and normalize scheduler errors."""
+        try:
+            response = sync_scheduler_client.forward(req)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to {operation}: scheduler request failed: {exc}"
+            ) from exc
+        if response is None:
+            raise RuntimeError(f"Failed to {operation}: scheduler returned no response")
+        if error := getattr(response, "error", None):
+            raise RuntimeError(f"Failed to {operation}: {error}")
+        output = getattr(response, "output", None)
+        if not isinstance(output, dict):
+            raise RuntimeError(
+                f"Failed to {operation}: scheduler returned no status payload"
+            )
+        if not output.get("success", False):
+            raise RuntimeError(
+                f"Failed to {operation}: {output.get('message', 'unknown error')}"
+            )
+        return output
+
+    def release_memory_occupation(self) -> dict[str, Any]:
+        """Sleep the diffusion engine by moving active model weights to CPU."""
+        return self._send_lifecycle_request(
+            ReleaseMemoryOccupationReqInput(), "release memory occupation"
+        )
+
+    def resume_memory_occupation(self) -> dict[str, Any]:
+        """Wake the diffusion engine by restoring weights to their prior devices."""
+        return self._send_lifecycle_request(
+            ResumeMemoryOccupationReqInput(), "resume memory occupation"
+        )
+
+    def update_weights_from_disk(
+        self,
+        model_path: str,
+        *,
+        flush_cache: bool = True,
+        target_modules: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Refit model weights from disk without restarting the engine.
+
+        A sleeping engine must be resumed before calling this method.
+        """
+        if not model_path:
+            raise ValueError("model_path must not be empty")
+        return self._send_lifecycle_request(
+            UpdateWeightFromDiskReqInput(
+                model_path=model_path,
+                flush_cache=flush_cache,
+                target_modules=target_modules,
+            ),
+            "update weights from disk",
+        )
 
     # LoRA
     def _send_lora_request(self, req: Any, success_msg: str, failure_msg: str):

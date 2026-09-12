@@ -1,0 +1,28 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19090",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 3065's DiffGenerator sleep, wake, and disk-refit API and fixed the independently reproduced malformed scheduler response AttributeError leaks by converting them to lifecycle-specific RuntimeError failures.",
+  "tests": [
+    {
+      "command": "At d2019b162a993952a2c4728ccad0a1b2b940fc4d: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-cec3c112657c/venv/bin/python inline malformed-response reproduction",
+      "exit_code": 1,
+      "what_was_measured": "A None scheduler response and a response missing output both leaked AttributeError before the correction. Output retained in raw/failing_before.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-cec3c112657c/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_diffusion_generator_lifecycle.py python/sglang/multimodal_gen/test/unit/test_diffusion_generator_shutdown.py python/sglang/multimodal_gen/test/unit/test_component_residency.py::test_snapshot_offload_sleep_uses_existing_host_storage python/sglang/multimodal_gen/test/unit/test_weight_snapshot.py::test_sleep_keeps_the_pin_lease_and_existing_pins_are_reused",
+      "exit_code": 0,
+      "what_was_measured": "15 lifecycle, shutdown, residency, and snapshot tests passed, including the two new malformed-response regressions."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The correction concerns DiffGenerator scheduler response validation. No real diffusion checkpoint was available. The prior synthetic GPU controller round trip exercised code already present in the base rather than the candidate transport surface and is not claimed as validation here.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No real diffusion checkpoint was run through sleep, wake, generation, and disk refit; model-specific correctness and memory behavior remain unverified.",
+    "No end-to-end sleep+wake+refit versus kill-and-relaunch timing comparison was possible without a qualifying diffusion checkpoint.",
+    "FSDP inference sleep/wake remains explicitly unsupported and raises RuntimeError.",
+    "The qualified tiny Llama fixture validates transport and engine execution only and cannot qualify diffusion architecture behavior, so it was not used as model evidence.",
+    "Distributed and CUDA-specific behavior remain unverified."
+  ]
+}
