@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31023",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "0550ec5195800baec69bdf9c67cf7a7feb2affa6",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Accept as test-only hardening: the candidate adds relevant GPU regression coverage for the planner correction already present in the recorded base. It makes no production change and does not fully verify or resolve the original TP8 CUDA Graph issue.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-007d5124beab/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate regression on the real GPU-input c128 plan_prefill path; both reported ragged shapes, uniform control, partial-warp, full-1024-thread-block, and zero-extend cases passed (3 tests)."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-007d5124beab/venv/bin/python /job/review-evidence-j-007d5124beab/adversarial_planner.py",
+      "exit_code": 0,
+      "what_was_measured": "500 independent gfx950 planner launches across 25 fixed/random cases; exact sorted IDs, cardinality, uniqueness, and the original max-ID bound all held."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-007d5124beab/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py",
+      "exit_code": 0,
+      "what_was_measured": "Adjacent DSV4 CPU/GPU planner invariants passed: 5 tests and 82 subtests."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-007d5124beab/venv/bin/python /job/review-evidence-j-007d5124beab/historical_race.py (with the five #32467-removed initialization lines temporarily restored)",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before attempt on the two reported ragged vectors: 0 bad plans in 4,000 gfx950 launches, so the timing-sensitive NVIDIA failure was not reproduced on the assigned AMD GPU."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI350X, gfx950:sramecc+:xnack-, PyTorch 2.11.0+rocm7.2 and ROCm 7.2.26015. Fresh JIT artifact: /job/.cache/sglang/jit/gfx950/sgl_kernel_jit_dpsk_v4_compress_plan/build-0bbc057a34dba450/deps-666e3e1963b72122/sgl_kernel_jit_dpsk_v4_compress_plan.so",
+  "native_rebuilt": false,
+  "native_rebuild_detail": "Candidate 0550ec5 changes no native source. The planner JIT was freshly compiled from the checkout's c_plan.cuh for gfx950; a separate native rebuild was not applicable.",
+  "remaining_counterexamples": [
+    "The exact historical A1 compact-SPS TP8 c256/2560-request reproduction has not been rerun with the corrected source.",
+    "NVIDIA B300/B30Z TP8 startup capture and sustained CUDA Graph replay are untested in this one-gfx950 environment.",
+    "Cross-rank plan agreement and NCCL/sticky-CUDA-error behavior are untested on a single GPU.",
+    "The historical racing formulation did not fail in 4,000 gfx950 launches, so no local failing-before/passing-after pair was obtained.",
+    "DeepSeek-V4-Pro-DSpark full-model execution remains untested without its weights and required NVIDIA topology."
+  ],
+  "remaining_limitations": [
+    "Assigned hardware was one AMD MI350X gfx950 GPU rather than NVIDIA B300/B30Z TP8.",
+    "No DSpark model weights were available.",
+    "The candidate is regression-only; the production correction was already in the recorded base.",
+    "Raw review evidence is retained at /job/review-evidence-j-007d5124beab/."
+  ]
+}
