@@ -1,0 +1,62 @@
+Upstream issue: https://github.com/sgl-project/sglang/issues/38980
+Mirror issue: https://github.com/amdpilot-org/sglang/issues/3288
+Candidate parent PR: https://github.com/amdpilot-org/sglang/pull/3253
+Independent review parent PR: https://github.com/amdpilot-org/sglang/pull/3287
+Exact candidate: 69a812d5542f78a804be6c48779e0298f2b4b3d3
+Recorded base: 358c163250ad3b1f62939b01ce1314a0a31a0365
+
+Environment
+-----------
+Interpreter: /tmp/amdpilot-repo-j-0ac6272a51a8/venv/bin/python
+Torch: 2.11.0+rocm7.2
+torch.version.cuda: None
+torch.version.hip: 7.2.26015
+NVIDIA GPU, nvcc, cuobjdump, CUDA flash_ops build: unavailable
+
+Source inspection
+-----------------
+The checked-in extension registers one FlashAttention operation,
+sgl_kernel::fwd, in python/sglang/kernels/aot/csrc/flash_extension.cc. Both
+public wrappers call that operation. No separately registered FA2 operation is
+wired to these wrappers, so a ver=2 dispatch cannot be implemented or claimed
+from the pinned source. The correction therefore takes the issue's alternative
+resolution and removes the misleading selector from both signatures.
+
+Candidate failing reproduction
+------------------------------
+Command:
+  TEST_FLASH_ATTN_SOURCE=/tmp/amdpilot-repro-j-0ac6272a51a8/candidate/python/sglang/kernels/aot/python/sgl_kernel/flash_attn.py /tmp/amdpilot-repo-j-0ac6272a51a8/venv/bin/python -m pytest -q python/sglang/kernels/aot/tests/test_flash_attn_public_contract.py
+Exit: 1
+Result: 2 failed, 14 passed
+Measured: both exact-candidate public signatures retained ver=3. The other
+contract tests passed, preserving the candidate's valid device, CUDA-version,
+architecture, dependency-pin, and backend-boundary behavior.
+
+Corrected regression
+--------------------
+Command:
+  /tmp/amdpilot-repo-j-0ac6272a51a8/venv/bin/python -m pytest -q python/sglang/kernels/aot/tests/test_flash_attn_public_contract.py
+Exit: 0
+Result: 16 passed
+Measured: neither wrapper advertises ver; both validate the modeled input
+device before reaching the instrumented native boundary; supported capability
+and CUDA-version decisions and the dependency pin are retained.
+
+Additional checks
+-----------------
+Command:
+  /tmp/amdpilot-repo-j-0ac6272a51a8/venv/bin/python -m py_compile python/sglang/kernels/aot/python/sgl_kernel/flash_attn.py python/sglang/kernels/aot/tests/test_flash_attn_public_contract.py
+Exit: 0
+
+Command:
+  git diff --check
+Exit: 0
+
+Native limitation
+-----------------
+This ROCm-only job did not rebuild the CUDA dependency, inspect cubins, or run
+SM89 numerical tests. It therefore does not independently confirm the pinned
+native correction or SM86-cubin execution on SM89. The pin and archive hash are
+preserved from candidate 69a812d because source-issue evidence identifies a
+shape-specific shared-memory/local-KV correction, and absence of local NVIDIA
+hardware is not evidence for removing SM8x support.
