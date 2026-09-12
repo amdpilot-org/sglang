@@ -27,8 +27,13 @@ from sglang.srt.layers.vocab_parallel_embedding import (
 from sglang.srt.lora.backend.base_backend import BaseLoRABackend
 from sglang.srt.lora.utils import LoRABatchInfo, get_lm_head_lora_b_shard_size
 from sglang.srt.runtime_context import get_parallel
+from sglang.srt.utils import is_pin_memory_available
 
 _SGLANG_EXPERIMENTAL_LORA_OPTI = envs.SGLANG_EXPERIMENTAL_LORA_OPTI.get()
+
+
+def _pin_memory_available(lora_backend: BaseLoRABackend) -> bool:
+    return is_pin_memory_available(lora_backend.device)
 
 
 def unwrap_lora_layer(module: nn.Module) -> nn.Module:
@@ -134,7 +139,7 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
             offsets,
             dtype=torch.int32,
             device="cpu",
-            pin_memory=True,
+            pin_memory=_pin_memory_available(lora_backend),
         )
 
     def set_lora_info(
@@ -320,7 +325,7 @@ class ParallelLMHeadWithLoRA(BaseLayerWithLoRA):
             offsets,
             dtype=torch.int32,
             device="cpu",
-            pin_memory=True,
+            pin_memory=_pin_memory_available(lora_backend),
         )
 
     def set_lora_info(
@@ -467,7 +472,7 @@ class ColumnParallelLinearWithLoRA(BaseLayerWithLoRA):
             offsets,
             dtype=torch.int32,
             device="cpu",
-            pin_memory=True,
+            pin_memory=_pin_memory_available(lora_backend),
         )
 
     def set_lora_info(
@@ -570,7 +575,9 @@ class MergedColumnParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
             dtype=torch.int32,
             device=next(self.base_layer.parameters()).device,
         )
-        self.output_offset_cpu = self.output_offset.cpu().pin_memory()
+        self.output_offset_cpu = self.output_offset.cpu()
+        if _pin_memory_available(self.lora_backend):
+            self.output_offset_cpu = self.output_offset_cpu.pin_memory()
         self.max_out_dim = max(partition_sizes)
         self.use_gate_up_lora = (
             lora_n_slices == 2 and partition_sizes[0] == partition_sizes[1]
@@ -697,7 +704,7 @@ class QKVParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
             offsets,
             dtype=torch.int32,
             device="cpu",
-            pin_memory=True,
+            pin_memory=_pin_memory_available(lora_backend),
         )
 
         # For computing number of launched blocks
@@ -785,7 +792,7 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
             offsets,
             dtype=torch.int32,
             device="cpu",
-            pin_memory=True,
+            pin_memory=_pin_memory_available(self.lora_backend),
         )
 
     def apply_lora(self, base_output: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
