@@ -1,0 +1,53 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33696",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1854",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1811",
+  "candidate_commit": "5183bfec4e04d9c3082d0cd8d482cbfa0cdc7970",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduced the concurrent pause/continue orphan. The exact candidate correlates each waiter and router broadcast by operation ID, cleans cancelled and failed operations, preserves late-broadcast state updates, and passed both its regression and independent adversarial review cases.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9b5b923d9f78/venv/bin/python /job/review-evidence-j-9b5b923d9f78/review_pause_continue.py --expect base",
+      "exit_code": 0,
+      "what_was_measured": "On prepared base 358c163, reverse broadcasts left pause_done=False while continue_done=True, reproducing the original orphan; final is_pause still became true."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9b5b923d9f78/venv/bin/python -m pytest -q test/registered/unit/managers/test_multi_tokenizer_mixin.py -k PauseContinueWaiters",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit 5183bfec, all four candidate waiter regressions passed (4 passed, 6 deselected)."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9b5b923d9f78/venv/bin/python /job/review-evidence-j-9b5b923d9f78/review_pause_continue.py --expect candidate",
+      "exit_code": 0,
+      "what_was_measured": "Independent original reproduction plus three-way reverse ordering, unique correlation IDs, cancellation/late broadcast, dispatch failure cleanup, and router fan-out/forwarding including abort skip all passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9b5b923d9f78/venv/bin/python -m pytest -q test/registered/unit/managers/test_multi_tokenizer_mixin.py",
+      "exit_code": 0,
+      "what_was_measured": "The complete modified unit file passed: 10 tests."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9b5b923d9f78/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_pause_generation.py",
+      "exit_code": 0,
+      "what_was_measured": "Existing scheduler pause/continue boundary coverage passed: 21 tests and 2 subtests."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 5183bfec4e04d9c3082d0cd8d482cbfa0cdc7970",
+      "exit_code": 2,
+      "what_was_measured": "Candidate committed raw pytest logs contain trailing whitespace; no functional source counterexample was identified."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The issue is asyncio/IPC waiter correlation and uses no GPU computation. No unrelated GPU smoke was used as proof.",
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "The candidate changes only Python, tests, and reports. repository-environment.json reports native=null, so a native rebuild was not applicable.",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No full HTTP server/model-serving or real multi-process deployment was run because model weights were not supplied; review exercised the actual TokenizerWorker and MultiTokenizerRouter code deterministically.",
+    "The review does not qualify model semantic accuracy, GPU kernels, a distributed workload, or multi-node behavior.",
+    "The candidate's committed raw pytest logs contain trailing whitespace, causing git diff --check to return 2; this is non-functional repository hygiene."
+  ]
+}
