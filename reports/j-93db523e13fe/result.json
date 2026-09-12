@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38980",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "Exact candidate 4b304308 independently fixes the Python version-selection and device-validation contract, and its pinned archive contains the stated SM8x source correction. The original SM89 native launch failure cannot be independently rebuilt or executed in the prepared ROCm-only environment, so full resolution remains unverified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-93db523e13fe/venv/bin/python < instrumented recorded-base contract script",
+      "exit_code": 0,
+      "what_was_measured": "At base 358c163, both wrappers exposed ver; ver=2 reached the same sgl_kernel::fwd boundary; SM89 was accepted; CUDA 12.10 was incorrectly rejected by lexicographic comparison."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-93db523e13fe/venv/bin/python -m pytest -q python/sglang/kernels/aot/tests/test_flash_attn_public_contract.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 4b304308, 16 tests passed for public signatures, dependency pin, numeric CUDA comparison, capability decisions, input-device routing, and rejection before the instrumented backend."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-93db523e13fe/venv/bin/python < independent candidate adversarial contract script",
+      "exit_code": 0,
+      "what_was_measured": "Checked the exact checked-out source for CUDA 12.2/12.3/12.10/13.0, SM80/SM89/SM90/SM91/SM100, both wrappers, backend non-entry on rejection, and TypeError for removed ver=2."
+    },
+    {
+      "command": "curl -L https://github.com/sgl-project/sgl-attn/archive/149a54916c6a1b940f7ff1afd95f078349a9c471.tar.gz; sha256sum; inspect archive",
+      "exit_code": 0,
+      "what_was_measured": "Archive hash exactly matched the candidate pin and source contained the SM8x shared-memory/local-KV changes and CUDA numerical regression."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-93db523e13fe/venv/bin/python -m build --wheel --no-isolation --config-setting=build-dir=/tmp/amdpilot-review-j-93db523e13fe/native-build .",
+      "exit_code": 1,
+      "what_was_measured": "Native rebuild prerequisite failed because the candidate package requires torch==2.13.0 while the mandated prepared interpreter has torch 2.11.0+rocm7.2."
+    },
+    {
+      "command": "cmake -S /job/repo/python/sglang/kernels/aot -B /tmp/amdpilot-review-j-93db523e13fe/cmake-build -DCMAKE_PREFIX_PATH=<prepared torch prefix> -DSGL_KERNEL_COMPILE_THREADS=1",
+      "exit_code": 1,
+      "what_was_measured": "Direct native configuration failed because nvcc/CUDA toolkit is unavailable."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned device is AMD Instinct MI350X with Torch 2.11.0+rocm7.2 and HIP 7.2. No NVIDIA GPU or CUDA-native flash_ops is available; no SM89 numerical execution occurred."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Rebuild the pinned native dependency and reproduce the original SM89 fp16/bf16 head-dimension-256 split-attention case against an independent numerical reference.",
+    "Execute SM89 local split and shuffled paged-KV cases, including CUDA Graph replay after V changes.",
+    "Inspect the rebuilt flash_ops CUDA binary and demonstrate actual SM86-cubin execution on SM89."
+  ],
+  "remaining_limitations": [
+    "ROCm-only host: AMD MI350X, no NVIDIA GPU, nvcc, or cuobjdump.",
+    "The mandated prepared Torch 2.11.0+rocm7.2 does not satisfy the kernel package's torch==2.13.0 build requirement.",
+    "The installed prepared sgl_kernel package has common_ops but no importable flash_ops, so it cannot validate the candidate native path."
+  ]
+}
