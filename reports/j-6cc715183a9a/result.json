@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/28312",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "12e81109f0ecb3fa6bf480acbcde8b15c6589d1b",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Accept the candidate as test-only hardening. The recorded base already contains the runtime None-to-slot-0 guard; the candidate adds accurate regression coverage and no runtime/native changes. The exact original B300 TP=2 Qwen3.5 serving incident remains unverified in the available single-gfx950 environment.",
+  "tests": [
+    {
+      "command": "Temporarily remove only the existing None-to-0 guard on base 358c163250ad3b1f62939b01ce1314a0a31a0365, then invoke set_mamba_track_indices_from_reqs with [None, 1] using PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6cc715183a9a/venv/bin/python",
+      "exit_code": 1,
+      "what_was_measured": "Independent failing-before reproduction raised TypeError: 'NoneType' object cannot be interpreted as an integer at the same torch.tensor boundary as the report. Evidence: reports/j-6cc715183a9a/raw/failing_before_independent.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6cc715183a9a/venv/bin/python -m pytest -q test/registered/unit/managers/test_mamba_track_indices.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 12e81109f0ecb3fa6bf480acbcde8b15c6589d1b, all-None, mixed None/valid, and explicit override cases passed (3 passed). Evidence: reports/j-6cc715183a9a/raw/candidate_pytest.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6cc715183a9a/venv/bin/python < independent gfx950 helper test at exact candidate commit",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X gfx950, non-identity pool ordering and mixed [None, 1, None] produced [400, 101, 300], and explicit [1, 0, 1] produced [401, 100, 301], exactly matching independent CPU references. Evidence: reports/j-6cc715183a9a/raw/candidate_adversarial_gpu.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "reports/j-6cc715183a9a/raw/candidate_adversarial_gpu.log records AMD Instinct MI355X, gfx950:sramecc+:xnack-, the repository source path, and exact output/reference equality.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The full Qwen3.5-397B-A17B-FP8 HTTP serving workload on two NVIDIA B300 GPUs with CUDA/TensorRT and TP=2 was not run.",
+    "Long-running production traffic and the request/cache history that triggered the open issue were unavailable.",
+    "The helper fixture does not establish that slot 0 contains semantically valid model state for every real scheduler state that can reach Spec-v2 verification."
+  ],
+  "remaining_limitations": [
+    "Qwen3.5-397B-A17B-FP8 weights and NVIDIA B300 hardware were unavailable.",
+    "The review environment provides one AMD Instinct MI355X gfx950 GPU with ROCm 7.2, so CUDA/TensorRT and TP=2 behavior are unverified.",
+    "No full model, HTTP serving, distributed workload, production traffic, or semantic-accuracy reproduction is claimed.",
+    "No native code changed between the base and candidate; no native rebuild was applicable."
+  ]
+}
+
