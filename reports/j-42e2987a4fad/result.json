@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19087",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Added opt-in hierarchical diffusion startup profiling via SGLANG_DIFFUSION_STARTUP_PROFILE. The profile covers Scheduler initialization, ZMQ setup, GPU worker/device/distributed initialization, pipeline discovery and construction, config loading, every named component load, pipeline initialization, and stage creation. The profiler is disabled by default, performs no clock reads or tree allocation while disabled, resets safely after fork, and emits one rank-zero summary. Verified on the native SGLang Qwen-Image pipeline using one AMD Instinct MI355X.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-42e2987a4fad/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_startup_profiler.py",
+      "exit_code": 0,
+      "what_was_measured": "Five unit tests covered disabled no-clock/no-tree behavior, nested parent-relative percentages, independent top-level siblings, exception-safe stack restoration, and fork/PID isolation."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_DIFFUSION_STARTUP_PROFILE=1 /tmp/amdpilot-repo-j-42e2987a4fad/venv/bin/python -c 'from sglang.cli.main import main; main()' generate --model-path /tmp/amdpilot-repo-j-42e2987a4fad/hf-cache/models--Qwen--Qwen-Image/snapshots/75e0b4be04f60ec59a75f475837eced720f823b6 --performance-mode speed --warmup-mode off --prompt 'A red square centered on a white background' --height 256 --width 256 --num-inference-steps 1 --seed 17 --output-path /tmp/amdpilot-repo-j-42e2987a4fad/qwen-output --save-output",
+      "exit_code": 0,
+      "what_was_measured": "Actual Qwen-Image startup and one-step GPU inference on ROCm. The profile reported 20.94 s Scheduler initialization, 7.48 s distributed initialization, 13.14 s load_modules, and per-component timings (transformer 9.25 s, text encoder 3.59 s, VAE 0.18 s, tokenizer 0.11 s, scheduler 0.001 s). Inference saved a valid 256x256 RGB PNG with SHA256 4fb0c7ceedb9da5d54393af7e1033e9ef9364c514d28ccb72d208a166a51a7c3. Full output is retained in qwen_image_gpu.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-42e2987a4fad/venv/bin/python -m py_compile python/sglang/multimodal_gen/envs.py python/sglang/multimodal_gen/runtime/utils/startup_profiler.py python/sglang/multimodal_gen/runtime/managers/gpu_worker.py python/sglang/multimodal_gen/runtime/managers/scheduler.py python/sglang/multimodal_gen/runtime/pipelines_core/__init__.py python/sglang/multimodal_gen/runtime/pipelines_core/composed_pipeline_base.py python/sglang/multimodal_gen/test/unit/test_startup_profiler.py",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python modules compiled successfully with the prepared interpreter."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-42e2987a4fad/venv/bin/python -m ruff check <changed files>",
+      "exit_code": 1,
+      "what_was_measured": "Unavailable tooling: the pinned prepared interpreter does not contain the ruff module (No module named ruff). No package installation or pinned-stack modification was attempted."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One assigned AMD Instinct MI355X, torch 2.11.0+rocm7.2 / HIP 7.2.26015. Qwen-Image loaded a 38.05 GB transformer and 14.22 GB text encoder, executed text encoding, one denoising step and VAE decoding, and saved the PNG recorded in qwen_image_gpu.log.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The persistent profile begins inside each scheduler worker. Python import time, CLI argument preparation, parent-process pipe creation/process spawning, and the parent's wait-for-ready duration are not included in the hierarchical worker summary; cross-process phases cannot be represented as synchronous child phases without explicit IPC aggregation.",
+    "Only the assigned single AMD MI355X path was exercised. Multi-GPU rank-zero suppression, NVIDIA CUDA, Intel XPU, Apple MPS, Ascend NPU, and disaggregated deployments were not run on unavailable hardware/topologies.",
+    "The GPU run validates startup instrumentation and engine execution, not semantic image quality. No independent numerical reference is applicable because the change does not alter model numerics; the generated artifact metadata and checksum are retained as execution evidence.",
+    "No native code changed, so no native rebuild was applicable. Torch, ROCm, and the pinned environment were left intact.",
+    "The offline generator emitted its pre-existing forced-cleanup warning after successfully saving output; no worker remained afterward."
+  ]
+}
