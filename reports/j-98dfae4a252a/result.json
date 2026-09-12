@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38360",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/861",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/816",
+  "candidate_commit": "fc221c29a238457b74ee4e2b5ee26e32cb299982",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The candidate fixes the original single-label /v1/score response-shape defect at the production tokenizer-manager boundary. Scalar scheduler outputs become one-element rows, existing row-shaped and multi-label outputs are preserved, and ScoringResponse accepts the result.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-98dfae4a252a/venv/bin/python /job/review-evidence-j-98dfae4a252a/score_contract_probe.py (base commit)",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced the reported failure: issue-valued Python scalars produced Pydantic list_type validation errors, while existing row-shaped and multi-label inputs remained valid. Raw output: reports/j-98dfae4a252a/raw/base_contract_probe.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-98dfae4a252a/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_score_results.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression for issue scalars, scalar softmax, prompt-token accounting, and unchanged multi-label vectors: 3 passed. Raw output: reports/j-98dfae4a252a/raw/candidate_regression.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-98dfae4a252a/venv/bin/python /job/review-evidence-j-98dfae4a252a/score_contract_probe.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Independent boundary cases validated issue floats, integer scalars, scalar softmax, pre-shaped single-label rows, and multi-label vectors through ScoringResponse. A raw 0-D tensor injection remains invalid but is outside the actual scheduler transport representation. Raw output: reports/j-98dfae4a252a/raw/candidate_contract_probe.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-98dfae4a252a/venv/bin/python /job/review-evidence-j-98dfae4a252a/gpu_pooler_probe.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, actual CrossEncodingPooler output shape (2,) and issue values matched an independent tensor reference exactly; scheduler-style transport produced Python floats and the candidate validated [[5.875], [-10.109375]] through ScoringResponse. Raw output: reports/j-98dfae4a252a/raw/candidate_gpu_pooler_probe.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-98dfae4a252a/venv/bin/python -m pytest -q test/registered/unit/layers/test_pooler_score_and_pool.py test/registered/prefill_only/test_serving_rerank.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Adjacent pooler and rerank behavior: 21 passed. Raw output: reports/j-98dfae4a252a/raw/candidate_adjacent_tests.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X, gfx950:sramecc+:xnack-, executed the actual CrossEncodingPooler and exact numerical comparison."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "BAAI/bge-reranker-v2-m3 weights were unavailable, so the full BGE server and original HTTP curl were not executed.",
+    "The deterministic GPU fixture validates the complete reported shape contract, not BGE semantic accuracy.",
+    "Validation was on AMD gfx950 with ROCm 7.2 and PyTorch 2.11.0; the reporter's NVIDIA A10/CUDA environment was not available.",
+    "No native code changed and the prepared environment declares no separate native component, so no native rebuild was applicable."
+  ]
+}
