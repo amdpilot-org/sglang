@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38580",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the three-to-four-row DSA planner mismatch and its focused tests pass, but it does not establish the original issue's required safe execution extent. In particular, eager padding zero-fills out_cache_loc, the DSA forward writes every physical K row through that tensor, and the new validator accepts the synthetic cache location solely because its length matches. Thus a padded row can write cache slot 0 and overwrite real KV state. This is a partial metadata-shape fix plus test hardening, not a full original-issue fix.",
+  "tests": [
+    {
+      "command": "At base 358c163250ad3b1f62939b01ce1314a0a31a0365: PYTHONPATH=python /tmp/amdpilot-repo-j-23e2825dd434/venv/bin/python /tmp/amdpilot-repo-j-23e2825dd434/review_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "The recorded base predicted and produced only 3 DSA metadata rows for a 3-token batch whose attention-TP physical extent is 4, reproducing the original padding mismatch (predicted_rows=3, padded_cache_rows=3)."
+    },
+    {
+      "command": "At candidate 0b4099988e6bd675e3ff4ab159afa37eaeba3b2f: HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-23e2825dd434/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_eager_metadata_extent.py test/registered/kernel/attention/test_dsa_padding_metadata.py test/registered/unit/model_executor/test_forward_metadata_plan_record.py",
+      "exit_code": 0,
+      "what_was_measured": "14 focused candidate tests passed, including GPU tensor execution of the 3-to-4 attention-TP padding helper and CPU validation cases. Imports resolved to /job/repo/python/sglang; no native source changed."
+    },
+    {
+      "command": "At candidate 0b4099988e6bd675e3ff4ab159afa37eaeba3b2f: PYTHONPATH=python /tmp/amdpilot-repo-j-23e2825dd434/venv/bin/python /tmp/amdpilot-repo-j-23e2825dd434/review_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate predicts/pads 4 metadata rows but its validator accepts out_cache_loc=[10,11,12,0]. Source tracing confirms _pad_inputs_to_size zero-fills this tensor and DSA forward passes the full tensor and K rows to set_mla_kv_buffer."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The candidate GPU regression ran on one AMD Instinct MI350X (gfx950) with torch 2.11.0+rocm7.2 and ROCm 7.2.26015. This exercised GPU padding tensors, not an end-to-end DeepSeek DSA model/kernel execution."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A DRAFT_EXTEND_V2 batch padded from three real token rows to four physical rows gets a zero-filled synthetic out_cache_loc entry. validate_preplanned_metadata_extent accepts it because kv_rows == physical_tokens, while forward_extend writes all physical K rows using that location; the synthetic row can overwrite cache slot 0.",
+    "No executable evidence demonstrates a consistent real-versus-physical extent across actual DSA attention, indexer/top-k output, DeepGEMM scheduling, and KV writes. Shape equality alone does not prove synthetic-row side effects are safe."
+  ],
+  "remaining_limitations": "No DeepSeek DSA model weights or qualified end-to-end speculative DSA fixture were available. MI350X/ROCm cannot exercise CUDA-only DeepGEMM scheduling paths, so those remain architecture-blocked. The tiny Llama serving fixture is a different architecture and cannot qualify DSA semantics. No C++ or FlyDSL files changed, repository-environment.json records native=null, and no native rebuild was applicable. Distributed attention-TP execution was not run; the deterministic mocked parallel configuration exercised its padding calculation."
+}
