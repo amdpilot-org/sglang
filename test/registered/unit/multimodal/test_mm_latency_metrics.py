@@ -1,6 +1,7 @@
 import asyncio
 import concurrent.futures
 import io
+import os
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,6 +14,7 @@ register_cpu_ci(est_time=15, suite="base-a-test-cpu")
 
 from sglang.srt.managers.schedule_batch import Modality
 from sglang.srt.multimodal.processors.base_processor import BaseMultimodalProcessor
+from sglang.srt.multimodal.processors.moss_vl import MossVLImageProcessor
 
 
 class _RecordingCollector:
@@ -130,8 +132,8 @@ def test_request_stage_timings_are_isolated():
 
     try:
         asyncio.run(exercise())
-        processor.process_mm_data("a", delay=0.02)
-        processor.process_mm_data("b", delay=0.04)
+        processor._call_process_mm_data(input_text="a", delay=0.02)
+        processor._call_process_mm_data(input_text="b", delay=0.04)
     finally:
         processor.io_executor.shutdown()
 
@@ -141,3 +143,55 @@ def test_request_stage_timings_are_isolated():
     assert len(collector.processor) == 2
     assert collector.processor[0] >= 0.015
     assert collector.processor[1] >= 0.035
+
+
+def test_processor_override_is_timed_at_shared_dispatch():
+    collector = _RecordingCollector()
+
+    class _OverrideProcessor(_StubProcessor):
+        def process_mm_data(self, **kwargs):
+            time.sleep(0.02)
+            return {"input_ids": [[1]]}
+
+    processor = _OverrideProcessor.__new__(_OverrideProcessor)
+    processor.metrics_collector = collector
+
+    processor._call_process_mm_data(input_text="override")
+
+    assert len(collector.processor) == 1
+    assert collector.processor[0] >= 0.015
+
+
+def test_specialized_video_download_observes_item_metrics(monkeypatch):
+    collector = _RecordingCollector()
+    processor = MossVLImageProcessor.__new__(MossVLImageProcessor)
+    processor.metrics_collector = collector
+    payload = b"bounded-video-fixture"
+
+    def fake_download(url, timeout):
+        from sglang.srt.utils.common import download_remote_media
+
+        # Exercise the real capture hook while keeping the fixture local.
+        monkeypatch.setattr(
+            "sglang.srt.utils.common._download_remote_media",
+            lambda requested_url, requested_timeout: payload,
+        )
+        return download_remote_media(url, timeout)
+
+    monkeypatch.setattr(
+        "sglang.srt.multimodal.processors.moss_vl.download_remote_media",
+        fake_download,
+    )
+    path = None
+    try:
+        path, cleanup_paths = processor._normalize_single_video_input(
+            "https://fixture.invalid/sample.mp4"
+        )
+        assert cleanup_paths == [path]
+        assert len(collector.media) == 1
+        assert collector.media[0]["modality"] == "video"
+        assert collector.media[0]["download_seconds"] is not None
+        assert collector.media[0]["download_bytes"] == len(payload)
+    finally:
+        if path is not None:
+            os.remove(path)

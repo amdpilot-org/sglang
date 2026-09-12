@@ -50,7 +50,6 @@ from sglang.srt.runtime_context import (
 )
 from sglang.srt.utils import (
     CLIENT_MEDIA_EXCEPTIONS,
-    capture_media_download_timings,
     configure_media_url_security,
     envs,
     is_cpu,
@@ -60,6 +59,7 @@ from sglang.srt.utils import (
     load_image,
     load_video,
     logger,
+    observe_media_load,
     smart_to_rgb,
 )
 
@@ -891,20 +891,12 @@ class BaseMultimodalProcessor(ABC):
                 kwargs.setdefault("add_special_tokens", False)
 
         with self._temporary_fast_processor_cuda_pool(processor_device):
-            processor_started_at = time.perf_counter()
-            try:
-                result = processor.__call__(
-                    text=[input_text],
-                    padding=True,
-                    return_tensors="pt",
-                    **kwargs,
-                )
-            finally:
-                metrics_collector = getattr(self, "metrics_collector", None)
-                if metrics_collector is not None:
-                    metrics_collector.observe_mm_processor(
-                        time.perf_counter() - processor_started_at
-                    )
+            result = processor.__call__(
+                text=[input_text],
+                padding=True,
+                return_tensors="pt",
+                **kwargs,
+            )
             # Deferred: the hash is computed on the GPU tensor first, and
             # _precompute_hashes_before_cpu_transfer moves it down afterwards.
             if (
@@ -970,10 +962,8 @@ class BaseMultimodalProcessor(ABC):
 
         Class method that can be pickled for multiprocessing
         """
-        load_started_at = time.perf_counter()
-        download_timings = []
         try:
-            with capture_media_download_timings() as download_timings:
+            with observe_media_load(metrics_collector, modality.name.lower()):
                 if cls._is_preprocessed_input(data):
                     return data
                 if modality == Modality.IMAGE:
@@ -1004,26 +994,6 @@ class BaseMultimodalProcessor(ABC):
             if len(data_str) > 100:
                 data_str = data_str[:100] + "..."
             raise RuntimeError(f"Error while loading data {data_str}: {e}") from e
-        finally:
-            if metrics_collector is not None:
-                download_seconds = (
-                    sum(timing.seconds for timing in download_timings)
-                    if download_timings
-                    else None
-                )
-                successful_sizes = [
-                    timing.size_bytes
-                    for timing in download_timings
-                    if timing.size_bytes is not None
-                ]
-                metrics_collector.observe_mm_media_load(
-                    modality=modality.name.lower(),
-                    load_seconds=time.perf_counter() - load_started_at,
-                    download_seconds=download_seconds,
-                    download_bytes=(
-                        sum(successful_sizes) if successful_sizes else None
-                    ),
-                )
 
     @staticmethod
     def _get_preprocessed_input_format(data):
@@ -1713,7 +1683,7 @@ class BaseMultimodalProcessor(ABC):
         """
         if processor is not None:
             kwargs["processor"] = processor
-        ret = self.process_mm_data(
+        ret = self._call_process_mm_data(
             input_text=input_text,
             images=images,
             audios=audios,
@@ -1725,6 +1695,23 @@ class BaseMultimodalProcessor(ABC):
         collected_items = self.collect_mm_items_from_processor_output(ret)
 
         return collected_items, input_ids, ret
+
+    def _call_process_mm_data(self, **kwargs) -> dict:
+        """Time the shared dispatch so subclass overrides cannot bypass metrics."""
+        with self._observe_mm_processor():
+            return self.process_mm_data(**kwargs)
+
+    @contextmanager
+    def _observe_mm_processor(self):
+        processor_started_at = time.perf_counter()
+        try:
+            yield
+        finally:
+            metrics_collector = getattr(self, "metrics_collector", None)
+            if metrics_collector is not None:
+                metrics_collector.observe_mm_processor(
+                    time.perf_counter() - processor_started_at
+                )
 
     @staticmethod
     def _ensure_input_ids_is_tensor(input_ids) -> Optional[torch.Tensor]:
