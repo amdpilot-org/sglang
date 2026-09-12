@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38676",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/729",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/724",
+  "candidate_commit": "d59233e0bf91f107c60a4c0fdcad430d1e1b615d",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a substantial partial fix: its regression suite passes and it covers the previously reported MiDashengLM/Ernie shared-dispatch bypass plus selected MiMo, Moss, and Inkling paths. Independent adversarial tests still show that TransformersAutoMultimodalProcessor._load_images downloads and decodes a remote image without mm_media_download/mm_media_load observations, and async processor overrides that call process_mm_data directly bypass _call_process_mm_data and emit no mm_processor observation. Concrete repository instances of the latter pattern remain in MossVLImageProcessor and MiniCPMVImageProcessor. Therefore the original request for well-defined standard tokenizer-manager preprocessing metrics is not fully satisfied.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1226d6a98a38/venv/bin/python -m pytest -q /job/review-evidence-j-1226d6a98a38/test_mm_latency_metrics.py",
+      "revision": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 1,
+      "what_was_measured": "Original prepared-base behavior against the candidate regression: all four tests failed because the metrics hooks were absent."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1226d6a98a38/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_mm_latency_metrics.py test/registered/unit/multimodal/test_base_processor_bad_input.py test/registered/unit/multimodal/test_base_processor_image_decode.py test/registered/unit/observability/test_stat_loggers_di.py",
+      "revision": "d59233e0bf91f107c60a4c0fdcad430d1e1b615d",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and neighboring error/decode/metrics behavior: 39 passed and 15 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1226d6a98a38/venv/bin/python -m pytest -q /job/review-evidence-j-1226d6a98a38/test_independent_adversarial.py",
+      "revision": "d59233e0bf91f107c60a4c0fdcad430d1e1b615d",
+      "exit_code": 1,
+      "what_was_measured": "Independent contract cases: a real bounded local HTTP image through TransformersAuto produced zero per-item observations, and a direct async override produced zero processor observations; 2 failed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1226d6a98a38/venv/bin/python - <GPU check script>",
+      "revision": "d59233e0bf91f107c60a4c0fdcad430d1e1b615d",
+      "exit_code": 0,
+      "what_was_measured": "ROCm device availability and a 4x4 FP32 identity matmul on the assigned AMD Instinct MI355X; max absolute error 0.0. This is environment evidence only because the reviewed metrics are host-side."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X was visible through torch 2.11.0+rocm7.2 / HIP 7.2.26015 and executed the numerical check with max_abs_error 0.0."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "TransformersAutoMultimodalProcessor._load_images calls load_image directly for URL inputs outside observe_media_load; a bounded local HTTP fixture loaded successfully while the recording collector received zero media observations.",
+    "MossVLImageProcessor.process_mm_data_async directly calls self.process_mm_data instead of _call_process_mm_data, so its HF processor interval is not observed.",
+    "MiniCPMVImageProcessor.process_mm_data_async directly calls self.process_mm_data instead of _call_process_mm_data, so its HF processor interval is not observed.",
+    "The design does not enforce processor timing around process_mm_data_async as a whole; any specialized async override that directly invokes its processor path can bypass mm_processor_seconds."
+  ],
+  "remaining_limitations": [
+    "No model weights were downloaded and no full model server was started; model-specific end-to-end paths were assessed with bounded synthetic fixtures, focused unit tests, and source-path inventory.",
+    "The host architecture is x86_64 with one AMD Instinct MI355X. The issue is host-side observability and required no GPU-specific kernel validation.",
+    "No C++, HIP, CUDA, FlyDSL, or other native source changed in the candidate, repository-environment.json reports native=null, and no native rebuild was applicable.",
+    "Prometheus multiprocess exposition was covered by the candidate/neighboring unit suite, but a production multiprocess server was not launched."
+  ]
+}
