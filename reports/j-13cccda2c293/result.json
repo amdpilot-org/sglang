@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34112",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Exact candidate 3a1c517 fixes the independently reproduced delayed final-prefill token/metadata commit, optimistic-decode admission, and beam commit ordering in deterministic tests. It does not test or independently verify the original issue's negative scheduler output_ids contract, so it is a partial fix with an overbroad full-fix claim.",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "remaining_counterexamples": [
+    "The original workload reports persistent negative scheduler output_ids after cancellation, but no candidate regression inspects schedule_batch or schedule_batch_post_run output_ids and this symptom was not reproduced or ruled out on the candidate.",
+    "The exact meta-llama/Llama-3.2-1B-Instruct plus RTX 4090/CUDA serving workload could not be executed in the assigned AMD gfx950/ROCm environment, so end-to-end absence of the visible token and negative-ID ladder remains unverified."
+  ],
+  "tests": [
+    {
+      "command": "candidate issue-specific tests copied onto the recorded base",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction at delayed-result and optimistic-decode boundaries: all three tests failed; the cancelled request committed output/metadata and remained schedulable."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-13cccda2c293/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunked_req_gate.py test/registered/unit/managers/test_scheduler_chunked_abort_race.py test/registered/unit/managers/test_batch_result_processor_hidden_states.py test/registered/unit/managers/test_batch_result_processor_spec_grammar.py",
+      "exit_code": 0,
+      "what_was_measured": "On exact candidate 3a1c517: 23 passed and 2 subtests passed, covering its regressions and adjacent result-processing paths, but not scheduler-record negative output IDs."
+    },
+    {
+      "command": "py_compile changed Python files and git diff --check recorded-base exact-candidate",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python files compile and the exact candidate diff has no whitespace errors."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-13cccda2c293/venv/bin/python GPU tensor probe",
+      "exit_code": 0,
+      "what_was_measured": "Torch 2.11.0+rocm7.2 used one AMD Instinct MI350X gfx950 and produced tensor_sum=5.0; environment evidence only."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported model weights and NVIDIA RTX 4090/CUDA environment were unavailable.",
+    "The original HTTP/action-plan workload and its negative scheduler output_ids observation were not rerun on the candidate.",
+    "The available tiny Llama fixture validates transport and engine execution only and cannot qualify the original model/workload contract, so it was not substituted as proof.",
+    "GPU execution was an environment probe; the issue-specific regressions were CPU control-flow fixtures.",
+    "No native files changed and repository-environment.json records native=null, so no native rebuild was applicable."
+  ]
+}
