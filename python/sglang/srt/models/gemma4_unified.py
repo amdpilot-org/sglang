@@ -51,8 +51,16 @@ from sglang.srt.managers.schedule_batch import (
     flatten_nested_list,
 )
 from sglang.srt.model_loader.weight_utils import default_weight_loader
-from sglang.srt.models.gemma4_causal import Gemma4TextModel, pp_filter_load_weight
-from sglang.srt.models.gemma4_mm import Gemma4ForConditionalGeneration
+from sglang.srt.models.gemma4_causal import (
+    Gemma4TextModel,
+    load_tied_lm_head,
+    pp_filter_load_weight,
+)
+from sglang.srt.models.gemma4_mm import (
+    Gemma4ForConditionalGeneration,
+    _is_cpu,
+    _is_cpu_amx_available,
+)
 from sglang.srt.utils import add_prefix
 
 logger = logging.getLogger(__name__)
@@ -190,7 +198,12 @@ class Gemma4UnifiedForConditionalGeneration(Gemma4ForConditionalGeneration):
         )
 
         text_tie = getattr(text_config, "tie_word_embeddings", True)
-        if self.pp_group.world_size == 1 and text_tie:
+        self.lm_head_is_tied = (
+            self.pp_group.world_size == 1
+            and text_tie
+            and not (_is_cpu and _is_cpu_amx_available)
+        )
+        if self.lm_head_is_tied:
             self.lm_head = self.language_model.embed_tokens
         elif self.pp_group.is_last_rank:
             self.lm_head = ParallelLMHead(
@@ -409,6 +422,16 @@ class Gemma4UnifiedForConditionalGeneration(Gemma4ForConditionalGeneration):
                 param = params_dict[name]
                 weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
+                if (
+                    text_tie
+                    and not self.lm_head_is_tied
+                    and name == "language_model.embed_tokens.weight"
+                ):
+                    load_tied_lm_head(
+                        loaded_weight,
+                        params_dict=params_dict,
+                        loaded_params=loaded_params,
+                    )
                 loaded_params.add(name)
 
         unloaded_params = params_dict.keys() - loaded_params

@@ -1,0 +1,27 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38673",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the missing lm_head_is_tied attribute in the checked-out Gemma4Unified constructor and inherited first-forward path. The unified constructor now records the same tied-head condition as Gemma4ForConditionalGeneration, including the CPU AMX exception, and its loader copies tied checkpoint embeddings into a materialized head when aliasing is unavailable. Added regression coverage using a small real Transformers Gemma4UnifiedConfig for tied and untied construction, tied and untied weight loading, numerical first forward, and GPU graph capture/replay.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-1a400177cb9a/venv/bin/python -m pytest -q test/registered/unit/models/test_gemma4_unified_lm_head.py (base implementation with regression present)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: construction completed, then all paths that inspected the expected state failed with AttributeError: Gemma4UnifiedForConditionalGeneration has no attribute lm_head_is_tied. Raw output: reports/j-1a400177cb9a/raw/failing_before.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-1a400177cb9a/venv/bin/python -m pytest -q test/registered/unit/models/test_gemma4_unified_lm_head.py",
+      "exit_code": 0,
+      "what_was_measured": "Five passing tests covering tied and untied constructor state, independent numerical logits references, tied materialized-head loading, independent untied embedding/head loading, and ROCm graph capture/replay. Raw output: reports/j-1a400177cb9a/raw/final_focused_test.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-1a400177cb9a/venv/bin/python - <<'PY' ... torch.cuda device inspection ... PY",
+      "exit_code": 0,
+      "what_was_measured": "Prepared Torch 2.11.0+rocm7.2 saw exactly one assigned AMD Instinct MI350X; ROCm version 7.2.26015. Raw output: reports/j-1a400177cb9a/raw/gpu_evidence.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "The focused suite performed tied and untied logits matmuls on the assigned AMD Instinct MI350X and captured/replayed the inherited tied-head forward with torch.cuda.CUDAGraph; see final_focused_test.txt and gpu_evidence.txt.",
+  "native_rebuilt": false,
+  "remaining_limitations": "The original google/gemma-4-12B-it startup was not exercised because its gated weights were not downloaded. Heavy decoder components were substituted in the regression while retaining the actual SGLang unified constructor, loader, inherited forward, real small Gemma4UnifiedConfig, and GPU graph machinery. Multi-process pipeline-parallel execution and a physical CPU AMX host were not available; their branch behavior is covered structurally, including the materialized tied-head load path. No native code changed."
+}
