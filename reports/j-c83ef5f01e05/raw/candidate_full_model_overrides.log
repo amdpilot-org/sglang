@@ -1,0 +1,604 @@
+...........................F...F.................. [ 52%]
+.......F.F...................................  [100%]
+=================================== FAILURES ===================================
+____ TestGoldenModelOverrides.test_deepseek_v4_overrides_at_callable_level _____
+
+self = <test_model_overrides.TestGoldenModelOverrides testMethod=test_deepseek_v4_overrides_at_callable_level>
+
+    def test_deepseek_v4_overrides_at_callable_level(self):
+        from sglang.srt.arg_groups.model_overrides.deepseek_v4 import (
+            _deepseek_v4_overrides,
+        )
+    
+        hf = SimpleNamespace(architectures=["DeepseekV4ForCausalLM"])
+    
+        def _args(**kw):
+            defaults = dict(
+                device="cuda",
+                swa_full_tokens_ratio=_declared_default("swa_full_tokens_ratio"),
+                moe_a2a_backend="none",
+                moe_runner_backend="auto",
+                _model_config=SimpleNamespace(is_fp4_experts=True, nvfp4_moe_meta=None),
+            )
+            defaults.update(kw)
+            return SimpleNamespace(**defaults)
+    
+        with (
+            envs.SGLANG_DSV4_FP4_DEQUANT.override(False),
+            override_platform(is_sm100=True),
+        ):
+>           self.assertEqual(
+                _deepseek_v4_overrides(_args(), hf),
+                {
+                    "attention_backend": "dsv4",
+                    "moe_runner_backend": "flashinfer_mxfp4",
+                    "page_size": 256,
+                    "swa_full_tokens_ratio": 0.1,
+                },
+            )
+E           AssertionError: {'att[21 chars]4', 'page_size': 256, 'swa_full_tokens_ratio': 0.1} != {'att[21 chars]4', 'moe_runner_backend': 'flashinfer_mxfp4', [42 chars] 0.1}
+E           - {'attention_backend': 'dsv4', 'page_size': 256, 'swa_full_tokens_ratio': 0.1}
+E           + {'attention_backend': 'dsv4',
+E           +  'moe_runner_backend': 'flashinfer_mxfp4',
+E           +  'page_size': 256,
+E           +  'swa_full_tokens_ratio': 0.1}
+
+test/registered/unit/test_model_overrides.py:1662: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7021549e7d80>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x702a3a8d2a20>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestGoldenModelOverrides.test_deepseek_v4_overrides_at_callable_level
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/test_model_overrides.py", line 1662, in test_deepseek_v4_overrides_at_callable_level
+    self.assertEqual(
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1184, in assertDictEqual
+    self.fail(self._formatMessage(msg, standardMsg))
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: {'att[21 chars]4', 'page_size': 256, 'swa_full_tokens_ratio': 0.1} != {'att[21 chars]4', 'moe_runner_backend': 'flashinfer_mxfp4', [42 chars] 0.1}
+- {'attention_backend': 'dsv4', 'page_size': 256, 'swa_full_tokens_ratio': 0.1}
++ {'attention_backend': 'dsv4',
++  'moe_runner_backend': 'flashinfer_mxfp4',
++  'page_size': 256,
++  'swa_full_tokens_ratio': 0.1}
+_____ TestGoldenModelOverrides.test_dllm_forces_flashinfer_with_cuda_graph _____
+
+self = <test_model_overrides.TestGoldenModelOverrides testMethod=test_dllm_forces_flashinfer_with_cuda_graph>
+
+    def test_dllm_forces_flashinfer_with_cuda_graph(self):
+        # CUDA path: cuda graph enabled by default -> dllm forces flashinfer.
+        # A real dllm arch: the page pass now runs regardless of the radix
+        # switch and builds DllmConfig for it.
+        sa = self._construct(
+            "SDARForCausalLM",
+            "llama",
+            dllm_algorithm="LowConfidence",
+            disable_radix_cache=True,
+            attention_backend="triton",
+        )
+>       self.assertEqual(
+            self._resolved(sa, "attention_backend"), "flashinfer"
+        )  # materialized
+E       AssertionError: 'triton' != 'flashinfer'
+E       - triton
+E       + flashinfer
+
+test/registered/unit/test_model_overrides.py:1377: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x702154862d40>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x702a3a8d2a20>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestGoldenModelOverrides.test_dllm_forces_flashinfer_with_cuda_graph
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/test_model_overrides.py", line 1377, in test_dllm_forces_flashinfer_with_cuda_graph
+    self.assertEqual(
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1251, in assertMultiLineEqual
+    self.fail(self._formatMessage(msg, standardMsg))
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: 'triton' != 'flashinfer'
+- triton
++ flashinfer
+
+------------------------------ Captured log call -------------------------------
+WARNING  sglang.srt.arg_groups.serving_hook:serving_hook.py:773 SGLANG_USE_CUDA_IPC_TRANSPORT is deprecated; use --mm-feature-transport=cpu instead.
+WARNING  sglang.srt.arg_groups.dllm_hook:dllm_hook.py:35 Cuda graph is disabled for diffusion LLM inference on AMD GPUs
+WARNING  sglang.srt.arg_groups.overrides:overrides.py:1701 Overlap schedule is disabled because of using diffusion LLM inference
+___ TestGoldenModelOverrides.test_minimax_m2_sm10x_nvfp4_uses_routed_trtllm ____
+
+self = <test_model_overrides.TestGoldenModelOverrides testMethod=test_minimax_m2_sm10x_nvfp4_uses_routed_trtllm>
+
+    def test_minimax_m2_sm10x_nvfp4_uses_routed_trtllm(self):
+        """MiniMax-M2 NVFP4 auto must avoid the unsupported plain TRT-LLM path."""
+        # Every module that asks: the attention handler validates what the
+        # override family picks, and each holds its own import.
+        with override_platform(is_sm100=True), override_platform(is_sm100=True):
+>           explicit = self._construct(
+                "MiniMaxM2ForCausalLM",
+                "llama",
+                quantization="modelopt_fp4",
+                moe_runner_backend="flashinfer_cutlass",
+            )
+
+test/registered/unit/test_model_overrides.py:670: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/unit/test_model_overrides.py:579: in _construct
+    server_args.resolve_once()
+python/sglang/srt/server_args.py:281: in resolve_once
+    run_resolution_pipeline(self)
+python/sglang/srt/arg_groups/pipeline.py:188: in run_resolution_pipeline
+    apply_inkling_prefill_cuda_graph_default(server_args)
+python/sglang/srt/arg_groups/cuda_graph_hook.py:497: in apply_inkling_prefill_cuda_graph_default
+    arch = model_config_of(server_args).hf_config.architectures[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/arg_groups/model_override_base.py:249: in model_config_of
+    model_config = ModelConfig.from_server_args(server_args)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/configs/model_config.py:720: in from_server_args
+    return ModelConfig(
+python/sglang/srt/configs/model_config.py:669: in __init__
+    self._verify_quantization()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.configs.model_config.ModelConfig object at 0x702154958980>
+
+    def _verify_quantization(self) -> None:
+        supported_quantization = [*QUANTIZATION_METHODS]
+        rocm_supported_quantization = [
+            "awq",
+            "fp8",
+            "compressed_tensors",
+            "compressed-tensors",
+            "w8a8_fp8",
+            "petit_nvfp4",
+            "quark",
+            "mxfp4",
+            "mxfp8",
+            "auto-round",
+            "auto-round-int8",
+            "quark_int4fp8_moe",
+            "quark_mxfp4",
+        ]
+        optimized_quantization_methods = [
+            "fp8",
+            "marlin",
+            "modelopt_fp8",
+            "modelopt_fp4",
+            "modelopt_mixed",
+            "nvfp4_online",
+            "gptq_marlin_24",
+            "gptq_marlin",
+            "awq_marlin",
+            "compressed_tensors",
+            "compressed-tensors",
+            "experts_int8",
+            "w8a8_int8",
+            "w8a8_fp8",
+            "moe_wna16",
+            "w4afp8",
+            "petit_nvfp4",
+            "quark",
+            "modelslim",
+            "humming",
+            "quark_mxfp4",
+            "auto-round",
+        ]
+        compatible_quantization_methods = {
+            "modelopt_fp8": ["modelopt"],
+            # Keep explicit or inherited modelopt_fp4 for literal FP8 checkpoints
+            # so eligible MoE experts are requantized online.
+            "modelopt_fp4": ["modelopt", "fp8"],
+            "modelopt_mixed": ["modelopt"],
+            "nvfp4_online": ["fp8", "modelopt_fp8"],
+            "petit_nvfp4": ["modelopt"],
+            "w8a8_int8": ["compressed-tensors", "compressed_tensors"],
+            "w8a8_fp8": ["compressed-tensors", "compressed_tensors"],
+            "auto-round-int8": ["compressed-tensors", "compressed_tensors"],
+        }
+        if self.quantization is not None:
+            self.quantization = self.quantization.lower()
+    
+        # Parse quantization method from the HF and ModelSlim model config, if available.
+        # Only one function should return config, other should return None.
+        cfg_list = []
+        hf_config = self._parse_quant_hf_config()
+        modelslim_config = self._find_quant_modelslim_config()
+        quant_config = modelslim_config or hf_config
+        if quant_config is not None:
+            cfg_list.append(quant_config)
+    
+        # Filter out None values
+        cfg_list = [item for item in cfg_list if item is not None]
+        if len(cfg_list) > 1:
+            raise ValueError(
+                "Config list contains configs from 2 methods, must be only 1"
+            )
+        quant_cfg = cfg_list[0] if cfg_list else None
+    
+        if quant_cfg is not None:
+            quant_method = quant_cfg.get(
+                "quant_method", "" if not self.quantization else self.quantization
+            ).lower()
+    
+            # ModelOpt FP4 and mixed checkpoints can quantize only the target
+            # model; an embedded MTP draft may stay unquantized, so an explicit
+            # nvfp4_online opt-in for the draft wins over checkpoint detection.
+            # The online loader rejects already-packed weights at load time.
+            preserve_online_draft_quantization = (
+                self.is_draft_model
+                and self.quantization == "nvfp4_online"
+                and quant_method in ("modelopt_fp4", "modelopt_mixed")
+            )
+            # An explicit online-requantization request (e.g. quark_mxfp4 on top
+            # of an NVFP4/mixed checkpoint) must not be overridden back to the
+            # source format
+            if self.quantization not in REQUANTIZATION_METHODS:
+                # Detect which checkpoint is it
+                if not preserve_online_draft_quantization:
+                    for _, method in QUANTIZATION_METHODS.items():
+                        quantization_override = method.override_quantization_method(
+                            quant_cfg, self.quantization
+                        )
+                        if quantization_override:
+                            quant_method = quantization_override
+                            self.quantization = quantization_override
+                            break
+    
+            # Verify quantization configurations.
+            if self.quantization is None:
+                self.quantization = quant_method
+            elif self.quantization != quant_method:
+                # Check if the CLI-specified quantization is compatible with HF config's quant_method
+                is_compatible = preserve_online_draft_quantization or (
+                    self.quantization in compatible_quantization_methods
+                    and quant_method
+                    in compatible_quantization_methods[self.quantization]
+                )
+                if is_compatible:
+                    # Keep the CLI-specified quantization (e.g., modelopt_fp4) even if
+                    # HF config says "modelopt" - they are compatible
+                    logger.info(
+                        f"Using CLI-specified quantization ({self.quantization}) which is "
+                        f"compatible with HF config quant_method ({quant_method})."
+                    )
+                elif self.is_draft_model and not (
+                    self.is_draft_quantization_explicit
+                    and self.quantization in REQUANTIZATION_METHODS
+                    and is_hip()
+                    and is_qwen3_5_mtp_draft(self.hf_config)
+                ):
+                    # Allow auto-detection of quantization from checkpoint for draft model
+                    # only if the CLI quantization is not compatible. An explicit
+                    # online-requantization request for the draft (e.g. quark_mxfp4
+                    # for an MTP stack the checkpoint left in bf16) is honored below.
+                    logger.info(
+                        f"Draft model quantization ({quant_method}) differs from "
+                        f"main model quantization ({self.quantization}). "
+                        f"Using draft model's detected quantization: {quant_method}"
+                    )
+                    self.quantization = quant_method
+                elif self.quantization in REQUANTIZATION_METHODS:
+                    logger.info_once(
+                        f"Requantizing from quant_method='{quant_method}' to the requested online quantization='{self.quantization}'. Beware that requantization may incur a loss in accuracy, the requantized model should be re-validated/re-evaluated. More details at https://docs.sglang.io/advanced_features/quantization.html#online-quantization."
+                    )
+                else:
+                    raise ValueError(
+                        "Quantization method specified in the model config "
+                        f"({quant_method}) does not match the quantization "
+                        f"method specified in the `quantization` argument "
+                        f"({self.quantization})."
+                    )
+    
+        if self.quantization is not None:
+            if self.quantization not in supported_quantization:
+                raise ValueError(
+                    f"Unknown quantization method: {self.quantization}. Must "
+                    f"be one of {supported_quantization}."
+                )
+            if is_hip() and self.quantization not in rocm_supported_quantization:
+>               raise ValueError(
+                    f"{self.quantization} quantization is currently not "
+                    f"supported in ROCm."
+                )
+E               ValueError: modelopt_fp4 quantization is currently not supported in ROCm.
+
+python/sglang/srt/configs/model_config.py:1827: ValueError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7021548b0b80>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x702a3a8d2a20>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestGoldenModelOverrides.test_minimax_m2_sm10x_nvfp4_uses_routed_trtllm
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/test_model_overrides.py", line 670, in test_minimax_m2_sm10x_nvfp4_uses_routed_trtllm
+    explicit = self._construct(
+               ^^^^^^^^^^^^^^^^
+  File "/job/repo/test/registered/unit/test_model_overrides.py", line 579, in _construct
+    server_args.resolve_once()
+  File "/job/repo/python/sglang/srt/server_args.py", line 281, in resolve_once
+    run_resolution_pipeline(self)
+  File "/job/repo/python/sglang/srt/arg_groups/pipeline.py", line 188, in run_resolution_pipeline
+    apply_inkling_prefill_cuda_graph_default(server_args)
+  File "/job/repo/python/sglang/srt/arg_groups/cuda_graph_hook.py", line 497, in apply_inkling_prefill_cuda_graph_default
+    arch = model_config_of(server_args).hf_config.architectures[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/arg_groups/model_override_base.py", line 249, in model_config_of
+    model_config = ModelConfig.from_server_args(server_args)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/configs/model_config.py", line 720, in from_server_args
+    return ModelConfig(
+           ^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/configs/model_config.py", line 669, in __init__
+    self._verify_quantization()
+  File "/job/repo/python/sglang/srt/configs/model_config.py", line 1827, in _verify_quantization
+    raise ValueError(
+ValueError: modelopt_fp4 quantization is currently not supported in ROCm.
+________ TestGoldenModelOverrides.test_moe_runner_quant_constraint_pass ________
+
+self = <test_model_overrides.TestGoldenModelOverrides testMethod=test_moe_runner_quant_constraint_pass>
+
+    def test_moe_runner_quant_constraint_pass(self):
+        from sglang.srt.arg_groups.overrides import (
+            ResolvedView,
+            _moe_runner_backend_quant_constraints,
+        )
+    
+        def _view(**kw):
+            defaults = dict(
+                quantization=None,
+                moe_runner_backend="auto",
+                moe_a2a_backend="none",
+            )
+            defaults.update(kw)
+            return ResolvedView(SimpleNamespace(**defaults))
+    
+        with override_platform(is_sm100=True):
+            self.assertEqual(
+                _moe_runner_backend_quant_constraints(
+                    _view(quantization="nvfp4_online")
+                ),
+                {"moe_runner_backend": "flashinfer_trtllm"},
+            )
+            with self.assertRaises(ValueError):  # incompatible explicit backend
+                _moe_runner_backend_quant_constraints(
+                    _view(quantization="nvfp4_online", moe_runner_backend="triton")
+                )
+>       self.assertEqual(
+            _moe_runner_backend_quant_constraints(_view(quantization="mxfp8")),
+            {"moe_runner_backend": "flashinfer_trtllm"},
+        )
+E       AssertionError: {'moe_runner_backend': 'triton'} != {'moe_runner_backend': 'flashinfer_trtllm'}
+E       - {'moe_runner_backend': 'triton'}
+E       ?                           - ^^
+E       
+E       + {'moe_runner_backend': 'flashinfer_trtllm'}
+E       ?                         +++++++++++   ^^^
+
+test/registered/unit/test_model_overrides.py:2540: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7021548b3600>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x702a3a8d2a20>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestGoldenModelOverrides.test_moe_runner_quant_constraint_pass
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/test_model_overrides.py", line 2540, in test_moe_runner_quant_constraint_pass
+    self.assertEqual(
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1184, in assertDictEqual
+    self.fail(self._formatMessage(msg, standardMsg))
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: {'moe_runner_backend': 'triton'} != {'moe_runner_backend': 'flashinfer_trtllm'}
+- {'moe_runner_backend': 'triton'}
+?                           - ^^
+
++ {'moe_runner_backend': 'flashinfer_trtllm'}
+?                         +++++++++++   ^^^
+
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/test_model_overrides.py::TestGoldenModelOverrides::test_deepseek_v4_overrides_at_callable_level
+FAILED test/registered/unit/test_model_overrides.py::TestGoldenModelOverrides::test_dllm_forces_flashinfer_with_cuda_graph
+FAILED test/registered/unit/test_model_overrides.py::TestGoldenModelOverrides::test_minimax_m2_sm10x_nvfp4_uses_routed_trtllm
+FAILED test/registered/unit/test_model_overrides.py::TestGoldenModelOverrides::test_moe_runner_quant_constraint_pass
+4 failed, 91 passed, 17 warnings, 48 subtests passed in 12.15s

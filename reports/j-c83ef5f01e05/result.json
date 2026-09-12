@@ -1,0 +1,53 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38606",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review of exact candidate 89326ddaae9db3f6ce59041bb6db3df362318389 reproduced the missing HYV4 attention-TP-gather opt-out on the recorded base and verified that the candidate publishes the opt-out for both HYV4 architectures through the model override registry. The actual gfx950 MoE padded-row mask demonstrated the original consequence: a shard-local valid count of 1 masks 7 of 8 full-width rows, whereas the corrected full-width contract masks none.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c83ef5f01e05/venv/bin/python /job/review-evidence-j-c83ef5f01e05/check_override.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: HYV4ForCausalLM and HYV4ForCausalLMNextN returned no disable_attn_tp_gather declaration; the DeepseekV3 control remained unchanged. See raw/base_override.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c83ef5f01e05/venv/bin/python /job/review-evidence-j-c83ef5f01e05/check_override.py (candidate 89326dd)",
+      "exit_code": 0,
+      "what_was_measured": "Independent passing-after configuration matrix: both HYV4 architectures declare the opt-out for deepep, no-A2A, and pure-DP-attention boundaries, while a DeepseekV3 control does not. See raw/candidate_override.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c83ef5f01e05/venv/bin/python -m pytest -q test/registered/unit/test_model_overrides.py -k 'hyv4_always_disables_attn_tp_gather or server_args_whitelist_is_exactly_the_migrated_fields'",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and resolution whitelist: 2 tests, 10 subtests passed. See raw/candidate_focused_pytest.log."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c83ef5f01e05/venv/bin/python /job/review-evidence-j-c83ef5f01e05/gpu_mask_check.py",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X gfx950, the actual repository MoE mask helper matched an independent reference: valid counts 0, 1, 5, and 8 masked 8, 7, 3, and 0 rows respectively. See raw/gpu_mask_check.log."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c83ef5f01e05/venv/bin/python -m pytest -q test/registered/moe/test_topk_padded_region.py -k 'matches_eager_across_shapes or none_pad_count_is_noop or non_contiguous_falls_back_to_eager'",
+      "exit_code": 0,
+      "what_was_measured": "Existing GPU kernel boundaries: 3 tests and 25 subtests passed. See raw/gpu_topk_pytest.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c83ef5f01e05/venv/bin/python -m pytest -q test/registered/unit/test_model_overrides.py",
+      "exit_code": 1,
+      "what_was_measured": "91 passed and 4 platform-sensitive tests failed. The same four fail on the recorded base under ROCm, including CUDA/SM100 expectations and unsupported modelopt_fp4; the candidate regression passed. See raw/candidate_full_model_overrides.log and raw/base_platform_failures.log."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI355X gfx950 executed the repository's actual MoE padded-row masking path and matched an independent numerical tensor reference."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Only one gfx950 GPU was available; TP8/EP8 DeepEP communication was not reproduced.",
+    "The Hunyuan-V4-preview weights were unavailable, so no full-model logprob, throughput, or semantic-accuracy comparison is claimed.",
+    "The GPU fixture validates the concrete token-masking consequence and the source/configuration contract, not a distributed serving deployment.",
+    "No native files changed in the candidate and repository-environment.json specifies no prepared native artifact, so no native rebuild was applicable.",
+    "Four unrelated model-override tests fail identically on the recorded base due to this ROCm environment's CUDA/SM100 assumptions and unsupported modelopt_fp4."
+  ]
+}
