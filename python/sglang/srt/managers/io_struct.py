@@ -54,6 +54,7 @@ from sglang.srt.beam_search.types import BeamSearchSequence
 from sglang.srt.environ import envs
 from sglang.srt.lora.lora_registry import LoRARef
 from sglang.srt.managers.embed_types import PositionalEmbeds
+from sglang.srt.managers.load_snapshot import LoadSnapshot
 from sglang.srt.managers.schedule_batch import (
     Modality,
     MultimodalProcessorOutput,
@@ -1527,6 +1528,11 @@ class BatchTokenIDOutput(BaseBatchReq, kw_only=True):
     input_top_logprobs_idx_flat: Optional[List[Optional[np.ndarray]]] = None
     input_top_logprobs_flat_null_prefix: Optional[List[Optional[int]]] = None
 
+    # Latest scheduler load, piggybacked on the normal output stream.  This is
+    # a batch-level gauge (not per request), so multi-tokenizer fanout copies it
+    # unchanged to every destination.
+    load_snapshot: Optional[LoadSnapshot] = None
+
 
 class BatchStrOutput(BaseBatchReq, kw_only=True):
     # The finish reason
@@ -1621,6 +1627,9 @@ class BatchStrOutput(BaseBatchReq, kw_only=True):
     input_top_logprobs_idx_flat: Optional[List[Optional[np.ndarray]]] = None
     input_top_logprobs_flat_null_prefix: Optional[List[Optional[int]]] = None
 
+    # Passed through by DetokenizerManager from BatchTokenIDOutput.
+    load_snapshot: Optional[LoadSnapshot] = None
+
 
 class BatchEmbeddingOutput(BaseBatchReq, kw_only=True):
     # The finish reason
@@ -1648,6 +1657,9 @@ class BatchEmbeddingOutput(BaseBatchReq, kw_only=True):
     #   Stacked:     [stacked_tensor(N, ...)] — len 1, reduces pickle overhead
     #   Non-stacked: [t0, t1, ..., tN]       — len N, when shapes differ or None entries exist
     pooled_hidden_states: Optional[List[Optional[torch.Tensor]]] = None
+
+    # Latest scheduler load, piggybacked on the normal output stream.
+    load_snapshot: Optional[LoadSnapshot] = None
 
 
 class ClearHiCacheReqInput(BaseReq, kw_only=True):
