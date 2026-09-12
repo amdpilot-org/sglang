@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38207",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Fixed the no-RoPE MLA KV scatter path so DCP-widened virtual locations are owner-filtered and divided by the DCP width before indexing a per-rank buffer. The same path now honors reserved_skip_index. This restores the DCP contract already implemented by the RoPE branch and prevents writes beyond physical per-rank capacity.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-2205162890bd/venv/bin/python -m pytest test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py -k 'norope_localizes_dcp_virtual_locs or norope_dcp_skips_reserved_index' -vv",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before run on the base implementation: both DCP rank cases wrote raw virtual rows instead of localized physical rows, including rows beyond the simulated per-rank capacity; the no-RoPE path also overwrote the reserved slot. Raw output: reports/j-2205162890bd/raw/failing_before_norope_dcp.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-2205162890bd/venv/bin/python -m pytest test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py -k 'norope_localizes_dcp_virtual_locs or norope_dcp_skips_reserved_index' -vv",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after GPU regression: owner filtering and virtual-to-physical localization passed for DCP ranks 0 and 1, and reserved-index skipping passed (3 tests). Raw output: reports/j-2205162890bd/raw/passing_after_norope_dcp.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-2205162890bd/venv/bin/python -m pytest test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py -vv",
+      "exit_code": 0,
+      "what_was_measured": "Existing and new MLA buffer GPU coverage: 8 passed and 58 NVIDIA TMA-only cases skipped on ROCm. Raw output: reports/j-2205162890bd/raw/full_mla_buffer_suite.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Tests executed Triton kernels on the assigned AMD Instinct MI350X (gfx950) through torch 2.11.0+rocm7.2. The regression compared complete GPU buffer contents against independently constructed owner/localization expectations."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported end-to-end workload requires 8 NVIDIA B200 GPUs, CUDA/FlashInfer TRT-LLM MLA, and GLM-5.3 weights. The prepared environment has one AMD Instinct MI350X (gfx950) and no model weights, so the full model, B200-specific backend execution, TP8/DCP8 communication, HiCache interaction, and long-context serving reproduction remain unverified.",
+    "The deterministic tiny Llama fixture is not architecture-qualified for GLM-5.3 no-RoPE MLA or distributed DCP, so it was not used as a substitute for the reported workload.",
+    "No native library was changed or rebuilt; the defect and correction are in the Python-hosted Triton kernel."
+  ]
+}
