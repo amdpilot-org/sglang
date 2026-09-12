@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33324",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1964",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1927",
+  "candidate_commit": "efe036384e2b805fdacd493f51d539a85b5770eb",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the GLM-4.7 non-streaming defect: repeated calls produce [0,0,0] and get_weather/search/get_weather produces [0,1,0]. At the exact candidate commit, the new regression tests, the complete TestGlm47MoeDetector class, and independent adversarial cases all pass with dense local call indices. The candidate is a narrow source fix to Glm47MoeDetector.detect_and_parse and fully resolves the detector and path reported by the original issue.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-017b1350fe05/venv/bin/python -c '<independent base contract harness>'",
+      "exit_code": 1,
+      "what_was_measured": "On the exact recorded base, direct Glm47MoeDetector.detect_and_parse calls returned [0,0,0] for three repeated get_weather calls and [0,1,0] for get_weather/search/get_weather instead of dense call positions. The imported module was /job/repo/python/sglang/srt/function_call/glm47_moe_detector.py."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-017b1350fe05/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py::TestGlm47MoeDetector::test_non_streaming_tool_indices_follow_call_order test/registered/unit/function_call/test_function_call_parser.py::TestGlm47MoeDetector::test_non_streaming_tool_indices_remain_dense_after_unknown_tool",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit efe036384e2b805fdacd493f51d539a85b5770eb, both candidate regressions passed, including repeated/mixed calls and filtering an unknown tool: 2 passed and 2 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-017b1350fe05/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py::TestGlm47MoeDetector",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate commit, the complete GLM-4.7 detector unit class passed: 14 passed and 2 subtests passed, covering existing non-streaming and streaming behavior."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-017b1350fe05/venv/bin/python -c '<independent candidate adversarial harness>'",
+      "exit_code": 0,
+      "what_was_measured": "Independent cases passed for five repeated calls, call order differing from request tool order, unknown tools at edges and between valid calls, and repeated no-argument calls interleaved with normal text. Every emitted call had dense indices 0..N-1 and retained its name and parameters."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The reviewed contract is deterministic CPU-side parsing of an already generated string, so GPU execution would not add issue-specific evidence. The assigned device was detected as one AMD Instinct MI350X with gfx950:sramecc+:xnack- under torch 2.11.0+rocm7.2 / HIP 7.2.26015, but no GPU computation was run.",
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "The candidate diff changes only Python detector/test/report files and no native or FlyDSL C++ source. The tested detector loaded directly from /job/repo/python/sglang/srt/function_call/glm47_moe_detector.py, so no native rebuild was applicable.",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No GLM-4.7 or GLM-5 weights were available or necessary for the deterministic parser contract, so model generation and HTTP serving were not exercised or claimed.",
+    "The similarly structured glm4_moe, deepseekv3, deepseekv31, deepseekv32, and gigachat3 detectors mentioned only in the issue scope note remain outside this candidate and were not qualified; they are not counterexamples to the specifically reported Glm47MoeDetector defect.",
+    "No native code changed, so native rebuild and ISA/compiler validation were not applicable."
+  ]
+}
