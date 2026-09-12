@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31568",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/2290",
+  "candidate_commit": "97894db357f711b28bca4ce7a0f279d2609e806e",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate removes both unnecessary Triton specialization inputs identified by the original issue. Both contract checks fail on the recorded base and pass on the candidate; independent gfx950 numerical and compiled-cache checks confirm varying N no longer creates distinct compiled entries for the masked KV write kernel.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-969a77b43ae2/venv/bin/python -m pytest -q test/registered/kernels/test_triton_cache_key_hygiene.py -vv (recorded base with candidate test only)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: N remained in the masked kernel parameters and NT_BUCKET remained in the XPU kernel signature; the post-fix GPU call convention also mismatched the base signature."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-969a77b43ae2/venv/bin/python -m pytest -q test/registered/kernels/test_triton_cache_key_hygiene.py -vv (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Three tests and three GPU boundary subtests passed: both specialization parameters were absent and masked writes matched PyTorch for candidate-provided boundary shapes."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-969a77b43ae2/venv/bin/python /job/review-evidence-j-969a77b43ae2/adversarial_candidate.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent contiguous cases with fixed H=2,D=65 and N=1,7,65 matched PyTorch for none/all/mixed masks and added one compiled Triton cache entry total."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X gfx950 executed the masked KV Triton kernel with Torch 2.11.0+rocm7.2/HIP 7.2.26015; import and test logs are under /job/review-evidence-j-969a77b43ae2/."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The XPU FLA kernel was verified statically only; no XPU hardware was available on the AMD gfx950 host.",
+    "No native rebuild was applicable because the candidate changes Python/Triton source only and the prepared environment declares no native component.",
+    "No full model or distributed serving workload was run or claimed; the issue contract is a static specialization/cache-key defect plus focused kernel correctness."
+  ]
+}
