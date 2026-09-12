@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37852",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/960",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/930",
+  "candidate_commit": "a3fa16067a307d43108209a4235e91e0b7a3611c",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate changes the DeepSeek-V4 metric from zero to the exact tensor-byte total for the exercised standard FP8, HIP FP4-indexer, and unified-KV layouts. It does not fully satisfy the original contract for HiSparse: HiSparseC4DevicePool owns an additional GPU data_ptrs tensor, but DeepSeekV4SingleKVPool.allocated_tensors() returns only kv_buffer, so top-level mem_usage under-reports that active layout. The submitted tests and GPU verifier omit this tensor and therefore do not detect the counterexample.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-da6f828b96d2/venv/bin/python reports/j-da6f828b96d2/verify_actual_pool.py (base commit)",
+      "exit_code": 0,
+      "what_was_measured": "Actual gfx950 allocations reproduced inherited mem_usage=0 for non-unified FP8, HIP FP4 indexer, HiSparse, and unified layouts despite independently counted owned tensors of 3,594,944; 3,588,800; 3,594,952; and 4,099,456 bytes respectively."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-da6f828b96d2/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_dsv4_compressed_pools.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate's focused regression file passed: 5 tests and 8 subtests."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-da6f828b96d2/venv/bin/python reports/j-da6f828b96d2/verify_actual_pool.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Actual gfx950 allocations matched exactly for standard FP8 (3,594,944 bytes), HIP FP4 indexer (3,588,800 bytes), and unified KV (4,099,456 bytes), but HiSparse reported 3,594,944 bytes versus 3,594,952 bytes physically owned."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 a3fa16067a307d43108209a4235e91e0b7a3611c",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "One assigned AMD Instinct MI355X (gfx950) executed real torch allocations for standard FP8, HIP FP4-indexer, HiSparse, and unified-KV layouts; see evidence/base_actual_pool.txt and evidence/candidate_actual_pool.txt.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With enable_hisparse=True, HiSparseC4DevicePool allocates self.data_ptrs on the GPU, but the candidate's allocated_tensors() inherited from DeepSeekV4SingleKVPool returns only self.kv_buffer. The reduced one-C4-layer run reports 3,594,944 bytes while the pool owns 3,594,952 bytes."
+  ],
+  "remaining_limitations": [
+    "DeepSeek-V4/DeepSeek-V4-Flash weights were unavailable, so no full server launch or HTTP metrics scrape was performed.",
+    "The original 8-rank NVIDIA H100 environment was unavailable. Validation used one assigned AMD Instinct MI355X (gfx950), so it does not qualify CUDA, multi-GPU, tensor-parallel, pipeline-parallel, or model-semantic behavior.",
+    "NPU hardware and torch_npu were unavailable. NPU accounting was source-reviewed but not executed.",
+    "No native source changed in the candidate; a native rebuild was not applicable. Python imported sglang from /job/repo/python/sglang and torch from /opt/venv/lib/python3.12/site-packages/torch."
+  ]
+}
