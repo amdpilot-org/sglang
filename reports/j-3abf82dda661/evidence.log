@@ -1,0 +1,37 @@
+Prepared base: 358c163250ad3b1f62939b01ce1314a0a31a0365
+Candidate: cdc14d94a9d8efbb48b96910176cb11b1f14eb43
+Imported sglang: /job/repo/python/sglang/__init__.py
+Imported common: /job/repo/python/sglang/srt/utils/common.py
+Torch: 2.11.0+rocm7.2; HIP: 7.2.26015
+Device: AMD Instinct MI350X; gfx950:sramecc+:xnack-
+
+BASE REPRODUCTION
+_load_image source=L type=Tensor shape=(1, 48, 64) device=cpu
+_load_image source=RGB type=Tensor shape=(3, 48, 64) device=cpu
+decode_calls=[{'device': 'cuda'}, {'device': 'cuda'}]
+mixed_stack_error=stack expects each tensor to be equal size, but got [1, 48, 64] at entry 0 and [3, 48, 64] at entry 1
+gemma4_projection_error=mat1 and mat2 shapes cannot be multiplied (12x256 and 768x1152)
+torchvision_default_gray_shape=(1, 48, 64)
+
+CANDIDATE REGRESSION
+............ [100%]
+12 passed, 26 warnings in 26.41s
+
+CANDIDATE REPRODUCTION
+_load_image source=L type=Tensor shape=(3, 48, 64) device=cpu
+_load_image source=RGB type=Tensor shape=(3, 48, 64) device=cpu
+decode_calls=[{'mode': <ImageReadMode.RGB: 3>, 'device': 'cuda'}, {'mode': <ImageReadMode.RGB: 3>, 'device': 'cuda'}]
+gemma4_projection_shape=(12, 1152)
+torchvision_default_gray_shape=(1, 48, 64)
+
+INDEPENDENT BOUNDARIES
+jpeg L (3, 32, 32) torch.uint8
+jpeg RGB (3, 32, 32) torch.uint8
+jpeg CMYK (3, 32, 32) torch.uint8
+png_rgba Image RGB (8, 8)
+native_nvjpeg_blocker RuntimeError decode_jpegs_cuda: torchvision not compiled with nvJPEG support
+
+SCHEDULER SOURCE COMPARISON
+git diff --exit-code base candidate -- mm_utils.py scheduler.py gemma4_vision.py
+exit_code=0
+The unchanged run_scheduler_process broad exception handler sends SIGQUIT to the parent.

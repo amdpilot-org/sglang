@@ -1,0 +1,64 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/26751",
+  "candidate_issue_url": "https://github.com/amdpilot-org/sglang/issues/2484",
+  "review_issue_url": "https://github.com/amdpilot-org/sglang/issues/2551",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2541",
+  "candidate_commit": "cdc14d94a9d8efbb48b96910176cb11b1f14eb43",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is a valid narrow fix for Bug A: it requests RGB from the standard torchvision JPEG decoder, eliminating the grayscale one-channel tensor, mixed-stack failure, and 256-vs-768 Gemma-shaped projection failure. It does not change or verify Bug B, so it is a partial fix to the original issue rather than a full resolution.",
+  "tests": [
+    {
+      "command": "git show cdc14d94a9d8efbb48b96910176cb11b1f14eb43:reports/j-87740c602657/reproduce_grayscale_gpu.py | PYTHONPATH=python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-3abf82dda661/venv/bin/python -",
+      "revision": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "Checked-out base _load_image passed no mode, returned grayscale/RGB shapes (1,48,64)/(3,48,64), failed mixed stacking, and produced the on-device gfx950 Linear(768,1152) error for 256-wide patches."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-3abf82dda661/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_base_processor_image_decode.py",
+      "revision": "cdc14d94a9d8efbb48b96910176cb11b1f14eb43",
+      "exit_code": 0,
+      "what_was_measured": "12 focused tests passed, including candidate grayscale-to-RGB, RGB, mixed-stack, fallback, and existing PIL cases."
+    },
+    {
+      "command": "PYTHONPATH=python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-3abf82dda661/venv/bin/python reports/j-87740c602657/reproduce_grayscale_gpu.py",
+      "revision": "cdc14d94a9d8efbb48b96910176cb11b1f14eb43",
+      "exit_code": 0,
+      "what_was_measured": "Candidate passed ImageReadMode.RGB at the decode boundary, returned three channels for grayscale and RGB, and completed the gfx950 Gemma-shaped projection with output (12,1152)."
+    },
+    {
+      "command": "Independent inline boundary script using candidate common._load_image and BaseMultimodalProcessor._load_single_item",
+      "revision": "cdc14d94a9d8efbb48b96910176cb11b1f14eb43",
+      "exit_code": 0,
+      "what_was_measured": "Grayscale, RGB, and CMYK JPEG inputs became (3,32,32) tensors; RGBA PNG became an RGB PIL image; the real CUDA/HIP torchvision JPEG call reported that nvJPEG support was not compiled."
+    },
+    {
+      "command": "git diff --exit-code 358c163250ad3b1f62939b01ce1314a0a31a0365 cdc14d94a9d8efbb48b96910176cb11b1f14eb43 -- python/sglang/srt/multimodal/mm_utils.py python/sglang/srt/managers/scheduler.py python/sglang/srt/models/gemma4_vision.py",
+      "revision": "candidate comparison",
+      "exit_code": 0,
+      "what_was_measured": "No embedding, scheduler containment, per-request isolation, or Gemma vision guard source changed."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Torch reported AMD Instinct MI350X gfx950:sramecc+:xnack-. The base 256-wide patches failed an on-device Linear(768,1152), while candidate-normalized 768-wide patches produced (12,1152). The nvJPEG decoder itself could not run because this ROCm torchvision lacks nvJPEG support.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "An unrelated or malformed multimodal encoder input can still raise through forward_batch_generation into the scheduler process exception handler and its parent SIGQUIT path.",
+    "A failing multimodal request in a mixed batch is not identified or selectively aborted; true per-request isolation remains absent.",
+    "The real nvJPEG implementation on NVIDIA hardware and full Gemma-4 2xH200 TP=2 serving path were not executable in this environment."
+  ],
+  "remaining_limitations": [
+    "The installed ROCm torchvision 0.26.0+rocm7.2 is not compiled with nvJPEG support; decoder semantics were tested with a deterministic CPU decoder substitution at the checked-out call boundary.",
+    "Gemma-4 weights and the reported two-H200 topology were unavailable, so no full model, HTTP server, concurrent batch, or scheduler subprocess reproduction is claimed.",
+    "No native source changed, so a native rebuild was not applicable."
+  ],
+  "source_paths": [
+    "/job/repo/python/sglang/srt/utils/common.py",
+    "/job/repo/python/sglang/srt/multimodal/processors/base_processor.py",
+    "/job/repo/python/sglang/srt/managers/scheduler.py",
+    "/job/repo/test/registered/unit/multimodal/test_base_processor_image_decode.py"
+  ],
+  "native_paths": []
+}
