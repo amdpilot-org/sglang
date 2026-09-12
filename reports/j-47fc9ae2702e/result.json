@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37342",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "reject",
+  "fully_resolves_original": false,
+  "summary": "PR 1413 at 678b659 is test-only hardening. Its production-created buffer fixture is better than the prior hand-sized fixture, but all seven loader/shape cases already pass on the recorded base, so it supplies no failing-before reproduction or production correction for the original Hidden size mismatch. The only base failure fixed by the candidate is ROCm leakage into a mocked NVIDIA backend-selection test, which is unrelated to the reported H800 checkpoint-load assertion.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-47fc9ae2702e/venv/bin/python -m pytest test/registered/unit/layers/quantization/test_dsv4_mxfp4_loader.py test/registered/unit/test_model_overrides.py::TestGoldenModelOverrides::test_deepseek_v4_overrides_at_callable_level -q (candidate 678b659)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 8 passed plus 3 subtests; checkout-local SGLang production sources were imported."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-47fc9ae2702e/venv/bin/python -m pytest /job/review-evidence-j-47fc9ae2702e/test_dsv4_mxfp4_loader.py -q (base 358c163)",
+      "exit_code": 0,
+      "what_was_measured": "Independent failing-before check: all 7 candidate loader/model-contract cases already pass on the recorded base, demonstrating no regression catches the original failure."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-47fc9ae2702e/venv/bin/python -m pytest test/registered/unit/test_model_overrides.py::TestGoldenModelOverrides::test_deepseek_v4_overrides_at_callable_level -q (base 358c163)",
+      "exit_code": 1,
+      "what_was_measured": "The base test fails because the physical ROCm platform leaks into a mocked SM100 case; this is test isolation, not the original SM90 Hidden size mismatch."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-47fc9ae2702e/venv/bin/python -m pytest test/registered/unit/layers/quantization/test_mxfp4_sm90_cutlass.py -q (candidate 678b659)",
+      "exit_code": 0,
+      "what_was_measured": "The SM90 preprocessing/kernel suite was attempted and skipped on the AMD host."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "No issue-specific GPU execution was possible. The assigned device is AMD Instinct MI355X (ROCm 7.2), while the reported path requires NVIDIA SM90/H800 and FlashInfer CUDA kernels.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No full DeepSeek-V4-Flash-0731 checkpoint load reproduces or clears the original Hidden size mismatch.",
+    "No FlashInfer SM90 post-load preprocessing or kernel execution validates the loaded/permuted expert dimensions.",
+    "The candidate's 1024/64 and 2048/127 boundary test only compares tensor shapes; it does not execute the loader and assert rejection.",
+    "The candidate loader regression passes unchanged on the recorded base, so it cannot distinguish the allegedly broken implementation from the candidate.",
+    "No four-rank H800 TP=4, DSPARK, HTTP serving, or semantic-output validation was performed."
+  ],
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 checkpoint weights were unavailable.",
+    "The assigned GPU is AMD Instinct MI355X gfx950 on ROCm 7.2, not NVIDIA SM90/H800.",
+    "The candidate changes no production or native source, so no native rebuild was applicable.",
+    "The prepared checkout imports SGLang from /job/repo/python; Torch comes from /opt/venv/lib/python3.12/site-packages and reports 2.11.0+rocm7.2."
+  ]
+}
