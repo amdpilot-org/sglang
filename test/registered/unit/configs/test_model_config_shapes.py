@@ -140,5 +140,46 @@ class TestModelConfigShapes(CustomTestCase):
         self.assertEqual(_quant_config_to_dict(quant_config), {"quant_method": "test"})
 
 
+class TestQwen35DraftConfig(CustomTestCase):
+    def _configure(self, architecture, *, is_draft_model=True):
+        model_config = ModelConfig.__new__(ModelConfig)
+        model_config.is_draft_model = is_draft_model
+        model_config.speculative_algorithm = "EAGLE"
+        model_config.hf_config = SimpleNamespace(architectures=[architecture])
+        model_config.hf_text_config = SimpleNamespace()
+
+        model_config._config_draft_model()
+        return model_config
+
+    def test_conditional_generation_mtp_depth_is_visible_to_shape_derivation(self):
+        model_config = self._configure("Qwen3_5ForConditionalGeneration")
+
+        self.assertEqual(
+            model_config.hf_config.architectures, ["Qwen3_5ForCausalLMMTP"]
+        )
+        self.assertEqual(model_config.hf_config.num_nextn_predict_layers, 1)
+        self.assertEqual(model_config.hf_text_config.num_nextn_predict_layers, 1)
+
+    def test_causal_lm_variant_uses_the_same_single_mtp_layer(self):
+        model_config = self._configure("Qwen3_5ForCausalLM")
+
+        self.assertEqual(model_config.hf_config.num_nextn_predict_layers, 1)
+        self.assertEqual(model_config.hf_text_config.num_nextn_predict_layers, 1)
+
+    def test_target_config_is_not_rewritten_as_mtp(self):
+        model_config = self._configure(
+            "Qwen3_5ForConditionalGeneration", is_draft_model=False
+        )
+
+        self.assertEqual(
+            model_config.hf_config.architectures,
+            ["Qwen3_5ForConditionalGeneration"],
+        )
+        self.assertFalse(hasattr(model_config.hf_config, "num_nextn_predict_layers"))
+        self.assertFalse(
+            hasattr(model_config.hf_text_config, "num_nextn_predict_layers")
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
