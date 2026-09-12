@@ -7,11 +7,12 @@
 
 use axum::{
     Router,
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
 };
+use serde::Deserialize;
 use std::sync::Arc;
 
 use super::app::AppState;
@@ -33,6 +34,93 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         // alias).
         .route("/get_model_info", get(model_info))
         .route("/model_info", get(model_info))
+        .route("/v1/loads", get(loads))
+}
+
+#[derive(Default, Deserialize)]
+struct LoadsQuery {
+    dp_rank: Option<u64>,
+    include: Option<String>,
+    format: Option<String>,
+}
+
+async fn loads(State(state): State<Arc<AppState>>, Query(query): Query<LoadsQuery>) -> Response {
+    if query
+        .format
+        .as_deref()
+        .is_some_and(|format| format != "json")
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            "Rust /v1/loads currently supports JSON format only",
+        )
+            .into_response();
+    }
+    let includes = query.include.as_deref().map(|raw| {
+        raw.split(',')
+            .map(str::trim)
+            .collect::<std::collections::BTreeSet<_>>()
+    });
+    let valid = ["core", "memory", "spec", "lora", "disagg", "queues", "all"];
+    if let Some(includes) = &includes {
+        if let Some(invalid) = includes.iter().find(|value| !valid.contains(value)) {
+            return (
+                StatusCode::BAD_REQUEST,
+                format!("Invalid include section: {invalid}"),
+            )
+                .into_response();
+        }
+    }
+
+    let snapshots = state
+        .load_snapshots
+        .read()
+        .expect("load snapshot lock poisoned");
+    let loads: Vec<_> = snapshots
+        .iter()
+        .filter(|(rank, _)| query.dp_rank.is_none_or(|wanted| wanted == **rank))
+        .map(|(_, snapshot)| filter_load_snapshot(snapshot.clone(), includes.as_ref()))
+        .collect();
+    axum::Json(serde_json::json!({
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs_f64(),
+        "version": state.server_args.version,
+        // Topology/device metadata is not part of the Rust launch handoff yet;
+        // report it as unknown rather than fabricating a value.
+        "accelerator": serde_json::Value::Null,
+        "num_accelerators": serde_json::Value::Null,
+        "loads": loads,
+    }))
+    .into_response()
+}
+
+fn filter_load_snapshot(
+    mut snapshot: serde_json::Value,
+    includes: Option<&std::collections::BTreeSet<&str>>,
+) -> serde_json::Value {
+    const SECTIONS: [(&str, &str); 5] = [
+        ("memory", "memory"),
+        ("speculative", "spec"),
+        ("lora", "lora"),
+        ("disaggregation", "disagg"),
+        ("queues", "queues"),
+    ];
+    let Some(includes) = includes else {
+        return snapshot;
+    };
+    if includes.contains("all") {
+        return snapshot;
+    }
+    if let Some(object) = snapshot.as_object_mut() {
+        for (field, include) in SECTIONS {
+            if !includes.contains(include) {
+                object.remove(field);
+            }
+        }
+    }
+    snapshot
 }
 
 /// Submit a control request through the request FSM (no tokenization) and await the
