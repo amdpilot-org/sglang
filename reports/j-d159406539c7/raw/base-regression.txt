@@ -1,0 +1,205 @@
+.F.F                                                                     [100%]
+=================================== FAILURES ===================================
+_ TestCacheFinishedReqEmptyInsert.test_finished_req_without_track_boundary_inserts_nothing _
+
+self = <test_candidate.TestCacheFinishedReqEmptyInsert testMethod=test_finished_req_without_track_boundary_inserts_nothing>
+
+    def test_finished_req_without_track_boundary_inserts_nothing(self):
+        cache, allocator, req_to_token_pool = build_fixture(self.cfg)
+        tokens = [1, 2, 3]
+    
+        seed = [7, 7, 7]
+        donor = Req(
+            rid="seed-donor",
+            origin_input_text="",
+            origin_input_ids=array("q"),
+            sampling_params=SamplingParams(temperature=0, max_new_tokens=1),
+        )
+        req_to_token_pool.alloc([donor])
+        seed_value = allocator.alloc(len(seed))
+        self.assertIsNotNone(seed_value)
+        cache.insert(
+            InsertParams(
+                key=RadixKey(array("q", seed)),
+                value=seed_value,
+                mamba_value=donor.kv.mamba_pool_idx.unsqueeze(0),
+            )
+        )
+        matched = cache.match_prefix(MatchPrefixParams(key=RadixKey(array("q", seed))))
+        self.assertNotEqual(matched.last_device_node, cache.root_node_handle())
+        lock_result = cache.inc_lock_ref(matched.last_device_node)
+    
+        kv0 = allocator.available_size()
+        m0 = req_to_token_pool.mamba_allocator.available_size()
+    
+        req = self._finish(
+            cache,
+            allocator,
+            req_to_token_pool,
+            tokens,
+            None,
+            last_node=matched.last_device_node,
+            lock_result=lock_result,
+        )
+    
+        match = cache.match_prefix(MatchPrefixParams(key=RadixKey(array("q", tokens))))
+        self.assertEqual(len(match.device_indices), 0)
+        self.assertEqual(cache.mamba_evictable_size(), 1)
+>       self.assertEqual(req.last_node, matched.last_device_node)
+E       AssertionError: 28 != 37
+
+../review-evidence/test_candidate.py:116: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x751ef8e70720>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7527df656840>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestCacheFinishedReqEmptyInsert.test_finished_req_without_track_boundary_inserts_nothing
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/review-evidence/test_candidate.py", line 116, in test_finished_req_without_track_boundary_inserts_nothing
+    self.assertEqual(req.last_node, matched.last_device_node)
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 878, in _baseAssertEqual
+    raise self.failureException(msg)
+AssertionError: 28 != 37
+______ TestCacheFinishedReqEmptyInsert.test_insert_empty_key_is_pure_noop ______
+
+self = <test_candidate.TestCacheFinishedReqEmptyInsert testMethod=test_insert_empty_key_is_pure_noop>
+
+    def test_insert_empty_key_is_pure_noop(self):
+        cache, _, req_to_token_pool = build_fixture(self.cfg)
+        m0 = req_to_token_pool.mamba_allocator.available_size()
+        req = self._make_finished_req(req_to_token_pool, [9, 9, 9], None)
+    
+        result = cache.insert(
+            InsertParams(
+                key=RadixKey(array("q")),
+                value=torch.tensor([], dtype=torch.int64),
+                mamba_value=req.kv.mamba_pool_idx.unsqueeze(0),
+            )
+        )
+    
+        self.assertEqual(result.prefix_len, 0)
+        self.assertTrue(result.mamba_exist)
+>       self.assertIsNone(result.last_device_node)
+E       AssertionError: 65 is not None
+
+../review-evidence/test_candidate.py:160: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x751ef8c3e660>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7527df656840>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestCacheFinishedReqEmptyInsert.test_insert_empty_key_is_pure_noop
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/review-evidence/test_candidate.py", line 160, in test_insert_empty_key_is_pure_noop
+    self.assertIsNone(result.last_device_node)
+  File "/usr/lib/python3.12/unittest/case.py", line 1281, in assertIsNone
+    self.fail(self._formatMessage(msg, standardMsg))
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: 65 is not None
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../review-evidence/test_candidate.py::TestCacheFinishedReqEmptyInsert::test_finished_req_without_track_boundary_inserts_nothing
+FAILED ../review-evidence/test_candidate.py::TestCacheFinishedReqEmptyInsert::test_insert_empty_key_is_pure_noop
+2 failed, 2 passed, 16 warnings in 20.26s
