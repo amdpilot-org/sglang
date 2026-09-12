@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34113",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1963",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1925",
+  "candidate_commit": "13901903c9cf5d6f7ffe304888a189f41dbf7ec6",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "reject",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes a real pre-normalization streaming cleanup AttributeError, but the changed create_abort_task is not used by the public /abort_request endpoint. The endpoint still returns HTTP 200 after local dispatch without confirmed downstream cancellation. Independent live probes aborted cleanly on both base and candidate, so the original endpoint failure was not reproduced and the candidate cannot be credited as a full original-issue fix.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-fe7bd7536fd1/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-fe7bd7536fd1/review-evidence/test_tokenizer_manager_rid_cleanup_candidate.py -k TestCreateAbortTask (recorded base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "The candidate's exact regression exposed the cleanup defect on base: 3 failed with missing is_single and 1 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fe7bd7536fd1/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py -k TestCreateAbortTask (exact candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "All four candidate cleanup cases passed at commit 13901903c9cf5d6f7ffe304888a189f41dbf7ec6."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fe7bd7536fd1/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py (exact candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "The complete related file passed: 30 tests and 3 subtests."
+    },
+    {
+      "command": "run_http_abort.py with qualified tiny Llama fixture (recorded base checkout)",
+      "exit_code": 0,
+      "what_was_measured": "On one gfx950 GPU, /abort_request returned 200 and the live stream ended with finish_reason.type=abort after four tokens; no claimed AttributeError was present."
+    },
+    {
+      "command": "run_http_abort.py with qualified tiny Llama fixture (exact candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "On one gfx950 GPU, /abort_request returned 200 and the live stream ended with finish_reason.type=abort after four tokens; no claimed AttributeError was present."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Base and candidate performed real generation on one AMD gfx950 GPU using Torch 2.11.0+rocm7.2 and deterministic tiny-Llama weights with SHA-256 6632fab7c351a0bd85518d80a89ec673f68139587f5ad3fa8d5ab38fad87e75f."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The public /abort_request endpoint is unchanged between base and candidate and directly calls TokenizerManager.abort_request; it never invokes the changed create_abort_task.",
+    "HTTP 200 still acknowledges only successful local dispatch. The candidate adds no downstream completion acknowledgement or cancellation-failure propagation.",
+    "The original endpoint failure was not reproduced: identical qualified live GPU probes aborted cleanly on both recorded base and exact candidate."
+  ],
+  "remaining_limitations": [
+    "The original meta-llama/Llama-3.2-1B-Instruct weights were unavailable.",
+    "The issue reports RTX 4090/CUDA, while review execution used one AMD gfx950 with ROCm 7.2.",
+    "The tiny random Llama fixture validates transport and engine execution only, not semantic accuracy, the original model configuration, or distributed behavior.",
+    "Both owned server process groups required SIGKILL after exceeding the runner's 30-second graceful shutdown window; descendants were reaped.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
