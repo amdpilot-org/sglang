@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/23363",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2581",
+  "candidate_commit": "6791b29b61cb0054a6be3387528f08f31d1872f8",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a substantial partial fix: it passes its focused regressions and independently fixes one-character streaming fragmentation, streaming singular-marker stripping, a simple unclosed-section overflow, and explicit reset. It does not fully resolve the original issue because an earlier complete call masks an oversized unclosed later call from the one-time safety check, leaving over-limit state buffered even after finish(), and the non-streaming public path still does not recognize singular K2-Thinking section markers.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-45385f766aff/venv/bin/python /tmp/amdpilot-repo-j-45385f766aff/review_harness.py (base 358c1632)",
+      "exit_code": 0,
+      "what_was_measured": "Recorded-base reproduction: one-character fragmentation produced zero calls and leaked the complete wire format; singular streaming markers leaked; a 200-character unclosed call remained buffered; no reset method existed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-45385f766aff/venv/bin/python -m pytest -q test/registered/function_call/test_kimik2_detector.py (candidate 6791b29b)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 67 passed, 7 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-45385f766aff/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py -k KimiK2Detector (candidate 6791b29b)",
+      "exit_code": 0,
+      "what_was_measured": "Existing parser integration unit coverage: 6 passed, 237 deselected."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-45385f766aff/venv/bin/python /tmp/amdpilot-repo-j-45385f766aff/review_harness.py (candidate 6791b29b)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial cases. One-character and singular-marker streaming passed; simple overflow flushed. A complete first call plus oversized unclosed second call retained 269 characters with section_max=128, and finish() retained the same buffer. Singular markers in detect_and_parse produced no calls and leaked all markers."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-45385f766aff/venv/bin/python -c 'import sglang.srt.function_call.kimik2_detector as m; print(m.__file__)'",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed tests imported candidate source from /job/repo/python/sglang/srt/function_call/kimik2_detector.py rather than an installed wheel."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One gfx950-compatible ROCm device was visible through torch, but no GPU execution was used because the changed code is a deterministic Python string parser and no model weights were available."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With SGLANG_KIMI_PARSER_SECTION_MAX=128, one increment containing a complete first tool call followed by an unclosed second call with 200 argument characters bypasses the entry-time safety check because the buffer contains the first call's end marker. The candidate emits call fragments for both calls and retains 269 characters; BaseFormatDetector.finish() emits nothing and leaves all 269 characters buffered.",
+    "detect_and_parse/has_tool_call still only recognize <|tool_calls_section_begin|>. A complete singular K2-Thinking wire format using <|tool_call_section_begin|>/<|tool_call_section_end|> returns zero calls and leaks the complete marked text as normal content."
+  ],
+  "remaining_limitations": [
+    "No Kimi-K2 or Kimi-K2.5 weights were available, so actual model token emission, semantic tool accuracy, HTTP client behavior, and multi-node behavior were not tested.",
+    "The candidate changes only Python; repository-environment.json specifies native=null and wheel=null, so no native rebuild applies.",
+    "The configured section limit is implemented with Python character count although candidate prose describes bytes; multibyte-memory behavior was not used as a rejection basis.",
+    "Serving code constructs a parser per response choice, so cross-request reuse is not the normal inspected serving path. Direct reuse remains stateful unless the caller explicitly invokes reset()."
+  ]
+}
