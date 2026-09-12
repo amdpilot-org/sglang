@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33714",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2818",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2786",
+  "candidate_commit": "6c47c937760863072df17141ca2199b0d8e3a3bb",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review reproduced the remaining hybrid-Mamba extra-buffer failure on the recorded base and verified the exact candidate fixes it. The base left an already committed chunk-boundary node unbacked when a short final extend produced no new Mamba checkpoint. The candidate re-walks the request's tree-owned cache_protected_len at finalization; exact-commit tests then backed up both the FULL KV payload and Mamba sidecar without changing native code. Current base already performs the final non-chunked walk for ordinary attention; the candidate addresses the remaining Mamba extra-buffer boundary. The exact reported 256K hybrid-KDA model and MooncakeStore restart/loadback topology were unavailable, so those deployment-specific paths remain unqualified rather than being used as proof.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-2b7a9af31e02/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_radix_hicache_chunk_finalize.py (candidate test file on base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: immediate write-through stayed backuped=False and selective write-through stayed at hit_count=0; 2 failed and the write-back compatibility case passed. Raw output is retained at /tmp/amdpilot-repo-j-2b7a9af31e02/review-evidence/base-candidate-regression.txt."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-2b7a9af31e02/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_radix_hicache_chunk_finalize.py (exact candidate 6c47c937760863072df17141ca2199b0d8e3a3bb)",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression: immediate write-through, selective threshold accounting, and write-back non-eagerness all passed (3 passed). Raw output: /tmp/amdpilot-repo-j-2b7a9af31e02/review-evidence/candidate-focused.txt."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-2b7a9af31e02/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_unittest.py test/registered/unit/mem_cache/test_unified_radix_hicache_chunk_finalize.py",
+      "exit_code": 0,
+      "what_was_measured": "Mamba compatibility suite plus candidate regression on the assigned GPU: 19 passed. Raw output: /tmp/amdpilot-repo-j-2b7a9af31e02/review-evidence/candidate-mamba-suite.txt."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-2b7a9af31e02/venv/bin/python - <<'PY' (independent host-materialization lifecycle probe; see review.md)",
+      "exit_code": 0,
+      "what_was_measured": "After chunked insertion and a short final extend, the boundary was backuped with hit_count=1 and both FULL.host_value and MAMBA.host_value materialized; cache.sanity_check() passed. Raw output: /tmp/amdpilot-repo-j-2b7a9af31e02/review-evidence/adversarial-host-materialization.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2b7a9af31e02/venv/bin/python import-path probe at exact candidate",
+      "exit_code": 0,
+      "what_was_measured": "sglang and mamba_component imported from /job/repo/python; the existing AITER extension loaded from /tmp/amdpilot-repo-j-2b7a9af31e02/cache/aiter/module_aiter_core.so."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X (gfx950), Torch 2.11.0+rocm7.2, HIP 7.2.26015. The focused lifecycle and compatibility tests allocate and transfer real cache tensors. Raw device output: /tmp/amdpilot-repo-j-2b7a9af31e02/review-evidence/gpu-info.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The reported 256K hybrid-KDA model and weights were unavailable, so that exact architecture and context length were not executed.",
+    "No two-process MooncakeStore deployment was available; storage persistence across server restart/loadback was not measured. Verification reached the real HiCache host-backup transition and materialized both FULL and Mamba host payloads.",
+    "No independent model-output numerical comparison was run because the candidate changes Python cache-finalization bookkeeping only, not model-forward or kernel arithmetic.",
+    "No native source changed. repository-environment.json declares native=null, so no native rebuild was applicable; the pre-existing AITER extension path was recorded but is not evidence for the candidate fix.",
+    "NUMA balancing was enabled on the node and AITER emitted its standard performance warning; node-wide state was not changed."
+  ]
+}
