@@ -492,8 +492,6 @@ class MoEGate(nn.Module):
             self.e_score_correction_bias = nn.Parameter(correction_bias)
         else:
             self.e_score_correction_bias = None
-        if _is_cpu and _is_cpu_amx_available:
-            self.quant_method = PackWeightMethod(weight_names=["weight"])
         self.tiny_router_gemm_max_tokens = tiny_router_gemm_max_tokens(
             num_experts=config.n_routed_experts,
             hidden_size=config.hidden_size,
@@ -509,13 +507,11 @@ class MoEGate(nn.Module):
         if self.weight.dtype == torch.float32:
             return F.linear(hidden_states.float(), self.weight)
 
-        if use_intel_amx_backend(self):
-            return torch.ops.sgl_kernel.weight_packed_linear(
-                hidden_states,
-                self.weight,
-                None,  # bias
-                True,  # is_vnni
-            )
+        # CPU weight_packed_linear returns the activation dtype, quantizing the
+        # fp32 GEMM accumulator to bf16 before routing.  Keep the unpacked gate
+        # weight and compute fp32 logits, matching the CUDA router contract.
+        if not _is_cuda:
+            return F.linear(hidden_states.float(), self.weight.float())
 
         if get_exec().deterministic.enable_deterministic_inference:
             return F.linear(hidden_states, self.weight, None)
