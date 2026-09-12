@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -81,6 +82,49 @@ def test_every_compatibility_dimension_invalidates_marker(tmp_path: Path):
         assert not marker_matches(path, candidate)
 
 
+def test_deep_gemm_identity_covers_sibling_jit_sources(tmp_path: Path):
+    package_dir = tmp_path / "deep_gemm"
+    package_dir.mkdir()
+    init_path = package_dir / "__init__.py"
+    jit_path = package_dir / "jit_kernels.py"
+    init_path.write_text('__version__ = "1.0.0"\n')
+    jit_path.write_text('KERNEL_TEMPLATE = "v1"\n')
+    module = SimpleNamespace(__file__=str(init_path), __version__="1.0.0")
+
+    before = compile_utils._module_identity(module, ())
+    jit_path.write_text('KERNEL_TEMPLATE = "v2"\n')
+    after = compile_utils._module_identity(module, ())
+
+    assert before != after
+
+
+def test_deep_gemm_identity_covers_distribution_native_artifacts(
+    tmp_path: Path, monkeypatch
+):
+    package_dir = tmp_path / "deep_gemm"
+    package_dir.mkdir()
+    init_path = package_dir / "__init__.py"
+    native_path = tmp_path / "deep_gemm_native.so"
+    init_path.write_text('__version__ = "1.0.0"\n')
+    native_path.write_bytes(b"native-v1")
+    module = SimpleNamespace(__file__=str(init_path), __version__="1.0.0")
+    distribution = SimpleNamespace(
+        files=[Path("deep_gemm_native.so")],
+        locate_file=lambda relative_path: tmp_path / relative_path,
+    )
+    monkeypatch.setattr(
+        compile_utils.importlib.metadata,
+        "distribution",
+        lambda _name: distribution,
+    )
+
+    before = compile_utils._module_identity(module, ("deep-gemm",))
+    native_path.write_bytes(b"native-v2")
+    after = compile_utils._module_identity(module, ("deep-gemm",))
+
+    assert before != after
+
+
 @pytest.fixture
 def compile_marker_state(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("DG_JIT_CACHE_DIR", str(tmp_path))
@@ -92,7 +136,14 @@ def compile_marker_state(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(
         compile_utils, "_normalize_warmup_m_values", lambda _t, m: sorted(set(m))
     )
-    monkeypatch.setattr(compile_utils, "_warmup_identity", lambda: {"test": "identity"})
+    monkeypatch.setattr(
+        compile_utils,
+        "_warmup_identity",
+        lambda: {
+            "test": "identity",
+            "deep_gemm": {"artifact_manifest_sha256": "test-digest"},
+        },
+    )
     compile_utils._INITIALIZATION_DICT.clear()
     yield
     compile_utils._INITIALIZATION_DICT.clear()
@@ -151,6 +202,32 @@ def test_failed_or_partial_warmup_never_marks(compile_marker_state, monkeypatch)
     )
     with pytest.raises(RuntimeError, match="warmup failed"):
         compile_utils._maybe_compile_deep_gemm_one_type_all(*args)
+    assert not list(Path(os.environ["DG_JIT_CACHE_DIR"]).rglob("*.json"))
+
+
+def test_unknown_deep_gemm_identity_never_skips_or_marks(
+    compile_marker_state, monkeypatch
+):
+    monkeypatch.setattr(
+        compile_utils,
+        "_warmup_identity",
+        lambda: {
+            "deep_gemm": {"artifact_manifest_sha256": "unknown"},
+        },
+    )
+    calls = []
+    monkeypatch.setattr(
+        compile_utils,
+        "_compile_deep_gemm_one_type_all",
+        lambda **kwargs: calls.append(kwargs) or True,
+    )
+    args = (compile_utils.DeepGemmKernelType.GEMM_NT_F8F8BF16, 16, 32, 1)
+
+    compile_utils._maybe_compile_deep_gemm_one_type_all(*args)
+    compile_utils._INITIALIZATION_DICT.clear()
+    compile_utils._maybe_compile_deep_gemm_one_type_all(*args)
+
+    assert len(calls) == 2
     assert not list(Path(os.environ["DG_JIT_CACHE_DIR"]).rglob("*.json"))
 
 
