@@ -81,6 +81,13 @@ class BaseFormatDetector(ABC):
 
         results = []
         for act in action:
+            if not isinstance(act, dict):
+                logger.warning(
+                    "Model attempted to call a function with a non-object payload: %r",
+                    act,
+                )
+                continue
+
             name = act.get("name")
             if not (name and name in tool_indices):
                 logger.warning(f"Model attempted to call undefined function: {name}")
