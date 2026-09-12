@@ -1,0 +1,21 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38787",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The reported prefill defect was reproduced by reconstructing the pre-fix constexpr signature from the checked-out implementation. Four representative expanded-page-table row strides produced four Triton cache keys and four distinct HSACO binaries. Main already contains upstream PR #37093: page_table_stride_0 is a runtime do_not_specialize argument, and the same strides reuse one cache key and one HSACO while matching an independent PyTorch reference exactly. No duplicate source fix was applied.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 TRITON_CACHE_DIR=<private-temp-dir> PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bc5811f892bc/venv/bin/python test/registered/kernels/ops/attention/test_dsa_transform_index.py -v",
+      "exit_code": 0,
+      "what_was_measured": "Nine GPU tests covering exact numerical correctness, dynamic prefill strides, specialization count, padding, empty batches, batch size 8192, context lengths through 1,000,000, decode output, and zero decode row stride."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 TRITON_CACHE_DIR=<private-temp-dir> PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bc5811f892bc/venv/bin/python reports/j-bc5811f892bc/measure_compile_identities.py",
+      "exit_code": 0,
+      "what_was_measured": "Actual Triton in-memory cache keys and SHA-256 identities of generated gfx950 HSACO for row strides 4096, 4160, 4224, and 65537, plus exact comparison with an independent torch.gather reference. Pre-fix counts were 1/2/3/4 with four distinct binaries; current counts were 1/1/1/1 with one binary."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": "The CUDA-specific cuModuleLoadData lock and long-lived NVIDIA process memory growth were not directly measured on this ROCm-only assigned GPU. The compiler-level cause and bounded identity behavior were measured with Triton 3.7.0 on gfx950. Decode was intentionally not changed: its operational page table comes from fixed-width preallocated request/CUDA-graph storage, unlike the contiguous expanded prefill table whose row stride follows each context length. No FlyDSL C++ code changed, so no native rebuild was applicable."
+}
