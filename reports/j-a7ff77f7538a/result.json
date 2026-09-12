@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31011",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2402",
+  "candidate_commit": "055aba252884d1f8995dce00442ef07d8b9b1154",
+  "outcome": "environment_blocked",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "The recorded base reproduces the application-level corruption when the reported XCCL MIN-to-SUM behavior is simulated. The candidate is a plausible XPU-only gather-plus-local-min workaround and its mocked regression passes, but the issue-defining two-rank Intel XPU/XCCL path could not be run. A two-rank Gloo adversarial run rejects the candidate's stacked all_gather_into_tensor output layout, making backend-specific XCCL validation necessary.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a7ff77f7538a/venv/bin/python /job/review-evidence/base/base_contract_repro.py",
+      "exit_code": 1,
+      "what_was_measured": "On the exact base, simulated XCCL integer MIN fallback to SUM changed token IDs [42, 7] to [84, 14], reproducing the sampler-level failure contract."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a7ff77f7538a/venv/bin/python -m pytest -q test/registered/unit/layers/test_sampler_xpu_token_sync.py",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate commit, all four candidate mock-based regression cases passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a7ff77f7538a/venv/bin/python /job/review-evidence/candidate/gloo_candidate_adversarial.py",
+      "exit_code": 1,
+      "what_was_measured": "A real two-rank Gloo collective rejected candidate output shape (world_size, batch) with invalid tensor size; this is a portability counterexample and shows the mocks do not validate collective layout."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-a7ff77f7538a/venv/bin/python /job/review-evidence/candidate/rocm_collective_shape.py",
+      "exit_code": 0,
+      "what_was_measured": "On one assigned gfx950 GPU with RCCL world size one, a three-element int64 token tensor remained [42, 7, 0] through the candidate path. This does not validate multi-rank or XCCL."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X gfx950, Torch 2.11.0+rocm7.2, one visible GPU; the candidate path ran with RCCL world size one. No Intel XPU execution occurred."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The issue-defining Intel XPU/XCCL two-rank path was not executable in the prepared ROCm environment.",
+    "Two-rank Gloo rejects the candidate's stacked all_gather_into_tensor output shape; XCCL acceptance of that exact shape remains unverified.",
+    "The candidate regression mocks all distributed operations and covers only scalar per-rank token tensors, not a real batched collective or serving path."
+  ],
+  "remaining_limitations": [
+    "No Intel XPU hardware, PyTorch XPU build, XCCL/oneCCL runtime, or second assigned GPU was available.",
+    "The single-gfx950 run cannot qualify another architecture or a distributed workload.",
+    "No native code changed, so native rebuild requirements were not applicable."
+  ]
+}
