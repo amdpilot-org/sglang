@@ -274,6 +274,7 @@ class KVCacheConfigurator:
     hybrid_gdn_config: Optional[Any] = field(init=False)
     is_hybrid_swa_mtp_draft: bool = field(init=False)
     draft_swa_full_capacity: bool = field(init=False)
+    _warned_cuda_graph_request_capacity: bool = field(init=False, default=False)
 
     def __post_init__(self) -> None:
         self.mambaish_config = mambaish_config(self.model_config)
@@ -2285,6 +2286,18 @@ class KVCacheConfigurator:
             requested_per_worker = None
             max_num_reqs = min(estimated, token_capacity // 2)
 
+            # Keep the automatically derived admission limit on the captured
+            # decode-graph fast path. Users can still opt into eager overflow
+            # by setting --max-running-requests explicitly.
+            cuda_graph_config = get_exec().graph.cuda_graph_config
+            if cuda_graph_config is not None:
+                decode_config = cuda_graph_config.decode
+                if (
+                    decode_config.backend != "disabled"
+                    and decode_config.max_bs is not None
+                ):
+                    max_num_reqs = min(max_num_reqs, decode_config.max_bs)
+
         capped_by_mamba = False
         if self.mambaish_config is not None:
             ratio = self._calculate_mamba_ratio()
@@ -2323,7 +2336,35 @@ class KVCacheConfigurator:
                 requested_per_worker,
                 max_num_reqs,
             )
+        self._warn_cuda_graph_request_capacity(max_num_reqs)
         return max_num_reqs
+
+    def _warn_cuda_graph_request_capacity(self, max_num_reqs: int) -> None:
+        """Warn when an explicit admission override exceeds graph coverage."""
+        if self._warned_cuda_graph_request_capacity:
+            return
+
+        cuda_graph_config = get_exec().graph.cuda_graph_config
+        if cuda_graph_config is None:
+            return
+        decode_config = cuda_graph_config.decode
+        graph_max_bs = decode_config.max_bs
+        if (
+            decode_config.backend == "disabled"
+            or graph_max_bs is None
+            or max_num_reqs <= graph_max_bs
+        ):
+            return
+
+        logger.warning(
+            "Effective max_running_requests per DP worker (%d) exceeds the largest "
+            "captured decode CUDA graph batch size (%d). Decode batches above this "
+            "size fall back to eager execution. Consider raising "
+            "--cuda-graph-max-bs-decode or lowering --max-running-requests.",
+            max_num_reqs,
+            graph_max_bs,
+        )
+        self._warned_cuda_graph_request_capacity = True
 
     def _resolve_memory_pool_config(
         self, pre_model_load_memory: int
