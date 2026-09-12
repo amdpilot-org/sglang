@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35333",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "fd613337e313f299b9c3bd94dbbf9211e2fb356c",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "Partial fix: ordinary denoising requests can resolve promoted regional plans and uncovered requests fall back eagerly, and unsupported tensor metrics now fail closed. The stateful CausalDMD/LingBot production forward path never invokes request-time plan resolution, and no real offline full-trajectory validation/adaptor flow produces manifests.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-2ed8cef14fec/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_compile_trajectory_gate.py python/sglang/multimodal_gen/test/unit/test_regional_torch_compile.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 22 tests passed, including resolver mismatch fallback, regional wrapper deactivation/reactivation, trajectory structural/numerical checks, and fail-closed unsupported tensor metrics."
+    },
+    {
+      "command": "AST inspection of CausalDMDDenoisingStage.forward on exact candidate",
+      "exit_code": 1,
+      "what_was_measured": "Independent adversarial production-path check: the stateful causal forward override calls neither _resolve_compile_plan nor _maybe_enable_cache_dit_and_torch_compile."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TORCHINDUCTOR_CACHE_DIR=/tmp/amdpilot-repo-j-2ed8cef14fec/review-inductor-cache HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-2ed8cef14fec/venv/bin/python reports/j-ca997a4b410d/gpu_trajectory_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "ROCm/Inductor Linear-tanh toy: four-step eager/compiled parity, warm/reset-short-history behavior, and intentional perturbation rejection; not a production model qualification."
+    },
+    {
+      "command": "Source inspection at recorded base 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "Original feature absence: compile_trajectory.py absent and causal request path has no trajectory-plan resolution."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X, Torch 2.11.0+rocm7.2. Toy maximum absolute error 1.1920928955078125e-07; perturbation rejected. No production model weights were available."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "CausalDMDDenoisingStage.forward, the stateful base used by LingBot-World, never resolves or applies a manifest-backed compile plan; configured manifests cause initialization compilation to be deferred, so matching stateful requests remain eager.",
+    "No non-test caller captures and evaluates a complete eager-versus-compiled trajectory or writes a validated manifest, so the proposed promotion flow is not operational.",
+    "No real diffusion or stateful world-model trajectory qualifies history/shape regimes, cache on/off, CFG serial/parallel, reset isolation, mutation/alias metadata, semantic output metrics, or distributed topology."
+  ],
+  "remaining_limitations": [
+    "No production diffusion or LingBot-World weights and no promoted production manifests were available.",
+    "The GPU exercise is a deterministic Linear/tanh toy and cannot establish model semantic accuracy or state/cache safety.",
+    "Only one AMD Instinct MI355X was available; distributed and non-ROCm architectures were not tested.",
+    "No native source changed and repository-environment.json reports no native component, so a native rebuild was not applicable.",
+    "Torch emitted non-fatal Dynamo metrics JSON-serialization errors during the successful toy compilation run."
+  ]
+}
