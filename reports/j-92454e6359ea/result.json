@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31459",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "Independently reproduced the initial MCP tool_choice rewrite on the exact recorded base in streaming and non-streaming gateway paths. At exact candidate b4d9051eff6bffcbf5d0c00500cebdd09e924267, the initial request preserved required, the post-MCP request used auto, and both flows returned the completed MCP call and final assistant response. Independent structured-choice and resume-payload boundary tests also passed.",
+  "tests": [
+    {
+      "command": "cargo test --test api_tests api::responses_api_test::test_non_streaming_mcp_minimal_e2e_with_persistence -- --exact --nocapture (candidate test instrumentation on exact base source)",
+      "exit_code": 101,
+      "what_was_measured": "The actual first JSON body captured by the mock upstream had tool_choice=auto rather than the client-requested required; this reproduced the original non-streaming failure."
+    },
+    {
+      "command": "cargo test --test api_tests api::responses_api_test::test_streaming_with_mcp_tool_calls -- --exact --nocapture (candidate test instrumentation on exact base source)",
+      "exit_code": 101,
+      "what_was_measured": "The actual first streaming-path upstream JSON body had tool_choice=auto rather than required, while MCP execution and final response assembly still completed."
+    },
+    {
+      "command": "cargo test --test api_tests api::responses_api_test::test_non_streaming_mcp_minimal_e2e_with_persistence -- --exact --nocapture (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Two captured upstream requests were required then auto; the resume contained function_call_output and the response contained the completed MCP call and final assistant message."
+    },
+    {
+      "command": "cargo test --test api_tests api::responses_api_test::test_streaming_with_mcp_tool_calls -- --exact --nocapture (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "The streaming upstream sequence was required then auto and the SSE output contained the completed MCP call and final assistant text."
+    },
+    {
+      "command": "cargo test --lib initial_tool_choice -- --nocapture (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate boundaries preserved explicit required/auto/none and defaulted an omitted choice to auto."
+    },
+    {
+      "command": "cargo test --lib review_ -- --nocapture (temporary independent review-only tests on exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "A structured allowed_tools/required choice and unrelated fields survived initial transformation; resume forced auto while retaining history and unrelated fields."
+    },
+    {
+      "command": "cargo fmt -- --check && git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 b4d9051eff6bffcbf5d0c00500cebdd09e924267",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Rust formatting and patch whitespace were clean using pinned Rust 1.90.0 with rustfmt."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned AMD Instinct MI355X gfx950 was visible, but this deterministic Rust JSON-routing defect does not execute model or GPU code; the gateway was validated with its in-process HTTP worker and MCP server."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No real model weights or external MCP service were used; deterministic mocks qualify gateway transport, MCP execution, payload sequencing, and response assembly, not model semantic quality.",
+    "No GPU or multi-node execution was performed because the affected path is Rust request routing and no kernel/native accelerator code changed.",
+    "No separate C++/FlyDSL/native library was rebuilt because the candidate changes only Rust gateway source and Rust tests; the Rust gateway test binaries were rebuilt from the exact checked-out source.",
+    "The prepared checkout matched the recorded base, while origin/main advanced to bd45cd50ca900dd821f829ca9adfbf9aa3336bda during review; the mandated base remains an ancestor."
+  ]
+}
