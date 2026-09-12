@@ -1,0 +1,70 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32264",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2958",
+  "candidate_commit": "5f47ca6feb445c0a130ed1231f06ddccbb0588ee",
+  "outcome": "environment_blocked",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the three concrete admission counterexamples from the independent review: nonzero temperature with top_k=1, beam_width=2, and shape-compatible but unpinned target/assistant identifiers and revisions are rejected. Host-independent tests and an independent msgpack round-trip pass. The full original Apple Silicon/MLX correctness contract is not verified on this Linux x86_64 ROCm host: MLX is absent, the Stage B E2E is skipped, model weights are unavailable, and cargo is absent so the changed Rust sampling transport could not be rebuilt or tested natively.",
+  "tests": [
+    {
+      "command": "python -m pytest -q /job/review_evidence/base/test_mlx_spec_guardrails_candidate.py (at base 358c163)",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before feature absence: candidate regression cannot collect because the MLX Gemma 4 MTP modules do not exist on the recorded base."
+    },
+    {
+      "command": "independent Python probe at prior candidate 333b37951dfca5d98dffb77b25ee5a8e0801100b",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced both reviewed request-admission defects: temperature=0.7/top_k=1 and temperature=0/beam_width=2 were both accepted (validator returned None)."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/hardware_backend/mlx/test_mlx_spec_guardrails.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 5 tests and 27 subtests passed, including repository/revision pinning and temperature/beam rejection."
+    },
+    {
+      "command": "independent SamplingParams normalize + msgspec msgpack round-trip adversarial probe",
+      "exit_code": 0,
+      "what_was_measured": "Explicit temperature=0 remains distinguishable after normalization/transport; temperature=0.7 with top_k=1, beam_width=2, and default sampling are rejected."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/hardware_backend/mlx test/registered/mlx/models_e2e/test_gemma4_mtp_mlx_correctness.py",
+      "exit_code": 0,
+      "what_was_measured": "Full candidate MLX collection on this host: 29 passed, 214 skipped, 42 subtests passed. The real Stage B E2E and most MLX runtime tests did not execute."
+    },
+    {
+      "command": "python -m pytest -q -rs test/registered/mlx/models_e2e/test_gemma4_mtp_mlx_correctness.py",
+      "exit_code": 0,
+      "what_was_measured": "Stage B result: one test skipped because Apple Silicon, MLX, and mlx-vlm are required."
+    },
+    {
+      "command": "python -m compileall -q python/sglang/srt/hardware_backend/mlx",
+      "exit_code": 0,
+      "what_was_measured": "Candidate MLX Python source compiles and imports from /job/repo/python; mlx itself is not installed."
+    },
+    {
+      "command": "cargo test -p sglang-router message::sampling --lib",
+      "exit_code": 127,
+      "what_was_measured": "Native Rust sampling transport rebuild/test was attempted but cargo is unavailable in the prepared environment."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No relevant GPU execution was possible. The prepared host is Linux x86_64 with Torch 2.11.0+rocm7.2; the requested backend requires Apple Silicon/MLX."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No executed evidence establishes target-only versus MTP equality of token IDs, text, and finish reason for the pinned 64-token cross-window request.",
+    "No executed evidence establishes nonzero proposal/verification activity or agreement between per-request and worker counter deltas.",
+    "No executed evidence establishes native-cache transaction behavior, read-only generation-checked target-KV views, rollback/rotating-cache correctness, cleanup ownership, cache flush to zero, retained assistant generation, or post-flush serving on Apple Silicon.",
+    "The changed Rust SamplingParams wire layout was not rebuilt or tested because cargo is absent."
+  ],
+  "remaining_limitations": [
+    "Architecture mismatch: Linux x86_64/ROCm, not Apple Silicon.",
+    "The mlx and mlx-vlm packages are absent; pinned target and assistant weights are unavailable.",
+    "214 candidate tests were skipped on this host, including the only real Stage B E2E.",
+    "The deterministic tiny Llama fixture cannot qualify Gemma 4 architecture, MLX numerical parity, or native-cache semantics and therefore was not substituted for the required Stage B test.",
+    "No native C++ files changed, but Rust native transport code changed and cargo is unavailable, so native_rebuilt is false."
+  ]
+}
