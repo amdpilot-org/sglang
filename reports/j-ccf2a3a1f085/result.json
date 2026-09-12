@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38606",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared base reproduced the HYV4 configuration defect: its model override returned no disable_attn_tp_gather declaration for deepep. HYV4 keeps full-width hidden states at the MoE boundary, while the scheduler's attention-TP gather path derives a shard-local num_token_non_padded. The fix declares disable_attn_tp_gather for both HYV4 architectures through the existing model-override registry and marks the field resolvable. A focused regression failed before and passes after, with independent topology/backend boundary cases and a non-HYV4 control.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-ccf2a3a1f085/venv/bin/python < pre-fix HYV4 override assertion",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before evidence: _deepseek_family_overrides returned {} for HYV4ForCausalLM with moe_a2a_backend=deepep instead of declaring disable_attn_tp_gather=true. Raw output: reports/j-ccf2a3a1f085/raw/failing_before.log"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-ccf2a3a1f085/venv/bin/python -m pytest -q test/registered/unit/test_model_overrides.py -k 'hyv4_always_disables_attn_tp_gather or server_args_whitelist_is_exactly_the_migrated_fields'",
+      "exit_code": 0,
+      "what_was_measured": "The field is registry-resolvable and both HYV4 architectures always declare the safety override across deepep, no-a2a, dense-TP, pure-DP-attention, and already-disabled cases; a DeepSeek V3 control remains unchanged. 2 tests and 10 subtests passed."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-ccf2a3a1f085/venv/bin/python < GPU MoE mask reference script",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, the repository's _mask_topk_ids_padded_region masked 7/8 rows for num_token_non_padded=1, 3/8 for 5, and 0/8 for 8, exactly matching an independent CPU reference. Raw output: reports/j-ccf2a3a1f085/raw/gpu_mask_evidence.log"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-ccf2a3a1f085/venv/bin/python -m pytest -q test/registered/unit/test_model_overrides.py",
+      "exit_code": 1,
+      "what_was_measured": "91 passed and 4 unrelated existing platform-sensitive tests failed because this ROCm environment does not satisfy CUDA/SM100 expectations (including modelopt_fp4 being unsupported on ROCm). The new regression passed. Raw output: reports/j-ccf2a3a1f085/raw/full_model_override_tests.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ccf2a3a1f085/venv/bin/python -m ruff format --check ...",
+      "exit_code": 1,
+      "what_was_measured": "Formatting tool availability only: the prepared interpreter has no ruff module. git diff --check passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X (gfx950:sramecc+:xnack-) executed the actual repository MoE padded-row masking function and matched CPU reference values for three boundary counts."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The Hunyuan-V4-preview checkpoint and an 8-GPU TP8/EP8 topology were not available, so no full-model logprob or DeepEP distributed serving reproduction is claimed.",
+    "The single-gfx950 check validates the actual masking kernel behavior and configuration fix, not Hunyuan-V4 semantic accuracy or multi-rank communication.",
+    "The complete model-override test module has four unrelated ROCm/platform failures; focused affected tests pass.",
+    "No native sources changed, so no native rebuild was applicable."
+  ]
+}

@@ -82,6 +82,15 @@ def _deepseek_family_overrides(server_args: Any, hf_config: Any) -> dict:
                         "HYV4 MXFP8: defaulting MoE/FP8 GEMM backends to deep_gemm."
                     )
 
+        # HYV4 keeps the full sequence at the MoE boundary and does not consume
+        # the scheduler's gathered_buffer. A shard-local num_token_non_padded
+        # would therefore mask valid rows when an all-to-all backend is active.
+        overrides["disable_attn_tp_gather"] = True
+        logger.info(
+            "HYV4 keeps the full sequence at its MoE and consumes no "
+            "gathered_buffer: disabling attn_tp_gather."
+        )
+
     if is_deepseek_dsa(hf_config):  # DeepSeek 3.2/GLM 5
         # Set attention backend for DeepSeek
         if is_attention_backend_not_set(cfg):
