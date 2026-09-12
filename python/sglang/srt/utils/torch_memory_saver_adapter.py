@@ -1,6 +1,11 @@
 import logging
+import os
+import site
 from abc import ABC
 from contextlib import contextmanager
+from pathlib import Path
+
+import torch
 
 from sglang.srt.utils.common import is_xpu
 
@@ -22,6 +27,24 @@ except ImportError as e:
 logger = logging.getLogger(__name__)
 
 _warned_xpu_cuda_graph = False
+
+
+def _get_pip_cuda_runtime_library_dir():
+    cuda_version = torch.version.cuda
+    if not cuda_version:
+        return None
+
+    cuda_major = cuda_version.split(".", 1)[0]
+    runtime_soname = f"libcudart.so.{cuda_major}"
+    for site_packages in site.getsitepackages():
+        for relative_dir in (
+            Path("nvidia") / f"cu{cuda_major}" / "lib",
+            Path("nvidia") / "cuda_runtime" / "lib",
+        ):
+            candidate = Path(site_packages) / relative_dir
+            if (candidate / runtime_soname).is_file():
+                return candidate
+    return None
 
 
 class TorchMemorySaverAdapter(ABC):
@@ -95,7 +118,30 @@ class _TorchMemorySaverAdapterReal(TorchMemorySaverAdapter):
             # Nothing to preload: this LD_PRELOADs the preload-mode .so, which the
             # upstream setup.py does not build for XPU.
             return self._noop_context()
-        return torch_memory_saver.configure_subprocess()
+        return self._configure_cuda_subprocess()
+
+    @contextmanager
+    def _configure_cuda_subprocess(self):
+        runtime_dir = _get_pip_cuda_runtime_library_dir()
+        old_library_path = os.environ.get("LD_LIBRARY_PATH")
+
+        if runtime_dir is not None:
+            entries = old_library_path.split(os.pathsep) if old_library_path else []
+            runtime_dir_str = os.fspath(runtime_dir)
+            if runtime_dir_str not in entries:
+                os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(
+                    [runtime_dir_str, *entries]
+                )
+
+        try:
+            with torch_memory_saver.configure_subprocess():
+                yield
+        finally:
+            if runtime_dir is not None:
+                if old_library_path is None:
+                    os.environ.pop("LD_LIBRARY_PATH", None)
+                else:
+                    os.environ["LD_LIBRARY_PATH"] = old_library_path
 
     def region(self, tag: str, enable_cpu_backup: bool = False):
         return _memory_saver.region(tag=tag, enable_cpu_backup=enable_cpu_backup)
