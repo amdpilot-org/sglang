@@ -516,6 +516,11 @@ def _target_checkpoint_bundles_dspark_draft(server_args: ServerArgs) -> bool:
 
 def _handle_dspark(server_args: ServerArgs) -> None:
     cfg = resolving_view(server_args)
+
+    if cfg.speculative_dspark_lora_path is not None and not str(
+        cfg.speculative_dspark_lora_path
+    ).strip():
+        raise ValueError("--speculative-dspark-lora-path must not be empty.")
     _is_npu = cfg.device.startswith("npu")
     if not cfg.device.startswith(("cuda", "npu")):
         raise ValueError(
