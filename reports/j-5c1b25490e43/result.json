@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/21443",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Consolidated the valid MPS working-set accounting from candidate PR https://github.com/amdpilot-org/sglang/pull/2901 and corrected the counterexamples independently reported by review PR https://github.com/amdpilot-org/sglang/pull/2972. MPS total and available memory remain capped by torch.mps.recommended_max_memory() on the supported path. Missing, raising, invalid, or non-positive safety inputs now fail closed instead of falling back to uncapped host RAM. Available-memory accounting also fails closed when driver allocation usage cannot be determined. The registered unit test now uses only the CPU CI registry required by repository taxonomy.",
+  "tests": [
+    {
+      "command": "candidate ad0162d0c4c667916f85904b30cd356d38feee84: /tmp/amdpilot-repo-j-5c1b25490e43/venv/bin/python -m pytest -q test/registered/unit/utils/test_mps_memory.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's original focused suite passed 10 tests, establishing that the review counterexamples were absent from its regression coverage. Raw output: /job/reports-j-5c1b25490e43-raw/candidate-focused-tests.txt"
+    },
+    {
+      "command": "candidate ad0162d0c4c667916f85904b30cd356d38feee84: independent Python matrix for missing/raising/zero/negative/invalid recommended_max_memory",
+      "exit_code": 0,
+      "what_was_measured": "All five candidate cases returned host values of 64 GiB total and 60 GiB available, reproducing the unsafe fallback before correction. Raw output: /job/reports-j-5c1b25490e43-raw/candidate-counterexamples.txt"
+    },
+    {
+      "command": "candidate ad0162d0c4c667916f85904b30cd356d38feee84: PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-5c1b25490e43/pre-commit pre-commit run check-registered-tests --files test/registered/unit/utils/test_mps_memory.py",
+      "exit_code": 1,
+      "what_was_measured": "Repository taxonomy rejected the unit test's MLX registration: unit tests may register only CPU suites. Raw output: /job/reports-j-5c1b25490e43-raw/candidate-taxonomy.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5c1b25490e43/venv/bin/python -m pytest -q test/registered/unit/utils/test_mps_memory.py",
+      "exit_code": 0,
+      "what_was_measured": "23 corrected compatibility, adversarial, pressure, over-allocation, and production-integration tests passed. Raw output: /job/reports-j-5c1b25490e43-raw/corrected-focused-tests.txt"
+    },
+    {
+      "command": "independent Python matrix for missing/raising/zero/negative/invalid recommended_max_memory",
+      "exit_code": 0,
+      "what_was_measured": "All ten corrected total/available calls raised explicit safety errors and none returned host RAM. Raw output: /job/reports-j-5c1b25490e43-raw/corrected-counterexamples.txt"
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-5c1b25490e43/pre-commit pre-commit run --files python/sglang/_mps_memory.py python/sglang/_platform_stubs.py python/sglang/srt/utils/common.py python/sglang/multimodal_gen/runtime/platforms/mps.py test/registered/unit/utils/test_mps_memory.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository hooks passed, including registered-test taxonomy. Raw output: /job/reports-j-5c1b25490e43-raw/corrected-precommit.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5c1b25490e43/venv/bin/python -m compileall -q <all changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "Every changed Python source and test file compiled successfully. Raw output: /job/reports-j-5c1b25490e43-raw/compileall.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The prepared host is Linux/x86_64 with Torch 2.11.0+rocm7.2; torch.backends.mps.is_built() and is_available() are both false. AMD GPU execution cannot validate Apple Metal memory accounting. Environment output: /job/reports-j-5c1b25490e43-raw/environment.txt",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Apple Silicon/MPS device was available, so the native torch.mps values were not compared with MTLDevice.recommendedMaxWorkingSetSize.",
+    "No MPS model-loading, KV-cache, UMA pressure, paging, or stability workload was run; deterministic mocks exercised the actual Python production call paths.",
+    "Runtimes without working recommended_max_memory and driver_allocated_memory APIs are intentionally unsupported for automatic MPS memory sizing because no verified safe device-specific fallback is available.",
+    "No native rebuild was applicable because the correction is Python-only."
+  ]
+}

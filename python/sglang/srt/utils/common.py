@@ -531,7 +531,11 @@ def get_available_gpu_memory(
             free_gpu_memory = psutil.virtual_memory().available
         free_gpu_memory, total_gpu_memory = torch.musa.mem_get_info()
     elif device == "mps":
-        free_gpu_memory = psutil.virtual_memory().available
+        from sglang._mps_memory import get_mps_available_memory
+
+        if empty_cache:
+            empty_device_cache(torch.mps)
+        free_gpu_memory = get_mps_available_memory(torch.mps)
     else:
         if not current_platform.is_out_of_tree():
             raise ValueError(
