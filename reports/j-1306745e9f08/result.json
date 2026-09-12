@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31404",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the OpenAI HTTP model-validation defect on the prepared source checkout, then added shared explicit-model validation for OpenAI serving handlers and the separate Responses API path. Unknown models now return HTTP 404 with code model_not_found; the served model, omitted compatibility default, and registered base:LoRA form remain accepted.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-1306745e9f08/venv/bin/python /tmp/amdpilot-repo-j-1306745e9f08/run_server_probe.py --fixture /tmp/amdpilot-repo-j-1306745e9f08/tiny-random-llama --output /tmp/amdpilot-repo-j-1306745e9f08/evidence/before_chat",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before real HTTP/engine execution: bogus and served model names both returned 200 on /v1/chat/completions and /v1/completions; bogus response model fields echoed gpt-nonexistent-999. Raw evidence is under evidence/before/."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-1306745e9f08/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_model_validation.py",
+      "exit_code": 0,
+      "what_was_measured": "Four regression tests plus two subtests passed, covering unknown, served, omitted, explicit default, registered LoRA, missing LoRA, and mismatched-base LoRA cases."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-1306745e9f08/venv/bin/python /tmp/amdpilot-repo-j-1306745e9f08/run_server_probe.py --fixture /tmp/amdpilot-repo-j-1306745e9f08/tiny-random-llama --output /tmp/amdpilot-repo-j-1306745e9f08/evidence/after",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after real HTTP/engine execution: bogus model names returned 404 model_not_found on both reported endpoints, while served-name requests returned 200. Raw evidence is under evidence/after/."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/entrypoints/openai/serving_base.py python/sglang/srt/entrypoints/openai/serving_responses.py test/registered/unit/entrypoints/openai/test_serving_model_validation.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository formatting, lint, safety, and registered-test validation hooks passed."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The qualified fixture is a deterministic tiny random Llama and validates transport plus engine execution only; it does not validate Meta-Llama-3.1-8B semantic accuracy or any other model architecture.",
+    "Only the assigned single gfx950 GPU was used; distributed and multi-node paths were not exercised.",
+    "The Rust model-gateway path was inspected but not changed or runtime-tested because the reproduced defect and correction are in the Python HTTP server path.",
+    "The /v1/responses path shares the validation helper and was wired explicitly, but the real-GPU probes targeted the two endpoints named in the report: chat completions and completions."
+  ]
+}

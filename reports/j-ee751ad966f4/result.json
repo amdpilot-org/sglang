@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31404",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate 12421813's Python OpenAI serving validation, corrected its error.param contract to null, and added explicit model membership validation to the model-gateway IGW HTTP resolution path with focused boundary regressions.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-ee751ad966f4/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_model_validation.py (exact candidate, before correction)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's valid Python model validation behavior: 4 tests and 2 subtests passed before the correction tests were tightened."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-ee751ad966f4/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_model_validation.py (candidate with expected param=null regression, before correction)",
+      "exit_code": 1,
+      "what_was_measured": "The candidate returned error.param='model' instead of the issue's expected null."
+    },
+    {
+      "command": "cargo test --manifest-path sgl-model-gateway/Cargo.toml router_manager::tests --no-fail-fast (candidate with gateway regression, before correction)",
+      "exit_code": 127,
+      "what_was_measured": "The prepared image has no cargo executable. Direct candidate source inspection independently confirmed that resolve_model_id returned every explicit model before reading the registry; the new regression also references the correction-only helper and therefore is absent from the candidate."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-ee751ad966f4/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_model_validation.py (after correction)",
+      "exit_code": 0,
+      "what_was_measured": "404 model_not_found response contract with param=null, served and omitted model acceptance, explicit default rejection, and registered/unregistered LoRA boundaries: 4 tests and 2 subtests passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "This correction targets deterministic request validation before engine execution. Candidate PR 2315's retained tiny-Llama evidence was preserved, but no new GPU execution was claimed for this correction."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The prepared image contains no cargo or rustfmt executable, so the Rust model-gateway regression could not be compiled or executed locally.",
+    "No production model weights, alternate model architecture, semantic-accuracy, distributed, or multi-node behavior was tested; none is required to establish these pre-execution validation defects."
+  ]
+}
