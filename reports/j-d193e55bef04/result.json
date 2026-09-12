@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37326",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/986",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Verified and corrected a residual UnifiedRadixCache empty-finished-request path relevant to Qwen4Exp hybrid Mamba serving. When no Mamba track boundary had been reached, cache_finished_req continued with an empty key and adopted the root as last_node despite holding no root lock. The fix mirrors the existing unfinished-request guard, releases request-owned KV/Mamba resources without inserting, and makes direct empty inserts explicit no-ops. This is a verified candidate for one accumulation mechanism, not a reproduction of the reported 24-hour acceptance decay.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python:test/registered/unit/mem_cache /tmp/amdpilot-repo-j-d193e55bef04/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_cache_finished_empty_insert.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before GPU regression: 2 failed and 2 passed. A finished request with no Mamba track boundary was repointed from its matched node to the root, and direct empty insertion returned the root as last_device_node. Raw output: reports/j-d193e55bef04/raw/regression-before.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python:test/registered/unit/mem_cache /tmp/amdpilot-repo-j-d193e55bef04/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_cache_finished_empty_insert.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after GPU regression: 4 passed, covering no-boundary cleanup and node ownership, a positive track-boundary insertion, zero-length request cleanup, and direct empty insertion. Raw output: reports/j-d193e55bef04/raw/regression-after.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python:test/registered/unit/mem_cache /tmp/amdpilot-repo-j-d193e55bef04/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_cache_finished_empty_insert.py test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py",
+      "exit_code": 0,
+      "what_was_measured": "GPU regression plus adjacent UnifiedRadixCache suite: 1214 passed, 1362 skipped, 58 subtests passed. Raw output: reports/j-d193e55bef04/raw/regression-and-adjacent-after.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validation."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Tests executed with HIP_VISIBLE_DEVICES=0 on the assigned AMD Instinct MI350X, ISA gfx950, using Torch 2.11.0+rocm7.2. The fixture allocated real KV and Mamba pools and checked GPU-backed cache behavior and allocator conservation."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported RadixArk/Qwen3.8-Flash-Next-NVFP4 weights were unavailable, and the source workload requires two SM121 DGX Spark nodes with TP=2; no full-model, SM121, multi-node, or 24-hour uptime reproduction was performed.",
+    "The test verifies transport-independent UnifiedRadixCache state ownership and resource conservation only. It does not establish semantic accuracy or prove that this is the only cause of NEXTN acceptance decay.",
+    "Issue comments report that the older legacy-cache ghost-node fix and both speculative tracking clamps did not prevent relapse in one deployment, so those changes alone are not claimed as a solution here.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable."
+  ]
+}

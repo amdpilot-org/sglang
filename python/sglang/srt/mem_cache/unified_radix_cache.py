@@ -564,6 +564,12 @@ class UnifiedRadixCache(BasePrefixCache):
     def insert(self, params: InsertParams) -> InsertResult:
         if self.disable:
             return InsertResult(prefix_len=0)
+        # An empty key cannot transfer ownership to the tree. Avoid returning
+        # the root as last_device_node, since callers would then make an
+        # unlocked root look like the request's matched node. mamba_exist=True
+        # tells cleanup that the donated state was not consumed.
+        if params.key is None or len(params.key) == 0:
+            return InsertResult(prefix_len=0, mamba_exist=True)
         # Fail fast on re-entrancy without touching the in-flight walk.
         assert not self.tree_core.has_ongoing_insert(), "re-entrant insert"
         # Pump the resumable insert, applying each step's actions at its barrier.
@@ -972,6 +978,25 @@ class UnifiedRadixCache(BasePrefixCache):
                 )
                 if cl is not None:
                     effective_cache_len = min(effective_cache_len, cl)
+
+            # A short Mamba request may finish before reaching a track
+            # boundary, leaving every component with zero cacheable tokens.
+            # Mirror cache_unfinished_req: release request-owned resources and
+            # do not run an empty insert or register a zero-length session ref.
+            if effective_cache_len <= 0:
+                self.free_kv_row(
+                    req.kv, [(req.kv.cache_protected_len, kv_len_to_handle)]
+                )
+                if req.last_node is not None:
+                    self._dec_req_lock(req, skip_swa=req.swa_prefix_lock_released)
+                for comp in self._components_tuple:
+                    comp.cleanup_after_caching_req(
+                        req,
+                        is_finished=True,
+                        insert_result=None,
+                        insert_params=insert_params,
+                    )
+                return
 
             # Truncate if needed; the tail free is deferred and batched with
             # the unaligned tail below so a shared boundary page is emitted once.
