@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36841",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "32cfaf2e45c6fe1b120ecacbd92f254c04f0f9ab",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The candidate changes the DOTS-3 MoE dispatcher from the deprecated PretrainedConfig.torch_dtype getter to config.dtype. On the recorded base, all four focused cases reached the real MaybeTboDeepEPDispatcher path with the correct dtype but failed because Transformers logged the deprecation. At the exact candidate commit, those cases passed, as did an independent eight-case matrix covering default, float16, bfloat16, and float32 values supplied through both dtype and legacy torch_dtype constructor inputs.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-eb126b5f6a93/venv/bin/python -m pytest -q /job/review-evidence-j-eb126b5f6a93/test_dots3_dispatcher_dtype.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction with the actual Dots3Config and Dots3MoE constructor through the real MaybeTboDeepEPDispatcher wrapper. Four dtype/default cases failed only because warning_once observed the deprecated torch_dtype getter; dtype propagation itself matched config.dtype."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-eb126b5f6a93/venv/bin/python -m pytest -q test/registered/unit/models/test_dots3_dispatcher_dtype.py (candidate 32cfaf2e45c6fe1b120ecacbd92f254c04f0f9ab)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 4 passed; default, float16, bfloat16, and float32 propagated to the captured heavyweight dispatcher boundary without the Transformers deprecated-getter warning."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-eb126b5f6a93/venv/bin/python -m pytest -q /job/review-evidence-j-eb126b5f6a93/test_independent_dtype_paths.py (candidate 32cfaf2e45c6fe1b120ecacbd92f254c04f0f9ab)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial matrix: 8 passed across dtype= and compatibility torch_dtype= inputs for default, float16, bfloat16, and float32; verified identity of params_dtype with config.dtype and absence of deprecated getter access."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-eb126b5f6a93/venv/bin/python environment/import inspection",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed Transformers 5.12.1 from /opt/venv, Torch 2.11.0+rocm7.2, actual source imports under /job/repo/python, candidate source expression config.dtype, and one visible AMD Instinct MI350X."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X was visible, but the original defect is a host-side configuration property access and no DOTS-3 weights or distributed DeepEP workload were available. The tests intentionally stopped at a capture replacement for the heavyweight DeepEPDispatcher endpoint."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No DOTS-3 model weights were available, so full model loading and distributed DeepEP transport were not executed.",
+    "GPU numerical execution is not relevant evidence for this host-side deprecated configuration getter and was not claimed.",
+    "No native source changed, repository-environment.json declares no native build target, and no native rebuild was required.",
+    "Only the pinned Transformers 5.12.1 behavior was executed; no claim is made about a future release where torch_dtype is removed."
+  ]
+}
