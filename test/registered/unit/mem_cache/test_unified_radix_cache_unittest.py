@@ -3263,6 +3263,145 @@ class UnifiedRadixCacheSuite:
         self.assertTrue(torch.equal(loaded_v, expected_v))
         cons.sanity_check()
 
+    def test_hicache_l3_prefetch_after_device_and_host_eviction(self):
+        """Same-tree L3 recall survives partial and complete L1/L2 eviction."""
+        if self._skip_unsupported_hicache_test():
+            return
+        if self.cfg.components != (ComponentType.FULL,):
+            self.skipTest("FULL-only regression isolates the storage anchor")
+
+        storage_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, storage_dir, ignore_errors=True)
+        cache, allocator, req_to_token_pool = build_fixture(self.cfg)
+        self._init_hicache(
+            cache,
+            storage_backend="file",
+            storage_dir=storage_dir,
+            prefetch_threshold=1,
+        )
+
+        ps = self.cfg.page_size
+        prefix = self._make_seq(1, 2)
+        seq = prefix + self._make_seq(1000, 2)
+        # Repeating the short prefix before the longer one forces a branch
+        # boundary, allowing one case to retain an L2 prefix while its suffix
+        # survives only in L3.
+        self._insert(cache, allocator, req_to_token_pool, prefix)
+        self._insert(cache, allocator, req_to_token_pool, seq)
+        match = cache.match_prefix(MatchPrefixParams(key=RadixKey(array("q", seq))))
+        self._fill_full_kv(allocator, match.device_indices, marker=23)
+        expected_k, expected_v = self._snapshot_full_kv(allocator, match.device_indices)
+        leaf = match.last_device_node
+        self._backup_node(cache, leaf)
+        self._write_path_to_l3(cache, leaf)
+        self._flush_l3_backups(cache)
+
+        cache.evict(EvictParams(num_tokens=len(seq)))
+        self.assertEqual(
+            len(
+                cache.match_prefix(
+                    MatchPrefixParams(key=RadixKey(array("q", seq)))
+                ).device_indices
+            ),
+            0,
+        )
+
+        # First evict only the suffix from L2. The repeated prefix remains a
+        # real host hit, while current UnifiedTreeCore removes the host leaf
+        # instead of retaining the issue's backup-only stub.
+        self.assertGreaterEqual(
+            cache.evict_host(len(seq) - len(prefix)), len(seq) - len(prefix)
+        )
+        partial = cache.match_prefix(
+            MatchPrefixParams(key=RadixKey(array("q", seq)))
+        )
+        self.assertEqual(partial.host_hit_length, len(prefix))
+        self.assertEqual(partial.last_host_node, partial.best_match_node)
+        partial_start = len(partial.device_indices) + partial.host_hit_length
+        partial_tokens = seq[partial_start:]
+        self.assertEqual(len(partial_tokens), 2 * ps)
+
+        cache.prefetch_from_storage(
+            "partial-eviction",
+            partial.last_host_node,
+            array("q", partial_tokens),
+            cache.get_last_hash_value(partial.last_host_node),
+            None,
+            matched_prefix_tokens=seq[:partial_start],
+        )
+        self.assertIn("partial-eviction", cache.ongoing_prefetch)
+        self._run_prefetch_to_completion(cache, "partial-eviction")
+
+        restored = cache.match_prefix(
+            MatchPrefixParams(key=RadixKey(array("q", seq)))
+        )
+        self.assertEqual(restored.host_hit_length, len(seq))
+        self._load_back_node(cache, restored.best_match_node)
+        loaded = cache.match_prefix(
+            MatchPrefixParams(key=RadixKey(array("q", seq)))
+        ).device_indices
+        loaded_k, loaded_v = self._snapshot_full_kv(allocator, loaded)
+        self.assertTrue(torch.equal(loaded_k, torch.full_like(loaded_k, 23)))
+        self.assertTrue(torch.equal(loaded_v, torch.full_like(loaded_v, 24)))
+        self.assertTrue(torch.equal(loaded_k, expected_k))
+        self.assertTrue(torch.equal(loaded_v, expected_v))
+
+        # Evict both tiers again, now completely.  The root must become the
+        # anchor and the whole backed-up span must be queried a second time.
+        cache.evict(EvictParams(num_tokens=len(seq)))
+        cache.evict_host(len(seq))
+        complete = cache.match_prefix(
+            MatchPrefixParams(key=RadixKey(array("q", seq)))
+        )
+        self.assertEqual(complete.host_hit_length, 0)
+        self.assertEqual(complete.last_host_node, cache.root_node_handle())
+        complete_start = len(complete.device_indices) + complete.host_hit_length
+        self.assertEqual(complete_start, 0)
+        cache.prefetch_from_storage(
+            "complete-eviction",
+            complete.last_host_node,
+            array("q", seq[complete_start:]),
+            cache.get_last_hash_value(complete.last_host_node),
+            None,
+            matched_prefix_tokens=seq[:complete_start],
+        )
+        self.assertIn("complete-eviction", cache.ongoing_prefetch)
+        self._run_prefetch_to_completion(cache, "complete-eviction")
+        complete_restored = cache.match_prefix(
+            MatchPrefixParams(key=RadixKey(array("q", seq)))
+        )
+        self.assertEqual(complete_restored.host_hit_length, len(seq))
+        self._load_back_node(cache, complete_restored.best_match_node)
+        complete_loaded = cache.match_prefix(
+            MatchPrefixParams(key=RadixKey(array("q", seq)))
+        ).device_indices
+        complete_k, complete_v = self._snapshot_full_kv(allocator, complete_loaded)
+        self.assertTrue(torch.equal(complete_k, torch.full_like(complete_k, 23)))
+        self.assertTrue(torch.equal(complete_v, torch.full_like(complete_v, 24)))
+        self.assertTrue(torch.equal(complete_k, expected_k))
+        self.assertTrue(torch.equal(complete_v, expected_v))
+
+        # An unavailable neighboring key must remain a miss; the regression
+        # is an actual storage round trip, not a plain radix-cache hit.
+        missing = self._make_seq(9000, 2)
+        cache.prefetch_from_storage(
+            "unavailable",
+            cache.root_node_handle(),
+            array("q", missing),
+            None,
+            None,
+        )
+        self._run_prefetch_to_completion(cache, "unavailable")
+        self.assertEqual(
+            len(
+                cache.match_prefix(
+                    MatchPrefixParams(key=RadixKey(array("q", missing)))
+                ).device_indices
+            ),
+            0,
+        )
+        cache.sanity_check()
+
     def test_release_aborted_request_l3_prefetch_io_in_progress(self):
         """Test release_aborted_request while a prefetch IO is still in-progress.
         1. Fill KV and SWA to L3.
