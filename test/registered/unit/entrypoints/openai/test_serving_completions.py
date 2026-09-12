@@ -118,6 +118,53 @@ class ServingCompletionTestCase(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "single request"):
             internal.normalize_batch_and_arguments()
 
+    def test_batched_cache_namespaces_are_normalized_per_prompt(self):
+        req = CompletionRequest(
+            model="x",
+            prompt=["same prompt", "same prompt"],
+            max_tokens=1,
+            cache_salt=["tenant-a", "tenant-b"],
+            extra_key=["class-a", "class-b"],
+        )
+        internal, _ = self.sc._convert_to_internal_request(req)
+
+        internal.normalize_batch_and_arguments()
+
+        self.assertEqual(internal.cache_salt, ["tenant-a", "tenant-b"])
+        self.assertEqual(internal.extra_key, ["class-a", "class-b"])
+
+    def test_scalar_cache_namespaces_are_broadcast_for_batched_prompts(self):
+        req = CompletionRequest(
+            model="x",
+            prompt=["prompt-a", "prompt-b"],
+            max_tokens=1,
+            cache_salt="tenant",
+            extra_key="classification",
+        )
+        internal, _ = self.sc._convert_to_internal_request(req)
+
+        internal.normalize_batch_and_arguments()
+
+        self.assertEqual(internal.cache_salt, ["tenant", "tenant"])
+        self.assertEqual(internal.extra_key, ["classification", "classification"])
+
+    def test_batched_cache_namespace_lengths_must_match_prompts(self):
+        for field in ("cache_salt", "extra_key"):
+            with self.subTest(field=field):
+                req = CompletionRequest(
+                    model="x",
+                    prompt=["prompt-a", "prompt-b"],
+                    max_tokens=1,
+                    **{field: ["only-one"]},
+                )
+                internal, _ = self.sc._convert_to_internal_request(req)
+
+                with self.assertRaisesRegex(
+                    ValueError,
+                    rf"length of {field} should be equal to the batch size",
+                ):
+                    internal.normalize_batch_and_arguments()
+
     # ---------- echo-handling ----------
     def test_echo_with_list_of_strings_streaming(self):
         req = CompletionRequest(

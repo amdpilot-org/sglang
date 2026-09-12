@@ -1,0 +1,32 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33563",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The reported scalar-only adapter failure reproduces at d257b58e67193780ff8a59ab54b48219b9dc28d2, but the prepared base already contains the functional fix from upstream PR #30827. Added regression coverage for per-prompt lists, scalar broadcasting, and independent wrong-length validation of extra_key and cache_salt; no runtime source change was needed.",
+  "tests": [
+    {
+      "command": "cd /tmp/amdpilot-repo-j-e716fe2b73c7/historical-d257b58 && /tmp/amdpilot-repo-j-e716fe2b73c7/venv/bin/python < historical reproduction script",
+      "exit_code": 0,
+      "what_was_measured": "Imported the historical checkout explicitly and observed the reported TypeError for schema-valid list values of both extra_key and cache_salt. The script catches and prints each expected failure so both fields are measured in one run. Raw output: reports/j-e716fe2b73c7/evidence/historical_reproduction.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e716fe2b73c7/venv/bin/python test/registered/unit/entrypoints/openai/test_serving_completions.py ServingCompletionTestCase.test_batched_cache_namespaces_are_normalized_per_prompt ServingCompletionTestCase.test_scalar_cache_namespaces_are_broadcast_for_batched_prompts ServingCompletionTestCase.test_batched_cache_namespace_lengths_must_match_prompts -v",
+      "exit_code": 0,
+      "what_was_measured": "Three focused regressions passed: elementwise per-prompt mapping for both fields, scalar broadcasting for both fields, and mismatched-list rejection independently for each field. Raw output: reports/j-e716fe2b73c7/evidence/focused_regression.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e716fe2b73c7/venv/bin/python test/registered/unit/entrypoints/openai/test_serving_completions.py -v",
+      "exit_code": 0,
+      "what_was_measured": "All 22 completion-serving unit tests passed, including the new regressions and existing distinct-field and single-request boundaries. Raw output: reports/j-e716fe2b73c7/evidence/full_serving_completions_unit.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The failure and correction are confined to CPU-side Pydantic request adaptation and GenerateReqInput normalization before tokenization or engine execution; GPU execution would not measure the reported defect."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No live HTTP server or model inference was run because the source-level failure occurs before those stages.",
+    "The tests qualify completion request adaptation and normalization only; they do not qualify model semantic accuracy, another model architecture, or a distributed workload."
+  ]
+}
