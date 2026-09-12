@@ -3762,7 +3762,10 @@ def stamp_http_worker_ipc(obj: Any, ipc_name: str) -> None:
     elif isinstance(
         obj, (BatchTokenizedGenerateReqInput, BatchTokenizedEmbeddingReqInput)
     ):
+        if obj.rids is None:
+            obj.rids = [req.rid for req in obj]
         for req in obj:
             req.http_worker_ipc = ipc_name
+        obj.http_worker_ipcs = [ipc_name] * len(obj.rids)
     elif isinstance(obj, BaseBatchReq):
         obj.http_worker_ipcs = [ipc_name] * len(obj.rids)
