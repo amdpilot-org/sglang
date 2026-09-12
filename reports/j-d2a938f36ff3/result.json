@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38708",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the breakable DSA decode None-metadata page-table failure on the assigned ROCm GPU using the checked-out Indexer.forward_cuda path, then fixed metadata resolution to match the decode graph lifecycle. TC piecewise retains its custom-op metadata handoff, while breakable decode now uses the capture-stable metadata initialized by DecodeCudaGraphRunner and alternate attention backends that return no DSA metadata still return cleanly.",
+  "tests": [
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d2a938f36ff3/venv/bin/python <isolated breakable decode reproducer>",
+      "exit_code": 1,
+      "what_was_measured": "Before the fix, the real Indexer.forward_cuda breakable-decode control flow passed metadata=None to the paged path and raised AttributeError: 'NoneType' object has no attribute 'get_page_table_64'. Raw output: /job/logs/j-d2a938f36ff3/failing_before_breakable_metadata.log"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d2a938f36ff3/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_dsa_breakable_metadata.py",
+      "exit_code": 0,
+      "what_was_measured": "Two ROCm GPU regressions passed: breakable decode resolves a valid DSA page-table metadata object, and an alternate backend returning no indexer metadata remains a clean no-op. Raw output: /job/logs/j-d2a938f36ff3/regression_after.log"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/job/artifacts/j-d2a938f36ff3/triton-cache /tmp/amdpilot-repo-j-d2a938f36ff3/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_dsa_transform_index.py test/registered/kernels/ops/attention/test_dsa_indexer.py::TestDSAIndexer::test_indexer_metadata_interface",
+      "exit_code": 0,
+      "what_was_measured": "10 tests and 4 subtests passed on gfx950. Decode/prefill page-table transforms, nontrivial strides, large batches and context lengths, mixed lengths, padding, empty batches, and the get_page_table_64 interface were checked against independent PyTorch references. Raw output: /job/logs/j-d2a938f36ff3/gpu_page_table_tests.log"
+    },
+    {
+      "command": "/opt/rocm/llvm/bin/llvm-objdump -d /job/artifacts/j-d2a938f36ff3/triton-cache/5JOGX7FSZQNOCNYOLZ337HNVXVD5V5NNQFOGPZ7H27W4QJC62ZVA/transform_index_page_table_decode_kernel.hsaco",
+      "exit_code": 0,
+      "what_was_measured": "Disassembled the gfx950 Triton HSACO produced by the GPU test. The transform_index_page_table_decode_kernel symbol contains real AMDGPU buffer_load_dword and buffer_store_dword instructions. Raw output: /job/logs/j-d2a938f36ff3/decode_page_table_isa.txt; compiler artifacts: /job/artifacts/j-d2a938f36ff3/triton-cache"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validation passed."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported zai-org/GLM-5.3 configuration is a 753B FP8 model requiring TP4/PP2 across eight MI300X GPUs. This job had one MI355X and no model weights, so the full launch-to-serving condition was not reproduced.",
+    "The source report was on gfx942/MI300X with Torch 2.9.1; focused validation here used the prepared Torch 2.11.0+rocm7.2 environment on gfx950/MI355X.",
+    "No FlyDSL C++ or other native source changed, so no native rebuild was required."
+  ]
+}
