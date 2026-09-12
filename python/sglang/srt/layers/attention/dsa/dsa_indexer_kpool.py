@@ -876,7 +876,8 @@ class IndexerKPool(MultiPlatformOp):
         logits_bytes = num_q * num_k * bytes_per_elem
 
         need_chunk = (logits_bytes * 2 > free_mem) or (logits_bytes > total_mem * 0.3)
-        return need_chunk, free_mem
+        budget_bytes = max(1, min(free_mem // 4, int(total_mem * 0.3)))
+        return need_chunk, budget_bytes
 
     def _get_topk_ragged_kpool_plan(
         self,
@@ -908,6 +909,18 @@ class IndexerKPool(MultiPlatformOp):
             f"plan has more real rows ({n_real}) than q_fp8 ({total_q})"
         )
 
+        topk_method = metadata.topk_transform_method
+        attn_metadata = metadata.attn_metadata
+        page_table_all = None
+        page_table_row_index_all = None
+        topk_offsets_all = None
+        if envs.SGLANG_DSA_FUSE_TOPK.get():
+            if topk_method == TopkTransformMethod.PAGED:
+                page_table_all = plan.ragged_paged_page_table
+                page_table_row_index_all = plan.ragged_paged_page_table_row_index
+            elif topk_method == TopkTransformMethod.RAGGED:
+                topk_offsets_all = attn_metadata.topk_indices_offset
+
         if total_k_rows > 0:
             k_u8 = plan.ragged_k_u8
             k_scale = plan.ragged_k_scale
@@ -922,9 +935,68 @@ class IndexerKPool(MultiPlatformOp):
                 scale_out=k_scale,
             )
             k_fp8 = k_u8.view(torch.float8_e4m3fn)
+            kv_fp8 = (k_fp8.contiguous(), k_scale.contiguous())
+            need_chunk, logits_budget_bytes = self._should_chunk_mqa_logits(
+                n_real, total_k_rows, device
+            )
+            if need_chunk:
+                bytes_per_row = total_k_rows * 4
+                max_rows = max(1, logits_budget_bytes // bytes_per_row)
+                max_rows = min(max_rows, n_real)
+                topk_chunks = []
+                for start in range(0, n_real, max_rows):
+                    end = min(start + max_rows, n_real)
+                    logits_chunk = deep_gemm.fp8_mqa_logits(
+                        q_fp8[start:end].contiguous(),
+                        kv_fp8,
+                        weights[start:end].contiguous(),
+                        ks_per_q[start:end],
+                        ke_per_q[start:end],
+                        clean_logits=True,
+                    )
+                    topk_chunks.append(
+                        self._topk_from_kpool_logits(
+                            logits_chunk,
+                            pool_lens[start:end],
+                            seq_lens=seq_lens_expanded[start:end],
+                            page_table=(
+                                page_table_all[start:end]
+                                if page_table_all is not None
+                                else None
+                            ),
+                            topk_offsets=(
+                                topk_offsets_all[start:end]
+                                if topk_offsets_all is not None
+                                else None
+                            ),
+                            row_starts=ks_per_q[start:end],
+                            page_table_row_index=(
+                                page_table_row_index_all[start:end]
+                                if page_table_row_index_all is not None
+                                else None
+                            ),
+                        )
+                    )
+                    del logits_chunk
+
+                topk_result = (
+                    topk_chunks[0]
+                    if len(topk_chunks) == 1
+                    else torch.cat(topk_chunks, dim=0)
+                )
+                if total_q > n_real:
+                    padding = torch.full(
+                        (total_q - n_real, topk_result.shape[1]),
+                        -1,
+                        dtype=topk_result.dtype,
+                        device=topk_result.device,
+                    )
+                    topk_result = torch.cat((topk_result, padding), dim=0)
+                return topk_result
+
             logits = deep_gemm.fp8_mqa_logits(
                 q_fp8[:n_real].contiguous(),
-                (k_fp8.contiguous(), k_scale.contiguous()),
+                kv_fp8,
                 weights[:n_real].contiguous(),
                 ks_per_q,
                 ke_per_q,
@@ -932,18 +1004,6 @@ class IndexerKPool(MultiPlatformOp):
             )
         else:
             logits = torch.empty((n_real, 0), dtype=torch.float32, device=device)
-
-        topk_method = metadata.topk_transform_method
-        attn_metadata = metadata.attn_metadata
-        page_table_all = None
-        page_table_row_index_all = None
-        topk_offsets_all = None
-        if envs.SGLANG_DSA_FUSE_TOPK.get():
-            if topk_method == TopkTransformMethod.PAGED:
-                page_table_all = plan.ragged_paged_page_table
-                page_table_row_index_all = plan.ragged_paged_page_table_row_index
-            elif topk_method == TopkTransformMethod.RAGGED:
-                topk_offsets_all = attn_metadata.topk_indices_offset
 
         return self._topk_from_kpool_logits(
             logits,
