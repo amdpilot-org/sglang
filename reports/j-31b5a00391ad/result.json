@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39087",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/845",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/802",
+  "candidate_commit": "443165313174bfca93cee9a80dae4fc9740a2407",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is a correctly scoped warning-only mitigation. On the recorded base, explicit compressed-tensors and inherited auto-round DFLASH draft quantization resolve without a warning. At the candidate commit, both configurations emit the new diagnostic, while explicit and inherited unquantized boundaries remain silent. The candidate does not repair or validate quantized DFlash2 acceptance, so it is a partial mitigation rather than a full original-issue fix.",
+  "tests": [
+    {
+      "command": "Base 358c163: Python probe calling handle_missing_default_values followed by _handle_dflash for explicit compressed-tensors, inherited auto-round, explicit unquant, and inherited unquant",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before behavior: quantization provenance and resolved values were correct, but neither quantized case emitted the issue-specific warning. Raw output: /job/review-evidence/base/independent_hook_probe.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-31b5a00391ad/venv/bin/python -m pytest -q test/registered/unit/server_args/test_server_args.py -k 'DFlashDraftQuantizationWarning or draft_quantization_explicitness' --junitxml=/job/review-evidence/candidate/focused.junit.xml",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite at exact commit 4431653: 4 passed, covering explicit quantization, inherited quantization, explicit unquant, and provenance round-trip."
+    },
+    {
+      "command": "Candidate 4431653: independent Python probe calling handle_missing_default_values followed by _handle_dflash for explicit compressed-tensors, inherited auto-round, explicit unquant, and inherited unquant",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after and adversarial boundaries: each quantized case emitted exactly one warning with correct provenance; both unquantized cases emitted none. Raw output: /job/review-evidence/candidate/independent_hook_probe.txt"
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 443165313174bfca93cee9a80dae4fc9740a2407",
+      "exit_code": 2,
+      "what_was_measured": "The candidate's checked-in server_args.junit.xml contains trailing whitespace. This contradicts the candidate report's recorded diff-check exit code 0 but does not affect the Python warning behavior."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned device is one AMD Instinct MI355X, gfx950, with Torch 2.11.0+rocm7.2. The original report requires two RTX 3090 GPUs with TP=2 and exercises NVIDIA compressed-tensors/Marlin behavior. No substitute GPU smoke was treated as acceptance evidence."
+  },
+  "native_rebuilt": false,
+  "source_import_evidence": "sglang imported from /job/repo/python/sglang/__init__.py and speculative_hook from /job/repo/python/sglang/srt/arg_groups/speculative_hook.py under the prepared interpreter.",
+  "remaining_counterexamples": [
+    "A correctly declared compressed-tensors DFlash2 checkpoint may still load and produce approximately zero accepted draft tokens; the candidate only warns.",
+    "The quantized linear/Marlin runtime path identified by the issue follow-up remains uncorrected and untested on this AMD-only host.",
+    "The warning cannot detect a checkpoint whose quantization is auto-detected later when the resolved draft quantization option is null; only non-null configured or inherited quantization reaches this warning."
+  ],
+  "remaining_limitations": [
+    "The 27B target and draft weights were unavailable and the host has only one GPU, so the original TP=2 full-model acceptance-rate failure was not reproduced numerically.",
+    "The assigned gfx950 ROCm architecture cannot validate the RTX 3090 NVIDIA Marlin path implicated by the report.",
+    "No native sources changed in the candidate, repository-environment.json declares native and wheel paths null, and therefore no native rebuild was applicable.",
+    "The candidate's committed JUnit artifact has whitespace errors and its report incorrectly records git diff --check as successful."
+  ]
+}
