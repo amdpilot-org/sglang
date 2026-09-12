@@ -3148,7 +3148,12 @@ class Scheduler(
             )
             self._prefetch_kvcache(req)
 
-    def _add_request_to_queue(self, req: Req, is_retracted: bool = False):
+    def _add_request_to_queue(
+        self,
+        req: Req,
+        is_retracted: bool = False,
+        is_rebootstrap: bool = False,
+    ):
         if not self._set_or_validate_priority(req):
             return
         if self.disaggregation_mode == DisaggregationMode.NULL:
@@ -3165,8 +3170,12 @@ class Scheduler(
             )
             req.time_stats.set_prefill_bootstrap_queue_entry_time()
         elif self.disaggregation_mode == DisaggregationMode.DECODE:
-            self.disagg_decode_prealloc_queue.add(req, is_retracted=is_retracted)
-            if not is_retracted:
+            self.disagg_decode_prealloc_queue.add(
+                req,
+                is_retracted=is_retracted,
+                is_rebootstrap=is_rebootstrap,
+            )
+            if not is_retracted and not is_rebootstrap:
                 req.time_stats.set_decode_prealloc_queue_entry_time()
             else:
                 req.time_stats.set_retract_time()
@@ -4085,7 +4094,12 @@ class Scheduler(
                 if mamba_allocator is not None
                 else None
             )
-            retracted_reqs, new_token_ratio, reqs_to_abort = batch.retract_decode()
+            (
+                retracted_reqs,
+                new_token_ratio,
+                reqs_to_abort,
+                reqs_to_rebootstrap,
+            ) = batch.retract_decode()
             new_available_tokens = self.token_to_kv_pool_allocator.available_size()
             new_token_gained = new_available_tokens - old_available_tokens
             mamba_num_gained = (
@@ -4133,6 +4147,11 @@ class Scheduler(
 
             for req in retracted_reqs:
                 self._add_request_to_queue(req, is_retracted=True)
+            for req in reqs_to_rebootstrap:
+                if req.output_ids:
+                    req.pd_rebootstrap_forced_output_id = req.output_ids.pop()
+                req.pd_rebootstrap_in_progress = True
+                self._add_request_to_queue(req, is_rebootstrap=True)
         else:
             self.new_token_ratio_tracker.decay_step()
 

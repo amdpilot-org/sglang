@@ -2106,8 +2106,8 @@ def release_req(
     tree_cache: BasePrefixCache,
     hisparse_coordinator: Optional[HiSparseCoordinator],
     offload_kv: bool = True,
-) -> bool:
-    """Returns False when the KV backup failed and the request cannot be resumed."""
+) -> Optional[bool]:
+    """Return backup status: saved, exhausted, or rebootstrap required."""
     if hisparse_coordinator is not None and not req.finished():
         hisparse_coordinator.retract_req(req)
 
@@ -2115,15 +2115,25 @@ def release_req(
     # restored later without recompute (see resume_retracted_reqs/load_kv_cache).
     # Callers that will recompute the KV instead (PD true-retraction rebootstrap)
     # pass offload_kv=False to skip the wasteful device->host copy.
-    backup_saved = True
+    backup_saved: Optional[bool] = True
     if get_disagg().disaggregation_mode == "decode" and offload_kv:
-        backup_saved = retraction_backup(
-            req,
-            tree_cache,
-            req_to_token_pool,
-            token_to_kv_pool_allocator,
-            get_disagg().disaggregation_decode_retraction_backup,
-        )
+        disagg = get_disagg()
+        backend = disagg.disaggregation_decode_retraction_backup
+        if (
+            backend == "cpu_tensor"
+            and not disagg.disaggregation_decode_enable_offload_kvcache
+        ):
+            # CPU-tensor backup is the legacy decode-offload path. Respect its
+            # opt-in flag and recompute the request through PD rebootstrap.
+            backup_saved = None
+        else:
+            backup_saved = retraction_backup(
+                req,
+                tree_cache,
+                req_to_token_pool,
+                token_to_kv_pool_allocator,
+                backend,
+            )
     # TODO (csy): for preempted requests, we may want to insert into the tree
     release_kv_cache(req, tree_cache, is_insert=False)
     # NOTE(lsyin): we should use the newly evictable memory instantly.
@@ -3094,13 +3104,14 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             num_tokens=num_tokens, tree_cache=self.tree_cache
         )
 
-    def retract_decode(self) -> Tuple[List[Req], float, List[Req]]:
+    def retract_decode(self) -> Tuple[List[Req], float, List[Req], List[Req]]:
         """Retract the decoding requests when there is not enough memory."""
         sorted_indices = self._get_decode_retraction_order(self.reqs)
         sorted_indices = beam_retraction_order(sorted_indices, self.reqs)
 
         retracted_reqs = []
         reqs_to_abort: List[Req] = []
+        reqs_to_rebootstrap: List[Req] = []
         first_iter = True
         while first_iter or (
             not self.check_decode_mem(selected_indices=sorted_indices)
@@ -3131,9 +3142,10 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
                 self.release_req(idx, len(sorted_indices), offload_kv=False)
                 continue
             # release memory and don't insert into the tree because we need the space instantly
-            if self.release_req(idx, len(sorted_indices)):
+            backup_saved = self.release_req(idx, len(sorted_indices))
+            if backup_saved is True:
                 retracted_reqs.append(req)
-            else:
+            elif backup_saved is False:
                 # The retraction host pool could not hold the backup and the
                 # device KV is already freed, so the request cannot resume.
                 req.to_finish = FINISH_ABORT(
@@ -3146,6 +3158,8 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
                     "exhausted",
                     req.rid,
                 )
+            else:
+                reqs_to_rebootstrap.append(req)
 
         if len(sorted_indices) <= 1 and not self.check_decode_mem(
             selected_indices=sorted_indices
@@ -3178,7 +3192,12 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             NewTokenRatioTracker.estimate_new_token_ratio_after_retract(self.reqs)
         )
 
-        return retracted_reqs, new_estimate_ratio, reqs_to_abort
+        return (
+            retracted_reqs,
+            new_estimate_ratio,
+            reqs_to_abort,
+            reqs_to_rebootstrap,
+        )
 
     @staticmethod
     def _get_decode_retraction_order(reqs: List[Req]) -> List[int]:

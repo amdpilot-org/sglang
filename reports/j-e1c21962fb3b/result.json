@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33385",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced PR 2051's two concrete counterexamples against PR 1957 commit 8a7f0fe8: disabled cpu_tensor offload was still invoked and unsupported DSV4 CPU copy was converted into request abort. The correction skips disabled CPU offload, preserves narrow NotImplementedError containment, and routes unavailable backup through existing PD rebootstrap/recompute while retaining host-pool exhaustion as an abort condition.",
+  "tests": [
+    {
+      "command": "isolated base 358c163: pytest -q test/registered/unit/mem_cache/test_retraction_backup_fallback.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: unconditional disabled-offload call and uncaught unsupported DSV4-compatible CPU-copy exception; 2 failed, 2 passed."
+    },
+    {
+      "command": "isolated candidate 8a7f0fe: pytest -q test/registered/unit/mem_cache/test_retraction_backup_fallback.py",
+      "exit_code": 1,
+      "what_was_measured": "Independent candidate reproduction: flag-false release returned the abort signal after attempting offload, and unsupported CPU copy returned abort rather than rebootstrap; 2 failed, 2 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e1c21962fb3b/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_retraction_backup_fallback.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after: disabled offload makes zero CPU-copy calls, unsupported CPU copy requests rebootstrap, DSV4 inherits the unsupported stub, and unrelated exceptions propagate; 4 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e1c21962fb3b/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_decode_retraction_backup.py",
+      "exit_code": 0,
+      "what_was_measured": "On one gfx950 GPU, exact-value MHA target and speculative draft KV backup/restore plus host-capacity boundary; 2 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e1c21962fb3b/venv/bin/python -m pytest -q test/registered/unit/managers/test_retraction_order.py test/registered/unit/mem_cache/test_retraction_mamba_backup.py",
+      "exit_code": 0,
+      "what_was_measured": "Related retraction ordering and Mamba backup compatibility; 7 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e1c21962fb3b/venv/bin/python -m ruff check ...",
+      "exit_code": 1,
+      "what_was_measured": "Ruff was unavailable in the prepared interpreter (No module named ruff)."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI355X, capability (9, 5), Torch 2.11.0+rocm7.2; exact-value supported MHA host-pool target/draft backup and restore tests passed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4 weights and the reported tp8/dp8 multi-node PD deployment were unavailable.",
+    "The speculative MTP4/HiSparse workload, full serving behavior, semantic output, and KV-full race timing remain unverified.",
+    "The GPU test validates supported MHA host-pool mechanics, not DeepSeekV4TokenToKVPool.",
+    "The existing PD rebootstrap payload is not valid for multimodal requests.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
