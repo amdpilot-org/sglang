@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34719",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced mixed tensor/list logprob normalization crashes in both scheduler consumers and guarded all six conversions with torch.is_tensor, preserving host list placeholders.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-355548aa4ab4/venv/bin/python < direct four-case reproduction",
+      "exit_code": 0,
+      "what_was_measured": "Before the source change, the real move_logprobs_to_cpu and _normalize_decode_outputs methods each raised AttributeError for mixed token-ID and mixed top-logprob entries on gfx950; exceptions were recorded per case."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-355548aa4ab4/venv/bin/python -m pytest -q test/registered/unit/managers/test_batch_result_processor_mixed_logprobs.py",
+      "exit_code": 0,
+      "what_was_measured": "Four regression and boundary tests passed after the fix, covering both consumers, all three affected fields, host lists, and tensor/empty-tensor entries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-355548aa4ab4/venv/bin/python -m pytest -q test/registered/unit/managers/test_batch_result_processor_mixed_logprobs.py test/registered/unit/managers/test_batch_result_processor_hidden_states.py",
+      "exit_code": 0,
+      "what_was_measured": "11 tests and 2 subtests passed, including the focused regression and neighboring batch-result processor coverage."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-355548aa4ab4/venv/bin/python -m pre_commit run --files python/sglang/srt/managers/scheduler_components/batch_result_processor.py test/registered/unit/managers/test_batch_result_processor_mixed_logprobs.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, safety, and registered-test checks passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-355548aa4ab4/venv/bin/python < independent GPU conversion reference",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X/gfx950, mixed GPU tensors and host lists normalized exactly to the independently specified nested-list values and indices."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-355548aa4ab4/venv/bin/python /tmp/run_server_probe.py --fixture /tmp/amdpilot-repo-j-355548aa4ab4/tiny-model --output /tmp/amdpilot-repo-j-355548aa4ab4/tiny-server",
+      "exit_code": 0,
+      "what_was_measured": "A real tiny-Llama SGLang server handled eight concurrent scored/plain request pairs (HTTP 200, eight tokens per response), logged a two-request decode batch, remained healthy, and was reaped by the subreaper runner."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Direct before/after conversion ran on AMD Instinct MI350X/gfx950, and the tiny-Llama server log records ROCm engine execution plus a decode batch with two running requests; see reports/j-355548aa4ab4/raw/.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No production Qwen3.5-9B-derived weights were available; the deterministic random tiny Llama validates transport and engine execution only, not semantic or architecture-specific behavior.",
+    "The assigned hardware was AMD Instinct MI350X/gfx950, not the reported NVIDIA B200/CUDA environment.",
+    "No multi-node or distributed workload was tested.",
+    "The HTTP fixture demonstrated mixed decode batching; the prefill-result consumer was covered directly with the real method rather than a separate prefill-only HTTP batch."
+  ]
+}
