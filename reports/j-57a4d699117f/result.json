@@ -1,0 +1,58 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35692",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1592",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1557",
+  "candidate_commit": "5fd904c6cd24fe460d6446117b7ea7f541f81db8",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "Partial fix: the candidate fixes the original strict-template reproduction and the prior unrelated-string counterexample, but a generic template with an unrelated object.type == 'tool_reference' comparison is still falsely classified as native-capable and reproduces the original strict-renderer exception.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-57a4d699117f/venv/bin/python /job/review-evidence-j-57a4d699117f/reproduce_contract.py",
+      "exit_code": 1,
+      "what_was_measured": "Recorded-base conversion emits structured tool_reference content and strict Jinja rendering raises ValueError: Unexpected item type in content."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-57a4d699117f/venv/bin/python /job/review-evidence-j-57a4d699117f/reproduce_contract.py unrelated",
+      "exit_code": 1,
+      "what_was_measured": "Recorded-base reproduction of the PR 1487 unrelated-string counterexample."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-57a4d699117f/venv/bin/python /job/review-evidence-j-57a4d699117f/reproduce_contract.py [and unrelated variant] at candidate commit",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate converts both known strict-template cases to text fallback and renders successfully."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-57a4d699117f/venv/bin/python -m pytest -q test/registered/unit/entrypoints/anthropic/test_tool_reference.py test/registered/unit/entrypoints/anthropic/test_serving.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 77 passed and 5 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python:/job/review-evidence-j-57a4d699117f /tmp/amdpilot-repo-j-57a4d699117f/venv/bin/python /job/review-evidence-j-57a4d699117f/adversarial_candidate.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent diagnostic: false_positive_detected=True, structured part emitted, and real Jinja rendering raises the original ValueError; also records the fully bracketed native-template false negative."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..5fd904c6cd24fe460d6446117b7ea7f541f81db8",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "CPU-only request conversion and real Jinja rendering. The host exposes one AMD Instinct MI350X gfx950, but GPU execution is not relevant to this defect."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A generic strict template that filters tools with tool.function.defer_loading and compares an unrelated telemetry.type to 'tool_reference' is classified as native-capable; conversion forwards the structured part and rendering raises ValueError: Unexpected item type in content.",
+    "A genuinely native template using bracket access for tool['function']['defer_loading'] is classified as generic, so native structured-reference behavior and deferred metadata are not preserved."
+  ],
+  "remaining_limitations": [
+    "No full HTTP server or model weights were used; transport and generation were not exercised.",
+    "No model-architecture semantics or distributed workload were tested.",
+    "No native code changed, so native rebuild validation was not applicable.",
+    "The available architecture is one AMD Instinct MI350X gfx950, unlike the source report's NVIDIA H100 environment; GPU behavior is not implicated in the reproduced CPU path."
+  ]
+}
