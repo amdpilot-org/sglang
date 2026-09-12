@@ -1,0 +1,39 @@
+F..                                                                      [100%]
+=================================== FAILURES ===================================
+_______ test_completed_store_is_not_reaped_at_scheduler_budget_boundary ________
+
+    def test_completed_store_is_not_reaped_at_scheduler_budget_boundary():
+        cache = helpers._bare_cache()
+        node = object()
+        future = helpers.ControlledFuture(result=True)
+        cache._in_flight_mp_stores = [(node, future, "request-1")]
+        cache._mp_load_back_markers["request-1"] = object()
+    
+        # Model a tree whose only cached slots are still locked. The ordinary
+        # radix budget therefore reports no evictable capacity and no allocation
+        # path has a reason to call evict().
+        with patch.object(mod.RadixCache, "evictable_size", return_value=0):
+            assert cache.evictable_size() == 0
+    
+        # Contract expectation: once completion is observable, the scheduling
+        # budget boundary must release the pin so these slots can be reused.
+>       assert future.called is True
+E       assert False is True
+E        +  where False = <candidate_helpers.ControlledFuture object at 0x7f6e4739da60>.called
+
+/tmp/amdpilot-repo-j-75a2f73bf9c5/review-evidence/shared/test_review_adversarial.py:32: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../../tmp/amdpilot-repo-j-75a2f73bf9c5/review-evidence/shared/test_review_adversarial.py::test_completed_store_is_not_reaped_at_scheduler_budget_boundary
+1 failed, 2 passed, 16 warnings in 11.84s
+pytest_exit=1
