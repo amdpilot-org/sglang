@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37553",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "32b01f36846b86eba8b04bc1a40806b0fd110d69",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduced retained growth and stale oversized returns in EAGLE and DFlash. At the exact candidate commit, submitted and independent real-gfx950 GPU tests showed exact returned lengths across growth, shrink, zero-length, and empty-batch boundaries while preserving the semantic mask prefix and never retaining padding on self.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-378c4f34c991/venv/bin/python /job/review-evidence-j-378c4f34c991/independent_mask_contract.py",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before real-GPU sequence on the recorded base: after 2->7->1 batch changes, EAGLE returned 462 elements for required 66 and DFlash returned 168 for required 24; both retained the oversized tensors. Zero-length and empty-batch calls also returned stale oversized masks."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-378c4f34c991/venv/bin/python -m pytest -q test/registered/unit/spec/test_custom_mask_padding.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression at exact commit: 5 passed on GPU, covering growth/shrink for both implementations, retained identity, nontrivial prefix preservation, shrink view storage, and DFlash None."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-378c4f34c991/venv/bin/python /job/review-evidence-j-378c4f34c991/independent_mask_contract.py --expect-fixed",
+      "exit_code": 0,
+      "what_was_measured": "Independent candidate adversarial sequence for EAGLE and DFlash over batch/sequence pairs (2,5), (7,5), (1,5), (4,0), and (0,0); asserted exact formula-derived lengths, retained three-element identity, prefix equality, and true-only padding."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-378c4f34c991/venv/bin/python -m py_compile python/sglang/srt/speculative/eagle_info.py python/sglang/srt/speculative/dflash_info.py test/registered/unit/spec/test_custom_mask_padding.py",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python source and test files compiled successfully."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 32b01f36846b86eba8b04bc1a40806b0fd110d69",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One visible AMD Instinct MI350X gfx950 executed the candidate regression and independent cases with Torch 2.11.0+rocm7.2 / HIP 7.2.26015, including the real create_flashinfer_kv_indices_triton launch."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No EAGLE or DFlash model weights were provided, so full HTTP/model-serving and semantic-generation validation were not performed.",
+    "No long-duration serving allocator-fragmentation measurement was performed; focused tensor identity and retained-size checks directly cover the reported retention mechanism.",
+    "Validation used one gfx950 GPU, not a distributed or multi-node workload.",
+    "The candidate changes only Python and tests; no native source changed, so a native rebuild was not applicable.",
+    "NUMA balancing was enabled and produced an AIter warning, but the real GPU kernel tests completed successfully."
+  ]
+}
