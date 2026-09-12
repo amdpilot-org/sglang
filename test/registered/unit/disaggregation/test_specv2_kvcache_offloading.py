@@ -26,6 +26,7 @@ from sglang.srt.managers.scheduler_components.batch_result_processor import (
 )
 from sglang.srt.mem_cache.allocator import BaseTokenToKVPoolAllocator
 from sglang.srt.mem_cache.base_prefix_cache import BasePrefixCache
+from sglang.srt.mem_cache.hicache_storage import PoolHitPolicy, PoolName, PoolTransfer
 from sglang.srt.runtime_context import get_context
 from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import CustomTestCase
@@ -109,6 +110,8 @@ def _make_manager(pool_size: int, page_size: int = 1):
     manager.ongoing_offload = {}
     manager.ongoing_backup = {}
     manager.offload_inflight = WeakKeyDict()
+    manager._is_deepseek_v4 = False
+    manager._dsv4_sidecars = []
 
     return manager, freed_indices
 
@@ -116,6 +119,65 @@ def _make_manager(pool_size: int, page_size: int = 1):
 class _FinishedEvent:
     def synchronize(self):
         pass
+
+
+class TestDeepSeekV4DecodeOffload(unittest.TestCase):
+    def test_composite_transfers_keep_swa_and_all_derived_pools(self):
+        manager = object.__new__(DecodeKVCacheOffloadManager)
+        manager._is_deepseek_v4 = True
+        manager.token_to_kv_pool_allocator = MagicMock()
+        manager.token_to_kv_pool_allocator.get_kvcache.return_value = SimpleNamespace(
+            translate_loc_from_full_to_swa=lambda indices: indices + 100
+        )
+        manager.decode_host_mem_pool = SimpleNamespace(
+            entry_map={PoolName.SWA: object()}
+        )
+        manager._dsv4_sidecars = [
+            PoolTransfer(
+                name=PoolName.DEEPSEEK_V4_C4,
+                indices_from_pool=PoolName.KV,
+            ),
+            PoolTransfer(
+                name=PoolName.DEEPSEEK_V4_C4_STATE,
+                indices_from_pool=PoolName.SWA,
+                hit_policy=PoolHitPolicy.TRAILING_PAGES,
+            ),
+        ]
+
+        transfers = manager._build_extra_transfers(torch.tensor([1, 2]))
+
+        self.assertEqual(
+            [transfer.name for transfer in transfers],
+            [PoolName.SWA, PoolName.DEEPSEEK_V4_C4, PoolName.DEEPSEEK_V4_C4_STATE],
+        )
+        self.assertEqual(transfers[0].device_indices.tolist(), [101, 102])
+        self.assertEqual(transfers[1].indices_from_pool, PoolName.KV)
+        self.assertEqual(transfers[2].indices_from_pool, PoolName.SWA)
+        self.assertIsNot(transfers[1], manager._dsv4_sidecars[0])
+
+    def test_backup_releases_independent_side_pool_allocations(self):
+        manager = object.__new__(DecodeKVCacheOffloadManager)
+        manager.page_size = 2
+        manager.decode_host_mem_pool = MagicMock()
+        manager.cache_controller = MagicMock()
+        manager.cache_controller.ack_backup_queue.get.return_value = SimpleNamespace(
+            id=7
+        )
+        host_indices = torch.tensor([0, 1])
+        swa = PoolTransfer(name=PoolName.SWA, host_indices=torch.tensor([2, 3]))
+        derived = PoolTransfer(
+            name=PoolName.DEEPSEEK_V4_C4_STATE,
+            host_indices=swa.host_indices,
+            indices_from_pool=PoolName.SWA,
+        )
+        manager.ongoing_backup = {7: ("rid", host_indices, [swa, derived], 0.0)}
+
+        manager._check_backup_progress(1)
+
+        manager.decode_host_mem_pool.free.assert_called_once_with(host_indices)
+        manager.decode_host_mem_pool.release_transfers.assert_called_once_with(
+            [swa, derived]
+        )
 
 
 class TestReleaseFinishedReq(unittest.TestCase):

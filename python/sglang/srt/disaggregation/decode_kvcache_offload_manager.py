@@ -4,6 +4,8 @@ import json
 import logging
 import threading
 import time
+from dataclasses import replace
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from weakref import WeakKeyDictionary as WeakKeyDict
 
@@ -14,7 +16,13 @@ from sglang.srt.environ import envs
 from sglang.srt.managers.cache_controller import HiCacheController
 from sglang.srt.mem_cache.allocator import BaseTokenToKVPoolAllocator
 from sglang.srt.mem_cache.base_prefix_cache import BasePrefixCache
+from sglang.srt.mem_cache.hicache_storage import (
+    PoolHitPolicy,
+    PoolName,
+    PoolTransfer,
+)
 from sglang.srt.mem_cache.hybrid_cache.hybrid_pool_assembler import (
+    build_deepseek_v4_hicache_stack,
     build_kv_host_pool,
 )
 from sglang.srt.mem_cache.memory_pool import (
@@ -57,17 +65,6 @@ class DecodeKVCacheOffloadManager:
                 self.page_size, (env_stride // self.page_size) * self.page_size
             )
         kv_cache = self.token_to_kv_pool_allocator.get_kvcache()
-        if not isinstance(kv_cache, (MHATokenToKVPool, MLATokenToKVPool)):
-            raise ValueError("Unsupported KV cache type for decode offload")
-        self.decode_host_mem_pool = build_kv_host_pool(
-            kv_pool=kv_cache,
-            page_size=self.page_size,
-            use_mla=isinstance(kv_cache, MLATokenToKVPool),
-        )
-
-        self.tp_group = tp_group
-        self.tp_world_size = torch.distributed.get_world_size(group=self.tp_group)
-
         hicache_storage_backend_extra_config = {}
         if get_memory().hicache_storage_backend_extra_config:
             try:
@@ -78,18 +75,79 @@ class DecodeKVCacheOffloadManager:
                 raise ValueError(
                     f"Invalid hicache storage backend extra config JSON: {e}"
                 )
-
-        self.cache_controller = HiCacheController(
-            token_to_kv_pool_allocator=self.token_to_kv_pool_allocator,
-            mem_pool_host=self.decode_host_mem_pool,
-            page_size=self.page_size,
-            tp_group=tp_group,
-            io_backend=get_memory().hicache_io_backend,
-            load_cache_event=threading.Event(),
-            storage_backend=get_memory().hicache_storage_backend,
-            model_name=get_serving().served_model_name,
-            storage_backend_extra_config=hicache_storage_backend_extra_config,
+        from sglang.srt.mem_cache.deepseek_v4_memory_pool import (
+            DeepSeekV4TokenToKVPool,
         )
+
+        self._is_deepseek_v4 = isinstance(kv_cache, DeepSeekV4TokenToKVPool)
+        if not isinstance(
+            kv_cache, (MHATokenToKVPool, MLATokenToKVPool, DeepSeekV4TokenToKVPool)
+        ):
+            raise ValueError("Unsupported KV cache type for decode offload")
+
+        if self._is_deepseek_v4:
+            params = SimpleNamespace(
+                page_size=self.page_size,
+                token_to_kv_pool_allocator=self.token_to_kv_pool_allocator,
+                mtp_draft_device_pools=(),
+                tp_cache_group=tp_group,
+                attn_cp_cache_group=None,
+                attn_tp_cache_group=None,
+                pp_cache_group=None,
+            )
+            self.decode_host_mem_pool, self.cache_controller = (
+                build_deepseek_v4_hicache_stack(
+                    params=params,
+                    kvcache=kv_cache,
+                    load_cache_event=threading.Event(),
+                    storage_backend=get_memory().hicache_storage_backend,
+                    model_name=get_serving().served_model_name,
+                    storage_backend_extra_config=hicache_storage_backend_extra_config,
+                )
+            )
+            self._dsv4_sidecars = [
+                PoolTransfer(
+                    name=name,
+                    indices_from_pool=source,
+                    hit_policy=(
+                        PoolHitPolicy.TRAILING_PAGES
+                        if source == PoolName.SWA
+                        else PoolHitPolicy.ALL_PAGES
+                    ),
+                )
+                for name, source in (
+                    (PoolName.DEEPSEEK_V4_C4, PoolName.KV),
+                    (PoolName.DEEPSEEK_V4_C4_INDEXER, PoolName.KV),
+                    (PoolName.DEEPSEEK_V4_C4_INDEXER_SCALE, PoolName.KV),
+                    (PoolName.DEEPSEEK_V4_C128, PoolName.KV),
+                    (PoolName.DEEPSEEK_V4_C4_STATE, PoolName.SWA),
+                    (PoolName.DEEPSEEK_V4_C4_INDEXER_STATE, PoolName.SWA),
+                )
+                if name in self.decode_host_mem_pool.entry_map
+            ]
+        else:
+            self.decode_host_mem_pool = build_kv_host_pool(
+                kv_pool=kv_cache,
+                page_size=self.page_size,
+                use_mla=isinstance(kv_cache, MLATokenToKVPool),
+            )
+            self._dsv4_sidecars = []
+
+        self.tp_group = tp_group
+        self.tp_world_size = torch.distributed.get_world_size(group=self.tp_group)
+
+        if not self._is_deepseek_v4:
+            self.cache_controller = HiCacheController(
+                token_to_kv_pool_allocator=self.token_to_kv_pool_allocator,
+                mem_pool_host=self.decode_host_mem_pool,
+                page_size=self.page_size,
+                tp_group=tp_group,
+                io_backend=get_memory().hicache_io_backend,
+                load_cache_event=threading.Event(),
+                storage_backend=get_memory().hicache_storage_backend,
+                model_name=get_serving().served_model_name,
+                storage_backend_extra_config=hicache_storage_backend_extra_config,
+            )
 
         self.ongoing_offload = {}
         self.ongoing_backup = {}
@@ -114,6 +172,26 @@ class DecodeKVCacheOffloadManager:
 
     def _has_inflight_offload(self, req: Req):
         return self.offload_inflight.get(req, 0) > 0
+
+    def _build_extra_transfers(self, device_indices: torch.Tensor):
+        if not self._is_deepseek_v4:
+            return None
+
+        kv_cache = self.token_to_kv_pool_allocator.get_kvcache()
+        transfers = []
+        if PoolName.SWA in self.decode_host_mem_pool.entry_map:
+            swa_indices = kv_cache.translate_loc_from_full_to_swa(device_indices)
+            if bool((swa_indices <= 0).any()):
+                raise ValueError("DeepSeek V4 decode offload found unmapped SWA slots")
+            transfers.append(
+                PoolTransfer(
+                    name=PoolName.SWA,
+                    device_indices=swa_indices.long(),
+                    hit_policy=PoolHitPolicy.TRAILING_PAGES,
+                )
+            )
+        transfers.extend(replace(transfer) for transfer in self._dsv4_sidecars)
+        return transfers
 
     def _prefill_offloaded_len(self, req: Req) -> int:
         # Page-aligned prompt length; the prefill instance offloaded this part.
@@ -169,21 +247,28 @@ class DecodeKVCacheOffloadManager:
         # Asynchronously offload incremental KV cache from device to host
         self.request_counter += 1
         ack_id = self.request_counter
-        host_indices = self.cache_controller.write(
+        extra_pools = self._build_extra_transfers(incremental_indices.long())
+        write_kwargs = dict(
             device_indices=incremental_indices.long(),
             node_id=ack_id,
         )
+        if extra_pools is not None:
+            write_kwargs["extra_pools"] = extra_pools
+        host_indices = self.cache_controller.write(**write_kwargs)
         if host_indices is None:
             logger.error(f"Not enough host memory for request {req.rid}")
             return False
 
         self._mark_offload_started(req)
-        self.ongoing_offload[ack_id] = (
+        operation = (
             req,
             host_indices,
             incremental_tokens,
             time.time(),
         )
+        if extra_pools is not None:
+            operation += (extra_pools,)
+        self.ongoing_offload[ack_id] = operation
         state.inc_len += incremental_aligned_len
         return True
 
@@ -213,12 +298,9 @@ class DecodeKVCacheOffloadManager:
             ack = self.cache_controller.ack_write_queue.pop(0)
             ack.finish_event.synchronize()
             for ack_id in ack.node_ids:
-                (
-                    req,
-                    host_indices,
-                    incremental_tokens,
-                    start_time,
-                ) = self.ongoing_offload.pop(ack_id)
+                operation = self.ongoing_offload.pop(ack_id)
+                req, host_indices, incremental_tokens, start_time = operation[:4]
+                extra_pools = operation[4] if len(operation) == 5 else None
 
                 self._mark_offload_finished(req)
                 prior_hash = (
@@ -226,9 +308,23 @@ class DecodeKVCacheOffloadManager:
                     if req in self.offloaded_state
                     else None
                 )
-                last_hash = self._trigger_backup(
-                    req, host_indices, incremental_tokens, start_time, prior_hash
-                )
+                if extra_pools is None:
+                    last_hash = self._trigger_backup(
+                        req,
+                        host_indices,
+                        incremental_tokens,
+                        start_time,
+                        prior_hash,
+                    )
+                else:
+                    last_hash = self._trigger_backup(
+                        req,
+                        host_indices,
+                        incremental_tokens,
+                        start_time,
+                        prior_hash,
+                        extra_pools,
+                    )
                 if req in self.offloaded_state:
                     self.offloaded_state[req].last_hash = last_hash
 
@@ -258,26 +354,53 @@ class DecodeKVCacheOffloadManager:
         for _ in range(finish_count):
             storage_operation = self.cache_controller.ack_backup_queue.get()
             ack_id = storage_operation.id
-            req_id, host_indices, start_time = self.ongoing_backup.pop(ack_id)
+            operation = self.ongoing_backup.pop(ack_id)
+            if len(operation) == 3:
+                req_id, host_indices, start_time = operation
+                extra_pools = None
+            else:
+                req_id, host_indices, extra_pools, start_time = operation
 
             # Release host memory
             self.decode_host_mem_pool.free(host_indices)
+            if extra_pools:
+                self.decode_host_mem_pool.release_transfers(extra_pools)
 
             logger.debug(
                 f"Finished backup request {req_id}, free host memory, len:{len(host_indices)}, cost time:{time.time() - start_time:.2f} seconds."
             )
 
     def _trigger_backup(
-        self, req, host_indices, incremental_tokens, start_time, prior_hash
+        self,
+        req,
+        host_indices,
+        incremental_tokens,
+        start_time,
+        prior_hash,
+        extra_pools=None,
     ):
         """Trigger async backup from host to storage."""
         page_hashes = self._compute_prefix_hash(incremental_tokens, prior_hash)
+        for transfer in extra_pools or []:
+            if transfer.name != PoolName.SWA or transfer.host_indices is None:
+                continue
+            num_pages = transfer.host_indices.numel() // self.page_size
+            transfer.keys = page_hashes[-num_pages:]
+        storage_kwargs = dict(hash_value=page_hashes)
+        if extra_pools is not None:
+            storage_kwargs["extra_pools"] = extra_pools
         ack_id = self.cache_controller.write_storage(
-            host_indices,
-            incremental_tokens,
-            hash_value=page_hashes,
+            host_indices, incremental_tokens, **storage_kwargs
         )
-        self.ongoing_backup[ack_id] = (req.rid, host_indices, start_time)
+        if extra_pools is None:
+            self.ongoing_backup[ack_id] = (req.rid, host_indices, start_time)
+        else:
+            self.ongoing_backup[ack_id] = (
+                req.rid,
+                host_indices,
+                extra_pools,
+                start_time,
+            )
         return page_hashes[-1] if len(page_hashes) > 0 else prior_hash
 
     def _compute_prefix_hash(self, tokens, prior_hash=""):

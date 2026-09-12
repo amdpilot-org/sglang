@@ -1,0 +1,27 @@
+Base commit: 358c163250ad3b1f62939b01ce1314a0a31a0365
+
+LMCache failure boundary in the base implementation:
+python/sglang/srt/mem_cache/storage/lmcache/lmc_radix_cache.py constructed
+connector_kwargs with
+
+  getattr(kvcache, "k_buffer", getattr(allocator._kvcache, "k_buffer"))
+
+Python evaluates the default argument eagerly. DeepSeekV4TokenToKVPool has no
+k_buffer/v_buffer attributes, so construction raises AttributeError before an
+LMCache connector is started. MLATokenToKVPool also exposes kv_buffer rather
+than split k_buffer/v_buffer and therefore needs its established one-buffer
+adapter form.
+
+Decode-offload failure boundary in the base implementation:
+python/sglang/srt/disaggregation/decode_kvcache_offload_manager.py accepted only
+MHATokenToKVPool and MLATokenToKVPool in its constructor and raised
+
+  ValueError: Unsupported KV cache type for decode offload
+
+for DeepSeekV4TokenToKVPool before allocating any host mirrors.
+
+The regression tests added in this change exercise the composite transfer
+enumeration, SWA index translation, derived sidecar relationships, and
+independent-allocation release behavior. The pre-change constructor check and
+eager fallback cannot satisfy those tests because no composite transfer list
+or grouped host pool exists.

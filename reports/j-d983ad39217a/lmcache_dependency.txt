@@ -1,0 +1,23 @@
+Inspected repository: https://github.com/LMCache/LMCache
+Inspected dev commit: 05a013b29da78cf2321b9b46ec5039dde2fb0bb0
+Files:
+  lmcache/integration/sglang/sglang_adapter.py
+  lmcache/integration/sglang/multi_process_adapter.py
+
+At that commit, both SGLang connector entry points expose a classic split-pool
+contract:
+
+  LMCacheLayerwiseConnector(..., k_pool: List[Tensor], v_pool: List[Tensor], ...)
+  LMCacheMPConnector(..., k_pool: list[Tensor], v_pool: list[Tensor], ...)
+
+The in-process adapter sets its registered caches to k_pool for MLA or
+k_pool + v_pool for MHA. The multiprocess adapter validates non-empty,
+equal-length K and V layer lists, flattens them, and registers the layout hint
+"k_v". Neither API can describe the DeepSeek-V4 SWA, C4, C4 indexer,
+C128, and state regions or their different index sources/page geometry.
+
+Required external work: LMCache must add a grouped-pool registration and
+transfer contract (the SGLang patch probes for a `pool_group` constructor
+parameter) and implement it for both layerwise and multiprocess paths. Until
+then SGLang raises NotImplementedError after successfully resolving the real
+physical pool group, rather than fabricating k_pool/v_pool.
