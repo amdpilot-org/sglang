@@ -80,6 +80,18 @@ class TestDisaggregationPriorityQueueing(unittest.TestCase):
         )
         req.time_stats.set_decode_prealloc_queue_entry_time.assert_called_once()
 
+    def test_decode_mode_forwards_rebootstrap_only_when_requested(self):
+        scheduler = self._new_scheduler(DisaggregationMode.DECODE)
+        req = self._new_req(priority=None)
+
+        scheduler._add_request_to_queue(req, is_rebootstrap=True)
+
+        scheduler.disagg_decode_prealloc_queue.add.assert_called_once_with(
+            req, is_retracted=False, is_rebootstrap=True
+        )
+        req.time_stats.set_retract_time.assert_called_once()
+        req.time_stats.set_decode_prealloc_queue_entry_time.assert_not_called()
+
     def test_priority_disabled_abort_validation_applies_to_decode_mode(self):
         scheduler = self._new_scheduler(DisaggregationMode.DECODE)
         scheduler.enable_priority_scheduling = False
