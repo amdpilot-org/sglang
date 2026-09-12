@@ -218,9 +218,6 @@ class SchedulerBatchResultProcessor:
         full_nan_rows = getattr(logits_output, "full_nan_rows", None)
         if full_nan_rows is None:
             return set()
-        assert batch.spec_algorithm.is_none(), (
-            "full-NaN request abort currently supports plain sampling only"
-        )
         assert len(full_nan_rows) == len(batch.reqs), (
             f"full_nan_rows has {len(full_nan_rows)} rows for "
             f"{len(batch.reqs)} requests; expected one row per request"

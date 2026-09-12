@@ -91,7 +91,16 @@ def sanitize_nan_logits(logits: torch.Tensor, msg: str = ""):
     ):
         return
     maybe_warn_nan(logits, msg)
-    torch.nan_to_num_(logits, nan=-1e30, posinf=1e30, neginf=-1e30)
+    full_nan_rows = torch.isnan(logits).all(dim=-1)
+    finite_limit = torch.finfo(logits.dtype).max
+    torch.nan_to_num_(
+        logits, nan=-finite_limit, posinf=finite_limit, neginf=-finite_limit
+    )
+    # A row containing no valid lane only needs to remain safe until its
+    # request-scoped abort is processed.  Use zero rather than a large negative
+    # sentinel: dividing a constant near dtype.min by temperature can overflow
+    # FP16 back to -inf, making softmax NaN again.
+    logits.masked_fill_(full_nan_rows.unsqueeze(-1), 0)
 
 
 def maybe_assert_async(cond: torch.Tensor, msg: str = ""):
