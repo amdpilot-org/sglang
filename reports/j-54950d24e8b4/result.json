@@ -1,0 +1,58 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33625",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3295",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3292",
+  "candidate_commit": "2119495d903f4081c5462ae3fd39a623f4487666",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review confirms that the candidate implements the original opt-in bounded_consistent_hashing contract and corrects the prior min_load_gap defect. The preferred worker is retained exactly when its active load is at most average_healthy_worker_load * max_load_skew; otherwise the first healthy clockwise ring candidate within the same bound is selected. Strict consistent_hashing, explicit target-worker routing, implicit-key routing, one-worker behavior, no-eligible fallback, metrics, and streaming/non-streaming load lifetimes remain covered. No candidate source changes were made.",
+  "tests": [
+    {
+      "command": "At base 358c163: rebuild PyO3 with maturin develop, then import source package/native module and call policy_from_str('bounded_consistent_hashing')",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction. Source Python and rebuilt native module both resolved under /job/repo/sgl-model-gateway/bindings/python/src; the base raised KeyError because the requested policy did not exist."
+    },
+    {
+      "command": "cargo test bounded_consistent_hashing --lib -- --nocapture (with temporary reviewer_exhaustive_low_load_relative_contract test)",
+      "exit_code": 0,
+      "what_was_measured": "19 tests passed. Independently enumerated preferred loads 0..5, equal peer loads 0..3, and max_load_skew values 1.0, 1.25, 1.5, and 2.0. This included the disputed [1,0,0,0] and [2,0,0,0] vectors and verified both spill and no-spill boundary behavior. The temporary review test was removed and git diff was clean before leaving the candidate."
+    },
+    {
+      "command": "cargo test --test load_guard_raii_test",
+      "exit_code": 0,
+      "what_was_measured": "8 tests passed, covering regular HTTP non-streaming, streaming, disconnect/error, and policy-scoped active-load guard lifetimes."
+    },
+    {
+      "command": "cargo test --test routing_tests non_igw_bounded",
+      "exit_code": 0,
+      "what_was_measured": "1 two-worker HTTP routing test passed, validating explicit-key bounded spillover on the non-IGW serving path."
+    },
+    {
+      "command": "cargo test --lib",
+      "exit_code": 0,
+      "what_was_measured": "415 Rust library tests passed with pinned Rust 1.90.0."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/sgl-model-gateway/bindings/python/src:/job/repo/python python -m pytest -q sgl-model-gateway/bindings/python/tests/test_arg_parser.py sgl-model-gateway/bindings/python/tests/test_pyo3_binding.py",
+      "exit_code": 0,
+      "what_was_measured": "100 passed and 1 skipped. Verified launch_router.py, router_args.py, and the rebuilt sglang_router_rs.abi3.so all loaded from the candidate checkout."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU execution was used because the changed contract is deterministic CPU/Rust Model Gateway selection and PyO3 configuration. The host exposes an AMD Instinct MI355X (gfx950), but no model weights or model-architecture behavior are needed or claimed."
+  },
+  "native_rebuilt": true,
+  "native_rebuild_evidence": "Rebuilt the candidate PyO3 extension with maturin develop using rustc 1.90.0; verified /job/repo/sgl-model-gateway/bindings/python/src/sglang_router/sglang_router_rs.abi3.so was the imported native module.",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No model-backed GPU benchmark was run, so no throughput, p95 latency, cache/prefill, semantic-accuracy, or distributed-workload claim is made.",
+    "The active-request load signal remains local to each gateway process and is not coordinated across gateway replicas; that is outside the original stateless selection contract.",
+    "The gateway has no committed Cargo.lock, so the clean native build resolved current compatible crate versions. Build caches and the Rust toolchain were kept under /tmp/amdpilot-repo-j-54950d24e8b4.",
+    "An initial Python test invocation without an explicit gateway-source PYTHONPATH mixed candidate files with /opt/venv's preinstalled sglang_router source and failed five tests. The source-pinned rerun verified every imported path and passed 100 tests; the contaminated run is retained as environment evidence, not counted as a candidate failure."
+  ],
+  "evidence_directory": "/job/review-evidence-j-54950d24e8b4",
+  "architecture": "x86_64 host, AMD EPYC 9575F CPU; AMD Instinct MI355X gfx950 visible but unused"
+}
