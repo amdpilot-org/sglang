@@ -1,0 +1,54 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_______________________ test_stale_driver_is_not_checked _______________________
+
+    def test_stale_driver_is_not_checked():
+        sig = signature()
+        current = get_runtime_environment()
+        assert not any("driver" in key for key in current), current
+        recorded = {**current, "driver_version": "stale-driver"}
+        report = CalibrationReport("code", recorded, (result(sig, ParallelExecutionPlan(1)),))
+        resolution = resolve_calibrated_plan(
+            report, sig, code_revision="code", environment=current
+        )
+>       assert resolution.plan is None, (
+            "A stale recorded driver is accepted because the current environment "
+            "contains no driver identity and report-only fields are ignored"
+        )
+E       AssertionError: A stale recorded driver is accepted because the current environment contains no driver identity and report-only fields are ignored
+E       assert ParallelExecutionPlan(num_gpus=1, cfg_parallel_size=1, tensor_parallel_size=1, sequence_parallel_size=1, fsdp=False, data_parallel_replicas=1) is None
+E        +  where ParallelExecutionPlan(num_gpus=1, cfg_parallel_size=1, tensor_parallel_size=1, sequence_parallel_size=1, fsdp=False, data_parallel_replicas=1) = Resolution(plan=ParallelExecutionPlan(num_gpus=1, cfg_parallel_size=1, tensor_parallel_size=1, sequence_parallel_size=1, fsdp=False, data_parallel_replicas=1), source='exact_calibration', reasons=(), signature_hash=None).plan
+
+../review-evidence/j-1d3d435f41da/adversarial_review.py:48: AssertionError
+_____________ test_product_valid_but_cfg_illegal_plan_is_selected ______________
+
+    def test_product_valid_but_cfg_illegal_plan_is_selected():
+        sig = signature(cfg_branches=1)
+        plan = ParallelExecutionPlan(num_gpus=2, cfg_parallel_size=2)
+        assert plan.required_devices == plan.num_gpus
+        report = CalibrationReport("code", {}, (result(sig, plan),))
+        resolution = resolve_calibrated_plan(report, sig)
+>       assert resolution.plan is None, (
+            "Startup selects CFG degree 2 for a workload with only one CFG branch; "
+            "no capabilities/model legality validation is performed"
+        )
+E       AssertionError: Startup selects CFG degree 2 for a workload with only one CFG branch; no capabilities/model legality validation is performed
+E       assert ParallelExecutionPlan(num_gpus=2, cfg_parallel_size=2, tensor_parallel_size=1, sequence_parallel_size=1, fsdp=False, data_parallel_replicas=1) is None
+E        +  where ParallelExecutionPlan(num_gpus=2, cfg_parallel_size=2, tensor_parallel_size=1, sequence_parallel_size=1, fsdp=False, data_parallel_replicas=1) = Resolution(plan=ParallelExecutionPlan(num_gpus=2, cfg_parallel_size=2, tensor_parallel_size=1, sequence_parallel_size=1, fsdp=False, data_parallel_replicas=1), source='exact_calibration', reasons=(), signature_hash=None).plan
+
+../review-evidence/j-1d3d435f41da/adversarial_review.py:60: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../review-evidence/j-1d3d435f41da/adversarial_review.py::test_stale_driver_is_not_checked
+FAILED ../review-evidence/j-1d3d435f41da/adversarial_review.py::test_product_valid_but_cfg_illegal_plan_is_selected
+2 failed, 16 warnings in 15.17s
