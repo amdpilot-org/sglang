@@ -1,0 +1,62 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39173",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/767",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/736",
+  "candidate_commit": "2aea7cad31ab4ef5547ee7a23c6425220e41a65f",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the reported 42-token capture geometry (seven width-six rows rather than eight unequal rows) and fixes the independently reproduced overlapping DSV4 replay-metadata copy on a real ROCm GPU. It does not establish the original Engram contract for genuinely ragged tiers: 43 tokens still captures as [6,6,6,5,5,5,5,5], which is incompatible with the issue's equal-block EngramHasher branch unless that hasher is changed to consume per-request ragged context. This base/candidate has no EngramHasher or Engram model integration, so actual Engram hash outputs and the full first-forward path cannot be verified. The change is therefore a partial fix, not a full original-issue resolution.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-24bff7dff6fe/venv/bin/python -c 'from sglang.srt.speculative.ragged_verify import build_capture_verify_lens; print(build_capture_verify_lens(num_tokens=42,num_slots=8,num_draft_tokens=6))' (base)",
+      "exit_code": 0,
+      "what_was_measured": "Actual base layout helper returned [6,6,5,5,5,5,5,5], reproducing the 42-token/8-slot geometry behind the Engram assertion."
+    },
+    {
+      "command": "Real-device DSV4RawVerifyMetadata.copy_ overlap reproduction using the prepared interpreter (base)",
+      "exit_code": 1,
+      "what_was_measured": "On AMD Instinct MI355X, overlapping slices raised RuntimeError: unsupported operation: some elements ... refer to a single memory location."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-24bff7dff6fe/venv/bin/python -m pytest -q test/registered/spec/dspark/test_ragged_verify.py test/registered/unit/layers/test_dsv4_metadata_copy.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 14 passed and 5 subtests passed."
+    },
+    {
+      "command": "Independent MI355X adversarial script over token tiers 1,5,6,7,11,12,13,23,24,25,41,42,43,47,48; real RaggedVerifyLayout device prefix sums; overlapping verify/decode metadata views at offsets 0, 1, 2, and -1 (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Slot/lens packing invariants, real device qo_indptr and extend_start_loc against an independent Python prefix-sum reference, and alias-safe tensor values. It also demonstrated unequal Engram-incompatible capture rows at non-multiple tiers including 43 tokens."
+    },
+    {
+      "command": "Prepared-interpreter import-path probe at candidate commit",
+      "exit_code": 0,
+      "what_was_measured": "sglang and changed Python modules imported from /job/repo/python; torch imported from /opt/venv and reported 2.11.0+rocm7.2, HIP 7.2.26015, AMD Instinct MI355X."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Real tensors and DSV4 metadata-copy operations ran on the assigned AMD Instinct MI355X. The base overlap failure and candidate success were both observed on device."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "At request width 6, capture_num_slots(43, 6, 8) yields 8 and build_capture_verify_lens yields [6,6,6,5,5,5,5,5]. The original EngramHasher target-verify assertion requires num_tokens == bs * block, so this genuinely ragged tier remains incompatible absent an Engram-side layout-aware change.",
+    "Other non-multiple tiers also remain unequal (for example 41 -> [6,6,6,6,6,6,5] and 47 -> [6,6,6,6,6,6,6,5]); no actual per-request Engram hash output could be compared with a reference because the implementation is absent.",
+    "The reported full first-forward path after forced-uniform capture was not run with DeepSeek-V4.1-Flash. Only the isolated real-device DSV4 overlap mechanism was reproduced and fixed."
+  ],
+  "remaining_limitations": [
+    "The prepared base and exact candidate contain no python/sglang/srt/layers/engram.py, EngramHasher, or DeepSeek-V4.1 Engram integration, so the required per-request hash-context and real hash-output comparison is unsupported in this checkout.",
+    "Full TP4/EP4 DeepSeek-V4.1-Flash CUDA execution is unavailable on the assigned single AMD ROCm GPU and remains explicitly unverified.",
+    "The source report used NVIDIA GB10/CUDA 13.0; this review used AMD Instinct MI355X with ROCm 7.2, so NVIDIA CUDA-graph behavior was not executed.",
+    "No C++, FlyDSL, LLVM, or other native source changed in the candidate. A native rebuild was not applicable; imported changed code was confirmed to come from /job/repo/python rather than an installed sglang wheel."
+  ],
+  "evidence_paths": [
+    "/tmp/amdpilot-repo-j-24bff7dff6fe/baseline-42x8.txt",
+    "/tmp/amdpilot-repo-j-24bff7dff6fe/baseline-overlap.txt",
+    "/tmp/amdpilot-repo-j-24bff7dff6fe/candidate-tests.txt",
+    "/tmp/amdpilot-repo-j-24bff7dff6fe/adversarial.txt",
+    "/tmp/amdpilot-repo-j-24bff7dff6fe/import-paths.txt",
+    "/tmp/amdpilot-repo-j-24bff7dff6fe/candidate.diff"
+  ]
+}
