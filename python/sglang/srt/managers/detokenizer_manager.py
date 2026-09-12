@@ -70,6 +70,12 @@ logger = logging.getLogger(__name__)
 # Use power of 2 values for better memory allocation.
 DETOKENIZER_MAX_STATES = int(os.environ.get("SGLANG_DETOKENIZER_MAX_STATES", 1 << 16))
 
+# U+FFFD is used below as a proxy for an incomplete trailing byte sequence, but
+# it can also be a complete model output. Limit how long that proxy may freeze
+# the incremental decode offsets so an undecodable stream cannot make the
+# re-decoded token window grow with the full response.
+MAX_STALLED_DECODE_STEPS = 8
+
 
 @dataclasses.dataclass
 class DecodeStatus:
@@ -81,6 +87,7 @@ class DecodeStatus:
     read_offset: int
     # Offset that's sent to tokenizer for incremental update.
     sent_offset: int = 0
+    stalled_steps: int = 0
     decoded_text_len: int = dataclasses.field(init=False)
     decoded_text_chunks: List[str] = dataclasses.field(default_factory=list)
 
@@ -390,8 +397,11 @@ class DetokenizerManager(MultiHttpWorkerDetokenizerMixin):
                 # in a prior "�" recovery step; we skip it from this step's
                 # emission so we don't double-send.
                 pending = s.sent_offset - s.decoded_text_len
-                if new_text and not new_text.endswith("�"):
-                    # Clean text: commit to decoded_text and advance offsets.
+                clean = bool(new_text) and not new_text.endswith("�")
+                if clean or s.stalled_steps >= MAX_STALLED_DECODE_STEPS:
+                    # Clean text, or a persistently undecodable tail: commit
+                    # and advance offsets to keep the decode window bounded.
+                    s.stalled_steps = 0
                     s.append_decoded_text(new_text)
                     s.surr_offset = s.read_offset
                     s.read_offset = len(s.decode_ids)
@@ -401,6 +411,7 @@ class DetokenizerManager(MultiHttpWorkerDetokenizerMixin):
                     # Incomplete UTF-8: emit the printable prefix only; do not
                     # commit (token offsets stay so the next iteration retries
                     # with more tokens).
+                    s.stalled_steps += 1
                     printable = find_printable_text(new_text)
                     s.sent_offset = s.decoded_text_len + len(printable)
                     output_strs.append(printable[pending:] if pending else printable)

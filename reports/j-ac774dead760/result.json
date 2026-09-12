@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34740",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared main checkout still froze incremental-detokenization offsets indefinitely for streams ending in U+FFFD. A failing-before regression drove the real DetokenizerManager decode method with byte-fallback tokens; the bounded consecutive-stall correction from the still-open upstream PR #34852 makes the decoded window independent of response length while preserving split UTF-8 decoding and reset behavior. The separate hardcoded simulated token defect remains present and was confirmed on the assigned GPU.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ac774dead760/venv/bin/python -m pytest -q test/registered/unit/managers/test_detokenizer_incremental_window.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: the U+FFFD stream committed no text; the split-multibyte and clean-reset boundary cases passed. Raw output: reports/j-ac774dead760/failing-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ac774dead760/venv/bin/python -m pytest -q test/registered/unit/managers/test_detokenizer_incremental_window.py test/registered/unit/managers/test_trim_matched_stop.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression plus existing stop-trimming coverage: 11 passed. The long U+FFFD stream's live re-decode window is bounded below 64 tokens and no more than twice the short stream's window. Raw output: reports/j-ac774dead760/passing-after.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-ac774dead760/venv/bin/python < focused generate_simulated_accept_index GPU fixture",
+      "exit_code": 0,
+      "what_was_measured": "On the single visible AMD Instinct MI350X/gfx950 GPU, the actual fixed-token simulation path produced predict_unique=[100], confirming Defect A remains reachable. Raw output: reports/j-ac774dead760/gpu-simulated-acceptance.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ac774dead760/venv/bin/python -m pre_commit run --files python/sglang/srt/managers/detokenizer_manager.py test/registered/unit/managers/test_detokenizer_incremental_window.py",
+      "exit_code": 0,
+      "what_was_measured": "All configured formatting, lint, test-registration, and repository policy hooks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One visible AMD Instinct MI350X (gfx950) executed generate_simulated_accept_index with ROCm Torch; synchronized output showed accept_index [[3,4,5,6]], num_correct_drafts [3], and predict_unique [100]."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Pro weights and the reported eight-GPU TP/DP/EAGLE deployment were unavailable, so throughput, TTFT, semantic output, and full serving behavior were not reproduced.",
+    "The deterministic test validates the real Python detokenizer method with a byte-fallback tokenizer fixture; it does not qualify DeepSeek-V4-Pro's tokenizer or model architecture.",
+    "Defect A remains: fixed simulated acceptance still writes vocabulary-dependent token id 100. This change narrowly addresses the production detokenizer's unbounded-window failure mode.",
+    "The correction bounds stalls after eight consecutive decode events; a pathological stream whose chunks grow without bound can still make an individual event expensive, though the reported fixed-size speculative chunks remain bounded.",
+    "No native code changed and repository-environment.json provides no native rebuild target."
+  ]
+}
