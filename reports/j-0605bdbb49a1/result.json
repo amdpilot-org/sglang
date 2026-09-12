@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35736",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1373",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1339",
+  "candidate_commit": "d0bd05d4171be2654eaf62984012f50181ca65c0",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base deterministically injects the request tool schema and DSV4 tool-call instructions into the encoded prompt despite tool_choice=none. The exact candidate removes request-level and pre-existing per-message tools on the DSV4/DSV3.2 path when tool_choice=none. Its focused regression, the complete serving-chat unit file, and independent prompt-contract cases pass. Non-none tool behavior remains enabled. No native source changed.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python:/job/repo/test /tmp/amdpilot-repo-j-0605bdbb49a1/venv/bin/python - <<'PY' ... issue-shaped OpenAIServingChat._process_messages DSV4 prompt assertion ... PY (base)",
+      "exit_code": 1,
+      "what_was_measured": "At 358c163, the exact issue-shaped request produced a prompt containing ## Tools, Bash, and <｜DSML｜tool_calls>; the negative assertion failed as expected."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python:/job/repo/test /tmp/amdpilot-repo-j-0605bdbb49a1/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py -k 'dsv_encoders_omit_tools_when_tool_choice_is_none or dsv_encoders_keep_tools_when_tool_choice_is_auto'",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and preservation tests: 2 tests passed, 4 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python:/job/repo/test /tmp/amdpilot-repo-j-0605bdbb49a1/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py",
+      "exit_code": 0,
+      "what_was_measured": "Complete serving-chat unit file: 137 tests passed and 72 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python:/job/repo/test /tmp/amdpilot-repo-j-0605bdbb49a1/venv/bin/python - <<'PY' ... independent DSV4/DSV3.2 prompt matrix ... PY",
+      "exit_code": 0,
+      "what_was_measured": "Independent valid cases covered DSV4 none with reasoning_effort unset/high/max, request and embedded message tools, request immutability, DSV3.2 none, and DSV4/DSV3.2 auto/required preservation using each encoder's actual DSML spelling."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU execution was necessary for the prompt-construction defect. The assigned host exposes one gfx950 AMD Instinct MI350X, unlike the report's two NVIDIA B300 GPUs."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash weights were unavailable, so no full HTTP server or model-generation reproduction was performed.",
+    "The available architecture is one AMD gfx950 MI350X under ROCm 7.2; the report used two NVIDIA B300 GPUs under CUDA 13.0.",
+    "The verification proves the reported causal prompt contract and serving-path behavior, not model semantic quality or a two-GPU deployment.",
+    "No native/C++ files changed, so native rebuild validation was not applicable."
+  ]
+}
