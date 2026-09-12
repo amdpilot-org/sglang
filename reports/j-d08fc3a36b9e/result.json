@@ -1,0 +1,64 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19087",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2953",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2921",
+  "candidate_commit": "8205569c20da3c3019476dcb3d7e8ded26514532",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate adds and validates useful hierarchical profiling for scheduler-worker and model-loading initialization, but it starts after spawned-worker module imports and omits parent-side launch work. An independent fresh-process import of gpu_worker took 11.383 seconds, and the retained Qwen timeline shows approximately ten seconds outside its 20.936-second tree. This is a partial original-issue fix, not a full launch-time breakdown.",
+  "tests": [
+    {
+      "command": "On base: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d08fc3a36b9e/venv/bin/python -c <source path and startup_profiler spec check>",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed imports came from /job/repo/python and the startup_profiler module/instrumentation did not exist on the recorded base."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d08fc3a36b9e/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_startup_profiler.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact-candidate regression suite: 5 tests passed, covering disabled behavior, nesting, siblings, exceptions, and PID/fork reset."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d08fc3a36b9e/venv/bin/python -m compileall -q <all changed runtime Python paths>",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python runtime sources compiled successfully."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d08fc3a36b9e/venv/bin/python -c <import changed runtime modules and print __file__>",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed startup_profiler, gpu_worker, scheduler, and pipelines_core loaded from the exact candidate checkout."
+    },
+    {
+      "command": "Prepared interpreter wrapper timed a fresh child process importing sglang.multimodal_gen.runtime.managers.gpu_worker",
+      "exit_code": 0,
+      "what_was_measured": "11.383 seconds elapsed before import completion; this work occurs before the candidate's root startup phase."
+    },
+    {
+      "command": "Independent mocked-logger adversarial script invoking log_startup_summary() twice",
+      "exit_code": 0,
+      "what_was_measured": "Observed two logger calls, disproving an enforced log-once API property."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..8205569c20da3c3019476dcb3d7e8ded26514532",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the exact candidate diff."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The review node exposed one AMD Instinct MI355X gfx950, but Qwen-Image weights were absent from this review runtime. The candidate's retained Qwen log was inspected as candidate evidence, not represented as an independent review execution.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Spawned-worker Python/model dependency imports occur before run_scheduler_process and are absent from the timing tree; a fresh gpu_worker import took 11.383 seconds.",
+    "The candidate's retained Qwen run spans about 31 seconds from its first timestamp to profile emission while the root phase reports only 20.936 seconds, leaving roughly ten seconds unattributed.",
+    "Parent CLI/import preparation, multiprocessing pipe/process setup, process start overhead, and parent wait-for-ready duration are not measured or aggregated.",
+    "Calling log_startup_summary twice logs twice despite its log-once wording."
+  ],
+  "remaining_limitations": [
+    "No Qwen-Image model weights were available in the review runtime, so the candidate's GPU launch was not independently rerun.",
+    "Only AMD MI355X gfx950 hardware was visible; multi-GPU, CUDA, XPU, MPS, NPU, and disaggregated paths were not exercised.",
+    "No native source changed, so native rebuild was not applicable.",
+    "Instrumentation does not change model numerics; no independent numerical reference was applicable to the reviewed code path."
+  ],
+  "evidence_directory": "/job/review-evidence-j-d08fc3a36b9e"
+}
