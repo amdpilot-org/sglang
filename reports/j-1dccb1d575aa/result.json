@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31261",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Exact candidate 3f2279024311a27aadc133ac24d0d53c8e37989a is useful test-only hardening, not a production fix. Its only functional changes are tests. The candidate GPU regression passes on the exact recorded base before the candidate is applied, because that base already contains the earlier Qwen3.5 batch-invariant gated-normalization implementation from merged upstream PR 27869. The same test passes at the candidate, and an independent adversarial GPU matrix also passes. The original Qwen3.5-27B TP=2 serving report was not reproduced or fully qualified on this one-GPU, weights-free node.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python XDG_CACHE_HOME=/tmp/amdpilot-repo-j-1dccb1d575aa/cache TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-1dccb1d575aa/cache/triton /tmp/amdpilot-repo-j-1dccb1d575aa/venv/bin/python -m pytest -q -s /job/review-evidence-j-1dccb1d575aa/candidate_gated_test.py (recorded base checkout)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's exact focused regression was materialized outside the checkout and run against base 358c163. Result: 2 passed and 11 subtests passed on GPU, proving the candidate does not create a failing-before/passing-after transition."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python XDG_CACHE_HOME=/tmp/amdpilot-repo-j-1dccb1d575aa/cache TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-1dccb1d575aa/cache/triton /tmp/amdpilot-repo-j-1dccb1d575aa/venv/bin/python -m pytest -q -s test/registered/layers/test_qwen35_gated_norm_deterministic.py (candidate 3f227902 checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression using checkout source: constant deterministic launch geometry at 11 row counts, bitwise equality of a BF16 shared row at 1 versus 1025 rows, and agreement with the repository FP32 PyTorch reference. Result: 2 passed and 11 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python XDG_CACHE_HOME=/tmp/amdpilot-repo-j-1dccb1d575aa/cache TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-1dccb1d575aa/cache/triton /tmp/amdpilot-repo-j-1dccb1d575aa/venv/bin/python /job/review-evidence-j-1dccb1d575aa/adversarial_probe.py (candidate 3f227902 checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Independent real-GPU adversarial matrix over BF16 and FP16, row counts 2/3/5/33/257/1025, and first/middle/last shared-row positions: all 36 shared rows were bitwise equal and reference-close. Deterministic geometry stayed at 4 for 14 boundary sizes; the historical adaptive policy selected both 1 and 4."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1dccb1d575aa/venv/bin/python -m pytest --collect-only -q test/registered/attention/test_qwen35_deterministic.py test/registered/layers/test_qwen35_gated_norm_deterministic.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate test discovery. Eight tests collected, including the Qwen3.5-27B TP=2 Triton serving cases; those serving cases were not executed."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "One AMD Instinct MI355X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2, HIP 7.2.26015. Imports resolved to /job/repo/python/sglang and the pinned interpreter's Torch. Raw logs are retained in /job/review-evidence-j-1dccb1d575aa/.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The exact Qwen/Qwen3.5-27B Qwen3_5ForConditionalGeneration server was not run because model weights were unavailable.",
+    "The reported TP=2 topology and distributed collectives were not exercised because only one GPU was assigned.",
+    "Repeated HTTP generation and logprob equality under changing scheduler batches remains unverified for the actual model.",
+    "The 262144-token context path, random-seed-42 configuration, reasoning parser, tool-call parser, and served-model-name combination from the report were not executed by the candidate's available local evidence.",
+    "NVIDIA H100 behavior is unverified; local kernel evidence is ROCm gfx950 only."
+  ],
+  "remaining_limitations": [
+    "The original issue remains open upstream, and this review cannot establish 100% deterministic generation for the reported deployment.",
+    "The candidate contains no production or native-code change and therefore cannot itself be credited as the original fix.",
+    "The candidate calls the repository's rms_norm_ref an independent reference; it is algorithmically separate PyTorch code, but it is imported from the same production module rather than independently authored in the test.",
+    "No native C++, FlyDSL, or other compiled source changed between base and candidate, so a native rebuild was not applicable.",
+    "The tiny Llama transport fixture was not substituted because it cannot qualify Qwen3.5 architecture semantics or TP=2 behavior."
+  ]
+}
