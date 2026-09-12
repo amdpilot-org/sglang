@@ -1,0 +1,53 @@
+diff --git a/rust/sglang-server/src/api_server/common.rs b/rust/sglang-server/src/api_server/common.rs
+index 9c5c5a1..90f7865 100644
+--- a/rust/sglang-server/src/api_server/common.rs
++++ b/rust/sglang-server/src/api_server/common.rs
+@@ -399,4 +399,48 @@ mod tests {
+     fn bracketed_non_ipv6_host_is_not_advertisable() {
+         assert_eq!(parse_advertisable_tcp("tcp://[not-ipv6]:5557"), None);
+     }
++
++    #[test]
++    fn independent_review_endpoint_and_schema_matrix() {
++        let endpoint_cases = [
++            ("tcp://*:1", Some(("*", 1))),
++            ("tcp://host-name:65535", Some(("host-name", 65535))),
++            ("tcp://[::]:5557", Some(("[::]", 5557))),
++            ("tcp://[::1]:5557", Some(("[::1]", 5557))),
++            ("tcp://:5557", None),
++            ("tcp://host:0", None),
++            ("tcp://host:65536", None),
++            ("tcp://host:-1", None),
++            ("tcp://host:5x", None),
++            ("tcp://host", None),
++            ("tcp://[::1]", None),
++            ("tcp://[::1]:", None),
++            ("tcp://[::1]:5557:9", None),
++            ("tcp://[not-ipv6]:5557", None),
++            ("tcp://2001:db8::5:5557", None),
++            ("inproc://kv", None),
++            ("TCP://host:5557", None),
++        ];
++        for (endpoint, expected) in endpoint_cases {
++            assert_eq!(parse_advertisable_tcp(endpoint), expected, "{endpoint}");
++        }
++
++        let invalid_json_shapes = [
++            "null",
++            "[]",
++            r#"{"publisher":7,"endpoint":"tcp://*:5557"}"#,
++            r#"{"publisher":"zmq","endpoint":null}"#,
++            r#"{"publisher":"zmq","endpoint":"tcp://*:5557","topic":7}"#,
++        ];
++        for raw in invalid_json_shapes {
++            let sa = ServerArgs {
++                kv_events_config: Some(raw.into()),
++                page_size: Some(64),
++                ..Default::default()
++            };
++            let out = shape_server_info(&msgpack_with_secret_canaries(), &sa).unwrap();
++            let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
++            assert!(value["kv_events"].is_null(), "raw={raw}");
++        }
++    }
+ }

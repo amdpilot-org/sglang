@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33055",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3437",
+  "candidate_commit": "760ef21de6b20abcf4ee851c4e895d1c9467d512",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate implements the original additive Rust /server_info.kv_events contract as a source/native fix. The recorded base lacks the field. Candidate Rust and Python route/reference tests agree for valid TCP metadata, disabled and malformed configurations, port/page-size rejection, valid IPv6, the prior [not-ipv6] counterexample, allowlisting, and secret redaction. A forced release rebuild and import used the candidate checkout's Rust sources.",
+  "tests": [
+    {
+      "command": "git show 358c163250ad3b1f62939b01ce1314a0a31a0365:rust/sglang-server/src/api_server/common.rs (inspect shape_server_info response)",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before reproduction on the exact prepared base: Rust shape_server_info has no kv_events key, while the base Python /server_info suite confirms the reference contract."
+    },
+    {
+      "command": "RUSTUP_HOME=/tmp/amdpilot-repo-j-8368074f3cbe/rustup CARGO_HOME=/tmp/amdpilot-repo-j-8368074f3cbe/cargo CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-8368074f3cbe/cargo-target cargo test -p sglang-server api_server::common::tests --manifest-path rust/Cargo.toml",
+      "exit_code": 0,
+      "what_was_measured": "Exact-candidate Rust serializer and parser regressions: 5 passed, including valid metadata, null fallbacks, allowlist/redaction canaries, valid IPv6, and malformed bracket rejection."
+    },
+    {
+      "command": "cargo test -p sglang-server independent_review_endpoint_and_schema_matrix --manifest-path rust/Cargo.toml (temporary review-only test, removed afterward)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial Rust matrix: TCP scheme, empty hosts, ports 0/1/65535/65536, negative and nonnumeric ports, missing ports, malformed/trailing bracket syntax, valid and bare IPv6, invalid JSON shapes, and typed-field schema failures; 1 matrix test passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8368074f3cbe/venv/bin/python /job/review-evidence-j-8368074f3cbe/python_reference_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent Python reference for the adversarial matrix; in particular tcp://[not-ipv6]:5557 returned None while valid bracketed IPv6 remained accepted."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8368074f3cbe/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_server_info.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python reference/route contract: 29 tests and 12 subtests passed, including malformed endpoint and existing-field preservation cases."
+    },
+    {
+      "command": "load_rust_extension('sglang.srt.rust_extensions._server', mode='force', cache_dir=Path('/tmp/amdpilot-repo-j-8368074f3cbe/rust-extension-review'))",
+      "exit_code": 0,
+      "what_was_measured": "Forced release native rebuild from /job/repo/rust at exact candidate commit and imported _server.cpython-312-x86_64-linux-gnu.so from the private cache."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "No GPU execution was performed because the issue is a CPU-only config parser and JSON metadata serializer. The prepared Torch 2.11.0+rocm7.2 / HIP 7.2 stack was not changed.",
+  "native_rebuilt": true,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Validation was on x86_64 Linux with repository-pinned rustc 1.92.0; no architecture-specific behavior is expected for this parser/serializer path.",
+    "The freshly rebuilt PyO3 extension and Rust serializer unit path were exercised, but a live model-backed Axum server was not launched. The tiny-Llama fixture would only add unrelated transport/engine smoke coverage.",
+    "KV-event publishing is outside the original issue and was not exercised."
+  ]
+}
