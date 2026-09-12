@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37931",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/917",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/886",
+  "candidate_commit": "82ceba80bdfc5eed0c74e81ae5e3b402a0b09e0d",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate correctly bounds the full-matrix FP8-to-MXFP4 conversion allocation and preserves exact output bytes. On gfx950 the independent incremental peak fell 49.66%. The unavailable two-node GB10 model startup prevents claiming the original scheduler OOM is fully resolved.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-ed4ce67725c9/venv/bin/python review-evidence/compare_conversion.py (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "Real checked-out base conversion on gfx950: 2,657,092,096-byte incremental peak for FP8 [4096,8192], with output checksums retained."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-ed4ce67725c9/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_fp8_utils_mxfp4.py test/registered/unit/models/test_deepseek_v4_mxfp4_shared_expert_requant.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 10 tests passed, covering chunking, packing layout, numerical round trips, grouped input, partial final scale rows, and invalid K alignment."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-ed4ce67725c9/venv/bin/python review-evidence/compare_conversion.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate conversion on the identical seeded gfx950 input: 1,337,459,200-byte incremental peak (49.66% lower), identical packed and scale checksums."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-ed4ce67725c9/venv/bin/python review-evidence/adversarial_conversion.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Independent byte-exact comparison with the old algorithm across partial blocks, multidimensional/grouped shapes, alternate block sizes, and invalid K."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X (gfx950:sramecc+:xnack-) executed the real conversion; raw measurements are in base_gpu_conversion.txt and candidate_gpu_conversion.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The original 2x NVIDIA GB10/SM120 distributed launch with the 156.31 GiB checkpoint was not available and may still exceed 121 GB per node.",
+    "Host anonymous RSS and unified-memory peak were not measured on GB10; the gfx950 allocator result does not prove the scheduler avoids the kernel OOM killer.",
+    "Concurrent checkpoint/H2D staging and loader-thread memory are outside this patch and may remain sufficient to OOM.",
+    "The SM12x-only b12x backend and its final packed-weight consumer were not executable on AMD gfx950."
+  ],
+  "remaining_limitations": "No NVIDIA GB10/SM120, second node, DeepSeek-V4-Flash-Vision-Exp weights, CUDA 13 container, b12x runtime, NCCL/RoCE setup, or full serving path. The change is Python-only, so no native rebuild was applicable."
+}
