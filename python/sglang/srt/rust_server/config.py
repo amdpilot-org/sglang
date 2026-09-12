@@ -14,8 +14,10 @@ from sglang.srt.runtime_context import (
     get_mm,
     get_model,
     get_observability,
+    get_parallel,
     get_serving,
 )
+from sglang.srt.utils import get_device_name
 from sglang.version import __version__
 
 if TYPE_CHECKING:
@@ -44,6 +46,10 @@ def _build_server_args(scheduler: Scheduler) -> ServerArgs:
         "prefill": ext.DisaggregationMode.Prefill,
         "decode": ext.DisaggregationMode.Decode,
     }[get_disagg().disaggregation_mode]
+    parallel = get_parallel()
+    num_accelerators = parallel.tp_size * parallel.pp_size
+    if parallel.enable_dp_attention:
+        num_accelerators //= parallel.dp_size
     return ext.ServerArgs(
         model_path=get_model().model_path,
         served_model_name=get_serving().served_model_name,
@@ -94,6 +100,8 @@ def _build_server_args(scheduler: Scheduler) -> ServerArgs:
         # can serve them statically (no scheduler round-trip).
         version=__version__,
         max_total_num_tokens=scheduler.max_total_num_tokens,
+        accelerator=get_device_name(),
+        num_accelerators=num_accelerators,
     )
 
 

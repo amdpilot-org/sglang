@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import msgspec
 
 from sglang.srt.managers.load_snapshot import LoadSnapshot
+from sglang.srt.managers.scheduler import Scheduler
 from sglang.srt.managers.scheduler_components.output_streamer import (
     SchedulerOutputStreamer,
 )
@@ -19,6 +20,24 @@ register_cpu_ci(est_time=5, suite="base-a-test-cpu")
 
 
 class TestPiggybackLoad(unittest.TestCase):
+    def test_rust_cache_receives_watch_snapshot_without_generation(self):
+        snapshot = LoadSnapshot(timestamp=20.0, dp_rank=0, num_running_reqs=0)
+        native = MagicMock()
+        scheduler = SimpleNamespace(
+            load_snapshot_writer=SimpleNamespace(
+                publish_counter=0,
+                publish_interval=1,
+                write=MagicMock(),
+            ),
+            load_inquirer=SimpleNamespace(get_loads=MagicMock(return_value=snapshot)),
+            rust_server=SimpleNamespace(update_load_snapshot=native.update_load_snapshot),
+        )
+
+        result = Scheduler.publish_load_snapshot(scheduler, force=True)
+
+        self.assertIs(result, snapshot)
+        native.update_load_snapshot.assert_called_once()
+
     def test_rust_generation_wire_carries_load_snapshot(self):
         native = MagicMock()
         native.push_decode_result_batch.return_value = True

@@ -45,17 +45,6 @@ struct LoadsQuery {
 }
 
 async fn loads(State(state): State<Arc<AppState>>, Query(query): Query<LoadsQuery>) -> Response {
-    if query
-        .format
-        .as_deref()
-        .is_some_and(|format| format != "json")
-    {
-        return (
-            StatusCode::BAD_REQUEST,
-            "Rust /v1/loads currently supports JSON format only",
-        )
-            .into_response();
-    }
     let includes = query.include.as_deref().map(|raw| {
         raw.split(',')
             .map(str::trim)
@@ -81,19 +70,79 @@ async fn loads(State(state): State<Arc<AppState>>, Query(query): Query<LoadsQuer
         .filter(|(rank, _)| query.dp_rank.is_none_or(|wanted| wanted == **rank))
         .map(|(_, snapshot)| filter_load_snapshot(snapshot.clone(), includes.as_ref()))
         .collect();
+    if query.format.as_deref() == Some("prometheus") {
+        return format_loads_prometheus(&loads);
+    }
     axum::Json(serde_json::json!({
         "timestamp": std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs_f64(),
         "version": state.server_args.version,
-        // Topology/device metadata is not part of the Rust launch handoff yet;
-        // report it as unknown rather than fabricating a value.
-        "accelerator": serde_json::Value::Null,
-        "num_accelerators": serde_json::Value::Null,
+        "accelerator": state.server_args.accelerator,
+        "num_accelerators": state.server_args.num_accelerators,
         "loads": loads,
     }))
     .into_response()
+}
+
+fn format_loads_prometheus(loads: &[serde_json::Value]) -> Response {
+    let mut metrics: std::collections::BTreeMap<String, Vec<(u64, String)>> =
+        std::collections::BTreeMap::new();
+    for load in loads {
+        let Some(object) = load.as_object() else {
+            continue;
+        };
+        let Some(rank) = object.get("dp_rank").and_then(serde_json::Value::as_u64) else {
+            continue;
+        };
+        for (key, value) in object {
+            if key == "dp_rank" {
+                continue;
+            }
+            if let Some(value) = prometheus_number(value) {
+                metrics
+                    .entry(format!("sglang_{key}"))
+                    .or_default()
+                    .push((rank, value));
+            } else if let Some(section) = value.as_object() {
+                let prefix = match key.as_str() {
+                    "speculative" => "spec",
+                    "disaggregation" => "disagg",
+                    other => other,
+                };
+                for (sub_key, sub_value) in section {
+                    if let Some(value) = prometheus_number(sub_value) {
+                        metrics
+                            .entry(format!("sglang_{prefix}_{sub_key}"))
+                            .or_default()
+                            .push((rank, value));
+                    }
+                }
+            }
+        }
+    }
+    let mut text = String::new();
+    for (name, samples) in metrics {
+        text.push_str(&format!("# TYPE {name} gauge\n"));
+        for (rank, value) in samples {
+            text.push_str(&format!("{name}{{dp_rank=\"{rank}\"}} {value}\n"));
+        }
+    }
+    (
+        StatusCode::OK,
+        [("content-type", "text/plain; version=0.0.4; charset=utf-8")],
+        text,
+    )
+        .into_response()
+}
+
+fn prometheus_number(value: &serde_json::Value) -> Option<String> {
+    value
+        .as_i64()
+        .map(|v| v.to_string())
+        .or_else(|| value.as_u64().map(|v| v.to_string()))
+        .or_else(|| value.as_f64().map(|v| v.to_string()))
 }
 
 fn filter_load_snapshot(
@@ -268,6 +317,7 @@ fn shape_server_info(msgpack: &[u8], server_args: &ServerArgs) -> Result<Vec<u8>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::to_bytes;
 
     /// The scheduler's `internal_state` embeds the full server-args dump (incl.
     /// `api_key`/`admin_api_key`). `/server_info` must surface only the allowlisted
@@ -327,5 +377,56 @@ mod tests {
         assert!(state0.get("api_key").is_none());
         // Curated top-level config comes from typed accessors, not the dump.
         assert_eq!(v["model_path"], "/m");
+    }
+
+    #[tokio::test]
+    async fn loads_preserves_prometheus_and_metadata_contract() {
+        let mut server_args = ServerArgs::default();
+        server_args.version = "test".into();
+        server_args.accelerator = Some("Test Accelerator".into());
+        server_args.num_accelerators = 2;
+        let senders = crate::tokenizer_manager::wiring::Senders {
+            tok_manager_tx: flume::unbounded().0,
+            abort_tx: flume::unbounded().0,
+            tokenizer_tx: flume::unbounded().0,
+            detokenizer_tx: vec![],
+        };
+        let state = Arc::new(AppState {
+            senders,
+            response_buf: 8,
+            server_args: Arc::new(server_args),
+            chat_formatter: None,
+            response_activity: Default::default(),
+            load_snapshots: Default::default(),
+            startup_readiness: Default::default(),
+        });
+        state
+            .load_snapshots
+            .write()
+            .unwrap()
+            .insert(0, serde_json::json!({"dp_rank": 0, "num_running_reqs": 2}));
+
+        let prometheus = loads(
+            State(state.clone()),
+            Query(LoadsQuery {
+                format: Some("prometheus".into()),
+                ..Default::default()
+            }),
+        )
+        .await;
+        assert_eq!(prometheus.status(), StatusCode::OK);
+        let content_type = prometheus.headers()["content-type"].to_str().unwrap();
+        assert!(content_type.starts_with("text/plain"));
+        let body = to_bytes(prometheus.into_body(), 64 * 1024).await.unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(text.contains("sglang_num_running_reqs{dp_rank=\"0\"} 2"));
+
+        let json = loads(State(state), Query(LoadsQuery::default())).await;
+        let body = to_bytes(json.into_body(), 64 * 1024).await.unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(!value["accelerator"].is_null());
+        assert!(!value["num_accelerators"].is_null());
+        assert_eq!(value["accelerator"], "Test Accelerator");
+        assert_eq!(value["num_accelerators"], 2);
     }
 }

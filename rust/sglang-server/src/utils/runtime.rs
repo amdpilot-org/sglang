@@ -44,6 +44,9 @@ pub struct Runtime {
     /// MM results parked between a worker's `MmEncoded` and the scheduler drain
     /// (`Server.take_mm_result`).
     pub mm_results: crate::multi_modality::result_store::MmResultStore,
+    /// Latest scheduler load per DP rank, shared by piggyback frames, direct
+    /// watch publications, and the Rust `/v1/loads` handler.
+    pub load_snapshots: tokenizer_manager::from_scheduler::LoadSnapshots,
     /// Wiring for the late-spawned MM pool ([`Runtime::start_mm_workers`]).
     mm_wiring: crate::multi_modality::worker::MmWiring,
     /// Worker join handles, joined by `request_shutdown` / `Drop`.
@@ -328,6 +331,7 @@ pub fn start(cfg: RuntimeConfig) -> Result<Runtime, String> {
         to_scheduler_rx,
         from_scheduler_tx,
         mm_results,
+        load_snapshots,
         mm_wiring: crate::multi_modality::worker::MmWiring {
             mm_rx: mm_worker_rx,
             tm_tx: tok_manager_tx,

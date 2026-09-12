@@ -149,7 +149,7 @@ impl Runnable for Dispatcher {
     }
 }
 
-fn record_load_snapshot(loads: &LoadSnapshots, snapshot: serde_json::Value) {
+pub(crate) fn record_load_snapshot(loads: &LoadSnapshots, snapshot: serde_json::Value) {
     let Some(rank) = snapshot.get("dp_rank").and_then(serde_json::Value::as_u64) else {
         tracing::warn!("from_scheduler: load snapshot missing dp_rank");
         return;

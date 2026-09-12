@@ -256,6 +256,12 @@ class RustServer:
 
         self.server.push_control_result(recv_req.rid, encoded)
 
+    def update_load_snapshot(self, snapshot) -> None:
+        """Feed the Rust HTTP cache from the scheduler's watch publication."""
+        self.server.update_load_snapshot(
+            msgspec.msgpack.encode(msgspec.structs.asdict(snapshot))
+        )
+
     def push_generation(self, payload: BatchTokenIDOutput) -> None:
         """Egress redirect for generation output (replaces the zmq detokenizer).
 

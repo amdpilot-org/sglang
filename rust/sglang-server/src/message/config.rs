@@ -151,6 +151,9 @@ pub struct ServerArgs {
     /// and the scheduler-derived KV token capacity, reported by `/server_info`.
     pub version: String,
     pub max_total_num_tokens: u64,
+    /// Device topology metadata matching the Python `/v1/loads` contract.
+    pub accelerator: Option<String>,
+    pub num_accelerators: u64,
 }
 
 #[pyo3::pymethods]
@@ -185,6 +188,8 @@ impl ServerArgs {
         num_reserved_tokens,
         version,
         max_total_num_tokens,
+        accelerator,
+        num_accelerators,
     ))]
     // The parameter list IS the schema; one keyword per field, all required.
     #[allow(clippy::too_many_arguments)]
@@ -217,6 +222,8 @@ impl ServerArgs {
         num_reserved_tokens: u64,
         version: String,
         max_total_num_tokens: u64,
+        accelerator: Option<String>,
+        num_accelerators: u64,
     ) -> Self {
         Self {
             model_path,
@@ -247,6 +254,8 @@ impl ServerArgs {
             num_reserved_tokens,
             version,
             max_total_num_tokens,
+            accelerator,
+            num_accelerators,
         }
     }
 }
@@ -285,6 +294,8 @@ impl Default for ServerArgs {
             num_reserved_tokens: 0,
             version: String::new(),
             max_total_num_tokens: 0,
+            accelerator: None,
+            num_accelerators: 0,
         }
     }
 }
