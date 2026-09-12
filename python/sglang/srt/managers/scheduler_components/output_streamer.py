@@ -38,6 +38,7 @@ from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
 from sglang.srt.utils.weight_versions import compute_weight_version_spans
 
 if TYPE_CHECKING:
+    from sglang.srt.managers.load_snapshot import LoadSnapshot
     from sglang.srt.rust_server.server import RustServer
 
 
@@ -63,6 +64,7 @@ class SchedulerOutputStreamer:
     # Rust egress ring via `rust_server.push_generation` instead of the zmq
     # detokenizer. None otherwise. (Rust-specific state lives in RustServer.)
     rust_server: Optional[RustServer] = None
+    load_snapshot_provider: Optional[Callable[[], LoadSnapshot]] = None
     _test_stream_output_count: int = 0
 
     def __post_init__(self) -> None:
@@ -81,6 +83,21 @@ class SchedulerOutputStreamer:
             if storage_backend is not None:
                 storage_backend_type = type(storage_backend).__name__
         return storage_backend_type
+
+    def _get_load_snapshot(self) -> Optional[LoadSnapshot]:
+        """Best-effort snapshot for output piggybacking.
+
+        Load reporting must never make token delivery fail.  The normal SHM /
+        ZMQ publisher remains the watch-mode fallback when snapshot collection
+        is unavailable on an output step.
+        """
+        if self.load_snapshot_provider is None:
+            return None
+        try:
+            return self.load_snapshot_provider()
+        except Exception as e:
+            logger.warning("piggyback load snapshot collection failed: %s", e)
+            return None
 
     def get_cached_tokens_details(self, req: Req) -> Optional[CachedTokensDetails]:
         """Get detailed cache breakdown for a request, if available.
@@ -209,6 +226,7 @@ class SchedulerOutputStreamer:
             is_idle_batch=is_idle_batch,
         )
         if payload is not None:
+            payload.load_snapshot = self._get_load_snapshot()
             if self.rust_server is not None:
                 self.rust_server.push_generation(payload)
             else:
@@ -306,6 +324,7 @@ class SchedulerOutputStreamer:
                 placeholder_tokens_val=None,
                 retraction_counts=retraction_counts,
                 pooled_hidden_states=stacked_phs,
+                load_snapshot=self._get_load_snapshot(),
             )
         )
 
