@@ -21,7 +21,6 @@ from sglang.srt.layers.linear import (
     ColumnParallelLinear,
     MergedColumnParallelLinear,
     QKVParallelLinear,
-    ReplicatedLinear,
     RowParallelLinear,
 )
 from sglang.srt.layers.logits_processor import LogitsProcessor
@@ -31,6 +30,7 @@ from sglang.srt.layers.moe import (
 )
 from sglang.srt.layers.moe.ep_moe.layer import get_moe_impl_class
 from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
+from sglang.srt.layers.moe.router_gate import RouterGate
 from sglang.srt.layers.moe.topk import StandardTopKOutput, TopK
 from sglang.srt.layers.moe.utils import (
     RoutingMethodType,
@@ -118,7 +118,6 @@ class Step3p5MoEMLP(nn.Module):
         self.tp_size = get_parallel().tp_size
         self.layer_id = layer_id
 
-        self.need_fp32_gate = config.need_fp32_gate
         self.routed_scaling_factor = config.moe_router_scaling_factor
         self.use_moe_router_bias = config.use_moe_router_bias
         if self.use_moe_router_bias:
@@ -159,12 +158,11 @@ class Step3p5MoEMLP(nn.Module):
             gemm1_clamp_limit=self.limit,
         )
 
-        self.gate = ReplicatedLinear(
+        self.gate = RouterGate(
             config.hidden_size,
             config.moe_num_experts,
-            bias=False,
-            quant_config=None,
-            prefix=add_prefix("gate", prefix),
+            fp32_compute=False,
+            params_dtype=torch.bfloat16,
         )
 
         if get_moe_a2a_backend().is_deepep():
@@ -206,13 +204,7 @@ class Step3p5MoEMLP(nn.Module):
         num_tokens, hidden_dim = hidden_states.shape
         hidden_states = hidden_states.view(-1, hidden_dim)
         # router_logits: (num_tokens, n_experts)
-        if self.need_fp32_gate:
-            router_logits = torch.matmul(
-                hidden_states.to(torch.float32), self.gate.weight.t().to(torch.float32)
-            )
-        else:
-            # router_logits: (batch * sequence_length, n_experts)
-            router_logits, _ = self.gate(hidden_states)
+        router_logits = self.gate(hidden_states)
         topk_output = self.topk(hidden_states, router_logits)
         if hasattr(topk_output, "to_standard"):
             topk_output = topk_output.to_standard(layer_id=self.layer_id)
@@ -235,7 +227,7 @@ class Step3p5MoEMLP(nn.Module):
     ) -> torch.Tensor:
         if hidden_states.shape[0] > 0:
             # router_logits: (num_tokens, n_experts)
-            router_logits, _ = self.gate(hidden_states)
+            router_logits = self.gate(hidden_states)
             topk_output = self.topk(
                 hidden_states,
                 router_logits,
@@ -257,7 +249,7 @@ class Step3p5MoEMLP(nn.Module):
             state.forward_batch.forward_mode, state.hidden_states_mlp_input
         ):
             # router_logits: (num_tokens, n_experts)
-            state.router_logits, _ = self.gate(state.hidden_states_mlp_input)
+            state.router_logits = self.gate(state.hidden_states_mlp_input)
         else:
             state.router_logits = None
 

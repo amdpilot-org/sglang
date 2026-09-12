@@ -27,12 +27,12 @@ from sglang.srt.layers.layernorm import RMSNorm
 from sglang.srt.layers.linear import (
     MergedColumnParallelLinear,
     QKVParallelLinear,
-    ReplicatedLinear,
     RowParallelLinear,
 )
 from sglang.srt.layers.logits_processor import LogitsProcessor
 from sglang.srt.layers.moe import should_skip_post_experts_all_reduce
 from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
+from sglang.srt.layers.moe.router_gate import RouterGate
 from sglang.srt.layers.moe.topk import TopK
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
 from sglang.srt.layers.radix_attention import RadixAttention
@@ -114,13 +114,11 @@ class HYV3MoEFused(nn.Module):
         scoring_func = "sigmoid"
         self.e_score_correction_bias = self.expert_bias
         self.router_scaling_factor = getattr(config, "router_scaling_factor", 1.0)
-        self.gate = ReplicatedLinear(
+        self.gate = RouterGate(
             config.hidden_size,
             config.num_experts,
-            bias=False,
-            quant_config=None,
-            params_dtype=torch.float32,
-            prefix=f"{prefix}.gate",
+            fp32_compute=False,
+            params_dtype=torch.bfloat16,
         )
         self.topk = TopK(
             top_k=config.num_experts_per_tok,
@@ -178,7 +176,7 @@ class HYV3MoEFused(nn.Module):
         hidden_dim = hidden_states.shape[-1]
         hidden_states = hidden_states.view(-1, hidden_dim)
 
-        router_logits, _ = self.gate(hidden_states.to(dtype=torch.float32))
+        router_logits = self.gate(hidden_states)
         topk_output = self.topk(hidden_states, router_logits)
         if self.shared_mlp is not None:
             shared_output = self.shared_mlp(hidden_states)
@@ -217,7 +215,7 @@ class HYV3MoEFused(nn.Module):
         shared_output = self.shared_mlp(hidden_states)
 
         with torch.cuda.stream(self.alt_stream):
-            router_logits, _ = self.gate(hidden_states.to(dtype=torch.float32))
+            router_logits = self.gate(hidden_states)
             topk_output = self.topk(hidden_states, router_logits)
             final_hidden_states = self.experts(
                 hidden_states=hidden_states, topk_output=topk_output

@@ -50,6 +50,7 @@ from sglang.srt.layers.linear import (
 from sglang.srt.layers.logits_processor import LogitsProcessor
 from sglang.srt.layers.moe.ep_moe.layer import get_moe_impl_class
 from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
+from sglang.srt.layers.moe.router_gate import RouterGate
 from sglang.srt.layers.moe.topk import TopK
 from sglang.srt.layers.moe.utils import (
     RoutingMethodType,
@@ -199,15 +200,12 @@ class NemotronHMoE(nn.Module):
             config.moe_latent_size if self.use_latent_moe else config.hidden_size
         )
 
-        self.gate = ReplicatedLinear(
+        self.gate = RouterGate(
             config.hidden_size,
             config.n_routed_experts,
-            bias=False,
-            quant_config=None,
-            prefix=f"{prefix}.gate",
-        )
-        self.gate.e_score_correction_bias = nn.Parameter(
-            torch.empty(config.n_routed_experts, dtype=torch.float32)
+            fp32_compute=False,
+            params_dtype=torch.bfloat16,
+            has_correction_bias=True,
         )
 
         self.experts = get_moe_impl_class(quant_config)(
@@ -304,9 +302,7 @@ class NemotronHMoE(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         # router_scores: [num_tokens, num_experts]
         # bf16 gemm on tensor cores with fp32 accumulation/output for sigmoid/topk.
-        router_logits = torch.mm(
-            hidden_states, self.gate.weight.t(), out_dtype=torch.float32
-        )
+        router_logits = self.gate(hidden_states)
         if self.shared_experts is not None:
             shared_output = self.shared_experts(hidden_states)
         else:
@@ -333,9 +329,7 @@ class NemotronHMoE(nn.Module):
         with self.device_module.stream(alt_stream):
             # router_scores: [num_tokens, num_experts]
             # bf16 gemm on tensor cores with fp32 accumulation/output for sigmoid/topk.
-            router_logits = torch.mm(
-                hidden_states, self.gate.weight.t(), out_dtype=torch.float32
-            )
+            router_logits = self.gate(hidden_states)
             topk_output = self.topk(hidden_states, router_logits)
             if self.use_latent_moe:
                 hidden_states = self._apply_fc1_latent_proj(hidden_states)
