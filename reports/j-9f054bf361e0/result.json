@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32202",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that an explicit speculative draft load format of auto remained LoadFormat.AUTO for an S3 draft and selected DefaultModelLoader. Updated draft object-storage format resolution to treat explicit auto like the existing unspecified case, producing LoadFormat.RUNAI_STREAMER and RunaiModelStreamerLoader without mutating the target load-format field.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9f054bf361e0/venv/bin/python -m pytest -q test/registered/unit/server_args/test_model_source_paths.py::TestDraftObjectStoreLoadFormat::test_an_explicit_auto_draft_uses_the_object_store_loader",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression with the original condition: target resolved to runai_streamer but the explicit draft value remained auto."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9f054bf361e0/venv/bin/python -m pytest -q test/registered/unit/server_args/test_model_source_paths.py test/registered/unit/spec/test_draft_per_runner_config.py",
+      "exit_code": 0,
+      "what_was_measured": "26 focused tests passed after the fix, including concrete RunaiModelStreamerLoader selection and independent unspecified, explicit non-auto, non-object-store, and per-runner isolation boundaries."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9f054bf361e0/venv/bin/python -c '<loader-selection reproduction recorded in evidence.txt>'",
+      "exit_code": 0,
+      "what_was_measured": "Before: target=runai_streamer, draft=auto, LoadFormat.AUTO, DefaultModelLoader. After: target=runai_streamer, draft=runai_streamer, LoadFormat.RUNAI_STREAMER, RunaiModelStreamerLoader."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No real S3-compatible object store or model weights were available, so object download and full server startup were not exercised.",
+    "No H20 multi-node TP=8/PP=2 deployment reproduction was attempted; the verified behavior is the pre-hardware loader-selection path described by the issue.",
+    "The assigned gfx950 GPU was not used because this defect occurs before GPU execution and a GPU smoke would not validate object-storage loader selection; the CPU-only loader-dispatch output is retained in evidence.txt."
+  ]
+}

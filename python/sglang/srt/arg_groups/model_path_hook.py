@@ -202,7 +202,7 @@ def handle_load_format(server_args: Any):
     if (
         cfg.speculative_draft_model_path is not None
         and is_runai_obj_uri(cfg.speculative_draft_model_path)
-        and cfg.speculative_draft_load_format is None
+        and cfg.speculative_draft_load_format in (None, "auto")
     ):
         declare_resolution(
             server_args,
