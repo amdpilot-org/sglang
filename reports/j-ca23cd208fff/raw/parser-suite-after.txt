@@ -1,0 +1,62 @@
+........................................................................ [ 29%]
+.........F.......................................................... [ 57%]
+........................................................................ [ 87%]
+...............................                                          [100%]
+=================================== FAILURES ===================================
+_______________ TestDeepSeekV4Detector.test_streaming_xml_format _______________
+
+self = <test_function_call_parser.TestDeepSeekV4Detector testMethod=test_streaming_xml_format>
+
+    def test_streaming_xml_format(self):
+        """Test streaming parsing of XML format"""
+        text = """<｜DSML｜tool_calls>
+            <｜DSML｜invoke name="get_favorite_tourist_spot">
+                <｜DSML｜parameter name="city" string="true">San Francisco</｜DSML｜parameter>
+                <｜DSML｜parameter name="another_city" string="true">London</｜DSML｜parameter>
+                <｜DSML｜parameter name="topn" string="false">10</｜DSML｜parameter>
+                <｜DSML｜parameter name="obj" string="false">{"name": "John", "age": 30}</｜DSML｜parameter>
+            </｜DSML｜invoke>
+        </｜DSML｜tool_calls>"""
+    
+        input_ids = self.tokenizer.encode(text, add_special_tokens=False)
+        chunk_ids = [
+            input_ids[i : i + self.interval]
+            for i in range(0, len(input_ids), self.interval)
+        ]
+        chunks = [self.tokenizer.decode(chunk_id) for chunk_id in chunk_ids]
+    
+        tool_calls_by_index = {}
+    
+        num_tool_call_chunks = 0
+        for chunk in chunks:
+            result = self.detector.parse_streaming_increment(chunk, self.tools)
+            for call in result.calls:
+                num_tool_call_chunks += 1
+                if call.tool_index is not None:
+                    if call.tool_index not in tool_calls_by_index:
+                        tool_calls_by_index[call.tool_index] = {
+                            "name": "",
+                            "parameters": "",
+                        }
+    
+                    if call.name:
+                        tool_calls_by_index[call.tool_index]["name"] = call.name
+                    if call.parameters:
+                        tool_calls_by_index[call.tool_index]["parameters"] += (
+                            call.parameters
+                        )
+    
+>       self.assertGreater(num_tool_call_chunks, 8)
+E       AssertionError: 2 not greater than 8
+
+test/registered/unit/function_call/test_function_call_parser.py:2131: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/function_call/test_function_call_parser.py::TestDeepSeekV4Detector::test_streaming_xml_format
+1 failed, 242 passed, 1 warning, 4 subtests passed in 9.31s

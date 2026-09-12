@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38013",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced DeepSeek-V4 DSML direct-JSON tool arguments being forwarded with model-added arguments/args envelopes. Added schema-aware normalization for complete V4 arguments, including JSON-string and repeated envelopes, while preserving legitimate schema properties and unknown/corrupted payloads. Direct-JSON streaming is held until the invoke closes so emitted fragments remain consistent with normalization.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ca23cd208fff/venv/bin/python -m pytest -q test/registered/unit/function_call/test_deepseekv4_detector.py",
+      "exit_code": 0,
+      "what_was_measured": "Before change: 6 existing tests passed. After change: 10 tests and 6 subtests passed, including reported envelope forms plus independent schema-ambiguity and corruption boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ca23cd208fff/venv/bin/python -m pytest -q test/registered/unit/function_call/test_deepseekv4_detector.py test/registered/unit/function_call/test_function_call_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "253 DeepSeek/function-call parser tests and 10 subtests passed, covering non-streaming and token-chunked streaming behavior."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ca23cd208fff/venv/bin/python reports/j-ca23cd208fff/raw reproduction scripts (captured in reproduction-before.txt and reproduction-after.txt)",
+      "exit_code": 0,
+      "what_was_measured": "Actual DeepSeekV4Detector output: four reported envelope variants were nested before the fix and normalize to the declared command/flag payload after it; valid, legitimate arguments-property, unknown-key, and corrupted-string cases remain unchanged."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No DeepSeek-V4-Flash-Vision-Exp weights were available, so the model's generation frequency, semantic tool choice, vision architecture, and retry behavior were not reproduced end to end.",
+    "The qualified tiny Llama serving fixture cannot validate DeepSeek-V4 output behavior and was therefore not used as substitute evidence.",
+    "Mid-stream corruption inside the command text is not safely recoverable and is intentionally forwarded unchanged.",
+    "Envelope repair requires a declared top-level property set and a candidate whose keys fit it; ambiguous schemas and legitimate parameters named arguments or args are intentionally preserved."
+  ]
+}
