@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31000",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared base already contains the issue-specific solution merged upstream as PR #31311 (commit 1843384c7a59b8a904f4bdadef51f10cbcaa017b): the LongCat ScMoE dense branch gathers scattered hidden/residual rows before self_attn[1], then reconciles branch row counts. This change adds the missing regression coverage and verifies the reported scattered-hidden/full-positions reshape failure plus the corrected boundary behavior.",
+  "tests": [
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-dee30f6c3ca9/venv/bin/python -m pytest -q test/registered/unit/models/test_longcat_flash_scmoe.py",
+      "exit_code": 0,
+      "what_was_measured": "Five focused cases: active-EP TP=2 gathers before second attention; the legacy no-gather path reproduces a RoPE token-count RuntimeError; no-backend and TP=1 boundaries remain unchanged; row alignment gathers and rank-slices correctly. Raw output: reports/j-dee30f6c3ca9/raw/pytest.log"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-dee30f6c3ca9/venv/bin/python < inline gfx950 alignment probe",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI350X (gfx950), a scattered q_pe tensor failed the full-position RoPE view as reported; the existing alignment path produced full rows, a valid RoPE view, correct rank-local slicing, and max absolute error 0.0 against an independent torch.cat reference. Raw output: reports/j-dee30f6c3ca9/raw/gfx950_alignment.log"
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-dee30f6c3ca9/pre-commit pre-commit run --files test/registered/unit/models/test_longcat_flash_scmoe.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, AST, and registered-test metadata checks passed. Raw output: reports/j-dee30f6c3ca9/raw/precommit.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The deterministic tensor-level probe ran on the assigned AMD Instinct MI350X, reported gfx950:sramecc+:xnack-, reproduced the invalid legacy reshape, and validated corrected aligned values with max_abs_error=0.0."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one gfx950 GPU was assigned, so the reported 4x H200 tp16/ep16 PD-disaggregated DeepEP deployment could not be reproduced.",
+    "LongCat-2.0-FP8 weights were not available; model semantic accuracy and the complete serving path remain unverified here.",
+    "The GPU probe validates the token-shape/alignment mechanism, not a live multi-rank all-gather or DeepEP/UCCL transport.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable."
+  ]
+}
