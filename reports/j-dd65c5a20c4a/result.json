@@ -1,0 +1,29 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37609",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Spark2.5 now explicitly selects the exact GELU fused path required by its reference model contract. A regression instantiates the actual Spark2_5MLP activation selection and compares representative float32 GPU tensors, including boundary inputs, with Transformers ACT2FN[\"gelu\"] at rtol=1e-6 and atol=1e-6.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-dd65c5a20c4a/venv/bin/python -m pytest -q test/srt/models/test_spark2_5.py (before fix)",
+      "exit_code": 1,
+      "what_was_measured": "Preserved regression failure: Spark2_5MLP selected tanh and its fused GPU output differed from reference GELU. Raw output: /job/test-output/spark2_5-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-dd65c5a20c4a/venv/bin/python -m pytest -q test/srt/models/test_spark2_5.py (after fix)",
+      "exit_code": 0,
+      "what_was_measured": "Both the Spark2_5MLP exact-GELU contract and fused GPU output parity with Transformers ACT2FN[\"gelu\"] passed without tolerance weakening (rtol=1e-6, atol=1e-6). Raw output: /job/test-output/spark2_5-final.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-dd65c5a20c4a/venv/bin/python < focused GPU numerical comparison script",
+      "exit_code": 0,
+      "what_was_measured": "On an AMD Instinct MI355X (gfx950), exact fused output had max absolute and relative error 0 against Transformers GELU for 4,106 finite boundary/random results; the old tanh path had max absolute error 0.0009351540. Against an independent scalar float64 erf formulation, float32 fused output max absolute error was 3.6508846e-07. Raw output: /job/test-output/spark2_5-numerics.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The regression and numerical script executed the fused activation on the assigned AMD Instinct MI355X, gfx950:sramecc+:xnack-."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": "No full Spark-X2.5 checkpoint was downloaded and no end-to-end logit comparison was run. This change does not modify FlyDSL C++ or another native source, so no native rebuild was applicable. Source paths: /job/repo/python/sglang/srt/models/spark2_5.py and /job/repo/test/srt/models/test_spark2_5.py. Loaded native activation cache observed at /tmp/amdpilot-repo-j-dd65c5a20c4a/cache/aiter/module_aiter_core.so."
+}
