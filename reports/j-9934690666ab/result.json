@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32264",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "unsupported_architecture",
+  "summary": "Ported the complete seven-commit experimental Gemma 4 Frozen-KV MTP prototype onto current main, including the native-cache prerequisite, MLX-only worker dispatch, target feedback, assistant runtime, synchronous worker, strict Level-1 admission guardrails, lifecycle accounting, observability, pinned Stage B parity test, and documentation. Architecture-independent tests pass. The required Apple Silicon/Metal execution and pinned real-model parity remain unverified because this node is Linux x86_64 with AMD ROCm and has no MLX runtime.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-9934690666ab/venv/bin/python -m py_compile $(git diff --name-only 358c163250ad3b1f62939b01ce1314a0a31a0365 -- '*.py')",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python sources compile with the pinned interpreter. Raw output: reports/j-9934690666ab/raw/all_changed_py_compile_final.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9934690666ab/venv/bin/python -m pytest -q test/registered/unit/hardware_backend/mlx/test_mlx_spec_decode.py test/registered/unit/hardware_backend/mlx/test_gemma4_cache_transaction.py test/registered/unit/hardware_backend/mlx/test_gemma4_target_adapter.py test/registered/unit/hardware_backend/mlx/test_gemma4_mtp_assistant.py test/registered/unit/hardware_backend/mlx/test_gemma4_mtp_worker.py test/registered/unit/hardware_backend/mlx/test_mlx_spec_guardrails.py test/registered/unit/spec/test_spec_registry.py test/registered/unit/spec/test_decode_bookkeeping_ownership.py",
+      "exit_code": 0,
+      "what_was_measured": "38 passed, 11 architecture-gated skips, and 26 subtests passed: verification decisions, cache transaction failure isolation, guardrails, non-MLX worker compatibility, registry behavior, and scheduler bookkeeping. Raw output: reports/j-9934690666ab/raw/combined_final.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9934690666ab/venv/bin/python -m pytest -q test/registered/mlx/models_e2e/test_gemma4_mtp_mlx_correctness.py",
+      "exit_code": 0,
+      "what_was_measured": "Pinned Stage B test was collected and skipped because the host is not Darwin arm64 and MLX/mlx-vlm are unavailable. Raw output: reports/j-9934690666ab/raw/stage_b_unavailable.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9934690666ab/venv/bin/python -m ruff check <changed paths>",
+      "exit_code": 1,
+      "what_was_measured": "Formatting/lint runner unavailable in the pinned environment (No module named ruff). git diff --check passed. Raw output: reports/j-9934690666ab/raw/ruff.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned accelerator is AMD Instinct MI350X under Linux x86_64 with torch 2.11.0+rocm7.2; importlib reports mlx=None. AMD execution cannot qualify an Apple Silicon Metal/MLX feature, so no unrelated GPU smoke was represented as feature evidence. See reports/j-9934690666ab/raw/platform.log."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Apple Silicon host was available, so target-only versus MTP 64-token cross-window numerical parity was not executed.",
+    "The pinned target and assistant checkpoints were not downloaded or executed; assistant generation, proposal/verification counters, cleanup, flush, and post-flush serving remain Stage B candidates only.",
+    "MLX-native cache clone/replay and rotating-cache tests were collected but skipped because MLX is unavailable.",
+    "No native C++ or FlyDSL source was changed, so no native rebuild was applicable.",
+    "The pinned environment lacks ruff; source compilation and git diff whitespace validation passed instead.",
+    "Follow-up concurrency, heterogeneous paged/radix KV, and performance/overlap tracks remain explicitly out of scope, as specified by the source issue."
+  ]
+}

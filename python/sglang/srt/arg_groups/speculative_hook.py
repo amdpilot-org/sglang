@@ -5,7 +5,6 @@ import logging
 import os
 from typing import TYPE_CHECKING, Optional
 
-<<<<<<< HEAD
 from sglang.srt.arg_groups.choices import DRAFT_ATTENTION_BACKEND_CHOICES
 from sglang.srt.arg_groups.overrides import (
     _speculative_moe_runner_default,
@@ -17,8 +16,8 @@ from sglang.srt.arg_groups.overrides import (
     resolving_view,
     run_post_process_pass,
 )
+from sglang.srt.hardware_backend.mlx.runtime import use_mlx
 from sglang.srt.runtime_context import get_platform
-from sglang.srt.utils.tensor_bridge import use_mlx
 
 if TYPE_CHECKING:
     from sglang.srt.server_args import ServerArgs

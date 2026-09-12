@@ -14,6 +14,7 @@ from sglang.srt.arg_groups.speculative_hook import (
     _handle_frozen_kv_mtp,
     _resolve_speculative_algorithm_alias,
 )
+from sglang.srt.arg_groups.overrides import resolution_result
 from sglang.srt.hardware_backend.mlx.spec_config import (
     validate_mlx_frozen_kv_mtp_args,
     validate_mlx_frozen_kv_mtp_request,
@@ -154,13 +155,15 @@ class TestMlxGemma4MTPGuardrails(unittest.TestCase):
         self.assertEqual(get_config.call_args.kwargs["revision"], "rev")
 
     def test_platform_dispatch_preserves_cuda_worker(self):
-        with mock.patch("sglang.srt.utils.tensor_bridge.use_mlx", return_value=False):
+        with mock.patch(
+            "sglang.srt.hardware_backend.mlx.runtime.use_mlx", return_value=False
+        ):
             worker = SpeculativeAlgorithm.FROZEN_KV_MTP.create_worker(_server_args())
         self.assertEqual(worker.__name__, "FrozenKVMTPWorkerV2")
 
         if _HAS_MLX:
             with mock.patch(
-                "sglang.srt.utils.tensor_bridge.use_mlx", return_value=True
+                "sglang.srt.hardware_backend.mlx.runtime.use_mlx", return_value=True
             ):
                 worker = SpeculativeAlgorithm.FROZEN_KV_MTP.create_worker(
                     _server_args()
@@ -189,14 +192,14 @@ class TestMlxGemma4MTPGuardrails(unittest.TestCase):
             _handle_frozen_kv_mtp(args)
         self.assertEqual(
             (
-                args.max_running_requests,
-                args.speculative_eagle_topk,
-                args.speculative_num_steps,
-                args.speculative_num_draft_tokens,
+                resolution_result(args, "max_running_requests"),
+                resolution_result(args, "speculative_eagle_topk"),
+                resolution_result(args, "speculative_num_steps"),
+                resolution_result(args, "speculative_num_draft_tokens"),
             ),
             (1, 1, 1, 2),
         )
-        self.assertTrue(args.disable_overlap_schedule)
+        self.assertTrue(resolution_result(args, "disable_overlap_schedule"))
         self.assertEqual(args._mlx_gemma4_mtp_assistant_config, _assistant_config())
 
     def test_server_guardrails(self):

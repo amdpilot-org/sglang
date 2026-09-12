@@ -327,7 +327,7 @@ class SpeculativeAlgorithm(Enum):
             return DSparkWorkerV2
 
         if self.is_frozen_kv_mtp():
-            from sglang.srt.utils.tensor_bridge import use_mlx
+            from sglang.srt.hardware_backend.mlx.runtime import use_mlx
 
             if use_mlx():
                 from sglang.srt.hardware_backend.mlx.speculative_worker import (
