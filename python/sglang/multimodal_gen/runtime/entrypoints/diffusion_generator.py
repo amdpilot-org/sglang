@@ -566,7 +566,12 @@ class DiffGenerator:
 
     def _send_lifecycle_request(self, req: Any, operation: str) -> dict[str, Any]:
         """Send a sleep, wake, or refit request and normalize scheduler errors."""
-        response = sync_scheduler_client.forward(req)
+        try:
+            response = sync_scheduler_client.forward(req)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to {operation}: scheduler request failed: {exc}"
+            ) from exc
         if response.error:
             raise RuntimeError(f"Failed to {operation}: {response.error}")
         if not isinstance(response.output, dict):

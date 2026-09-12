@@ -80,6 +80,34 @@ def test_diffusion_generator_lifecycle_surfaces_failures(
         _generator().update_weights_from_disk("/weights/refit")
 
 
+@pytest.mark.parametrize(
+    "transport_error",
+    [ConnectionError("scheduler transport down"), TimeoutError("scheduler timed out")],
+)
+def test_diffusion_generator_lifecycle_normalizes_transport_failures(
+    monkeypatch, transport_error
+):
+    def forward(_req):
+        raise transport_error
+
+    monkeypatch.setattr(
+        "sglang.multimodal_gen.runtime.entrypoints.diffusion_generator."
+        "sync_scheduler_client.forward",
+        forward,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "Failed to release memory occupation: scheduler request failed: "
+            f"{transport_error}"
+        ),
+    ) as exc_info:
+        _generator().release_memory_occupation()
+
+    assert exc_info.value.__cause__ is transport_error
+
+
 def test_diffusion_generator_refit_rejects_empty_path(monkeypatch):
     forward = lambda _req: pytest.fail("empty model path must fail client-side")
     monkeypatch.setattr(
