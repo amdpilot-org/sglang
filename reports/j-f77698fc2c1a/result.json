@@ -1,0 +1,61 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19352",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3228",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3219",
+  "candidate_commit": "ea369671b9998d6caa4e2888ac53ac7a740d3db6",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a valid partial fix: it centralizes the three inherited server/unit counterexamples and its focused regression passes, but its repeated-ID guard still misses ordinary executable model fixtures. An existing cross-tree repetition of ideogram-ai/ideogram-4-fp8 remains in server/gpu_cases.py and unit/test_diffusion_bcg_padding.py, while the guard reports no finding. Independent dictionary and positional-constructor fixtures also evade the policy. The candidate therefore does not fully enforce the original common-entry contract.",
+  "tests": [
+    {
+      "command": "rg -n 'Comfy-Org/Ideogram-4|Lightricks/LTX-2.5-Diffusers|FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree' python/sglang/multimodal_gen/test",
+      "exit_code": 0,
+      "what_was_measured": "On the recorded base, each reviewed ID occurred in both server/gpu_cases.py and an ordinary unit fixture. At the candidate commit, each occurs only in test_utils.py, confirming the inherited counterexamples were corrected."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f77698fc2c1a/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_common_model_names.py",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate's own model-name regression suite passed: 4 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f77698fc2c1a/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_ideogram4.py python/sglang/multimodal_gen/test/unit/test_ltx2_5_config.py python/sglang/multimodal_gen/test/unit/test_minimax_h3_fasth3.py",
+      "exit_code": 0,
+      "what_was_measured": "Directly affected unit coverage passed: 94 passed and 5 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f77698fc2c1a/venv/bin/python -m pytest -q /job/review_evidence/j-f77698fc2c1a/adversarial_test.py",
+      "exit_code": 1,
+      "what_was_measured": "Both independent contract cases failed because repeated dictionary model_path fixtures and repeated positional DiffusionServerArgs model IDs returned no guard findings."
+    },
+    {
+      "command": "candidate helper over server/gpu_cases.py and unit/test_diffusion_bcg_padding.py",
+      "exit_code": 0,
+      "what_was_measured": "The helper returned [] despite ideogram-ai/ideogram-4-fp8 being present in both files."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f77698fc2c1a/venv/bin/python -c 'import sglang, pathlib; print(pathlib.Path(sglang.__file__).resolve())'",
+      "exit_code": 0,
+      "what_was_measured": "The imported package resolved to /job/repo/python/sglang/__init__.py, confirming tests used checkout source."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No inference or numerical implementation changed. The review exercised AST policy and affected CPU unit tests; no GPU-output claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The existing model ID ideogram-ai/ideogram-4-fp8 remains hard-coded in server/gpu_cases.py and unit/test_diffusion_bcg_padding.py; the candidate guard returns no finding because the unit occurrence is an assertion literal rather than a recognized resolver or named assignment.",
+    "Repeated model IDs stored as dictionary values under model_path are not recognized until separately added to the shared constant set.",
+    "Repeated model IDs passed positionally to DiffusionServerArgs are not recognized by the uncentralized-ID detector.",
+    "The blanket exemption for unit/test_server_args.py leaves executable model-selection literals outside both enforcement checks; this includes values also used outside that file, although some entries are intentional parser vectors and need a narrower classification rather than unconditional scanning."
+  ],
+  "remaining_limitations": [
+    "No native source changed (the base-to-candidate native diff is empty), so a native rebuild was not applicable.",
+    "No model weights were downloaded and no model inference was run; semantic accuracy is outside this refactor's changed behavior.",
+    "Ascend and MUSA runtime paths are unavailable on this ROCm host, and the touched data-parallel serving case requires two GPUs while one GPU was assigned.",
+    "The broad literal inventory includes intentional expected-value/parser vectors and non-model slash strings; only concrete executable cross-tree examples were used for the recommendation."
+  ],
+  "evidence_root": "/job/review_evidence/j-f77698fc2c1a"
+}
