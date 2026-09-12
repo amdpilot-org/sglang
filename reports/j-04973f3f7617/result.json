@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37342",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "74ec83a71f7217b9c4af342c749ca37e9c477a63",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes host-independent backend-selection test isolation and adds an exact-shape direct _load_w13 sharding fixture, but changes no production code and does not exercise the initialization, post-load preprocessing, or SM90 runner contract associated with the original Hidden size mismatch.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-04973f3f7617/venv/bin/python -m pytest test/registered/unit/test_model_overrides.py::TestGoldenModelOverrides::test_deepseek_v4_overrides_at_callable_level -q (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced the candidate's stated test-harness failure: ROCm host state prevents the nominal SM100 case from selecting flashinfer_mxfp4. This is not the original checkpoint Hidden size mismatch."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-04973f3f7617/venv/bin/python -m pytest test/registered/unit/test_model_overrides.py::TestGoldenModelOverrides::test_deepseek_v4_overrides_at_callable_level test/registered/unit/layers/quantization/test_dsv4_mxfp4_loader.py -q (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Five tests and three subtests passed: isolated backend selection plus direct _load_w13 row sharding/order for four logical TP ranks."
+    },
+    {
+      "command": "Independent inline _load_w13 adversarial cases for [2048,1024]/[2048,64] and [2048,2048]/[2048,127]",
+      "exit_code": 0,
+      "what_was_measured": "Both incompatible dimension combinations were accepted, demonstrating that the candidate fixture does not validate hidden-size or scale-width invariants."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-04973f3f7617/venv/bin/python -m pytest test/registered/unit/layers/quantization/test_mxfp4_sm90_cutlass.py -q",
+      "exit_code": 5,
+      "what_was_measured": "Module skipped because the assigned accelerator is AMD gfx950, not NVIDIA SM90."
+    },
+    {
+      "command": "Inline torch GPU matmul compared with CPU reference",
+      "exit_code": 0,
+      "what_was_measured": "A float32 matmul ran on AMD Instinct MI355X gfx950 and matched the CPU reference; unrelated to FlashInfer Hopper qualification."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-04973f3f7617/evidence/gpu.txt records AMD Instinct MI355X gfx950 execution and a matching CPU reference.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The direct loader fixture accepts a packed weight width of 1024 and scale width of 64 just as it accepts the reported 2048/128 pair, because no model hidden size or runner contract is constructed.",
+    "The direct loader fixture accepts a 127-column scale tensor paired with a 2048-column packed weight, so it does not enforce the reported MXFP4 scale relationship.",
+    "No FlashInfer SM90 post-load preprocessing or kernel execution demonstrates that loaded/permuted expert dimensions satisfy the Hopper contract.",
+    "No full DeepSeek-V4 checkpoint load reproduces or clears the original Hidden size mismatch."
+  ],
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 weights were unavailable.",
+    "NVIDIA H800/SM90 hardware was unavailable; the assigned GPU was an AMD Instinct MI355X gfx950.",
+    "Only logical per-rank TP=4 slicing was tested, not four-process distributed TP=4 execution.",
+    "Full serving, DSPARK, HTTP transport, and semantic accuracy were not tested.",
+    "The candidate changes no native code; a native rebuild was not applicable."
+  ]
+}
