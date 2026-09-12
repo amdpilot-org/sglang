@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35229",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that AnthropicMessagesRequest silently discarded PD bootstrap and DP-routing metadata, then added the matching fields and forwarded them unchanged into ChatCompletionRequest. Added scalar regression coverage plus independent list-valued and omitted-field boundary cases.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-2476198ea9fa/venv/bin/python -c '<base request-validation reproducer>'",
+      "exit_code": 1,
+      "what_was_measured": "On the untouched base, bootstrap_host, bootstrap_port, bootstrap_room, routed_dp_rank, and disagg_prefill_dp_rank were absent after AnthropicMessagesRequest validation; the assertion on bootstrap_room failed. Raw output: reports/j-2476198ea9fa/raw/failing-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2476198ea9fa/venv/bin/python -m pytest -q test/registered/unit/entrypoints/anthropic/test_serving.py -k 'pd_routing'",
+      "exit_code": 0,
+      "what_was_measured": "Three focused conversion tests passed: scalar PD/DP fields are preserved, list-valued bootstrap fields are preserved, and omitted fields remain None. Raw output: reports/j-2476198ea9fa/raw/pytest-pd-routing.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2476198ea9fa/venv/bin/python -m pytest -q test/registered/unit/entrypoints/anthropic/test_serving.py",
+      "exit_code": 0,
+      "what_was_measured": "The complete Anthropic serving unit suite passed: 64 tests and 5 subtests. Raw output: reports/j-2476198ea9fa/raw/pytest-anthropic-serving.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2476198ea9fa/venv/bin/python scripts/lint/check_registered_tests.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository registered-test metadata validation passed. Raw output: reports/j-2476198ea9fa/raw/check-registered-tests.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2476198ea9fa/venv/bin/python -m compileall -q python/sglang/srt/entrypoints/anthropic test/registered/unit/entrypoints/anthropic/test_serving.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source and tests compiled successfully. Raw output: reports/j-2476198ea9fa/raw/compileall.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors were found. Raw output: reports/j-2476198ea9fa/raw/git-diff-check.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is entirely in HTTP request model validation and Anthropic-to-OpenAI request conversion, before engine or GPU execution. No GPU claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original two-worker Ascend PD serving deployment and ascend transfer backend were not available; a single gfx950 GPU cannot qualify that architecture or distributed path.",
+    "No full model serving run was performed because the reproduced loss occurs deterministically before model execution. The tests validate request transport into ChatCompletionRequest, not model semantics or multi-node KV transfer."
+  ]
+}
