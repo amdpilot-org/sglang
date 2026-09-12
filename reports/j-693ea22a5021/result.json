@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32572",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "6f9ba912ed5a5a9ff2434f7505e86326bff8c20d",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the evidenced Qwen3-VL deepstack linear_fc LoRA path, but does not implement MOSS-VL-specific dimensions and introduces an unbounded deepstack namespace match.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-693ea22a5021/venv/bin/python (base issue-specific fixture)",
+      "exit_code": 0,
+      "what_was_measured": "Recorded base returned no layer id for a reported deepstack adapter tensor and raised NotImplementedError for linear_fc1/linear_fc2 hidden dimensions."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-693ea22a5021/venv/bin/python -m pytest -q test/registered/unit/lora/test_qwen3_vl_lora_targets.py test/registered/unit/lora/test_laguna_hidden_dim_unit.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and adjacent hidden-dimension compatibility; 17 tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-693ea22a5021/venv/bin/python (independent adversarial fixture)",
+      "exit_code": 0,
+      "what_was_measured": "Qwen3-VL dimensions, normalization, row sharding, valid/malformed/unindexed layer parsing, and namespace false positives."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-693ea22a5021/venv/bin/python reports/j-efa2c48ba8e1/gpu_linear_fc_reference.py",
+      "exit_code": 0,
+      "what_was_measured": "BF16 rank-32 projection arithmetic for 4608x4608 and 4608x4096 shapes against CPU FP32 references on gfx950."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X, gfx950, ROCm 7.2; candidate GPU reference completed for both reported Qwen3-VL projection shapes."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "MossVLForConditionalGeneration has no model-specific get_hidden_dim override; its concatenating merger has architecture-specific input dimensions not supplied by the Qwen3-VL-only candidate.",
+    "get_layer_id('model.notdeepstack_merger_list.4.linear_fc2.weight') returns 4 because the new alternative lacks a path-segment boundary."
+  ],
+  "remaining_limitations": [
+    "No Qwen3-VL-8B or EditScore model weights were available, so full serving/model-load behavior was not verified.",
+    "The assigned GPU was AMD gfx950 rather than the report's NVIDIA H100; CUDA backend parity was not tested.",
+    "The GPU fixture validates projection shapes and arithmetic only, not model architecture integration or semantic accuracy.",
+    "No native source changed and the prepared environment declared no native rebuild target."
+  ]
+}
