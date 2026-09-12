@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33360",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced both independent-review counterexamples at candidate commit 152efc1 and strengthened the test oracle to require the exact local token-ID clone expression and reject any partial gather in the synchronous post-attention MoE path; the prepared base's production fix is unchanged.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=<candidate>/python python -m pytest -q <candidate>/test/registered/unit/models/test_deepseek_v4_dp_gather_semantics.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression on clean candidate source: 3 passed."
+    },
+    {
+      "command": "SGLANG_DSV4_GATHER_TEST_MODELS_DIR=<combined-adversarial-fixture> PYTHONPATH=<candidate>/python python -m pytest -q <candidate-test>",
+      "exit_code": 0,
+      "what_was_measured": "Candidate falsely accepted both wrong input_ids_global.clone() operands plus an extra synchronous dp_gather_partial: 3 passed."
+    },
+    {
+      "command": "SGLANG_DSV4_GATHER_TEST_MODELS_DIR=<combined-adversarial-fixture> /tmp/amdpilot-repo-j-8230978539fc/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v4_dp_gather_semantics.py",
+      "exit_code": 1,
+      "what_was_measured": "Corrected regression rejected the combined corruptions: 2 failed, 1 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8230978539fc/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v4_dp_gather_semantics.py",
+      "exit_code": 0,
+      "what_was_measured": "Corrected regression accepted the prepared production source: 3 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8230978539fc/venv/bin/python <inline torch gfx950 arithmetic and aliasing check>",
+      "exit_code": 0,
+      "what_was_measured": "On MI355X/gfx950, partial summation scaled replicas by 2/4/8 and clone isolated in-place zeroing."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI355X gfx950 tensor arithmetic and view/clone aliasing check; not a distributed SGLang or Marlin execution."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original eight-H800 TP8/DP4 DeepSeek-V4-Flash-0731 Marlin serving workload was not executable on the single assigned AMD gfx950 GPU.",
+    "DeepSeek-V4-Flash-0731 weights, NVIDIA H800 hardware, CUDA, and Marlin were unavailable; semantic output accuracy remains unverified."
+  ]
+}
