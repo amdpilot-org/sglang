@@ -182,6 +182,14 @@ class StorageBackendFactory:
                     mem_pool_host.get_size_per_token() * mem_pool_host.page_size
                 )
 
+            # DeepSeek V4 uses a LogicalHostPool as the primary index anchor.
+            # Its payload is stored by the named v2 side pools, but HF3FS still
+            # needs a non-empty primary object so the anchor key can gate those
+            # side-pool lookups. Use a one-byte marker only for that explicit
+            # logical-pool contract; a zero-sized physical pool remains invalid.
+            if bytes_per_page == 0 and getattr(mem_pool_host, "kv_buffer", 0) is None:
+                bytes_per_page = 1
+
             dtype = mem_pool_host.dtype
             return backend_class.from_env_config(bytes_per_page, dtype, storage_config)
         elif backend_name == "eic":
