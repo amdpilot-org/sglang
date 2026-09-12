@@ -222,7 +222,7 @@ ONE_GPU_CASES: list[DiffusionTestCase] = [
     DiffusionTestCase(
         "flux_2_image_t2i_upscaling_4x",
         DiffusionServerArgs(
-            model_path="black-forest-labs/FLUX.2-dev",
+            model_path=DEFAULT_FLUX_2_DEV_MODEL_NAME_FOR_TEST,
         ),
         DiffusionSamplingParams(
             prompt="Doraemon is eating dorayaki",
@@ -300,7 +300,7 @@ ONE_GPU_CASES: list[DiffusionTestCase] = [
     DiffusionTestCase(
         "wan2_1_t2v_1.3b_frame_interp_2x",
         DiffusionServerArgs(
-            model_path="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+            model_path=DEFAULT_WAN_2_1_T2V_1_3B_MODEL_NAME_FOR_TEST,
         ),
         DiffusionSamplingParams(
             prompt=T2V_PROMPT,
@@ -312,7 +312,7 @@ ONE_GPU_CASES: list[DiffusionTestCase] = [
     DiffusionTestCase(
         "wan2_1_t2v_1.3b_upscaling_4x",
         DiffusionServerArgs(
-            model_path="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+            model_path=DEFAULT_WAN_2_1_T2V_1_3B_MODEL_NAME_FOR_TEST,
         ),
         DiffusionSamplingParams(
             prompt=T2V_PROMPT,
@@ -324,7 +324,7 @@ ONE_GPU_CASES: list[DiffusionTestCase] = [
     DiffusionTestCase(
         "wan2_1_t2v_1.3b_frame_interp_2x_upscaling_4x",
         DiffusionServerArgs(
-            model_path="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+            model_path=DEFAULT_WAN_2_1_T2V_1_3B_MODEL_NAME_FOR_TEST,
         ),
         DiffusionSamplingParams(
             prompt=T2V_PROMPT,
@@ -1161,7 +1161,7 @@ if not current_platform.is_hip():
         DiffusionTestCase(
             "flux_2_ti2i_multi_image_cache_dit",
             DiffusionServerArgs(
-                model_path="black-forest-labs/FLUX.2-dev",
+                model_path=DEFAULT_FLUX_2_DEV_MODEL_NAME_FOR_TEST,
                 enable_cache_dit=True,
             ),
             MULTI_IMAGE_TI2I_UPLOAD_sampling_params,
