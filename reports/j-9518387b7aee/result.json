@@ -1,0 +1,58 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31861",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2459",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2420",
+  "candidate_commit": "8929cfe77e5eb9ecc407ed9338da6b515d5376e4",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a valid partial fix: it makes the DeepSeek-family CPU gate compute FP32 logits and rejects non-FP32 inputs at the Python CPU TopK boundary. It does not enforce the issue-wide router contract: ernie4.MoEGate still emits BF16 when its parameters are BF16, and the new TopK check converts that existing path into a ValueError. The optional specialized BF16-activation x FP32-weight AMX kernel also remains absent; FP32 DeepSeek router weights use the semantically correct unaccelerated fallback.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9518387b7aee/venv/bin/python <base reproduction script>",
+      "exit_code": 0,
+      "what_was_measured": "At the recorded base, forced DeepSeek AMX dispatch returned BF16 and biased_grouped_topk_cpu forwarded the identical BF16 tensor; FP32 logits 1.001 and 1.002 collapsed to a BF16 tie."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9518387b7aee/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_amx_router_logits.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's five focused regressions passed at the exact candidate commit."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9518387b7aee/venv/bin/python <candidate adversarial script>",
+      "exit_code": 0,
+      "what_was_measured": "DeepSeek BF16 and FP32 weight branches returned FP32; BF16, FP16, and FP64 TopK inputs were rejected before mocked native dispatch; FP32 was forwarded unchanged. The installed native module did not expose biased_grouped_topk_cpu on this AMD host."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9518387b7aee/venv/bin/python <Ernie counterexample script>",
+      "exit_code": 0,
+      "what_was_measured": "The actual ernie4.MoEGate returned torch.bfloat16 for BF16 input/weight, after which the candidate CPU TopK wrapper raised its FP32-contract ValueError."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9518387b7aee/venv/bin/python <gfx950 linear_bf16_fp32 reference script>",
+      "exit_code": 0,
+      "what_was_measured": "On MI355X/gfx950, linear_bf16_fp32 returned FP32 for (7,9)x(11,9) and matched CPU FP32 matmul of the same BF16 operands with maximum absolute error 2.384185791015625e-07."
+    },
+    {
+      "command": "git diff 358c163250ad3b1f62939b01ce1314a0a31a0365 8929cfe77e5eb9ecc407ed9338da6b515d5376e4 --check",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI355X (gfx950) executed the independent linear_bf16_fp32 numerical reference. This does not validate Intel AMX."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "python/sglang/srt/models/ernie4.py MoEGate still uses F.linear(hidden_states, weight) without an FP32 conversion. With BF16 input and BF16 weight it emits BF16, and the candidate's biased_grouped_topk_cpu now raises ValueError instead of providing an FP32 router path.",
+    "The optional specialized BF16 activation x FP32 router-weight AMX kernel is not implemented; DeepSeek FP32 router weights remain on the semantically correct but unaccelerated FP32 F.linear fallback."
+  ],
+  "remaining_limitations": [
+    "The host CPU is AMD EPYC 9575F and has no Intel AMX, so actual AMX packed-weight execution and performance were not validated.",
+    "The installed sgl_kernel module was /opt/venv/lib/python3.12/site-packages/sglang_kernel-0.4.6.post1-py3.12-linux-x86_64.egg/sgl_kernel/__init__.py and did not register biased_grouped_topk_cpu on this host, preventing direct native CPU TopK execution.",
+    "No native source changed in the candidate, so no native rebuild was applicable.",
+    "No affected full-model weights were available; no full-model, serving, semantic-accuracy, or distributed-workload claim is made."
+  ]
+}
