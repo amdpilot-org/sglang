@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38156",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/870",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/830",
+  "candidate_commit": "3d10c70a56be17ed89300d26ffb77faf67ad992e",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the timing-dependent double charge among ranks in one multi-rank TP group by taking a TP CPU-group MIN snapshot before allocation. Its focused tests and real three-process Gloo regression pass. It does not make the host-wide decision independent of ordering when more than one TP group is co-located: ranks_per_host divides by every local rank, but the snapshot synchronizes only one TP group. A real four-process/two-group Gloo case retains the false rejection even though all requested pools fit at the initial reading. This is a partial fix, not test-only hardening, but it does not fully satisfy the issue's host-wide contract.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-92dbabe30345/venv/bin/python reports/j-92dbabe30345/adversarial_budget.py (equivalent preserved script first run outside checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Deterministically reproduced the base formula's timing-dependent false rejection: with 100 GiB initially available, a 10 GiB reserve, four ranks, and 20 GiB per rank, later readings yield budgets below 20 GiB although all pools fit initially. It also identified the two-TP-group counterexample."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-92dbabe30345/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mem_pool_host.py::TestHostMemoryBudget",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, all seven candidate host-budget unit tests passed, including mocked MIN/group/dtype behavior and boundary fallbacks."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-92dbabe30345/venv/bin/python reports/j-c4c21258a7da/repro_gloo.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, a real three-process Gloo collective in one group reduced divergent readings to the same minimum-derived budget on every rank."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-92dbabe30345/venv/bin/python /job/review-evidence-j-92dbabe30345/repro_two_tp_groups.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent real four-process Gloo counterexample using two two-rank TP-like groups. Group A obtained 22.5 GiB/rank and later group B obtained 12.5 GiB/rank; a 20 GiB request therefore still fails in group B although four such pools fit in the initial 100 GiB with the 10 GiB reserve."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-92dbabe30345/venv/bin/python -m py_compile python/sglang/srt/mem_cache/pool_host/base.py",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate Python source compiled successfully and imported from /job/repo/python, not from an installed wheel."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned device is one AMD Instinct MI350X (gfx950). The reported workload requires 8xH200 (SM90), TP8, GLM-5.2-W4AFP8 weights, and roughly 1.7 TiB host RAM. No GPU/model-serving claim was made; CPU/Gloo processes directly exercised the changed synchronization path."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Two or more TP groups co-located on one host remain timing-dependent because ranks_per_host counts all local ranks while host_memory_sync_group synchronizes only the current TP group. If one group allocates before another samples, the later group double-counts the earlier allocation and can reject pools that fit host-wide.",
+    "The same topology gap can occur with multiple pipeline stages or in-job data-parallel TP groups on one host; candidate tests cover only a single synchronization group."
+  ],
+  "remaining_limitations": [
+    "The exact 8xH200 GLM-5.2-W4AFP8 startup and sidecar allocation sequence could not be run on the assigned single gfx950 GPU, and model weights were unavailable.",
+    "The independent counterexample uses real Gloo collectives and controlled psutil readings rather than allocating tens or hundreds of GiB of pinned host memory.",
+    "No native files changed between base and candidate, repository-environment.json declares native null, and therefore no native rebuild was applicable."
+  ]
+}
