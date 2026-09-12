@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -162,6 +163,36 @@ def _tensor_metrics(reference: torch.Tensor, candidate: torch.Tensor) -> dict[st
     }
 
 
+def _structurally_equal(reference: object, candidate: object) -> bool:
+    """Compare captured terminal state without invoking tensor truthiness."""
+    if isinstance(reference, torch.Tensor) or isinstance(candidate, torch.Tensor):
+        return (
+            isinstance(reference, torch.Tensor)
+            and isinstance(candidate, torch.Tensor)
+            and reference.shape == candidate.shape
+            and reference.dtype == candidate.dtype
+            and torch.equal(reference.detach().cpu(), candidate.detach().cpu())
+        )
+    if isinstance(reference, Mapping) or isinstance(candidate, Mapping):
+        if not isinstance(reference, Mapping) or not isinstance(candidate, Mapping):
+            return False
+        return reference.keys() == candidate.keys() and all(
+            _structurally_equal(reference[key], candidate[key]) for key in reference
+        )
+    if isinstance(reference, (tuple, list)) or isinstance(candidate, (tuple, list)):
+        if type(reference) is not type(candidate) or len(reference) != len(candidate):
+            return False
+        return all(
+            _structurally_equal(lhs, rhs)
+            for lhs, rhs in zip(reference, candidate, strict=True)
+        )
+    try:
+        equal = reference == candidate
+        return equal if isinstance(equal, bool) else False
+    except (RuntimeError, TypeError, ValueError):
+        return False
+
+
 def evaluate_trajectory_gate(
     reference: TrajectoryCapture,
     candidate: TrajectoryCapture,
@@ -190,13 +221,17 @@ def evaluate_trajectory_gate(
             step_reports.append(metrics)
             for metric, threshold in gate.tensor_thresholds.get(name, {}).items():
                 value = metrics[metric]
-                failed = value < threshold if metric == "cosine_similarity" else value > threshold
+                failed = not math.isfinite(value) or (
+                    value < threshold
+                    if metric == "cosine_similarity"
+                    else value > threshold
+                )
                 if failed:
                     failures.append(f"tensor:{name}:{step}:{metric}")
         reports[name] = tuple(step_reports)
     if gate.require_decision_trace_match and reference.decision_trace != candidate.decision_trace:
         failures.append("decision_trace")
-    if reference.terminal_state != candidate.terminal_state:
+    if not _structurally_equal(reference.terminal_state, candidate.terminal_state):
         failures.append("terminal_state")
     adapters = output_metric_adapters or {}
     output_report: dict[str, float] = {}
@@ -206,6 +241,6 @@ def evaluate_trajectory_gate(
             continue
         value = adapters[name](reference.outputs[name], candidate.outputs[name])
         output_report[name] = value
-        if value < threshold:
+        if not math.isfinite(value) or value < threshold:
             failures.append(f"output_metric:{name}")
     return TrajectoryGateResult(not failures, tuple(failures), reports, output_report)
