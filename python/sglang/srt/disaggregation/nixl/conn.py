@@ -2461,6 +2461,7 @@ class NixlKVManager(StagingManagerMixin, CommonKVManager):
             elif st in (
                 StateType.SWA,
                 StateType.SWA_RING,
+                StateType.DSV4_C2_STATE,
                 StateType.DSV4_REQUEST_STATE,
             ):
                 if not self.is_mla_backend and self.attn_tp_size != decode_tp_size:

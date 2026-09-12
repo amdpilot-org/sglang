@@ -999,7 +999,8 @@ class CommonKVManager(BaseKVManager):
     ) -> Tuple[List[int], List[int]]:
         # Match the pool's flat buffer order, with layers grouped by ratio:
         # KV: [C4 KV, C4 indexer KV, C128 KV].
-        # SWA state: [SWA KV, C4 compressor state, C4 indexer state].
+        # SWA state: [SWA KV].
+        # DSV4_C2_STATE: [C4 compressor state, C4 indexer state].
         # DSV4_REQUEST_STATE: [C128 compressor state]; SWA_RING: [SWA rings].
         # Prefill src is stage-local; decode dst may cover the full model.
         start_layer = self.kv_args.prefill_start_layer
@@ -1019,6 +1020,12 @@ class CommonKVManager(BaseKVManager):
 
         if state_type == StateType.DSV4_REQUEST_STATE:
             return src_kv_ptrs, list(dst_kv_ptrs[c128_off_s:c128_off_e])
+
+        if state_type == StateType.DSV4_C2_STATE:
+            return src_kv_ptrs, (
+                list(dst_kv_ptrs[c4_off_s:c4_off_e])
+                + list(dst_kv_ptrs[c4_full + c4_off_s : c4_full + c4_off_e])
+            )
 
         if state_type == StateType.SWA_RING:
             swa_s = min(start_layer, len(dst_kv_ptrs))

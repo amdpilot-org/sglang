@@ -89,18 +89,23 @@ def get_dsv4_c4_state_indices(
     *,
     ring_size: int,
 ) -> np.ndarray:
-    # Prefill and decode can have different ring sizes (8 or 16 with EAGLE/MTP);
-    # pair the overlap compressor's live rows by logical token position.
-    if ring_size < 8 or ring_size % 4 != 0:
-        raise ValueError(
-            f"C4 ring_size must be a multiple of 4 and at least 8, got {ring_size}"
-        )
+    """Return the single pending C2 row at a committed PD boundary.
+
+    The C4 compressor consumes pairs.  An even boundary therefore has no
+    pending state; an odd boundary carries the row produced by position N-1.
+    Each endpoint calls this with its own request slot and ring capacity.
+    """
+    if ring_size < 2 or ring_size & (ring_size - 1):
+        raise ValueError(f"C2 ring_size must be a power of two >= 2, got {ring_size}")
 
     seq_len = max(0, int(seq_len))
-    state_len = seq_len % 4 + 4
-    positions = np.arange(max(0, seq_len - state_len), seq_len, dtype=np.int64)
-    rows = int(req_pool_idx) * int(ring_size) + positions % int(ring_size)
-    return rows.astype(np.int32)
+    if seq_len % 2 == 0:
+        return np.empty((0,), dtype=np.int32)
+    position = seq_len - 1
+    return np.array(
+        [int(req_pool_idx) * int(ring_size) + position % int(ring_size)],
+        dtype=np.int32,
+    )
 
 
 def get_dsv4_c128_state_indices(
@@ -1331,6 +1336,20 @@ def setup_state_kv_args(
             append_state_component(
                 kv_args, StateType.SWA, data_ptrs, data_lens, item_lens
             )
+            if isinstance(token_to_kv_pool, DeepSeekV4TokenToKVPool) and hasattr(
+                token_to_kv_pool, "get_c2_state_buf_infos"
+            ):
+                c2_ptrs, c2_lens, c2_item_lens = (
+                    token_to_kv_pool.get_c2_state_buf_infos()
+                )
+                if c2_ptrs:
+                    append_state_component(
+                        kv_args,
+                        StateType.DSV4_C2_STATE,
+                        c2_ptrs,
+                        c2_lens,
+                        c2_item_lens,
+                    )
             # MXFP8 KV: each sub-pool's block scales ride as their own component
             # so they inherit the index payload of the KV they describe.
             # Only the concrete SWAKVPool owns a full sub-pool; other
