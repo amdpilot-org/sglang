@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34740",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced both concrete counterexamples against candidate PR https://github.com/amdpilot-org/sglang/pull/1564 at 5e007ae4fb75b5b0b68c0c37a7ffe913239ca402, as independently reported by https://github.com/amdpilot-org/sglang/pull/1630. The correction preserves bounded recovery while enforcing it in token space and replaces vocabulary-dependent fixed token id 100 with a complete token derived from the active tokenizer.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-69fb2eb5a4ec/venv/bin/python -m pytest -q test/registered/unit/managers/test_detokenizer_incremental_window.py test/registered/unit/spec/test_simulated_acceptance_token.py (base source with new tests)",
+      "exit_code": 1,
+      "what_was_measured": "Failing before: 5 failed, 2 passed. Replacement streams never committed, the oversized event remained unbounded, and fixed simulation had no tokenizer-derived token interface. Raw output: /job/review-evidence/j-69fb2eb5a4ec/failing-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-69fb2eb5a4ec/venv/bin/python -m pytest -q test/registered/unit/managers/test_detokenizer_incremental_window.py test/registered/unit/managers/test_trim_matched_stop.py test/registered/unit/spec/test_simulated_acceptance_token.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing after: 15 tests passed, covering ordinary and oversized invalid-byte events, split UTF-8, clean reset behavior, safe token resolution, fixed-token filling, and existing stop trimming. Raw output: /job/review-evidence/j-69fb2eb5a4ec/passing-after.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-69fb2eb5a4ec/venv/bin/python < focused generate_simulated_accept_index fixture",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, the corrected real tensor path resolved token 64 decoding to 'a' and produced predict_unique=[64], versus predict_unique=[100] on the exact candidate. Raw output: /job/review-evidence/j-69fb2eb5a4ec/gpu-after.log"
+    },
+    {
+      "command": "pre-commit run --files <all changed Python source and tests>",
+      "exit_code": 0,
+      "what_was_measured": "All configured hooks passed, including AST, import sorting, Ruff, formatting, codespell, and CI registry validation."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One assigned AMD Instinct MI355X, gfx950:sramecc+:xnack-, executed and synchronized the corrected generate_simulated_accept_index tensor path with Torch 2.11.0+rocm7.2. This was not a model-serving run.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Pro weights and its tokenizer were unavailable, so the reported model semantics were not directly verified.",
+    "The reported eight-GPU TP/DP/EAGLE serving workload, throughput, TTFT, and distributed topology were not reproduced.",
+    "The deterministic tokenizer fixture qualifies the Python detokenizer and simulated-acceptance control flow; the single-GPU fixture qualifies tensor execution only.",
+    "No native source changed and repository-environment.json declares native=null, so no native rebuild was applicable."
+  ]
+}
