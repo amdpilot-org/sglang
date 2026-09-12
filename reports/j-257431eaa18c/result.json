@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32124",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved the marker-only warmup reuse implementation from amdpilot-org/sglang PR 2824 and corrected the independently reproduced false compatibility match from PR 2928. DeepGEMM identity now hashes a deterministic manifest of the full import package and distribution-owned implementation artifacts, including sibling JIT sources and native libraries outside deep_gemm.__file__. If no implementation artifacts can be identified, marker reuse and publication are disabled so startup falls back to the all-M warmup.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-257431eaa18c/venv/bin/python -m pytest -q test/registered/utils/test_deep_gemm_warmup_marker.py -k identity_covers_sibling_jit_sources (candidate behavior before correction)",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced the review counterexample at the exact candidate implementation: changing a sibling jit_kernels.py file while retaining the package version and __init__.py produced an unchanged identity. Raw output: reports/j-257431eaa18c/failing-before.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-257431eaa18c/venv/bin/python -m pytest -q test/registered/unit/deep_gemm/test_deep_gemm_warmup_marker.py",
+      "exit_code": 0,
+      "what_was_measured": "Twelve marker and dispatch tests passed, including invalidation for a changed sibling JIT source, invalidation for a changed distribution-owned native artifact, conservative fallback for unknown identity, atomic marker behavior, exact M coverage, restored-cache skipping, and warmup failure paths. Raw output: reports/j-257431eaa18c/marker-tests-final.log."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-257431eaa18c/pre-commit /opt/venv/bin/pre-commit run --files python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py python/sglang/srt/layers/deep_gemm_wrapper/warmup_marker.py test/registered/unit/deep_gemm/test_deep_gemm_warmup_marker.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, syntax, spelling, integrity, and registered-test taxonomy hooks passed. Raw output: reports/j-257431eaa18c/precommit-final.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-257431eaa18c/venv/bin/python -m compileall -q python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py python/sglang/srt/layers/deep_gemm_wrapper/warmup_marker.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python modules compiled and the complete working diff had no whitespace errors."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The assigned accelerator was an AMD Instinct MI355X with Torch 2.11.0+rocm7.2 and HIP 7.2. torch.version.cuda was None and deep_gemm was not installed. Raw probe: reports/j-257431eaa18c/hardware-probe.log.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Real NVIDIA DeepGEMM JIT compilation and restored-cache reuse could not be executed in the prepared ROCm environment.",
+    "Independent CUDA GPU numerical comparison and CUDA graph parity remain unverified.",
+    "DeepSeek-V4-Pro TP=8 startup latency and steady-state inference performance remain unverified because the architecture, weights, and required NVIDIA topology were unavailable.",
+    "No native source was changed, so a native rebuild was not applicable."
+  ]
+}
