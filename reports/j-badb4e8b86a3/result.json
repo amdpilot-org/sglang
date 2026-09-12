@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31719",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced both counterexamples from https://github.com/amdpilot-org/sglang/pull/2335 against candidate https://github.com/amdpilot-org/sglang/pull/2280 at 4b0d2276a4cf6ce3e6ed5d2c7f66dce81416d0ac. Preserved the candidate's tracked-snapshot cast and corrected the following GDN prefill boundary by running causal convolution on active cache slots in activation dtype, then restoring updated slots to the configured cache dtype.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-badb4e8b86a3/venv/bin/python reports/j-badb4e8b86a3/reproduce_mixed_conv_dtype.py (exact candidate source, before correction)",
+      "exit_code": 1,
+      "what_was_measured": "On gfx950, FP16 activation/BF16 cache and BF16/BF16 succeeded; BF16 activation/FP32 cache and BF16 activation/FP16 cache failed in ROCm Triton compilation with mismatched new_conv_state branch types. See candidate_before.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-badb4e8b86a3/venv/bin/python reports/j-badb4e8b86a3/reproduce_mixed_conv_dtype.py",
+      "exit_code": 0,
+      "what_was_measured": "All four dtype combinations compiled and ran on gfx950. Output and final cache values matched an independent grouped torch.nn.functional.conv1d reference; see corrected_after.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-badb4e8b86a3/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_gdn_prefill_backend_policy.py",
+      "exit_code": 0,
+      "what_was_measured": "18 tests, 27 subtests passed, including selected-slot dtype conversion/writeback and the candidate's snapshot-store cases; see pytest_policy.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-badb4e8b86a3/venv/bin/python -m pytest -q test/registered/layers/mamba/test_causal_conv1d.py -k branches_from_cloned_query_state",
+      "exit_code": 0,
+      "what_was_measured": "Existing causal-convolution branch-state GPU regression passed (1 passed, 245 deselected)."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X gfx950 with ROCm 7.2 executed the failing candidate compiler cases and passing corrected numerical cases; raw output is retained in candidate_before.txt and corrected_after.txt.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "QuantTrio/Qwen3.6-27B-AWQ weights were unavailable, so full serving and semantic accuracy were not tested.",
+    "The available GPU was AMD Instinct MI350X gfx950 with ROCm 7.2, not the reporter's NVIDIA RTX 5090 SM120 with CUDA 13.3.",
+    "The tiny Llama fixture cannot qualify the qwen3_5 hybrid-GDN architecture and was not substituted as proof.",
+    "No native source changed, so no native rebuild was applicable.",
+    "No multi-node behavior was tested."
+  ]
+}

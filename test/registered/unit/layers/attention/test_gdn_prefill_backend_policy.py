@@ -11,6 +11,7 @@ from sglang.srt.layers.attention.linear import gdn_backend
 from sglang.srt.layers.attention.linear.gdn_backend import (
     GDNAttnBackend,
     GDNKernelDispatcher,
+    _causal_conv1d_with_cache_dtype,
     _store_tracked_conv_states,
     _validate_gdn_linear_attn_backends,
     flashinfer_gdn_prefill_default,
@@ -82,6 +83,35 @@ def make_runner(
 
 
 class TestFlashInferGDNPrefillBackendPolicy(CustomTestCase):
+    def test_prefill_conv_uses_activation_dtype_and_restores_cache_dtype(self):
+        mixed_qkv = torch.zeros(4, 6, dtype=torch.bfloat16)
+        conv_states = torch.arange(60, dtype=torch.float32).reshape(5, 4, 3)
+        original = conv_states.clone()
+        cache_indices = torch.tensor([3, 1], dtype=torch.int32)
+
+        def fake_conv(x, weight, bias, *, conv_states, cache_indices, **kwargs):
+            self.assertEqual(conv_states.dtype, x.dtype)
+            torch.testing.assert_close(
+                cache_indices, torch.tensor([0, 1], dtype=torch.int32)
+            )
+            conv_states.add_(2)
+            return sentinel.output
+
+        with patch.object(gdn_backend, "causal_conv1d_fn", side_effect=fake_conv):
+            output = _causal_conv1d_with_cache_dtype(
+                mixed_qkv,
+                sentinel.weight,
+                sentinel.bias,
+                conv_states=conv_states,
+                cache_indices=cache_indices,
+            )
+
+        self.assertIs(output, sentinel.output)
+        torch.testing.assert_close(
+            conv_states[[3, 1]], original[[3, 1]].to(torch.bfloat16).float() + 2
+        )
+        torch.testing.assert_close(conv_states[[0, 2, 4]], original[[0, 2, 4]])
+
     def test_tracked_conv_states_use_cache_dtype(self):
         tracked_states = torch.tensor(
             [[[1.25, -2.5], [3.75, -4.0]], [[5.5, -6.25], [7.0, -8.5]]],
