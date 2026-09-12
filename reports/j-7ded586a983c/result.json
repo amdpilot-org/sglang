@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34149",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the delayed final-prefill abort race on the prepared main: an aborted prefill entered optimistic decode and committed token 101 before consuming the abort. Added guards at scheduler admission and prefill-result commit, preserving mixed-decode behavior and packed metadata cursor alignment.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-7ded586a983c/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunked_req_gate.py test/registered/unit/managers/test_batch_result_processor_hidden_states.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: 3 failed, 11 passed, 2 subtests passed; observed optimistic-decode admission, output_ids changing from [] to [101], and abort precedence loss."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-7ded586a983c/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunked_req_gate.py test/registered/unit/managers/test_batch_result_processor_hidden_states.py test/registered/unit/managers/test_batch_result_processor_spec_grammar.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression and independent boundaries: 20 passed and 2 subtests passed, covering pending-result admission, already-processed results, mixed decode membership, hidden/custom/logprob cursor behavior, sampling-mask precedence, and grammar advancement."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-7ded586a983c/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunked_abort_race.py test/registered/unit/managers/test_batch_result_processor_spec_grammar.py",
+      "exit_code": 0,
+      "what_was_measured": "Additional deferred chunked-abort and grammar boundary coverage: 8 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7ded586a983c/venv/bin/python /tmp/sglang-fixture-tools-j-7ded586a983c/run_server_probe.py --fixture /tmp/amdpilot-repo-j-7ded586a983c/tiny-random-llama --output /job/repo/reports/j-7ded586a983c/raw/gpu_server",
+      "exit_code": 0,
+      "what_was_measured": "Patched source-checkout server performed real gfx950 prefill/decode; /generate, /v1/completions, two-request batch, and streaming completion all returned HTTP 200, with 8 stream events."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7ded586a983c/venv/bin/python -m compileall -q python/sglang/srt/managers/scheduler.py python/sglang/srt/managers/scheduler_components/batch_result_processor.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Touched Python modules compile and the patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-7ded586a983c/raw/gpu_server/server.log identifies AMD gfx950 execution, records Triton compilation warnings and real prefill batches; probe-summary.json records four HTTP 200 results. Post-run rocm-smi reported 0% utilization and 0% allocated VRAM.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The tiny random Llama fixture validates transport and engine execution only, not model semantic accuracy or Qwen behavior.",
+    "The HTTP GPU probe did not deterministically pause at the exact delayed-final-prefill abort window; that race is reproduced by focused scheduler regression fixtures.",
+    "No multi-GPU, pipeline-parallel, data-parallel, distributed, or multi-node runtime validation was performed.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable."
+  ]
+}
