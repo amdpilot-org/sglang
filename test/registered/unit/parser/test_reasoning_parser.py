@@ -55,6 +55,30 @@ class TestBaseReasoningFormatDetector(CustomTestCase):
         self.assertEqual(result.reasoning_text, "This is reasoning")
         self.assertEqual(result.normal_text, "This is normal")
 
+    def test_force_nonempty_content_treats_whitespace_only_content_as_empty(self):
+        detector = BaseReasoningFormatDetector(
+            "<think>", "</think>", force_nonempty_content=True
+        )
+
+        for whitespace in (" ", "\n", "\t", " \r\n\t"):
+            with self.subTest(whitespace=repr(whitespace)):
+                result = detector.detect_and_parse(
+                    "<think>The answer is 42.</think>" + whitespace
+                )
+                self.assertEqual(result.normal_text, "The answer is 42.")
+                self.assertEqual(result.reasoning_text, whitespace)
+
+    def test_force_nonempty_content_preserves_content_with_non_whitespace(self):
+        detector = BaseReasoningFormatDetector(
+            "<think>", "</think>", force_nonempty_content=True
+        )
+        result = detector.detect_and_parse(
+            "<think>Reasoning here</think> answer surrounded by spaces "
+        )
+
+        self.assertEqual(result.normal_text, " answer surrounded by spaces ")
+        self.assertEqual(result.reasoning_text, "Reasoning here")
+
     def test_detect_and_parse_force_reasoning(self):
         """Test forced reasoning mode."""
         detector = BaseReasoningFormatDetector(
@@ -780,6 +804,19 @@ class TestReasoningParser(CustomTestCase):
         )
         self.assertEqual(reasoning, "\nLet me think\n")
         self.assertEqual(normal, "\n\nThe answer is 42.\n")
+
+    def test_force_nonempty_content_rescues_answer_before_blank_tail(self):
+        class Request:
+            chat_template_kwargs = {"force_nonempty_content": True}
+
+        for model_type in ("qwen3", "deepseek-r1", "glm45"):
+            with self.subTest(model_type=model_type):
+                parser = ReasoningParser(model_type, request=Request())
+                reasoning, normal = parser.parse_non_stream(
+                    "<think>The answer is 42.</think> "
+                )
+                self.assertEqual(normal, "The answer is 42.")
+                self.assertEqual(reasoning, " ")
 
     def test_parse_non_stream_strips_repeated_leading_start_tokens(self):
         """Repeated leading start tokens are markers, not reasoning payload."""

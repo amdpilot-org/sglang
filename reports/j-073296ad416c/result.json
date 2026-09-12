@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37652",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the force_nonempty_content whitespace-tail defect in the checked-out implementation for qwen3, deepseek-r1, and glm45. Changed the shared rescue gate to treat whitespace-only normal text as empty, while preserving normal content containing any non-whitespace character.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-073296ad416c/venv/bin/python reproduction script across qwen3, deepseek-r1, and glm45 before the fix",
+      "exit_code": 0,
+      "what_was_measured": "Direct parse_non_stream output showed space, newline, and tab tails stranded 'The answer is 42.' in reasoning_content for every reported parser family. Raw output: reports/j-073296ad416c/raw/reproduction-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-073296ad416c/venv/bin/python -m pytest -q test/registered/unit/parser/test_reasoning_parser.py::TestBaseReasoningFormatDetector::test_force_nonempty_content_treats_whitespace_only_content_as_empty test/registered/unit/parser/test_reasoning_parser.py::TestReasoningParser::test_force_nonempty_content_rescues_answer_before_blank_tail",
+      "exit_code": 1,
+      "what_was_measured": "The added regression failed against the original source condition with seven subtest failures: four independent whitespace forms and qwen3, deepseek-r1, and glm45. Raw output: reports/j-073296ad416c/raw/regression-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-073296ad416c/venv/bin/python -m pytest -q test/registered/unit/parser/test_reasoning_parser.py::TestBaseReasoningFormatDetector::test_force_nonempty_content_treats_whitespace_only_content_as_empty test/registered/unit/parser/test_reasoning_parser.py::TestBaseReasoningFormatDetector::test_force_nonempty_content_preserves_content_with_non_whitespace test/registered/unit/parser/test_reasoning_parser.py::TestReasoningParser::test_force_nonempty_content_rescues_answer_before_blank_tail",
+      "exit_code": 0,
+      "what_was_measured": "The regression and independent non-whitespace boundary passed after the fix: 3 tests and 7 subtests. Raw output: reports/j-073296ad416c/raw/regression-after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-073296ad416c/venv/bin/python -m pytest -q test/registered/unit/parser/test_reasoning_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "Full reasoning parser unit coverage passed: 124 tests and 71 subtests. Raw output: reports/j-073296ad416c/raw/pytest-reasoning-parser.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-073296ad416c/venv/bin/python reproduction script across qwen3, deepseek-r1, and glm45 after the fix",
+      "exit_code": 0,
+      "what_was_measured": "Direct parse_non_stream output rescued the answer for empty, space, newline, and tab tails in all three parsers, while 'answer' and ' answer ' remained normal content. Raw output: reports/j-073296ad416c/raw/reproduction-after.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The defect and correction are confined to deterministic CPU string parsing in reasoning_parser.py; no model, kernel, compiler, or serving execution is involved, so the assigned gfx950 GPU was not used for an unrelated smoke test.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No HTTP server or model-weight reproduction was run because the reported public API reproduction directly exercises the affected parser and requires neither serving nor weights.",
+    "No GPU numerical validation applies to this string-classification change.",
+    "No native library was changed or rebuilt."
+  ],
+  "source_paths": [
+    "python/sglang/srt/parser/reasoning_parser.py",
+    "test/registered/unit/parser/test_reasoning_parser.py"
+  ],
+  "native_paths": []
+}
