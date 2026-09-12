@@ -1,0 +1,58 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36599",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1233",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1200",
+  "candidate_commit": "e0cf917cd8902b7684bb8c2f26899f41f51cd542",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduced the issue-specific defect: DeepseekModelNextN discarded an explicit modelopt_fp4 config before constructing its decoder. At the exact candidate commit, the blanket shared-constructor override is removed, DeepSeek retains its legacy BF16 NextN policy in its resolver, and GLM retains modelopt_fp4 after checking the checkpoint's whole-layer exclusion. Against the published LibertAIDAI/GLM-5.3-Flash-NVFP4 config, the candidate retains FP4 for the NextN decoder/expert path while the real '*.eh_proj' exclusion remains effective. This fully fixes the narrow configuration-routing contract in issue 36599. It does not establish a full GLM serving run or solve the separately tracked GLM exclusion/EP/DSA issues.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1383d8df0900/venv/bin/python (mock only heavyweight layers, instantiate the actual base DeepseekModelNextN)",
+      "exit_code": 0,
+      "what_was_measured": "At base 358c163250ad3b1f62939b01ce1314a0a31a0365, an explicit modelopt_fp4 object reached DeepseekModelNextN but the actual decoder constructor received quant_config=None. Imported deepseek_nextn.py and glm5_next_nextn.py both resolved under /job/repo/python. Evidence: evidence/base-reproduction.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1383d8df0900/venv/bin/python -m pytest -q test/registered/unit/models/test_nextn_quant_config.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate e0cf917cd8902b7684bb8c2f26899f41f51cd542, all 5 candidate regression/boundary tests passed, including constructor propagation, DeepSeek BF16 preservation, GLM quantized and whole-layer-excluded cases, and a non-ModelOpt control. Evidence: evidence/candidate-regression.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1383d8df0900/venv/bin/python using ModelOptFp4Config.from_config on the published GLM-5.3-Flash-NVFP4 config",
+      "exit_code": 0,
+      "what_was_measured": "Independent real-metadata check: GLM retained modelopt_fp4; DeepSeek resolved it to BF16; ModelOpt excluded model.eh_proj due to '*.eh_proj' but did not exclude model.decoder.mlp.experts. The log also records the assigned AMD Instinct MI350X gfx950. Evidence: evidence/adversarial-resolution.log and evidence/glm53-config.json"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1383d8df0900/venv/bin/python (whole-layer exclusion spelling matrix)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial boundary: canonical model.layers.45.* resolves to BF16, while model.language_model.layers.45.*, model.layers.45, and model.layers.45* do not. These are remaining robustness counterexamples for other checkpoint metadata, not the reported checkpoint. Evidence: evidence/adversarial-patterns.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1383d8df0900/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_modelopt_loader.py::TestModelOptFp4LoaderSelection::test_draft_modelopt_fp4_uses_checkpoint_exclusions test/registered/unit/model_loader/test_modelopt_loader.py::TestModelOptFp4LoaderSelection::test_unquantized_modelopt_fp4_preserves_modelopt_workflows",
+      "exit_code": 0,
+      "what_was_measured": "2 adjacent loader tests passed with 6 subtests, covering checkpoint exclusions and serialized/unserialized ModelOpt loader selection. Evidence: evidence/candidate-loader-tests.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1383d8df0900/venv/bin/python -m py_compile python/sglang/srt/models/deepseek_nextn.py python/sglang/srt/models/glm5_next_nextn.py test/registered/unit/models/test_nextn_quant_config.py; git diff --check 358c163... e0cf917...",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python and test files compiled, and the candidate diff passed whitespace validation. Evidence: evidence/candidate-pycompile.log"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The assigned device was detected as one AMD Instinct MI350X, gfx950, with torch 2.11.0+rocm7.2. The issue requires NVIDIA ModelOpt NVFP4/Marlin on SM121 and the checkout rejects modelopt_fp4 on ROCm, so no relevant GPU execution was possible or claimed.",
+  "native_rebuilt": false,
+  "native_rebuild_reason": "The candidate changes only Python source, a Python unit test, and its report; no C++/CUDA/HIP/FlyDSL/native source or extension build inputs changed.",
+  "remaining_counterexamples": [
+    "A GLM checkpoint declaring the whole NextN layer unquantized as model.language_model.layers.45.* is not recognized by the candidate resolver and incorrectly retains modelopt_fp4.",
+    "Equivalent whole-layer exclusions model.layers.45 and model.layers.45* are not recognized; only the exact model.layers.45.* spelling is handled."
+  ],
+  "remaining_limitations": [
+    "No GLM-5.3-Flash-NVFP4 weights were available, so no full checkpoint load, speculative-serving startup, token correctness, or throughput test was performed.",
+    "The reported environment is two NVIDIA DGX Spark GB10/SM121 systems with TP2/EP2 and Marlin; this environment has one AMD gfx950 GPU and cannot validate that architecture/backend/distributed workload.",
+    "The published config was fetched and used for deterministic routing/exclusion checks, but packed checkpoint tensors were not downloaded.",
+    "The original report states that separate exclusion-matching fixes are also needed for the complete GLM bring-up; those companion issues are outside candidate PR 1200 and were not treated as fixed here.",
+    "The deterministic tiny Llama fixture is not GLM/ModelOpt-FP4 equivalent and was intentionally not used as substitute proof."
+  ]
+}
