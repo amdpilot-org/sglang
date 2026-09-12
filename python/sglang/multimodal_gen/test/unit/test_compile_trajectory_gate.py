@@ -146,3 +146,42 @@ def test_gate_keeps_task_metric_separate_from_tensor_parity():
     assert result.checkpoint_metrics["latents"][0]["max_abs"] == 0.0
     assert result.output_metrics["quality"] == pytest.approx(0.7)
     assert result.failures == ("output_metric:quality",)
+
+
+def test_gate_rejects_non_finite_tensor_and_output_metrics():
+    reference = TrajectoryCapture(outputs={"quality": 1.0})
+    candidate = TrajectoryCapture(outputs={"quality": 1.0})
+    reference.record("latents", torch.tensor([1.0]))
+    candidate.record("latents", torch.tensor([float("nan")]))
+    gate = TrajectoryGate(
+        ("latents",),
+        {"latents": {"max_abs": 0.0, "cosine_similarity": 1.0}},
+        {"quality": 1.0},
+    )
+
+    result = evaluate_trajectory_gate(
+        reference,
+        candidate,
+        gate,
+        output_metric_adapters={"quality": lambda lhs, rhs: float("nan")},
+    )
+
+    assert not result.passed
+    assert "tensor:latents:0:max_abs" in result.failures
+    assert "tensor:latents:0:cosine_similarity" in result.failures
+    assert "output_metric:quality" in result.failures
+
+
+def test_gate_compares_nested_tensor_terminal_state_structurally():
+    reference = TrajectoryCapture(
+        terminal_state={"cache": [torch.tensor([1, 2]), {"step": 3}]}
+    )
+    candidate = TrajectoryCapture(
+        terminal_state={"cache": [torch.tensor([1, 2]), {"step": 3}]}
+    )
+    equal = evaluate_trajectory_gate(reference, candidate, TrajectoryGate((), {}))
+    assert equal.passed
+
+    candidate.terminal_state["cache"][0][1] = 4
+    changed = evaluate_trajectory_gate(reference, candidate, TrajectoryGate((), {}))
+    assert changed.failures == ("terminal_state",)
