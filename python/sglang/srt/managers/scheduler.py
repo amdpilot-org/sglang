@@ -5202,6 +5202,22 @@ class Scheduler(
             req = self.waiting_queue.pop(i)
             self._release_aborted_request(req.rid)
             self.beam_coordinator.retire_group(req)
+            if req.session is not None and req.session.streaming:
+                # create_req marks a streaming session inflight before the req
+                # reaches this queue. Since this path removes the req without a
+                # model step, no normal finish callback will clear that state.
+                # Mark the req too: Mamba requests can already own a restored
+                # session slot, and release_kv_cache must take its abort branch
+                # instead of committing this never-executed turn.
+                reason = recv_req.finished_reason or {}
+                req.finished_reason = FINISH_ABORT(
+                    recv_req.abort_message
+                    or reason.get("message")
+                    or "Abort in waiting queue",
+                    status_code=reason.get("status_code"),
+                    err_type=reason.get("err_type"),
+                )
+                req.session.abort_req()
             # Without the initiator's reason the tokenizer falls back to a
             # generic abort message.
             self.ipc_channels.send_to_tokenizer.send_output(
