@@ -26,7 +26,7 @@ from sglang.srt.runtime_context import (
 logger = logging.getLogger(__name__)
 from sglang.kernels.ops.attention.dsa.dequant_k_cache import (
     concat_cast_kv_fp8_pad,
-    dequantize_k_cache_paged,
+    dequantize_k_cache_paged_selective,
     gather_dequant_requant_fp8_paged,
 )
 from sglang.kernels.ops.attention.dsa.quant_k_cache import quantize_k_cache
@@ -2204,8 +2204,10 @@ class DeepseekSparseAttnBackend(
                         self.forward_metadata.page_table_1_flattened
                     )
                     assert page_table_1_flattened is not None
-                    kv_cache = dequantize_k_cache_paged(
-                        kv_cache, page_table_1_flattened
+                    kv_cache, page_table_1, _ = dequantize_k_cache_paged_selective(
+                        kv_cache,
+                        page_table_1_flattened,
+                        page_table_1,
                     )
                 else:
                     kv_cache = _cat([k, k_rope], dim=-1)
