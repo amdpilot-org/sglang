@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33035",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Ported the complete current upstream candidate for opt-in, non-blocking, weighted per-tokenizer-worker multimodal preprocessing admission. The limiter rejects permanently oversized requests with HTTP 400 and transient saturation with HTTP 503, keeps reservations through preprocessing and scheduler handoff, and tracks submitted native executor futures so cancellation cannot release capacity while CPU work is still running. Protocol-specific propagation is covered for raw HTTP generation, OpenAI Responses/transcription, and Anthropic Messages. The feature is disabled by default and intentionally does not bound ASGI request-body parsing before TokenizerManager admission.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-d8507245caeb/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-d8507245caeb/before/test_multimodal_preprocessing_admission.py",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before regression against the untouched prepared base. Collection failed because sglang.srt.managers.multimodal_preprocessing_admission did not exist. Raw output: /tmp/amdpilot-repo-j-d8507245caeb/before/admission-test.log"
+    },
+    {
+      "command": "PYTHONPATH=python:test/registered/unit/entrypoints/openai /tmp/amdpilot-repo-j-d8507245caeb/venv/bin/python -m pytest -q test/registered/unit/server_args/test_server_args.py test/registered/unit/managers/test_multimodal_preprocessing_admission.py test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py test/registered/unit/managers/test_mm_process_config.py test/registered/unit/models/test_llava_processor_pool.py test/registered/unit/multimodal/test_media_artifact_processor.py test/registered/unit/multimodal/test_dots_note_omni.py test/registered/unit/multimodal/test_processor_async_call_sites.py test/registered/unit/multimodal/test_glm4v_mixed_offsets.py test/registered/unit/entrypoints/openai/test_serving_responses_stream.py test/registered/unit/entrypoints/openai/test_serving_transcription.py test/registered/unit/entrypoints/anthropic/test_serving.py test/registered/unit/test_server_args_namespaces.py",
+      "exit_code": 1,
+      "what_was_measured": "Full focused suite: 454 passed and 58 subtests passed; two unrelated context-parallel tests failed because the prepared HIP platform explicitly rejects deprecated prefill CP. No admission-control test failed. Raw output: /tmp/amdpilot-repo-j-d8507245caeb/after/focused-tests.log"
+    },
+    {
+      "command": "PYTHONPATH=python:test/registered/unit/entrypoints/openai /tmp/amdpilot-repo-j-d8507245caeb/venv/bin/python -m pytest -q [same focused files] -k 'not test_canonical_prefill_cp_requires_strategy and not test_context_parallel_handler_initializes_cp_strategy'",
+      "exit_code": 0,
+      "what_was_measured": "All platform-applicable controller, weighted accounting, cancellation/error cleanup, executor-future ownership, protocol error mapping, processor compatibility, and configuration regressions: 454 passed, 2 deselected, 58 subtests passed. Raw output: /tmp/amdpilot-repo-j-d8507245caeb/after/focused-tests-applicable.log"
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files $(git diff --cached --name-only --diff-filter=AM)",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, Ruff lint/format, isort, codespell, Python AST, merge-conflict, private-key, and registered-test policy checks. Raw output: /tmp/amdpilot-repo-j-d8507245caeb/after/pre-commit.log"
+    },
+    {
+      "command": "git diff --cached --check && /tmp/amdpilot-repo-j-d8507245caeb/venv/bin/python -m py_compile $(git diff --cached --name-only --diff-filter=AM -- 'python/*.py' 'python/**/*.py')",
+      "exit_code": 0,
+      "what_was_measured": "Whitespace correctness and byte-compilation of changed production Python sources."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU/kernel/model-forward behavior changes. The deterministic tiny Llama fixture is text-only and cannot qualify multimodal admission or Kimi-K2.6. An unrelated GPU smoke or numerical check would not measure the requested feature."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The limiter starts after FastAPI/ASGI request parsing and therefore cannot bound memory already consumed by HTTP body buffering, JSON parsing, or construction of the request model before TokenizerManager admission.",
+    "The reported 200-request, 5,600-image Kimi-K2.6 workload was not reproduced because the model weights and 1.5 TiB host setup were not provided. Transport and admission behavior is covered with deterministic unit/adversarial tests instead.",
+    "The budget is per tokenizer worker, so operators must divide a desired process-wide or deployment-wide budget across tokenizer workers and replicas.",
+    "No native library was changed or rebuilt; native executor Future lifetimes are exercised using the existing pinned stack.",
+    "Two existing prefill context-parallel server-argument tests are inapplicable on the prepared HIP node because production validation raises 'Prefill CP on HIP/NPU/MUSA is deprecated'; they pass neither before nor as part of this feature and were excluded only from the final applicable-suite run."
+  ]
+}
