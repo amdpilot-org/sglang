@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35691",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2696",
+  "review_issue_url": "https://github.com/amdpilot-org/sglang/issues/2787",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2751",
+  "candidate_commit": "5b6b88cb70670aab3ad36601bb168c569832647c",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base ignores OTEL_SERVICE_NAME and has no custom service-name CLI. At the exact candidate commit, SRT and diffusion CLIs register the option, every current SRT tracing entry point propagates it, diffusion preserves its separate compatibility default, synchronous and asynchronous initialization use the resolved name, and real OTLP exports carry the expected service.name. No candidate defect tied to the original contract was found.",
+  "tests": [
+    {
+      "command": "OTEL_SERVICE_NAME=review-custom /tmp/amdpilot-repo-j-d534de1fbecc/venv/bin/python /job/review-evidence-j-d534de1fbecc/probe_trace_contract.py --env-name review-custom (on base)",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before reproduction using /job/repo/python/sglang/srt/observability/trace.py: the real Resource reported service.name=sglang instead of review-custom. The base launch_server help also contained no --otlp-service-name option."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d534de1fbecc/venv/bin/python -m pytest -q test/registered/unit/observability/test_trace.py test/registered/unit/test_server_args_cli_metadata.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 55 tests and 7 subtests passed, including service-name precedence, empty-value fallback, async exporter propagation, and SRT CLI metadata."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d534de1fbecc/venv/bin/python /job/review-evidence-j-d534de1fbecc/probe_trace_contract.py (independent matrix at candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Independent Resource creation verified explicit name over environment, OTEL_SERVICE_NAME fallback, sglang default, empty explicit value fallback, and sglang-diffusion default. Imports resolved to /job/repo/python/sglang."
+    },
+    {
+      "command": "SGLANG_OTLP_EXPORTER_SCHEDULE_DELAY_MILLIS=50 /tmp/amdpilot-repo-j-d534de1fbecc/venv/bin/python reports/j-e9b604974a4a/verify_otlp_service_name.py (three separate explicit/environment/default cases)",
+      "exit_code": 0,
+      "what_was_measured": "Real OpenTelemetry SDK and OTLP gRPC collector exports reported service.name=cli-real, env-real, and sglang respectively."
+    },
+    {
+      "command": "Diffusion FlexibleArgumentParser parse, py_compile of all changed production Python files, and git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Diffusion CLI parsed --otlp-service-name diffusion-cli with model_path=dummy; all changed production files compiled; candidate diff had no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU was used. The feature changes OpenTelemetry resource metadata and contains no model, tensor, kernel, or numerical behavior; the relevant boundary was validated with real OTLP exports."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No model-backed HTTP server or distributed workload was launched; those paths add no service-name transformation, and each current process_tracing_init call site was inspected, but full process-topology execution was not performed.",
+    "No GPU architecture was exercised because the candidate contains only Python tracing/CLI changes and the contract is architecture-independent.",
+    "No native rebuild was applicable because the candidate changes no native source or extension build inputs.",
+    "An isolated diffusion ServerArgs.from_cli_args construction reached unrelated pipeline model validation; diffusion CLI registration/parsing and its tracing wrapper/default were verified directly instead."
+  ]
+}
