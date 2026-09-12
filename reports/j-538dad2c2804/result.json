@@ -1,0 +1,59 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32449",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/2141",
+  "candidate_commit": "cb61a727f731f4b00935590d85372031d8625a46",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "The recorded base reproducibly raises AttributeError in the inherited insertion and prefix-match contracts because MlxAuxiliaryStateComponent lacks mamba_max_states_per_path and mamba_checkpoint_grid. The base already contains the mamba_allocator alias, so that reported subproblem predates the candidate and is not candidate work. At the exact candidate commit, an independent model-free harness over the real production module confirmed initialization of the inherited fields, synchronous CoW into an existing request slot, CoW with allocation of a new request slot, and no copy when CoW is disabled. The production change is narrowly consistent with the source contract. However, the candidate's three added tests live behind the file-wide MLX availability guard and all 41 tests skip on this host; they also instantiate the component directly rather than driving the real UnifiedRadixCache insertion/match/eviction paths described by the issue. With no Apple Silicon or MLX runtime, the original first-request serving crash and real-cache regression remain unexecuted, so this review cannot honestly mark the original issue fully resolved.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-538dad2c2804/venv/bin/python /job/review_contract_harness.py base",
+      "exit_code": 0,
+      "what_was_measured": "On the recorded base, calls into the real inherited production methods reproduced AttributeError for missing mamba_max_states_per_path during insertion handling and missing mamba_checkpoint_grid during prefix-match finalization. Raw: reports/j-538dad2c2804/raw/base/contract_harness.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-538dad2c2804/venv/bin/python -m pytest -q test/registered/unit/hardware_backend/mlx/test_attention_patching.py (base)",
+      "exit_code": 0,
+      "what_was_measured": "The prepared base collected and skipped all 38 tests because mlx is unavailable. Raw: reports/j-538dad2c2804/raw/base/candidate_test_file.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-538dad2c2804/venv/bin/python /job/review_contract_harness.py candidate",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate cb61a727, the real production class initialized chunk/grid/path-cap fields; independent fake-snapshot boundaries verified existing-slot CoW (7 to 3), newly allocated-slot CoW (7 to 11), clearing the staged source after copy, and no copy when cow_mamba=false. Raw: reports/j-538dad2c2804/raw/candidate/contract_harness.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-538dad2c2804/venv/bin/python -m pytest -q test/registered/unit/hardware_backend/mlx/test_attention_patching.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate cb61a727, all 41 tests skipped due to the absent mlx package; this is collection evidence only, not regression execution. Raw: reports/j-538dad2c2804/raw/candidate/candidate_test_file.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-538dad2c2804/venv/bin/python -m py_compile python/sglang/srt/hardware_backend/mlx/kv_cache/auxiliary_state.py test/registered/unit/hardware_backend/mlx/test_attention_patching.py",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate's modified Python production and test files compile. Raw: reports/j-538dad2c2804/raw/candidate/py_compile.log"
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 cb61a727f731f4b00935590d85372031d8625a46",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate diff has no whitespace errors. Raw: reports/j-538dad2c2804/raw/candidate/diff_check.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Host is x86_64 Linux with torch 2.11.0+rocm7.2 and an AMD Instinct MI350X/gfx950-class GPU; importlib reports no mlx package. A ROCm execution cannot validate an Apple MLX backend defect. See reports/j-538dad2c2804/raw/environment.log."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A real UnifiedRadixCache on Apple MLX inserting the first completed hybrid-SSM request was not executed, so the reported scheduler-crash path remains runtime-unverified.",
+    "A real prefix hit on Apple MLX was not executed, so the copied native auxiliary snapshot's restoration and avoidance of full-prompt recomputation remain runtime-unverified.",
+    "Real-cache slot exhaustion/eviction and matched-but-not-admitted scheduler rollback were not exercised end to end with MLX objects.",
+    "The candidate regression tests do not construct and drive the real UnifiedRadixCache promised by the original issue's model-free reproduction; on this host they are all skipped by the module-level MLX guard."
+  ],
+  "remaining_limitations": [
+    "No Apple Silicon, Metal runtime, mlx package, or hybrid-SSM model weights were available.",
+    "The independent harness uses the actual Python production class and Torch index tensors but substitutes a minimal MLX module and snapshot pool; it validates control-flow contracts, not native MLX array semantics or serving.",
+    "No native sources changed, so no native rebuild was required or performed.",
+    "The assigned AMD GPU was intentionally not used as evidence for an Apple-only backend."
+  ]
+}
