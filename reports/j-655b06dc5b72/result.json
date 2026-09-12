@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/13809",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "87e34445ba8ea528d5d65faab47853f575bf8846",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a verified partial fix for ordinary TP constrained decoding: a non-entry rank skips grammar lookup and carries a placeholder, the entry token is broadcast for constrained batches, and unconstrained batches retain the no-extra-collective path. It intentionally disables this optimization for speculative decoding and active attention context parallelism, so it does not fully resolve the original TP feature request.",
+  "tests": [
+    {
+      "command": "git checkout --detach 358c163250ad3b1f62939b01ce1314a0a31a0365 && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-655b06dc5b72/venv/bin/python /tmp/amdpilot-repo-j-655b06dc5b72/reproduce_review.py",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before behavior: a simulated non-entry TP rank submitted one grammar backend lookup and retained a Future."
+    },
+    {
+      "command": "git checkout --detach 87e34445ba8ea528d5d65faab47853f575bf8846 && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-655b06dc5b72/venv/bin/python /tmp/amdpilot-repo-j-655b06dc5b72/reproduce_review.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after ordinary TP behavior (zero lookup and PlaceholderGrammarObject) and remaining adversarial source paths: speculative TP and CP-active TP each made one backend lookup and retained a Future."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-655b06dc5b72/venv/bin/python -m pytest -q test/registered/unit/constrained/test_grammar_manager.py test/registered/unit/sampling/test_sampling_batch_info.py test/registered/unit/layers/test_sampler_grammar_tp_sync.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and compatibility coverage: 97 passed, including placeholder compilation avoidance, constrained broadcast, legacy fallback, and no collective for unconstrained batches."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-655b06dc5b72/venv/bin/python -m compileall -q python/sglang/srt/constrained python/sglang/srt/layers/sampler.py python/sglang/srt/model_executor/model_runner.py python/sglang/srt/sampling/sampling_batch_info.py",
+      "exit_code": 0,
+      "what_was_measured": "All candidate-changed Python implementation modules compiled successfully."
+    },
+    {
+      "command": "inline Torch ROCm masked-argmax comparison recorded in raw/evidence.txt",
+      "exit_code": 0,
+      "what_was_measured": "On one MI350X, masked argmax [2, 3] matched an independently computed allowed-token reference [2, 3]; this is not distributed-serving evidence."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Torch 2.11.0+rocm7.2 executed an independent mask numerical check on one AMD Instinct MI350X. Only one GPU was visible, so no true TP/CP distributed execution was possible."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With tensor parallelism and speculative decoding active, tp_grammar_entry_only is false; a non-entry TP rank still submits a grammar backend lookup and retains per-rank grammar masking/state.",
+    "With tensor parallelism and an active attention context-parallel group, tp_grammar_entry_only is false; applicable non-entry ranks still compile grammars and apply masks."
+  ],
+  "remaining_limitations": [
+    "Speculative TP needs a correctness design that synchronizes draft/verify-tree grammar masks, FSM advancement, accepted lengths/indexes, and committed tokens; ordinary sampler token broadcast alone does not establish that contract.",
+    "Attention context parallelism needs ownership and collectives across its orthogonal CP/TP request topology; the candidate deliberately retains the legacy path.",
+    "Exactly one GPU was available, preventing real multi-rank TP, speculative TP, attention context-parallel TP, distributed serving, and end-to-end overhead measurement.",
+    "The deterministic tiny Llama fixture cannot qualify the unavailable distributed architectures and was not used as substitute proof.",
+    "No native sources changed, so a native rebuild was not applicable."
+  ]
+}
