@@ -45,6 +45,26 @@ class TestServerArgsCPUBackend(CustomTestCase):
         )
         self.assertEqual(resolution_result(server_args, "sampling_backend"), "pytorch")
 
+    @patch("sglang.srt.arg_groups.platform_hook.cpu_has_rvv_support", return_value=True)
+    @patch("sglang.srt.arg_groups.platform_hook.is_host_cpu_arm64", return_value=False)
+    def test_rvv_cpu_defaults_to_rvv(self, _mock_is_arm64, _mock_has_rvv):
+        server_args = self._make_server_args()
+
+        handle_cpu_backends(server_args)
+
+        self.assertEqual(resolution_result(server_args, "attention_backend"), "rvv")
+        self.assertEqual(resolution_result(server_args, "sampling_backend"), "pytorch")
+
+    @patch("sglang.srt.arg_groups.platform_hook.cpu_has_rvv_support", return_value=True)
+    def test_explicit_cpu_backend_is_not_overridden_by_rvv(self, _mock_has_rvv):
+        server_args = self._make_server_args(attention_backend="torch_native")
+
+        handle_cpu_backends(server_args)
+
+        self.assertEqual(
+            resolution_result(server_args, "attention_backend"), "torch_native"
+        )
+
 
 class TestServerArgsIBDeviceValidation(CustomTestCase):
     def _validate_ib_devices(self, device_str, available_devices=None):

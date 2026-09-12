@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/18072",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "unsupported_architecture",
+  "summary": "Ported the complete three-phase RVV proposal from the related open work onto the prepared main checkout: RVV 1.0 C++ kernels and unit tests, Python dispatch and attention-backend integration, and the RISC-V Docker/documentation path. Adapted CPU backend selection to the current arg_groups resolution architecture and added compatibility/adversarial regression coverage. The prepared host is x86_64 and has no RVV device or RISC-V sysroot/toolchain, so this is an unqualified candidate rather than a claim that the feature is fully verified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-d2960c95291c/venv/bin/python -m pytest -q test/srt/cpu/rvv --disable-warnings",
+      "exit_code": 0,
+      "what_was_measured": "RVV suite collection and non-hardware integration/fallback behavior on x86_64: 14 passed and 49 hardware kernel tests skipped. No RVV numerical execution occurred."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d2960c95291c/venv/bin/python -m pytest -q test/registered/cpu/test_server_args_backend.py test/srt/cpu/rvv/test_rvv_backend_registration.py --disable-warnings -rs",
+      "exit_code": 0,
+      "what_was_measured": "Current server-argument compatibility, RVV default selection, preservation of an explicit backend, backend registration, metadata guards, cache wiring, fallback semantics, and weight-packing behavior: 21 passed."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-d2960c95291c/pre-commit SKIP=no-commit-to-branch /opt/venv/bin/pre-commit run --files <changed Python and RVV C++ files>",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting and static hooks for the changed Python and C++ implementation: isort, Ruff lint/format, codespell, clang-format, AST and conflict checks all passed on the final rerun."
+    },
+    {
+      "command": "/opt/rocm-7.2.4/lib/llvm/bin/clang-22 --target=riscv64-unknown-linux-gnu -march=rv64gcv -mabi=lp64d -mrvv-vector-bits=256 -DCPU_CAPABILITY_RVV -std=c++17 -fsyntax-only -x c++ -include python/sglang/kernels/aot/csrc/cpu/riscv64/vector_math.h /dev/null",
+      "exit_code": 1,
+      "what_was_measured": "Attempted independent RVV compiler validation. The pinned ROCm Clang 22 installation lacks riscv_vector.h, so it cannot compile RVV intrinsics; raw diagnostic is retained in rvv-vector-math-clang.log."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No RISC-V/RVV 1.0 hardware was assigned; all 49 native kernel numerical tests were skipped on the x86_64 host.",
+    "No GPU was used: the requested backend targets RISC-V CPUs, and an unrelated GPU smoke would not validate RVV execution.",
+    "The available pinned Clang 22 is ROCm-specific and does not ship riscv_vector.h; no RISC-V sysroot or Clang 19+ RVV toolchain was available, so the native library was not rebuilt or inspected for emitted RVV instructions.",
+    "Qwen2.5-1.5B-Instruct GSM8K accuracy and RVV-versus-Torch-native performance were not run because they require a supported RISC-V board and model weights. The tiny Llama serving fixture cannot qualify this architecture, RVV numerical accuracy, or performance, so it was not substituted.",
+    "The Docker image was not built because the current node is x86_64 and the documented image requires native linux/riscv64 dependencies, including vendor-provided wheels.",
+    "The linked upstream Phase 1, Phase 2, and Phase 3 changes remain open and their published hardware results were inspected but not independently reproduced here."
+  ]
+}
