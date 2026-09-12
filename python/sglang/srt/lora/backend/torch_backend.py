@@ -11,6 +11,7 @@ from sglang.srt.lora.torch_ops import (
 )
 from sglang.srt.lora.utils import LoRABatchInfo, generate_sequence_lengths
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
+from sglang.srt.utils import is_pin_memory_available
 
 
 @dataclass
@@ -41,6 +42,10 @@ class TorchNativeLoRABackend(BaseLoRABackend):
         **kwargs,
     ):
         super().__init__(max_loras_per_batch, device)
+        self.pin_memory_available = is_pin_memory_available(device)
+
+    def _maybe_pin(self, tensor: torch.Tensor) -> torch.Tensor:
+        return tensor.pin_memory() if self.pin_memory_available else tensor
 
     def run_lora_a_embedding(
         self,
@@ -213,7 +218,7 @@ class TorchNativeLoRABackend(BaseLoRABackend):
                 )
             )
 
-            seg_lens_cpu = (
+            seg_lens_cpu = self._maybe_pin(
                 torch.zeros_like(
                     unique_weight_indices_tensor, dtype=torch.int32, device="cpu"
                 )
@@ -222,26 +227,35 @@ class TorchNativeLoRABackend(BaseLoRABackend):
                     inverse_weight_indices_tensor,
                     original_seq_lens_cpu,
                 )
-                .pin_memory()
             )
 
-            weight_indices_tensor = unique_weight_indices_tensor.pin_memory()
+            weight_indices_tensor = self._maybe_pin(unique_weight_indices_tensor)
         else:
-            weight_indices_tensor = torch.repeat_interleave(
-                torch.tensor(weight_indices, dtype=torch.int32, device="cpu"),
-                original_seq_lens_cpu,
-            ).pin_memory()
-            seg_lens_cpu = torch.ones_like(weight_indices_tensor).pin_memory()
+            weight_indices_tensor = self._maybe_pin(
+                torch.repeat_interleave(
+                    torch.tensor(weight_indices, dtype=torch.int32, device="cpu"),
+                    original_seq_lens_cpu,
+                )
+            )
+            seg_lens_cpu = self._maybe_pin(torch.ones_like(weight_indices_tensor))
 
         seg_indptr_cpu = torch.zeros(
-            (len(seg_lens_cpu) + 1,), dtype=torch.int32, pin_memory=True
+            (len(seg_lens_cpu) + 1,),
+            dtype=torch.int32,
+            pin_memory=self.pin_memory_available,
         )
         seg_indptr_cpu[1:] = torch.cumsum(seg_lens_cpu, dim=0)
         lora_ranks_tensor = torch.tensor(
-            lora_ranks, dtype=torch.int32, pin_memory=True, device="cpu"
+            lora_ranks,
+            dtype=torch.int32,
+            pin_memory=self.pin_memory_available,
+            device="cpu",
         )
         scalings_tensor = torch.tensor(
-            scalings, dtype=torch.float, pin_memory=True, device="cpu"
+            scalings,
+            dtype=torch.float,
+            pin_memory=self.pin_memory_available,
+            device="cpu",
         )
 
         bs = forward_batch.batch_size
