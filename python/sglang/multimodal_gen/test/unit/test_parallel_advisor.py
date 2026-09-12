@@ -120,6 +120,37 @@ def test_stale_code_revision_fails_closed(signature):
     assert resolve_calibrated_plan(report, signature, code_revision="new").plan is None
 
 
+def test_stale_environment_fails_closed(signature):
+    report = CalibrationReport(
+        "code1",
+        {"backend": "nccl", "device": "MI300X", "driver": "6.3"},
+        (result(signature, ParallelExecutionPlan(1)),),
+    )
+    resolution = resolve_calibrated_plan(
+        report,
+        signature,
+        code_revision="code1",
+        environment={"backend": "rccl", "device": "MI355X", "driver": "7.2"},
+    )
+    assert resolution.plan is None
+    assert resolution.reasons == ("calibration environment mismatch",)
+
+
+def test_feasible_report_cannot_select_internally_illegal_plan(signature):
+    illegal = ParallelExecutionPlan(
+        num_gpus=1,
+        cfg_parallel_size=2,
+        tensor_parallel_size=2,
+        sequence_parallel_size=2,
+        fsdp=True,
+        data_parallel_replicas=2,
+    )
+    report = CalibrationReport("code1", {}, (result(signature, illegal),))
+    resolution = resolve_calibrated_plan(report, signature)
+    assert resolution.plan is None
+    assert resolution.reasons == ("parallel degree product does not equal num_gpus",)
+
+
 def test_report_round_trip_and_stable_hash(tmp_path, signature):
     report = CalibrationReport(
         "code", {"driver": "x"}, (result(signature, ParallelExecutionPlan(1)),)
@@ -141,15 +172,24 @@ def test_explicit_flags_override_report(tmp_path, signature):
     assert resolution.source == "explicit_flags"
 
 
-def test_advisor_applies_exact_world_size_one_plan(tmp_path, signature):
+def test_advisor_applies_exact_world_size_one_plan(tmp_path, signature, monkeypatch):
     plan = ParallelExecutionPlan(1)
-    report = CalibrationReport("code", {}, (result(signature, plan),))
+    environment = {"backend": "rccl", "device": "MI355X", "driver": "7.2"}
+    report = CalibrationReport("code", environment, (result(signature, plan),))
     path = tmp_path / "report.json"
     report.dump(path)
     args = SimpleNamespace(
         diffusion_parallel_plan=f"auto:{path}",
         diffusion_workload_signature=json.dumps(asdict(signature)),
         _explicit_arg_names=set(),
+    )
+    monkeypatch.setattr(
+        "sglang.multimodal_gen.runtime.server_args.parallel_advisor.get_git_commit_hash",
+        lambda: "code",
+    )
+    monkeypatch.setattr(
+        "sglang.multimodal_gen.runtime.server_args.parallel_advisor.get_runtime_environment",
+        lambda: environment,
     )
     resolution = apply_advisor_to_server_args(args)
     assert resolution.plan == plan
@@ -158,3 +198,46 @@ def test_advisor_applies_exact_world_size_one_plan(tmp_path, signature):
     assert args.cfg_parallel_degree == args.dp_size == 1
     assert args.enable_cfg_parallel is False
     assert args.use_fsdp_inference is False
+
+
+@pytest.mark.parametrize(
+    ("recorded_code", "recorded_environment", "expected_reason"),
+    [
+        ("old-code", {"device": "current-device"}, "code revision mismatch"),
+        (
+            "current-code",
+            {"device": "old-device"},
+            "calibration environment mismatch",
+        ),
+    ],
+)
+def test_startup_rejects_stale_revision_and_environment(
+    tmp_path,
+    signature,
+    monkeypatch,
+    recorded_code,
+    recorded_environment,
+    expected_reason,
+):
+    plan = ParallelExecutionPlan(1)
+    report = CalibrationReport(
+        recorded_code, recorded_environment, (result(signature, plan),)
+    )
+    path = tmp_path / "report.json"
+    report.dump(path)
+    args = SimpleNamespace(
+        diffusion_parallel_plan=f"auto:{path}",
+        diffusion_workload_signature=json.dumps(asdict(signature)),
+        _explicit_arg_names=set(),
+    )
+    monkeypatch.setattr(
+        "sglang.multimodal_gen.runtime.server_args.parallel_advisor.get_git_commit_hash",
+        lambda: "current-code",
+    )
+    monkeypatch.setattr(
+        "sglang.multimodal_gen.runtime.server_args.parallel_advisor.get_runtime_environment",
+        lambda: {"device": "current-device"},
+    )
+    resolution = apply_advisor_to_server_args(args)
+    assert resolution.plan is None
+    assert resolution.reasons == (expected_reason,)
