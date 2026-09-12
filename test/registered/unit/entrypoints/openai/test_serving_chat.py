@@ -803,6 +803,59 @@ class ServingChatTestCase(unittest.TestCase):
         kwargs = self.tm.tokenizer.apply_chat_template.call_args.kwargs
         self.assertIs(kwargs["enable_thinking"], True)
 
+    def _render_converted_template_kwargs(self, request) -> dict:
+        """Drive conversion through the template render boundary."""
+        self.template_manager.chat_template_name = None
+        captured = {}
+
+        def fake_apply(messages, **kwargs):
+            captured.update(kwargs)
+            return "PROMPT"
+
+        self.tm.tokenizer.apply_chat_template.side_effect = fake_apply
+        self.chat._convert_to_internal_request(request)
+        return captured
+
+    def test_request_reasoning_effort_beats_default_after_conversion(self):
+        self.chat.default_chat_template_kwargs = {
+            "reasoning_effort": "medium",
+            "thinking": True,
+        }
+        request = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "What is 2+2?"}],
+            chat_template_kwargs={"reasoning_effort": "xhigh"},
+        )
+
+        kwargs = self._render_converted_template_kwargs(request)
+
+        self.assertEqual(kwargs["reasoning_effort"], "xhigh")
+        self.assertIs(kwargs["thinking"], True)
+
+    def test_top_level_reasoning_effort_beats_default_after_conversion(self):
+        self.chat.default_chat_template_kwargs = {"reasoning_effort": "medium"}
+        request = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "What is 2+2?"}],
+            reasoning_effort="xhigh",
+        )
+
+        kwargs = self._render_converted_template_kwargs(request)
+
+        self.assertEqual(kwargs["reasoning_effort"], "xhigh")
+
+    def test_default_reasoning_effort_survives_conversion_when_request_is_silent(self):
+        self.chat.default_chat_template_kwargs = {"reasoning_effort": "medium"}
+        request = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "What is 2+2?"}],
+        )
+
+        kwargs = self._render_converted_template_kwargs(request)
+
+        self.assertEqual(kwargs["reasoning_effort"], "medium")
+        self.assertEqual(request.reasoning_effort, "medium")
+
     def test_default_chat_template_kwargs_mirrors_reasoning_effort(self):
         self.template_manager.chat_template_name = None
         self.template_manager.jinja_template_content_format = "string"

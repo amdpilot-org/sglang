@@ -1075,14 +1075,17 @@ class OpenAIServingChat(OpenAIServingBase):
                 request.return_output_ids_in_sglext = True
 
         reasoning_effort = None
-        if not uses_hunyuan_reasoning_effort(
+        uses_hunyuan_effort = uses_hunyuan_reasoning_effort(
             self.reasoning_parser, self.template_manager.reasoning_config
-        ):
+        )
+        explicit_reasoning_effort = request.reasoning_effort is not None
+        if not uses_hunyuan_effort:
             reasoning_effort = (
                 request.chat_template_kwargs.pop("reasoning_effort", None)
                 if request.chat_template_kwargs
                 else None
             )
+            explicit_reasoning_effort |= reasoning_effort is not None
 
         if self.is_gpt_oss and reasoning_effort == "none":
             raise ValueError(
@@ -1113,7 +1116,11 @@ class OpenAIServingChat(OpenAIServingBase):
         is_multimodal = self.tokenizer_manager.model_config.is_multimodal
 
         # Process messages and apply chat template
-        processed_messages = self._process_messages(request, is_multimodal)
+        processed_messages = self._process_messages(
+            request,
+            is_multimodal,
+            explicit_reasoning_effort=explicit_reasoning_effort,
+        )
         # Build sampling parameters
         sampling_params = request.to_sampling_params(
             stop=processed_messages.stop,
@@ -1199,12 +1206,22 @@ class OpenAIServingChat(OpenAIServingBase):
         return adapted_request, request
 
     def _process_messages(
-        self, request: ChatCompletionRequest, is_multimodal: bool
+        self,
+        request: ChatCompletionRequest,
+        is_multimodal: bool,
+        explicit_reasoning_effort: bool = False,
     ) -> MessageProcessingResult:
-        """Process chat messages and apply chat template"""
+        """Process chat messages and apply chat template.
+
+        ``explicit_reasoning_effort`` preserves whether a Chat Completions
+        request supplied an effort before its template kwargs are normalized.
+        Other callers retain their existing precedence by using the default.
+        """
         if self.default_chat_template_kwargs:
             ctk = dict(request.chat_template_kwargs or {})
             for k, v in self.default_chat_template_kwargs.items():
+                if k == "reasoning_effort" and explicit_reasoning_effort:
+                    continue
                 ctk.setdefault(k, v)
             request.chat_template_kwargs = ctk
             effort = ctk.get("reasoning_effort")

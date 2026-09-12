@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38104",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced both reported Chat Completions precedence failures at the apply_chat_template boundary. The conversion path now preserves whether either the top-level reasoning_effort field or chat_template_kwargs.reasoning_effort was explicitly supplied, preventing the server default from overwriting it. Server defaults still apply to silent requests, unrelated defaults still merge, and the Responses API retains its existing separately tested precedence.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-5043561b3d80/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py -k 'request_reasoning_effort_beats_default_after_conversion or top_level_reasoning_effort_beats_default_after_conversion or default_reasoning_effort_survives_conversion_when_request_is_silent'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: nested and top-level explicit xhigh both rendered as the server default medium; the silent-request boundary passed. Raw output: reports/j-5043561b3d80/raw/regression-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5043561b3d80/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py -k 'request_reasoning_effort_beats_default_after_conversion or top_level_reasoning_effort_beats_default_after_conversion or default_reasoning_effort_survives_conversion_when_request_is_silent or default_chat_template_kwargs_overridden_per_request or hunyuan_reasoning_effort_precedence_survives_conversion'",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after render-boundary regression plus independent silent-default, unrelated-template-key, and Hunyuan normalization boundaries: 5 passed, 2 subtests passed. Raw output: reports/j-5043561b3d80/raw/regression-after.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5043561b3d80/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_responses.py -k 'k2_output_parser_reuses_effective_template_default'",
+      "exit_code": 0,
+      "what_was_measured": "Responses API boundary retained its existing server-default precedence: 1 passed. Raw output: reports/j-5043561b3d80/raw/responses-boundary.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5043561b3d80/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py test/registered/unit/entrypoints/openai/test_serving_responses.py",
+      "exit_code": 0,
+      "what_was_measured": "Full affected OpenAI unit files: 173 passed and 70 subtests passed. Raw output: reports/j-5043561b3d80/raw/openai-unit.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5043561b3d80/venv/bin/python -m pre_commit run --files python/sglang/srt/entrypoints/openai/serving_chat.py test/registered/unit/entrypoints/openai/test_serving_chat.py docs/docs/basic_usage/openai_api_completions.mdx",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository formatting, lint, and registered-test validation hooks passed. Raw output: reports/j-5043561b3d80/raw/pre-commit.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is deterministic request-kwargs precedence before engine execution and was reproduced at the actual apply_chat_template call boundary. No GPU kernel or numerical output is involved, so the assigned gfx950 was not used."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported Qwen/Qwen3.8-Flash-Next-FP8 weights and 2x NVIDIA H200 NVL TP2+EP2 environment were unavailable; no full-model reasoning-length or multi-GPU reproduction is claimed.",
+    "The deterministic tests validate Chat Completions conversion and template-render inputs, not model semantic accuracy or generated reasoning length.",
+    "The Responses API intentionally retains its existing server-default precedence and is outside the Chat Completions behavior changed here."
+  ]
+}
