@@ -28,6 +28,19 @@ def _in_progress_response(request: ResponsesRequest) -> ResponsesResponse:
 
 
 class ResponsesRequestTestCase(CustomTestCase):
+    def test_prompt_cache_key_is_preserved(self):
+        request = ResponsesRequest(input="hello", prompt_cache_key="task-a")
+
+        self.assertEqual(request.prompt_cache_key, "task-a")
+        self.assertEqual(request.model_dump()["prompt_cache_key"], "task-a")
+        self.assertIsNone(request.cache_salt)
+
+    def test_prompt_cache_key_defaults_to_none(self):
+        request = ResponsesRequest(input="hello")
+
+        self.assertIsNone(request.prompt_cache_key)
+        self.assertIn("prompt_cache_key", request.model_dump())
+
     def test_function_tool_accepted(self):
         request = ResponsesRequest(
             model="x",

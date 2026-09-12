@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37263",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that ResponsesRequest silently discarded prompt_cache_key, then added the OpenAI field and forwarded it as GenerateReqInput.cache_salt when the native cache_salt is absent. An explicit native cache_salt retains precedence. A single-gfx950 tiny-Llama serving run observed cached-token counts 0/43/0/43 for prompt-cache keys A/A/B/B.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-743166142ea1/venv/bin/python - <<'PY' ... failing schema assertion ... PY",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before issue reproduction: prompt_cache_key was absent from ResponsesRequest.model_dump() while cache_salt remained null. Raw output: reports/j-743166142ea1/raw/failing-before-schema.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-743166142ea1/venv/bin/python -m pytest test/registered/unit/entrypoints/openai/test_responses_protocol.py test/registered/unit/entrypoints/openai/test_serving_responses.py -q",
+      "exit_code": 0,
+      "what_was_measured": "61 focused protocol/serving tests and 2 subtests passed, including schema preservation, adapter forwarding, native cache_salt precedence, and absent/empty boundaries. Raw output: reports/j-743166142ea1/raw/focused-tests-after.txt"
+    },
+    {
+      "command": "SGLANG_QUAL_FIXTURE=/tmp/amdpilot-repo-j-743166142ea1/tiny-random-llama /tmp/amdpilot-repo-j-743166142ea1/venv/bin/python /tmp/amdpilot-repo-j-743166142ea1/create_tiny_llama.py",
+      "exit_code": 0,
+      "what_was_measured": "Recreated the pinned deterministic two-layer Llama fixture with weight SHA256 6632fab7c351a0bd85518d80a89ec673f68139587f5ad3fa8d5ab38fad87e75f outside the worktree."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-743166142ea1/venv/bin/python /tmp/amdpilot-repo-j-743166142ea1/run_server_probe.py --fixture /tmp/amdpilot-repo-j-743166142ea1/tiny-random-llama --output /job/repo/reports/j-743166142ea1/raw/gpu-http-final",
+      "exit_code": 0,
+      "what_was_measured": "A source-checkout server executed on one gfx950 GPU. Four /v1/responses requests with identical 44-token input and keys A/A/B/B all returned HTTP 200 with cached_tokens 0/43/0/43. Ordinary generate/completions/batch/stream probes also returned HTTP 200. The owned process group was stopped and reaped."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Torch reported one AMD Instinct MI355X (gfx950) using ROCm 7.2. The final server log records real GPU prefill/decode and the A/A/B/B cached-token pattern. See reports/j-743166142ea1/raw/gpu-environment.txt and raw/gpu-http-final/."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The deterministic fixture validates HTTP transport, Responses adaptation, engine execution, and radix-cache namespace behavior only; its random tiny Llama weights do not validate semantic accuracy.",
+    "The reported NVIDIA RTX 5090 and Qwen3.8-27B hybrid GDN configuration and 36,022-token latency measurements were not available and were not reproduced.",
+    "No multi-node or distributed workload was tested.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable.",
+    "The pinned fixture needed a private minimal chat template for /v1/responses because its tokenizer has no bundled chat_template. Two diagnostic attempts are retained: one documents that prerequisite and one documents an overlong-prompt max_new_tokens rejection."
+  ]
+}
