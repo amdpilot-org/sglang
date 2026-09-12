@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37128",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Restored per-request spec_draft and spec_verify timing on the active EAGLE V2, multi-layer EAGLE V2, and NGRAM paths. Verify completion is shared by both EAGLE workers and converts accept_lens (which includes the bonus token) to drafts-only num_correct_drafts only when tracing is enabled. The removed spec_draft_extend request stage remains removed. A related upstream fix exists as open PR https://github.com/sgl-project/sglang/pull/37352, but neither the recorded base nor mirror main contained it.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-4ac7fa9d9f8a/venv/bin/python -m pytest -q test/registered/unit/observability/test_spec_decode_tracing.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: all five tests failed because production verify-close support and EAGLE/NGRAM request-tracing call sites were absent. Raw output: reports/j-4ac7fa9d9f8a/raw/regression-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4ac7fa9d9f8a/venv/bin/python -m pytest -q test/registered/unit/observability/test_spec_decode_tracing.py test/registered/unit/observability/test_req_time_stats.py",
+      "exit_code": 0,
+      "what_was_measured": "11 CPU tests passed: restored worker call sites, drafts-only count mapping, one timestamp per batch, and no device read or request mutation when tracing is disabled or the batch is empty. Raw output: reports/j-4ac7fa9d9f8a/raw/focused-tests.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-4ac7fa9d9f8a/venv/bin/python < focused GPU helper script",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI350X (gfx950), a real device int32 accept_lens tensor [3, 1, 4] produced per-request drafts-only trace counts [2, 0, 3]. Raw output: reports/j-4ac7fa9d9f8a/raw/gpu-helper-check.txt"
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run ruff and ruff-format on changed Python files; git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources and regression tests pass repository lint/format checks and contain no whitespace errors. Raw output: reports/j-4ac7fa9d9f8a/raw/lint.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A single assigned gfx950 GPU reported as AMD Instinct MI350X executed the trace-only device-to-host acceptance-count conversion; [3, 1, 4] mapped to [2, 0, 3]. This was not a model-serving reproduction."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No EAGLE or NGRAM model weights were provided, so no live serving/exporter trace was produced.",
+    "The GPU check validates the exact device-tensor conversion used by the fix, not model architecture behavior, semantic accuracy, multi-GPU execution, or multi-node execution.",
+    "The deliberately removed spec_draft_extend RequestStage was not reintroduced."
+  ]
+}
