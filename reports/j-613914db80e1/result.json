@@ -1,0 +1,31 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37755",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source already contains MiMo-V2.5 Pro-specific fused-QKV checkpoint loading, TP compatibility validation, and block-scale de-interleave/requantization. Added focused regression coverage and verified the transformation numerically. No product-code change was justified without the reported private W8A8 checkpoint and Ascend topology.",
+  "tests": [
+    {
+      "command": "SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK=0 /tmp/amdpilot-repo-j-613914db80e1/venv/bin/python -m pytest -q test/registered/unit/models/test_mimo_v2_fused_qkv_weights.py",
+      "exit_code": 0,
+      "what_was_measured": "Six CPU cases covering compatible TP shard merging, incompatible TP rejection, QKV de-interleave plus FP8 scale requantization, and fused-QKV config boundaries; 6 passed."
+    },
+    {
+      "command": "pre-commit run --files test/registered/unit/models/test_mimo_v2_fused_qkv_weights.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, static checks, and registered-test CI metadata for the new regression."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK=0 /tmp/amdpilot-repo-j-613914db80e1/venv/bin/python < gfx950 fused-QKV numerical fixture",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, de-interleave/requantization recovered [1,2,5.1428576,6.0000005,3,7,4,8] against [1,2,5,6,3,7,4,8], max absolute FP8 rounding error 0.1428576."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Ascend 910B device or CANN runtime was available; the NPU kernel path was not executed.",
+    "The private /home/weights/MiMo-V2.5-Pro-W8A8 checkpoint was unavailable, so its exact tensor metadata and semantic accuracy could not be checked.",
+    "Only one gfx950 GPU was assigned; the reported 2-node TP32/DP4 topology was not reproduced.",
+    "The GPU fixture validates tensor layout arithmetic only and is not a substitute for model accuracy or distributed serving validation."
+  ]
+}

@@ -1,0 +1,68 @@
+..F...                                                                   [100%]
+=================================== FAILURES ===================================
+___________ test_fused_qkv_scale_requantization_preserves_qkv_order ____________
+
+    def test_fused_qkv_scale_requantization_preserves_qkv_order():
+        # Two checkpoint shards, each laid out [Q0, Q1, K, V].  Merging them for
+        # runtime TP=1 must produce [all Q, all K, all V].  Distinct values make an
+        # accidental plain concatenation observable after dequantize/requantize.
+        checkpoint_weight = torch.tensor(
+            [[1], [2], [3], [4], [5], [6], [7], [8]], dtype=torch.float8_e4m3fn
+        )
+        checkpoint_scale = torch.ones(4, 1, dtype=torch.float32)
+        weight = torch.nn.Parameter(checkpoint_weight.clone(), requires_grad=False)
+        scale = torch.nn.Parameter(torch.empty(4, 1), requires_grad=False)
+        name = "model.layers.0.self_attn.qkv_proj.weight_scale_inv"
+        config = SimpleNamespace(
+            hybrid_layer_pattern=[0],
+            num_attention_heads=4,
+            num_key_value_heads=2,
+            head_dim=1,
+            v_head_dim=1,
+        )
+
+        with patch("sglang.srt.models.mimo_v2.get_parallel", return_value=_parallel(1, 0)):
+            _resolve_deferred_qkv_scale_inv(
+                {
+                    name.replace(".weight_scale_inv", ".weight"): weight,
+                    name: scale,
+                },
+                {name: checkpoint_scale},
+                expected_fused_tp_size=2,
+                block_size=2,
+                config=config,
+            )
+
+        recovered = weight.float() * scale.repeat_interleave(2, 0).repeat_interleave(2, 1)[:8, :1]
+        expected = torch.tensor([[1], [2], [5], [6], [3], [7], [4], [8]], dtype=torch.float32)
+>       torch.testing.assert_close(recovered, expected, rtol=0.02, atol=0.02)
+E       AssertionError: Tensor-likes are not close!
+E
+E       Mismatched elements: 1 / 8 (12.5%)
+E       Greatest absolute difference: 0.14285707473754883 at index (2, 0) (up to 0.02 allowed)
+E       Greatest relative difference: 0.028571415692567825 at index (2, 0) (up to 0.02 allowed)
+
+test/registered/unit/models/test_mimo_v2_fused_qkv_weights.py:85: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+python/sglang/srt/environ.py:1781
+  /job/repo/python/sglang/srt/environ.py:1781: UserWarning: Environment variable SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK is deprecated. Please use SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK instead.
+    warnings.warn(message)
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/models/test_mimo_v2_fused_qkv_weights.py::test_fused_qkv_scale_requantization_preserves_qkv_order
+1 failed, 5 passed, 18 warnings in 12.28s
