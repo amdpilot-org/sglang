@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/3642",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3233",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3226",
+  "candidate_commit": "6eee21cad4fbdf2e6593eee89a616d756a2c8e5f",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "The prepared base already resolved the original zero-reserved-token completion overflow but still failed reserved-token accounting. The exact candidate preserves feasible automatic truncation, correctly accounts for reserved tokens, and rejects the impossible reserved>context configuration without mutating the request. Its focused suite passed, and an independent 49,152-case grid found no invalid acceptance or unexpected rejection.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-52d208c04f89/venv/bin/python /job/review-evidence-j-52d208c04f89/independent_probe.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "The original 6+8>10 case was already auto-truncated to 6+4 on the prepared base. The inherited reserved-token case failed the invariant with prompt=10, reserved=3, completion=0, total=13 at context=10."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-52d208c04f89/venv/bin/python -m pytest -q test/registered/unit/managers/test_auto_truncate_validation.py test/registered/unit/managers/test_sampling_mask_validation.py test/registered/unit/managers/test_hidden_state_server_mode.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and adjacent compatibility coverage: 13 tests and 11 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-52d208c04f89/venv/bin/python /job/review-evidence-j-52d208c04f89/independent_probe.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Original total overflow, prompt overflow, feasible reserved budgets, reserved==context, reserved>context rejection, and disabled-auto-truncate compatibility all behaved as required."
+    },
+    {
+      "command": "Independent exhaustive TokenizerManager grid: context=1..12; prompt, completion, reserved=0..15 (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "49,152 combinations: 23,040 accepted, 26,112 rejected, zero accepted totals above context, and zero rejections where reserved<=context."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..6eee21cad4fbdf2e6593eee89a616d756a2c8e5f",
+      "exit_code": 0,
+      "what_was_measured": "The candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI355X was visible, but no compatible EAGLE speculative draft model/weights were available. The qualified tiny Llama fixture cannot exercise nonzero reserved tokens, so no unrelated GPU smoke was used as proof."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Nonzero reserved-token behavior was validated directly at TokenizerManager rather than end-to-end with an EAGLE model because compatible draft weights were unavailable.",
+    "The deterministic tiny Llama fixture validates transport and engine execution only and cannot qualify the EAGLE-specific reserved-token path.",
+    "No native source changed, so native rebuild and compiler/ISA validation were not applicable.",
+    "Independent GPU numerical comparison is not applicable to deterministic request-length control flow."
+  ]
+}
