@@ -1,0 +1,32 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33187",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate 41e7ba79d5a83b5e3ddb4f43b733ed0820a04351 and corrected two independently reproduced gaps: abort-only mode now sanitizes logits before sampling, and full-NaN prefill aborts use the comprehensive cleanup path with cache insertion disabled.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-873f9e3a819a/venv/bin/python -m pytest -q test/registered/unit/utils/test_abort_on_nan_logits.py::TestAbortOnNanLogits::test_abort_mode_sanitizes_before_sampling_without_sanitize_flag test/registered/unit/managers/test_batch_result_processor_hidden_states.py::TestPrefillHiddenStateOffsets::test_full_nan_abort_uses_comprehensive_cleanup",
+      "exit_code": 1,
+      "what_was_measured": "At the exact candidate implementation, both regressions failed: abort-only preprocessing retained NaNs and prefill did not call the comprehensive cleanup helper. See raw/failing-before-clean.txt."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-873f9e3a819a/venv/bin/python reports/j-873f9e3a819a/raw/gpu-abort-only.py",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, the candidate produced mask=[True], nan_after_preprocess=True and zero finite values for a 163840-wide row; after correction it produced mask=[True], nan_after_preprocess=False and 163840 finite -1e30 values. See raw/gpu-abort-only-before.txt and raw/gpu-abort-only-after.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-873f9e3a819a/venv/bin/python -m pytest -q test/registered/unit/utils/test_abort_on_nan_logits.py test/registered/unit/managers/test_batch_result_processor_hidden_states.py test/registered/unit/managers/test_batch_result_processor_mamba_boundary.py test/registered/unit/disaggregation/test_prefill_abort_result_cleanup.py",
+      "exit_code": 0,
+      "what_was_measured": "27 tests and 4 subtests passed, covering abort-only sanitization, full/partial row boundaries, prefill/decode behavior, cleanup hooks, no cache insertion, Mamba boundaries, and disaggregated prefill cleanup."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI355X, gfx950:sramecc+:xnack-, torch 2.11.0+rocm7.2; HIP_VISIBLE_DEVICES=0; a 1x163840 GPU logits row was checked before and after the correction.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Kimi-K3 weights, Blackwell SM10x TP=8, the transient production NaN source, and multi-node serving were unavailable.",
+    "The hierarchical-cache guarantee was verified at the publication boundary (release with is_insert=False), not against a live external storage backend.",
+    "Speculative decoding remains unsupported for full-NaN request abort because verified logits rows require algorithm-specific request mapping; the reported production configuration had speculative decoding disabled.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}

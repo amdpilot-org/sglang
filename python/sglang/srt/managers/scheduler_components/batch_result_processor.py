@@ -386,8 +386,7 @@ class SchedulerBatchResultProcessor:
 
                     if i in full_nan_aborts:
                         req.update_finish_state(0)
-                        release_kv_cache(req, self.tree_cache, is_insert=False)
-                        req.time_stats.set_completion_time()
+                        self._handle_sampling_mask_abort(req)
                         continue
                     elif sampling_mask_finish_reason is not None:
                         req.to_finish = sampling_mask_finish_reason
@@ -1291,7 +1290,12 @@ class SchedulerBatchResultProcessor:
         )
 
     def _handle_sampling_mask_abort(self, req: Req) -> None:
-        """Release a request whose sampled token must not be committed."""
+        """Release a request whose sampled token must not be committed.
+
+        This common path is also used for fully-NaN logits so prefill and
+        decode both run every backend-specific cleanup hook and never publish
+        the affected KV through a radix or hierarchical cache.
+        """
         if req.multimodal_inputs is not None and req.session is None:
             req.multimodal_inputs.release_features()
         if get_disagg().disaggregation_decode_enable_offload_kvcache:

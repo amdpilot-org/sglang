@@ -82,7 +82,13 @@ def sanitize_nan_logits(logits: torch.Tensor, msg: str = ""):
     rather than dtype min/max because callers divide logits by temperature,
     which would overflow dtype min/max to +-Inf and softmax back to NaN."""
     maybe_detect_nan(logits, msg)
-    if not envs.SGLANG_SANITIZE_NAN_LOGITS.get():
+    # Request-scoped abort is processed after sampling results reach the host.
+    # Keep every sampling backend safe until then, even when the independent
+    # sanitize flag is disabled.
+    if not (
+        envs.SGLANG_SANITIZE_NAN_LOGITS.get()
+        or envs.SGLANG_ABORT_ON_NAN_LOGITS.get()
+    ):
         return
     maybe_warn_nan(logits, msg)
     torch.nan_to_num_(logits, nan=-1e30, posinf=1e30, neginf=-1e30)
