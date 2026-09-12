@@ -185,6 +185,100 @@ class DeepSeekV32Detector(BaseFormatDetector):
 
         return json.dumps(parameters, ensure_ascii=False)
 
+    @staticmethod
+    def _tool_parameter_schema(func_name: str, tools: list[Tool]) -> dict:
+        for tool in tools:
+            if tool.function.name == func_name:
+                return tool.function.parameters or {}
+        return {}
+
+    def _normalize_wrapped_parameters(
+        self, func_name: str, parameters: str, tools: list[Tool]
+    ) -> str:
+        """Repair the two wrapper keys observed in malformed DSML output.
+
+        A wrapper name that is declared by the tool is a real parameter and must
+        remain untouched. Scalar wrappers are only remapped when the schema gives
+        one unambiguous destination.
+        """
+        try:
+            parsed = json.loads(parameters)
+        except (json.JSONDecodeError, TypeError):
+            return parameters
+        if not isinstance(parsed, dict) or len(parsed) != 1:
+            return parameters
+
+        wrapper = next(iter(parsed))
+        if wrapper not in ("arguments", "input"):
+            return parameters
+
+        schema = self._tool_parameter_schema(func_name, tools)
+        properties = schema.get("properties") or {}
+        if wrapper in properties:
+            return parameters
+
+        value = parsed[wrapper]
+        if isinstance(value, str):
+            try:
+                decoded = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                decoded = value
+            if isinstance(decoded, dict):
+                value = decoded
+
+        if isinstance(value, dict):
+            normalized = value
+        else:
+            required = schema.get("required") or []
+            if len(required) == 1:
+                destination = required[0]
+            elif len(properties) == 1:
+                destination = next(iter(properties))
+            else:
+                return parameters
+            normalized = {destination: value}
+
+        return json.dumps(normalized, ensure_ascii=False)
+
+    def _may_need_wrapper_normalization(
+        self, func_name: str, invoke_content: str, tools: list[Tool]
+    ) -> bool:
+        """Whether streaming this prefix could expose a reserved wrapper key."""
+        schema = self._tool_parameter_schema(func_name, tools)
+        properties = schema.get("properties") or {}
+        candidates = [key for key in ("arguments", "input") if key not in properties]
+        if not candidates:
+            return False
+
+        content = invoke_content.lstrip()
+        if not content:
+            return True
+        if content.startswith("{"):
+            key_prefix = content[1:].lstrip()
+            if not key_prefix:
+                return True
+            if not key_prefix.startswith('"'):
+                return False
+            key_prefix = key_prefix[1:]
+            quote = key_prefix.find('"')
+            if quote != -1:
+                return key_prefix[:quote] in candidates
+            return any(candidate.startswith(key_prefix) for candidate in candidates)
+
+        if content.startswith("<"):
+            match = re.match(
+                r'<｜DSML｜parameter\s+name="([^"]*)', content, re.DOTALL
+            )
+            if match:
+                name_prefix = match.group(1)
+                if '"' in content[match.start(1) :]:
+                    return name_prefix in candidates
+                return any(candidate.startswith(name_prefix) for candidate in candidates)
+            parameter_tag = "<｜DSML｜parameter"
+            return parameter_tag.startswith(content) or content.startswith(parameter_tag)
+
+        return False
+
     def detect_and_parse(self, text: str, tools: list[Tool]) -> StreamingParseResult:
         """
         One-time parsing: Detects and parses tool calls in the provided text.
@@ -213,6 +307,9 @@ class DeepSeekV32Detector(BaseFormatDetector):
                         invoke_match
                     )
                     func_args = self._parse_parameters_from_xml(invoke_content)
+                    func_args = self._normalize_wrapped_parameters(
+                        func_name, func_args, tools
+                    )
                     # construct match_result for parse_base_json
                     match_result = {
                         "name": func_name,
@@ -311,6 +408,13 @@ class DeepSeekV32Detector(BaseFormatDetector):
                 current_params = self._parse_parameters_from_xml(
                     invoke_content, allow_partial=not is_tool_end
                 )
+                defer_arguments = self._may_need_wrapper_normalization(
+                    func_name, invoke_content, tools
+                )
+                if is_tool_end:
+                    current_params = self._normalize_wrapped_parameters(
+                        func_name, current_params, tools
+                    )
 
                 # 3. Calculate and send incremental arguments
                 sent_len = len(self.streamed_args_for_tool[self.current_tool_id])
@@ -323,7 +427,7 @@ class DeepSeekV32Detector(BaseFormatDetector):
                 if is_tool_end:
                     # If complete, send everything remaining
                     argument_diff = current_params[sent_len:]
-                elif prev_params is not None:
+                elif not defer_arguments and prev_params is not None:
                     # If partial, send stable prefix diff
                     if current_params != prev_params:
                         prefix = _find_common_prefix(current_params, prev_params)
