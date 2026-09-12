@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33783",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2002",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1965",
+  "candidate_commit": "723d55b5b5f30fba408b11761e3bd15292d4623b",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes idle completed-prefix reuse and uses a full reset for hierarchical cache state, but deliberately retains live disaggregated-prefill mid-chunk KV. That path still permits stale-weight KV and violates the original complete provenance-boundary contract.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-61bbfee20c03/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_pause_generation.py",
+      "exit_code": 0,
+      "what_was_measured": "Prepared-base existing pause-generation suite: 21 passed and 2 subtests passed; it did not cover the idle cached-prefix failure."
+    },
+    {
+      "command": "Independent inline Python probe on base using TestSchedulerPauseGeneration._new_scheduler and a simulated RadixCache",
+      "exit_code": 0,
+      "what_was_measured": "A four-token completed-request prefix remained matchable 4/4 after idle retract; allocator clear count was zero."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-61bbfee20c03/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_pause_generation.py test/registered/unit/managers/test_retract_all_cache_release.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact-candidate focused suite: 25 passed and 2 subtests passed."
+    },
+    {
+      "command": "Independent inline Python candidate probes for idle completed-prefix and live disaggregated-prefill chunk boundaries",
+      "exit_code": 0,
+      "what_was_measured": "Idle prefix became unmatchable 0/4 and allocator clear ran once; live disaggregated-prefill retained the chunk, prefix remained matchable 4/4, and allocator clear did not run."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One assigned AMD Instinct MI350X gfx950 GPU was visible, but the deterministic scheduler/RadixCache review used CPU simulation and did not execute GPU kernels or model inference."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With disaggregation_mode=PREFILL and a live unfinished chunked_req, pause_generation(mode='retract') intentionally skips tree_cache.reset() and all pool clears; an independently inserted four-token radix prefix remains matchable 4/4 after pause.",
+    "Because the live disaggregated-prefill KV is retained across the pause, the candidate does not establish the issue's required no-old-weight-KV provenance boundary for that documented path."
+  ],
+  "remaining_limitations": [
+    "No model weights or multi-node disaggregated deployment were available, so real model-output divergence and distributed KV-sender teardown were not exercised.",
+    "HiRadix reset semantics were verified by source inspection and candidate mock coverage, not by a real hierarchical host/device cache deployment.",
+    "No native sources changed in the candidate, so a native rebuild was not applicable."
+  ]
+}
