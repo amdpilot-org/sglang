@@ -3,6 +3,12 @@
 import argparse
 import unittest
 
+from sglang.srt.layers.quantization import (
+    QUANTIZATION_METHODS,
+    get_quantization_config,
+)
+from sglang.srt.layers.quantization.awq import AWQMarlinConfig
+from sglang.srt.layers.quantization.gptq import GPTQMarlinConfig
 from sglang.srt.server_args import ServerArgs, _declared_default
 from sglang.srt.utils.common import human_readable_int
 from sglang.test.ci.ci_register import register_cpu_ci
@@ -104,6 +110,25 @@ class TestServerArgsMigratedCliMetadata(CustomTestCase):
         self.assertEqual(server_args.dp_size, 2)
         self.assertEqual(server_args.load_balance_method, "total_tokens")
         self.assertEqual(server_args.tp_size, 4)
+
+    def test_quantization_marlin_is_not_advertised_as_a_direct_method(self):
+        quantization_choices = self.actions_by_option["--quantization"].choices
+
+        self.assertNotIn("marlin", quantization_choices)
+        self.assertNotIn("marlin", QUANTIZATION_METHODS)
+        with self.assertRaisesRegex(ValueError, "Invalid quantization method: marlin"):
+            get_quantization_config("marlin")
+        with self.assertRaises(SystemExit):
+            self.parser.parse_args(
+                ["--model", "dummy", "--quantization", "marlin"]
+            )
+
+        # The explicit formats remain valid; only the ambiguous checkpoint-
+        # conditional alias is excluded from the public CLI.
+        self.assertIn("gptq_marlin", quantization_choices)
+        self.assertIn("awq_marlin", quantization_choices)
+        self.assertIs(get_quantization_config("gptq_marlin"), GPTQMarlinConfig)
+        self.assertIs(get_quantization_config("awq_marlin"), AWQMarlinConfig)
 
 
 if __name__ == "__main__":
