@@ -88,6 +88,12 @@ class CompressedTensorsW4AFP8MoE(CompressedTensorsMoEScheme):
         self.num_bits = config.num_bits
         self.packed_factor = 32 // config.num_bits
         self.group_size = config.group_size
+        if self.group_size != 128:
+            raise ValueError(
+                "CompressedTensorsW4AFP8MoE only supports group_size=128, "
+                f"but the checkpoint uses group_size={self.group_size}. "
+                "Loading it would apply weight scales with the wrong stride."
+            )
         self.weight_quant = weight_quant
         self.input_quant = input_quant
 
@@ -298,7 +304,6 @@ class CompressedTensorsW4AFP8MoE(CompressedTensorsMoEScheme):
         topk_output = dispatch_output.topk_output
         topk_weights, topk_ids, _ = topk_output
 
-        # TODO: currently, group_size is hardcoded to 128 in the cutlass_w4a8_moe kernel.
         output = cutlass_w4a8_moe(
             x,
             layer.w13_weight_packed,
