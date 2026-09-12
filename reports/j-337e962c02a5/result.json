@@ -1,0 +1,26 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35447",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared source already contains the issue-specific fix landed in upstream merge commit 17313cf4b25d7420e1fd10b969d8b911d28e6498: MiniMax H3 reference-audio VAE execution is wrapped in set_forward_context(current_timestep=0, attn_metadata=None), with a direct regression. Suppressing only that wrapper reproduced the reported assertion; the checked-in path passed on gfx950 and correctly restored context state.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-337e962c02a5/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_minimax_h3_media.py -k reference_audio_encode_sets_forward_context",
+      "exit_code": 0,
+      "what_was_measured": "Existing issue-specific regression reaches audio VAE pre_block, observes current_timestep=0, and checks the canonical latent row shape; 1 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-337e962c02a5/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_minimax_h3_media.py",
+      "exit_code": 0,
+      "what_was_measured": "Complete focused MiniMax H3 media unit module; 8 passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-337e962c02a5/venv/bin/python < focused GPU context fixture",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X gfx950, replacing only set_forward_context with a no-op reproduced the exact reported assertion. Current code returned an independently checked all-ones (8, 32) tensor with sum 256.0 and ref_audio_t=4; nested outer context restoration and cleanup after success and exception also passed. See raw/gpu_context_evidence.log."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": "MiniMax H3 weights and the original reference media were unavailable, so no full model/server ref2va reproduction, semantic media validation, or distributed validation was performed. The deterministic GPU fixture qualifies only the traceback's audio-VAE context path."
+}
