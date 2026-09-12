@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31117",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Preserved candidate PR 2371's eager cross-stream event ordering and corrected its host-thread race by holding a per-communicator lock across guard bookkeeping and the native legacy/V2 enqueue. The candidate still cannot fully resolve the original issue because concurrent CUDA graph replay bypasses Python and both native implementations retain unbounded device spins.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-e89cf3de41b7/venv/bin/python reports/j-e89cf3de41b7/check_host_thread_serialization.py /tmp/amdpilot-j-e89cf3de41b7-before",
+      "exit_code": 1,
+      "what_was_measured": "Exact candidate 39673680441fb67c3934e0139f317742a2aa4353 lacks a lock spanning the legacy and V2 native launches."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e89cf3de41b7/venv/bin/python reports/j-e89cf3de41b7/check_host_thread_serialization.py /job/repo",
+      "exit_code": 0,
+      "what_was_measured": "Corrected source holds stream_guard.serialize() around both native launch paths."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e89cf3de41b7/venv/bin/python -m pytest -q test/registered/unit/distributed/test_custom_all_reduce_stream_guard.py test/registered/unit/distributed/test_custom_all_reduce_v2_capability.py",
+      "exit_code": 0,
+      "what_was_measured": "10 tests passed: thread exclusion, eager stream ordering, graph-capture boundary, legacy/V2 launch hooks, and adjacent V2 capability behavior."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e89cf3de41b7/venv/bin/python reports/j-e89cf3de41b7/gpu_host_thread_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X gfx950, two host threads and two GPU streams produced ordered result 2, matching CPU reference 2."
+    },
+    {
+      "command": "pre-commit run --files <changed source, tests, and report files>",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, spelling, safety, and registered-test registry checks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-e89cf3de41b7/raw/gfx950_host_thread_probe.txt records AMD Instinct MI350X gfx950 and ordered_numeric_result=2 matching cpu_reference=2. This is an ordering primitive test, not the original multi-GPU CUDA reproduction."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one AMD gfx950 GPU was available; the two-A100 NVLink CUDA deadlock and green-context workload were not reproduced.",
+    "Concurrent CUDA graph replay bypasses the Python guard and remains unsafe for graphs sharing one communicator.",
+    "V2 push/pull and legacy AOT polling loops remain unbounded; no speculative CUDA device deadline was added without CUDA compiler, ISA, and runtime validation.",
+    "No full model or serving workload was run."
+  ],
+  "source_paths": [
+    "python/sglang/srt/distributed/device_communicators/custom_all_reduce_utils.py",
+    "python/sglang/srt/distributed/device_communicators/custom_all_reduce.py",
+    "python/sglang/srt/distributed/device_communicators/custom_all_reduce_v2.py",
+    "test/registered/unit/distributed/test_custom_all_reduce_stream_guard.py"
+  ],
+  "native_paths": []
+}

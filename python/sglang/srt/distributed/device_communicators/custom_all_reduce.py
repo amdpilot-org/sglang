@@ -286,27 +286,31 @@ class CustomAllreduce:
 
     def _all_reduce_impl(self, inp: torch.Tensor, registered: bool):
         out = torch.empty_like(inp)
-        self.stream_guard.maybe_serialize()
-        if not _is_hip:  # CUDA-like
-            if registered:
-                ops.all_reduce(self._ptr, inp, out, 0, 0)
-            else:
-                ops.all_reduce(
-                    self._ptr, inp, out, self.buffer_ptrs[self.rank], self.max_size
-                )
-        elif self.use_amd_deterministic_impl:
-            inp_size = inp.numel() * inp.element_size()
-            if inp_size < self.max_size:
-                reg_buffer = self.buffer.view(inp.dtype)[: inp.numel()]
-                ops.deterministic_all_reduce_unreg(self._ptr, inp, reg_buffer, out)
-            else:
-                self.register_buffer(inp)
-                ops.deterministic_all_reduce_reg(self._ptr, inp, out)
-        else:  # normal AMD ROCm path
-            if registered:
-                ops.all_reduce_reg(self._ptr, inp, out)
-            else:
-                ops.all_reduce_unreg(self._ptr, inp, self.buffer, out)
+        with self.stream_guard.serialize():
+            if not _is_hip:  # CUDA-like
+                if registered:
+                    ops.all_reduce(self._ptr, inp, out, 0, 0)
+                else:
+                    ops.all_reduce(
+                        self._ptr,
+                        inp,
+                        out,
+                        self.buffer_ptrs[self.rank],
+                        self.max_size,
+                    )
+            elif self.use_amd_deterministic_impl:
+                inp_size = inp.numel() * inp.element_size()
+                if inp_size < self.max_size:
+                    reg_buffer = self.buffer.view(inp.dtype)[: inp.numel()]
+                    ops.deterministic_all_reduce_unreg(self._ptr, inp, reg_buffer, out)
+                else:
+                    self.register_buffer(inp)
+                    ops.deterministic_all_reduce_reg(self._ptr, inp, out)
+            else:  # normal AMD ROCm path
+                if registered:
+                    ops.all_reduce_reg(self._ptr, inp, out)
+                else:
+                    ops.all_reduce_unreg(self._ptr, inp, self.buffer, out)
         return out
 
     def custom_all_reduce(self, input: torch.Tensor) -> Optional[torch.Tensor]:

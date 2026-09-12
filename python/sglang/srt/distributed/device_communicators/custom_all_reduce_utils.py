@@ -10,6 +10,8 @@ import pickle
 import subprocess
 import sys
 import tempfile
+import threading
+from contextlib import contextmanager
 from functools import wraps
 from itertools import product
 from typing import Callable, Dict, List, Optional, Sequence, TypeVar
@@ -449,6 +451,14 @@ class SingleStreamGuard:
         self._last_stream: Optional[torch.cuda.Stream] = None
         self._last_raw_stream: Optional[int] = None
         self._event: Optional[torch.cuda.Event] = None
+        self._launch_lock = threading.Lock()
+
+    @contextmanager
+    def serialize(self):
+        """Serialize guard state together with the associated kernel enqueue."""
+        with self._launch_lock:
+            self.maybe_serialize()
+            yield
 
     def maybe_serialize(self) -> None:
         """Order this launch after the prior launch when its stream changes."""
