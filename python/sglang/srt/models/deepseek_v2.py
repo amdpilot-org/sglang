@@ -102,6 +102,7 @@ from sglang.srt.layers.moe.ep_moe.layer import get_moe_impl_class
 from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
 from sglang.srt.layers.moe.hash_topk import HashTopK
 from sglang.srt.layers.moe.kt_ep_wrapper import KTEPWrapperMethod
+from sglang.srt.layers.moe.router_gate import router_linear_bf16_fp32
 from sglang.srt.layers.moe.token_dispatcher.base import (
     BaseDispatcher,
     CombineInput,
@@ -206,9 +207,6 @@ from sglang.srt.utils import (
 )
 from sglang.srt.utils.custom_op import register_custom_op
 
-if _use_aiter:
-    from sglang.srt.layers.rocm_linear_utils import aiter_dsv3_router_gemm
-
 if _use_aiter_gfx95:
     from sglang.srt.layers.rocm_linear_utils import (
         get_dsv3_gemm_output_zero_allocator_size,
@@ -217,9 +215,7 @@ if _use_aiter_gfx95:
 if _use_aiter:
     pass
 
-if _is_cuda:
-    from sglang.kernels.ops.gemm.tiny_gemm import tiny_gemm_bf16
-elif _is_npu:
+if _is_npu:
     from sglang.srt.hardware_backend.npu.modules.deepseek_v2_attention_mla_npu import (
         forward_dsa_core_npu,
         forward_dsa_prepare_npu,
@@ -517,27 +513,11 @@ class MoEGate(nn.Module):
                 True,  # is_vnni
             )
 
-        if get_exec().deterministic.enable_deterministic_inference:
-            return F.linear(hidden_states, self.weight, None)
-
-        if hidden_states.shape[0] <= self.tiny_router_gemm_max_tokens:
-            logits = tiny_gemm_bf16(
-                hidden_states,
-                self.weight,
-                out_dtype=torch.float32,
-                max_m=self.tiny_router_gemm_max_tokens,
-            )
-        elif _use_aiter:
-            logits = aiter_dsv3_router_gemm(hidden_states, self.weight)
-        elif not _is_cuda:
-            logits = F.linear(hidden_states, self.weight, None)
-        else:
-            # cuBLAS bf16 x bf16 -> fp32 GEMM (torch.mm's out_dtype kwarg is CUDA-only)
-            from sglang.kernels.ops.attention.dsv4 import linear_bf16_fp32
-
-            logits = linear_bf16_fp32(hidden_states, self.weight)
-
-        return logits
+        return router_linear_bf16_fp32(
+            hidden_states,
+            self.weight,
+            tiny_max_tokens=self.tiny_router_gemm_max_tokens,
+        )
 
 
 class DeepseekV2MoE(nn.Module):
