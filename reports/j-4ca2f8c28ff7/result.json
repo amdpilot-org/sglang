@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39073",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/640",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/524",
+  "candidate_commit": "74b6e0b9b61a6789f82ffeecc7c5c4186cd7365c",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "Independent review reproduced the original hidden-import-cause failure on the prepared base, then verified the exact candidate through the real multimodal manager import/lookup path without model weights. The candidate preserves best-effort discovery, reports deterministic concise module/type/message failures only on fatal lookup, refreshes repeated failures, and removes a module's stale failure after a successful retry. No functional counterexample tied to the original contract remained. The supplied 39-character commit prefix resolves to the candidate PR head ending in 7365c.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-4ca2f8c28ff7/venv/bin/python - <<'PY'  # original issue reproducer against base manager path",
+      "exit_code": 0,
+      "what_was_measured": "At base 358c163, import_processors() logged and continued after test_processors.broken raised ImportError, while the later get_mm_processor() ValueError omitted both the module and cause. Evidence: raw/base-original-reproducer.txt."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-4ca2f8c28ff7/venv/bin/python -m pytest -q test/registered/unit/managers/test_multimodal_processor_import_diagnostics.py",
+      "exit_code": 0,
+      "what_was_measured": "At candidate 74b6e0b9b61a6789f82ffeecc7c5c4186cd7365c, its regression exercised import_processors() followed by fatal get_mm_processor(), verified module/type/cause reporting, then verified successful retry clears stale state. One test passed. Evidence: raw/candidate-regression.txt."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-4ca2f8c28ff7/venv/bin/python - <<'PY'  # independent adversarial manager-path assertions",
+      "exit_code": 0,
+      "what_was_measured": "Independent cases verified two differently typed failures are sorted deterministically, a later successful import clears only that module, a repeated failure refreshes its cause, and fatal lookup reports the remaining current failure. Evidence: raw/adversarial.txt."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..74b6e0b9b61a6789f82ffeecc7c5c4186cd7365c",
+      "exit_code": 2,
+      "what_was_measured": "The candidate's committed raw pytest logs contain trailing whitespace. This contradicts its report's diff-check claim but is confined to evidence artifacts and is not a counterexample to the original runtime contract."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The original defect and candidate are Python import discovery/error construction only. The prepared ROCm interpreter reported torch 2.11.0+rocm7.2, HIP 7.2.26015, and torch.cuda.is_available() true, but no GPU kernel or model-weight execution was relevant or used as proof.",
+  "native_rebuilt": false,
+  "remaining_limitations": "No C++, FlyDSL, LLVM, kernel, or other native source changed, and repository-environment.json records native=null and wheel=null, so no native rebuild was applicable. Validation did not launch a full multiprocess server; it directly exercised the actual manager sequence identified by the platform-independent issue. The candidate PR metadata currently names a newer main base, but the candidate commit's sole parent exactly matches this review's prepared base."
+}
