@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38676",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Added tokenizer-process Prometheus histograms for per-item multimodal download duration/bytes and full load duration, plus per-request load_mm_data and processor-call duration. Measurements use perf_counter intervals, preserve missing download observations for non-URL media, remain local to each thread/request, and are emitted on error paths. Regression coverage uses a bounded localhost PNG fixture and concurrent synthetic request stages.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-e925a005e32a/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_mm_latency_metrics.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression on the recorded base: the implementation rejected the metrics observer and had no request-stage timing hook. Raw output: reports/j-e925a005e32a/raw/failing-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e925a005e32a/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_mm_latency_metrics.py test/registered/unit/multimodal/test_base_processor_bad_input.py test/registered/unit/multimodal/test_base_processor_image_decode.py test/registered/unit/observability/test_stat_loggers_di.py",
+      "exit_code": 0,
+      "what_was_measured": "37 tests and 15 subtests passed: real localhost HTTP download timing and byte size, in-memory absent-vs-zero semantics, decode error observation, concurrent request isolation, processor intervals, existing media error/decode behavior, and metrics collector DI. Raw output: reports/j-e925a005e32a/raw/regression-suite-final.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e925a005e32a/venv/bin/python - <<'PY' ... TokenizerMetricsCollector + prometheus_client.generate_latest assertions ... PY",
+      "exit_code": 0,
+      "what_was_measured": "Actual Prometheus exposition for all five metric families; confirmed image download count/sum and bytes, audio load count, request load/processor sums, and absence of an audio download series. Raw output: reports/j-e925a005e32a/raw/prometheus-exposition.txt"
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files python/sglang/srt/utils/common.py python/sglang/srt/multimodal/processors/base_processor.py python/sglang/srt/observability/metrics_collector.py python/sglang/srt/managers/tokenizer_manager.py test/registered/unit/multimodal/test_mm_latency_metrics.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, AST, registry, and safety hooks. Raw output: reports/j-e925a005e32a/raw/pre-commit-second.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e925a005e32a/venv/bin/python - <<'PY' ... torch CUDA matmul compared with NumPy ... PY",
+      "exit_code": 0,
+      "what_was_measured": "Prepared ROCm GPU execution on one AMD Instinct MI350X; a 2x2 FP32 matmul matched an independent NumPy reference with max absolute error 0.0. This validates the assigned GPU environment, not the CPU-side metrics behavior. Raw output: reports/j-e925a005e32a/raw/gpu-numerical-check.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "torch 2.11.0+rocm7.2 reported one AMD Instinct MI350X and produced an exact NumPy-referenced FP32 matmul result; reports/j-e925a005e32a/raw/gpu-numerical-check.txt"
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No native or FlyDSL code changed, so no native rebuild was applicable.",
+    "A full model server was not started or model weights downloaded; Prometheus wiring was exercised directly through the real collector and media/processor implementation with bounded synthetic fixtures.",
+    "Specialized processor subclasses that completely replace BaseMultimodalProcessor.process_mm_data do not pass through the base HF processor-call timer; the common base path named in the issue is covered."
+  ]
+}
