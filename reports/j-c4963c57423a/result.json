@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35331",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR https://github.com/amdpilot-org/sglang/pull/2749 and corrected both concrete counterexamples from review PR https://github.com/amdpilot-org/sglang/pull/3139: Cosmos3 latent preparation now constructs the effective candidate batch and draws video, action, and sound noise with per-candidate generators instead of passing a generator list to torch.randn.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c4963c57423a/venv/bin/python /tmp/adversarial_candidate.py",
+      "exit_code": 1,
+      "what_was_measured": "Exact candidate commit failed before denoising with TypeError because torch.randn received generator=list; it also reported one conditioning item for two logical candidates. Raw output: reports/j-c4963c57423a/failing_before.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c4963c57423a/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_candidate_trajectory.py python/sglang/multimodal_gen/test/unit/test_cosmos3.py python/sglang/multimodal_gen/test/unit/test_pi05_action_api.py",
+      "exit_code": 0,
+      "what_was_measured": "155 tests and 43 subtests passed, including single-conditioning-image candidate expansion, exact per-seed sequential RNG parity, reducer behavior, API lowering, and Cosmos3 compatibility. Raw output: reports/j-c4963c57423a/pytest_focused_after.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c4963c57423a/venv/bin/python reports/j-c4963c57423a/adversarial_candidate_after.py",
+      "exit_code": 0,
+      "what_was_measured": "The corrected stage constructs physical latent batch size 2 for two candidate generators. Raw output: reports/j-c4963c57423a/passing_after.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c4963c57423a/venv/bin/python reports/j-c4963c57423a/gpu_numerical_script.py",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X, a two-candidate physical latent batch was bitwise equal to independent sequential per-seed torch.randn references and the candidates were distinct. Raw output: reports/j-c4963c57423a/gpu_numerical.txt"
+    },
+    {
+      "command": "git diff --check && /tmp/amdpilot-repo-j-c4963c57423a/venv/bin/python -m compileall -q python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/cosmos3.py python/sglang/multimodal_gen/test/unit/test_candidate_trajectory.py reports/j-c4963c57423a",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources compile and the patch has no whitespace errors. Ruff was unavailable in the pinned interpreter."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "reports/j-c4963c57423a/gpu_numerical.txt records AMD Instinct MI350X execution, physical_latent_batch=2, sequential_parity=True, and candidate_distinct=True.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Cosmos3 action model weights were unavailable, so end-to-end Cosmos3 serving and semantic action quality were not tested.",
+    "TP/SP, CFG-parallel, cancellation/failure recovery, unrelated-request dynamic co-batching, and N={1,2,4,8,10} model benchmarks remain unverified.",
+    "The GPU check qualifies latent RNG and physical batch construction only; it does not qualify the unavailable Cosmos3 architecture or weights.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}

@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
@@ -13,6 +14,7 @@ from sglang.multimodal_gen.runtime.candidate_trajectory import (
 )
 from sglang.multimodal_gen.runtime.pipelines_core.stages.model_specific_stages.cosmos3 import (
     Cosmos3DecodingStage,
+    Cosmos3LatentPreparationStage,
 )
 
 CAPABILITY = ActionCandidateCapability(
@@ -98,3 +100,94 @@ def test_cosmos3_returns_one_reduced_action_with_stable_candidate_identity():
     assert [item["candidate_id"] for item in payload["candidates"]] == [0, 1, 2]
     assert [item["seed"] for item in payload["candidates"]] == [100, 101, 102]
     assert result.action_pred.shape == (1, 1, 2)
+
+
+def test_cosmos3_latents_use_candidate_batch_and_per_candidate_generators(monkeypatch):
+    monkeypatch.setattr(
+        "sglang.multimodal_gen.runtime.pipelines_core.stages."
+        "model_specific_stages.cosmos3.get_local_torch_device",
+        lambda: torch.device("cpu"),
+    )
+
+    class FakeVAE(torch.nn.Module):
+        config = SimpleNamespace(
+            scale_factor_temporal=4,
+            scale_factor_spatial=16,
+            latents_mean=[0.0, 0.0],
+            latents_std=[1.0, 1.0],
+        )
+
+        def __init__(self):
+            super().__init__()
+            self.anchor = torch.nn.Parameter(torch.zeros(1))
+
+        def encode(self, video):
+            latent = torch.zeros(video.shape[0], 2, 1, 1, 1)
+            return SimpleNamespace(mode=lambda: latent)
+
+    stage = Cosmos3LatentPreparationStage(FakeVAE(), SimpleNamespace(latent_channel=2))
+    stage.log_info = lambda *args, **kwargs: None
+    stage.use_declared_component = lambda **kwargs: nullcontext()
+    batch = SimpleNamespace(
+        extra={},
+        num_frames=5,
+        height=16,
+        width=16,
+        preprocessed_image=torch.zeros(1, 3, 16, 16),
+        preprocessed_video=None,
+        data_type=DataType.ACTION,
+        generator=[
+            torch.Generator().manual_seed(100),
+            torch.Generator().manual_seed(101),
+        ],
+        seed=100,
+        batch_size=2,
+        sampling_params=SimpleNamespace(action_mode=None),
+        sound_duration=0.0,
+    )
+
+    result = stage.forward(batch, SimpleNamespace())
+
+    assert result.latents.shape == (2, 2, 2, 1, 1)
+    assert result.extra["condition_latents"].shape[0] == 2
+    reference = torch.cat(
+        [
+            torch.randn(
+                (1, 2, 2, 1, 1),
+                generator=torch.Generator().manual_seed(seed),
+                dtype=torch.bfloat16,
+            )
+            for seed in (100, 101)
+        ]
+    )
+    torch.testing.assert_close(result.latents[:, :, 1:], reference[:, :, 1:])
+
+
+def test_cosmos3_latents_reject_generator_count_mismatch(monkeypatch):
+    monkeypatch.setattr(
+        "sglang.multimodal_gen.runtime.pipelines_core.stages."
+        "model_specific_stages.cosmos3.get_local_torch_device",
+        lambda: torch.device("cpu"),
+    )
+    stage = Cosmos3LatentPreparationStage(
+        SimpleNamespace(
+            config=SimpleNamespace(scale_factor_temporal=4, scale_factor_spatial=16)
+        ),
+        SimpleNamespace(latent_channel=2),
+    )
+    stage.log_info = lambda *args, **kwargs: None
+    batch = SimpleNamespace(
+        extra={},
+        num_frames=1,
+        height=16,
+        width=16,
+        preprocessed_image=None,
+        preprocessed_video=None,
+        data_type=DataType.ACTION,
+        generator=[torch.Generator().manual_seed(100)],
+        seed=100,
+        batch_size=2,
+    )
+
+    with pytest.raises(ValueError, match="effective batch size of 2"):
+        stage.forward(batch, SimpleNamespace())
