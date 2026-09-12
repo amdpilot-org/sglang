@@ -1,7 +1,7 @@
 import asyncio
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Dict, List, Optional
 
 from fastapi import (
     APIRouter,
@@ -39,6 +39,14 @@ from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 
 logger = init_logger(__name__)
 router = APIRouter(prefix="/v1/meshes", tags=["meshes"])
+_MESH_JOB_TASKS: set[asyncio.Task[None]] = set()
+
+
+def _start_mesh_job(job: Awaitable[None]) -> asyncio.Task[None]:
+    task = asyncio.create_task(job)
+    _MESH_JOB_TASKS.add(task)
+    task.add_done_callback(_MESH_JOB_TASKS.discard)
+    return task
 
 
 def _normalize_format(fmt: Optional[str]) -> str:
@@ -219,7 +227,7 @@ async def create_mesh(
         sampling_params=sampling_params,
     )
 
-    asyncio.create_task(_dispatch_job_async(request_id, batch))
+    _start_mesh_job(_dispatch_job_async(request_id, batch))
     return MeshResponse(**job)
 
 
