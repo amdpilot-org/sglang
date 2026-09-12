@@ -33,7 +33,7 @@ from sglang.srt.configs.model_config import (
 )
 from sglang.srt.configs.update_config import adjust_config_with_unaligned_cpu_tp
 from sglang.srt.debug_utils.dumper import dumper
-from sglang.srt.distributed import bootstrap
+from sglang.srt.distributed import bootstrap, get_tp_group
 from sglang.srt.distributed.device_communicators.mooncake_transfer_engine import (
     maybe_init_shared_mooncake_transfer_engine,
 )
@@ -1908,42 +1908,60 @@ class ModelRunner:
         Returns:
             A list of next_token_ids
         """
-        # LogitsProcessorOutput is normally invocation-scoped, but CUDA graph
-        # runners may reuse backing objects. Never leak an auxiliary result from
-        # a previous replay into a request with no observer state.
-        logits_output.auxiliary_device_output = None
-        observer = self.sampling_observer
-        # Preserve two-argument overrides when observation is inactive.
-        if observer is not None and observer.is_active(forward_batch.sampling_info):
-            observer_state = self._preprocess_logits(
+        gather_to_root = logits_output.tp_logits_gathered
+        is_tp_root = get_tp_group().rank_in_group == 0
+        if not gather_to_root or is_tp_root:
+            # LogitsProcessorOutput is normally invocation-scoped, but CUDA graph
+            # runners may reuse backing objects. Never leak an auxiliary result from
+            # a previous replay into a request with no observer state.
+            logits_output.auxiliary_device_output = None
+            observer = self.sampling_observer
+            # Preserve two-argument overrides when observation is inactive.
+            if observer is not None and observer.is_active(forward_batch.sampling_info):
+                observer_state = self._preprocess_logits(
+                    logits_output,
+                    forward_batch.sampling_info,
+                    observer=observer,
+                )
+            else:
+                observer_state = self._preprocess_logits(
+                    logits_output, forward_batch.sampling_info
+                )
+
+            # Sample the next tokens.
+            next_token_ids = self.sampler(
                 logits_output,
                 forward_batch.sampling_info,
-                observer=observer,
+                forward_batch.return_logprob,
+                forward_batch.top_logprobs_nums,
+                forward_batch.token_ids_logprobs,
+                # For prefill, we only use the position of the last token.
+                (
+                    forward_batch.positions
+                    if forward_batch.forward_mode.is_decode()
+                    else forward_batch.seq_lens - 1
+                ),
             )
+            if observer_state is not None:
+                logits_output.auxiliary_device_output = observer.after_sample(
+                    observer_state,
+                    next_token_ids,
+                )
         else:
-            observer_state = self._preprocess_logits(
-                logits_output, forward_batch.sampling_info
+            assert logits_output.next_token_logits is None
+            # There are no full logits to preprocess on a non-root gather rank,
+            # but these invocation-local objects must still be released/reset.
+            forward_batch.sampling_info.grammar_mask = None
+            logits_output.auxiliary_device_output = None
+            next_token_ids = torch.empty(
+                forward_batch.seq_lens.shape,
+                dtype=torch.int64,
+                device=forward_batch.input_ids.device,
             )
 
-        # Sample the next tokens
-        next_token_ids = self.sampler(
-            logits_output,
-            forward_batch.sampling_info,
-            forward_batch.return_logprob,
-            forward_batch.top_logprobs_nums,
-            forward_batch.token_ids_logprobs,
-            # For prefill, we only use the position of the last token.
-            (
-                forward_batch.positions
-                if forward_batch.forward_mode.is_decode()
-                else forward_batch.seq_lens - 1
-            ),
-        )
-        if observer_state is not None:
-            logits_output.auxiliary_device_output = observer.after_sample(
-                observer_state,
-                next_token_ids,
-            )
+        if gather_to_root:
+            get_tp_group().broadcast(next_token_ids, src=0)
+
         self.ngram_embedding_manager.update_after_decode(
             next_token_ids=next_token_ids,
             forward_batch=forward_batch,

@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/3365",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3196",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3127",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/3193",
+  "candidate_commit": "a02a0a49441faa169529abec7f93cfcdba92fe13",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved the candidate's root-only tensor-parallel logits gather and sampled-token broadcast for compatible eager generation, while correcting both independently reproduced review counterexamples. DLLM_EXTEND now retains all-gather because dLLM consumes full_logits on every TP rank and bypasses ModelRunner.sample. Non-root gather ranks now clear grammar_mask and stale auxiliary_device_output without preprocessing absent logits.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-dc8071e434fa/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-dc8071e434fa/test_review_counterexamples.py (at a02a0a49441faa169529abec7f93cfcdba92fe13)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction against the exact candidate: both adversarial checks failed. Eager DLLM_EXTEND incorrectly selected gather, and a non-root sampling rank retained grammar_mask and auxiliary_device_output. Raw output: /tmp/amdpilot-repo-j-dc8071e434fa/candidate-counterexamples-failing.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-dc8071e434fa/venv/bin/python -m pytest -q test/registered/unit/layers/test_tp_logits_gather.py test/registered/unit/model_executor/test_model_runner_decode_rows.py /tmp/amdpilot-repo-j-dc8071e434fa/test_review_counterexamples.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after candidate regression, adjacent decode-row, and independent adversarial coverage: 14 passed. Raw output: /tmp/amdpilot-repo-j-dc8071e434fa/corrected-focused-tests.log"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/layers/logits_processor.py python/sglang/srt/model_executor/model_runner.py test/registered/unit/layers/test_tp_logits_gather.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, source-safety, and registered-test validation hooks passed."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-dc8071e434fa/venv/bin/python < independent FP32 full-vocabulary versus two-shard projection check",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X, the independent full projection and concatenated two-shard projection had max_abs_error=0.0 and identical argmax token IDs. This validates local sharding/order arithmetic, not distributed communication. Raw output: /tmp/amdpilot-repo-j-dc8071e434fa/gpu-local-numerical.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI350X ran the local numerical reference under Torch 2.11.0+rocm7.2 and HIP 7.2.26015; exactly one GPU was visible.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one GPU was assigned, so no real two-rank RCCL gather/broadcast serving or model execution and no collective performance comparison were possible.",
+    "The deterministic tiny Llama serving fixture cannot qualify tensor-parallel communication on one GPU or the distinct dLLM architecture, so it was not used as substitute evidence.",
+    "CUDA graph, speculative decoding, return-logprob, prefill-only, DP-attention, attention-TP, TP-LM-head all-to-all, and dLLM paths intentionally retain all-gather for correctness and therefore do not receive this optimization.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
