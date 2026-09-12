@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38707",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "summary": "Candidate commit 228043c plausibly corrects rank-local SCATTERED PP proxy row views in decode graph capture/replay and dummy warmup, but its regression tests only helper arithmetic and the original 8x gfx942 GLM-5.3 DSA multi-chunk serving failure could not be reproduced or cleared on the assigned single gfx950 GPU. An adjacent prefill graph capture path still uses global rows.",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-9112ca0362ed/venv/bin/python -m pytest -q test/registered/unit/model_executor/runner/test_pp_proxy_token_count.py test/registered/unit/model_executor/runner/test_decode_cuda_graph_runner.py test/registered/unit/model_executor/test_cuda_graph_buffer_registry.py",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate's helper regression and neighboring decode graph/buffer registry suite: 57 passed. This did not run PP communication or the original serving workload."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9112ca0362ed/venv/bin/python -u <independent boundary and prefill-capture probe>",
+      "exit_code": 0,
+      "what_was_measured": "Independent helper boundaries plus a real-gfx950 tensor passed through PrefillCudaGraphRunner._capture_pp_proxy_tensors; helper returned 8 local rows for global=32/TP=4, while the adjacent prefill capture path returned 32 rows and did not consult scattered-boundary state."
+    },
+    {
+      "command": "git diff 358c163250ad3b1f62939b01ce1314a0a31a0365..228043c10a9a95e33a94076e3f1e74abdae151df --check",
+      "exit_code": 2,
+      "what_was_measured": "Candidate diff has whitespace errors only in candidate-owned report artifacts; no runtime source whitespace error was reported."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI355X gfx950:sramecc+:xnack- was visible and used for an independent tensor/capture-shape probe. This is not the issue's 8x MI300X gfx942 architecture.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "PrefillCudaGraphRunner._capture_pp_proxy_tensors still returns global num_tokens rows and does not apply the candidate's SCATTERED attention-TP row-count invariant.",
+    "No evidence shows that 43k with full or 100k with tc_piecewise stops faulting on 8x gfx942 TP=4/PP=2 GLM-5.3 DSA.",
+    "No evidence covers the overlap-scheduler first-request failure reported in the same issue.",
+    "The candidate's failing-before test is a missing-symbol import error, not reproduction of incorrect graph proxy shapes or the HIP fault."
+  ],
+  "remaining_limitations": [
+    "Only one gfx950 GPU was assigned; the report requires 8x gfx942 and distributed TP=4/PP=2 or PP=4.",
+    "The zai-org/GLM-5.3 753B FP8 weights were unavailable.",
+    "The original request-length and decode-backend matrix was not executable.",
+    "The tiny Llama fixture cannot validate GLM DSA semantics, gfx942 behavior, or distributed PP and was not used as substitute proof.",
+    "No native files changed, so no native rebuild was applicable."
+  ]
+}
