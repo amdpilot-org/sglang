@@ -1,0 +1,32 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/29160",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "SGLang main already pins FlashInfer 0.6.18, whose tagged source contains the issue-specific +1 route-map padding workaround merged in FlashInfer PR 4288. No duplicate SGLang operator change was justified. This is source/dependency verification; the original SM100 runtime failure was not reproduced on the assigned gfx950 GPU.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-98215d94d979/venv/bin/python reports/j-98215d94d979/audit_flashinfer_route_map.py /tmp/amdpilot-repo-j-98215d94d979/flashinfer-v0.6.12-trtllm_fused_moe_kernel_launcher.cu --expect vulnerable",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before source boundary: FlashInfer v0.6.12 has unpadded route-map allocations and does not contain all three +1 safeguards."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-98215d94d979/venv/bin/python reports/j-98215d94d979/audit_flashinfer_route_map.py /tmp/amdpilot-repo-j-98215d94d979/flashinfer-v0.6.18-trtllm_fused_moe_kernel_launcher.cu --expect fixed",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after source boundary: FlashInfer v0.6.18 pads the common launcher and both independent routing metadata entry points and has no legacy unpadded route-map assignment."
+    },
+    {
+      "command": "rocm-smi --showproductname --showuniqueid --showmeminfo vram",
+      "exit_code": 0,
+      "what_was_measured": "The assigned device is one AMD Instinct MI350X with gfx950 ISA, not an NVIDIA SM100/B200 device."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The only assigned GPU is AMD Instinct MI350X gfx950 under ROCm 7.2. The defect is in a CUDA SM100 FlashInfer cubin, which cannot execute on this GPU; FlashInfer is not installed in the prepared ROCm environment.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No NVIDIA B200/SM100 GPU was available, so the CUDA illegal-memory-access behavior and the corrected cubin were not executed.",
+    "GLM-5.2-NVFP4 weights and the original crash dump were unavailable.",
+    "The reported TP=8, speculative decoding, hierarchical cache, and production serving workload were not reproduced on the single assigned GPU.",
+    "The audit verifies the dependency pin and tagged integration workaround, not semantic accuracy or full-model stability."
+  ]
+}
