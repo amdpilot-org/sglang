@@ -197,6 +197,42 @@ class TestForwardPassMetrics(unittest.TestCase):
         self.assertEqual(metrics.queued_requests.num_prefill_requests, 1)
         self.assertEqual(metrics.queued_requests.num_decode_requests, 1)
 
+    def test_emit_decode_batch_falls_back_when_seq_lens_cpu_is_none(self):
+        reqs = [_FakeReq(8, output_len=3), _FakeReq(12, output_len=5)]
+        batch = self._make_batch(reqs=reqs, seq_lens_cpu=None)
+
+        with patch(
+            "sglang.srt.managers.scheduler_components.metrics_reporter.time.monotonic",
+            return_value=101.0,
+        ):
+            self.reporter._emit_forward_pass_metrics(batch)
+
+        scheduled = self.scheduler._fpm_publisher.metrics[0].scheduled_requests
+        self.assertEqual(scheduled.num_decode_requests, 2)
+        self.assertEqual(scheduled.sum_decode_kv_tokens, 28)
+        self.assertEqual(scheduled.var_decode_kv_tokens, 9.0)
+
+    def test_decode_batch_prefers_available_seq_lens_cpu(self):
+        batch = self._make_batch(
+            reqs=[_FakeReq(100), _FakeReq(200)],
+            seq_lens_cpu=[7, 13],
+        )
+
+        scheduled = self.reporter._build_scheduled_request_metrics(batch)
+
+        self.assertEqual(scheduled.num_decode_requests, 2)
+        self.assertEqual(scheduled.sum_decode_kv_tokens, 20)
+        self.assertEqual(scheduled.var_decode_kv_tokens, 9.0)
+
+    def test_empty_decode_batch_with_no_seq_lens_cpu_reports_zero(self):
+        batch = self._make_batch(reqs=[], seq_lens_cpu=None)
+
+        scheduled = self.reporter._build_scheduled_request_metrics(batch)
+
+        self.assertEqual(scheduled.num_decode_requests, 0)
+        self.assertEqual(scheduled.sum_decode_kv_tokens, 0)
+        self.assertEqual(scheduled.var_decode_kv_tokens, 0.0)
+
     def test_emit_uses_device_timer_gpu_time(self):
         self.scheduler._fpm_uses_device_timer = True
         self.scheduler._fpm_gpu_time_acc = 0.042

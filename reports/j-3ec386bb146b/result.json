@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31309",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the Forward Pass Metrics crash in the checked-out implementation when a pure decode batch has seq_lens_cpu=None, then made decode metrics fall back to req.seqlen. Added regression coverage through the emitting path plus populated-mirror and empty-batch boundary cases. Upstream PR https://github.com/sgl-project/sglang/pull/31319 is open with the same fallback concept, but the prepared main base did not contain it.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-3ec386bb146b/venv/bin/python -m pytest -q test/registered/unit/observability/test_forward_pass_metrics.py -k 'decode_batch_falls_back or decode_batch_prefers or empty_decode_batch'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: the FPM emit path raised TypeError at metrics_reporter.py while iterating a decode batch whose seq_lens_cpu was None; the populated seq_lens_cpu boundary passed. Raw output: reports/j-3ec386bb146b/failing-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3ec386bb146b/venv/bin/python -m pytest -q test/registered/unit/observability/test_forward_pass_metrics.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after validation of all 21 Forward Pass Metrics unit tests, including fallback count/sum/population variance, preservation of the populated CPU mirror, and an empty decode batch. Raw output: reports/j-3ec386bb146b/passing-after.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is CPU-side observability aggregation before publication and was deterministically reproduced in the real SchedulerMetricsReporter emit path without executing a GPU kernel. No GPU result is claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original 8x NVIDIA B200, GLM-5.1, NSA/TRTLLM, DP-attention distributed deployment was unavailable; no full-model or multi-node reproduction is claimed.",
+    "The assigned single gfx950 cannot reproduce the report's multi-rank NVIDIA/Gloo failure cascade, and GPU execution is not needed to exercise the faulty metrics aggregation branch.",
+    "The prepared Python environment does not contain the ruff module, so ruff checks were unavailable; git diff --check passed.",
+    "No native code changed and no native rebuild was applicable."
+  ]
+}
