@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38817",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the reported Float8_e4m3fn/BFloat16 promotion failure at the MTP normalization-to-concat boundary. Native RMSNorm and GemmaRMSNorm preserved the FP8 input dtype, and the following BF16 concat failed. Float8 inputs now use the native FP32 accumulation path and return the norm weight/model activation dtype; existing BF16/FP16 fast paths are unchanged. GPU regression coverage validates both norm variants, preserved dequantization scales, output dtype, and the downstream concat against independent FP64 references.",
+  "tests": [
+    {
+      "command": "SGLANG_USE_AITER=0 /tmp/amdpilot-repo-j-ab7112e6986d/venv/bin/python -m pytest -q test/registered/layers/test_layernorm_fusion.py -k 'float8_input_returns_model_dtype'",
+      "exit_code": 0,
+      "what_was_measured": "Public RMSNorm and GemmaRMSNorm GPU dispatch with Float8_e4m3fn inputs; BF16 output/concat contract and numerical agreement with an independent FP64 RMS normalization reference. One test and two subtests passed."
+    },
+    {
+      "command": "SGLANG_USE_AITER=0 /tmp/amdpilot-repo-j-ab7112e6986d/venv/bin/python -m pytest -q test/registered/layers/test_layernorm_fusion.py",
+      "exit_code": 0,
+      "what_was_measured": "The complete registered layernorm fusion test file on ROCm: two tests passed, two optional FlashInfer tests skipped, and three subtests passed."
+    },
+    {
+      "command": "SGLANG_USE_AITER=1 /tmp/amdpilot-repo-j-ab7112e6986d/venv/bin/python -m pytest -q test/registered/layers/test_layernorm_fusion.py -k 'float8_input_returns_model_dtype'",
+      "exit_code": 0,
+      "what_was_measured": "The same Float8 MTP boundary regression with AITER enabled; one test and two subtests passed."
+    },
+    {
+      "command": "SGLANG_USE_AITER=0 /tmp/amdpilot-repo-j-ab7112e6986d/venv/bin/python < GPU numerical reference script",
+      "exit_code": 0,
+      "what_was_measured": "MI350X/gfx950 execution over quantization scales 0.03125, 0.125, and 0.5. All outputs and concatenations were BF16. Maximum absolute error versus FP64 was 0.0019461 for RMSNorm and 0.0105713 for GemmaRMSNorm. Raw output: /job/reports/j-ab7112e6986d/raw/gpu_numerical_reference.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ab7112e6986d/venv/bin/python -m compileall -q python/sglang/srt/layers/layernorm.py test/registered/layers/test_layernorm_fusion.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Python syntax compilation and patch whitespace validation."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "All numerical and regression tests ran on the single assigned AMD Instinct MI350X, ROCm 7.2, gfx950:sramecc+:xnack-.",
+  "native_rebuilt": false,
+  "remaining_limitations": "The issue report does not identify the model/checkpoint or provide a complete launch command, so an end-to-end 0.5.6 service reproduction with the reporter's weights was not possible. The exact failing tensor operation and current MTP normalization/concat path were reproduced and validated on GPU. No compiler or ISA claim is made, and no native code changed."
+}

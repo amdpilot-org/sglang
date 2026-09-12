@@ -3,7 +3,7 @@ import unittest
 
 import torch
 
-from sglang.srt.layers.layernorm import RMSNorm
+from sglang.srt.layers.layernorm import GemmaRMSNorm, RMSNorm
 from sglang.test.ci.ci_register import register_amd_ci, register_cuda_ci
 from sglang.test.test_utils import CustomTestCase
 
@@ -41,6 +41,60 @@ class TestRMSNormInputShape(CustomTestCase):
                     actual[0], expected[0], atol=1e-2, rtol=1.5e-2
                 )
                 torch.testing.assert_close(actual[1], expected[1], atol=1e-2, rtol=1e-2)
+
+    def test_float8_input_returns_model_dtype(self):
+        """MTP can feed an FP8 embedding into a BF16 normalization boundary."""
+        torch.manual_seed(1)
+        shape = (5, 512)
+        scale = torch.tensor(0.125, device="cuda", dtype=torch.float64)
+        source = torch.randn(shape, device="cuda", dtype=torch.float64)
+        quantized = (source / scale).to(torch.float8_e4m3fn)
+        dequantized = quantized.to(torch.float64) * scale
+        hidden = torch.randn(shape, device="cuda", dtype=torch.bfloat16)
+
+        for layer_cls in (RMSNorm, GemmaRMSNorm):
+            with self.subTest(layer_cls=layer_cls.__name__):
+                layer = layer_cls(shape[-1]).to(device="cuda", dtype=torch.bfloat16)
+                layer.weight.data.normal_(mean=0.0, std=0.1)
+
+                # Supply the preserved quantization scale before normalization;
+                # this mirrors the MTP embedding dequantization boundary.
+                actual = layer.forward_native(dequantized.to(torch.bfloat16))
+                concatenated = torch.cat((actual, hidden), dim=-1)
+
+                weight = layer.weight.detach().to(torch.float64)
+                if layer_cls is GemmaRMSNorm:
+                    weight = 1.0 + weight
+                variance = dequantized.square().mean(dim=-1, keepdim=True)
+                reference = (
+                    dequantized
+                    * torch.rsqrt(variance + layer.variance_epsilon)
+                    * weight
+                )
+
+                self.assertEqual(actual.dtype, torch.bfloat16)
+                self.assertEqual(concatenated.dtype, torch.bfloat16)
+                torch.testing.assert_close(
+                    actual.float(), reference.float(), atol=2e-2, rtol=2e-2
+                )
+
+                # Exercise the reported raw-FP8 path too: it must widen rather
+                # than leaking FP8 into the following BF16 concat.
+                raw_actual = layer(quantized)
+                raw_input = quantized.to(torch.float64)
+                raw_variance = raw_input.square().mean(dim=-1, keepdim=True)
+                raw_reference = (
+                    raw_input
+                    * torch.rsqrt(raw_variance + layer.variance_epsilon)
+                    * weight
+                )
+                self.assertEqual(raw_actual.dtype, torch.bfloat16)
+                torch.testing.assert_close(
+                    raw_actual.float(), raw_reference.float(), atol=2e-2, rtol=2e-2
+                )
+                self.assertEqual(
+                    torch.cat((raw_actual, hidden), dim=-1).dtype, torch.bfloat16
+                )
 
 
 class TestRMSNormFp8QuantFusion(CustomTestCase):
