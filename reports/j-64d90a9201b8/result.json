@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38069",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Added the explicit per-request skip_cache_insert field across native, Engine, OpenAI chat/completions/responses, tokenizer, scheduler, session, encoder, and rebootstrap paths. Cache lookup remains enabled while device/HiCache insertion is suppressed and request-owned KV is released. Removed the unrelated fake-bootstrap-host inference, made synthetic callers opt out explicitly, and included the chunked-prefill ownership fix required by the skip path.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-64d90a9201b8/venv/bin/python -c 'GenerateReqInput(text=\"x\", skip_cache_insert=True)' on the recorded base",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced the missing API before changes: construction raised TypeError; raw output is /job/raw/j-64d90a9201b8/failing-before.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-64d90a9201b8/venv/bin/python -m pytest -q test/registered/unit/managers/test_io_struct.py test/registered/unit/mem_cache/test_skip_radix_cache_insert.py test/registered/unit/entrypoints/openai/test_serving_completions.py test/registered/unit/entrypoints/openai/test_serving_chat.py test/registered/unit/entrypoints/test_http_server_warmup.py test/registered/unit/managers/test_priority_scheduling_disaggregation.py test/registered/unit/disaggregation/test_encode_receiver.py test/registered/unit/mem_cache/test_session_token_share_unit.py test/registered/unit/mem_cache/test_radix_cache_cpp_unit.py",
+      "exit_code": 1,
+      "what_was_measured": "Candidate-before-prerequisite regression: 239 passed and four chunked-prefill ownership assertions failed, proving the skip path still returned before advancing request-owned KV. Raw output: /job/raw/j-64d90a9201b8/unit-focused.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-64d90a9201b8/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_skip_radix_cache_insert.py test/registered/unit/managers/test_io_struct.py test/registered/unit/entrypoints/openai/test_serving_completions.py test/registered/unit/entrypoints/openai/test_serving_chat.py",
+      "exit_code": 0,
+      "what_was_measured": "211 passed with 78 subtests: field normalization and isolation, explicit Req propagation, fake-host independence, cache-hit reads, insertion suppression, finished-request cleanup, and chunked radix/chunk/SWA paths. Raw output: /job/raw/j-64d90a9201b8/unit-passing-after.txt."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 pytest -q test/registered/e2e/mem_cache/test_skip_cache_insert.py (runtime model override only: Qwen/Qwen2.5-1.5B-Instruct)",
+      "exit_code": 0,
+      "what_was_measured": "5 tests passed with 10 subtests through live /generate and OpenAI chat request paths on plain radix and HiCache write_through: skipped writes, subsequent normal insertion, cache-hit reads by opted-out requests, per-item batch isolation, chunked prefill, and host-tier suppression. Raw output: /job/raw/j-64d90a9201b8/e2e-gpu-qwen.txt."
+    },
+    {
+      "command": "pytest -q test/registered/e2e/mem_cache/test_skip_cache_insert.py using repository default model",
+      "exit_code": 1,
+      "what_was_measured": "Environment-only startup failure: the default meta-llama/Llama-3.2-1B-Instruct is gated and returned HTTP 401. Raw output: /job/raw/j-64d90a9201b8/e2e-gpu.txt."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The live E2E matrix passed on assigned GPU 0, AMD Instinct MI350X, gfx950, unique ID 0x6e4208b780600d88. Inventory is /job/raw/j-64d90a9201b8/gpu-inventory.txt and server/test output is /job/raw/j-64d90a9201b8/e2e-gpu-qwen.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": "The prefill-only PD E2E was not run. The repository-default gated Llama model could not be accessed, so the same cache E2E was executed with the public Qwen/Qwen2.5-1.5B-Instruct model. No C++/FlyDSL native source changed, so no native rebuild was applicable. Raw logs and model/build caches remain under /job outside the checkout."
+}
