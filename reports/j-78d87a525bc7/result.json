@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33360",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared base already contains the issue-specific fix from upstream PR #31700: DeepSeek-V4 post-attention hidden states and token IDs use replicate rather than partial DP gathers, preventing already-reduced attention-TP replicas from being summed and scaled by attn_tp_size. Added regression coverage; no duplicate production change was made.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-78d87a525bc7/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v4_dp_gather_semantics.py",
+      "exit_code": 0,
+      "what_was_measured": "Three source-contract boundaries: replicated post-attention hidden-state gather, cloned replicate gathers for main and NextN token IDs, and preservation of the intentionally partial TBO gather. Result: 3 passed."
+    },
+    {
+      "command": "SGLANG_DSV4_GATHER_TEST_MODELS_DIR=/tmp/amdpilot-repo-j-78d87a525bc7/pre-fix-models /tmp/amdpilot-repo-j-78d87a525bc7/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v4_dp_gather_semantics.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before fixture restoring the historical partial hidden-state gather and non-cloned token-ID inputs. Result: 2 failed, 1 passed; the independent TBO boundary remained valid."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-78d87a525bc7/venv/bin/python - <<'PY' # GPU gather-arithmetic and aliasing reference; see reports/j-78d87a525bc7/gfx950_gather_reference.log",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, summing replicated tensors scaled values exactly by attention-TP widths 2 and 4, leader-only replicate semantics had zero error, an input_ids view was mutated by in-place zeroing, and a clone preserved the source."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A numerical gather-semantics and aliasing reference ran on the assigned AMD Instinct MI350X gfx950. This was not a Marlin, full-model, or distributed execution."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one AMD gfx950 GPU was available; the report requires eight NVIDIA H800 GPUs with TP8/DP4.",
+    "DeepSeek-V4-Flash-0731 weights were unavailable, so generated-text accuracy was not reproduced locally.",
+    "NVIDIA Marlin kernels cannot be executed on the assigned AMD GPU.",
+    "No multi-GPU or multi-node claim is made; full-system evidence is limited to the documented upstream PR #31700 reproduction."
+  ]
+}
