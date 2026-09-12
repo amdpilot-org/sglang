@@ -944,6 +944,179 @@ class TestPrefillAdder(CustomTestCase):
             )._swa_req_never_fits(**req)
         )
 
+    def _build_dsv4_issue_req(self, *, prompt_len, rem_swa=20_992, size_swa=20_992):
+        """Reproduce the admission geometry reported in upstream issue #31205."""
+        adder, req = self._build_hybrid_swa_chunked_req(
+            page_size=512,
+            rem_swa=rem_swa,
+            rem_chunk=32_768,
+            extend_input_len=prompt_len,
+        )
+        self.mock_token_allocator.size_swa = size_swa
+        self.mock_tree_cache.sliding_window_size = 4096
+        # PD prefill forces max_new_tokens=1 before scheduler admission.
+        req.sampling_params.max_new_tokens = 1
+        req.sampling_params.ignore_eos = False
+        req.swa_host_hit_length = 0
+        req.last_node = MagicMock()
+        return adder, req
+
+    def test_dsv4_oversized_swa_budget_is_chunked_instead_of_starving(self):
+        # Reported failure: a 20,742-token prompt has an SWA budget larger than
+        # the entire 20,992-token pool, so the old gate deferred it forever at
+        # the FCFS queue head. Simulate that old gate first, then verify the
+        # current escape hatch admits a page-aligned chunk and makes progress.
+        old_adder, old_req = self._build_dsv4_issue_req(prompt_len=20_742)
+        with patch.object(old_adder, "_swa_req_never_fits", return_value=False):
+            self.assertIs(
+                old_adder.add_one_req(
+                    old_req, has_chunked_req=False, truncation_align_size=None
+                ),
+                AddReqResult.NO_TOKEN,
+            )
+        old_req.set_extend_range.assert_not_called()
+
+        adder, req = self._build_dsv4_issue_req(prompt_len=20_742)
+        result = adder.add_one_req(
+            req, has_chunked_req=False, truncation_align_size=None
+        )
+
+        self.assertIsNot(result, AddReqResult.NO_TOKEN)
+        self.assertIn(req, adder.can_run_list)
+        self.assertEqual(req.extend_range.length, 19_968)
+        self.assertLess(req.extend_range.length + 1 + 512, 20_992)
+
+    def test_dsv4_swa_capacity_boundaries(self):
+        # Just below total capacity, the complete prompt is admitted unchanged.
+        fits_adder, fits_req = self._build_dsv4_issue_req(prompt_len=19_968)
+        self.assertIs(
+            fits_adder.add_one_req(
+                fits_req, has_chunked_req=False, truncation_align_size=None
+            ),
+            AddReqResult.OTHER,
+        )
+        self.assertEqual(fits_req.extend_range.length, 19_968)
+
+        # At exact capacity the conservative token-pool gate requires slack, so
+        # the request takes the escape hatch and is safely chunked.
+        edge_adder, edge_req = self._build_dsv4_issue_req(prompt_len=19_969)
+        self.assertIs(
+            edge_adder.add_one_req(
+                edge_req, has_chunked_req=False, truncation_align_size=None
+            ),
+            AddReqResult.OTHER,
+        )
+        self.assertEqual(edge_req.extend_range.length, 19_968)
+
+        # A request that exceeds only currently available SWA (not total pool
+        # capacity) must still defer until running work drains.
+        busy_adder, busy_req = self._build_dsv4_issue_req(
+            prompt_len=20_742, rem_swa=20_000, size_swa=40_000
+        )
+        self.assertIs(
+            busy_adder.add_one_req(
+                busy_req, has_chunked_req=False, truncation_align_size=None
+            ),
+            AddReqResult.NO_TOKEN,
+        )
+        busy_req.set_extend_range.assert_not_called()
+
+    def test_intrinsically_oversized_swa_req_with_zero_chunk_cap_is_rejected(self):
+        adder, req = self._build_dsv4_issue_req(
+            prompt_len=2_000, rem_swa=512, size_swa=512
+        )
+
+        self.assertIs(
+            adder.add_one_req(req, has_chunked_req=False, truncation_align_size=None),
+            AddReqResult.REJECT,
+        )
+
+        req.set_extend_range.assert_not_called()
+        self.assertEqual([item[0] for item in adder.rejected_reqs], [req])
+        self.assertIn("capacity=512 tokens", adder.rejected_reqs[0][1])
+
+    def test_ignore_eos_intrinsically_oversized_swa_req_is_rejected(self):
+        adder, req = self._build_dsv4_issue_req(
+            prompt_len=2_000, rem_swa=512, size_swa=512
+        )
+        self.mock_tree_cache.disable = True
+        req.sampling_params.ignore_eos = True
+
+        for _ in range(3):
+            result = adder.add_one_req(
+                req, has_chunked_req=False, truncation_align_size=None
+            )
+            if result is AddReqResult.REJECT:
+                break
+
+        self.assertIs(result, AddReqResult.REJECT)
+        req.set_extend_range.assert_not_called()
+        self.assertEqual([item[0] for item in adder.rejected_reqs], [req])
+
+    def test_ignore_eos_swa_req_under_transient_pressure_still_defers(self):
+        adder, req = self._build_dsv4_issue_req(
+            prompt_len=2_000, rem_swa=512, size_swa=4_096
+        )
+        self.mock_tree_cache.disable = True
+        req.sampling_params.ignore_eos = True
+
+        self.assertIs(
+            adder.add_one_req(req, has_chunked_req=False, truncation_align_size=None),
+            AddReqResult.NO_TOKEN,
+        )
+        self.assertEqual(adder.rejected_reqs, [])
+
+    def test_intrinsically_oversized_swa_req_rejects_below_one_page_cap(self):
+        # 1,023 free tokens leave 510 after decode/page headroom: positive, but
+        # still less than one 512-token page and therefore not a usable chunk.
+        adder, req = self._build_dsv4_issue_req(
+            prompt_len=2_000, rem_swa=1_023, size_swa=1_023
+        )
+
+        self.assertTrue(adder._swa_req_never_fits(2_048, 1))
+        self.assertEqual(adder._swa_chunk_cap(1), 0)
+        self.assertIs(
+            adder.add_one_req(req, has_chunked_req=False, truncation_align_size=None),
+            AddReqResult.REJECT,
+        )
+
+    def test_zero_chunk_cap_under_transient_pressure_still_defers(self):
+        adder, req = self._build_dsv4_issue_req(
+            prompt_len=8_000, rem_swa=512, size_swa=4_096
+        )
+
+        self.assertTrue(adder._swa_req_never_fits(8_192, 1))
+        self.assertEqual(adder._swa_chunk_cap(1), 0)
+        self.assertEqual(adder._swa_pool_chunk_cap(1), 3_072)
+        self.assertIs(
+            adder.add_one_req(req, has_chunked_req=False, truncation_align_size=None),
+            AddReqResult.NO_TOKEN,
+        )
+        self.assertEqual(adder.rejected_reqs, [])
+
+    def test_rejected_swa_head_does_not_block_runnable_tail(self):
+        adder, head = self._build_dsv4_issue_req(
+            prompt_len=2_000, rem_swa=4_096, size_swa=4_096
+        )
+        # A page-rounded host load-back alone exceeds the pool, leaving no
+        # possible extend chunk even though an ordinary short request can fit.
+        head.swa_host_hit_length = 4_096
+
+        _, tail = self._build_dsv4_issue_req(
+            prompt_len=128, rem_swa=4_096, size_swa=4_096
+        )
+
+        self.assertIs(
+            adder.add_one_req(head, has_chunked_req=False, truncation_align_size=None),
+            AddReqResult.REJECT,
+        )
+        self.assertIs(
+            adder.add_one_req(tail, has_chunked_req=False, truncation_align_size=None),
+            AddReqResult.CONTINUE,
+        )
+        self.assertEqual([item[0] for item in adder.rejected_reqs], [head])
+        self.assertEqual(adder.can_run_list, [tail])
+
 
 if __name__ == "__main__":
     unittest.main()

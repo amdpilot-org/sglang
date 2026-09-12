@@ -1,0 +1,32 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31205",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the independent review's zero-page SWA chunk counterexample against candidate 1d3dec7eab68bfaf1e28ab1068b2438543d3c406. Preserved its valid safe-chunking coverage and added terminal HTTP 400 rejection/removal for requests that cannot fit one page-aligned chunk even after the total SWA pool drains, while retaining deferral under transient pressure and allowing later queue entries to run.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-bc6ea174a336/venv/bin/python - <<'PY' (direct PrefillAdder reproduction recorded in reports/j-bc6ea174a336/raw/reproduction-before.txt)",
+      "exit_code": 0,
+      "what_was_measured": "Before the correction, the candidate implementation reported never_fits=true and chunk_cap=0, then returned NO_TOKEN three times without an extend range for the 512/512/512/1/2000 counterexample; an independent short request was runnable."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bc6ea174a336/venv/bin/python -m pytest -q test/registered/unit/managers/test_prefill_adder.py",
+      "exit_code": 0,
+      "what_was_measured": "After the correction, all 34 PrefillAdder tests and 12 subtests passed, including the candidate's reported-geometry tests, exact and sub-page permanent-capacity rejections, transient-pressure deferral, and rejected-head/runnable-tail progress."
+    },
+    {
+      "command": "git diff --check && /tmp/amdpilot-repo-j-bc6ea174a336/venv/bin/python -m compileall -q python/sglang/srt/managers/schedule_policy.py python/sglang/srt/managers/scheduler.py",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors and both modified production modules byte-compiled successfully."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The corrected scheduler-admission path and its unit tests are CPU-only and launched no GPU kernels; no GPU numerical claim is made.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Pro/DSpark weights and the reported 1P1D TP4+TP4, mooncake, multi-node, 8xB300 deployment were unavailable.",
+    "No full HTTP serving-path, model-semantic, transfer-path, or distributed reproduction is claimed.",
+    "No native source changed, so a native rebuild was not applicable.",
+    "The prepared Python environment did not contain ruff; git diff --check and Python byte-compilation were used alongside the complete focused unit module."
+  ]
+}

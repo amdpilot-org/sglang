@@ -3901,7 +3901,7 @@ class Scheduler(
                 truncation_align_size=self.truncation_align_size,
             )
 
-            if self.enable_lora:
+            if self.enable_lora and res != AddReqResult.REJECT:
                 running_loras.add(req.lora_id)
 
             if res != AddReqResult.CONTINUE:
@@ -3931,10 +3931,23 @@ class Scheduler(
                             req.kv.mamba_pool_idx.unsqueeze(-1)
                         )
                         req.kv.mamba_pool_idx = None
+                if res == AddReqResult.REJECT:
+                    continue
                 break
 
         if mamba_allocator is not None:
             mamba_allocator.alloc_group_end()
+
+        rejected_set = {req for req, _ in adder.rejected_reqs}
+        if rejected_set:
+            self.waiting_queue = [
+                x for x in self.waiting_queue if x not in rejected_set
+            ]
+            for req, error_msg in adder.rejected_reqs:
+                req.time_stats.trace_ctx.abort(abort_info={"reason": error_msg})
+                prepare_abort(req, error_msg, status_code=HTTPStatus.BAD_REQUEST)
+                self.output_streamer.stream_output([req], req.return_logprob)
+                self._release_aborted_request(req.rid)
 
         # Update waiting queue
         can_run_list: List[Req] = adder.can_run_list
