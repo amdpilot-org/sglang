@@ -56,13 +56,12 @@ class TestMqaLogitsBudgetArithmetic(CustomTestCase):
                 num_rows=64, row_bytes=row_bytes, budget_bytes=budget
             )
         )
-        # A budget below one row uses the smallest possible useful launch.
-        self.assertEqual(
+        # A sub-row budget cannot be honored by any useful launch and must not
+        # be silently exceeded.
+        with self.assertRaisesRegex(RuntimeError, "cannot fit one aligned row"):
             mqa_logits_rows_per_chunk(
-                num_rows=4096, row_bytes=row_bytes, budget_bytes=1
-            ),
-            1,
-        )
+                num_rows=4096, row_bytes=row_bytes, budget_bytes=row_bytes - 1
+            )
         self.assertIsNone(
             mqa_logits_rows_per_chunk(
                 num_rows=128,
@@ -185,6 +184,69 @@ class TestPagedIndexerMetadataChunking(CustomTestCase):
                 use_topk_v2=use_topk_v2,
             )
         return metadata, deep_gemm, plan_topk_v2
+
+    def test_graph_modes_use_static_budget_without_sync(self):
+        metadata = object.__new__(PagedIndexerMetadata)
+        metadata.compressed_seq_lens = SimpleNamespace(
+            is_cuda=True, device=SimpleNamespace(index=0)
+        )
+        metadata.page_table = SimpleNamespace(shape=(4096, _ISSUE_ALIGNED_COLS // 64))
+        metadata.compressed_page_size = 64
+
+        cases = (
+            (True, False, False, False),
+            (False, True, False, False),
+            (False, False, True, False),
+            (False, False, False, True),
+        )
+        for prefill, capture, breakable, piecewise in cases:
+            with self.subTest(
+                prefill=prefill,
+                capture=capture,
+                breakable=breakable,
+                piecewise=piecewise,
+            ):
+                metadata.use_prefill_cuda_graph = prefill
+                with (
+                    patch(
+                        "torch.cuda.is_current_stream_capturing", return_value=capture
+                    ),
+                    patch(
+                        f"{_METADATA}.is_in_breakable_cuda_graph",
+                        return_value=breakable,
+                    ),
+                    patch(
+                        f"{_METADATA}.is_in_tc_piecewise_cuda_graph",
+                        return_value=piecewise,
+                    ),
+                    patch(
+                        f"{_METADATA}.mqa_logits_budget_bytes",
+                        return_value=512 << 20,
+                    ) as budget,
+                ):
+                    self.assertEqual(
+                        metadata._mqa_logits_budget(num_rows=4096), 512 << 20
+                    )
+                budget.assert_called_once_with(device_index=0, allow_sync=False)
+
+    def test_eager_mode_uses_live_budget(self):
+        metadata = object.__new__(PagedIndexerMetadata)
+        metadata.compressed_seq_lens = SimpleNamespace(
+            is_cuda=True, device=SimpleNamespace(index=0)
+        )
+        metadata.page_table = SimpleNamespace(shape=(4096, _ISSUE_ALIGNED_COLS // 64))
+        metadata.compressed_page_size = 64
+        metadata.use_prefill_cuda_graph = False
+        with (
+            patch("torch.cuda.is_current_stream_capturing", return_value=False),
+            patch(f"{_METADATA}.is_in_breakable_cuda_graph", return_value=False),
+            patch(f"{_METADATA}.is_in_tc_piecewise_cuda_graph", return_value=False),
+            patch(
+                f"{_METADATA}.mqa_logits_budget_bytes", return_value=512 << 20
+            ) as budget,
+        ):
+            self.assertEqual(metadata._mqa_logits_budget(num_rows=4096), 512 << 20)
+        budget.assert_called_once_with(device_index=0, allow_sync=True)
 
     def test_budget_splits_schedules_and_topk_plans_over_the_same_rows(self):
         num_rows, budget = 4096, 512 << 20

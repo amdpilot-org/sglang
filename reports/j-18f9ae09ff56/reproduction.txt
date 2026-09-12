@@ -1,0 +1,62 @@
+Reviewed candidate: https://github.com/amdpilot-org/sglang/pull/1437
+Independent review: https://github.com/amdpilot-org/sglang/pull/1521
+Exact candidate commit: ace5d6123d773bd6fd760375352226467c82628c
+
+Independent candidate probe
+---------------------------
+The issue dimensions give an aligned fp32 logits row of 372736 bytes and a
+4096-row allocation of 1526726656 bytes (1.421875 GiB).
+
+At the exact candidate, each graph-backed case returned no budget without
+calling the budget helper, and therefore selected no row chunking when no SM120
+cap was present:
+
+  prefill_cuda_graph: budget=None rows_per_chunk=None budget_helper_calls=0
+  stream_capture: budget=None rows_per_chunk=None budget_helper_calls=0
+  breakable_graph: budget=None rows_per_chunk=None budget_helper_calls=0
+  tc_piecewise_graph: budget=None rows_per_chunk=None budget_helper_calls=0
+
+The candidate also selected one row for budgets of 1 and 372735 bytes, although
+the resulting allocation was 372736 bytes and exceeded both budgets.
+
+Raw output:
+  /job/review-evidence-j-18f9ae09ff56/candidate-counterexamples.txt
+
+Failing before / passing after
+------------------------------
+The corrected regression file was executed against the exact candidate by
+placing /tmp/amdpilot-repro-j-18f9ae09ff56/python first on sys.path. It failed
+the sub-row hard-bound assertion and all four graph-mode subtests:
+
+  5 failed, 9 passed, 9 subtests passed
+  exit code: 1
+
+Raw output and JUnit:
+  /job/review-evidence-j-18f9ae09ff56/candidate-new-regression.txt
+  /job/review-evidence-j-18f9ae09ff56/candidate-new-regression.xml
+
+Against the corrected branch, the combined focused suite passed:
+
+  23 passed, 29 subtests passed
+  exit code: 0
+
+JUnit:
+  /job/review-evidence-j-18f9ae09ff56/corrected-focused-final.xml
+
+GPU numerical boundary
+----------------------
+On the assigned AMD Instinct MI350X (gfx950), sorted selected page indices were
+identical between an unchunked fp32 Top-K transform and row chunks of 1, 7, 16,
+and 36 rows for a 37 x 4096 fixture. This validates row independence of the
+Python reduction, not CUDA DeepGEMM or the full DeepSeek-V4 serving workload.
+
+Raw output:
+  /job/review-evidence-j-18f9ae09ff56/gpu-topk.txt
+
+Limitations
+-----------
+DeepSeek-V4-Flash-0731 weights and the reported 4xH100 TP4 environment were not
+available. The assigned gfx950 GPU cannot execute the changed CUDA DeepGEMM
+path. No native source changed, so no native rebuild was applicable. The tiny
+Llama fixture does not contain the DSV4 indexer and was not used as substitute
+evidence.

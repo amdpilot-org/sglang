@@ -323,11 +323,13 @@ def mqa_logits_rows_per_chunk(
     *, num_rows: int, row_bytes: int, budget_bytes: int
 ) -> Optional[int]:
     """Query rows per chunk so one logits chunk fits the budget; None if all rows fit."""
+    if row_bytes > budget_bytes:
+        raise RuntimeError(
+            "MQA logits memory budget cannot fit one aligned row: "
+            f"row_bytes={row_bytes}, budget_bytes={budget_bytes}. "
+            "Reduce the configured context length or reserve more free GPU memory."
+        )
     if num_rows * row_bytes <= budget_bytes:
         return None
-    # A positive budget smaller than one row cannot be honored exactly, but one
-    # row is the smallest useful launch.  Do not impose a larger launch floor:
-    # that would knowingly exceed the measured budget and can recreate the OOM
-    # this chunking is intended to prevent for very wide contexts.
-    rows = max(1, budget_bytes // max(row_bytes, 1))
+    rows = budget_bytes // row_bytes
     return int(rows) if rows < num_rows else None
