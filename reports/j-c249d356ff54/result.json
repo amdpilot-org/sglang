@@ -1,0 +1,63 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34899",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/3063",
+  "candidate_commit": "512cdcfcf8b16bb55f328a84068c6b82f77a6c80",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is test-only hardening that correctly replaces the unified-memory cases' averaged KL threshold with value-exact logprob comparison. It rejects the independently reproduced 5.0000069648240756e-11 counterexample and a smaller numerical difference, but neither tree backend has a supported end-to-end Inkling result and no FULL/SWA/MAMBA restoration guard has revert-then-red or fault-injection proof.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-c249d356ff54/venv/bin/python -c 'from sglang.test.kl_test_utils import compare_kl_divergence; compare_kl_divergence([[0.0]], [[-1e-5]], {\"model\": {\"kl_div\": 1e-9}}, \"model\", \"base_reported_counterexample\")'",
+      "exit_code": 0,
+      "what_was_measured": "At recorded base 358c163, unequal logprobs produced nonzero KL 5.0000069648240756e-11 and were accepted by the averaged 1e-9 threshold."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c249d356ff54/venv/bin/python -m pytest --collect-only -q test/registered/radix_cache/unified_radix_tree/test_unified_radix_cache_kl_hybrid_bitexact.py",
+      "exit_code": 0,
+      "what_was_measured": "Base collected 18 tests; exact candidate collected 24, confirming discovery of the six new unified-memory cases only."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c249d356ff54/venv/bin/python -m pytest -q test/srt/test_kl_test_utils.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, all three exact-oracle unit tests passed."
+    },
+    {
+      "command": "independent compare_kl_divergence adversarial script with require_exact=True",
+      "exit_code": 0,
+      "what_was_measured": "The candidate rejected the reported nonzero KL and a 1e-12 numerical difference. NumPy value equality accepted signed-zero and dtype-only equal values, both of which have zero KL."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c249d356ff54/venv/bin/python -c 'import sglang.srt.models.inkling'",
+      "exit_code": 1,
+      "what_was_measured": "Inkling resolved from /job/repo and failed in its NVIDIA CUTE attention import with ModuleNotFoundError: No module named 'cutlass' on AMD gfx950/ROCm."
+    },
+    {
+      "command": "timeout 120 /tmp/amdpilot-repo-j-c249d356ff54/venv/bin/python -m pytest -q test/registered/radix_cache/unified_radix_tree/test_unified_radix_cache_kl_hybrid_bitexact.py::TestUnifiedMemoryHybridBitExact::test_logprobs_match -s",
+      "exit_code": 1,
+      "what_was_measured": "The actual Python unified-memory Inkling test failed during server/model initialization before inference or KL measurement; missing CUTLASS caused the Inkling model import to be ignored and model registration failed."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "One AMD Instinct MI355X (gfx950) was assigned. The server process reached GPU-oriented startup but failed before an inference request, so no GPU numerical output or exact-zero KL was measured.",
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "The candidate changes Python test utilities, Python test registration, and reports only; no native source or library changed, so a native rebuild was not applicable.",
+  "remaining_counterexamples": [
+    "The six unified-memory tests are collected but still have no supported end-to-end Inkling result for either the Python or Rust tree backend.",
+    "There is no revert-then-red or targeted fault-injection evidence showing that unified-memory FULL restoration is detected.",
+    "There is no revert-then-red or targeted fault-injection evidence showing that unified-memory SWA restoration is detected.",
+    "There is no revert-then-red or targeted fault-injection evidence showing that unified-memory MAMBA restoration is detected."
+  ],
+  "remaining_limitations": [
+    "The host is AMD Instinct MI355X gfx950 with ROCm 7.2, while Inkling imports a NVIDIA CUTE/CUTLASS path; cutlass is unavailable.",
+    "No qualifying end-to-end Inkling inference completed and no independent GPU numerical reference was produced.",
+    "The deterministic tiny Llama fixture cannot qualify Inkling's combined FULL/SWA/MAMBA architecture or state-restoration semantics.",
+    "The candidate's comparator enforces NumPy value equality, not literal representation equality; this distinction does not create a nonzero-KL escape for numeric logprobs."
+  ],
+  "source_import_paths": {
+    "sglang": "/job/repo/python/sglang/__init__.py",
+    "kl_test_utils": "/job/repo/python/sglang/test/kl_test_utils.py"
+  },
+  "raw_evidence_path": "/tmp/amdpilot-repo-j-c249d356ff54/review-evidence/"
+}
