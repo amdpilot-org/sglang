@@ -10,8 +10,13 @@ def aiter_dsv3_router_gemm(
     hidden_states: torch.Tensor,
     weight: torch.Tensor,
 ):
-    """Use aiter tuned GEMM dispatcher (tgemm.mm) to automatically select the GEMM kernel."""
-    return tgemm.mm(hidden_states, weight.detach(), otype=hidden_states.dtype)
+    """Use aiter tuned GEMM dispatcher (tgemm.mm) to automatically select the GEMM kernel.
+
+    Router logits stay in fp32 for numerical stability, matching the other
+    ``MoEGate`` GEMM branches. The input and weight compute types remain
+    unchanged.
+    """
+    return tgemm.mm(hidden_states, weight.detach(), otype=torch.float32)
 
 
 def get_dsv3_gemm_output_zero_allocator_size(
