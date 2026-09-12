@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32605",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The exact H200/GLM-5.2/PD-disaggregation/Mooncake report could not be reproduced from the issue because it provides no launch commands, request/output pairs, concurrency, or reproduction rate, and the assigned host has one AMD gfx950 GPU rather than the reported H200 deployment. Current source already contains directly relevant fixes: upstream PR #24226 prevents live decode KV slots and slots with in-flight D2H copies from being reused, a race documented to inject peer-request prompt fragments into responses; PR #37026 isolates asynchronous decode-offload state when request IDs are reused. Their current regression suite passes, including independent lifetime and boundary cases. No duplicate source correction was justified.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-07a2b315b545/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_specv2_kvcache_offloading.py",
+      "exit_code": 0,
+      "what_was_measured": "Current decode-side HiCache offload lifecycle regression suite: 15 tests and 2 subtests passed. It covers slot release, asynchronous-copy completion, reused request IDs, and allocation boundaries. Raw output: /tmp/amdpilot-repo-j-07a2b315b545/evidence/specv2_kvcache_offloading.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-07a2b315b545/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_specv2_kvcache_offloading.py -k 'release_finished_req_frees_prefill_and_pops_state or release_finished_req_skips_prefill_free_when_prompt_below_page or reused_rid_does_not_share_offload_lifecycle or finalize_release_defers_while_offload_is_in_flight or finished_offload_ack_waits_for_other_inflight_writes or finished_request_releases_all_committed_slots_after_last_offload_ack'",
+      "exit_code": 0,
+      "what_was_measured": "Six focused cases passed: live-prefix ownership, sub-page prompt boundary, reused-rid isolation, in-flight deferral, multiple-in-flight deferral, and release after the final acknowledgment. Raw output: /tmp/amdpilot-repo-j-07a2b315b545/evidence/focused_boundaries.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-07a2b315b545/venv/bin/python (torch device inventory script recorded in investigation.md)",
+      "exit_code": 0,
+      "what_was_measured": "Environment inventory only: PyTorch 2.11.0+rocm7.2 reports one AMD Instinct MI355X with gfx950. No model inference or issue-qualifying GPU workload was run. Raw output: /tmp/amdpilot-repo-j-07a2b315b545/evidence/gpu_inventory.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The GPU was queried for inventory only. The issue requires an NVIDIA H200 PD-disaggregated GLM-5.2 deployment with Mooncake; the available single AMD gfx950 cannot qualify that behavior. The deterministic regressions are CPU bookkeeping tests and do not claim model-level reproduction.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No exact reporter launch commands, request/output pairs, concurrency level, or reproduction frequency were available.",
+    "The assigned hardware is one AMD MI355X gfx950, not the reported multi-H200 deployment.",
+    "GLM-5.2 weights and a representative multi-node PD-disaggregation plus Mooncake environment were unavailable.",
+    "The current tests verify the concrete slot-reuse and request-identity races already fixed in source, but cannot prove that either race was the sole cause of the reporter's unspecified production symptom.",
+    "No tiny-Llama serving result is presented because such a fixture cannot qualify GLM-5.2 semantics, the H200 architecture, or a distributed Mooncake workload."
+  ]
+}
