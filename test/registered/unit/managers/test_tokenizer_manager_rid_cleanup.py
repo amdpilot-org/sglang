@@ -638,6 +638,100 @@ class TestParallelStreamTaskCleanup(CustomTestCase):
         asyncio.run(drive())
 
 
+class TestStreamAbortBoundary(CustomTestCase):
+    def _make_stream_manager(self):
+        tm = _make_tokenizer_manager(self)
+        tm.request_logger = MagicMock()
+        tm.request_metrics_exporter_manager = MagicMock()
+        tm.request_metrics_exporter_manager.exporter_enabled.return_value = False
+        return tm
+
+    @staticmethod
+    def _output(rid, text, output_ids, finish_reason=None):
+        return {
+            "text": text,
+            "output_ids": output_ids,
+            "meta_info": {"id": rid, "finish_reason": finish_reason},
+        }
+
+    def test_cancelled_stream_drops_queued_text_until_abort_finishes(self):
+        """Cancellation is the visibility boundary, not the scheduler echo."""
+
+        async def drive():
+            tm = self._make_stream_manager()
+            state = _make_req_state("grammar")
+            state.obj.stream = True
+            state.abort_sent = True
+            state.out_list.append(self._output("grammar", "invalid", [7]))
+            state.event.set()
+
+            stream = tm._stream_one_response(state.obj, state)
+            next_output = asyncio.create_task(stream.__anext__())
+            await asyncio.sleep(0)
+            self.assertFalse(next_output.done())
+
+            state.finished = True
+            state.out_list.append(
+                self._output(
+                    "grammar",
+                    "invalid",
+                    [7],
+                    {"type": "abort", "message": "cancelled"},
+                )
+            )
+            state.event.set()
+            out = await asyncio.wait_for(next_output, timeout=1)
+            self.assertEqual(out["text"], "")
+            self.assertEqual(out["output_ids"], [])
+            self.assertEqual(out["meta_info"]["finish_reason"]["type"], "abort")
+
+        asyncio.run(drive())
+
+    def test_uncancelled_stream_still_yields_queued_text(self):
+        async def drive():
+            tm = self._make_stream_manager()
+            state = _make_req_state("live")
+            state.obj.stream = True
+            state.out_list.append(self._output("live", "valid", [8]))
+            state.event.set()
+
+            stream = tm._stream_one_response(state.obj, state)
+            out = await asyncio.wait_for(stream.__anext__(), timeout=1)
+            self.assertEqual(out["text"], "valid")
+            self.assertEqual(out["output_ids"], [8])
+            await stream.aclose()
+
+        asyncio.run(drive())
+
+    def test_incremental_abort_does_not_coalesce_buffered_chunks(self):
+        async def drive():
+            tm = self._make_stream_manager()
+            tm.incremental_streaming_output = True
+            state = _make_req_state("incremental")
+            state.obj.stream = True
+            state.abort_sent = True
+            state.finished = True
+            state.out_list.extend(
+                [
+                    self._output("incremental", "invalid", [7]),
+                    self._output(
+                        "incremental",
+                        "invalid",
+                        [7],
+                        {"type": "abort", "message": "cancelled"},
+                    ),
+                ]
+            )
+            state.event.set()
+
+            stream = tm._stream_one_response(state.obj, state)
+            out = await asyncio.wait_for(stream.__anext__(), timeout=1)
+            self.assertEqual(out["text"], "")
+            self.assertEqual(out["output_ids"], [])
+            self.assertEqual(out["meta_info"]["finish_reason"]["type"], "abort")
+
+        asyncio.run(drive())
+
 class TestGenerateRequestCleanupOnDispatchFailure(CustomTestCase):
     """generate_request must not leak rid_to_state when dispatch fails.
 
