@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34259",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1683",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1645",
+  "candidate_commit": "bab33e2e1c26450edc7661eb4de484af3d331740",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate adds valid regression coverage for an existing hidden-state response offset fix, but does not reproduce or verify the original Kimi-K3 generated-reasoning leak. The proposed causal chronology is contradicted by repository history: upstream PR #30177 is already an ancestor of the official v0.5.17 tag that the reporter identified as affected.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-545a11bbc9ff/venv/bin/python -m pytest -q test/registered/unit/managers/test_batch_result_processor_hidden_states.py (at bab33e2e1c26450edc7661eb4de484af3d331740)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 9 tests and 2 subtests passed against the checked-out candidate source."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-545a11bbc9ff/venv/bin/python /job/review-evidence-j-545a11bbc9ff/adversarial_hidden_state_offsets.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent GPU cases for FULL capture with a non-stored/non-requesting two-row request and LAST capture with mixed request modes; expected offsets and literal row values matched."
+    },
+    {
+      "command": "git merge-base --is-ancestor a0b7bcf59289a6cf916fa5ee44e3cfa865a25f3d refs/tags/review-v0.5.17^{commit}",
+      "exit_code": 0,
+      "what_was_measured": "The merge of upstream PR #30177 predates and is contained in the official v0.5.17 tag, contradicting the candidate's stated release chronology."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-545a11bbc9ff/venv/bin/python <import-path inspection>",
+      "exit_code": 0,
+      "what_was_measured": "sglang and batch_result_processor imported from /job/repo/python; PyTorch 2.11.0+rocm7.2 used the assigned AMD Instinct MI350X."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Independent tensor slicing checks executed on cuda:0, reported by ROCm as AMD Instinct MI350X gfx950, and returned the expected FULL and LAST packed-row selections.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The reported reasoning leakage can occur for ordinary generation requests that do not request returned hidden states; the candidate test does not exercise that path.",
+    "The official v0.5.17 tag already contains the cited hidden-state offset correction, yet the original issue reports the symptom on v0.5.17.",
+    "No candidate test exercises Kimi-K3 generation, concurrent HTTP requests, tensor parallelism across eight B300 GPUs, or repeated randomized scheduling needed to seek the reported intermittent symptom."
+  ],
+  "remaining_limitations": [
+    "The issue has no deterministic reproducer, so the original failure was not reproduced on the prepared base.",
+    "Kimi-K3 weights were unavailable.",
+    "The reported architecture is eight NVIDIA B300 GPUs with CUDA 13.0; the review environment provides one AMD MI350X gfx950 with ROCm 7.2.",
+    "The GPU checks validate only hidden-state response offset accounting, not generated-text semantic isolation or the full serving path.",
+    "No native rebuild was needed because the candidate changes only Python tests and report files."
+  ]
+}
