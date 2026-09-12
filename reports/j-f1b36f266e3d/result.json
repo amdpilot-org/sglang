@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36475",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Streaming-session pre-abort cleanup now releases the session inflight slot only when the rejected or aborted request actually owns it. This prevents an overlapping request rejected during a disconnect race from clearing the live request's ownership and admitting a third concurrent turn.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-f1b36f266e3d/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_session_token_share_unit.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: both ownership tests failed because pre-abort cleanup cleared the live owner's inflight flag and admitted a third request. Raw output: reports/j-f1b36f266e3d/evidence/unit-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f1b36f266e3d/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_session_token_share_unit.py test/registered/unit/mem_cache/test_streaming_session_unit.py",
+      "exit_code": 0,
+      "what_was_measured": "16 focused lifecycle/cache tests passed after the fix, including rejected-overlap ownership, prevention of third-turn mutation, admitted-owner abort release, and existing pre/mid-abort KV cleanup boundaries. Raw output: reports/j-f1b36f266e3d/evidence/unit-after.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f1b36f266e3d/venv/bin/python reports/j-f1b36f266e3d/run_repro_server.py --fixture /tmp/amdpilot-repo-j-f1b36f266e3d/tiny-random-llama --output reports/j-f1b36f266e3d/evidence/http-before",
+      "exit_code": 1,
+      "what_was_measured": "Before the fix, a real gfx950 HTTP run reproduced the issue's immediate-retry context loss: turn 0 was 32+24 tokens, disconnected turn 1 inherited 72 prompt tokens with 56 cached, but immediate turn 2 returned prompt_tokens=1 and cached_tokens=0. Health remained 200 on this small fixture."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f1b36f266e3d/venv/bin/python reports/j-f1b36f266e3d/run_repro_server.py --fixture /tmp/amdpilot-repo-j-f1b36f266e3d/tiny-random-llama --output reports/j-f1b36f266e3d/evidence/http-after-final",
+      "exit_code": 0,
+      "what_was_measured": "After the fix, a real gfx950 HTTP run took the clean rollback path: immediate turn 2 completed with the expected 72 prompt tokens and health_after_wait=200. Full requests, responses, launch metadata, and server log are retained in the output directory."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "reports/j-f1b36f266e3d/evidence/gpu.json records AMD Instinct MI355X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2, HIP 7.2.26015. Server logs record real Triton prefill/decode execution.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Qwen/Qwen2.5-0.5B-Instruct weights were not available; the deterministic tiny random Llama fixture validates transport and engine/session execution only, not Qwen architecture or semantic accuracy.",
+    "The small 512-token pool reproduced the prompt-token context loss but not the reported idle invariant scheduler crash; that larger-memory symptom remains unverified here.",
+    "All validation used one assigned gfx950 GPU; no multi-GPU or multi-node claim is made."
+  ]
+}

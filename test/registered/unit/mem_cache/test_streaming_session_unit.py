@@ -84,9 +84,10 @@ class _FakeReq:
             session_id=session_id,
             streaming=True,
             finish_req=lambda req: None,
-            abort_req=lambda: None,
+            abort_req=lambda req=None: None,
             _inflight=False,
         )
+        self.streaming_session_inflight_owner = True
         self.kv = ReqKvInfo(
             req_pool_idx=req_pool_idx,
             kv_committed_len=committed,
@@ -161,6 +162,7 @@ def test_preabort_detaches_session_and_preserves_slot():
     )
 
     req = _FakeReq("session-a", req_pool_idx=1, committed=1, allocated=1)
+    req.streaming_session_inflight_owner = False
     req.to_finish = FINISH_ABORT("too long")
 
     result = tree_cache.match_prefix(
