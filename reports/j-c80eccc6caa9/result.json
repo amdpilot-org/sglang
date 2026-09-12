@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36495",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independently reproduced the original capacity-equals-depth invalid free on the recorded base, then reviewed PR 1423 at exact commit f6c401990d7325ba5bf2e9386560bc10805b7095. The candidate rejects invalid NGRAM capacity/depth combinations in the serving-argument validator even under python -O and independently in the native constructor. A fresh native build from the candidate sources rejects 4/4 synchronously, accepts and inserts at 5/4, and passes the complete focused native corpus suite. This is a full fix for the reported configuration contract, not test-only hardening.",
+  "tests": [
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-c80eccc6caa9/base-ngram-cache PYTHONPATH=/job/repo/python timeout 300 /tmp/amdpilot-repo-j-c80eccc6caa9/venv/bin/python -u /job/base_ngram_repro.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 134,
+      "what_was_measured": "The production NgramCorpus constructed at capacity=4/max_trie_depth=4, queued one four-token insertion, and aborted with munmap_chunk(): invalid pointer. This reproduces the original native failure without model or transport dependencies."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c80eccc6caa9/venv/bin/python -m pytest -q test/registered/unit/spec/test_ngram_server_args.py (candidate f6c401990d7325ba5bf2e9386560bc10805b7095)",
+      "exit_code": 0,
+      "what_was_measured": "All 5 candidate serving-validation regressions passed, including the python -O subprocess case."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c80eccc6caa9/venv/bin/python -O /job/candidate_validation_matrix.py (candidate f6c401990d7325ba5bf2e9386560bc10805b7095)",
+      "exit_code": 0,
+      "what_was_measured": "Independent optimized-Python matrix: NGRAM 4/4 and 3/4 raised ValueError; NGRAM 5/4 and non-NGRAM 4/4 were accepted."
+    },
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-c80eccc6caa9/candidate-ngram-cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c80eccc6caa9/venv/bin/python -u /job/base_ngram_repro.py (candidate f6c401990d7325ba5bf2e9386560bc10805b7095)",
+      "exit_code": 1,
+      "what_was_measured": "The freshly rebuilt candidate native extension rejected 4/4 synchronously with the documented RuntimeError before creating the insertion worker; no abort occurred."
+    },
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-c80eccc6caa9/candidate-ngram-cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c80eccc6caa9/venv/bin/python -m pytest -q test/registered/unit/spec/test_ngram_corpus.py (candidate f6c401990d7325ba5bf2e9386560bc10805b7095)",
+      "exit_code": 0,
+      "what_was_measured": "45 focused native-backed tests passed, including equality and below-depth rejection and a real insertion at the minimum valid 5/4 boundary."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..f6c401990d7325ba5bf2e9386560bc10805b7095",
+      "exit_code": 2,
+      "what_was_measured": "The candidate's archived report logs and Markdown contain trailing whitespace. No product source or test-code whitespace error was reported; this is non-blocking evidence-artifact formatting."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The failure and both guards are in the CPU-side NGRAM trie/JIT path. The assigned AMD Instinct MI355X (gfx950) was visible, but no GPU kernel was required or claimed."
+  },
+  "native_rebuilt": true,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The original NVIDIA L40S/CUDA/Qwen3-4B HTTP scenario was not rerun because the prepared environment is AMD ROCm 7.2 on gfx950 and does not provide the reported model weights.",
+    "The deterministic direct production NgramCorpus path reproduces the same native 4/4 invalid free and validates the correction, but it does not qualify HTTP transport, model semantic accuracy, NVIDIA-specific behavior, or distributed execution.",
+    "Fresh candidate native library: /tmp/amdpilot-repo-j-c80eccc6caa9/candidate-ngram-cache/gfx950/sgl_kernel_jit_ngram_corpus/build-f977ae1b18709294/deps-f7007fddf719da23/sgl_kernel_jit_ngram_corpus.so (ELF build ID 806f8af464564cf88e6f04a31b3e4ebbecd73002)."
+  ]
+}
