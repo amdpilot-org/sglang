@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36338",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2736",
+  "candidate_commit": "21e526df7844155adec0c2163992178bf899ba99",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The isolated selective FP8-to-BF16 dequantization/remap stage is numerically correct and speeds up the candidate's narrow 262144-row/8-query benchmark, but the heuristic pays torch.unique cost before deciding to fall back and has concrete query-scaling regressions. The target NVIDIA BF16 FlashMLA attention path could not be executed on the assigned AMD GPU. This is a partial implementation, not a full original-issue fix.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-2e5631a47cfa/triton-base /tmp/amdpilot-repo-j-2e5631a47cfa/venv/bin/python reports/j-2e5631a47cfa/evidence/base_reproduction.py",
+      "exit_code": 0,
+      "what_was_measured": "Recorded-base reproduction on MI350X: actual paged dequantization emitted all 131072 BF16 rows (150994944 bytes); selective API was absent; import resolved to checkout source."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-2e5631a47cfa/triton-candidate /tmp/amdpilot-repo-j-2e5631a47cfa/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_selective_dsa_kv_dequant.py -s",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate commit focused regression: independent FP8/BF16 numerical reconstruction, physical alias dedup/remap, fallback compatibility, and invalid sentinel handling; 3 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-2e5631a47cfa/triton-candidate /tmp/amdpilot-repo-j-2e5631a47cfa/venv/bin/python reports/j-f631daba9e47/benchmark_selective_dequant.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate benchmark independently reproduced on MI350X: 262144 logical rows, 4029 compact rows, 301989888 versus 4641408 BF16 bytes, 0.7912 versus 0.3099 ms (2.553x)."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-2e5631a47cfa/triton-candidate /tmp/amdpilot-repo-j-2e5631a47cfa/venv/bin/python reports/j-2e5631a47cfa/evidence/adversarial_scaling.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent warmed seven-repeat median query-scaling test at 131072 prefix rows/top-k 2048. Candidate/full latency ratios were 0.931x, 1.363x, 1.841x, and 2.082x for 8, 64, 256, and 1024 query rows. The last two chose full fallback only after deduplication. Peak allocation reached 213910016 bytes versus 150994944 for full dequantization."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-2e5631a47cfa/triton-candidate /tmp/amdpilot-repo-j-2e5631a47cfa/venv/bin/python -m pytest -q test/registered/attention/unittests/dsa/test_dsa.py -k sparse_fp8_prefill_cases -s",
+      "exit_code": 1,
+      "what_was_measured": "Real backend attempt on MI350X: 2 failed, 1 passed, 4 skipped. The relevant paths stop before attention because page_size=64 conflicts with the prepared legacy HIP DSA requirement page_size==1."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "The base full-dequant kernel and candidate selective Triton dequant/remap stage executed on one AMD Instinct MI350X (gfx950); raw numerical, timing, allocation, and backend logs are retained under evidence/.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "At 131072 prefix rows, 64 query rows and top-k 2048, the candidate selects the compact path but is 1.363x slower than warmed full dequantization on MI350X.",
+    "At 131072 prefix rows, 256 query rows and top-k 2048, the candidate falls back only after torch.unique and is 1.841x slower while peaking at 166724096 bytes versus 150994944 bytes for full dequantization.",
+    "At 131072 prefix rows, 1024 query rows and top-k 2048, the candidate falls back only after torch.unique and is 2.082x slower while peaking at 213910016 bytes, about 42% above the full path.",
+    "BF16 flashmla_sparse attention output and end-to-end sparse-prefill performance remain unverified on the required NVIDIA Hopper/Blackwell architecture."
+  ],
+  "remaining_limitations": [
+    "Assigned hardware was AMD Instinct MI350X gfx950, while BF16 flashmla_sparse is NVIDIA Hopper/Blackwell-only.",
+    "The real HIP DSA fixture stops before attention on page_size 64 versus legacy-HIP page_size 1.",
+    "No architecture-matching full-model execution was possible; transport/startup smoke was not substituted.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
