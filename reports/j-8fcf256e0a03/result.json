@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38676",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate commit adds and validates all five requested Prometheus families for the BaseMultimodalProcessor path, and its focused regression passes. However, supported tokenizer-manager processors that override process_mm_data without delegating to the base implementation remain uninstrumented. An independent execution of MiDashengLMMultimodalProcessor.process_mm_data performed a delayed processor call and emitted zero mm_processor_seconds observations. The change is therefore a substantial partial fix, not a complete resolution of the original observability contract.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8fcf256e0a03/venv/bin/python -m pytest -q /job/review-evidence-j-8fcf256e0a03/test_mm_latency_metrics.py (at base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction using the candidate regression against the prepared base: both tests failed because the per-item observer argument and request-stage timing hook did not exist. Raw output: raw/base-candidate-regression.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8fcf256e0a03/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_mm_latency_metrics.py (at e72aee61955df18f5d2f5b4ddc1f7529b3f1dffd)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's two regression tests passed, covering a localhost image download, byte count, absent download series for in-memory media, error-path load observation, and isolated synthetic request/processor timers. Raw output: raw/candidate-regression.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8fcf256e0a03/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_mm_latency_metrics.py test/registered/unit/multimodal/test_base_processor_bad_input.py test/registered/unit/multimodal/test_base_processor_image_decode.py test/registered/unit/observability/test_stat_loggers_di.py",
+      "exit_code": 0,
+      "what_was_measured": "37 tests and 15 subtests passed for the candidate's metrics regression plus existing media decode/error and collector dependency-injection behavior. Raw output: raw/candidate-focused-suite.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8fcf256e0a03/venv/bin/python /job/review-evidence-j-8fcf256e0a03/adversarial_metrics.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent counterexample: a real MiDashengLMMultimodalProcessor override completed a delayed fake HF processor call but its attached collector received zero processor observations. Raw output: raw/adversarial-specialized-processor.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8fcf256e0a03/venv/bin/python - <<'PY' ... torch ROCm matmul compared with NumPy ... PY",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed source imports came from /job/repo, torch 2.11.0+rocm7.2 saw exactly one AMD Instinct MI355X, and FP32 GPU matmul matched an independent NumPy reference with maximum absolute error 0.0. This checks the assigned GPU environment; the feature itself is CPU-side. Raw output: raw/environment-import-gpu.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X was visible through the prepared ROCm torch and produced a NumPy-referenced FP32 matmul with maximum absolute error 0.0; raw/environment-import-gpu.txt"
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "MiDashengLMMultimodalProcessor.process_mm_data directly calls processor.__call__ and emits no sglang:mm_processor_seconds observation.",
+    "Ernie4_5_VLImageProcessor.process_mm_data directly calls processor.__call__ and bypasses the new base timer.",
+    "MiMoV2ASRProcessor.process_mm_data and MiMoV2MultimodalProcessor.process_mm_data also replace the base processor path, so their processor latency is not covered by the candidate's hook.",
+    "Specialized media-loading paths that call download_remote_media outside BaseMultimodalProcessor._load_single_item, including Moss and MiMo-family code paths found in the source inventory, do not enter capture_media_download_timings and therefore can omit the requested download/load item metrics."
+  ],
+  "remaining_limitations": [
+    "No native, C++, FlyDSL, or LLVM files changed; a native rebuild was not applicable.",
+    "No model weights were downloaded and no full model server was started. The candidate's real collector/media implementation and an actual supported specialized processor class were exercised with bounded fixtures.",
+    "The GPU check validates the prepared ROCm environment only; multimodal metric collection under review is host-side and does not require a GPU numerical kernel.",
+    "The candidate is verified as a partial BaseMultimodalProcessor-path implementation, but the original issue's broad tokenizer-manager multimodal observability claim remains incomplete across supported override and bypass paths."
+  ]
+}
