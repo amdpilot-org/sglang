@@ -4,12 +4,11 @@ Candidate reviewed and preserved: https://github.com/amdpilot-org/sglang/pull/25
 
 Independent review investigated: https://github.com/amdpilot-org/sglang/pull/2573.
 
-The review's concrete evidence defect reproduced before modification. The
-candidate's committed raw record and `result.json` named the assigned gfx950
-GPU as AMD Instinct MI350X, while a direct query through the prepared
-PyTorch/ROCm interpreter reports `AMD Instinct MI355X` and
-`gfx950:sramecc+:xnack-`. This correction changes only that inaccurate model
-name in the candidate's retained evidence.
+The earlier review's concrete evidence mismatch reproduced in that prepared
+environment: its device query reported MI355X while the retained candidate
+record said MI350X. That correction is intentionally scoped to that run.
+`gfx950` does not by itself establish a marketed model name, and later prepared
+environments may identify the assigned device differently.
 
 The candidate's valid regression remains intact. At its exact commit, all
 three tests passed. After integration and evidence correction, the same three
@@ -23,4 +22,3 @@ No Ascend device, CANN/torch_npu runtime, or reported DeepSeekV3.2 weights were
 available. Therefore actual `npu_format_cast`, Ascend grouped matmul, and a
 full Engine or HTTP `update_weights_from_disk` scheduler-survival run remain
 unverified. Those limitations do not justify a speculative source change.
-

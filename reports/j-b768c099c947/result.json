@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/26794",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Preserved the candidate's valid NPU MoE reload regression and corrected its overbroad GPU identity evidence: this prepared review is MI350X according to both PyTorch and rocm-smi, while gfx950 alone does not distinguish the marketed model across environments. No additional production source correction was justified because the prepared base already contains the canonical-layout fix.",
+  "tests": [
+    {
+      "command": "git switch --detach 8bb43fd1dd0ad1d4910508a98bfa464c86b0835c && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b768c099c947/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_npu_unquant_moe_reload.py",
+      "exit_code": 0,
+      "what_was_measured": "Before changing the candidate, all three focused post-process and separate-expert reload regressions passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b768c099c947/venv/bin/python -c '<torch device query>'; rocm-smi --showproductname",
+      "exit_code": 0,
+      "what_was_measured": "PyTorch and rocm-smi independently identified the single assigned GPU as AMD Instinct MI350X; PyTorch reported gfx950:sramecc+:xnack- and rocm-smi reported gfx950."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b768c099c947/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_npu_unquant_moe_reload.py",
+      "exit_code": 0,
+      "what_was_measured": "After consolidating the evidence correction, the same three focused regressions passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-b768c099c947/raw/device_identity.txt records direct PyTorch and rocm-smi identity queries on the assigned MI350X. The GPU was used for identity evidence; no Ascend kernel execution is claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Ascend device, CANN, or torch_npu runtime was available, so actual npu_format_cast and Ascend grouped-matmul behavior were not independently executed.",
+    "The reported DeepSeekV3.2 weights were unavailable, so no full Engine or HTTP update_weights_from_disk run established scheduler survival after reload.",
+    "The focused regression mocks NPU format casting and validates loader layout only; it does not qualify NPU kernels, model semantics, HTTP transport, scheduler survival, or distributed execution."
+  ]
+}
