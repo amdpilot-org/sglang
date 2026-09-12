@@ -5,7 +5,6 @@ import argparse
 import json
 import urllib.request
 
-
 PREFERRED = {
     "temperature": 0.0,
     "top_p": 0.55,
@@ -52,17 +51,28 @@ def main():
         "chat_explicit_override": post(
             args.base_url,
             "/v1/chat/completions",
-            {**chat, "temperature": 1.0, "top_p": 1.0, "top_k": -1,
-             "presence_penalty": 0.0, "repetition_penalty": 1.0, "seed": 23},
+            {
+                **chat,
+                "temperature": 1.0,
+                "top_p": 1.0,
+                "top_k": -1,
+                "presence_penalty": 0.0,
+                "repetition_penalty": 1.0,
+                "seed": 23,
+            },
         ),
         "completion_omitted": post(args.base_url, "/v1/completions", completion),
         "completion_explicit_preferred": post(
             args.base_url, "/v1/completions", {**completion, **PREFERRED}
         ),
         "completion_batch_two": post(
-            args.base_url, "/v1/completions",
-            {"model": args.model, "prompt": ["hello world", "alpha beta"],
-             "max_tokens": 8},
+            args.base_url,
+            "/v1/completions",
+            {
+                "model": args.model,
+                "prompt": ["hello world", "alpha beta"],
+                "max_tokens": 8,
+            },
         ),
         "chat_stream": post(
             args.base_url, "/v1/chat/completions", {**chat, "stream": True}, True
@@ -72,12 +82,13 @@ def main():
         ),
     }
     omitted = results["chat_omitted"]["body"]["choices"][0]["message"]["content"]
-    explicit = results["chat_explicit_preferred"]["body"]["choices"][0]["message"]["content"]
+    explicit = results["chat_explicit_preferred"]["body"]["choices"][0]["message"][
+        "content"
+    ]
     results["checks"] = {
         "all_http_200": all(value["status"] == 200 for value in results.values()),
-        "batch_has_two_choices": len(
-            results["completion_batch_two"]["body"]["choices"]
-        ) == 2,
+        "batch_has_two_choices": len(results["completion_batch_two"]["body"]["choices"])
+        == 2,
         "streams_terminate": all(
             results[key]["lines"][-1] == "data: [DONE]"
             for key in ("chat_stream", "completion_stream")

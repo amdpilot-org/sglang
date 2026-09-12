@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39096",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the independent review's counterexamples at exact candidate commit d6959386c233a1fcb0d27030bc9f576ddd7ca26e. The candidate contained only qualification scripts/reports, so omitted chat fields still eagerly resolved to protocol defaults and overrode server preferences. The correction carries the chat fields explicitly supplied by the client into GenerateReqInput and merges with precedence explicit client value > preferred server value > model generation config > protocol default, while preserving legacy native-request precedence. The candidate's deterministic model generator and live probe are retained as useful validation tooling.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ea87d695e8f2/venv/bin/python inline direct request conversion/legacy tokenizer-manager merge at d6959386c233a1fcb0d27030bc9f576ddd7ca26e",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: omitted chat resolved temperature=1.0, top_p=1.0, top_k=-1, presence_penalty=0.0 instead of preferred 0.7, 0.8, 20, 1.5. Raw output: reports/j-ea87d695e8f2/raw/candidate-direct-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ea87d695e8f2/venv/bin/python inline direct request conversion/merge_preferred_sampling_params after correction",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after: omitted chat effective values matched every preferred value, including the four reviewed counterexamples. Raw output: reports/j-ea87d695e8f2/raw/direct-after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ea87d695e8f2/venv/bin/python -m pytest -q test/registered/unit/managers/test_chat_preferred_sampling_params.py test/registered/unit/entrypoints/openai/test_protocol.py",
+      "exit_code": 0,
+      "what_was_measured": "48 tests and 25 subtests passed, covering all tracked chat sampling fields, omitted-field preference, explicit client overrides including default-valued overrides, generation-config fallback, and legacy native requests. Raw output: reports/j-ea87d695e8f2/raw/focused-tests-after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ea87d695e8f2/venv/bin/python scripts/ci/probe_sampling_precedence.py --base-url http://127.0.0.1:31087 --model /tmp/amdpilot-repo-j-ea87d695e8f2/models/tiny-llama --expect-chat-precedence",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after live endpoint probe: all eight requests returned HTTP 200, omitted chat output equaled explicit-preferred output, the explicit override remained distinct, batching returned two choices, and both streams ended with data: [DONE]. Raw output: reports/j-ea87d695e8f2/raw/live-probe-after.json"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "One AMD Instinct MI350X (gfx950 as reported by the prepared ROCm PyTorch capability (9,5)) ran the tiny Llama server with torch_native attention and both graph phases disabled. The live probe completed all inference paths successfully. Server log retained at /tmp/amdpilot-repo-j-ea87d695e8f2/artifacts/server-after.log. GPU execution is integration evidence; the decisive source regression is the CPU request path.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The live model uses deterministic random tiny-Llama weights, so it validates request precedence and engine execution, not semantic model quality.",
+    "Prefill and decode graph modes were disabled because torch_native attention was selected for portable ROCm execution.",
+    "A non-fatal Torch Dynamo metrics serialization error appeared during warmup; the server became ready and all requests completed.",
+    "No native source changed, so a native rebuild was not applicable."
+  ],
+  "reviewed_candidate": "https://github.com/amdpilot-org/sglang/pull/665",
+  "independent_review": "https://github.com/amdpilot-org/sglang/pull/703",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/707",
+  "source_paths": [
+    "python/sglang/srt/entrypoints/openai/protocol.py",
+    "python/sglang/srt/entrypoints/openai/serving_chat.py",
+    "python/sglang/srt/managers/io_struct.py",
+    "python/sglang/srt/managers/tokenizer_manager.py",
+    "test/registered/unit/managers/test_chat_preferred_sampling_params.py",
+    "scripts/ci/generate_tiny_sampling_model.py",
+    "scripts/ci/probe_sampling_precedence.py"
+  ]
+}
