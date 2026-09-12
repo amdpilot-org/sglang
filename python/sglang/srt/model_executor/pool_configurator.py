@@ -580,8 +580,6 @@ class HybridSWAPoolConfigurator(MemoryPoolConfigurator):
         self._swa_full_tokens_ratio = get_schedule().swa_full_tokens_ratio
         self._sliding_window_size = kvc.sliding_window_size
         self._page_size = kvc.page_size
-        self._enable_unified_memory = get_memory().enable_unified_memory
-
         if model_config.attention_arch == AttentionArch.MLA:
             # MLA pool sizing uses latent dimensions rather than MHA heads.
             from sglang.srt.mem_cache.kv_cache_configurator import (
@@ -706,16 +704,25 @@ class HybridSWAPoolConfigurator(MemoryPoolConfigurator):
             + self._draft_cell_size
         )
 
-    def _max_unified_full_tokens(
+    def _full_capacity_draft_pool_bytes_per_token(self) -> int:
+        return int(
+            self._full_per_token * self._draft_full_layers_num
+            + self._swa_per_token * self._draft_swa_full_layers_num
+            + self._draft_cell_size
+        )
+
+    def _max_full_tokens_with_draft_pools(
         self,
         available_bytes: int,
         page_size: int,
         fixed_swa_tokens: Optional[int] = None,
     ) -> int:
         """Find the largest page-aligned full capacity whose allocations fit."""
-        draft_bytes_per_token = self._draft_pool_bytes_per_token()
+        draft_bytes_per_token = self._full_capacity_draft_pool_bytes_per_token()
         target_full_bytes_per_token = self._full_per_token * self._full_layers_num
-        target_swa_bytes_per_token = self._swa_per_token * self._swa_layers_num
+        target_swa_bytes_per_token = self._swa_per_token * (
+            self._swa_layers_num + self._draft_swa_layers_num
+        )
         assert target_full_bytes_per_token > 0
 
         def allocation_bytes(full_pages: int) -> int:
@@ -787,11 +794,10 @@ class HybridSWAPoolConfigurator(MemoryPoolConfigurator):
         self, available_bytes: int, page_size: int
     ) -> MemoryPoolConfig:
         if (
-            self._enable_unified_memory
-            and self._full_layers_num > 0
-            and self._draft_pool_bytes_per_token() > 0
+            self._full_layers_num > 0
+            and self._full_capacity_draft_pool_bytes_per_token() > 0
         ):
-            max_total_num_tokens = self._max_unified_full_tokens(
+            max_total_num_tokens = self._max_full_tokens_with_draft_pools(
                 available_bytes, page_size
             )
         else:
@@ -881,8 +887,8 @@ class SWAChunkCapPoolConfigurator(HybridSWAPoolConfigurator):
             * self._swa_per_token
             * (self._swa_layers_num + self._draft_swa_layers_num)
         )
-        if self._enable_unified_memory and self._draft_pool_bytes_per_token() > 0:
-            full_tokens = self._max_unified_full_tokens(
+        if self._full_capacity_draft_pool_bytes_per_token() > 0:
+            full_tokens = self._max_full_tokens_with_draft_pools(
                 available_bytes, page_size, fixed_swa_tokens=swa_tokens
             )
         else:

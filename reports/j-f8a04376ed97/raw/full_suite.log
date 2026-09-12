@@ -1,0 +1,223 @@
+......F....................F................                      [100%]
+=================================== FAILURES ===================================
+_ TestHybridSWAConfigurator.test_chunk_cache_cap_accounts_for_draft_swa_layers _
+
+self = <test_pool_configurator.TestHybridSWAConfigurator testMethod=test_chunk_cache_cap_accounts_for_draft_swa_layers>
+
+    def test_chunk_cache_cap_accounts_for_draft_swa_layers(self):
+        """Draft SWA tensors consume the same fixed-capacity pool as target SWA."""
+        available = 1_000_000
+        mr = _make_model_runner(
+            self,
+            is_hybrid_swa=True,
+            full_attention_layer_ids=[0],
+            swa_attention_layer_ids=[1],
+            swa_num_kv_heads=4,
+            disable_radix_cache=True,
+            chunked_prefill_size=4,
+            sliding_window_size=8,
+            page_size=1,
+            max_running_requests=2,
+        )
+        mr.spec_algorithm.is_eagle.return_value = True
+        mr.spec_algorithm.is_none.return_value = False
+        mr.spec_aux_config.eagle_draft_num_layers = 1
+        mr.spec_aux_config.eagle_draft_swa_num_layers = 1
+    
+        with mock_cpu_env():
+            from sglang.srt.model_executor.pool_configurator import (
+                create_memory_pool_configurator,
+            )
+    
+            cfg = create_memory_pool_configurator(mr)
+            config = cfg.calculate_pool_sizes(available, page_size=1)
+    
+        full_tokens = config.full_max_total_num_tokens
+        swa_tokens = config.swa_max_total_num_tokens
+        used = full_tokens * _full_per_token(mr) + swa_tokens * _swa_per_token(mr) * 2
+        self.assertLessEqual(used, available)
+>       self.assertGreater(used, available * 0.99)
+E       AssertionError: 537600 not greater than 990000.0
+
+test/registered/unit/model_executor/test_pool_configurator.py:545: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f329d7beca0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f3b7f5ce7a0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestHybridSWAConfigurator.test_chunk_cache_cap_accounts_for_draft_swa_layers
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/model_executor/test_pool_configurator.py", line 545, in test_chunk_cache_cap_accounts_for_draft_swa_layers
+    self.assertGreater(used, available * 0.99)
+  File "/usr/lib/python3.12/unittest/case.py", line 1269, in assertGreater
+    self.fail(self._formatMessage(msg, standardMsg))
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: 537600 not greater than 990000.0
+__ TestEagleConfigurator.test_hybrid_swa_draft_uses_swa_geometry_and_capacity __
+
+self = <test_pool_configurator.TestEagleConfigurator testMethod=test_hybrid_swa_draft_uses_swa_geometry_and_capacity>
+
+    def test_hybrid_swa_draft_uses_swa_geometry_and_capacity(self):
+        """SWA draft layers use SWA KV geometry and capacity."""
+        available = 10_000_000
+        ratio = 0.25
+        mr = _make_model_runner(
+            self,
+            num_kv_heads=8,
+            head_dim=64,
+            v_head_dim=64,
+            num_layers=4,
+            is_hybrid_swa=True,
+            full_attention_layer_ids=[0, 1],
+            swa_attention_layer_ids=[2, 3],
+            swa_num_kv_heads=2,
+            swa_head_dim=32,
+            swa_v_head_dim=32,
+            swa_full_tokens_ratio=ratio,
+        )
+        mr.spec_algorithm.is_eagle.return_value = True
+        mr.spec_algorithm.is_none.return_value = False
+        mr.spec_aux_config.eagle_draft_num_layers = 1
+        mr.spec_aux_config.eagle_draft_swa_num_layers = 1
+    
+        with mock_cpu_env():
+            from sglang.srt.model_executor.pool_configurator import (
+                create_memory_pool_configurator,
+            )
+    
+            cfg = create_memory_pool_configurator(mr)
+            config = cfg.calculate_pool_sizes(available, page_size=1)
+    
+        full_tokens = config.full_max_total_num_tokens
+        swa_tokens = config.swa_max_total_num_tokens
+        full_pt = _full_per_token(mr)
+        swa_pt = _swa_per_token(mr)
+        used = full_tokens * full_pt * 2 + swa_tokens * swa_pt * 3
+        self.assertLessEqual(used, available)
+>       self.assertGreater(used, available * 0.99)
+E       AssertionError: 9553664 not greater than 9900000.0
+
+test/registered/unit/model_executor/test_pool_configurator.py:799: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f329d81a5c0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f3b7f5ce7a0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestEagleConfigurator.test_hybrid_swa_draft_uses_swa_geometry_and_capacity
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/model_executor/test_pool_configurator.py", line 799, in test_hybrid_swa_draft_uses_swa_geometry_and_capacity
+    self.assertGreater(used, available * 0.99)
+  File "/usr/lib/python3.12/unittest/case.py", line 1269, in assertGreater
+    self.fail(self._formatMessage(msg, standardMsg))
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: 9553664 not greater than 9900000.0
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/model_executor/test_pool_configurator.py::TestHybridSWAConfigurator::test_chunk_cache_cap_accounts_for_draft_swa_layers
+FAILED test/registered/unit/model_executor/test_pool_configurator.py::TestEagleConfigurator::test_hybrid_swa_draft_uses_swa_geometry_and_capacity
+2 failed, 42 passed, 17 warnings, 7 subtests passed in 12.71s
