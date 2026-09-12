@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35884",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1367",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1331",
+  "candidate_commit": "3e666d05dfeb40785ab8195f8e1d13ceccc17f87",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the timeout-path defect with no scheduler abort. The exact candidate sends an AbortReq before local rid cleanup and prevents the busy-scheduler health shortcut from swallowing that abort. Candidate regressions, existing abort cleanup tests, and an independent actual Scheduler.process_input_requests boundary test pass.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-727e2898e69f/venv/bin/python -m pytest -vv /job/review-fixtures/test_health_check_abort.py",
+      "revision": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before timeout behavior: response was 503 but no scheduler abort was recorded; success control passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-727e2898e69f/venv/bin/python -m pytest -vv test/registered/unit/entrypoints/test_health_check_abort.py test/registered/unit/managers/test_health_check_probe.py",
+      "revision": "3e666d05dfeb40785ab8195f8e1d13ceccc17f87",
+      "exit_code": 0,
+      "what_was_measured": "Candidate timeout abort ordering, success control, generation/embedding classification, ordinary request boundary, and health-prefixed AbortReq exclusion; 5 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-727e2898e69f/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_health_check_abort.py test/registered/unit/managers/test_health_check_probe.py test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py",
+      "revision": "3e666d05dfeb40785ab8195f8e1d13ceccc17f87",
+      "exit_code": 0,
+      "what_was_measured": "Focused candidate regressions plus broader tokenizer rid/abort cleanup behavior; 31 passed and 3 subtests passed."
+    },
+    {
+      "command": "independent inline Python invocation of Scheduler.process_input_requests.__wrapped__ with a health-prefixed AbortReq and forced busy scheduler",
+      "revision": "3e666d05dfeb40785ab8195f8e1d13ceccc17f87",
+      "exit_code": 0,
+      "what_was_measured": "The actual scheduler input path dispatched the abort, queued no health acknowledgment, and rejected AbortReq and non-tokenized lookalikes as probes."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Control-plane Python cancellation behavior did not require a GPU kernel. Hardware inventory only: one AMD Instinct MI350X/gfx950, Torch 2.11.0+rocm7.2, HIP 7.2.26015."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The reported NVIDIA RTX PRO 6000 Blackwell architecture was unavailable; the assigned GPU was AMD Instinct MI350X/gfx950.",
+    "Qwen3.8-27B-FP8 weights and the reported NEXTN/262144-context serving configuration were unavailable.",
+    "The separate paged-prefill shape mismatch and NVIDIA driver reset were not reproduced or claimed fixed.",
+    "No full-model or multi-node reproduction was performed."
+  ]
+}
