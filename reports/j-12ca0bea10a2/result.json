@@ -1,0 +1,26 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38470",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Implemented a default-off SGLANG_HICACHE_ASYNC_LOAD_ENQUEUE path. The scheduler retains producer-slot handoff and captures start/fence events, while a FIFO loader thread performs ordered index movement and per-layer H2D enqueue. CPU recorded flags protect device-event waits, enqueue-done flags protect slot rotation and decode restore, and loader failures record/release all layers and publish an ordered acknowledgement.",
+  "tests": [
+    {
+      "command": "recorded-base cache-controller regression via runpy with /job/repo/python removed from sys.path",
+      "exit_code": 1,
+      "what_was_measured": "Both new recorded-flag and slot-enqueue APIs are absent on the recorded base; the regression errors before the change."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-12ca0bea10a2/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_async_load_enqueue.py test/registered/unit/mem_cache/test_hicache_staged_write_back_dispatch.py",
+      "exit_code": 0,
+      "what_was_measured": "19 passed, 1 skipped; recorded-flag blocking, slot backpressure, asynchronous handoff/fence capture, unchanged inline dispatch, and related staged-transfer behavior."
+    },
+    {
+      "command": "PYTHONPATH=python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-12ca0bea10a2/venv/bin/python < reports/j-12ca0bea10a2/gpu-ordering.log test script",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X, a producer-stream fill followed by loader-stream event wait and D2H copy returned 4,096/4,096 values equal to 38,470; the per-layer CPU gate released only after the GPU event was recorded."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": "No model weights or H100 TP8 allocation were available, so end-to-end HiCache serving throughput was not remeasured locally. The +8.8% throughput and other H100 TP8 figures remain upstream-reported results and are not local measurements. The local GPU check validates stream/event/copy ordering on ROCm MI350X, not CUDA-specific cudaMemcpyBatchAsync performance."
+}

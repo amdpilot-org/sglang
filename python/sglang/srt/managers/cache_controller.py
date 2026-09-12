@@ -40,11 +40,15 @@ from sglang.srt.layers.dp_attention import (
     get_attention_dp_rank,
     is_dp_attention_enabled,
 )
-from sglang.srt.mem_cache.l2_transfer import L2Transfer, L2TransferEngine
+from sglang.srt.mem_cache.l2_transfer import (
+    L2Transfer,
+    L2TransferEngine,
+    make_timing_event_pair,
+)
 from sglang.srt.mem_cache.memory_pool import MLATokenToKVPool
 from sglang.srt.mem_cache.utils import get_storage_hash_str
 from sglang.srt.runtime_context import get_parallel
-from sglang.srt.utils import get_device_module
+from sglang.srt.utils import get_bool_env_var, get_device_module
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +60,40 @@ class LayerLoadingEvent:
         self._num_layers = num_layers
         self.load_events = [device_module.Event() for _ in range(num_layers)]
         self.start_event = device_module.Event()  # start event on controller stream
+        self._condition = threading.Condition()
+        self._recorded = [False] * num_layers
+        self._enqueue_done = True
+
+    def begin_enqueue(self):
+        with self._condition:
+            self._recorded = [False] * self._num_layers
+            self._enqueue_done = False
 
     def complete(self, layer_index: int):
         assert 0 <= layer_index < self._num_layers
         self.load_events[layer_index].record()
+        with self._condition:
+            self._recorded[layer_index] = True
+            self._condition.notify_all()
 
     def wait(self, layer_index: int):
+        with self._condition:
+            self._condition.wait_for(lambda: self._recorded[layer_index])
         device_module.current_stream().wait_event(self.load_events[layer_index])
+
+    def mark_enqueue_done(self):
+        with self._condition:
+            self._enqueue_done = True
+            self._condition.notify_all()
+
+    def wait_enqueue_done(self):
+        with self._condition:
+            self._condition.wait_for(lambda: self._enqueue_done)
+
+    @property
+    def enqueue_done(self):
+        with self._condition:
+            return self._enqueue_done
 
     @property
     def finish_event(self):
@@ -80,9 +111,12 @@ class LayerDoneCounter:
 
     def update_producer(self):
         self.producer_index = (self.producer_index + 1) % self.num_counters
-        assert self.events[self.producer_index].finish_event.query(), (
+        event = self.events[self.producer_index]
+        event.wait_enqueue_done()
+        assert event.finish_event.query(), (
             "Producer finish event should be ready before being reused."
         )
+        event.begin_enqueue()
         return self.producer_index
 
     def set_consumer(self, index: int):
@@ -362,9 +396,14 @@ class HiCacheController:
         # Set by the scheduler to the forward stream; gates load-back H2D
         # behind in-flight forwards (see start_loading).
         self.load_fence_stream = None
+        self.async_load_enqueue = get_bool_env_var("SGLANG_HICACHE_ASYNC_LOAD_ENQUEUE")
+        self.load_enqueue_queue = None
+        self.load_enqueue_thread = None
         self.ack_write_queue: List[HiCacheAck] = []
 
         self.l2_transfer_engine = L2TransferEngine(io_backend)
+        if self.async_load_enqueue:
+            self._start_load_enqueue_thread()
 
         # If a storage backend is provided at startup, treat it as an implicit attach,
         # so init/runtime share the same lifecycle semantics and code paths.
@@ -749,6 +788,7 @@ class HiCacheController:
         )
 
     def reset(self):
+        self._stop_load_enqueue_thread()
         self.storage_stop_event.set()
 
         self.write_queue.clear()
@@ -771,6 +811,9 @@ class HiCacheController:
             self.prefetch_tokens_occupied = 0
 
         self.storage_stop_event.clear()
+
+        if self.async_load_enqueue:
+            self._start_load_enqueue_thread()
 
         if self.enable_storage:
             self.prefetch_thread = threading.Thread(
@@ -944,18 +987,45 @@ class HiCacheController:
 
         producer_id = self.layer_done_counter.update_producer()
         op = CacheOperation.merge_ops(self.load_queue)
-        host_indices, device_indices, pool_transfers = self._move_op_indices(op)
         self.load_queue.clear()
         producer_event = self.layer_done_counter.events[producer_id]
         producer_event.start_event.record()
 
+        fence_event = None
         if self.load_fence_stream is not None:
-            # in overlap scheduling, reclaimed pages might still be written by the forward thread
-            # therefore a fence is needed for loading thread to prevent memory corruption
-            # todo: it's possible to use a finer-grained fence
+            fence_event = device_module.Event()
+            fence_event.record(self.load_fence_stream)
+
+        if self.async_load_enqueue:
+            self.load_enqueue_queue.put((producer_id, producer_event, op, fence_event))
+            return producer_id
+
+        host_indices, device_indices, pool_transfers = self._move_op_indices(op)
+        if self.load_fence_stream is not None:
             self.l2_transfer_engine.host_to_device_stream.wait_stream(
                 self.load_fence_stream
             )
+        self._submit_load(
+            producer_event, op, host_indices, device_indices, pool_transfers
+        )
+        return producer_id
+
+    def _enqueue_load(self, producer_event, op, fence_event=None):
+        """Resolve indices, enqueue a load burst, and publish its ordered ack."""
+        stream = self.l2_transfer_engine.host_to_device_stream
+        with device_module.stream(stream):
+            producer_event.start_event.wait(stream)
+            if fence_event is not None:
+                fence_event.wait(stream)
+            host_indices, device_indices, pool_transfers = self._move_op_indices(op)
+
+        self._submit_load(
+            producer_event, op, host_indices, device_indices, pool_transfers
+        )
+
+    def _submit_load(
+        self, producer_event, op, host_indices, device_indices, pool_transfers
+    ):
 
         completion = self.l2_transfer_engine.submit_host_to_device(
             self._l2_load_transfers(host_indices, device_indices, pool_transfers),
@@ -975,7 +1045,49 @@ class HiCacheController:
                 num_bytes=self._transfer_num_bytes(op),
             )
         )
-        return producer_id
+        producer_event.mark_enqueue_done()
+
+    def _start_load_enqueue_thread(self):
+        self.load_enqueue_queue = Queue()
+        self.load_enqueue_thread = threading.Thread(
+            target=self._load_enqueue_loop,
+            name="hicache-load-enqueue",
+            daemon=True,
+        )
+        self.load_enqueue_thread.start()
+
+    def _stop_load_enqueue_thread(self):
+        if self.load_enqueue_thread is None:
+            return
+        self.load_enqueue_queue.put(None)
+        self.load_enqueue_thread.join()
+        self.load_enqueue_thread = None
+
+    def _load_enqueue_loop(self):
+        with device_module.device(self.device):
+            while True:
+                task = self.load_enqueue_queue.get()
+                if task is None:
+                    return
+                _producer_id, producer_event, op, fence_event = task
+                try:
+                    self._enqueue_load(producer_event, op, fence_event)
+                except Exception:
+                    logger.exception("Asynchronous HiCache load enqueue failed")
+                    # Record every missing layer on the transfer stream so forwards
+                    # and slot rotation cannot remain parked on an unrecorded event.
+                    with device_module.stream(
+                        self.l2_transfer_engine.host_to_device_stream
+                    ):
+                        for layer_id in range(self.layer_num):
+                            producer_event.complete(layer_id)
+                        ack_start, ack_finish, _ = make_timing_event_pair()
+                        ack_start.record()
+                        ack_finish.record()
+                    self.ack_load_queue.append(
+                        HiCacheAck(ack_start, ack_finish, op.node_ids)
+                    )
+                    producer_event.mark_enqueue_done()
 
     def evict_device(self, device_indices: torch.Tensor) -> int:
         self.mem_pool_device_allocator.free(device_indices)

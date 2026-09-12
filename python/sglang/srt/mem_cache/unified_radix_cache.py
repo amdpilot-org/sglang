@@ -3190,9 +3190,10 @@ class UnifiedRadixCache(BasePrefixCache):
         if consumer_index < 0 or self.cache_controller is None:
             return True
 
-        finish_event = self.cache_controller.layer_done_counter.events[
-            consumer_index
-        ].finish_event
+        loading_event = self.cache_controller.layer_done_counter.events[consumer_index]
+        if not loading_event.enqueue_done:
+            return False
+        finish_event = loading_event.finish_event
         if not finish_event.query():
             return False
 
