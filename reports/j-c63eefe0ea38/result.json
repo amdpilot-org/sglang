@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36764",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared main-branch Dockerfile still committed the three reported transient builder directories in COPY layers before deleting them in later RUN layers. The primary published Dockerfile now consumes those directories through BuildKit bind mounts, so they are available during installation/copying without becoming image-layer contents. A regression test failed on all three paths before the change and passes afterward, with independent positive and negative detector boundary cases.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-c63eefe0ea38/venv/bin/python -m pytest -q test/registered/unit/tools/test_docker_transient_build_mounts.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before run on base source: two boundary cases passed and the repository regression found /tmp/wheels/hpc-ops, /tmp/local_src, and /tmp/gateway_wheels committed by COPY and removed by later RUN instructions. Raw output: reports/j-c63eefe0ea38/failing-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c63eefe0ea38/venv/bin/python -m pytest -q test/registered/unit/tools/test_docker_transient_build_mounts.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after run: all three tests passed, confirming the three transient paths no longer use cross-layer COPY/delete and all three expected BuildKit bind mounts are present. Raw output: reports/j-c63eefe0ea38/passing-after.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validation."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c63eefe0ea38/venv/bin/python -m pytest -q test/registered/unit/tools/test_docker_transient_build_mounts.py test/registered/unit/tools/test_docker_build_metadata_args.py",
+      "exit_code": 0,
+      "what_was_measured": "Final focused suite: 10 tests passed, covering the new layer regression plus the existing final-stage Docker build metadata contract. Raw output: reports/j-c63eefe0ea38/final-tests.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "This is a Docker image-layer construction defect; no model execution or numerical GPU behavior is involved."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Docker and Podman are unavailable in the prepared environment, so the published image could not be pulled and its compressed layers could not be independently remeasured.",
+    "No full image build was run; validation covers the actual checked-out Dockerfile structure and BuildKit mount contract rather than resulting registry layer byte counts.",
+    "The analogous unmeasured patterns in docker/Dockerfile.cu134 and docker/rocm.Dockerfile were intentionally left unchanged because the source report only quantified the primary lmsysorg/sglang:latest Dockerfile paths."
+  ]
+}
