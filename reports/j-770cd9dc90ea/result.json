@@ -1,0 +1,29 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35324",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source already contains unconditional recovery of all-NaN DSPARK draft probability rows to a token-0 one-hot distribution before torch.multinomial. Added regression and boundary coverage; no production-path source correction was justified.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-770cd9dc90ea/venv/bin/python -m pytest -q test/registered/unit/spec/test_dspark_draft_probability_recovery.py",
+      "exit_code": 0,
+      "what_was_measured": "Three CPU tests: unrecovered NaN probabilities reproduce torch.multinomial's probability-tensor failure; all-minus-infinity and positive-infinity softmax rows recover to token zero; valid rows remain unchanged."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-770cd9dc90ea/venv/bin/python < inline GPU recovery/reference script",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, two non-finite softmax rows became finite token-0 one-hot rows and torch.multinomial completed; a valid row matched an independently computed float64 CPU softmax reference. Raw output: reports/j-770cd9dc90ea/raw/gpu_dspark_probability_recovery.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X gfx950:sramecc+:xnack- with torch 2.11.0+rocm7.2; recovery, sampling, synchronization, and CPU-reference comparison completed on cuda:0."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 weights were unavailable.",
+    "The assigned environment has one AMD gfx950 GPU, not eight NVIDIA H100 GPUs with CUDA.",
+    "TP=8, the full serving path, week-long production traffic, and the intermittent root cause that creates non-finite logits were not reproduced.",
+    "This verifies containment at the implicated DSPARK multinomial boundary, not model semantic accuracy or distributed behavior."
+  ]
+}
