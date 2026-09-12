@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36776",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The five reported DeepEP NPU tests configured accuracy_mmlu_threshold, but TestMMLU reads accuracy_mmlu and otherwise uses 0.00. Renaming those five class attributes makes their intended MMLU thresholds effective. A focused regression checks every reported file and the below-threshold, above-threshold, and unset-threshold behavior boundaries.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-63628f949a79/venv/bin/python - <<'PY' ... misconfigured TestMMLU fixture ... PY",
+      "exit_code": 0,
+      "what_was_measured": "Before the fix, a fixture with accuracy_mmlu_threshold=0.61 incorrectly accepted score=0.10 because TestMMLU fell back to 0.00. Raw output: reports/j-63628f949a79/raw/reproduction-before.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-63628f949a79/venv/bin/python test/registered/npu/test_mmlu_config.py",
+      "exit_code": 0,
+      "what_was_measured": "Four focused regressions passed: all five named source files use the consumed attribute with their original numeric values, a lower score is rejected, a higher score is accepted, and the unset-threshold default accepts a positive score. Raw output: reports/j-63628f949a79/raw/test-mmlu-config-final.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-63628f949a79/venv/bin/python - <<'PY' ... correctly configured TestMMLU fixture ... PY",
+      "exit_code": 0,
+      "what_was_measured": "After the fix, accuracy_mmlu=0.61 rejected score=0.10 with one unittest failure, demonstrating that the configured threshold is enforced. Raw output: reports/j-63628f949a79/raw/reproduction-after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-63628f949a79/venv/bin/python -m compileall -q <six changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python sources compiled successfully. Raw output: reports/j-63628f949a79/raw/compileall.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-63628f949a79/venv/bin/python -m ruff check <six changed Python files>",
+      "exit_code": 1,
+      "what_was_measured": "The prepared interpreter has no ruff module, so this lint invocation could not run. Raw output: reports/j-63628f949a79/raw/ruff.txt"
+    },
+    {
+      "command": "pre-commit run --files <all changed source and report files>",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository hooks passed, including AST validation, isort, ruff lint, ruff format, codespell, and registered-test CI validation. Raw output: reports/j-63628f949a79/raw/pre-commit-final.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and correction concern Python class attribute lookup in Ascend NPU test definitions. Executing an unrelated gfx950 workload would not validate the reported Ascend A3 MMLU configuration behavior."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The full MMLU model tests were not run because the required Ascend A3 hardware, 8/16-NPU topology, and Qwen3/DeepSeek model weights are not available in this gfx950 environment.",
+    "The change validates that the intended thresholds reach TestMMLU; it does not independently measure model semantic accuracy."
+  ]
+}
