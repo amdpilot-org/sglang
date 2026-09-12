@@ -1,0 +1,314 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+___________ test_fp4_dequant_precedes_rocm_weight_processing[False] ____________
+
+fp8_fnuz = False
+
+    @pytest.mark.parametrize("fp8_fnuz", [False, True])
+    def test_fp4_dequant_precedes_rocm_weight_processing(fp8_fnuz):
+        method = _method(is_fp4_expert=True, dequant=True)
+        layer = _layer()
+    
+        with (
+            patch.multiple(
+                fp8_quant,
+                _use_aiter=True,
+                _is_fp8_fnuz=fp8_fnuz,
+                _is_cpu=False,
+            ),
+            patch.object(fp8_quant, "cast_e2m1fn_to_e4m3fn", side_effect=_fake_cast) as cast,
+            patch.object(
+                fp8_quant,
+                "normalize_e4m3fn_to_e4m3fnuz",
+                side_effect=lambda weight, weight_scale, input_scale: (
+                    weight,
+                    weight_scale,
+                    input_scale,
+                ),
+            ),
+            patch.object(
+                fp8_quant,
+                "shuffle_weight",
+                side_effect=lambda weight, *args: weight,
+                create=True,
+            ),
+        ):
+>           method.process_weights_after_loading_block_quant(layer)
+
+test/registered/unit/layers/quantization/test_fp8_moe_fp4_dequant.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.layers.quantization.fp8.Fp8MoEMethod object at 0x755e365c2060>
+layer = Module()
+
+    def process_weights_after_loading_block_quant(self, layer: Module) -> None:
+        # AMD FP4 experts: use aiter's native MXFP4 MoE path
+        if _use_aiter and self.is_fp4_expert:
+            gu_intv = envs.SGLANG_USE_AITER_MOE_GU_ITLV.get()
+            fp4_weight_dtype = _require_fp4_dtype()
+    
+            # DeepSeek V4 MoE is implemented by the FlyDSL kernel, which supports
+            # tile_k=128, so we only need to pad dim to 128. This lets DeepSeek-V4-Pro
+            # at TP8 skip padding 384 -> 512, reducing routed-expert memory by ~25%.
+            # shuffle_scale also supports non-256 shapes since aiter PR#4130.
+            fp4_k_align = 128
+            E, w13_N, w13_K_packed = layer.w13_weight.shape
+            _, w2_N, w2_K_packed = layer.w2_weight.shape
+            inter_per_part = w13_N // 2
+            padded_inter = (
+                (inter_per_part + fp4_k_align - 1) // fp4_k_align * fp4_k_align
+            )
+            # Record the padding so fused_moe is told the real intermediate size
+            # (aiter fused_moe needs intermediate_pad = padded - real; ATOM passes
+            # 128, SGLang previously defaulted to 0 -> computed the padded region).
+            layer.intermediate_pad = padded_inter - inter_per_part
+            layer.hidden_pad = 0
+            if padded_inter != inter_per_part:
+                pad_amount = padded_inter - inter_per_part
+                fp4_block_k = 32
+    
+                # Pad w13_weight: (E, 2*inter, K_packed) → (E, 2*padded, K_packed)
+                old_w13 = layer.w13_weight.data
+                new_w13 = torch.zeros(
+                    E,
+                    2 * padded_inter,
+                    w13_K_packed,
+                    dtype=old_w13.dtype,
+                    device=old_w13.device,
+                )
+                new_w13[:, :inter_per_part, :] = old_w13[:, :inter_per_part, :]
+                new_w13[:, padded_inter : padded_inter + inter_per_part, :] = old_w13[
+                    :, inter_per_part:, :
+                ]
+                layer.w13_weight = torch.nn.Parameter(new_w13, requires_grad=False)
+    
+                # Pad w2_weight: (E, N, inter_packed) → (E, N, padded_packed)
+                old_w2 = layer.w2_weight.data
+                new_w2 = torch.zeros(
+                    E,
+                    w2_N,
+                    padded_inter // 2,
+                    dtype=old_w2.dtype,
+                    device=old_w2.device,
+                )
+                new_w2[:, :, :w2_K_packed] = old_w2
+                layer.w2_weight = torch.nn.Parameter(new_w2, requires_grad=False)
+    
+                # Pad w13 scale: (E, 2*inter, K/block_k) → (E, 2*padded, K/block_k)
+                old_s13 = layer.w13_weight_scale_inv.data
+                _, _, s13_K = old_s13.shape
+                new_s13 = torch.zeros(
+                    E,
+                    2 * padded_inter,
+                    s13_K,
+                    dtype=old_s13.dtype,
+                    device=old_s13.device,
+                )
+                new_s13[:, :inter_per_part, :] = old_s13[:, :inter_per_part, :]
+                new_s13[:, padded_inter : padded_inter + inter_per_part, :] = old_s13[
+                    :, inter_per_part:, :
+                ]
+                layer.w13_weight_scale_inv = torch.nn.Parameter(
+                    new_s13, requires_grad=False
+                )
+    
+                # Pad w2 scale: (E, N, inter/block_k) → (E, N, padded/block_k)
+                old_s2 = layer.w2_weight_scale_inv.data
+                new_s2 = torch.zeros(
+                    E,
+                    w2_N,
+                    padded_inter // fp4_block_k,
+                    dtype=old_s2.dtype,
+                    device=old_s2.device,
+                )
+                new_s2[:, :, : old_s2.shape[2]] = old_s2
+                layer.w2_weight_scale_inv = torch.nn.Parameter(
+                    new_s2, requires_grad=False
+                )
+    
+            for scale_name in ("w13_weight_scale_inv", "w2_weight_scale_inv"):
+                scale = getattr(layer, scale_name)
+                num_experts, num_rows, _ = scale.shape
+                is_w13_scale = scale_name == "w13_weight_scale_inv"
+                if _is_gfx1250_supported:
+                    scale.data = moe_shuffle_scale(
+                        scale.contiguous(),
+                        experts_cnt=num_experts,
+                        is_guinterleave=gu_intv,
+                        gate_up=is_w13_scale,
+                    )
+                else:
+                    scale_2d = scale.reshape(-1, scale.shape[-1])
+>                   scale.data = shuffle_scale(
+                                 ^^^^^^^^^^^^^
+                        scale_2d, num_experts, gu_intv, is_w13_scale
+                    )
+E                   NameError: name 'shuffle_scale' is not defined
+
+python/sglang/srt/layers/quantization/fp8.py:1593: NameError
+____________ test_fp4_dequant_precedes_rocm_weight_processing[True] ____________
+
+fp8_fnuz = True
+
+    @pytest.mark.parametrize("fp8_fnuz", [False, True])
+    def test_fp4_dequant_precedes_rocm_weight_processing(fp8_fnuz):
+        method = _method(is_fp4_expert=True, dequant=True)
+        layer = _layer()
+    
+        with (
+            patch.multiple(
+                fp8_quant,
+                _use_aiter=True,
+                _is_fp8_fnuz=fp8_fnuz,
+                _is_cpu=False,
+            ),
+            patch.object(fp8_quant, "cast_e2m1fn_to_e4m3fn", side_effect=_fake_cast) as cast,
+            patch.object(
+                fp8_quant,
+                "normalize_e4m3fn_to_e4m3fnuz",
+                side_effect=lambda weight, weight_scale, input_scale: (
+                    weight,
+                    weight_scale,
+                    input_scale,
+                ),
+            ),
+            patch.object(
+                fp8_quant,
+                "shuffle_weight",
+                side_effect=lambda weight, *args: weight,
+                create=True,
+            ),
+        ):
+>           method.process_weights_after_loading_block_quant(layer)
+
+test/registered/unit/layers/quantization/test_fp8_moe_fp4_dequant.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.layers.quantization.fp8.Fp8MoEMethod object at 0x755e365c3830>
+layer = Module()
+
+    def process_weights_after_loading_block_quant(self, layer: Module) -> None:
+        # AMD FP4 experts: use aiter's native MXFP4 MoE path
+        if _use_aiter and self.is_fp4_expert:
+            gu_intv = envs.SGLANG_USE_AITER_MOE_GU_ITLV.get()
+            fp4_weight_dtype = _require_fp4_dtype()
+    
+            # DeepSeek V4 MoE is implemented by the FlyDSL kernel, which supports
+            # tile_k=128, so we only need to pad dim to 128. This lets DeepSeek-V4-Pro
+            # at TP8 skip padding 384 -> 512, reducing routed-expert memory by ~25%.
+            # shuffle_scale also supports non-256 shapes since aiter PR#4130.
+            fp4_k_align = 128
+            E, w13_N, w13_K_packed = layer.w13_weight.shape
+            _, w2_N, w2_K_packed = layer.w2_weight.shape
+            inter_per_part = w13_N // 2
+            padded_inter = (
+                (inter_per_part + fp4_k_align - 1) // fp4_k_align * fp4_k_align
+            )
+            # Record the padding so fused_moe is told the real intermediate size
+            # (aiter fused_moe needs intermediate_pad = padded - real; ATOM passes
+            # 128, SGLang previously defaulted to 0 -> computed the padded region).
+            layer.intermediate_pad = padded_inter - inter_per_part
+            layer.hidden_pad = 0
+            if padded_inter != inter_per_part:
+                pad_amount = padded_inter - inter_per_part
+                fp4_block_k = 32
+    
+                # Pad w13_weight: (E, 2*inter, K_packed) → (E, 2*padded, K_packed)
+                old_w13 = layer.w13_weight.data
+                new_w13 = torch.zeros(
+                    E,
+                    2 * padded_inter,
+                    w13_K_packed,
+                    dtype=old_w13.dtype,
+                    device=old_w13.device,
+                )
+                new_w13[:, :inter_per_part, :] = old_w13[:, :inter_per_part, :]
+                new_w13[:, padded_inter : padded_inter + inter_per_part, :] = old_w13[
+                    :, inter_per_part:, :
+                ]
+                layer.w13_weight = torch.nn.Parameter(new_w13, requires_grad=False)
+    
+                # Pad w2_weight: (E, N, inter_packed) → (E, N, padded_packed)
+                old_w2 = layer.w2_weight.data
+                new_w2 = torch.zeros(
+                    E,
+                    w2_N,
+                    padded_inter // 2,
+                    dtype=old_w2.dtype,
+                    device=old_w2.device,
+                )
+                new_w2[:, :, :w2_K_packed] = old_w2
+                layer.w2_weight = torch.nn.Parameter(new_w2, requires_grad=False)
+    
+                # Pad w13 scale: (E, 2*inter, K/block_k) → (E, 2*padded, K/block_k)
+                old_s13 = layer.w13_weight_scale_inv.data
+                _, _, s13_K = old_s13.shape
+                new_s13 = torch.zeros(
+                    E,
+                    2 * padded_inter,
+                    s13_K,
+                    dtype=old_s13.dtype,
+                    device=old_s13.device,
+                )
+                new_s13[:, :inter_per_part, :] = old_s13[:, :inter_per_part, :]
+                new_s13[:, padded_inter : padded_inter + inter_per_part, :] = old_s13[
+                    :, inter_per_part:, :
+                ]
+                layer.w13_weight_scale_inv = torch.nn.Parameter(
+                    new_s13, requires_grad=False
+                )
+    
+                # Pad w2 scale: (E, N, inter/block_k) → (E, N, padded/block_k)
+                old_s2 = layer.w2_weight_scale_inv.data
+                new_s2 = torch.zeros(
+                    E,
+                    w2_N,
+                    padded_inter // fp4_block_k,
+                    dtype=old_s2.dtype,
+                    device=old_s2.device,
+                )
+                new_s2[:, :, : old_s2.shape[2]] = old_s2
+                layer.w2_weight_scale_inv = torch.nn.Parameter(
+                    new_s2, requires_grad=False
+                )
+    
+            for scale_name in ("w13_weight_scale_inv", "w2_weight_scale_inv"):
+                scale = getattr(layer, scale_name)
+                num_experts, num_rows, _ = scale.shape
+                is_w13_scale = scale_name == "w13_weight_scale_inv"
+                if _is_gfx1250_supported:
+                    scale.data = moe_shuffle_scale(
+                        scale.contiguous(),
+                        experts_cnt=num_experts,
+                        is_guinterleave=gu_intv,
+                        gate_up=is_w13_scale,
+                    )
+                else:
+                    scale_2d = scale.reshape(-1, scale.shape[-1])
+>                   scale.data = shuffle_scale(
+                                 ^^^^^^^^^^^^^
+                        scale_2d, num_experts, gu_intv, is_w13_scale
+                    )
+E                   NameError: name 'shuffle_scale' is not defined
+
+python/sglang/srt/layers/quantization/fp8.py:1593: NameError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/layers/quantization/test_fp8_moe_fp4_dequant.py::test_fp4_dequant_precedes_rocm_weight_processing[False]
+FAILED test/registered/unit/layers/quantization/test_fp8_moe_fp4_dequant.py::test_fp4_dequant_precedes_rocm_weight_processing[True]
+2 failed, 17 warnings in 7.92s
