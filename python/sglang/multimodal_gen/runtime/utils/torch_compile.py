@@ -99,6 +99,7 @@ def compile_matching_submodules(
 class CompiledModuleRegistry:
     module_ids: set[int] = field(default_factory=set)
     region_inventories: dict[int, tuple[str, ...]] = field(default_factory=dict)
+    region_compiled_calls: dict[int, dict[str, object]] = field(default_factory=dict)
 
     def is_compiled(self, module: nn.Module) -> bool:
         return id(module) in self.module_ids
@@ -130,6 +131,11 @@ class CompiledModuleRegistry:
             compile_kwargs=compile_kwargs,
         )
         self.region_inventories[module_id] = matching_submodule_names(module)
+        modules = dict(module.named_modules())
+        self.region_compiled_calls[module_id] = {
+            name: getattr(modules[name], "_compiled_call_impl", None)
+            for name in self.region_inventories[module_id]
+        }
         self.module_ids.add(module_id)
         return compiled_count
 
@@ -138,6 +144,15 @@ class CompiledModuleRegistry:
 
     def region_digest(self, module: nn.Module) -> str:
         return region_inventory_digest(self.region_inventory(module))
+
+    def set_regions_active(self, module: nn.Module, active: bool) -> None:
+        """Switch promoted regional wrappers on or off at a request boundary."""
+        compiled_calls = self.region_compiled_calls.get(id(module))
+        if compiled_calls is None:
+            return
+        modules = dict(module.named_modules())
+        for name, compiled_call in compiled_calls.items():
+            modules[name]._compiled_call_impl = compiled_call if active else None
 
 
 class CallableModule(nn.Module):

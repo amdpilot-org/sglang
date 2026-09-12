@@ -61,9 +61,11 @@ class CompiledPlanManifest:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> "CompiledPlanManifest":
+    def from_dict(cls, value: Mapping[str, Any]) -> CompiledPlanManifest:
         if value.get("schema_version", 1) != 1:
-            raise ValueError(f"Unsupported compile manifest schema: {value.get('schema_version')}")
+            raise ValueError(
+                f"Unsupported compile manifest schema: {value.get('schema_version')}"
+            )
         signature = dict(value["signature"])
         signature["latent_shape_regime"] = tuple(signature["latent_shape_regime"])
         steps = signature["num_inference_steps"]
@@ -80,7 +82,7 @@ class CompiledPlanManifest:
         )
 
     @classmethod
-    def load(cls, path: str | Path) -> "CompiledPlanManifest":
+    def load(cls, path: str | Path) -> CompiledPlanManifest:
         with open(path, encoding="utf-8") as stream:
             return cls.from_dict(json.load(stream))
 
@@ -103,7 +105,7 @@ class CompilePlanResolver:
         self._manifests = tuple(manifests)
 
     @classmethod
-    def load(cls, paths: Sequence[str | Path]) -> "CompilePlanResolver":
+    def load(cls, paths: Sequence[str | Path]) -> CompilePlanResolver:
         return cls([CompiledPlanManifest.load(path) for path in paths])
 
     def resolve(
@@ -146,7 +148,9 @@ class TrajectoryGateResult:
     output_metrics: Mapping[str, float]
 
 
-def _tensor_metrics(reference: torch.Tensor, candidate: torch.Tensor) -> dict[str, float]:
+def _tensor_metrics(
+    reference: torch.Tensor, candidate: torch.Tensor
+) -> dict[str, float]:
     lhs = reference.detach().cpu().double()
     rhs = candidate.detach().cpu().double()
     if lhs.shape != rhs.shape:
@@ -198,7 +202,8 @@ def evaluate_trajectory_gate(
     candidate: TrajectoryCapture,
     gate: TrajectoryGate,
     *,
-    output_metric_adapters: Mapping[str, Callable[[object, object], float]] | None = None,
+    output_metric_adapters: Mapping[str, Callable[[object, object], float]]
+    | None = None,
 ) -> TrajectoryGateResult:
     failures: list[str] = []
     reports: dict[str, tuple[Mapping[str, float], ...]] = {}
@@ -220,7 +225,10 @@ def evaluate_trajectory_gate(
                 continue
             step_reports.append(metrics)
             for metric, threshold in gate.tensor_thresholds.get(name, {}).items():
-                value = metrics[metric]
+                value = metrics.get(metric)
+                if value is None:
+                    failures.append(f"unsupported_tensor_metric:{name}:{metric}")
+                    continue
                 failed = not math.isfinite(value) or (
                     value < threshold
                     if metric == "cosine_similarity"
@@ -229,14 +237,21 @@ def evaluate_trajectory_gate(
                 if failed:
                     failures.append(f"tensor:{name}:{step}:{metric}")
         reports[name] = tuple(step_reports)
-    if gate.require_decision_trace_match and reference.decision_trace != candidate.decision_trace:
+    if (
+        gate.require_decision_trace_match
+        and reference.decision_trace != candidate.decision_trace
+    ):
         failures.append("decision_trace")
     if not _structurally_equal(reference.terminal_state, candidate.terminal_state):
         failures.append("terminal_state")
     adapters = output_metric_adapters or {}
     output_report: dict[str, float] = {}
     for name, threshold in gate.output_metrics.items():
-        if name not in adapters or name not in reference.outputs or name not in candidate.outputs:
+        if (
+            name not in adapters
+            or name not in reference.outputs
+            or name not in candidate.outputs
+        ):
             failures.append(f"missing_output_metric:{name}")
             continue
         value = adapters[name](reference.outputs[name], candidate.outputs[name])

@@ -447,6 +447,10 @@ class ServerArgs(DisaggServerArgsMixin):
     # Compilation
     enable_torch_compile: bool = False
     regional_compile: bool = False
+    compile_plan_manifests: list[str] | None = None
+    compile_gate_digest: str | None = None
+    compile_model_revision: str | None = None
+    compile_state_schema_version: str | None = None
 
     # Breakable CUDA graph (BCG): capture the DiT forward as CUDA-graph
     # segments split at attention modules (SP all-to-all / dynamic attention
@@ -2364,6 +2368,27 @@ class ServerArgs(DisaggServerArgsMixin):
                 "_compile_conditions instead of compiling the whole transformer. "
                 "Requires --enable-torch-compile."
             ),
+        )
+        parser.add_argument(
+            "--compile-plan-manifests",
+            nargs="+",
+            default=ServerArgs.compile_plan_manifests,
+            help="Validated regional compile manifests. When set, compilation is deferred until a request exactly matches a promoted workload signature.",
+        )
+        parser.add_argument(
+            "--compile-gate-digest",
+            default=ServerArgs.compile_gate_digest,
+            help="Digest of the offline trajectory gate used to promote the configured manifests.",
+        )
+        parser.add_argument(
+            "--compile-model-revision",
+            default=ServerArgs.compile_model_revision,
+            help="Immutable model revision recorded in compile workload signatures.",
+        )
+        parser.add_argument(
+            "--compile-state-schema-version",
+            default=ServerArgs.compile_state_schema_version,
+            help="Model adapter state/cache schema version recorded in compile workload signatures.",
         )
         parser.add_argument(
             "--offload-during-compile",

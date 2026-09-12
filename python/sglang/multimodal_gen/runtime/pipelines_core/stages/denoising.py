@@ -156,6 +156,11 @@ from sglang.multimodal_gen.runtime.post_training.rollout_denoising_mixin import 
     RolloutDenoisingMixin,
 )
 from sglang.multimodal_gen.runtime.server_args import ServerArgs
+from sglang.multimodal_gen.runtime.utils.compile_trajectory import (
+    CompilePlanResolution,
+    CompilePlanResolver,
+    CompileWorkloadSignature,
+)
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 from sglang.multimodal_gen.runtime.utils.nvtx_pytorch_hooks import maybe_nvtx_range
 from sglang.multimodal_gen.runtime.utils.perf_logger import StageProfiler
@@ -169,9 +174,6 @@ from sglang.multimodal_gen.runtime.utils.precision import (
     resolve_precision,
 )
 from sglang.multimodal_gen.runtime.utils.profiler import SGLDiffusionProfiler
-from sglang.multimodal_gen.runtime.utils.compile_trajectory import (
-    CompilePlanResolution,
-)
 from sglang.multimodal_gen.runtime.utils.torch_compile import (
     CompiledModuleRegistry,
     build_torch_compile_kwargs,
@@ -366,6 +368,10 @@ class DenoisingStage(PipelineStage, RolloutDenoisingMixin):
         # Whether request-scoped extra-high-or-higher fusions are mounted.
         self._quality_fusions_mounted = False
         self._torch_compile_registry = CompiledModuleRegistry()
+        manifest_paths = getattr(self.server_args, "compile_plan_manifests", None)
+        self._compile_plan_resolver = (
+            CompilePlanResolver.load(manifest_paths) if manifest_paths else None
+        )
         # Breakable CUDA graph runners, one per transformer module (lazy).
         self._bcg_runners: dict[int, Any] = {}
 
@@ -385,7 +391,8 @@ class DenoisingStage(PipelineStage, RolloutDenoisingMixin):
         # layerwise-offload and then compile to avoid OOM
         for transformer in filter(None, [self.transformer, self.transformer_2]):
             self._maybe_offload_during_compile(transformer)
-            self._maybe_torch_compile(transformer)
+            if self._compile_plan_resolver is None:
+                self._maybe_torch_compile(transformer)
 
         self.scheduler = scheduler
         self.vae = vae
@@ -557,14 +564,15 @@ class DenoisingStage(PipelineStage, RolloutDenoisingMixin):
         if self._cache_dit_requested() and not self._cache_dit_enabled:
             logger.debug("Deferring torch.compile until cache-dit is enabled")
             return
-        if self._torch_compile_registry.is_compiled(module):
-            return
-
         if resolved_plan is not None and not resolved_plan.use_compiled:
+            self._torch_compile_registry.set_regions_active(module, False)
             logger.info(
                 "Using eager transformer; compile plan fallback reason=%s",
                 resolved_plan.fallback_reason,
             )
+            return
+        if self._torch_compile_registry.is_compiled(module):
+            self._torch_compile_registry.set_regions_active(module, True)
             return
 
         if current_platform.is_npu():
@@ -587,6 +595,7 @@ class DenoisingStage(PipelineStage, RolloutDenoisingMixin):
                 assert manifest is not None
                 actual_regions = self._torch_compile_registry.region_inventory(module)
                 if actual_regions != manifest.regions:
+                    self._torch_compile_registry.set_regions_active(module, False)
                     logger.warning(
                         "Using eager transformer; promoted region inventory changed "
                         "(manifest=%s runtime=%s)",
@@ -641,7 +650,54 @@ class DenoisingStage(PipelineStage, RolloutDenoisingMixin):
         self._maybe_toggle_quality_fusions(batch)
         self._maybe_enable_cache_dit(num_inference_steps, batch)
         for transformer in filter(None, [self.transformer, self.transformer_2]):
-            self._maybe_torch_compile(transformer)
+            resolution = self._resolve_compile_plan(transformer, batch)
+            self._maybe_torch_compile(transformer, resolution)
+
+    def _resolve_compile_plan(
+        self, module: nn.Module, batch: Req
+    ) -> CompilePlanResolution | None:
+        resolver = self._compile_plan_resolver
+        if resolver is None:
+            return None
+        if not getattr(self.server_args, "regional_compile", False):
+            return CompilePlanResolution(None, "manifest_requires_regional_compile")
+        gate_digest = getattr(self.server_args, "compile_gate_digest", None)
+        model_revision = getattr(self.server_args, "compile_model_revision", None)
+        state_schema = getattr(self.server_args, "compile_state_schema_version", None)
+        if not gate_digest or not model_revision or not state_schema:
+            return CompilePlanResolution(
+                None, "runtime_signature_configuration_missing"
+            )
+        raw_shape = getattr(batch, "raw_latent_shape", None)
+        if raw_shape is None or getattr(batch, "latents", None) is None:
+            return CompilePlanResolution(None, "runtime_signature_shape_missing")
+        signature = CompileWorkloadSignature(
+            model_revision=model_revision,
+            dtype=str(batch.latents.dtype).removeprefix("torch."),
+            backend="torchair" if current_platform.is_npu() else "inductor",
+            parallel_signature=(
+                f"tp={self.server_args.tp_size or 1},"
+                f"sp={self.server_args.sp_degree or 1},"
+                f"cfg={self.server_args.cfg_parallel_degree or 1}"
+            ),
+            latent_shape_regime=tuple(int(value) for value in raw_shape),
+            num_inference_steps=int(batch.num_inference_steps),
+            cfg_mode=(
+                "parallel"
+                if batch.do_classifier_free_guidance
+                and (self.server_args.cfg_parallel_degree or 1) > 1
+                else "serial"
+                if batch.do_classifier_free_guidance
+                else "off"
+            ),
+            cache_mode="cache_dit" if self._cache_dit_enabled else "off",
+            state_schema_version=state_schema,
+        )
+        return resolver.resolve(
+            signature,
+            region_digest=self._torch_compile_registry.region_digest(module),
+            gate_digest=gate_digest,
+        )
 
     def _maybe_override_attention_backend(
         self, batch: Req, *, force_fa_for_self_attention: bool = False

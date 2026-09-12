@@ -51,7 +51,12 @@ def test_signature_hash_and_manifest_json_are_stable(tmp_path):
     path = tmp_path / "plan.json"
     manifest.write(path)
     assert CompiledPlanManifest.load(path) == manifest
-    assert json.loads(path.read_text())["signature"]["latent_shape_regime"] == [1, 16, 8, 8]
+    assert json.loads(path.read_text())["signature"]["latent_shape_regime"] == [
+        1,
+        16,
+        8,
+        8,
+    ]
 
 
 @pytest.mark.parametrize(
@@ -185,3 +190,18 @@ def test_gate_compares_nested_tensor_terminal_state_structurally():
     candidate.terminal_state["cache"][0][1] = 4
     changed = evaluate_trajectory_gate(reference, candidate, TrajectoryGate((), {}))
     assert changed.failures == ("terminal_state",)
+
+
+def test_gate_rejects_unsupported_tensor_metric_without_raising():
+    reference, candidate = TrajectoryCapture(), TrajectoryCapture()
+    reference.record("latents", torch.ones(1))
+    candidate.record("latents", torch.ones(1))
+
+    result = evaluate_trajectory_gate(
+        reference,
+        candidate,
+        TrajectoryGate(("latents",), {"latents": {"unsupported_metric": 0.0}}),
+    )
+
+    assert not result.passed
+    assert result.failures == ("unsupported_tensor_metric:latents:unsupported_metric",)
