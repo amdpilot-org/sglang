@@ -85,6 +85,7 @@ class RouterGate(nn.Module):
         params_dtype: Optional[torch.dtype] = None,
         has_correction_bias: bool = False,
         correction_bias_shape: Optional[tuple[int, ...]] = None,
+        correction_bias_name: str = "e_score_correction_bias",
     ):
         super().__init__()
         weight_dtype = (
@@ -99,11 +100,13 @@ class RouterGate(nn.Module):
         self.weight.weight_loader = default_weight_loader
         if has_correction_bias:
             shape = correction_bias_shape or (num_experts,)
-            self.e_score_correction_bias = nn.Parameter(
-                torch.empty(shape, dtype=torch.float32)
+            setattr(
+                self,
+                correction_bias_name,
+                nn.Parameter(torch.empty(shape, dtype=torch.float32)),
             )
         else:
-            self.e_score_correction_bias = None
+            setattr(self, correction_bias_name, None)
         self.tiny_router_gemm_max_tokens = tiny_router_gemm_max_tokens(
             num_experts=num_experts,
             hidden_size=hidden_size,

@@ -30,6 +30,18 @@ class TestRouterGate(unittest.TestCase):
             gate(torch.randn(2, 5, dtype=torch.bfloat16)).dtype, torch.float32
         )
 
+    def test_model_specific_correction_bias_name(self):
+        gate = RouterGate(
+            5,
+            3,
+            fp32_compute=False,
+            params_dtype=torch.bfloat16,
+            has_correction_bias=True,
+            correction_bias_name="expert_bias",
+        )
+        self.assertEqual(set(gate.state_dict()), {"weight", "expert_bias"})
+        self.assertEqual(gate.expert_bias.dtype, torch.float32)
+
     def test_deterministic_policy_skips_tiny_dispatch(self):
         x = torch.randn(1, 4, dtype=torch.bfloat16)
         weight = torch.randn(3, 4, dtype=torch.bfloat16)

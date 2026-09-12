@@ -44,10 +44,7 @@ from sglang.srt.layers.moe import (
 )
 from sglang.srt.layers.moe.ep_moe.layer import get_moe_impl_class
 from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
-from sglang.srt.layers.moe.router_gate import (
-    router_linear_bf16_fp32,
-    tiny_router_gemm_max_tokens,
-)
+from sglang.srt.layers.moe.router_gate import RouterGate
 from sglang.srt.layers.moe.topk import TopK
 from sglang.srt.layers.moe.utils import is_shared_experts_fusion_disabled
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
@@ -369,45 +366,23 @@ class BailingMLP(nn.Module):
         return x
 
 
-class BailingMoEGate(nn.Module):
+class BailingMoEGate(RouterGate):
     def __init__(
         self,
         config,
         params_dtype: Optional[torch.dtype] = None,
         prefix: str = "",
     ):
-        super().__init__()
-
         if params_dtype is None:
             params_dtype = torch.get_default_dtype()
-        self.params_dtype = params_dtype
-        self.weight = nn.Parameter(
-            torch.empty(
-                (config.num_experts, config.hidden_size),
-                dtype=self.params_dtype,
-            ),
+        super().__init__(
+            config.hidden_size,
+            config.num_experts,
+            fp32_compute=params_dtype == torch.float32,
+            params_dtype=params_dtype,
+            has_correction_bias=getattr(config, "moe_router_enable_expert_bias", False),
+            correction_bias_name="expert_bias",
         )
-
-        if getattr(config, "moe_router_enable_expert_bias", False):
-            self.expert_bias = nn.Parameter(
-                torch.empty((config.num_experts,), dtype=torch.float32),
-            )
-        else:
-            self.expert_bias = None
-        self.tiny_router_gemm_max_tokens = tiny_router_gemm_max_tokens(
-            num_experts=config.num_experts,
-            hidden_size=config.hidden_size,
-            weight_dtype=self.weight.dtype,
-        )
-
-    def forward(self, hidden_states):
-        if self.weight.dtype == torch.bfloat16:
-            return router_linear_bf16_fp32(
-                hidden_states.to(torch.bfloat16),
-                self.weight,
-                tiny_max_tokens=self.tiny_router_gemm_max_tokens,
-            )
-        return F.linear(hidden_states.float(), self.weight.float(), None)
 
 
 class BailingMoE(nn.Module):

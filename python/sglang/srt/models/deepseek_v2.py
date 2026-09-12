@@ -102,7 +102,7 @@ from sglang.srt.layers.moe.ep_moe.layer import get_moe_impl_class
 from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
 from sglang.srt.layers.moe.hash_topk import HashTopK
 from sglang.srt.layers.moe.kt_ep_wrapper import KTEPWrapperMethod
-from sglang.srt.layers.moe.router_gate import router_linear_bf16_fp32
+from sglang.srt.layers.moe.router_gate import RouterGate
 from sglang.srt.layers.moe.token_dispatcher.base import (
     BaseDispatcher,
     CombineInput,
@@ -448,7 +448,7 @@ class DeepseekV2MLP(nn.Module):
         return x
 
 
-class MoEGate(nn.Module):
+class MoEGate(RouterGate):
     def __init__(
         self,
         config,
@@ -457,19 +457,17 @@ class MoEGate(nn.Module):
         is_hash_moe: bool = False,
         is_deepseek_v4: bool = False,
     ):
-        super().__init__()
         self.is_deepseek_v4 = is_deepseek_v4
-        self.weight = nn.Parameter(
-            torch.empty(
-                (config.n_routed_experts, config.hidden_size),
-                dtype=(
-                    torch.float32
-                    if getattr(config, "router_fp32", False)
-                    else torch.get_default_dtype()
-                ),
-            )
+        router_fp32 = getattr(config, "router_fp32", False)
+        has_correction_bias = config.topk_method == "noaux_tc" and not is_hash_moe
+        super().__init__(
+            config.hidden_size,
+            config.n_routed_experts,
+            fp32_compute=router_fp32,
+            params_dtype=torch.get_default_dtype(),
+            has_correction_bias=has_correction_bias,
         )
-        if config.topk_method == "noaux_tc" and not is_hash_moe:
+        if has_correction_bias:
             correction_bias_dtype = torch.float32
             # GLM-5.2's bias sits at an offset where its spread is only a few bf16 ULPs
             # wide, so bf16 collapses it and reorders top-k routing. HF stores it fp32.
@@ -481,20 +479,13 @@ class MoEGate(nn.Module):
                 ):
                     correction_bias_dtype = torch.bfloat16
             correction_bias = torch.empty(
-                (config.n_routed_experts), dtype=correction_bias_dtype
+                config.n_routed_experts, dtype=correction_bias_dtype
             )
             if quant_config is not None and quant_config.get_name() == "expert_pack":
                 correction_bias.zero_()
             self.e_score_correction_bias = nn.Parameter(correction_bias)
-        else:
-            self.e_score_correction_bias = None
         if _is_cpu and _is_cpu_amx_available:
             self.quant_method = PackWeightMethod(weight_names=["weight"])
-        self.tiny_router_gemm_max_tokens = tiny_router_gemm_max_tokens(
-            num_experts=config.n_routed_experts,
-            hidden_size=config.hidden_size,
-            weight_dtype=self.weight.dtype,
-        )
 
     def forward(
         self,
@@ -513,11 +504,7 @@ class MoEGate(nn.Module):
                 True,  # is_vnni
             )
 
-        return router_linear_bf16_fp32(
-            hidden_states,
-            self.weight,
-            tiny_max_tokens=self.tiny_router_gemm_max_tokens,
-        )
+        return super().forward(hidden_states)
 
 
 class DeepseekV2MoE(nn.Module):
