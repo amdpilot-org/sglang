@@ -133,7 +133,18 @@ if TYPE_CHECKING:
     from sglang.srt.mem_cache.memory_pool import DSATokenToKVPool
 
 
-DUAL_STREAM_TOKEN_THRESHOLD = 1024 if _is_cuda else 0
+DUAL_STREAM_TOKEN_THRESHOLD = 1024 if (_is_cuda or _is_hip) else 0
+
+
+def should_use_dsa_dual_stream(
+    num_tokens: int, has_alt_stream: bool, is_capture_mode: bool
+) -> bool:
+    """Gate overlap by the flattened query-token count (q_lora.shape[0])."""
+    return (
+        has_alt_stream
+        and is_capture_mode
+        and 0 < num_tokens <= DUAL_STREAM_TOKEN_THRESHOLD
+    )
 
 
 if _is_cuda or _is_hip:
@@ -1502,11 +1513,8 @@ class Indexer(DSANPUIndexerMixin, BaseFusedOp):
         else:
             metadata = None
 
-        enable_dual_stream = (
-            self.alt_stream is not None
-            and get_is_capture_mode()
-            and q_lora.shape[0] > 0
-            and q_lora.shape[0] <= DUAL_STREAM_TOKEN_THRESHOLD
+        enable_dual_stream = should_use_dsa_dual_stream(
+            q_lora.shape[0], self.alt_stream is not None, get_is_capture_mode()
         )
 
         # Determine if should skip topk based on sequence length

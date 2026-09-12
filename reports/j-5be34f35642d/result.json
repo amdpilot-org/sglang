@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38745",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the ROCm contradiction: is_hip() was true while DUAL_STREAM_TOKEN_THRESHOLD was 0, so no positive q_lora token count could enable either DSA dual-stream path. The threshold now applies to CUDA and HIP, and both indexers use one explicit token-count gate. Regression coverage verifies 0, 1, 1024, and 1025 tokens, capture/stream prerequisites, the inclusive boundary, and the large-batch single-stream fallback. Raw logs are retained under /job/artifacts/j-5be34f35642d; changed source is under /job/repo/python/sglang/srt/layers/attention/dsa.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5be34f35642d/venv/bin/python test/registered/attention/unittests/dsa/test_dual_stream_gate.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression against the checked-out implementation: importing the expected shared gate failed before the production fix; raw output: /job/artifacts/j-5be34f35642d/failing-before.log. The existing implementation separately reported is_hip=True and threshold=0, making 0 < num_tokens <= threshold false for every input."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5be34f35642d/venv/bin/python test/registered/attention/unittests/dsa/test_dual_stream_gate.py -v",
+      "exit_code": 0,
+      "what_was_measured": "Three passing regression tests on ROCm. The boundary test covered token counts 0, 1, 1024, and 1025. The GPU test selected the alternate HIP stream at 1024 tokens, selected the current-stream fallback at 1025 tokens, and matched NumPy float32 sums with rtol=2e-6 and atol=2e-6; raw output: /job/artifacts/j-5be34f35642d/passing-after.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5be34f35642d/venv/bin/python -m py_compile python/sglang/srt/layers/attention/dsa/dsa_indexer.py python/sglang/srt/layers/attention/dsa/dsa_indexer_kpool.py test/registered/attention/unittests/dsa/test_dual_stream_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python modules compiled successfully."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5be34f35642d/venv/bin/python -c '<import both DSA indexers and print platform, threshold, boundary, and helper identity>'",
+      "exit_code": 0,
+      "what_was_measured": "Actual module imports reported is_cuda=False, is_hip=True, threshold=1024, boundary={0: false, 1: true, 1024: true, 1025: false}, and confirmed the k-pool indexer imports the identical shared gate."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python:/job/repo/test /tmp/amdpilot-repo-j-5be34f35642d/venv/bin/python test/registered/attention/unittests/dsa/test_dsa.py TestDSAAttentionBackendCorrectness.test_sparse_decode_impl_variants -v",
+      "exit_code": 1,
+      "what_was_measured": "Attempted the repository's broader DSA kernel fixture on HIP. All runnable variants stopped during fixture construction because the shared test fixture hard-codes page_size=64 while the production HIP legacy DSA pool requires page_size=1; two other variants skipped for their documented top-k/architecture constraints. No kernel output was produced. Raw output: /job/artifacts/j-5be34f35642d/dsa-kernel-focused.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5be34f35642d/venv/bin/python -m ruff check ... && /tmp/amdpilot-repo-j-5be34f35642d/venv/bin/python -m ruff format --check ...",
+      "exit_code": 1,
+      "what_was_measured": "Formatting/lint tooling was unavailable in the prepared interpreter: No module named ruff. No package installation or Torch/ROCm change was attempted."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": "No full DSA model checkpoint was available or loaded, so validation is a focused production-gate regression plus real HIP stream work rather than an end-to-end model run. The repository's broader DSA fixture could not execute on HIP because it uses page_size=64 while the HIP legacy DSA pool asserts page_size=1; that fixture blocker is unrelated to this threshold change and leaves full DSA-kernel/model-path execution unverified here. No C++/FlyDSL/compiler code changed, so no native rebuild or compiler/ISA claim applies. The prepared interpreter did not contain ruff."
+}
