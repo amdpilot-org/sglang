@@ -1,0 +1,29 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30815",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "reproduced",
+  "summary": "Reproduced the reported unfused scaled-FP8 KV write in the actual MHATokenToKVPool implementation: one relevant BF16 store kernel versus five scaled-FP8 kernels and a 1.88x pool-call latency ratio on the assigned gfx950. No duplicate fix was implemented because active upstream PR #31652 already provides the CUDA candidate and was reconfirmed active on 2026-09-12.",
+  "tests": [
+    {
+      "command": "env PYTHONPATH=/job/repo/python TORCHINDUCTOR_CACHE_DIR=/tmp/amdpilot-repo-j-2a14448cfa2f/cache/torch TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-2a14448cfa2f/cache/triton SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-2a14448cfa2f/cache/sglang /tmp/amdpilot-repo-j-2a14448cfa2f/venv/bin/python reports/j-2a14448cfa2f/reproduce_fp8_kv_write.py",
+      "exit_code": 0,
+      "what_was_measured": "Actual pool-level batch-1 KV writes on MI350X gfx950: BF16 median 24.88 us with one relevant store kernel; scaled FP8 median 46.72 us with two divide, two cast, and one store kernels. K and V were bit-exact against an independent PyTorch divide-then-cast reference. Raw output: reports/j-2a14448cfa2f/reproduce_fp8_kv_write.log."
+    },
+    {
+      "command": "env PYTHONPATH=/job/repo/python TORCHINDUCTOR_CACHE_DIR=/tmp/amdpilot-repo-j-2a14448cfa2f/cache/torch TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-2a14448cfa2f/cache/triton SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-2a14448cfa2f/cache/sglang /tmp/amdpilot-repo-j-2a14448cfa2f/venv/bin/python -m pytest test/registered/kernels/ops/kvcache/test_store_cache.py test/registered/unit/mem_cache/test_asymmetric_mha_pool.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Existing cache-store and pool boundary coverage: 366 tests passed with 9 subtests, including batch sizes, row widths, index dtypes, split configurations, asymmetric K/V dimensions, prefix-valid guards, and untouched-slot checks. Raw output: reports/j-2a14448cfa2f/focused_tests.log."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X, gfx950:sramecc+:xnack-, reported by PyTorch 2.11.0+rocm7.2; profiler device event names and numerical results are retained in reports/j-2a14448cfa2f/reproduce_fp8_kv_write.log."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The assigned GPU is AMD gfx950, not the reported Hopper H200/SM90, so H200/FA3 end-to-end decode slowdown was not reproduced or claimed.",
+    "No full model weights were available or required for the isolated KV-write path; no model-level ITL or semantic-accuracy claim is made.",
+    "The per-layer FA3 query conversion and FA3 split-KV performance claims remain unverified without FA3-capable Hopper hardware.",
+    "Active upstream PR https://github.com/sgl-project/sglang/pull/31652 is CUDA-only and leaves ROCm unfused; it was inspected but not duplicated or modified."
+  ]
+}
