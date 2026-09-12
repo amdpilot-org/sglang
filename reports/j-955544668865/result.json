@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38428",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/948",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/911",
+  "candidate_commit": "c2d4590aadb34914e913103c2e49a2b5c40bc09f",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review reproduced the original worker-death and queue-stall failure on the exact recorded base. At the exact candidate commit, both backup workers catch ordinary backend exceptions, acknowledge failed operations with distinct exception type/message metadata, retain partial-progress accounting, and continue draining subsequent work. False-return and hybrid sidecar failure metadata also passed the focused regression suite. No source or native files were changed by this review.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-955544668865/venv/bin/python - <<'PY' ... original two-operation reproduction ... PY (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the expected failing-before state: RuntimeError terminated HiCacheController.backup_thread_func, zero operations were acknowledged, and one operation remained queued."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-955544668865/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_backup_resilience.py (candidate c2d4590aadb34914e913103c2e49a2b5c40bc09f)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 7 passed, covering worker survival/draining, distinct exception details, partial progress, backend false returns, clean success/skip state, hybrid exception acknowledgement, and hybrid sidecar partial failure."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-955544668865/venv/bin/python reports/j-bcaa43eb3619/reproduce_review_counterexample.py (candidate c2d4590aadb34914e913103c2e49a2b5c40bc09f)",
+      "exit_code": 0,
+      "what_was_measured": "Both standard and hybrid workers distinguished TimeoutError('remote timed out') from ValueError('malformed response'), acknowledged both failures, and processed a following success."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-955544668865/venv/bin/python - <<'PY' ... independent actual _page_backup batching checks ... PY (candidate c2d4590aadb34914e913103c2e49a2b5c40bc09f)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial cases used the real HiCacheController._page_backup path: a timeout after 128 of 129 pages yielded completed_tokens=2048 and unwritten_pages=1 while the following operation completed; a False return yielded backend_false with two unwritten pages and the following operation completed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reported defect is CPU-only Python thread/queue/error-metadata behavior. The prepared interpreter has torch 2.11.0+rocm7.2, but GPU execution would not exercise the contract and was not claimed."
+  },
+  "native_rebuilt": false,
+  "source_import_paths": [
+    "/job/repo/python/sglang/srt/managers/cache_controller.py",
+    "/job/repo/python/sglang/srt/mem_cache/hybrid_cache/hybrid_cache_controller.py"
+  ],
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No real remote storage service was disrupted; deterministic injected timeout, malformed-response, and false-return behavior exercised the production worker and page-backup methods.",
+    "No model-serving, model-architecture, semantic-accuracy, GPU-kernel, or distributed-workload claim is made.",
+    "No native code changed between the recorded base and candidate, so a native rebuild was not applicable."
+  ]
+}
