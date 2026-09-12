@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32750",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Implemented the complete PP-aware PD + DSpark candidate: stage-local target features are projected into fixed-width context contributions, accumulated through PP proxy tensors, normalized once on the final prefill stage, written to draft KV there, and transferred with target KV through the existing PD data plane. The change covers DeepSeek-V4, Kimi-K3, Kimi Linear, quantized DSv4 projection slices, lifecycle-only/non-owner ranks, PP transfer consensus, and Mooncake/NIXL state mapping.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-b78db74a921b/venv/bin/python -m pytest -q test/registered/unit/spec/test_dspark_pp_context.py test/registered/unit/spec/test_dspark_target_hidden_projection.py test/registered/spec/dspark/test_dspark_stacked_ctx_kv_parity.py test/registered/unit/disaggregation/test_pp_pd_consensus.py test/registered/unit/disaggregation/test_disaggregation_wire.py",
+      "exit_code": 0,
+      "what_was_measured": "69 focused unit/regression tests and 12 subtests covering projection equivalence, stage-local capture, fixed-width PP accumulation, DSv4 block-FP8 slicing, lifecycle-only ranks, draft KV ownership, PD consensus, wire state mapping, and existing DSpark injection/stacked-KV compatibility. Raw output: reports/j-b78db74a921b/logs/focused_all.log"
+    },
+    {
+      "command": "MI355X torch GPU script comparing project_target_hidden_partial accumulation against independent torch.nn.functional.linear plus explicit RMSNorm math",
+      "exit_code": 0,
+      "what_was_measured": "GPU float32 numerical parity for five features distributed noncontiguously and out of order across three simulated PP owners; shape [37,64], max_abs=1.1920928955078125e-06, and adversarial feature-width mismatch rejection. Raw output: reports/j-b78db74a921b/logs/gpu_projection_parity.log"
+    },
+    {
+      "command": "git diff --check && python -m compileall -q <changed Python files> && pre-commit run --files <changed files>",
+      "exit_code": 0,
+      "what_was_measured": "Whitespace, Python syntax, repository lint, formatting, spelling, conflict markers, CI registry validity, and related static checks. Raw output: reports/j-b78db74a921b/logs/precommit.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Executed an independent numerical reference on the single assigned AMD Instinct MI355X with torch 2.11.0+rocm7.2 / HIP 7.2.26015; see reports/j-b78db74a921b/logs/gpu_projection_parity.log."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "End-to-end PP + PD serving was not run because only one GPU was assigned; the protocol requires multiple PP ranks.",
+    "Kimi-K3 and DeepSeek-V4/DSpark model weights were unavailable, so architecture-level generation accuracy and real quantized checkpoint execution remain unverified.",
+    "The deterministic tiny Llama fixture cannot qualify Kimi-K3 or DeepSeek-V4 semantics and was therefore not used as evidence for this architecture-specific feature.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable.",
+    "The implementation is adapted from the still-open upstream candidate PR https://github.com/sgl-project/sglang/pull/33863 and is reported as candidate_verified rather than fixed pending multi-GPU, real-model validation."
+  ]
+}
