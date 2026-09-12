@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33579",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the DFLASH/DSPARK page_size=1 req_to_token headroom mismatch (21 slots versus a 34-slot decode reserve), widened DFLASH-family rows at every page size, and added a fail-fast bound check before DFLASH allocation.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-d9ca8332f2f5/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_dflash_allocation_sizing.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction on the recorded base: DFLASH and DSPARK page_size=1 each produced headroom 21 below reserve 34; page_size=16 and non-spec boundary cases passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d9ca8332f2f5/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_dflash_allocation_sizing.py test/registered/unit/spec/test_dflash_row_width_guard.py test/registered/unit/mem_cache/test_uno_allocation_sizing.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after sizing invariants for DSPARK/DFLASH at page size 1, DFLASH alignment at page size 16, unchanged non-spec behavior, explicit overflow rejection, and no regression to UNO sizing."
+    },
+    {
+      "command": "git diff --check && pre-commit run --files python/sglang/srt/mem_cache/allocation_sizing.py python/sglang/srt/speculative/dflash_info_v2.py test/registered/unit/mem_cache/test_dflash_allocation_sizing.py test/registered/unit/spec/test_dflash_row_width_guard.py",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace plus repository formatting, lint, spelling, syntax, and registered-test metadata checks."
+    },
+    {
+      "command": "rocm-smi --showproductname --showuniqueid",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the assigned single AMD Instinct MI350X gfx950 GPU was visible; no GPU workload was needed or run for this pure sizing/bookkeeping defect."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned gfx950 GPU was enumerated with rocm-smi, but the issue-specific reproduction and regression are CPU-only. No compatible DFLASH/DSPARK model weights were available."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No live DFLASH/DSPARK server reproduction was run because compatible target and draft model weights were not provided.",
+    "The reported 4x B200 production workload, cross-request corruption, and delayed idle leak were not reproduced on the assigned single gfx950 GPU.",
+    "The tests establish the exact sizing mismatch, aligned boundary behavior, and fail-fast allocation bound, but do not make semantic-accuracy or distributed-workload claims."
+  ]
+}
