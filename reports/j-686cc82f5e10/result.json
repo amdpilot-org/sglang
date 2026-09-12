@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34399",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that alloc_extend and alloc_decode indexed their Triton launchers before rejecting requests requiring more pages than the logical free list. Moved the existing capacity calculations and checks ahead of output allocation and kernel launch, while retaining staged-page merging first. Added OOM launch-order regressions and independent exact-capacity and staged-page boundary cases.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-686cc82f5e10/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_paged_allocator_oom.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Three OOM regressions failed because both allocator methods indexed the mocked kernel launcher once; three success/boundary cases passed. Raw output: reports/j-686cc82f5e10/raw/pytest-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-686cc82f5e10/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_paged_allocator_oom.py",
+      "exit_code": 0,
+      "what_was_measured": "All six launch-order and boundary regressions passed after the fix. Raw output: reports/j-686cc82f5e10/raw/pytest-after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-686cc82f5e10/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_paged_allocator_oom.py test/registered/unit/mem_cache/test_paged_allocator_lazy_release.py",
+      "exit_code": 0,
+      "what_was_measured": "Eight focused and related allocator tests passed. Raw output: reports/j-686cc82f5e10/raw/pytest-focused-plus-related.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-686cc82f5e10/venv/bin/python reports/j-686cc82f5e10/gpu_reproducer.py",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI350X (gfx950), real Triton success-path kernels produced extend indices [4..11] and decode indices [4, 8], matching independent CPU references; patched extend/decode OOM calls returned None with zero launcher indexing. Raw output: reports/j-686cc82f5e10/raw/gpu-reproducer.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X, reported capability (9, 5), executed both real allocator Triton kernels and synchronized their outputs; see reports/j-686cc82f5e10/raw/gpu-reproducer.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": "No model weights or serving workload were needed for this allocator-ordering defect. This does not claim a full model, HTTP serving, CUDA/A100, semantic-accuracy, or multi-node reproduction. The prepared environment lacked ruff and black modules, so those checks could not run; git diff --check passed. No native source changed and no native rebuild was applicable. Source path: python/sglang/srt/mem_cache/allocator/paged.py; native path: not applicable."
+}
