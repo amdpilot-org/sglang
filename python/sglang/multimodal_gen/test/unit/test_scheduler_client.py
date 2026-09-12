@@ -30,14 +30,14 @@ def test_sync_scheduler_client_converts_configured_seconds_to_milliseconds():
     socket.close.assert_called_once_with()
 
 
-def test_async_scheduler_client_has_no_transport_deadline_by_default():
+def test_async_scheduler_client_configures_default_transport_deadline():
     response = {"status": "ok"}
     socket = MagicMock()
     socket.send = AsyncMock()
     socket.recv = AsyncMock(return_value=pickle.dumps(response))
     client = AsyncSchedulerClient()
     client.context = SimpleNamespace(socket=lambda _socket_type: socket)
-    client.server_args = SimpleNamespace(scheduler_rpc_timeout=None)
+    client.server_args = SimpleNamespace(scheduler_rpc_timeout=3600)
 
     result = asyncio.run(client._forward_one("tcp://scheduler", object(), None))
 
@@ -47,7 +47,8 @@ def test_async_scheduler_client_has_no_transport_deadline_by_default():
         for call in socket.setsockopt.call_args_list
         if call.args[0] == zmq.RCVTIMEO
     ]
-    assert recv_timeout_calls == []
+    assert len(recv_timeout_calls) == 1
+    assert recv_timeout_calls[0].args == (zmq.RCVTIMEO, 3_600_000)
     socket.close.assert_called_once_with()
 
 

@@ -1105,9 +1105,19 @@ class SchedulerDisaggMixin:
             return
 
         while self._running:
+            frames = None
             try:
                 # All ranks receive work (rank 0 via ZMQ, others via broadcast)
                 frames = self._disagg_recv_work()
+
+                if (
+                    self._fatal_error_message is not None
+                    and self._disagg_role == RoleType.ENCODER
+                ):
+                    self._reject_disagg_encoder_work(
+                        frames, self._fatal_error_message, send_tensors
+                    )
+                    continue
 
                 # Transfer dispatch: check on ALL ranks (frames are broadcast)
                 if self._is_transfer_frames(frames):
@@ -1126,6 +1136,15 @@ class SchedulerDisaggMixin:
                 self._consecutive_error_count = 0
 
             except Exception as e:
+                error_result = self._handle_execution_error(e)
+                if (
+                    self._fatal_error_message is not None
+                    and self._disagg_role == RoleType.ENCODER
+                    and frames is not None
+                ):
+                    self._reject_disagg_encoder_work(
+                        frames, error_result.error, send_tensors
+                    )
                 self._consecutive_error_count += 1
                 logger.error(
                     "Pool %s rank %d: error (attempt %d/%d): %s",
@@ -1143,6 +1162,26 @@ class SchedulerDisaggMixin:
                     ) from e
 
         self._cleanup_disagg()
+
+    def _reject_disagg_encoder_work(
+        self: Scheduler, frames, message: str, send_tensors_fn
+    ) -> None:
+        """Reply to encoder work without dispatching it after device failure."""
+        try:
+            reqs = pickle.loads(frames[-1])
+            req = reqs[0] if isinstance(reqs, list) else reqs
+            request_id = getattr(req, "request_id", "unknown")
+        except Exception:
+            request_id = "unknown"
+
+        if self._pool_result_push is not None:
+            send_tensors_fn(
+                self._pool_result_push,
+                {},
+                {"request_id": request_id, "_disagg_error": message},
+            )
+        if self._disagg_metrics:
+            self._disagg_metrics.record_request_failed(request_id)
 
     def _cleanup_disagg(self: Scheduler):
         """Clean up all pool mode resources (sockets, threads, transfer manager)."""

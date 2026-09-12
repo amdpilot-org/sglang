@@ -97,6 +97,7 @@ LTX2_TWO_STAGE_PIPELINE_NAMES = ("LTX2TwoStagePipeline", "LTX2TwoStageHQPipeline
 LTX2_RESIDENT_AUTO_ENABLE_MEM_GB = 130
 LORA_MERGE_MODES = ("auto", "merge", "dynamic")
 MAX_SCHEDULER_RPC_TIMEOUT_S = 2_147_483
+DEFAULT_SCHEDULER_RPC_TIMEOUT_S = 3600
 # Mirrors AttentionBackend.supports_ring_rotation; the name-level check
 # runs before backend classes are importable on every platform.
 RING_CAPABLE_ATTENTION_BACKENDS = ("fa", "sage_attn")
@@ -333,7 +334,7 @@ class ServerArgs(DisaggServerArgsMixin):
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: Optional[int] = None
     dist_timeout: int | None = 3600  # 1 hour
-    scheduler_rpc_timeout: int | None = None
+    scheduler_rpc_timeout: int | None = DEFAULT_SCHEDULER_RPC_TIMEOUT_S
 
     pipeline_config: PipelineConfig = field(default_factory=PipelineConfig, repr=False)
 
@@ -2326,8 +2327,8 @@ class ServerArgs(DisaggServerArgsMixin):
             default=ServerArgs.scheduler_rpc_timeout,
             help=(
                 "Optional end-to-end timeout in seconds for a scheduler RPC, including "
-                "time spent in the scheduler queue. By default no transport-level "
-                "deadline is imposed; callers may still cancel their request."
+                "time spent in the scheduler queue. Defaults to 3600 seconds. Set to "
+                "None through programmatic configuration to disable the deadline."
             ),
         )
 

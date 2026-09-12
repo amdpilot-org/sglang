@@ -72,6 +72,22 @@ logger = init_logger(__name__)
 _MAX_RECV_REQS_PER_POLL = 1024
 _BATCH_METRICS_LOG_INTERVAL = 5
 
+_UNRECOVERABLE_ACCELERATOR_ERROR_MARKERS = (
+    "cuda driver error: device not ready",
+    "cudacachingallocator.cpp",
+)
+
+
+def _is_unrecoverable_accelerator_error(error: Any) -> bool:
+    """Return whether continuing could execute work on a poisoned device.
+
+    These errors are distinct from an ordinary allocation failure: CUDA has
+    already reported an unavailable device or an allocator invariant failure.
+    The process cannot safely repair either condition with ``empty_cache``.
+    """
+    text = str(error).lower()
+    return any(marker in text for marker in _UNRECOVERABLE_ACCELERATOR_ERROR_MARKERS)
+
 
 @dataclasses.dataclass(frozen=True)
 class _SequentiallyReturnedOutputs:
@@ -84,6 +100,26 @@ class Scheduler(SchedulerWarmupMixin, SchedulerPostTrainingMixin, SchedulerDisag
     It listens for external requests via ZMQ and coordinates with other workers.
     This class does NOT manage worker processes.
     """
+
+    def _handle_execution_error(self, error: Exception) -> OutputBatch:
+        message = str(error)
+        if _is_unrecoverable_accelerator_error(error):
+            message = (
+                f"{message}. The accelerator entered an unrecoverable state; "
+                "restart the server before submitting more requests."
+            )
+            # Keep the RPC loop alive so later callers receive the same
+            # actionable failure instead of blocking on an absent scheduler.
+            # No further request may reach the worker once this is set.
+            self._fatal_error_message = message
+            logger.critical(message)
+        return OutputBatch(error=message)
+
+    def _fatal_state_result(self, req: Any) -> OutputBatch | None:
+        """Reject work after a fatal accelerator error without touching the device."""
+        if self._fatal_error_message is None or isinstance(req, ShutdownReq):
+            return None
+        return OutputBatch(error=self._fatal_error_message)
 
     def __init__(
         self,
@@ -139,6 +175,7 @@ class Scheduler(SchedulerWarmupMixin, SchedulerPostTrainingMixin, SchedulerDisag
         self.gpu_id = gpu_id
         self._show_warmup_progress = gpu_id == 0
         self._running = True
+        self._fatal_error_message: str | None = None
 
         self.request_handlers = {
             SetLoraReq: self._handle_set_lora,
@@ -250,7 +287,13 @@ class Scheduler(SchedulerWarmupMixin, SchedulerPostTrainingMixin, SchedulerDisag
         return reqs
 
     def _dispatch_single_request(self, req_or_group: Any) -> OutputBatch:
+        fatal_result = self._fatal_state_result(req_or_group)
+        if fatal_result is not None:
+            return fatal_result
         if isinstance(req_or_group, list):
+            fatal_result = self._fatal_state_result(req_or_group[0] if req_or_group else None)
+            if fatal_result is not None:
+                return fatal_result
             if not all(isinstance(req, Req) for req in req_or_group):
                 return OutputBatch(
                     error=f"Unknown request group type: {type(req_or_group)}"
@@ -1254,7 +1297,7 @@ class Scheduler(SchedulerWarmupMixin, SchedulerPostTrainingMixin, SchedulerDisag
                     f"Error executing request in scheduler event loop: {e}",
                     exc_info=True,
                 )
-                handler_result = OutputBatch(error=str(e))
+                handler_result = self._handle_execution_error(e)
 
             if isinstance(handler_result, _SequentiallyReturnedOutputs):
                 try:
