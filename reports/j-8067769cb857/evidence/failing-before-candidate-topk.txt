@@ -1,0 +1,99 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ TestDeepseekAmxRouterLogits.test_cpu_topk_rejects_bf16_router_logits_before_native_dispatch _
+
+self = <test_deepseek_amx_router_logits.TestDeepseekAmxRouterLogits testMethod=test_cpu_topk_rejects_bf16_router_logits_before_native_dispatch>
+
+    def test_cpu_topk_rejects_bf16_router_logits_before_native_dispatch(self):
+        """The CPU TopK boundary must not silently accept pre-rounded logits."""
+        hidden_states = torch.zeros((1, 2), dtype=torch.bfloat16)
+        gating_output = torch.tensor([[1.001, 1.002]], dtype=torch.bfloat16)
+        correction_bias = torch.zeros(2, dtype=torch.float32)
+
+        with patch.object(
+            torch.ops.sgl_kernel, "biased_grouped_topk_cpu", create=True
+        ) as native_topk:
+>           with self.assertRaisesRegex(ValueError, "requires FP32 gating_output"):
+E           AssertionError: ValueError not raised
+
+test/registered/unit/models/test_deepseek_amx_router_logits.py:87: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7fd41ea232e0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7fdd02be9c60>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestDeepseekAmxRouterLogits.test_cpu_topk_rejects_bf16_router_logits_before_native_dispatch
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/models/test_deepseek_amx_router_logits.py", line 87, in test_cpu_topk_rejects_bf16_router_logits_before_native_dispatch
+    with self.assertRaisesRegex(ValueError, "requires FP32 gating_output"):
+  File "/usr/lib/python3.12/unittest/case.py", line 263, in __exit__
+    self._raiseFailure("{} not raised".format(exc_name))
+  File "/usr/lib/python3.12/unittest/case.py", line 200, in _raiseFailure
+    raise self.test_case.failureException(msg)
+AssertionError: ValueError not raised
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+<frozen abc>:106
+  <frozen abc>:106: DeprecationWarning: MultiPlatformOp is deprecated; subclass sglang.kernels.fused_op.BaseFusedOp instead (RFC #29630).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/models/test_deepseek_amx_router_logits.py::TestDeepseekAmxRouterLogits::test_cpu_topk_rejects_bf16_router_logits_before_native_dispatch
+1 failed, 18 warnings in 12.71s

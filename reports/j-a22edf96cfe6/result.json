@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31861",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "DeepSeek-family CPU MoE gates no longer use weight_packed_linear, whose output inherits the BF16 activation dtype and rounds FP32 GEMM accumulation before TopK. The CPU gate now computes with explicit FP32 operands and returns FP32 logits. FP32 router weights retain their existing FP32 semantic path. Generic non-router AMX linear behavior is unchanged.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a22edf96cfe6/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_amx_router_logits.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: the production AMX branch returned torch.bfloat16 instead of the required torch.float32. Raw output: /tmp/amdpilot-repo-j-a22edf96cfe6/evidence/failing-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a22edf96cfe6/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_amx_router_logits.py test/registered/unit/models/test_glmmoedsa_correction_bias_fp32.py",
+      "exit_code": 0,
+      "what_was_measured": "12 focused and adjacent unit tests passed, covering BF16 CPU router output dtype, avoidance of packed linear, FP32 router weights, BF16 ordering collapse, and existing correction-bias boundaries. Raw output: /tmp/amdpilot-repo-j-a22edf96cfe6/evidence/passing-after-unit.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-a22edf96cfe6/venv/bin/python < focused linear_bf16_fp32 numerical script",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned gfx950, CUDA-path linear_bf16_fp32 returned torch.float32 for shape (7, 16) and matched a CPU FP32 matmul of identical BF16 operands with max absolute error 2.86102294921875e-06. Raw script output: /tmp/amdpilot-repo-j-a22edf96cfe6/evidence/gfx950-router-reference.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The host CPU is AMD EPYC 9965 and has no Intel AMX, so the original native AMX kernel could not be executed on this host. The regression exercises the actual MoEGate.forward control flow with only the unavailable custom-op boundary mocked.",
+    "The correction prioritizes routing correctness by bypassing AMX prepacking for MoEGate; it does not add an accelerated BF16 activation x FP32 weight AMX router kernel.",
+    "No DeepSeek/LongCat model weights were available, so no full-model or serving reproduction is claimed.",
+    "No native library was changed or rebuilt; inspection of python/sglang/kernels/aot/csrc/cpu/gemm.cpp established that weight_packed_linear allocates output with mat1.options() and converts FP32 accumulation back to the activation scalar type."
+  ]
+}

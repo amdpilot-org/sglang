@@ -1994,6 +1994,12 @@ def biased_grouped_topk_cpu(
     routed_scaling_factor: Optional[float] = None,
     apply_routed_scaling_factor_on_output: Optional[bool] = False,
 ):
+    if gating_output.dtype != torch.float32:
+        raise ValueError(
+            "biased_grouped_topk_cpu requires FP32 gating_output; casting after "
+            "router logits have been rounded cannot recover routing precision"
+        )
+
     return torch.ops.sgl_kernel.biased_grouped_topk_cpu(
         hidden_states,
         gating_output,
