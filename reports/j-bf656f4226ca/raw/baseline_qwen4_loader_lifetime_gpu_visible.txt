@@ -1,0 +1,76 @@
+...                                                                  [100%]
+=================================== FAILURES ===================================
+_ TestQwen4LoaderLifetime.test_replaced_parameters_are_released_without_cyclic_gc (with_ple=False) _
+
+self = <test_qwen4_loader_lifetime.TestQwen4LoaderLifetime testMethod=test_replaced_parameters_are_released_without_cyclic_gc>
+
+    def test_replaced_parameters_are_released_without_cyclic_gc(self):
+        for with_ple in (False, True):
+            with self.subTest(with_ple=with_ple):
+                model = make_model(torch.float32 if with_ple else None)
+                source = weakref.ref(model.weight)
+                weights = [("weight", torch.arange(4.0))]
+                expected_names = {"weight"}
+                if with_ple:
+                    weights.extend(ple_weights(torch.float32))
+                    expected_names.add("ple.ngram_embedding.weight")
+                gc_enabled = gc.isenabled()
+                gc.disable()
+                try:
+                    self.assertEqual(model.load_weights(weights), expected_names)
+                    torch.testing.assert_close(model.weight, torch.arange(4.0))
+                    # Quantization post-processing replaces loader-format Parameters
+                    # after load_weights returns. Its snapshot must not pin them.
+                    model.weight = nn.Parameter(torch.ones(4), requires_grad=False)
+>                   self.assertIsNone(source())
+E                   AssertionError: Parameter containing:
+E                   tensor([0., 1., 2., 3.]) is not None
+
+test/registered/unit/models/test_qwen4_loader_lifetime.py:67: AssertionError
+_ TestQwen4LoaderLifetime.test_replaced_parameters_are_released_without_cyclic_gc (with_ple=True) _
+
+self = <test_qwen4_loader_lifetime.TestQwen4LoaderLifetime testMethod=test_replaced_parameters_are_released_without_cyclic_gc>
+
+    def test_replaced_parameters_are_released_without_cyclic_gc(self):
+        for with_ple in (False, True):
+            with self.subTest(with_ple=with_ple):
+                model = make_model(torch.float32 if with_ple else None)
+                source = weakref.ref(model.weight)
+                weights = [("weight", torch.arange(4.0))]
+                expected_names = {"weight"}
+                if with_ple:
+                    weights.extend(ple_weights(torch.float32))
+                    expected_names.add("ple.ngram_embedding.weight")
+                gc_enabled = gc.isenabled()
+                gc.disable()
+                try:
+                    self.assertEqual(model.load_weights(weights), expected_names)
+                    torch.testing.assert_close(model.weight, torch.arange(4.0))
+                    # Quantization post-processing replaces loader-format Parameters
+                    # after load_weights returns. Its snapshot must not pin them.
+                    model.weight = nn.Parameter(torch.ones(4), requires_grad=False)
+>                   self.assertIsNone(source())
+E                   AssertionError: Parameter containing:
+E                   tensor([0., 1., 2., 3.]) is not None
+
+test/registered/unit/models/test_qwen4_loader_lifetime.py:67: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SUBFAILED(with_ple=False) test/registered/unit/models/test_qwen4_loader_lifetime.py::TestQwen4LoaderLifetime::test_replaced_parameters_are_released_without_cyclic_gc
+SUBFAILED(with_ple=True) test/registered/unit/models/test_qwen4_loader_lifetime.py::TestQwen4LoaderLifetime::test_replaced_parameters_are_released_without_cyclic_gc
+2 failed, 3 passed, 17 warnings, 2 subtests passed in 27.03s

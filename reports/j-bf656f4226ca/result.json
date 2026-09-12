@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38074",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the Qwen4 loader's retention of superseded Parameters with cyclic GC disabled. The nested PLE shard helper stored its once-per-load warning flag on itself, creating a function/closure cycle that also captured params_dict. Replacing the function attribute with a nonlocal boolean removes the cycle while preserving warning and loading behavior.",
+  "tests": [
+    {
+      "command": "CUDA_VISIBLE_DEVICES='' /tmp/amdpilot-repo-j-bf656f4226ca/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen4_loader_lifetime.py",
+      "exit_code": 2,
+      "what_was_measured": "Environment boundary: hiding the ROCm device prevents collection because an imported SGLang module queries device properties at import time. Raw output: reports/j-bf656f4226ca/raw/baseline_qwen4_loader_lifetime.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-bf656f4226ca/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen4_loader_lifetime.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression on the actual Qwen4 loader: both with-PLE and without-PLE lifetime subtests retained the replaced CPU Parameter while cyclic GC was disabled; 3 warning/value tests and 2 subtests passed. Raw output: reports/j-bf656f4226ca/raw/baseline_qwen4_loader_lifetime_gpu_visible.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-bf656f4226ca/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen4_loader_lifetime.py (after source fix)",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after lifetime regression plus independent PLE warning-frequency, repeated-load, matching-dtype, and value-preservation boundaries: 3 tests and 4 subtests passed. The fixture uses CPU tensors; GPU visibility is needed only for module import. Raw output: reports/j-bf656f4226ca/raw/fixed_qwen4_loader_lifetime.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-bf656f4226ca/venv/bin/python -m pytest -q test/registered/kernels/ops/moe/test_moe_wna16_marlin.py -k 'nvfp4_non_gated'",
+      "exit_code": 0,
+      "what_was_measured": "Architecture boundary: both NVFP4 Marlin MoE tests skipped on the assigned AMD Instinct MI350X/gfx950 because they require NVIDIA SM80/SM86/SM90. Raw output: reports/j-bf656f4226ca/raw/gfx950_marlin_nvfp4_attempt.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bf656f4226ca/venv/bin/python -m pre_commit run --files python/sglang/srt/models/qwen4_exp.py test/registered/unit/models/test_qwen4_loader_lifetime.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable touched-file checks passed, including formatting, lint, AST validation, and registered-test CI validation. Raw output: reports/j-bf656f4226ca/raw/precommit.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One assigned AMD Instinct MI350X (gfx950) was visible, but the defect regression uses CPU tensors and NVIDIA Marlin execution is unsupported; the two selected NVFP4 Marlin tests skipped. No CUDA kernel or full-model GPU result is claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original 2x NVIDIA L20, TP2, 48-layer Qwen3.8-Flash-Next NVFP4 checkpoint was not available in this job.",
+    "The assigned gfx950 GPU cannot execute the NVIDIA Marlin fallback, so persistent CUDA allocation and numerical kernel behavior were not remeasured locally.",
+    "The regression validates the real Qwen4 load_weights implementation and Parameter lifetime, not full-model construction, distributed loading, serving, or semantic accuracy.",
+    "Original-environment full-checkpoint A/B evidence exists in the upstream issue and PR discussion, but is not presented as execution performed by this job."
+  ]
+}
