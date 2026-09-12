@@ -11,16 +11,28 @@ from sglang.srt.mem_cache.storage.nixl.nixl_routing import (
 
 logger = logging.getLogger(__name__)
 
+_CACHE_KEY_HEX_LENGTH = 64
+
 
 def _name_matches_suffix(name: str, suffix: str) -> bool:
-    """Return whether a file name contains an instance suffix boundary."""
-    start = 0
-    while (index := name.find(suffix, start)) != -1:
-        remainder = name[index + len(suffix) :]
-        if not remainder or remainder.startswith("_"):
-            return True
-        start = index + 1
-    return False
+    """Return whether a cache file belongs to an instance suffix.
+
+    NIXL cache file names start with a SHA-256 page key, followed by the
+    instance suffix and, optionally, an underscore-prefixed pool component.
+    Anchoring the suffix after the fixed-width key avoids treating a shorter
+    model name as the underscore-delimited tail of a longer model name.
+    """
+    key = name[:_CACHE_KEY_HEX_LENGTH]
+    if len(key) != _CACHE_KEY_HEX_LENGTH or any(
+        char not in "0123456789abcdef" for char in key
+    ):
+        return False
+
+    scoped_name = name[_CACHE_KEY_HEX_LENGTH:]
+    if not scoped_name.startswith(suffix):
+        return False
+    remainder = scoped_name[len(suffix) :]
+    return not remainder or remainder.startswith("_")
 
 
 _SGLANG_NIXL_CONFIG_KEYS = {
