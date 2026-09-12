@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/13809",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Implemented entry-rank-only grammar compilation and vocab masking for tensor-parallel constrained decoding, with root token broadcast, DP-attention group correctness, and fallbacks for speculative decoding, context parallelism, forced synchronization, and unconstrained batches. Also fixed compile-exception propagation so the true InvalidGrammarObject is retained and cached instead of being mislabeled as a timeout.",
+  "tests": [
+    {
+      "command": "prepared Python inline baseline reproduction (see raw/baseline_compile_reproduction.txt)",
+      "exit_code": 0,
+      "what_was_measured": "Before the change, a simulated non-entry TP rank invoked get_cached_or_future_value once and received a Future, reproducing duplicate grammar compilation submission."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-06841fd1be4d/venv/bin/python -m pytest -q test/registered/unit/constrained/test_grammar_manager.py test/registered/unit/sampling/test_sampling_batch_info.py test/registered/unit/layers/test_sampler_grammar_tp_sync.py",
+      "exit_code": 0,
+      "what_was_measured": "97 focused compatibility, regression, and adversarial tests passed, covering compile-once placeholders, cache hits, compile exceptions, failure propagation, PP synchronization payloads, broadcast selection, all-reduce fallback, and no-grammar no-collective behavior."
+    },
+    {
+      "command": "prepared Python inline candidate regression (see raw/candidate_compile_regression.txt)",
+      "exit_code": 0,
+      "what_was_measured": "After the change, the same simulated non-entry TP rank made zero backend compile/cache lookups and carried a PlaceholderGrammarObject."
+    },
+    {
+      "command": "prepared Python inline two-rank torch.distributed Gloo validation (see raw/two_rank_collective_validation.txt)",
+      "exit_code": 0,
+      "what_was_measured": "A real two-process call through Sampler._sync_token_ids_across_tp broadcast divergent tokens [3, 9] to [3, 3] from group root 0."
+    },
+    {
+      "command": "prepared Python inline ROCm grammar-mask numerical check (see raw/gpu_mask_numerical_reference.txt)",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X, masked argmax token IDs [2, 1] exactly matched an independently constructed allowed-token reference [2, 1]."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-06841fd1be4d/venv/bin/python -m compileall -q python/sglang/srt/constrained python/sglang/srt/layers/sampler.py python/sglang/srt/model_executor/model_runner.py python/sglang/srt/sampling/sampling_batch_info.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python modules compiled successfully."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the contribution."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "ROCm 7.2 / torch 2.11.0+rocm7.2 executed the grammar-mask numerical check on the assigned AMD Instinct MI350X (gfx950); raw output is retained under reports/j-06841fd1be4d/raw/."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one GPU was assigned, so true TP=2/TP=4 serving, DP-attention distributed serving, and end-to-end constrained-decoding CPU-overhead benchmarks could not be executed locally.",
+    "The deterministic tiny Llama fixture is transport/engine-only and cannot create a multi-GPU TP path on the available single GPU, so it was not used as substitute evidence.",
+    "Speculative decoding and context parallelism intentionally retain the old compile-and-mask-on-every-rank plus MIN all-reduce path; optimizing those architectures remains outside this candidate.",
+    "No native sources changed, so no native rebuild was applicable."
+  ]
+}
