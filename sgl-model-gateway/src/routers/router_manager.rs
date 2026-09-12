@@ -13,6 +13,7 @@ use axum::{
     extract::Request,
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
+    Json,
 };
 use dashmap::DashMap;
 use serde_json::Value;
@@ -232,18 +233,39 @@ impl RouterManager {
     /// Resolve model_id for a request, inferring from available workers if not specified.
     ///
     /// Behavior in IGW mode (must fail fast if model not resolvable):
-    /// - If model_id is provided, use it directly
+    /// - If model_id is provided, require it to match an available model
     /// - If not provided and only one model exists, use it as implicit default
     /// - If not provided and multiple models exist, return error requiring specification
     /// - If no models exist, return service unavailable error
     fn resolve_model_id(&self, model_id: Option<&str>) -> Result<String, Box<Response>> {
-        // If model_id is provided, use it
-        if let Some(id) = model_id {
-            return Ok(id.to_string());
-        }
-
-        // Get all available models from worker registry
         let available_models = self.worker_registry.get_models();
+        Self::resolve_model_id_from_available(model_id, &available_models)
+    }
+
+    fn resolve_model_id_from_available(
+        model_id: Option<&str>,
+        available_models: &[String],
+    ) -> Result<String, Box<Response>> {
+        if let Some(id) = model_id {
+            if available_models.iter().any(|model| model == id) {
+                return Ok(id.to_string());
+            }
+
+            return Err(Box::new(
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({
+                        "error": {
+                            "message": format!("The model '{}' does not exist", id),
+                            "type": "invalid_request_error",
+                            "param": null,
+                            "code": "model_not_found"
+                        }
+                    })),
+                )
+                    .into_response(),
+            ));
+        }
 
         match available_models.len() {
             0 => Err(Box::new(
@@ -745,5 +767,58 @@ impl std::fmt::Debug for RouterManager {
             .field("workers_count", &self.worker_registry.get_all().len())
             .field("default_router", &*default_router)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    async fn error_json(response: Response) -> Value {
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn resolve_model_id_validates_explicit_model_membership() {
+        let available = vec!["model-a".to_string(), "model-b".to_string()];
+
+        assert_eq!(
+            RouterManager::resolve_model_id_from_available(Some("model-a"), &available).unwrap(),
+            "model-a"
+        );
+
+        let response = *RouterManager::resolve_model_id_from_available(
+            Some("missing-model"),
+            &available,
+        )
+        .unwrap_err();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            error_json(response).await,
+            serde_json::json!({
+                "error": {
+                    "message": "The model 'missing-model' does not exist",
+                    "type": "invalid_request_error",
+                    "param": null,
+                    "code": "model_not_found"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn resolve_model_id_preserves_implicit_model_boundaries() {
+        assert!(RouterManager::resolve_model_id_from_available(None, &[]).is_err());
+        assert_eq!(
+            RouterManager::resolve_model_id_from_available(None, &["only".to_string()]).unwrap(),
+            "only"
+        );
+        assert!(RouterManager::resolve_model_id_from_available(
+            None,
+            &["model-a".to_string(), "model-b".to_string()]
+        )
+        .is_err());
     }
 }
