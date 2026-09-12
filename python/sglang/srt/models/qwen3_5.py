@@ -621,6 +621,18 @@ class Qwen3_5GatedDeltaNet(nn.Module):
         # Qwen3.5 has separate in_proj_b and in_proj_a weights in the
         # checkpoint, which are loaded into the fused in_proj_ba parameter
         # via stacked_params_mapping with shard_id 0 and 1 respectively.
+        # GPTQ-Marlin can only repack output widths divisible by 64. Some
+        # GPTQModel checkpoints therefore leave this small gating projection
+        # in bf16, but do not list it in their dynamic exclusions. Avoid
+        # constructing an impossible packed parameter in that case so the
+        # plain ``in_proj_a.weight`` / ``in_proj_b.weight`` tensors can load.
+        local_output_size = 2 * num_v_heads // (tp_size or 1)
+        if (
+            quant_config is not None
+            and quant_config.get_name() == "gptq_marlin"
+            and local_output_size % 64 != 0
+        ):
+            quant_config = None
         return MergedColumnParallelLinear(
             input_size=hidden_size,
             output_sizes=[num_v_heads, num_v_heads],
