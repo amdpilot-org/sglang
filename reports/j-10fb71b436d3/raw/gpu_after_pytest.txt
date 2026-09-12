@@ -1,0 +1,97 @@
+.                                                                      [100%]
+=================================== FAILURES ===================================
+_ TestAiterRouterGemmDtype.test_router_logits_are_fp32_for_tuned_and_fallback_shapes (tokens=8, hidden_size=7168, experts=256) _
+
+self = <test_aiter_router_gemm_dtype.TestAiterRouterGemmDtype testMethod=test_router_logits_are_fp32_for_tuned_and_fallback_shapes>
+
+    def test_router_logits_are_fp32_for_tuned_and_fallback_shapes(self):
+        torch.manual_seed(20260912)
+    
+        # The production GLM/DeepSeek router shape exercises a tuned dispatch;
+        # the smaller non-multiple token count independently covers fallback.
+        for tokens, hidden_size, experts in ((8, 7168, 256), (65, 512, 64)):
+            with self.subTest(
+                tokens=tokens, hidden_size=hidden_size, experts=experts
+            ):
+                hidden_states = (
+                    torch.randn(tokens, hidden_size, device="cuda")
+                    / hidden_size**0.5
+                ).to(torch.bfloat16)
+                weight = torch.randn(
+                    experts, hidden_size, device="cuda", dtype=torch.bfloat16
+                )
+    
+                output = aiter_dsv3_router_gemm(hidden_states, weight)
+                reference = torch.nn.functional.linear(
+                    hidden_states.float(), weight.float()
+                )
+    
+                self.assertEqual(output.dtype, torch.float32)
+                self.assertEqual(output.shape, (tokens, experts))
+                self.assertTrue(torch.isfinite(output).all())
+                # An fp32 output must retain more information than rounding the
+                # independent fp32 accumulation reference to bf16.
+                output_error = (output - reference).abs().max()
+                bf16_error = (reference.to(torch.bfloat16).float() - reference).abs().max()
+>               self.assertLess(output_error, bf16_error)
+E               AssertionError: tensor(0.0076, device='cuda:0') not less than tensor(0.0076, device='cuda:0')
+
+test/registered/unit/layers/test_aiter_router_gemm_dtype.py:47: AssertionError
+_ TestAiterRouterGemmDtype.test_router_logits_are_fp32_for_tuned_and_fallback_shapes (tokens=65, hidden_size=512, experts=64) _
+
+self = <test_aiter_router_gemm_dtype.TestAiterRouterGemmDtype testMethod=test_router_logits_are_fp32_for_tuned_and_fallback_shapes>
+
+    def test_router_logits_are_fp32_for_tuned_and_fallback_shapes(self):
+        torch.manual_seed(20260912)
+    
+        # The production GLM/DeepSeek router shape exercises a tuned dispatch;
+        # the smaller non-multiple token count independently covers fallback.
+        for tokens, hidden_size, experts in ((8, 7168, 256), (65, 512, 64)):
+            with self.subTest(
+                tokens=tokens, hidden_size=hidden_size, experts=experts
+            ):
+                hidden_states = (
+                    torch.randn(tokens, hidden_size, device="cuda")
+                    / hidden_size**0.5
+                ).to(torch.bfloat16)
+                weight = torch.randn(
+                    experts, hidden_size, device="cuda", dtype=torch.bfloat16
+                )
+    
+                output = aiter_dsv3_router_gemm(hidden_states, weight)
+                reference = torch.nn.functional.linear(
+                    hidden_states.float(), weight.float()
+                )
+    
+                self.assertEqual(output.dtype, torch.float32)
+                self.assertEqual(output.shape, (tokens, experts))
+                self.assertTrue(torch.isfinite(output).all())
+                # An fp32 output must retain more information than rounding the
+                # independent fp32 accumulation reference to bf16.
+                output_error = (output - reference).abs().max()
+                bf16_error = (reference.to(torch.bfloat16).float() - reference).abs().max()
+>               self.assertLess(output_error, bf16_error)
+E               AssertionError: tensor(0.0124, device='cuda:0') not less than tensor(0.0124, device='cuda:0')
+
+test/registered/unit/layers/test_aiter_router_gemm_dtype.py:47: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SUBFAILED(tokens=8, hidden_size=7168, experts=256) test/registered/unit/layers/test_aiter_router_gemm_dtype.py::TestAiterRouterGemmDtype::test_router_logits_are_fp32_for_tuned_and_fallback_shapes
+SUBFAILED(tokens=65, hidden_size=512, experts=64) test/registered/unit/layers/test_aiter_router_gemm_dtype.py::TestAiterRouterGemmDtype::test_router_logits_are_fp32_for_tuned_and_fallback_shapes
+2 failed, 1 passed, 17 warnings in 33.28s
+exit_code=1

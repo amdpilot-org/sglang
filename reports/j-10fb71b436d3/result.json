@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34857",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared base already fixed GLM-5.2 correction-bias preservation at allocation and the aiter top-k boundary. The remaining aiter router GEMM output-dtype defect reproduced on gfx950 and was corrected by requesting torch.float32 output; a two-shape GPU regression now passes.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-10fb71b436d3/venv/bin/python <reports/j-10fb71b436d3/raw/gpu_before.txt reproduction script>",
+      "exit_code": 0,
+      "what_was_measured": "Before the change, actual aiter_dsv3_router_gemm calls returned torch.bfloat16 for (8,7168,256) and (65,512,64) on gfx950; maximum absolute errors versus independent fp32 torch linear references were 0.0238833427 and 0.0124273300."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-10fb71b436d3/venv/bin/python -m pytest -q test/registered/unit/layers/test_aiter_router_gemm_dtype.py",
+      "exit_code": 0,
+      "what_was_measured": "The production router dimensions and an independent fallback shape both return finite fp32 tensors with the expected dimensions on the assigned gfx950 GPU (1 test, 2 subtests)."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-10fb71b436d3/venv/bin/python -m pytest -q test/registered/unit/models/test_glmmoedsa_correction_bias_fp32.py",
+      "exit_code": 0,
+      "what_was_measured": "The existing correction-bias allocation, architecture-boundary, bf16-collapse, and routing-divergence regression coverage passes (9 tests)."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-10fb71b436d3/venv/bin/python <reports/j-10fb71b436d3/raw/gpu_after_numeric.txt comparison script>",
+      "exit_code": 0,
+      "what_was_measured": "After the change both shapes return torch.float32, but the installed untuned aiter fallback retains bf16-level internal rounding versus an independent fp32 torch linear reference."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the delivered changes."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Single AMD Instinct MI350X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2 / HIP 7.2.26015; raw logs in reports/j-10fb71b436d3/raw/gpu_before.txt, gpu_after_pytest_final.txt, and gpu_after_numeric.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No GLM-5.2 weights were available, so no full-model semantic or accuracy reproduction was performed.",
+    "Only one assigned gfx950 GPU was used; no multi-GPU or multi-node behavior was evaluated.",
+    "The installed aiter dispatcher had no tuned entry for the tested shapes. Although the corrected API returns fp32, its fallback showed bf16-level internal rounding, so improved numerical accuracy inside aiter is not claimed.",
+    "No native SGLang or aiter source was changed, so no native rebuild was applicable."
+  ]
+}
