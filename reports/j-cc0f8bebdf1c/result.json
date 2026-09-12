@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/29738",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "At exact candidate commit f2422973285f9887a12aaa110cb0ce0fefff1d6e, the local deep_gemm import fixes the reproduced disabled-JIT NameError in the real entrypoint source. Candidate and independent tests verify non-empty forwarding, the empty-input fast path, and the missing-dependency boundary. This is a narrow source fix plus regression coverage.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-cc0f8bebdf1c/venv/bin/python /job/review-evidence/hc_prenorm_contract.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "The real base entrypoint with ENABLE_JIT_DEEPGEMM=false raised NameError on a non-empty call despite an importable deep_gemm substitute. Evidence: reports/j-cc0f8bebdf1c/raw/base-independent-contract.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cc0f8bebdf1c/venv/bin/python test/registered/unit/layers/test_deep_gemm_hc_prenorm_import.py (candidate f2422973285f9887a12aaa110cb0ce0fefff1d6e)",
+      "exit_code": 0,
+      "what_was_measured": "All three candidate regression cases passed when executed against the exact candidate checkout. Evidence: reports/j-cc0f8bebdf1c/raw/candidate-regression.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cc0f8bebdf1c/venv/bin/python /job/review-evidence/hc_prenorm_contract.py (candidate f2422973285f9887a12aaa110cb0ce0fefff1d6e)",
+      "exit_code": 0,
+      "what_was_measured": "An independent harness passed non-empty dependency import and exact forwarding, empty-input no-import behavior, and missing-dependency ImportError behavior. Evidence: reports/j-cc0f8bebdf1c/raw/candidate-independent-contract.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cc0f8bebdf1c/venv/bin/python -m pytest -q test/registered/unit/layers/test_deep_gemm_hc_prenorm_import.py (candidate f2422973285f9887a12aaa110cb0ce0fefff1d6e)",
+      "exit_code": 0,
+      "what_was_measured": "Pytest collected and passed all three focused tests. Evidence: reports/j-cc0f8bebdf1c/raw/candidate-pytest.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cc0f8bebdf1c/venv/bin/python -m py_compile python/sglang/srt/layers/deep_gemm_wrapper/entrypoint.py test/registered/unit/layers/test_deep_gemm_hc_prenorm_import.py (candidate f2422973285f9887a12aaa110cb0ce0fefff1d6e)",
+      "exit_code": 0,
+      "what_was_measured": "Both changed Python files compiled successfully."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned GPU is AMD Instinct MI355X gfx950 on ROCm 7.2. DeepSeek-V4 disables this DeepGEMM path on HIP, the environment has no deep_gemm package, and no CUDA H100/SM90 execution was possible. See reports/j-cc0f8bebdf1c/raw/environment.log"
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No CUDA H100/SM90 was available, so the actual DeepGEMM TF32 kernel was not launched or numerically validated.",
+    "DeepSeek-V4 weights were unavailable, so no full-model forward or HTTP serving reproduction was performed.",
+    "The prepared environment had no deep_gemm package; import behavior and forwarding were validated with a deterministic module substitute against the real entrypoint source.",
+    "A pre-commit attempt initialized hook environments but did not complete hook execution, so no pre-commit result is claimed."
+  ]
+}
