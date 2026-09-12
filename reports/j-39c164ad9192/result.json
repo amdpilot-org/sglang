@@ -1,0 +1,56 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36906",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1131",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1096",
+  "candidate_commit": "5aad45facb10eadf8252176958378f7dd1c1576c",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the original non-first-stage mHC KeyError because the runner supplies only folded hidden_states while GLM5 unconditionally reads residual. The exact candidate aligns GLM5 input and output proxy keys with that existing runner contract and preserves non-mHC behavior. Focused regression, buffer allocation tests, and independent adversarial GPU cases passed. Full three-GPU NVIDIA model serving was unavailable, but no remaining source-level counterexample was found for the reported contract.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-39c164ad9192/venv/bin/python -m pytest -q /job/review-evidence/candidate/test/registered/unit/models/test_glm5_next_dflash_capture.py (base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before execution of the candidate regression against the exact recorded base: the mHC hidden_states-only proxy raised KeyError: 'residual'; the other two cases passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-39c164ad9192/venv/bin/python -m pytest -q test/registered/unit/models/test_glm5_next_dflash_capture.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Three focused GLM5 cases passed, including the original mHC boundary and the separate non-mHC residual boundary."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-39c164ad9192/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_cuda_graph_buffer_registry.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "All 41 runner buffer-registry tests passed, including mHC/non-mHC pipeline proxy allocation behavior."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-39c164ad9192/venv/bin/python reports/j-7cf1344686a5/evidence/gpu_pp_contract.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate GPU fixture preserved expected mHC and non-mHC proxy keys and values on AMD Instinct MI350X gfx950."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-39c164ad9192/venv/bin/python <independent inline adversarial proxy test> (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Independently verified mHC hidden-only input, extraneous-residual stripping, non-mHC tensor round-trip, and rejection of a missing non-mHC residual on gfx950."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 5aad45facb10eadf8252176958378f7dd1c1576c",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Candidate and independent proxy-contract tensor checks ran on the assigned AMD Instinct MI350X, reported by PyTorch as gfx950:sramecc+:xnack-."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "GLM-5.3-Flash-NVFP4 weights were unavailable, so full model warmup and semantic accuracy were not tested.",
+    "Only one assigned GPU was available, so an actual pp_size > 1 server topology could not be launched.",
+    "The review GPU was AMD gfx950; the original report used three NVIDIA SM120 GPUs, so backend-specific full-server integration was not reproduced.",
+    "No native source changed in the candidate, so a native rebuild was neither required nor performed.",
+    "The tiny Llama fixture was not used because it cannot qualify the GLM5 mHC architecture or a multi-stage pipeline handoff."
+  ]
+}
