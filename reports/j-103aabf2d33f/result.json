@@ -1,0 +1,60 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38695",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "ce113fb8d9d5b8a6fac88e0d2364dfcfc7ff2b6b",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a verified partial correction: it fixes the reproduced AITER bf16-output-store violation, centralizes the GEMM implementation, and migrates the five architectures named by the prior review. It does not complete the original issue's universal RouterGate consolidation because multiple issue-relevant consumers retain model-local gate implementations and do not all inherit the shared fp32-output and deterministic dispatch policy.",
+  "tests": [
+    {
+      "command": "SGLANG_USE_AITER=1 /tmp/amdpilot-repo-j-103aabf2d33f/venv/bin/python /tmp/amdpilot-repo-j-103aabf2d33f/review-evidence/check_gemm.py (base 358c163250ad)",
+      "exit_code": 0,
+      "what_was_measured": "On MI350X at M=1,7,8,15,16,17,64, every fp32-typed output exactly equaled the independent CPU fp32 reference rounded through bf16 and was exactly bf16-representable. Maximum error against the unrounded fp32 reference was 0.191894531, reproducing the output-store contract failure."
+    },
+    {
+      "command": "SGLANG_USE_AITER=1 /tmp/amdpilot-repo-j-103aabf2d33f/venv/bin/python /tmp/amdpilot-repo-j-103aabf2d33f/review-evidence/check_gemm.py (candidate ce113fb8d9d5)",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate, all boundary-shape outputs were fp32 and not bf16-representable. Maximum error against the independent CPU fp32 matmul was 7.62939453e-06."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-103aabf2d33f/venv/bin/python -m pytest -q test/registered/unit/layers/test_router_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "Four candidate regression tests passed: fp32 reference/output contract, fp32-compute and correction-bias behavior, deterministic small-token bypass, and neutral/legacy import identity."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-103aabf2d33f/venv/bin/python /tmp/amdpilot-repo-j-103aabf2d33f/review-evidence/check_deterministic.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent MI350X adversarial test forced router-GEMV and tiny-GEMM probes to raise under deterministic inference. Neither path was consulted; the output was fp32, not bf16-representable, and within 9.5367431640625e-07 of the CPU fp32 reference."
+    },
+    {
+      "command": "Import hunyuan_v3, minimax_m3, sarvam_moe, step3p5, nemotron_h, deepseek_v2, bailing_moe_v3, glm4_moe, mimo_v2, laguna, bailing_moe, bailing_moe_linear, llada2, ernie4, and kimi_linear with the prepared interpreter",
+      "exit_code": 0,
+      "what_was_measured": "All reviewed source modules imported from /job/repo successfully."
+    },
+    {
+      "command": "rg source audit of router operations and RouterGate imports at candidate ce113fb8d9d5",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the five prior-review architectures use RouterGate, but also confirmed remaining issue-relevant local gates in Kimi Linear, Bailing-MoE, Bailing-MoE-Linear, LLaDA2, Bailing-MoE-v3, and a DeepSeek-v2 wrapper."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X (gfx95) under Torch 2.11.0+rocm7.2 executed the failing-before and passing-candidate numerical tests plus the independent deterministic-dispatch adversarial test. Raw logs are in reports/j-103aabf2d33f/raw/."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Kimi Linear still constructs its router with ReplicatedLinear and therefore does not use the shared RouterGate policy; the candidate changes only its correction-bias dtype.",
+    "Bailing-MoE and Bailing-MoE-Linear retain model-local BailingMoEGate implementations. Removing their explicit output downcast is a valid precision fix, but their output dtype and dispatch remain controlled locally rather than by RouterGate.",
+    "LLaDA2 retains a model-local LLaDA2MoeGate. Removing its explicit output downcast does not consolidate it behind RouterGate or give it the shared deterministic/small-token policy.",
+    "Bailing-MoE-v3 retains a model-local gate wrapper. It calls shared helper functions, but it is still outside the proposed single gate layer.",
+    "DeepSeek-v2 retains a model-local MoEGate wrapper for AMX and extended call signatures. It reuses the shared helpers but is not fully consolidated into RouterGate.",
+    "Many additional MoE model files still use ReplicatedLinear or other local router implementations, as recorded by the candidate's own all_router_consumers_after.txt; those consumers were not migrated or validated under one policy."
+  ],
+  "remaining_limitations": [
+    "No model weights were available, so full-model checkpoint compatibility, semantic accuracy, serving behavior, and performance were not tested.",
+    "CUDA-only tiny GEMM, DeepGEMM, HPC-Ops, AMX, NPU, XPU, distributed, NVIDIA, and non-gfx95 paths were unavailable on the assigned AMD MI350X and remain unverified.",
+    "No native source changed in the candidate and repository-environment.json declares no native build target, so native rebuild was not applicable.",
+    "The AITER removal's performance impact was not benchmarked."
+  ]
+}
