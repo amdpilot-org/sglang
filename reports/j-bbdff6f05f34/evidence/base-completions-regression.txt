@@ -1,0 +1,122 @@
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+_ ServingCompletionTestCase.test_request_metrics_are_opt_in_and_omit_unmeasured_values _
+
+self = <test_serving_completions.ServingCompletionTestCase testMethod=test_request_metrics_are_opt_in_and_omit_unmeasured_values>
+
+    def test_request_metrics_are_opt_in_and_omit_unmeasured_values(self):
+        ret = [
+            {
+                "text": "answer",
+                "meta_info": {
+                    "id": "cmpl-metrics",
+                    "prompt_tokens": 2,
+                    "completion_tokens": 3,
+                    "cached_tokens": 0,
+                    "finish_reason": {"type": "stop"},
+                    "weight_version": "default",
+                    "queue_time": 0.25,
+                    "time_to_first_token": 0.5,
+                    "generation_time": 1.0,
+                    "e2e_latency": 1.5,
+                    "mean_inter_token_latency": 0.5,
+                    "output_token_throughput": 2.0,
+                },
+            }
+        ]
+        disabled = CompletionRequest(model="x", prompt="Hi", max_tokens=3)
+        disabled_response = self.sc._build_completion_response(disabled, ret, 123)
+        self.assertNotIn("sglext", disabled_response.model_dump())
+
+        ret[0]["meta_info"]["queue_time"] = 0.0
+        enabled = disabled.model_copy(update={"return_request_metrics": True})
+        response = self.sc._build_completion_response(enabled, ret, 123)
+>       metrics = response.model_dump()["sglext"]["request_metrics"]
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'sglext'
+
+test/registered/unit/entrypoints/openai/test_serving_completions.py:144: KeyError
+_ ServingCompletionTestCase.test_request_metrics_opt_in_propagates_to_internal_request _
+
+self = <test_serving_completions.ServingCompletionTestCase testMethod=test_request_metrics_opt_in_propagates_to_internal_request>
+
+    def test_request_metrics_opt_in_propagates_to_internal_request(self):
+        req = CompletionRequest(
+            model="x", prompt="Hi", max_tokens=1, return_request_metrics=True
+        )
+        internal, _ = self.sc._convert_to_internal_request(req)
+>       self.assertTrue(internal.return_request_metrics)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'GenerateReqInput' object has no attribute 'return_request_metrics'
+
+test/registered/unit/entrypoints/openai/test_serving_completions.py:115: AttributeError
+_ ServingCompletionTestCase.test_streaming_request_metrics_use_final_extension_chunk _
+
+self = <test_serving_completions.ServingCompletionTestCase testMethod=test_streaming_request_metrics_use_final_extension_chunk>
+
+    def test_streaming_request_metrics_use_final_extension_chunk(self):
+        async def generate():
+            yield {
+                "text": "answer",
+                "index": 0,
+                "meta_info": {
+                    "id": "cmpl-stream-metrics",
+                    "prompt_tokens": 2,
+                    "completion_tokens": 3,
+                    "cached_tokens": 0,
+                    "finish_reason": {"type": "stop"},
+                    "time_to_first_token": 0.5,
+                    "e2e_latency": 1.5,
+                },
+            }
+
+        self.sc.tokenizer_manager.generate_request = Mock(return_value=generate())
+        req = CompletionRequest(
+            model="x",
+            prompt="Hi",
+            max_tokens=3,
+            stream=True,
+            return_request_metrics=True,
+        )
+        internal, _ = self.sc._convert_to_internal_request(req)
+
+        async def collect():
+            return [
+                chunk
+                async for chunk in self.sc._generate_completion_stream(
+                    internal, req, self.fastapi_request
+                )
+            ]
+
+        chunks = get_or_create_event_loop().run_until_complete(collect())
+        parsed = [
+            json.loads(chunk[len("data: ") :])
+            for chunk in chunks
+            if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]"
+        ]
+        metric_chunks = [item for item in parsed if "sglext" in item]
+>       self.assertEqual(len(metric_chunks), 1)
+E       AssertionError: 0 != 1
+
+test/registered/unit/entrypoints/openai/test_serving_completions.py:190: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/entrypoints/openai/test_serving_completions.py::ServingCompletionTestCase::test_request_metrics_are_opt_in_and_omit_unmeasured_values
+FAILED test/registered/unit/entrypoints/openai/test_serving_completions.py::ServingCompletionTestCase::test_request_metrics_opt_in_propagates_to_internal_request
+FAILED test/registered/unit/entrypoints/openai/test_serving_completions.py::ServingCompletionTestCase::test_streaming_request_metrics_use_final_extension_chunk
+3 failed, 19 deselected, 17 warnings in 12.24s
