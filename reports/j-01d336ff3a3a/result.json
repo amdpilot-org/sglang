@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/16255",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Retained candidate 642e52a8e98ede176a3c4942bd18f926b40b3434's valid DeepSeek V3.2 extraction and corrected its remaining source-level counterexample by extracting NPU MHA/MLA/DSA dispatch into a lazy hardware mixin. This is not a claim of complete architecture or model-runtime qualification.",
+  "tests": [
+    {
+      "command": "CANDIDATE_DIR=<exact-candidate-worktree> python -c '<import DeepseekV2NPUAttentionMixin from candidate>'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before structural reproduction at exact candidate commit: the hardware_backend package and NPU mixin were absent."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-01d336ff3a3a/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v32_mixin.py test/registered/unit/models/test_deepseek_npu_mixin.py test/registered/unit/models/test_deepseek_mla_dispatch.py",
+      "exit_code": 0,
+      "what_was_measured": "22 tests and 8 subtests covering retained V3.2 policy plus MHA/MLA/DSA NPU prepare/core routing and DSA previous-top-k argument forwarding."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-01d336ff3a3a/pre-commit-cache pre-commit run --files <changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "Applicable formatting, lint, syntax, security, and CI registration checks."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-01d336ff3a3a/venv/bin/python <inline ROCm device-placement reference check>",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X, empty DSA top-k output matched an independent torch.empty reference for CUDA/ROCm device, int32 dtype, and (0, 2048) shape."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-01d336ff3a3a/evidence/gpu-device-after.log; AMD Instinct MI350X with Torch 2.11.0+rocm7.2 and HIP 7.2.26015. This validates allocation placement only, not Indexer numerics or model semantics."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No NPU execution; NPU dispatch is verified with mocks only.",
+    "No DeepSeek V3.2 checkpoint or weights; Indexer/IndexerKPool execution, checkpoint compatibility, logits, and semantic accuracy remain unverified.",
+    "No multi-GPU or pipeline-parallel stage-boundary execution.",
+    "NVIDIA, CPU-only, MUSA, and other architecture-specific runtime paths were not executed.",
+    "Dedicated AMD and CPU wrapper mixins were not added without a demonstrated defect; existing separate ROCm and CPU attention-forward mixins were preserved.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
