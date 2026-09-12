@@ -456,11 +456,9 @@ class OpenAIServingCompletion(OpenAIServingBase):
             sglext_request_metrics = None
             if request.return_request_metrics and request_metrics:
                 metrics = [
-                    request_metrics[index]
-                    for index in sorted(request_metrics)
-                    if request_metrics[index] is not None
+                    request_metrics[index] for index in sorted(request_metrics)
                 ]
-                if metrics:
+                if any(metric is not None for metric in metrics):
                     sglext_request_metrics = (
                         metrics if len(request_metrics) > 1 else metrics[0]
                     )
@@ -577,15 +575,11 @@ class OpenAIServingCompletion(OpenAIServingBase):
             if request.n > 1
             else (spec_details[0] if spec_details else None)
         )
-        metrics = [
-            metric
-            for metric in (
-                process_request_metrics_from_ret(item, request) for item in ret
-            )
-            if metric is not None
-        ]
+        metrics = [process_request_metrics_from_ret(item, request) for item in ret]
         request_metrics = (
-            metrics if len(ret) > 1 else (metrics[0] if metrics else None)
+            metrics
+            if len(ret) > 1 and any(metric is not None for metric in metrics)
+            else metrics[0] if len(ret) == 1 else None
         )
         response_sglext = None
         if (

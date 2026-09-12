@@ -3051,6 +3051,24 @@ class ServingChatTestCase(unittest.TestCase):
         )
         self.assertEqual([item["e2e_latency"] for item in metrics], [0.8, 1.2])
 
+    def test_non_streaming_request_metrics_preserve_unmeasured_choice_position(self):
+        req = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "Hi?"}],
+            max_tokens=2,
+            n=2,
+            return_request_metrics=True,
+        )
+        ret = [_spec_result(index) for index in range(2)]
+        ret[1]["meta_info"]["e2e_latency"] = 2.5
+
+        response = self.chat._build_chat_response(req, ret, 1234567890)
+
+        self.assertEqual(
+            response.model_dump()["sglext"]["request_metrics"],
+            [None, {"e2e_latency": 2.5}],
+        )
+
     def test_non_streaming_meta_info_omits_response_level_routed_experts(self):
         req = ChatCompletionRequest(
             model="x",
@@ -3287,6 +3305,64 @@ class ServingChatTestCase(unittest.TestCase):
                 "storage": 1,
                 "storage_backend": "file",
             },
+        )
+
+    def test_streaming_request_metrics_preserve_unmeasured_choice_position(self):
+        async def generate():
+            for index in range(2):
+                yield {
+                    "text": f"response-{index}",
+                    "index": index,
+                    "meta_info": {
+                        "id": "chatcmpl-stream-partial-metrics",
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "cached_tokens": 0,
+                        "finish_reason": {"type": "stop", "matched": None},
+                        "output_token_logprobs": None,
+                        "output_top_logprobs": None,
+                        **({"e2e_latency": 2.5} if index == 1 else {}),
+                    },
+                }
+
+        self.tm.generate_request.return_value = generate()
+        req = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "Hi?"}],
+            max_tokens=2,
+            n=2,
+            stream=True,
+            return_request_metrics=True,
+        )
+
+        with patch(
+            "sglang.srt.entrypoints.openai.serving_chat.generate_chat_conv"
+        ) as conv_mock:
+            conv_ins = Mock()
+            conv_ins.get_prompt.return_value = "Test prompt"
+            conv_mock.return_value = conv_ins
+            adapted_request, _ = self.chat._convert_to_internal_request(
+                req, self.fastapi_request
+            )
+
+            async def collect():
+                return [
+                    chunk
+                    async for chunk in self.chat._generate_chat_stream(
+                        adapted_request, req, self.fastapi_request
+                    )
+                ]
+
+        chunks = get_or_create_event_loop().run_until_complete(collect())
+        parsed = [
+            json.loads(chunk[len("data: ") :])
+            for chunk in chunks
+            if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]"
+        ]
+        metric_chunk = next(item for item in parsed if "sglext" in item)
+        self.assertEqual(
+            metric_chunk["sglext"]["request_metrics"],
+            [None, {"e2e_latency": 2.5}],
         )
 
     def _output_ids_ret(self, *output_ids_by_choice):

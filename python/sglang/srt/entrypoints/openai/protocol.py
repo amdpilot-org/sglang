@@ -457,7 +457,9 @@ class SglExt(BaseModel):
     spec_tokens_details: Optional[Union[SpecTokensDetails, List[SpecTokensDetails]]] = (
         None
     )
-    request_metrics: Optional[Union[RequestMetrics, List[RequestMetrics]]] = None
+    request_metrics: Optional[
+        Union[RequestMetrics, List[Optional[RequestMetrics]]]
+    ] = None
     input_ids: Optional[List[int]] = None
     output_ids: Optional[List[List[int]]] = None
 
