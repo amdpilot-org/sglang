@@ -8,6 +8,11 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+import torch
+
+from sglang.multimodal_gen.runtime.platforms import current_platform
+from sglang.multimodal_gen.runtime.utils.perf_logger import get_git_commit_hash
+
 SCHEMA_VERSION = 1
 PASSING_QUALITY_GATES = frozenset({"pass", "passed"})
 
@@ -54,6 +59,17 @@ class ParallelExecutionPlan:
     sequence_parallel_size: int = 1
     fsdp: bool = False
     data_parallel_replicas: int = 1
+
+    def __post_init__(self) -> None:
+        for name in (
+            "num_gpus",
+            "cfg_parallel_size",
+            "tensor_parallel_size",
+            "sequence_parallel_size",
+            "data_parallel_replicas",
+        ):
+            if getattr(self, name) < 1:
+                raise ValueError(f"{name} must be positive")
 
     @property
     def required_devices(self) -> int:
@@ -203,15 +219,55 @@ class Resolution:
     signature_hash: str | None = None
 
 
+def get_runtime_environment() -> dict[str, str]:
+    """Return the runtime identity fields required for calibration reuse."""
+    runtime_version = (
+        torch.version.hip
+        or torch.version.cuda
+        or getattr(torch.version, "xpu", None)
+        or "none"
+    )
+    try:
+        device_name = str(current_platform.get_device_name(0))
+    except Exception:
+        device_name = str(current_platform.device_type)
+    try:
+        distributed_backend = current_platform.get_torch_distributed_backend_str()
+    except Exception:
+        distributed_backend = "unknown"
+    return {
+        "device_type": str(current_platform.device_type),
+        "device_name": device_name,
+        "distributed_backend": str(distributed_backend),
+        "torch_version": str(torch.__version__),
+        "accelerator_runtime_version": str(runtime_version),
+    }
+
+
+def _intrinsic_plan_rejection(plan: ParallelExecutionPlan) -> str | None:
+    if plan.required_devices != plan.num_gpus:
+        return "parallel degree product does not equal num_gpus"
+    return None
+
+
 def resolve_calibrated_plan(
     report: CalibrationReport,
     signature: DiffusionWorkloadSignature,
     *,
     objective: str = "p95",
     code_revision: str | None = None,
+    environment: Mapping[str, Any] | None = None,
 ) -> Resolution:
     if code_revision is not None and report.code_revision != code_revision:
         return Resolution(None, "conservative_fallback", ("code revision mismatch",))
+    if environment is not None and any(
+        report.environment.get(key) != value for key, value in environment.items()
+    ):
+        return Resolution(
+            None,
+            "conservative_fallback",
+            ("calibration environment mismatch",),
+        )
     exact = [result for result in report.results if result.signature == signature]
     if not exact:
         return Resolution(None, "conservative_fallback", ("no exact signature match",))
@@ -226,6 +282,8 @@ def resolve_calibrated_plan(
             rejected.append(f"quality gate={result.quality_gate}")
         elif objective not in result.latency_ms:
             rejected.append(f"missing latency objective {objective}")
+        elif reason := _intrinsic_plan_rejection(result.plan):
+            rejected.append(reason)
         else:
             passing.append(result)
     if not passing:
@@ -268,7 +326,12 @@ def apply_advisor_to_server_args(server_args: Any) -> Resolution:
     if not isinstance(signature_raw, dict):
         raise ValueError("workload signature JSON must be an object")
     signature = DiffusionWorkloadSignature(**signature_raw)
-    resolution = resolve_calibrated_plan(CalibrationReport.load(spec[5:]), signature)
+    resolution = resolve_calibrated_plan(
+        CalibrationReport.load(spec[5:]),
+        signature,
+        code_revision=get_git_commit_hash(),
+        environment=get_runtime_environment(),
+    )
     resolution = Resolution(
         resolution.plan,
         resolution.source,
