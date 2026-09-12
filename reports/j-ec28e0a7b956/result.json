@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34974",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "ad7df07c3e50608a589021ee0b2897c77133cef2",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduced the exact layer_idx=None scatter_add_ dimension mismatch through DSparkV4Stage._run_ffn and the real EPLB stat gatherer. The exact candidate isolates only the DSpark draft MoE from the target expert recorder, passes its regression, passes independent state/ownership adversarial cases, and passes real gfx950 HIP graph capture/replay with exact output and unchanged target counts.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ec28e0a7b956/venv/bin/python - (independent base fixture at 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "The checked-out DSpark _run_ffn and real EPLB stat gatherer raised the exact reported RuntimeError because the draft hook reached scatter_add_ with layer_idx=None. The fixture treated that expected reproduction as success."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ec28e0a7b956/venv/bin/python test/registered/unit/spec/test_dspark_expert_distribution.py -v (at ad7df07c3e50608a589021ee0b2897c77133cef2)",
+      "exit_code": 0,
+      "what_was_measured": "All three candidate regressions passed: output/count preservation, exception restoration, and nested disabled-region preservation."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ec28e0a7b956/venv/bin/python - (independent adversarial fixture at candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Repeated draft calls suppressed invalid expert IDs, preserved an enclosing target layer index, restored global recorder state, kept target counts zero, and preserved output with recording/capture inactive."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-ec28e0a7b956/venv/bin/python reports/j-22da6c42d0c3/gfx950_capture_check.py (at candidate)",
+      "exit_code": 0,
+      "what_was_measured": "A real HIP graph captured and replayed on AMD Instinct MI350X/gfx950; output exactly equaled input+1, target counts were [[0,0,0,0],[2,0,4,0]], and recorder_disabled was false afterward."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X, capability (9, 5), real torch.cuda.CUDAGraph capture and replay using ROCm 7.2."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash weights were unavailable, so the complete model server was not started.",
+    "Only one AMD gfx950 GPU was assigned; the reporter's 8x NVIDIA H20 TP=8/EP=8 CUDA deployment was not reproduced.",
+    "Semantic accuracy, speculative acceptance rate, live EPLB migration, and crash-loop behavior were not exercised.",
+    "The candidate changes only Python source; no native source changed and no native rebuild was applicable."
+  ],
+  "source_paths": {
+    "dspark": "/job/repo/python/sglang/srt/models/deepseek_v4_dspark.py",
+    "expert_distribution": "/job/repo/python/sglang/srt/eplb/expert_distribution.py",
+    "python": "/tmp/amdpilot-repo-j-ec28e0a7b956/venv/bin/python"
+  }
+}
