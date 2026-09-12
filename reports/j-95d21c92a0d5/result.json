@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38821",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes processor registration for the public GLM-5.3 checkpoint on the prepared base, but omits required serving-path normalization for processor-expanded image-token spans and does not verify or explain the original semantic misidentification.",
+  "tests": [
+    {
+      "command": "HF_HOME=/tmp/amdpilot-repo-j-95d21c92a0d5/hf-cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-95d21c92a0d5/venv/bin/python -c '<base get_processor probe>'",
+      "exit_code": 1,
+      "what_was_measured": "On the exact recorded base, the real SGLang processor-loading path returned TokenizersBackend and image_processor access raised AttributeError."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-95d21c92a0d5/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_glm5_next_processor.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 436f0c1f6d0b64fa2947441bdd0add9611b4778b, all six candidate unit tests passed; they cover registration, synthetic JPEG preprocessing, and resize boundaries, but not the complete serving integration."
+    },
+    {
+      "command": "HF_HOME=/tmp/amdpilot-repo-j-95d21c92a0d5/hf-cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-95d21c92a0d5/venv/bin/python -c '<candidate full processor probe>'",
+      "exit_code": 0,
+      "what_was_measured": "The public checkpoint loaded the candidate processor from checkout source; one synthetic 64x48 image produced finite pixel_values shape (80, 1176), grid [[1, 8, 10]], and 20 expanded image tokens."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-95d21c92a0d5/venv/bin/python -m pytest -q /job/review-evidence-j-95d21c92a0d5/test_candidate_serving_path.py",
+      "exit_code": 1,
+      "what_was_measured": "Independent adversarial serving-path regression failed: one image represented by four processor-expanded image tokens was passed uncollapsed to load_mm_data, risking reinterpretation as four image placeholders."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-95d21c92a0d5/venv/bin/python -c '<environment and source import probe>'",
+      "exit_code": 0,
+      "what_was_measured": "Imports resolved to /job/repo/python; Torch reported ROCm 7.2, one AMD Instinct MI355X, and gfx950. This was inventory only, not model execution."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "One gfx950 GPU was visible, but the private GLM weights and exact issue fixture were unavailable; no issue-path model inference executed.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A processor-expanded list of input IDs containing one repeated image-token span is not collapsed before load_mm_data and can be interpreted as multiple image placeholders.",
+    "No candidate test sends the exact Statue of Liberty JPEG through the OpenAI-compatible endpoint and verifies landmark semantics with the reported GLM-5.3-Flash model.",
+    "The reported deployment already processed an image and returned unrelated visual semantics; the candidate's missing-processor diagnosis does not explain that observed path."
+  ],
+  "remaining_limitations": "The exact JPEG, private GLM-5.3-Flash-sglang0907-128k-0907t3 weights, 8x NVIDIA H20 topology, and CUDA environment were unavailable. The available host has one AMD MI355X gfx950. The candidate changes no native source, so native rebuilding was not applicable. Semantic accuracy, the private model architecture, and distributed behavior remain unverified."
+}
