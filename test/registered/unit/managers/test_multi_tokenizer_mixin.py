@@ -8,8 +8,6 @@ maybe_stub_sgl_kernel()
 
 from sglang.srt.managers.io_struct import (
     BatchStrOutput,
-    unwrap_from_pickle,
-    wrap_as_pickle,
 )
 from sglang.srt.managers.multi_tokenizer_mixin import (
     TokenizerWorker,
@@ -155,15 +153,13 @@ class TestMultiTokenizerMixin(unittest.TestCase):
             {"probe": [[200, 201]], "short": [[]]},
         )
 
-    def test_batch_str_output_keeps_time_stats_wrapped(self):
+    def test_batch_str_output_slices_native_time_stats(self):
         output = _make_batch_str_output()
-        output.time_stats = wrap_as_pickle({"probe": [100]})
+        output.time_stats = [None, None]
 
         single_output = _handle_output_by_index(output, 1)
 
-        self.assertEqual(
-            unwrap_from_pickle(single_output.time_stats), {"probe": [None]}
-        )
+        self.assertEqual(single_output.time_stats, [None])
 
 
 if __name__ == "__main__":

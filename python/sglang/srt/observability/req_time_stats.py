@@ -38,6 +38,10 @@ from sglang.srt.observability.trace import (
     TraceSliceContext,
     get_global_tracing_enabled,
 )
+from sglang.srt.observability.trace_async import (
+    TraceReqContextAsync,
+    is_async_tracing_available,
+)
 from sglang.srt.utils import get_bool_env_var
 
 if TYPE_CHECKING:
@@ -249,9 +253,9 @@ class ReqTimeStatsBase(
                 EncoderMetricsCollector,
             ]
         ] = None
-        self.trace_ctx: Union[TraceReqContext, TraceNullContext] = (
-            self._decode_trace_ctx_state(self.trace_ctx_state)
-        )
+        self.trace_ctx: Union[
+            TraceReqContext, TraceReqContextAsync, TraceNullContext
+        ] = self._decode_trace_ctx_state(self.trace_ctx_state)
 
         old_diff = self.diff_realtime_monotonic
         new_diff = global_diff_realtime_monotonic
@@ -290,9 +294,14 @@ class ReqTimeStatsBase(
     @staticmethod
     def _decode_trace_ctx_state(
         trace_ctx_state: Optional[Dict[str, Any]],
-    ) -> Union[TraceReqContext, TraceNullContext]:
+    ) -> Union[TraceReqContext, TraceReqContextAsync, TraceNullContext]:
         if isinstance(trace_ctx_state, dict) and trace_ctx_state.get("tracing_enable"):
-            trace_ctx = object.__new__(TraceReqContext)
+            trace_ctx_type = (
+                TraceReqContextAsync
+                if trace_ctx_state.get("is_async")
+                else TraceReqContext
+            )
+            trace_ctx = object.__new__(trace_ctx_type)
             trace_ctx.__setstate__(trace_ctx_state)
             return trace_ctx
         return TraceNullContext()
@@ -346,7 +355,10 @@ class ReqTimeStatsBase(
         bootstrap_room: Optional[int],
         external_trace_header: Optional[Dict[str, str]] = None,
     ):
-        self.trace_ctx = TraceReqContext(
+        trace_ctx_type = (
+            TraceReqContextAsync if is_async_tracing_available() else TraceReqContext
+        )
+        self.trace_ctx = trace_ctx_type(
             rid=rid,
             bootstrap_room=bootstrap_room,
             role=self.disagg_mode_str(),
@@ -687,13 +699,15 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
     # other
     transfer_speed_gb_s: float = 0.0
     transfer_total_mb: float = 0.0
+    has_timing_data: bool = False
 
     def __getstate__(self) -> object:
         # send to detokenizer/tokenizer
-        if not self.enable_metrics and not self.diff_realtime_monotonic:
+        if not (self.enable_metrics or self.has_timing_data):
             return {}
 
         state = {
+            "has_timing_data": True,
             "wait_queue_entry_time": self.wait_queue_entry_time,
             "forward_entry_time": self.forward_entry_time,
             "prefill_finished_time": self.prefill_finished_time,
@@ -702,9 +716,10 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
         return state
 
     def to_ipc(self) -> Self:
-        if not self.enable_metrics:
+        if not (self.enable_metrics or self.has_timing_data):
             return type(self)()
         return type(self)(
+            has_timing_data=True,
             wait_queue_entry_time=self.wait_queue_entry_time,
             forward_entry_time=self.forward_entry_time,
             prefill_finished_time=self.prefill_finished_time,
@@ -1112,9 +1127,9 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
             )
 
             if SGLANG_TEST_REQUEST_TIME_STATS:
-                assert (
-                    queue_duration >= 0 and forward_duration >= 0
-                ), f"queue_duration={queue_duration} < 0 or forward_duration={forward_duration} < 0"
+                assert queue_duration >= 0 and forward_duration >= 0, (
+                    f"queue_duration={queue_duration} < 0 or forward_duration={forward_duration} < 0"
+                )
 
             return f"queue_duration={self.format_duration(queue_duration)}, forward_duration={self.format_duration(forward_duration)}, entry_time={self.format_wallclock(self.wait_queue_entry_time)}"
         elif self.disagg_mode == DisaggregationMode.PREFILL:
@@ -1134,7 +1149,9 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
                         bootstrap_queue_duration >= 0
                         and queue_duration >= 0
                         and forward_duration >= 0
-                    ), f"bootstrap_queue_duration={bootstrap_queue_duration} < 0 or queue_duration={queue_duration} < 0 or forward_duration={forward_duration} < 0"
+                    ), (
+                        f"bootstrap_queue_duration={bootstrap_queue_duration} < 0 or queue_duration={queue_duration} < 0 or forward_duration={forward_duration} < 0"
+                    )
 
             if (
                 self.bootstrap_done_time > 0
@@ -1144,9 +1161,9 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
                     self.prefill_bootstrap_queue_entry_time, self.bootstrap_done_time
                 )
                 if SGLANG_TEST_REQUEST_TIME_STATS:
-                    assert (
-                        bootstrap_duration >= 0
-                    ), f"bootstrap_duration={bootstrap_duration} < 0"
+                    assert bootstrap_duration >= 0, (
+                        f"bootstrap_duration={bootstrap_duration} < 0"
+                    )
                 bootstrap_fields = (
                     f"bootstrap_duration={self.format_duration(bootstrap_duration)}, "
                 )
@@ -1188,7 +1205,9 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
                         and transfer_duration >= 0
                         and queue_duration >= 0
                         and forward_duration >= 0
-                    ), f"prealloc_duration={prealloc_duration} < 0 or transfer_duration={transfer_duration} < 0 or queue_duration={queue_duration} < 0 or forward_duration={forward_duration} < 0. {self=}"
+                    ), (
+                        f"prealloc_duration={prealloc_duration} < 0 or transfer_duration={transfer_duration} < 0 or queue_duration={queue_duration} < 0 or forward_duration={forward_duration} < 0. {self=}"
+                    )
 
             # Break down prealloc_duration into sub-phases
             if self.bootstrap_done_time > 0:
@@ -1199,9 +1218,9 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
                     self.bootstrap_done_time, self.decode_transfer_queue_entry_time
                 )
                 if SGLANG_TEST_REQUEST_TIME_STATS:
-                    assert (
-                        bootstrap_duration >= 0 and alloc_wait_duration >= 0
-                    ), f"bootstrap_duration={bootstrap_duration} < 0 or alloc_wait_duration={alloc_wait_duration} < 0"
+                    assert bootstrap_duration >= 0 and alloc_wait_duration >= 0, (
+                        f"bootstrap_duration={bootstrap_duration} < 0 or alloc_wait_duration={alloc_wait_duration} < 0"
+                    )
                 prealloc_fields = (
                     f"bootstrap_duration={self.format_duration(bootstrap_duration)}, "
                     f"alloc_wait_duration={self.format_duration(alloc_wait_duration)}, "

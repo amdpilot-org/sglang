@@ -2068,7 +2068,7 @@ class MMReceiverBase(ABC):
                 self.context, zmq.PULL, host=self.host
             )
             mm_data = self._extract_url_data(request_obj)
-            modalities = [m.get("modality") for m in mm_data]
+            modalities = [m.modality for m in mm_data]
             logger.info(
                 f"[{req_id}] Sending encode request to E, "
                 f"modalities={modalities}, num_items={len(mm_data)}"
@@ -2214,6 +2214,7 @@ class MMReceiverBase(ABC):
                 mm_data, len(encode_urls)
             )
             obj.num_items_assigned = num_items_assigned
+            obj.mm_data_mooncake = mm_data
             # Freeze the encoder URL snapshot onto obj so the scheduler
             # subprocess uses the same list when indexing encoder_idx.
             obj.encoder_urls = encode_urls
@@ -2568,14 +2569,14 @@ class MMReceiverBase(ABC):
         if random_shuffle:
             random.shuffle(encode_idx)
         # Get unique modalities with order preserved
-        modalities = list(dict.fromkeys(mm_item.get("modality") for mm_item in mm_data))
+        modalities = list(dict.fromkeys(mm_item.modality for mm_item in mm_data))
         # Use OrderedDict to explicitly maintain modality order
         num_items_assigned = OrderedDict()
         current_offset = 0
 
         for modality in modalities:
             mm_data_modality = [
-                mm_item for mm_item in mm_data if mm_item.get("modality") == modality
+                mm_item for mm_item in mm_data if mm_item.modality == modality
             ]
             num_items = len(mm_data_modality)
             if num_items == 0:
@@ -2729,7 +2730,7 @@ class MMReceiverHTTP(MMReceiverBase):
         effective_urls = encode_urls if encode_urls is not None else self.encode_urls
 
         # get unique modalities with order preserved
-        modalities = [mm_item.get("modality") for mm_item in mm_data]
+        modalities = [mm_item.modality for mm_item in mm_data]
         modalities = list(dict.fromkeys(modalities))
         encode_requests = []
 
@@ -2747,7 +2748,7 @@ class MMReceiverHTTP(MMReceiverBase):
         for modality in modalities:
             num_items_assigned_modality = num_items_assigned.get(modality)
             mm_data_modality = [
-                mm_item for mm_item in mm_data if mm_item.get("modality") == modality
+                mm_item for mm_item in mm_data if mm_item.modality == modality
             ]
 
             num_parts = modality_num_parts[modality]
@@ -2866,9 +2867,7 @@ class MMReceiverGrpc(MMReceiverBase):
         # gRPC currently only supports image; flatten typed items to simple lists.
         if mm_data and isinstance(mm_data[0], MooncakeMMUrlItem):
             non_image = [
-                item.modality
-                for item in mm_data
-                if item.modality != Modality.IMAGE
+                item.modality for item in mm_data if item.modality != Modality.IMAGE
             ]
             if non_image:
                 raise NotImplementedError(

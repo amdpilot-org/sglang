@@ -125,9 +125,8 @@ class BeamSearchOutput(BaseBatchReq, kw_only=True):
 class PickleWrapper(msgspec.Struct, tag=True, array_like=True):
     """Wraps an arbitrary Python object as pickle-serialized bytes for msgpack IPC.
 
-    In msgpack mode, fields that carry opaque or non-msgspec-typed payloads
-    (e.g. multimodal inputs, time stats) are stored as PickleWrapper so the
-    outer struct can still be msgpack-encoded.  In pickle mode
+    In msgpack mode, explicitly opaque top-level payloads may be stored as a
+    PickleWrapper so the outer frame can still be msgpack-encoded. In pickle mode
     (_USE_PICKLE_IPC=True), wrap_as_pickle / unwrap_from_pickle are no-ops
     and this class is not used on the wire.
     """
@@ -1070,6 +1069,7 @@ class TokenizedGenerateReqInput(BaseReq, kw_only=True):
 
     need_wait_for_mm_inputs: Optional[bool] = None
     num_items_assigned: Optional[Dict[Modality, List[int]]] = None
+    mm_data_mooncake: Optional[List[MooncakeMMUrlItem]] = None
     # Encoder URL snapshot frozen at tokenizer-side dispatch time so that
     # encoder_idx assignments stay consistent in the scheduler subprocess.
     # Internal IPC only.
@@ -1083,6 +1083,13 @@ class TokenizedGenerateReqInput(BaseReq, kw_only=True):
 
     # Cache namespace used to isolate otherwise-identical prefixes.
     cache_salt: Optional[str] = None
+
+    def wrap_pickle_fields(self):
+        """Compatibility hook; all fields are now msgpack-native."""
+
+    def unwrap_pickle_fields(self):
+        """Compatibility hook; all fields are now msgpack-native."""
+
 
 class BatchTokenizedGenerateReqInput(BaseBatchReq, kw_only=True):
     # The batch of tokenized requests
@@ -1361,6 +1368,12 @@ class TokenizedEmbeddingReqInput(BaseReq, kw_only=True):
 
     # For observability
     time_stats: Optional[RequestTimeStats] = None
+
+    def wrap_pickle_fields(self):
+        """Compatibility hook; all fields are now msgpack-native."""
+
+    def unwrap_pickle_fields(self):
+        """Compatibility hook; all fields are now msgpack-native."""
 
 
 class BatchTokenizedEmbeddingReqInput(BaseBatchReq, kw_only=True):

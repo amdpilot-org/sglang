@@ -8,14 +8,8 @@ from sglang.srt.managers.io_struct import (
 )
 from sglang.srt.managers.schedule_batch import Modality
 from sglang.srt.sampling.sampling_params import SamplingParams
-from sglang.test.ci.ci_register import (
-    register_amd_ci,
-    register_cpu_ci,
-    register_cuda_ci,
-)
+from sglang.test.ci.ci_register import register_cpu_ci
 
-register_cuda_ci(est_time=8, stage="base-b", runner_config="1-gpu-large")
-register_amd_ci(est_time=8, suite="stage-b-test-1-gpu-small-amd")
 register_cpu_ci(est_time=8, suite="base-c-test-cpu")
 
 
@@ -44,15 +38,25 @@ class TestTokenizedGenerateReqInputMsgpack(unittest.TestCase):
 
     def test_mm_data_mooncake_round_trips_populated(self):
         items = [
-            MooncakeMMUrlItem(url="http://x/a.jpg", modality=Modality.IMAGE),
+            MooncakeMMUrlItem(
+                url=b"image-bytes",
+                modality=Modality.IMAGE,
+                preprocess_kwargs={"detail": "high", "crop": False},
+                content_hash="sha256:deadbeef",
+            ),
             MooncakeMMUrlItem(url="http://x/b.mp4", modality=Modality.VIDEO),
         ]
 
         decoded = self._round_trip(self._make_request(items))
 
         self.assertEqual(decoded.mm_data_mooncake, items)
-        self.assertEqual(decoded.mm_data_mooncake[0].url, "http://x/a.jpg")
+        self.assertEqual(decoded.mm_data_mooncake[0].url, b"image-bytes")
         self.assertEqual(decoded.mm_data_mooncake[0].modality, Modality.IMAGE)
+        self.assertEqual(
+            decoded.mm_data_mooncake[0].preprocess_kwargs,
+            {"detail": "high", "crop": False},
+        )
+        self.assertEqual(decoded.mm_data_mooncake[0].content_hash, "sha256:deadbeef")
         self.assertEqual(decoded.mm_data_mooncake[1].url, "http://x/b.mp4")
         self.assertEqual(decoded.mm_data_mooncake[1].modality, Modality.VIDEO)
 

@@ -91,7 +91,6 @@ from sglang.srt.managers.io_struct import (
     async_sock_send,
     build_flat_input_top_logprobs_arrays,
     sock_send,
-    unwrap_from_pickle,
 )
 from sglang.srt.managers.load_snapshot import create_load_snapshot_reader
 from sglang.srt.managers.mm_utils import wrap_shm_features
@@ -1433,6 +1432,7 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                 token_type_ids=token_type_ids,
                 need_wait_for_mm_inputs=obj.need_wait_for_mm_inputs,
                 num_items_assigned=obj.num_items_assigned,
+                mm_data_mooncake=obj.mm_data_mooncake,
                 multi_item_delimiter_indices=obj.multi_item_delimiter_indices,
                 encoder_urls=obj.encoder_urls,
             )
