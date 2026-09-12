@@ -1,0 +1,166 @@
+FFFFF                                                                    [100%]
+=================================== FAILURES ===================================
+_ TestDFlashConfidence.test_dflash_sts_loader_applies_per_position_temperatures _
+
+self = <test_dflash_confidence_regression.TestDFlashConfidence testMethod=test_dflash_sts_loader_applies_per_position_temperatures>
+
+    def test_dflash_sts_loader_applies_per_position_temperatures(self):
+        worker = object.__new__(DFlashWorkerV2)
+        worker.block_size = 3
+        worker.device = torch.device("cpu")
+        worker.ps = SimpleNamespace(tp_rank=0)
+        head = DSparkConfidenceHead(
+            hidden_size=2, markov_rank=0, with_markov=False
+        )
+        worker.draft_model = SimpleNamespace(confidence_head=head)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as calibration:
+            calibration.write('{"temperatures":[1.0,2.0]}')
+            calibration.flush()
+            worker.server_args = SimpleNamespace(
+                speculative_dflash_confidence_sts_path=calibration.name
+            )
+>           worker._load_confidence_sts_calibration()
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/tmp/amdpilot-repo-j-88cd1a000c03/test_dflash_confidence_regression.py:109:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+python/sglang/srt/speculative/dflash_worker_v2.py:1335: in __getattr__
+    return getattr(self.target_worker, name)
+                   ^^^^^^^^^^^^^^^^^^
+python/sglang/srt/speculative/dflash_worker_v2.py:1335: in __getattr__
+    return getattr(self.target_worker, name)
+                   ^^^^^^^^^^^^^^^^^^
+python/sglang/srt/speculative/dflash_worker_v2.py:1335: in __getattr__
+    return getattr(self.target_worker, name)
+                   ^^^^^^^^^^^^^^^^^^
+E   RecursionError: maximum recursion depth exceeded
+!!! Recursion detected (same locals & position)
+___ TestDFlashConfidence.test_dflash_sts_loader_rejects_headless_checkpoint ____
+
+self = <test_dflash_confidence_regression.TestDFlashConfidence testMethod=test_dflash_sts_loader_rejects_headless_checkpoint>
+
+    def test_dflash_sts_loader_rejects_headless_checkpoint(self):
+        worker = object.__new__(DFlashWorkerV2)
+        worker.block_size = 3
+        worker.device = torch.device("cpu")
+        worker.ps = SimpleNamespace(tp_rank=0)
+        worker.draft_model = SimpleNamespace(confidence_head=None)
+        worker.server_args = SimpleNamespace(
+            speculative_dflash_confidence_sts_path="calibration.json"
+        )
+        with self.assertRaisesRegex(ValueError, "requires a DFlash2 checkpoint"):
+>           worker._load_confidence_sts_calibration()
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/tmp/amdpilot-repo-j-88cd1a000c03/test_dflash_confidence_regression.py:122:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+python/sglang/srt/speculative/dflash_worker_v2.py:1335: in __getattr__
+    return getattr(self.target_worker, name)
+                   ^^^^^^^^^^^^^^^^^^
+python/sglang/srt/speculative/dflash_worker_v2.py:1335: in __getattr__
+    return getattr(self.target_worker, name)
+                   ^^^^^^^^^^^^^^^^^^
+E   RecursionError: maximum recursion depth exceeded
+!!! Recursion detected (same locals & position)
+_ TestDFlashConfidence.test_enabled_confidence_head_weights_are_required_and_loaded _
+
+self = <test_dflash_confidence_regression.TestDFlashConfidence testMethod=test_enabled_confidence_head_weights_are_required_and_loaded>
+
+    def test_enabled_confidence_head_weights_are_required_and_loaded(self):
+        class MinimalDraft(torch.nn.Module):
+            load_weights = DFlashDraftModel.load_weights
+
+            def __init__(self):
+                super().__init__()
+                self.confidence_head = DSparkConfidenceHead(
+                    hidden_size=2, markov_rank=0, with_markov=False
+                )
+                self.markov_head = None
+                self.projector_type = "linear"
+                self.is_nemotron_35_draft = False
+
+        model = MinimalDraft()
+>       with self.assertRaisesRegex(ValueError, "missing required trained parameters"):
+E       AssertionError: ValueError not raised
+
+/tmp/amdpilot-repo-j-88cd1a000c03/test_dflash_confidence_regression.py:83: AssertionError
+_ TestDFlashConfidence.test_trained_head_confidence_takes_selected_path_tokens _
+
+self = <test_dflash_confidence_regression.TestDFlashConfidence testMethod=test_trained_head_confidence_takes_selected_path_tokens>
+
+    def test_trained_head_confidence_takes_selected_path_tokens(self):
+        model = SimpleNamespace()
+        model.confidence_head = DSparkConfidenceHead(
+            hidden_size=2, markov_rank=0, with_markov=False
+        )
+        model.markov_head = None
+        with torch.no_grad():
+            model.confidence_head.proj.weight.copy_(torch.tensor([[1.0, 0.0]]))
+            model.confidence_head.proj.bias.zero_()
+        model.confidence_head.sts_temperatures = torch.tensor([1.0, 2.0])
+
+>       confidence = DFlashDraftModel.compute_confidence(
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            model,
+            draft_hidden=torch.tensor([[[2.0, 9.0], [2.0, -3.0]]]),
+            anchor_tokens=torch.tensor([7]),
+            sampled_tokens=torch.tensor([[11, 13]]),
+        )
+E       AttributeError: type object 'DFlashDraftModel' has no attribute 'compute_confidence'
+
+/tmp/amdpilot-repo-j-88cd1a000c03/test_dflash_confidence_regression.py:58: AttributeError
+_ TestDFlashConfidence.test_trained_head_overrides_selector_lattice_confidence _
+
+self = <test_dflash_confidence_regression.TestDFlashConfidence testMethod=test_trained_head_overrides_selector_lattice_confidence>
+
+    def test_trained_head_overrides_selector_lattice_confidence(self):
+        worker = object.__new__(DFlashWorkerV2)
+        worker.block_size = 3
+        worker.server_args = SimpleNamespace(
+            speculative_algorithm="DFLASH_CONFIDENCE"
+        )
+        expected = torch.tensor([[0.8, 0.7]])
+        worker.draft_model = SimpleNamespace(
+            compute_confidence=mock.Mock(return_value=expected)
+        )
+        output = SimpleNamespace(hidden_states=torch.zeros(1, 3, 2))
+>       actual = worker._trained_confidence(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+            draft_logits_output=output,
+            bs=1,
+            anchor_tokens=torch.tensor([1]),
+            sampled_tokens=torch.tensor([[2, 3]]),
+        )
+
+/tmp/amdpilot-repo-j-88cd1a000c03/test_dflash_confidence_regression.py:135:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+python/sglang/srt/speculative/dflash_worker_v2.py:1335: in __getattr__
+    return getattr(self.target_worker, name)
+                   ^^^^^^^^^^^^^^^^^^
+python/sglang/srt/speculative/dflash_worker_v2.py:1335: in __getattr__
+    return getattr(self.target_worker, name)
+                   ^^^^^^^^^^^^^^^^^^
+python/sglang/srt/speculative/dflash_worker_v2.py:1335: in __getattr__
+    return getattr(self.target_worker, name)
+                   ^^^^^^^^^^^^^^^^^^
+E   RecursionError: maximum recursion depth exceeded
+!!! Recursion detected (same locals & position)
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../../tmp/amdpilot-repo-j-88cd1a000c03/test_dflash_confidence_regression.py::TestDFlashConfidence::test_dflash_sts_loader_applies_per_position_temperatures
+FAILED ../../tmp/amdpilot-repo-j-88cd1a000c03/test_dflash_confidence_regression.py::TestDFlashConfidence::test_dflash_sts_loader_rejects_headless_checkpoint
+FAILED ../../tmp/amdpilot-repo-j-88cd1a000c03/test_dflash_confidence_regression.py::TestDFlashConfidence::test_enabled_confidence_head_weights_are_required_and_loaded
+FAILED ../../tmp/amdpilot-repo-j-88cd1a000c03/test_dflash_confidence_regression.py::TestDFlashConfidence::test_trained_head_confidence_takes_selected_path_tokens
+FAILED ../../tmp/amdpilot-repo-j-88cd1a000c03/test_dflash_confidence_regression.py::TestDFlashConfidence::test_trained_head_overrides_selector_lattice_confidence
+5 failed, 24 deselected, 16 warnings in 9.16s
+exit_code=1
