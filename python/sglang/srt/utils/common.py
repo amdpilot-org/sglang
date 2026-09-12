@@ -1868,6 +1868,27 @@ def is_jpeg_with_cuda(
     return False
 
 
+def _get_exif_orientation(image_bytes: bytes) -> int:
+    """Return a valid EXIF orientation, or 1 when metadata is unusable."""
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            orientation = image.getexif().get(0x0112, 1)
+    except Exception:
+        return 1
+    return orientation if orientation in range(1, 9) else 1
+
+
+def _safe_exif_transpose(image: Image.Image) -> Image.Image:
+    """Apply a non-trivial EXIF orientation without rejecting bad metadata."""
+    try:
+        orientation = image.getexif().get(0x0112, 1)
+        if orientation not in range(2, 9):
+            return image
+        return ImageOps.exif_transpose(image)
+    except Exception:
+        return image
+
+
 @lru_cache(maxsize=16)
 def _warn_fancy_jpeg_fallback(error: str) -> None:
     logger.warning(
@@ -1889,7 +1910,13 @@ def _load_image(
     """
     if image_file != "":
         image_bytes = get_image_bytes(image_file)
-    if is_jpeg_with_cuda(image_bytes, gpu_image_decode):
+    # GPU JPEG decoders return raw sensor pixels and do not apply EXIF
+    # orientation. Route rotated JPEGs through PIL so all eight transforms use
+    # Pillow's canonical implementation; unrotated JPEGs retain the fast path.
+    if (
+        is_jpeg_with_cuda(image_bytes, gpu_image_decode)
+        and _get_exif_orientation(image_bytes) == 1
+    ):
         try:
             if gpu_image_decode == "nvjpeg_fancy":
                 from sglang.srt.utils.nvjpeg_decoder import (
@@ -1912,7 +1939,7 @@ def _load_image(
         image = Image.open(BytesIO(image_bytes))
     except OSError as e:
         raise ValueError(f"Could not decode image: {e}") from e
-    return _fully_load_pil_image(image)
+    return _fully_load_pil_image(_safe_exif_transpose(image))
 
 
 def _fully_load_pil_image(image: Image.Image) -> Image.Image:
@@ -1938,7 +1965,7 @@ def load_image(
     image = None
     image_size: Optional[tuple[int, int]] = None
     if isinstance(image_file, Image.Image):
-        image = _fully_load_pil_image(image_file)
+        image = _fully_load_pil_image(_safe_exif_transpose(image_file))
         image_size = (image.width, image.height)
     elif isinstance(image_file, bytes):
         image = _load_image(image_bytes=image_file, gpu_image_decode=gpu_image_decode)

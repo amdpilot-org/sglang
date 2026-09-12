@@ -25,7 +25,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 import requests
 import torch
-from PIL import Image
+from PIL import Image, ImageOps
 
 from sglang.srt.managers.schedule_batch import Modality
 from sglang.srt.multimodal.processors.base_processor import BaseMultimodalProcessor
@@ -56,6 +56,16 @@ def _jpeg_bytes(size=(8, 8)) -> bytes:
     arr = (np.random.RandomState(0).rand(size[1], size[0], 3) * 255).astype("uint8")
     buf = io.BytesIO()
     Image.fromarray(arr, "RGB").save(buf, format="JPEG", quality=90, subsampling=2)
+    return buf.getvalue()
+
+
+def _oriented_jpeg_bytes(orientation: int, size=(24, 16)) -> bytes:
+    arr = np.arange(size[0] * size[1] * 3, dtype=np.uint8).reshape(size[1], size[0], 3)
+    image = Image.fromarray(arr, "RGB")
+    exif = image.getexif()
+    exif[0x0112] = orientation
+    buf = io.BytesIO()
+    image.save(buf, format="JPEG", exif=exif)
     return buf.getvalue()
 
 
@@ -164,6 +174,72 @@ class TestLoadSingleItemImageDecode(CustomTestCase):
         self.assertIsInstance(image, Image.Image)
         reference = Image.open(io.BytesIO(data))
         np.testing.assert_array_equal(np.asarray(image), np.asarray(reference))
+
+    def test_cpu_decode_applies_all_exif_orientations(self):
+        for orientation in range(1, 9):
+            data = _oriented_jpeg_bytes(orientation)
+            image, _ = common.load_image(data, gpu_image_decode=False)
+            reference = ImageOps.exif_transpose(Image.open(io.BytesIO(data)))
+            np.testing.assert_array_equal(
+                np.asarray(image),
+                np.asarray(reference),
+                err_msg=f"orientation {orientation}",
+            )
+
+    def test_direct_pil_input_applies_exif_orientation_and_updates_size(self):
+        data = _oriented_jpeg_bytes(6)
+        image, image_size = common.load_image(Image.open(io.BytesIO(data)))
+        reference = ImageOps.exif_transpose(Image.open(io.BytesIO(data)))
+        np.testing.assert_array_equal(np.asarray(image), np.asarray(reference))
+        self.assertEqual(image_size, reference.size)
+
+    def test_rotated_jpeg_skips_both_gpu_decoders(self):
+        data = _oriented_jpeg_bytes(6)
+        reference = ImageOps.exif_transpose(Image.open(io.BytesIO(data)))
+        for mode, target in (
+            (True, "sglang.srt.utils.common.decode_jpeg"),
+            (
+                "nvjpeg_fancy",
+                "sglang.srt.utils.nvjpeg_decoder.decode_jpeg_with_fancy_upsampling",
+            ),
+        ):
+            with (
+                patch.object(common, "is_cuda", return_value=True),
+                patch(target) as decode,
+            ):
+                image, _ = common.load_image(data, gpu_image_decode=mode)
+            decode.assert_not_called()
+            np.testing.assert_array_equal(np.asarray(image), np.asarray(reference))
+
+    def test_unrotated_jpeg_keeps_both_gpu_decoder_routes(self):
+        data = _oriented_jpeg_bytes(1)
+        expected = torch.zeros((3, 16, 24), dtype=torch.uint8)
+        for mode, target in (
+            (True, "sglang.srt.utils.common.decode_jpeg"),
+            (
+                "nvjpeg_fancy",
+                "sglang.srt.utils.nvjpeg_decoder.decode_jpeg_with_fancy_upsampling",
+            ),
+        ):
+            with (
+                patch.object(common, "is_cuda", return_value=True),
+                patch(target, return_value=expected) as decode,
+            ):
+                image, _ = common.load_image(data, gpu_image_decode=mode)
+            decode.assert_called_once()
+            self.assertIs(image, expected)
+
+    def test_invalid_orientation_is_not_transformed(self):
+        data = _oriented_jpeg_bytes(99)
+        image, _ = common.load_image(data, gpu_image_decode=False)
+        reference = Image.open(io.BytesIO(data))
+        np.testing.assert_array_equal(np.asarray(image), np.asarray(reference))
+
+    def test_no_orientation_preserves_direct_pil_object(self):
+        image = Image.new("RGB", (12, 10), "red")
+        result, image_size = common.load_image(image, gpu_image_decode=False)
+        self.assertIs(result, image)
+        self.assertEqual(image_size, image.size)
 
     def test_high_fidelity_decoder_uses_fancy_planar_rgb_and_reuses_pool(self):
         expected = torch.zeros((3, 8, 8), dtype=torch.uint8)
