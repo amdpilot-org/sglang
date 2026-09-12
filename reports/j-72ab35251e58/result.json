@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33603",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced both source-level causes of the encoder sliding-window defect, implemented the narrow bidirectional-mask and forwarding correction, and verified it with focused regressions plus an independent gfx950 numerical reference. Full ModernBERT HTTP parity remains unverified because this checkout does not contain the model implementation or prepared weights.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-72ab35251e58/venv/bin/python - <<'PY' ... pre-fix mask assertion ... PY",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: the existing radius-one mask omitted four valid future positions from a five-token non-causal sequence. Raw output: reports/j-72ab35251e58/raw/failing-before-mask.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-72ab35251e58/venv/bin/python -m pytest -q test/registered/unit/layers/test_torch_native_backend.py",
+      "exit_code": 0,
+      "what_was_measured": "Four passing regressions: bidirectional mask semantics, encoder forward propagation of sliding_window_size, causal offset compatibility, and zero-width boundary behavior. Raw output: reports/j-72ab35251e58/raw/pytest-focused-final.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-72ab35251e58/venv/bin/python - <<'PY' ... gfx950 SDPA versus explicit masked-softmax reference ... PY",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X gfx950, corrected bidirectional-window SDPA matched an independent masked-softmax reference with maximum absolute error 1.1920928955078125e-07. Raw output: reports/j-72ab35251e58/raw/gpu-numerical.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-72ab35251e58/venv/bin/python -m pre_commit run --files python/sglang/srt/layers/attention/torch_native_backend.py test/registered/unit/layers/test_torch_native_backend.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository formatting, lint, safety, and registered-test checks passed. Raw output: reports/j-72ab35251e58/raw/pre-commit.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Single assigned AMD Instinct MI355X, gcnArchName gfx950:sramecc+:xnack-, ran corrected SDPA and matched the explicit numerical reference; reports/j-72ab35251e58/raw/gpu-numerical.txt"
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The prepared checkout does not contain the ModernBERT implementation referenced by the issue, so the original SGLang HTTP embedding path could not be launched.",
+    "The jhu-clsp/ettin-encoder-17m weights were not prepared, so HuggingFace-versus-SGLang long-context embedding parity was not measured.",
+    "The gfx950 result is a focused attention numerical check and does not qualify ModernBERT semantic accuracy or a full serving reproduction."
+  ]
+}
