@@ -64,7 +64,7 @@ class MistralDetector(BaseFormatDetector):
         if self.bot_token in tool_part:
             json_array_str = self._extract_json_array(tool_part)
             if not json_array_str:
-                return StreamingParseResult(normal_text=normal_text, calls=[])
+                return self._result_with_raw_fallback(text, normal_text, [])
 
             calls: list = []
             try:
@@ -87,7 +87,7 @@ class MistralDetector(BaseFormatDetector):
                 if trailing_text
                 else normal_text
             )
-            return StreamingParseResult(normal_text=combined_normal, calls=calls)
+            return self._result_with_raw_fallback(text, combined_normal, calls)
 
         # Compact: `[TOOL_CALLS]tool_name[ARGS]{...}`
         # Loop to extract all consecutive compact tool calls.
@@ -105,12 +105,12 @@ class MistralDetector(BaseFormatDetector):
             remaining = remaining[consumed:].strip()
 
         if not all_calls:
-            return StreamingParseResult(normal_text=normal_text, calls=[])
+            return self._result_with_raw_fallback(text, normal_text, [])
 
         combined_normal = (
             (normal_text + " " + remaining).strip() if remaining else normal_text
         )
-        return StreamingParseResult(normal_text=combined_normal, calls=all_calls)
+        return self._result_with_raw_fallback(text, combined_normal, all_calls)
 
     def parse_streaming_increment(
         self, new_text: str, tools: List[Tool]

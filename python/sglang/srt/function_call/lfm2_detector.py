@@ -776,7 +776,7 @@ class Lfm2Detector(BaseFormatDetector):
             parsed_calls = self._parse_tool_calls_content(match_result, tools)
             calls.extend(parsed_calls)
 
-        return StreamingParseResult(normal_text=normal_text, calls=calls)
+        return self._result_with_raw_fallback(text, normal_text, calls)
 
     def _strip_special_tokens(self, text: str) -> str:
         """Remove special tokens from text."""
