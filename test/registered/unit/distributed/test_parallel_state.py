@@ -50,6 +50,71 @@ register_cpu_ci(est_time=11, suite="base-a-test-cpu")
 parallel_state = pytest.importorskip("sglang.srt.distributed.parallel_state")
 
 
+def test_singleton_tcp_process_group_uses_hash_store():
+    """A TP=1 DP replica must not open a racy TCPStore listener."""
+    world = Mock(world_size=1)
+    with (
+        patch.object(parallel_state, "_WORLD", world),
+        patch.object(
+            parallel_state.torch.distributed, "is_initialized", return_value=False
+        ),
+        patch.object(
+            parallel_state.torch.distributed, "get_world_size", return_value=1
+        ),
+        patch.object(
+            parallel_state.torch.distributed, "HashStore", return_value=Mock()
+        ) as hash_store,
+        patch.object(
+            parallel_state.torch.distributed, "init_process_group"
+        ) as init_pg,
+        patch.object(
+            parallel_state, "get_torch_distributed_pg_options", return_value=None
+        ),
+    ):
+        parallel_state.init_distributed_environment(
+            backend="gloo",
+            world_size=1,
+            rank=0,
+            local_rank=0,
+            distributed_init_method="tcp://127.0.0.1:30101",
+        )
+
+    hash_store.assert_called_once_with()
+    kwargs = init_pg.call_args.kwargs
+    assert kwargs["store"] is hash_store.return_value
+    assert "init_method" not in kwargs
+
+
+def test_multi_rank_tcp_process_group_keeps_tcp_rendezvous():
+    world = Mock(world_size=2)
+    with (
+        patch.object(parallel_state, "_WORLD", world),
+        patch.object(
+            parallel_state.torch.distributed, "is_initialized", return_value=False
+        ),
+        patch.object(
+            parallel_state.torch.distributed, "get_world_size", return_value=2
+        ),
+        patch.object(
+            parallel_state.torch.distributed, "init_process_group"
+        ) as init_pg,
+        patch.object(
+            parallel_state, "get_torch_distributed_pg_options", return_value=None
+        ),
+    ):
+        parallel_state.init_distributed_environment(
+            backend="gloo",
+            world_size=2,
+            rank=0,
+            local_rank=0,
+            distributed_init_method="tcp://127.0.0.1:30101",
+        )
+
+    kwargs = init_pg.call_args.kwargs
+    assert kwargs["init_method"] == "tcp://127.0.0.1:30101"
+    assert "store" not in kwargs
+
+
 def test_custom_allreduce_precedes_symmetric_memory_pynccl():
     coordinator = parallel_state.GroupCoordinator.__new__(
         parallel_state.GroupCoordinator

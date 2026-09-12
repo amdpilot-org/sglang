@@ -1,12 +1,15 @@
 import os
 import socket
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from sglang.srt.server_args import PortArgs
 from sglang.srt.utils.network import (
     _get_addrinfos_for_bind,
     bind_port,
     get_free_port,
+    get_free_rendezvous_port,
     get_open_port,
     is_port_available,
     try_bind_socket,
@@ -119,6 +122,47 @@ class TestSocketUtilities(CustomTestCase):
         self.assertGreater(port, 0)
         self.assertLessEqual(port, 65535)
 
+    @patch("sglang.srt.utils.network._read_linux_ephemeral_port_range")
+    @patch("sglang.srt.utils.network.random.randrange", return_value=8975)
+    @patch("sglang.srt.utils.network.is_port_available")
+    def test_get_free_rendezvous_port_outside_ephemeral_range(
+        self, mock_available, _mock_random, mock_range
+    ):
+        """TCPStore ports must not be drawn from Linux's ephemeral range."""
+        mock_range.return_value = (10000, 61000)
+        checked_ports = []
+        mock_available.side_effect = (
+            lambda port: checked_ports.append(port) or port == 9999
+        )
+
+        port = get_free_rendezvous_port()
+
+        self.assertEqual(port, 9999)
+        self.assertTrue(all(port < 10000 or port > 61000 for port in checked_ports))
+
+    @patch("sglang.srt.utils.network._read_linux_ephemeral_port_range")
+    def test_get_free_rendezvous_port_fails_when_exhausted(self, mock_range):
+        mock_range.return_value = (1024, 65535)
+
+        with self.assertRaisesRegex(RuntimeError, "refusing to fall back"):
+            get_free_rendezvous_port()
+
+    @patch("sglang.srt.utils.network._read_linux_ephemeral_port_range")
+    def test_get_free_rendezvous_port_fails_without_procfs(self, mock_range):
+        mock_range.return_value = None
+
+        with self.assertRaisesRegex(RuntimeError, "range is unavailable"):
+            get_free_rendezvous_port()
+
+    @patch("sglang.srt.utils.network._read_linux_ephemeral_port_range")
+    @patch("sglang.srt.utils.network.random.randrange", return_value=0)
+    @patch("sglang.srt.utils.network.is_port_available", return_value=True)
+    def test_get_free_rendezvous_port_excludes_reserved_ports(
+        self, _mock_available, _mock_random, mock_range
+    ):
+        mock_range.return_value = (10000, 61000)
+        self.assertEqual(get_free_rendezvous_port(exclude_ports={1024}), 1025)
+
     def test_bind_port(self):
         """bind_port should return a listening socket."""
         port = get_free_port()
@@ -152,6 +196,43 @@ class TestSocketUtilities(CustomTestCase):
                 self.assertGreater(port, occupied_port)
         finally:
             sock.close()
+
+
+class TestPortArgsRendezvousPortExclusions(CustomTestCase):
+    def test_exclusions_cover_other_startup_listeners(self):
+        server_args = SimpleNamespace(
+            port=32000,
+            dp_size=3,
+            disaggregation_bootstrap_port=8998,
+            encoder_bootstrap_port=8997,
+            engine_info_bootstrap_port=6789,
+            grpc_port=32010,
+            gated_launch_port=32011,
+            smg_grpc_mode=True,
+            grpc_mode=False,
+            smg_http_sidecar_port=32012,
+            remote_instance_weight_loader_seed_instance_service_port=32013,
+            remote_instance_weight_loader_send_weights_group_ports=[32014, 32015],
+        )
+
+        exclusions = set(PortArgs._rendezvous_port_exclusions(server_args))
+
+        self.assertTrue(
+            {
+                6789,
+                8997,
+                8998,
+                32000,
+                32001,
+                32002,
+                32010,
+                32011,
+                32012,
+                32013,
+                32014,
+                32015,
+            }.issubset(exclusions)
+        )
 
 
 class TestReservePort(CustomTestCase):
