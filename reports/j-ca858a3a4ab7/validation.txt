@@ -1,0 +1,27 @@
+Baseline actual-cache reproduction (before the fix commits)
+Command: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ca858a3a4ab7/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_radix_cache_match.py -k 'n_minus_1 or tombstone or shared_prefix' -vv
+Exit code: 0
+Measured: 3 selected tests passed. The inserted [1,2,3] checkpoint remained owned by the leaf; matching the fresh-prefill [1,2] key split the compressed edge and returned 0 device indices, while the full key still reached all 3 indices.
+
+Focused regression after the fix
+Command: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ca858a3a4ab7/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_radix_cache_match.py -vv
+Exit code: 0
+Measured: 15 passed. This includes legacy and unified cache n-1 reuse, split tombstone revival, duplicate checkpoint freeing, stale checkpoint cleanup, and prev_prefix_len KV ownership.
+
+Related cache tests
+Command: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ca858a3a4ab7/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_unittest.py test/registered/unit/mem_cache/test_registry.py
+Exit code: 0
+Measured: 40 passed.
+
+Assigned-GPU actual-cache probe
+Command: ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ca858a3a4ab7/venv/bin/python reports/j-ca858a3a4ab7/gpu_cache_probe.py
+Exit code: 0
+Raw result: {'gpu': 'AMD Instinct MI350X', 'rocm': '7.2.26015', 'baseline_split_hit': 0, 'full_leaf_hit': 3, 'checkpointed_split_hit': 64, 'indices_equal_reference': True}
+
+Static validation
+Command: git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..HEAD
+Exit code: 0
+Measured: no whitespace errors.
+Command: /tmp/amdpilot-repo-j-ca858a3a4ab7/venv/bin/python -m compileall -q python/sglang/srt/managers/schedule_batch.py python/sglang/srt/mem_cache/mamba_radix_cache.py python/sglang/srt/mem_cache/memory_pool.py python/sglang/srt/mem_cache/unified_radix_cache.py
+Exit code: 0
+Measured: all changed Python modules compiled.
