@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34786",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1742",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1706",
+  "candidate_commit": "461a16aa4fd3436ce6882fc53dc9f00f5fb97a11",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Accept as test-only hardening. The candidate changes no runtime or native code. Its GPU regression validly covers fresh lazy allocation, speculative boundary planning, TARGET_VERIFY index construction, and confirmed-boundary promotion/freeing against source fixes already present in the recorded base. Independent no-boundary, allocation-failure, pending-slot-reuse, and window-edge cases passed. Full original-issue resolution remains unverified without an end-to-end hybrid-mamba NEXTN run on the reported NVIDIA topology.",
+  "tests": [
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-ff0fa4b64fc2/venv/bin/python - <<'PY' ... historical expression and actual base helper ... PY",
+      "exit_code": 0,
+      "what_was_measured": "On the recorded base, the historical unguarded torch.tensor expression raised the reported TypeError, while the actual source helper selected position 0 and GPU slot 101 without mutating the request's None field."
+    },
+    {
+      "command": "git switch --detach 461a16aa4fd3436ce6882fc53dc9f00f5fb97a11 && ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-ff0fa4b64fc2/venv/bin/python -m pytest -q test/registered/unit/managers/test_mamba_track_indices.py",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate's four GPU tests passed, including the lifecycle test for allocation, verify index selection, and boundary promotion/freeing."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-ff0fa4b64fc2/venv/bin/python -m pytest -q /job/review-evidence-j-ff0fa4b64fc2/adversarial_mamba_review.py",
+      "exit_code": 0,
+      "what_was_measured": "Four independent GPU adversarial cases passed: no reachable boundary performs no allocation, allocation failure falls back in place, an existing pending slot is reused, and a boundary exactly at the lookahead window is allocated and selected."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-ff0fa4b64fc2/venv/bin/python -m pytest -q test/registered/unit/managers/test_schedule_batch_prepare_for_decode.py test/registered/unit/managers/test_batch_result_processor_mamba_boundary.py",
+      "exit_code": 0,
+      "what_was_measured": "Adjacent scheduler/result-processing coverage passed: 3 tests and 2 subtests."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "PyTorch 2.11.0+rocm7.2 executed candidate and adversarial tensors on one AMD Instinct MI350X, gfx950:sramecc+:xnack-, with ROCR_VISIBLE_DEVICES=0."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No end-to-end fresh-request NEXTN TARGET_VERIFY serving run was performed on a hybrid-mamba model.",
+    "Qwen3.6-27B-FP8 weights and the reported two RTX 3090 GPUs were unavailable; NVIDIA and multi-GPU behavior remain unverified.",
+    "The candidate validates scheduler/cache allocation and speculative boundary lifecycle with GPU tensors, but not hybrid-mamba kernel semantics, model accuracy, HTTP serving, or distributed execution."
+  ],
+  "remaining_limitations": [
+    "The available accelerator was one AMD Instinct MI350X (gfx950), not the reported two NVIDIA RTX 3090 GPUs.",
+    "The required Qwen3.6-27B-FP8 weights were unavailable.",
+    "The tiny Llama serving fixture is not hybrid-mamba and was not used as proof.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
