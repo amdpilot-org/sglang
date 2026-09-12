@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32470",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "732c5174c612e2ca662eebec2075e55f2bf15b8a",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is useful test-only hardening on a base whose production source already contains the upstream fix, but its static synchronization helper accepts a divergent conditional block barrier and therefore does not fully enforce its claimed contract. The exact CUDA/H20 full-model failure remains architecture- and model-blocked.",
+  "tests": [
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 732c5174c612e2ca662eebec2075e55f2bf15b8a",
+      "exit_code": 0,
+      "what_was_measured": "The exact corrected candidate has no whitespace errors."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-ab820e869493/cache-candidate-fresh /tmp/amdpilot-repo-j-ab820e869493/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py -vv",
+      "exit_code": 0,
+      "what_was_measured": "All 5 tests and 9 subtests passed against an independently rebuilt gfx950 JIT planner; GPU plan rows matched the CPU reference for the reported shape, warp boundaries, and uniform controls."
+    },
+    {
+      "command": "candidate source helper against historical scratch initialization with no barrier",
+      "exit_code": 1,
+      "what_was_measured": "The regression deterministically rejected the original source-level race reconstructed temporarily on the recorded base."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-ab820e869493/cache-racy /tmp/amdpilot-repo-j-ab820e869493/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py::TestCompressPlanRaggedReduction::test_compact_capture_report_pattern -vv",
+      "exit_code": 0,
+      "what_was_measured": "The reconstructed racy kernel did not manifest its nondeterministic data corruption in 100 planner executions on AMD gfx950; this is not evidence for CUDA/H20 correctness."
+    },
+    {
+      "command": "candidate _assert_warp_extrema_synchronized helper with __syncthreads() inside if (tx < kNumWarps)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial counterexample: the helper accepted a divergent block barrier that does not satisfy the original synchronization contract."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI355X, gfx950, PyTorch 2.11.0+rocm7.2, HIP 7.2.26015. The source imports resolved under /job/repo/python and the fresh JIT library was emitted under /tmp/amdpilot-repo-j-ab820e869493/cache-candidate-fresh.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The source regression accepts __syncthreads() inside the tx < kNumWarps initializer branch, although most block threads skip that barrier; this can deadlock or violate block synchronization.",
+    "The candidate's documented SGLANG_JIT_KERNEL_CACHE_DIR variable is not the implementation's SGLANG_JIT_CACHE_DIR, so the candidate evidence used a shared /job/.cache artifact rather than the stated private cache."
+  ],
+  "remaining_limitations": [
+    "The original CUDA/H20 TP=2 DeepSeek-V4-Flash-DSpark graph-capture failure could not be run on the single AMD gfx950 GPU without the model weights.",
+    "The HIP planner fixture validates planner metadata and bounds, not NVIDIA warp scheduling, CUDA graph capture, the c128 write failure, semantic model accuracy, or distributed serving.",
+    "No monolithic native build is configured (repository-environment.json native is null). Candidate production/native source is unchanged; the applicable JIT extension was independently rebuilt from the checkout with the correct cache variable."
+  ]
+}

@@ -1,0 +1,116 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0 -- /tmp/amdpilot-repo-j-ab820e869493/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /job/repo/test
+configfile: pytest.ini
+plugins: hypothesis-6.155.0, anyio-4.15.1
+collecting ... collected 1 item
+
+test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py::TestCompressPlanRaggedReduction::test_warp_extrema_initialization_is_synchronized FAILED [100%]
+
+=================================== FAILURES ===================================
+_ TestCompressPlanRaggedReduction.test_warp_extrema_initialization_is_synchronized _
+
+self = <test_deepseek_v4_compress_plan_ragged.TestCompressPlanRaggedReduction testMethod=test_warp_extrema_initialization_is_synchronized>
+
+    def test_warp_extrema_initialization_is_synchronized(self):
+        """Reject only unsynchronized scratch initialization.
+
+        The current implementation needs no initialization because every warp
+        writes its own slot.  Initialization is also correct when a block barrier
+        orders it before those per-warp writes, as in the initial upstream fix.
+        """
+        source = (
+            Path(__file__).parents[5]
+            / "python/sglang/kernels/jit/csrc/deepseek_v4/c_plan.cuh"
+        ).read_text()
+        kernel = source.split("void plan_compress_prefill_kernel0", 1)[1].split(
+            "__global__ void plan_compress_prefill_kernel_1", 1
+        )[0]
+>       _assert_warp_extrema_synchronized(self, kernel)
+
+test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py:65:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py:47: in _assert_warp_extrema_synchronized
+    test.assertGreater(barrier, max(init_positions))
+E   AssertionError: -1 not greater than 1323
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7b374efa0900>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7b40329f2660>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestCompressPlanRaggedReduction.test_warp_extrema_initialization_is_synchronized
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py", line 65, in test_warp_extrema_initialization_is_synchronized
+    _assert_warp_extrema_synchronized(self, kernel)
+  File "/job/repo/test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py", line 47, in _assert_warp_extrema_synchronized
+    test.assertGreater(barrier, max(init_positions))
+  File "/usr/lib/python3.12/unittest/case.py", line 1269, in assertGreater
+    self.fail(self._formatMessage(msg, standardMsg))
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: -1 not greater than 1323
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_ragged.py::TestCompressPlanRaggedReduction::test_warp_extrema_initialization_is_synchronized
+======================== 1 failed, 17 warnings in 8.37s ========================
