@@ -2,9 +2,12 @@
 from functools import lru_cache
 from typing import Any
 
-import psutil
 import torch
 
+from sglang._mps_memory import (
+    get_mps_available_memory,
+    get_mps_recommended_memory,
+)
 from sglang.multimodal_gen.runtime.platforms import (
     AttentionBackendEnum,
     Platform,
@@ -59,8 +62,7 @@ class MpsPlatform(Platform):
     @classmethod
     @lru_cache(maxsize=1)
     def get_device_total_memory(cls, device_id: int = 0) -> int:
-
-        return psutil.virtual_memory().total
+        return get_mps_recommended_memory(torch.mps)
 
     @classmethod
     def is_async_output_supported(cls, enforce_eager: bool | None) -> bool:
@@ -91,8 +93,7 @@ class MpsPlatform(Platform):
         if empty_cache:
             torch.mps.empty_cache()
 
-        # For MPS, available memory is essentially the system available memory
-        free_memory = psutil.virtual_memory().available
+        free_memory = get_mps_available_memory(torch.mps)
 
         if distributed:
             import torch.distributed as dist
