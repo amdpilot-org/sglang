@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38428",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/833",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/791",
+  "candidate_commit": "e4c781e77f4537963484861602ee68910efab9d4",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes worker survival, continued queue draining, logging, acknowledgement, and therefore the existing host-release path. It only labels exception acks generically, so the ack itself does not say whether the backend timed out, returned malformed data, or failed for another reason as required by the original issue.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-df20781f5d94/venv/bin/python /job/review-evidence-j-df20781f5d94/reproduce_original.py (prepared base)",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced the defect: worker dead, zero acknowledgements, one operation still queued. The script reports observations rather than failing its process status."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-df20781f5d94/venv/bin/python /job/review-evidence-j-df20781f5d94/reproduce_original.py (candidate e4c781e)",
+      "exit_code": 0,
+      "what_was_measured": "Worker remained alive after RuntimeError, traceback was logged, both operations were acknowledged, and the queue was empty."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-df20781f5d94/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_backup_resilience.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 6 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-df20781f5d94/venv/bin/python -m pytest -q /job/review-evidence-j-df20781f5d94/test_independent_review.py",
+      "exit_code": 1,
+      "what_was_measured": "Two independent worker-resilience cases passed for standard and hybrid workers; causal ack detail failed because no ack field contained TimeoutError or its message (2 passed, 1 failed)."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X gfx950 device was visible, but the reviewed defect is CPU-only queue/thread behavior and no GPU operation was needed or claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "TimeoutError('remote timed out') and ValueError('malformed response') produce indistinguishable acknowledged StorageOperation failure metadata: failed=true, failure_kind='exception', and the same unwritten page count; neither ack retains the exception type or message."
+  ],
+  "remaining_limitations": [
+    "No real remote storage service was disrupted; backend exception and false-return behavior were deterministically injected through the production worker methods.",
+    "No model-serving or distributed workload was run because neither is necessary to exercise this CPU-only defect.",
+    "No native rebuild was performed because the candidate contains no native-source changes."
+  ]
+}
