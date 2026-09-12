@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38099",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/903",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/873",
+  "candidate_commit": "8073bd76d62c50adcf3650ee5bc5dab3e641994a",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproducibly overwrites destination A's staged source and replays A after destination B defers. The exact candidate fixes both send-path defects, drains mixed handles before retry, and passes delayed-completion/repeated-deferral adversarial scheduling. This verifies the original CPU-simulated worker contract, not the unproven production text-corruption hypothesis.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9d5ede978118/venv/bin/python -m pytest /job/review-evidence-j-9d5ede978118/test_nixl_backend_basic_candidate.py -q -k staging_fanout (base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: 3 failures showing A read B's source, A was submitted twice across deferral, and unfinished mixed handles survived to the next dequeue."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9d5ede978118/venv/bin/python -m pytest /job/review-evidence-j-9d5ede978118/test_nixl_backend_basic_candidate.py -q -k staging_fanout (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression: 3 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9d5ede978118/venv/bin/python -m pytest /job/review-evidence-j-9d5ede978118/test_nixl_adversarial_delayed.py -q -k staging_fanout",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial schedule: each transfer remained PROC for four polls and destination B deferred twice; 3 passed without source overwrite, replay, or live handles crossing dequeue."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9d5ede978118/venv/bin/python -m pytest test/registered/unit/disaggregation/test_nixl_backend_basic.py test/registered/unit/disaggregation/test_nixl_deferred_kv_release.py test/registered/unit/disaggregation/test_nixl_sender_failure_cleanup.py test/registered/unit/disaggregation/test_disaggregation_wire.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Neighboring NIXL and disaggregation behavior: 103 passed, 14 subtests passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Tests simulated GPU gathers and asynchronous NIXL completion. The host exposes one AMD Instinct MI355X/gfx950 through Torch 2.11.0+rocm7.2, but the contract requires distinct heterogeneous-TP prefill/decode endpoints."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No real multi-GPU or multi-node NIXL transfer was possible with the assigned single gfx950 GPU.",
+    "No model weights were loaded, so the production response corruption was neither reproduced nor causally attributed to these defects.",
+    "The candidate changes Python only; no native source changed and no native rebuild was applicable.",
+    "The issue author's separate fly-go-run commit could not be fetched during review; the exact candidate test was preserved outside the checkout and used identically before and after."
+  ]
+}
