@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38202",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared source reproduced the DFLASH/DSPARK draft KV budget defect: the resolver passed global tp_size to draft_model_config.get_num_kv_heads even though draft KV allocation is sharded by attn_tp_size. The fix changes that resolver argument to attn_tp_size. A resolver-level regression failed before the change for full and partial DP-attention layouts, passed after it, and also covers the unchanged no-DP boundary.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-1e99e9e5a4ef/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_spec_aux_hidden_state.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: full DP attention observed topology width 16 instead of 1; partial DP attention observed 16 instead of 4; the no-DP width-16 boundary passed. Raw output: reports/j-1e99e9e5a4ef/evidence/failing-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1e99e9e5a4ef/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_spec_aux_hidden_state.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after resolver regression across attn_tp_size 1, 4, and 16. Raw output: reports/j-1e99e9e5a4ef/evidence/passing-after-resolver.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1e99e9e5a4ef/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_pool_configurator.py -k DflashDraftKvBudget",
+      "exit_code": 0,
+      "what_was_measured": "Existing DFLASH combined target/draft budget tests, including DCP replication and HybridSWA capacity. Raw output: reports/j-1e99e9e5a4ef/evidence/passing-existing-dflash.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1e99e9e5a4ef/venv/bin/python < inline gfx950 KV allocation-byte check",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, actual bfloat16 GPU tensors for the regression geometry occupied 40960, 10240, and 2560 bytes at attn_tp_size 1, 4, and 16 respectively, confirming the 16x endpoint storage ratio. Raw output: reports/j-1e99e9e5a4ef/evidence/gfx950-kv-byte-check.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A single assigned AMD Instinct MI350X (gfx950) executed the independent draft-KV allocation-byte check. This was not a full Kimi-K3, DSPARK serving, 16-GPU, or multi-node reproduction."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported Kimi-K3/DSPARK deployment requires model weights and a 16-way DP-attention topology; neither was available, so the original full-model OOM was not reproduced.",
+    "The assigned environment had one gfx950 GPU, while the report used B300 GPUs. GPU validation was limited to allocation sizes for the same draft KV geometry.",
+    "No native code changed, so no native rebuild was applicable.",
+    "Production source path: python/sglang/srt/model_executor/model_runner_components/spec_aux_hidden_state.py; regression source path: test/registered/unit/model_executor/test_spec_aux_hidden_state.py."
+  ]
+}
