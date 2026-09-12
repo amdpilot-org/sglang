@@ -2,8 +2,11 @@ import unittest
 from array import array
 
 import torch
+from fastapi import APIRouter, FastAPI
+from starlette.requests import Request
 
 from sglang.srt.utils.common import (
+    _get_fastapi_request_path,
     flatten_arrays_to_int64_tensor,
     get_device_sm_nvidia_smi,
     get_nvidia_driver_version_str,
@@ -13,6 +16,70 @@ from sglang.test.test_utils import CustomTestCase
 
 register_cuda_ci(est_time=10, stage="base-b", runner_config="1-gpu-small")
 register_amd_ci(est_time=5, stage="stage-b", runner_config="1-gpu-small-amd")
+
+
+class TestGetFastAPIRequestPath(CustomTestCase):
+    @staticmethod
+    def _request(app: FastAPI, path: str) -> Request:
+        return Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": "GET",
+                "scheme": "http",
+                "path": path,
+                "raw_path": path.encode(),
+                "query_string": b"",
+                "headers": [],
+                "client": ("test", 1),
+                "server": ("test", 80),
+                "root_path": "",
+                "app": app,
+            }
+        )
+
+    def test_included_router_without_path_does_not_raise(self):
+        router = APIRouter(prefix="/v1")
+
+        @router.get("/items/{item_id}")
+        def get_item(item_id: str):
+            return {"item_id": item_id}
+
+        app = FastAPI()
+        app.include_router(router)
+        request = self._request(app, "/v1/items/42")
+
+        matching_route = next(
+            route
+            for route in app.routes
+            if route.matches(request.scope)[0].name == "FULL"
+        )
+        self.assertEqual(type(matching_route).__name__, "_IncludedRouter")
+        with self.assertRaisesRegex(AttributeError, "has no attribute 'path'"):
+            matching_route.path
+
+        self.assertEqual(
+            _get_fastapi_request_path(request), ("/v1/items/42", True)
+        )
+
+    def test_direct_parameterized_route_uses_template(self):
+        app = FastAPI()
+
+        @app.get("/items/{item_id}")
+        def get_item(item_id: str):
+            return {"item_id": item_id}
+
+        self.assertEqual(
+            _get_fastapi_request_path(self._request(app, "/items/42")),
+            ("/items/{item_id}", True),
+        )
+
+    def test_unmatched_route_uses_request_path(self):
+        app = FastAPI()
+        self.assertEqual(
+            _get_fastapi_request_path(self._request(app, "/not-found")),
+            ("/not-found", False),
+        )
 
 
 @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
