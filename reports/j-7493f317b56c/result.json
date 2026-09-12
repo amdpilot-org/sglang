@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33088",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2146",
+  "candidate_commit": "286168e74709454e5db1515306932ed21995212d",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a verified partial fix: it adds per-process, per-bootstrap exponential backoff and an eight-attempt terminal abort, eliminating the unbounded retry loop for an individual pending cohort. It does not coordinate once per node, and the exact two-node TP8/EP8/DP8 Errno 99 and successful-serving outcome could not be exercised in this environment.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7493f317b56c/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_decode_queue_cleanup.py -k 'unresolved_prefill_dp_rank_queries_are_rate_limited or dp_rank_query_throttle_is_independent_per_bootstrap or unreachable_dp_rank_query_retries_are_bounded' (candidate tests temporarily applied to recorded base source)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: base had no retry gate method, submitted three calls in three rapid cycles, and made ten calls in ten cycles rather than terminating after three."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7493f317b56c/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_decode_queue_cleanup.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit: 12 focused queue-cleanup and bootstrap lookup tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7493f317b56c/venv/bin/python -m pytest -q test/registered/unit/disaggregation",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit: 361 disaggregation tests and 45 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7493f317b56c/venv/bin/python - <independent adversarial harness>",
+      "exit_code": 0,
+      "what_was_measured": "Eight-attempt terminal bound and abort; recovery on the eighth attempt; eight initial calls across eight independent queues; fresh retry budget for a later cohort."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..286168e74709454e5db1515306932ed21995212d",
+      "exit_code": 2,
+      "what_was_measured": "Three candidate report text files contain trailing whitespace; no runtime source whitespace error was reported."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "rocminfo reports one gfx950 AMD Instinct MI355X, but the reviewed retry path is CPU-side and the required two-node, 16-GPU distributed topology and model weights were unavailable.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Retry and throttle state remains local to each decode queue/process; eight DP ranks can issue eight initial calls and up to 64 calls for one unresolved cohort rather than one node-wide query.",
+    "After a cohort reaches the retry cap and is aborted, a later cohort for the same permanently unreachable bootstrap receives a fresh retry budget; there is no persistent address-level circuit breaker.",
+    "No two-node Qwen3.5-397B-A17B-FP8 TP8/EP8/DP8 MoRI run demonstrates that the reported Errno 99 exhaustion is eliminated and requests complete successfully."
+  ],
+  "remaining_limitations": [
+    "Only one gfx950 GPU was available; the original setup requires two MI355X nodes with eight GPUs per role.",
+    "Qwen/Qwen3.5-397B-A17B-FP8 weights and the reported MoRI distributed topology were unavailable.",
+    "No native source changed, so no native rebuild was applicable.",
+    "The candidate diff has trailing whitespace in three report artifact files."
+  ]
+}
