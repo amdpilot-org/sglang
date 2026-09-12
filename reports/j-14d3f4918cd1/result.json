@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/28157",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved PR 2543's subprocess isolation, eight-second timeout, and singleflight overload response while correcting the three HTTP-contract regressions independently reported by PR 3259. The request query and Accept/Accept-Encoding headers are now passed to the isolated child, which uses Prometheus' own exposition negotiation before returning status, headers, and body to the ASGI endpoint.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-14d3f4918cd1/venv/bin/python reports/j-14d3f4918cd1/reproduce_candidate_contracts.py at exact candidate 0db576affad6f3fa606de7143b9d3925d1494641",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before comparison against prometheus_client.make_asgi_app: the candidate included unrelated beta_total for name[] filtering, omitted gzip Content-Encoding, and returned Prometheus text 0.0.4 for an OpenMetrics Accept header."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-14d3f4918cd1/venv/bin/python reports/j-14d3f4918cd1/reproduce_candidate_contracts.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after real ASGI/multiprocess comparison: name[] excluded beta_total, gzip was negotiated, and OpenMetrics returned application/openmetrics-text, matching the reference exporter."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-14d3f4918cd1/venv/bin/python -m pytest -q test/registered/unit/utils/test_common.py -k PrometheusMetricsExporter",
+      "exit_code": 0,
+      "what_was_measured": "Five focused tests passed for HTTP negotiation/filtering, event-loop isolation and singleflight, timeout cleanup, child failure, and cancellation cleanup."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-14d3f4918cd1/venv/bin/python reports/j-6481c627b918/reproduce_metrics_health_isolation.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's retained isolation fixture returned 200 for the active scrape, 503 for the overlapping scrape, and measured 0.001 seconds event-loop lag."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-14d3f4918cd1/venv/bin/python -m py_compile python/sglang/srt/utils/common.py test/registered/unit/utils/test_common.py reports/j-14d3f4918cd1/reproduce_candidate_contracts.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python files compiled and the patch had no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU was used because the corrected behavior is confined to CPU-side ASGI request negotiation and Prometheus multiprocess-file exposition. Exercising the available gfx950 would not validate this defect."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original eight-H100 multi-node single-tokenizer PD deployment, real sustained scrape pressure, bootstrap read timeouts, and decode-side connection-loss logs were unavailable and were not claimed as reproduced.",
+    "The deterministic isolation fixture validates event-loop protection and overload behavior, not a full distributed/model workload.",
+    "Prometheus' existing MultiProcessCollector name[] behavior may return an empty restricted response because the collector registers without metric-name descriptors; this correction deliberately preserves the prior make_asgi_app contract and, critically, no longer returns unrelated metrics."
+  ]
+}
