@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34899",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "d8788d51d7c567fea6c0dd8ccbf64e40f8dd5f03",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate adds six relevant unified-memory cache scenarios, but its 1e-9 averaged-KL tolerance accepts nonzero KL and therefore does not implement the original issue's exact-zero correctness oracle. End-to-end Inkling execution is also unverified on the assigned AMD gfx950/ROCm host.",
+  "tests": [
+    {
+      "command": "git switch --detach d8788d51d7c567fea6c0dd8ccbf64e40f8dd5f03 && /tmp/amdpilot-repo-j-42b7bdbf0841/venv/bin/python -m pytest --collect-only -q test/registered/radix_cache/unified_radix_tree/test_unified_radix_cache_kl_hybrid_bitexact.py",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate collected 24 tests, including baseline, prefill-cache-hit, and decode-cache-hit cases for both Python and Rust unified radix tree backends. This measured discovery only."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-42b7bdbf0841/venv/bin/python -c (call compare_kl_divergence with input [[0.0]], output [[-1e-5]], threshold 1e-9)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial oracle test. Unequal logprobs produced nonzero avg_kl_div=5.0000069648240756e-11, but the candidate's exactness threshold accepted it."
+    },
+    {
+      "command": "git switch amdpilot/j-42b7bdbf0841 && /tmp/amdpilot-repo-j-42b7bdbf0841/venv/bin/python -m pytest --collect-only -q test/registered/radix_cache/unified_radix_tree/test_unified_radix_cache_kl_hybrid_bitexact.py::TestUnifiedMemoryHybridBitExact::test_logprobs_match",
+      "exit_code": 4,
+      "what_was_measured": "Failing-before evidence on recorded base: the candidate's unified-memory class does not exist. This establishes addition of coverage, not behavioral detection of a cache defect."
+    },
+    {
+      "command": "rocm-smi --showproductname --showuniqueid --showmeminfo vram",
+      "exit_code": 0,
+      "what_was_measured": "Assigned accelerator is AMD Instinct MI355X, gfx950, with ROCm. The issue's Inkling path requires NVIDIA CUTE/FA4 and cannot be qualified here."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "Hardware was identified as AMD Instinct MI355X gfx950. No candidate Inkling inference or candidate regression executed on GPU.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No supported NVIDIA CUTLASS/FA4 execution measured exact-zero KL for the baseline, prefill-cache-hit, or decode-cache-hit cases.",
+    "Neither the Python nor Rust unified-memory class completed an end-to-end Inkling request in this review environment.",
+    "No real or injected unified-memory FULL, SWA, or MAMBA state-restoration defect was demonstrated failing before and passing after.",
+    "No model weights suitable for Inkling qualification were available; the tiny Llama transport fixture cannot qualify the combined architecture.",
+    "No native source changed, so no native rebuild target existed."
+  ],
+  "remaining_counterexamples": [
+    "A nonzero KL of 5.0000069648240756e-11 passes because the candidate uses an averaged threshold of 1e-9, contradicting the contract that any nonzero KL is a bug.",
+    "The six new tests are collected but have no supported end-to-end Inkling result on either tree backend.",
+    "There is no revert-then-red or fault-injection evidence for unified-memory FULL, SWA, or MAMBA restoration."
+  ]
+}
