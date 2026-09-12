@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31995",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the public DWDP import failure when cuda.bindings is unavailable. Current main had already removed dwdp/vmm.py and made the ModelRunner import conditional on dwdp_size, but dwdp/transport.py and dwdp/page_pool.py still imported the CUDA driver eagerly. Both imports are now optional, matching the existing cuda_vmm_utils behavior, while preserving the real driver object when available.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-187fe1486efd/venv/bin/python -m pytest -q test/registered/unit/layers/test_dwdp_optional_cuda_import.py::TestDwdpOptionalCudaImport::test_public_import_without_cuda_bindings --junitxml=reports/j-187fe1486efd/raw/pytest-before.xml (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "The public DwdpManager import raised ModuleNotFoundError from dwdp/transport.py when cuda.bindings was blocked. Raw JUnit output is retained at reports/j-187fe1486efd/raw/pytest-before.xml."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-187fe1486efd/venv/bin/python -m pytest -q test/registered/unit/layers/test_dwdp_optional_cuda_import.py --junitxml=reports/j-187fe1486efd/raw/pytest-after.xml",
+      "exit_code": 0,
+      "what_was_measured": "Two subprocess boundaries passed: public DWDP import with cuda.bindings unavailable, and preservation of an available CUDA driver module. Raw JUnit output is retained at reports/j-187fe1486efd/raw/pytest-after.xml."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-187fe1486efd/pre-commit /opt/venv/bin/pre-commit run --files python/sglang/srt/layers/moe/dwdp/page_pool.py python/sglang/srt/layers/moe/dwdp/transport.py test/registered/unit/layers/test_dwdp_optional_cuda_import.py",
+      "exit_code": 0,
+      "what_was_measured": "All repository formatting, static, spelling, and registered-test validation hooks applicable to the changed files passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-187fe1486efd/venv/bin/python - <<'PY' ... import DwdpManager and assert page_pool.cuda/transport.cuda are None ... PY",
+      "exit_code": 0,
+      "what_was_measured": "The actual prepared ROCm interpreter, which has no cuda package, imported the public DWDP entry point successfully and reported both optional driver bindings as None."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and correction are module-import behavior and require no GPU execution. No model-serving, CUDA/NVLink DWDP, or numerical GPU claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Intel XPU hardware and the reported Qwen model weights were unavailable, so the original full server command was not run.",
+    "CUDA/NVLink DWDP execution was not exercised; the CUDA-present boundary verifies import binding preservation only.",
+    "The deterministic tiny Llama fixture was not used because it cannot qualify the reported XPU platform or DWDP model architecture, and the failure was reproduced directly at the public import boundary."
+  ]
+}
