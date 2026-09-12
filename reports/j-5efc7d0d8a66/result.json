@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/3642",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "5870e01368cead04c7d273ffbd0b3a89b4108f88",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3108",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/3180",
+  "outcome": "fixed",
+  "summary": "Reproduced the review counterexample on the exact candidate: context_len=10 with 11 reserved tokens returned after truncating prompt and completion to zero while retaining an accounted total of 11. Preserved the candidate's feasible reserved-token accounting and added an explicit rejection when the immutable reserved-token budget alone exceeds context.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5efc7d0d8a66/venv/bin/python reports/j-5efc7d0d8a66/adversarial_probe.py (exact candidate checkout)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: the candidate accepted prompt=0, completion=0, reserved=11, accounted_total=11 with context_len=10; the probe's invariant assertion failed. Raw output: evidence/candidate-failing-before.txt."
+    },
+    {
+      "command": "PYTHONPATH=/tmp/amdpilot-repo-j-5efc7d0d8a66/candidate-5870/python /tmp/amdpilot-repo-j-5efc7d0d8a66/venv/bin/python -m pytest -q test/registered/unit/managers/test_auto_truncate_validation.py test/registered/unit/managers/test_sampling_mask_validation.py test/registered/unit/managers/test_hidden_state_server_mode.py (exact candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's valid fixes and adjacent compatibility tests passed: 11 tests and 11 subtests. Raw output: evidence/candidate-valid-tests.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5efc7d0d8a66/venv/bin/python -m pytest -q test/registered/unit/managers/test_auto_truncate_validation.py test/registered/unit/managers/test_sampling_mask_validation.py test/registered/unit/managers/test_hidden_state_server_mode.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after: 13 tests and 11 subtests passed, including completion truncation, disabled compatibility, feasible reserved-token accounting, reserved==context, and reserved>context rejection. Raw output: evidence/unit-after.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5efc7d0d8a66/venv/bin/python reports/j-5efc7d0d8a66/adversarial_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after: the exact context=10/reserved=11 counterexample is rejected with a precise ValueError because truncation cannot reduce the reserved budget. Raw output: evidence/adversarial-passing-after.txt."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the consolidated change."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The corrected code is deterministic Python request-budget validation. No compatible EAGLE draft model was available to exercise nonzero reserved tokens end-to-end; the tiny Llama fixture cannot qualify that architecture-specific path. The candidate's existing GPU HTTP artifact used speculative_algorithm=None and therefore did not cover this counterexample."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No compatible EAGLE speculative draft model or weights were available, so nonzero reserved-token behavior was validated directly at TokenizerManager rather than end-to-end on GPU.",
+    "The deterministic tiny-Llama fixture validates transport and engine execution only and cannot validate the EAGLE-specific reserved-token path.",
+    "No native source changed, so native rebuild and compiler/ISA validation were not applicable.",
+    "Independent GPU numerical comparison is not applicable to request-length control flow."
+  ]
+}
