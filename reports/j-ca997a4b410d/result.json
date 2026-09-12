@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35333",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Implemented the reusable trajectory-promotion contract: canonical workload signatures and JSON manifests, stable regional inventories/digests, digest-checked runtime resolution with explicit eager fallback reasons, request-owned named checkpoint capture, structural/numerical/task-level trajectory gates, and DenoisingStage acceptance of a resolved regional compile plan. Unit and synthetic ROCm GPU validation passed. This is a framework candidate, not a promoted production-model plan.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ca997a4b410d/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_compile_trajectory_gate.py python/sglang/multimodal_gen/test/unit/test_regional_torch_compile.py",
+      "exit_code": 0,
+      "what_was_measured": "18 unit tests covering stable serialization/hashing, supported and unsupported resolution, revision/state/digest fallback, rejected manifests, immutable capture snapshots, missing checkpoints, shape/decision/terminal invariants, per-step perturbation localization, separate output metrics, stable region inventory, and denoising eager fallback. Raw output: reports/j-ca997a4b410d/raw/unit_tests.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TORCHINDUCTOR_CACHE_DIR=/tmp/amdpilot-repo-j-ca997a4b410d/inductor-cache /tmp/amdpilot-repo-j-ca997a4b410d/venv/bin/python reports/j-ca997a4b410d/gpu_trajectory_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "Real torch.compile/Inductor execution on one AMD Instinct MI350X using an independent eager reference over a four-step stateful trajectory; cold compile+rollout 2.549s, warm rollout 1.125ms, max per-step absolute error 1.1921e-7, reset/two-step history passed, and an intentional step-1 perturbation was rejected at the first changed checkpoint. Raw output: reports/j-ca997a4b410d/raw/gpu_trajectory_gate.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ca997a4b410d/venv/bin/python -m compileall -q python/sglang/multimodal_gen/runtime/utils/compile_trajectory.py python/sglang/multimodal_gen/runtime/utils/torch_compile.py python/sglang/multimodal_gen/runtime/pipelines_core/stages/denoising.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Python syntax/import byte-compilation and whitespace validity. Ruff was unavailable in the prepared interpreter and on PATH."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X (gfx950), torch 2.11.0+rocm7.2; real Inductor compilation and eager-versus-compiled numerical trajectory evidence retained in reports/j-ca997a4b410d/raw/gpu_trajectory_gate.log"
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No production diffusion or stateful world-model weights were supplied, so this PR does not promote any concrete model/workload manifest and does not claim semantic image/video/action quality.",
+    "Cache-DiT on/off, CFG serial/parallel, distributed topology, and model-specific reset/history regimes remain to be validated by model adapters before their signatures may be marked validated.",
+    "The generic resolver is implemented and DenoisingStage accepts its resolved plan, but server configuration/CLI loading and request/server fallback counters are not wired in this candidate; callers must load and resolve the offline manifest and pass the resolution.",
+    "Graph-count, graph-break, recompile, peak-memory, and p50/p95 collection are not yet implemented in an offline promotion runner.",
+    "Mutation safety here clones captured tensors; model-specific custom operations that mutate cache buffers still require correct mutation/alias metadata and model integration tests.",
+    "No native C++ or FlyDSL source was changed, so no native rebuild was applicable.",
+    "Ruff is not installed in the prepared environment; compileall, git diff --check, and focused pytest coverage were used instead."
+  ]
+}
