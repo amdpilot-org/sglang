@@ -168,13 +168,14 @@ class MiMoDetector(BaseFormatDetector):
         if idx == -1:
             return StreamingParseResult(normal_text=text, calls=[])
 
-        normal_text = text[:idx]
+        normal_text_parts = [text[:idx]]
         tool_indices = self._get_tool_indices(tools)
 
         calls = []
         last_end = idx
 
         for match in self.tool_call_regex.finditer(text):
+            normal_text_parts.append(text[last_end : match.start()])
             tool_call_body = match.group(1)
 
             parsed = self._parse_tool_call(tool_call_body, tools)
@@ -186,14 +187,17 @@ class MiMoDetector(BaseFormatDetector):
                     logger.warning(f"Unknown function: {func_name}")
                     if not envs.SGLANG_FORWARD_UNKNOWN_TOOLS.get():
                         # Return tool call block as normal text
-                        normal_text += text[last_end : match.end()]
+                        normal_text_parts.append(match.group(0))
                         last_end = match.end()
                         continue
                 calls.extend(self.parse_base_json(parsed, tools))
+            else:
+                normal_text_parts.append(match.group(0))
 
             last_end = match.end()
 
-        return StreamingParseResult(normal_text=normal_text, calls=calls)
+        normal_text_parts.append(text[last_end:])
+        return StreamingParseResult(normal_text="".join(normal_text_parts), calls=calls)
 
     def parse_streaming_increment(
         self, new_text: str, tools: List[Tool]
@@ -202,52 +206,67 @@ class MiMoDetector(BaseFormatDetector):
         Streaming parsing: buffer until complete tool call block.
         """
         self._buffer += new_text
-        current_text = self._buffer
+        normal_text_parts = []
+        calls = []
 
-        start = current_text.find(self.bot_token)
-        if start == -1:
-            if self.current_tool_id > 0:
-                # Already processing tool calls, keep buffering
-                # (more tool calls might come, don't discard text yet)
-                return StreamingParseResult(normal_text="")
-            else:
-                # No tool calls seen yet, return as normal text
-                self._buffer = ""
-                return StreamingParseResult(normal_text=current_text)
+        while self._buffer:
+            start = self._buffer.find(self.bot_token)
+            if start == -1:
+                partial_match_len = self._ends_with_partial_token(
+                    self._buffer, self.bot_token
+                )
+                if partial_match_len:
+                    normal_text_parts.append(self._buffer[:-partial_match_len])
+                    self._buffer = self._buffer[-partial_match_len:]
+                else:
+                    normal_text_parts.append(self._buffer)
+                    self._buffer = ""
+                break
 
-        # Find end token AFTER the start token
-        end = current_text.find(self.eot_token, start)
-        if end == -1:
-            # Incomplete tool call, return text before start and keep buffering
-            normal_text = current_text[:start]
-            self._buffer = current_text[start:]
-            return StreamingParseResult(normal_text=normal_text)
+            if start:
+                normal_text_parts.append(self._buffer[:start])
+                self._buffer = self._buffer[start:]
+                start = 0
 
-        # Parse the complete tool call block
-        result = self.detect_and_parse(current_text[: end + len(self.eot_token)], tools)
+            end = self._buffer.find(self.eot_token, start)
+            if end == -1:
+                break
 
-        if result.calls:
-            # Valid tool call - initialize tracking if first one
-            if self.current_tool_id == -1:
-                self.current_tool_id = 0
-                self.prev_tool_call_arr = []
-                self.streamed_args_for_tool = [""]
+            block_end = end + len(self.eot_token)
+            result = self.detect_and_parse(self._buffer[:block_end], tools)
+            normal_text_parts.append(result.normal_text)
+            self._buffer = self._buffer[block_end:]
 
-            while len(self.prev_tool_call_arr) <= self.current_tool_id:
-                self.prev_tool_call_arr.append({})
-            while len(self.streamed_args_for_tool) <= self.current_tool_id:
-                self.streamed_args_for_tool.append("")
+            for call in result.calls:
+                if self.current_tool_id == -1:
+                    self.current_tool_id = 0
+                    self.prev_tool_call_arr = []
+                    self.streamed_args_for_tool = [""]
 
-            call = result.calls[0]
-            self.prev_tool_call_arr[self.current_tool_id] = {
-                "name": call.name,
-                "arguments": json.loads(call.parameters) if call.parameters else {},
-            }
-            self.streamed_args_for_tool[self.current_tool_id] = call.parameters
-            call.tool_index = self.current_tool_id
-            self.current_tool_id += 1
+                while len(self.prev_tool_call_arr) <= self.current_tool_id:
+                    self.prev_tool_call_arr.append({})
+                while len(self.streamed_args_for_tool) <= self.current_tool_id:
+                    self.streamed_args_for_tool.append("")
 
-        self._buffer = current_text[end + len(self.eot_token) :]
+                self.prev_tool_call_arr[self.current_tool_id] = {
+                    "name": call.name,
+                    "arguments": (
+                        json.loads(call.parameters) if call.parameters else {}
+                    ),
+                }
+                self.streamed_args_for_tool[self.current_tool_id] = call.parameters
+                call.tool_index = self.current_tool_id
+                calls.append(call)
+                self.current_tool_id += 1
+
+        return StreamingParseResult(normal_text="".join(normal_text_parts), calls=calls)
+
+    def finish(self, tools: List[Tool]) -> StreamingParseResult:
+        """Release text held only because the stream ended on a partial marker."""
+        result = self.parse_streaming_increment("", tools)
+        if self._buffer:
+            result.normal_text += self._buffer
+            self._buffer = ""
         return result
 
     def _parse_tool_call(
