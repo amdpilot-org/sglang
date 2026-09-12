@@ -1,0 +1,59 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37379",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/3498",
+  "candidate_commit": "0e3cc83943b4d0accea9d7a846eefbec3be7f63f",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "prepared_checkout_difference": "none; the prepared checkout was exactly the recorded base commit",
+  "current_origin_main": "bd45cd50ca900dd821f829ca9adfbf9aa3336bda",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a substantive partial fix: it repairs Qwen3.5 causal and conditional class support for the repository's nested KV calibration schema and passes independent hybrid-layer, TP-rank, validation, four-representation, and Triton-consumer checks. It does not load the exact flat calibration JSON published in the original issue, so it does not fully satisfy the original contract.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-9cb0fe6a54a8/venv/bin/python - (base reproduction harness)",
+      "exit_code": 0,
+      "what_was_measured": "On the recorded base, all four actual Qwen3.5 entry classes lacked load_kv_cache_scales and load_model_utils.load_kv_cache_scales raised the reported RuntimeError for Qwen3_5MoeForConditionalGeneration. Raw output: reports/j-9cb0fe6a54a8/base-reproduction.log."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-9cb0fe6a54a8/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen3_5_kv_cache_scales.py test/registered/unit/models/test_qwen3_5_pipeline_parallel.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, 10 tests and 6 subtests passed. Raw output: reports/j-9cb0fe6a54a8/candidate-tests.log."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-9cb0fe6a54a8/venv/bin/python - (independent adversarial harness)",
+      "exit_code": 0,
+      "what_was_measured": "Dense/MoE causal classes, both conditional wrappers through the real loader utility, TP-rank-dependent values, hybrid non-contiguous attention layers, all four scale fields, Triton descale selection, invalid calibration rejection, and the exact issue fixture counterexample. Raw output: reports/j-9cb0fe6a54a8/independent-adversarial.log."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-9cb0fe6a54a8/venv/bin/python - (AMD FP8 numerical comparison)",
+      "exit_code": 0,
+      "what_was_measured": "MI355X gfx950 FP8 E4M3 quantize/dequantize at scale 0.5 exactly matched an independent CPU reference. Raw output: reports/j-9cb0fe6a54a8/amd-fp8-check.log."
+    },
+    {
+      "command": "git diff 358c163250ad3b1f62939b01ce1314a0a31a0365 0e3cc83943b4d0accea9d7a846eefbec3be7f63f --check",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace validity."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI355X (gfx950) under Torch 2.11.0+rocm7.2 / HIP 7.2.26015 executed the independent FP8 arithmetic check; see amd-fp8-check.log. No Qwen3.5 weights or distributed serving run were available.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The exact flat JSON shown in the original issue has top-level scaling_factor rather than kv_cache.scaling_factor. QuantParamSchema rejects it; the loader catches the error and leaves k_scale, v_scale, k_scale_float, and v_scale_float unset, effectively using scale 1.0.",
+    "The candidate's failing-before artifact is a collection-time helper ImportError, not the original loader RuntimeError, although this review independently reproduced the real RuntimeError on the recorded base."
+  ],
+  "remaining_limitations": [
+    "The exact Qwen/Qwen3.5-122B-A10B weights and eight NVIDIA L20 GPUs with TP=8 were unavailable, so exact startup, distributed execution, and semantic generation remain unverified.",
+    "Available GPU validation was limited to one AMD Instinct MI355X and independent FP8 arithmetic; it did not execute a full Qwen3.5 attention backend with model weights.",
+    "No native source changed and repository-environment.json records no native build target, so a native rebuild was not applicable.",
+    "origin/main advanced after image preparation; all failing-before comparisons nevertheless used the mandated recorded base commit."
+  ],
+  "source_paths": [
+    "/job/repo/python/sglang/srt/models/qwen3_5.py",
+    "/job/repo/python/sglang/srt/model_loader/weight_utils.py",
+    "/job/repo/python/sglang/srt/layers/attention/triton_backend.py",
+    "/job/repo/test/registered/unit/models/test_qwen3_5_kv_cache_scales.py"
+  ],
+  "native_paths": []
+}
