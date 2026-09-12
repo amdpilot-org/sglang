@@ -1,0 +1,71 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+____________ test_single_request_row_must_not_exceed_logits_budget _____________
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires one GPU")
+    def test_single_request_row_must_not_exceed_logits_budget():
+        device = torch.device("cuda")
+        indexer = IndexerKPool.__new__(IndexerKPool)
+        torch.nn.Module.__init__(indexer)
+        indexer.index_topk = 2
+        indexer.index_kpool = 1
+    
+        plan = SimpleNamespace(
+            ragged_groups=(SimpleNamespace(q_start=0, q_len=1, k_start=0, k_rows=10),),
+            ragged_q_ks=torch.tensor([0], dtype=torch.int32, device=device),
+            ragged_q_ke=torch.tensor([10], dtype=torch.int32, device=device),
+            pooled_seq_lens_expanded=torch.tensor([10], dtype=torch.int32, device=device),
+            seq_lens_expanded=torch.tensor([10], dtype=torch.int32, device=device),
+        )
+        q = torch.zeros((1, 1, 8), dtype=torch.float8_e4m3fn, device=device)
+        k = torch.zeros((10, 8), dtype=torch.float8_e4m3fn, device=device)
+        scale = torch.ones(10, dtype=torch.float32, device=device)
+        weights = torch.ones((1, 1), dtype=torch.float32, device=device)
+        budget = 4
+        observed = []
+    
+        def fake_logits(q_chunk, kv, weights_chunk, ks, ke, clean_logits):
+            logits = torch.zeros((q_chunk.shape[0], kv[0].shape[0]), dtype=torch.float32, device=device)
+            observed.append(logits.numel() * logits.element_size())
+            return logits
+    
+        with (
+            mock.patch("sglang.srt.layers.attention.dsa.dsa_indexer_kpool.deep_gemm", SimpleNamespace(fp8_mqa_logits=fake_logits), create=True),
+            mock.patch.object(IndexerKPool, "_topk_from_kpool_logits", return_value=torch.zeros((1, 2), dtype=torch.int32, device=device)),
+        ):
+            indexer._topk_ragged_kpool_grouped(
+                plan=plan,
+                q_fp8=q,
+                weights=weights,
+                k_fp8=k,
+                k_scale=scale,
+                logits_budget_bytes=budget,
+                total_q=1,
+                page_table=None,
+                page_table_row_index=None,
+                topk_offsets=None,
+            )
+    
+>       assert max(observed) <= budget, f"observed {observed} bytes against {budget}-byte budget"
+E       AssertionError: observed [40] bytes against 4-byte budget
+E       assert 40 <= 4
+E        +  where 40 = max([40])
+
+../candidate_counterexample_test.py:55: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+<frozen abc>:106
+  <frozen abc>:106: DeprecationWarning: MultiPlatformOp is deprecated; subclass sglang.kernels.fused_op.BaseFusedOp instead (RFC #29630).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../candidate_counterexample_test.py::test_single_request_row_must_not_exceed_logits_budget
+1 failed, 17 warnings in 11.83s
