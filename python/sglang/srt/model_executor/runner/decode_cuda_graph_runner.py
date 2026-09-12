@@ -79,6 +79,7 @@ from sglang.srt.model_executor.runner.base_cuda_graph_runner import (
     freeze_gc,
     get_batch_sizes_to_capture,
 )
+from sglang.srt.model_executor.runner.base_runner import get_pp_proxy_num_tokens
 from sglang.srt.model_executor.runner.flashinfer_autotune import (
     maybe_flashinfer_autotune_speculative_draft,
 )
@@ -895,8 +896,13 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
         pp_proxy_tensors = None
         # pipeline parallelism
         if self.pp_size > 1:
+            pp_hidden_tokens = get_pp_proxy_num_tokens(
+                num_tokens,
+                require_attn_tp_gather=self.require_attn_tp_gather,
+                attn_tp_size=self.attn_tp_size,
+            )
             pp_proxy_tensors = PPProxyTensors(
-                {k: v[:num_tokens] for k, v in buffers.pp_proxy_tensors.items()}
+                {k: v[:pp_hidden_tokens] for k, v in buffers.pp_proxy_tensors.items()}
             )
 
         if self.require_mlp_tp_gather:
@@ -1470,7 +1476,14 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
             )
         else:
             assert isinstance(output, PPProxyTensors)
-            return PPProxyTensors({k: v[: self.bs] for k, v in output.tensors.items()})
+            pp_output_tokens = get_pp_proxy_num_tokens(
+                self.bs,
+                require_attn_tp_gather=self.require_attn_tp_gather,
+                attn_tp_size=self.attn_tp_size,
+            )
+            return PPProxyTensors(
+                {k: v[:pp_output_tokens] for k, v in output.tensors.items()}
+            )
 
     def get_spec_info(self, num_tokens: int):
         spec_info = None
