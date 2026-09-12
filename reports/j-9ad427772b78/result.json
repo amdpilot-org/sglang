@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31248",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Reproduced all three independent-review counterexamples at candidate b1b2f71e8032aff28d638ef356fb62ee61f249c1. Preserved its valid diagnostics and tests, then corrected the unsafe selection behavior so every matched 2:4 layout fails explicitly instead of allowing sparse W4A16 metadata to select dense CompressedTensorsWNA16. This does not implement the requested sparse feature.",
+  "tests": [
+    {
+      "command": "At detached candidate b1b2f71e: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9ad427772b78/venv/bin/python reports/j-9ad427772b78/evidence/reproduce_sparse24_selection.py",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced the top-level sparse-format ImportError, the incorrect dense CompressedTensorsWNA16 selection for per-group pack-quantized W4A16 plus 2:4 metadata, and the explicit unquantized 2:4 unsupported error. See candidate-counterexamples.log."
+    },
+    {
+      "command": "At detached candidate b1b2f71e: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9ad427772b78/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_mixed_precision.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's neighboring regression suite passed 7 tests despite the remaining contract violation. See candidate-tests.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9ad427772b78/venv/bin/python reports/j-9ad427772b78/evidence/reproduce_sparse24_selection.py",
+      "exit_code": 0,
+      "what_was_measured": "After correction, all three sparse cases fail closed with the explicit unsupported 2:4 error; quantized and unquantized layouts are identified. See corrected-counterexamples.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9ad427772b78/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_mixed_precision.py",
+      "exit_code": 0,
+      "what_was_measured": "Nine focused CPU tests passed, including regressions preventing sparse metadata from selecting the dense WNA16 scheme. See corrected-tests.log."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "Environment inventory found one AMD Instinct MI355X, Torch 2.11.0+rocm7.2, and HIP 7.2.26015. No GPU kernel was executed because the requested sparse implementation is NVIDIA-specific and absent; environment.log records the inventory.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "CompressedTensorsW4A16Sparse24 remains unimplemented: there is no maintained sparse scheme, weight loader, or execution kernel in the candidate or this correction.",
+    "The assigned AMD gfx950 accelerator cannot qualify an NVIDIA sparse kernel, compiler output, or ISA; no speculative implementation was made from unavailable-architecture evidence.",
+    "No native source changed, so a native rebuild was not applicable.",
+    "The reported 26B Gemma weights were not downloaded or served; full loading, NEXTN, HTTP transport, and semantic accuracy remain unverified.",
+    "The deterministic tiny Llama fixture was not used because it cannot validate Gemma 4 architecture, W4A16/NVFP4 semantics, or 2:4 sparse execution."
+  ]
+}

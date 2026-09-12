@@ -704,7 +704,10 @@ class CompressedTensorsConfig(QuantizationConfig):
                 )
             else:
                 raise ImportError(
-                    "Other method (CompressedTensorsW4A16Sparse24) is not supported now"
+                    "Unsupported compressed-tensors W4A16 format: "
+                    f"{quant_format!r}. Only {CompressionFormat.pack_quantized.value!r} "
+                    "is supported for weight-only W4A16; 2:4 sparsity is detected "
+                    "separately from sparsity_config."
                 )
 
         if is_activation_quantization_format(quant_format):
@@ -953,12 +956,17 @@ class CompressedTensorsConfig(QuantizationConfig):
             )
             sparsity_scheme = self.sparsity_scheme_map[matched_target]
 
-        if self.supports_cutlass_24(
-            weight_quant=weight_quant,
-            input_quant=input_quant,
-            sparsity_scheme=sparsity_scheme,
-        ):
-            raise ImportError("CompressedTensors24 is not supported now")
+        # Fail closed for every declared 2:4 layout. supports_cutlass_24()
+        # intentionally returns False for weight-only quantization, so using
+        # it as the rejection predicate let sparse W4A16 metadata silently
+        # fall through to the dense WNA16 loader.
+        if self.is_24_sparsity(sparsity_scheme):
+            quantization = "unquantized" if weight_quant is None else "quantized"
+            raise ImportError(
+                "Compressed-tensors 2:4 sparsity is not supported: SGLang has no "
+                "maintained sparse linear kernel for this checkpoint layout "
+                f"({quantization} weights)."
+            )
         elif weight_quant is None:
             logger.warning_once(
                 "Acceleration for non-quantized schemes is "
@@ -1095,6 +1103,22 @@ class CompressedTensorsConfig(QuantizationConfig):
         return None
 
     @staticmethod
+    def is_24_sparsity(
+        sparsity_scheme: Optional[SparsityCompressionConfig] = None,
+    ) -> bool:
+        if sparsity_scheme is None:
+            return False
+
+        return (
+            sparsity_scheme.sparsity_structure == SparsityStructure.TWO_FOUR.value
+            and sparsity_scheme.format
+            in {
+                CompressionFormat.dense.value,
+                CompressionFormat.sparse_24_bitmask.value,
+            }
+        )
+
+    @staticmethod
     def supports_cutlass_24(
         weight_quant: Optional[QuantizationArgs],
         input_quant: Optional[QuantizationArgs],
@@ -1113,23 +1137,7 @@ class CompressedTensorsConfig(QuantizationConfig):
         :return: True if the layer is supported by the Cutlass 2:4 Kernel
             False otherwise
         """
-        if sparsity_scheme is None:
-            return False
-
-        is_valid_sparsity_structure: bool = (
-            sparsity_scheme.sparsity_structure == SparsityStructure.TWO_FOUR.value
-        )
-
-        valid_compressors = {
-            CompressionFormat.dense.value,
-            CompressionFormat.sparse_24_bitmask.value,
-        }
-
-        is_valid_sparsity = (
-            is_valid_sparsity_structure and sparsity_scheme.format in valid_compressors
-        )
-
-        if not is_valid_sparsity:
+        if not CompressedTensorsConfig.is_24_sparsity(sparsity_scheme):
             return False
 
         # Unquantized cases are supported
