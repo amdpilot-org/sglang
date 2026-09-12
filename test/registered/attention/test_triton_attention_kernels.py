@@ -920,7 +920,9 @@ class TestTritonAttention(CustomTestCase):
 
         self.assertTrue(torch.isfinite(o).all())
 
-    def _test_extend_attention_unified_vs_regular_once(self, B, N_CTX, H_Q, H_KV, D):
+    def _test_extend_attention_unified_vs_regular_once(
+        self, B, N_CTX, H_Q, H_KV, D, xai_temperature_len=-1
+    ):
         """Test that unified kernel produces same results as 2-stage kernel."""
         dtype = torch.bfloat16
         device = get_device()
@@ -1001,6 +1003,7 @@ class TestTritonAttention(CustomTestCase):
             max_len_extend=max_len_extend,
             k_scale=1.0,
             v_scale=1.0,
+            xai_temperature_len=xai_temperature_len,
         )
 
         # Build unified KV indices
@@ -1041,6 +1044,7 @@ class TestTritonAttention(CustomTestCase):
             sm_scale=None,
             logit_cap=0.0,
             is_causal=True,
+            xai_temperature_len=xai_temperature_len,
         )
 
         # Compare results
@@ -1060,16 +1064,99 @@ class TestTritonAttention(CustomTestCase):
     def test_extend_attention_unified_vs_regular(self):
         """Test unified kernel matches 2-stage kernel across different configs."""
         configs = [
-            (4, 512, 32, 8, 128),  # Standard config
-            (2, 2048, 32, 8, 128),  # Long sequence (test 2048 specifically)
-            (8, 256, 64, 8, 80),  # Non-standard head dim
+            (4, 512, 32, 8, 128, -1),  # Standard config
+            (2, 2048, 32, 8, 128, -1),  # Long sequence (test 2048 specifically)
+            (8, 256, 64, 8, 80, -1),  # Non-standard head dim
+            (2, 512, 32, 8, 128, 4),  # Grok/xAI temperature scaling
         ]
 
-        for B, N_CTX, H_Q, H_KV, D in configs:
-            with self.subTest(B=B, N_CTX=N_CTX, H_Q=H_Q, H_KV=H_KV, D=D):
+        for B, N_CTX, H_Q, H_KV, D, xai_temperature_len in configs:
+            with self.subTest(
+                B=B,
+                N_CTX=N_CTX,
+                H_Q=H_Q,
+                H_KV=H_KV,
+                D=D,
+                xai_temperature_len=xai_temperature_len,
+            ):
                 self._test_extend_attention_unified_vs_regular_once(
-                    B, N_CTX, H_Q, H_KV, D
+                    B, N_CTX, H_Q, H_KV, D, xai_temperature_len=xai_temperature_len
                 )
+
+    def test_extend_attention_unified_xai_temperature_reference(self):
+        """Check xAI scaling below, at, and above its configured threshold."""
+        device = get_device()
+        dtype = torch.float32
+        prefix_len = 3
+        extend_len = 4
+        threshold = 4
+        num_heads = 4
+        head_dim = 32
+
+        torch.manual_seed(0)
+        q = torch.randn(
+            (extend_len, num_heads, head_dim), dtype=dtype, device=device
+        )
+        k_buffer = torch.randn(
+            (prefix_len + extend_len, num_heads, head_dim),
+            dtype=dtype,
+            device=device,
+        )
+        v_buffer = torch.randn_like(k_buffer)
+        qo_indptr = torch.tensor([0, extend_len], dtype=torch.int32, device=device)
+        kv_indptr = torch.tensor(
+            [0, prefix_len + extend_len], dtype=torch.int32, device=device
+        )
+        kv_indices = torch.arange(
+            prefix_len + extend_len, dtype=torch.int64, device=device
+        )
+        prefix_lens = torch.tensor([prefix_len], dtype=torch.int32, device=device)
+
+        output = torch.empty_like(q)
+        extend_attention_fwd_unified(
+            q,
+            output,
+            k_buffer,
+            v_buffer,
+            1.0,
+            1.0,
+            qo_indptr,
+            kv_indptr,
+            kv_indices,
+            prefix_lens,
+            max_len_extend=extend_len,
+            xai_temperature_len=threshold,
+        )
+
+        positions = prefix_len + torch.arange(extend_len, device=device)
+        temperature_scale = torch.where(
+            positions > threshold,
+            torch.log2(positions.float())
+            / torch.log2(torch.tensor(float(threshold), device=device)),
+            1.0,
+        )
+        reference = torch.empty_like(q)
+        extend_attention_fwd_unified(
+            q * temperature_scale[:, None, None],
+            reference,
+            k_buffer,
+            v_buffer,
+            1.0,
+            1.0,
+            qo_indptr,
+            kv_indptr,
+            kv_indices,
+            prefix_lens,
+            max_len_extend=extend_len,
+            xai_temperature_len=-1,
+        )
+
+        self.assertTrue(
+            torch.allclose(output, reference, rtol=2e-3, atol=2e-3),
+            f"Unified xAI scaling differs from the logarithmic reference. "
+            f"Per-position max diff: "
+            f"{(output - reference).abs().amax(dim=(1, 2)).tolist()}",
+        )
 
     def test_build_unified_kv_indices(self):
         """Test build_unified_kv_indices correctness."""

@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32942",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that unified deterministic extend attention used reciprocal xAI temperature scaling while regular extend/decode use logarithmic scaling. Aligned the unified formula and added both unified-vs-regular coverage and a deterministic same-kernel logarithmic reference covering positions below, at, and above the threshold.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-061a7f0f5402/venv/bin/python -m pytest test/registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention_unified_xai_temperature_reference -q (old reciprocal formula)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before gfx950 regression against an independent logarithmic query-scaling reference. Per-position maximum output differences for absolute positions 3, 4, 5, and 6 with threshold 4 were [0.0, 0.37117624282836914, 0.3268224895000458, 0.9590050578117371]."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-061a7f0f5402/venv/bin/python -m pytest test/registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention_unified_xai_temperature_reference -q (corrected logarithmic formula)",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after deterministic gfx950 kernel comparison to the independent logarithmic reference, including below-threshold position 3, threshold position 4, and above-threshold positions 5 and 6."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python:/job/repo/test/registered/attention /tmp/amdpilot-repo-j-061a7f0f5402/venv/bin/python (fixed-seed invocation of _test_extend_attention_unified_vs_regular_once(2, 512, 32, 8, 128, xai_temperature_len=4))",
+      "exit_code": 0,
+      "what_was_measured": "The corrected unified kernel passed the repository's existing AMD unified-vs-regular numerical tolerance with xAI scaling enabled."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-061a7f0f5402/venv/bin/python -m black --check ...; /tmp/amdpilot-repo-j-061a7f0f5402/venv/bin/python -m ruff check ...",
+      "exit_code": 1,
+      "what_was_measured": "Formatting tools could not run because the prepared interpreter does not contain the black or ruff modules; files were manually reviewed and git diff --check passed."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Grok model weights or full serving/model accuracy run were used; validation is limited to focused Triton attention kernel execution and does not claim model semantic accuracy.",
+    "The complete registered unified-vs-regular matrix has an unrelated stochastic gfx950 tolerance failure in the pre-existing D=80, xai_temperature_len=-1 case (captured in raw/failing_before.log), so issue-specific validation used the isolated xAI case and the deterministic same-kernel reference.",
+    "black and ruff are absent from the prepared Python environment."
+  ]
+}
