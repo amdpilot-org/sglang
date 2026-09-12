@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31071",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2545",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2531",
+  "candidate_commit": "eed79ea7bf564e3c5975f68d68b8c258fd1acf6c",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate makes finalized greedy EAGLE decisions TP-consistent on every backend. The prepared base reproduced the remaining non-HIP divergence with logical ranks accepting 3 versus 2 tokens; the candidate passed its regressions and independent multi-request TP/DP-attention adversarial cases.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python:/job/repo/python/sglang-kernel/python /tmp/amdpilot-repo-j-bf9f8e9e88b8/venv/bin/python -m pytest -q /job/review-evidence-j-bf9f8e9e88b8/tests/test_eagle_greedy_tp_sync.py",
+      "exit_code": 1,
+      "what_was_measured": "Recorded base behavior: the non-HIP greedy TP=2 near-tie regression failed with accepted-token counts 3 versus 2; the other three cases passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python:/job/repo/python/sglang-kernel/python /tmp/amdpilot-repo-j-bf9f8e9e88b8/venv/bin/python -m pytest -q test/registered/unit/spec/test_eagle_greedy_tp_sync.py /job/review-evidence-j-bf9f8e9e88b8/tests/test_independent_eagle_tp_sync.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate: 6 tests passed, covering HIP and non-HIP logical TP=2 synchronization, TP=1, DP-attention group routing, and independent two-request divergent decisions."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python:/job/repo/python/sglang-kernel/python /tmp/amdpilot-repo-j-bf9f8e9e88b8/venv/bin/python -c 'import torch, sglang; from sglang.srt.speculative import eagle_utils; print(sglang.__file__); print(eagle_utils.__file__); print(torch.__version__, torch.version.hip)'",
+      "exit_code": 0,
+      "what_was_measured": "Candidate execution imported SGLang and eagle_utils from the checked-out repository and used Torch 2.11.0+rocm7.2 / HIP 7.2.26015."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Real tensors and argmax executed on one AMD Instinct MI350X with gfx950:sramecc+:xnack-. Collective effects were replayed across logical ranks.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A real two-rank ROCm process-group reproduction of divergent decisions and the subsequent collective deadlock remains unverified because only one GPU was assigned.",
+    "The AITER all-reduce-fusion production configuration, full serving path, and model semantic accuracy remain unverified."
+  ],
+  "remaining_limitations": "One GPU only; no real TP=2 collective, deadlock, AITER fusion, full server, model weights, multi-node workload, or semantic accuracy test. No native source changed, so no native rebuild was required."
+}
