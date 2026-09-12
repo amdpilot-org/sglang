@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38009",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/905",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/872",
+  "candidate_commit": "3c8680cd17302b3a17b8de8463944e67a000000d",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Accept PR 872 as test-only hardening. It changes no production code and verifies TP synchronization calls for three DFlash acceptance paths already present in the recorded base via earlier upstream fix f60bc73c. An independent adversarial single-process case confirmed broadcast replacements are consumed before token commit. The original Qwen3.8-27B thinking-mode token-equivalence failure remains unverified because the required checkpoints, four NVIDIA GPUs, CUDA/NCCL, and TP=4 are unavailable.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-82e097bb724f/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_logits.py (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "The prepared base's 10 pre-existing DFlash logits tests pass; this establishes that the candidate is adding coverage rather than a production fix. Raw output: reports/j-82e097bb724f/evidence/base-tests.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-82e097bb724f/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_logits.py (exact candidate 3c8680cd17302b3a17b8de8463944e67a000000d)",
+      "exit_code": 0,
+      "what_was_measured": "All 13 tests pass, including the candidate's three parameterized synchronization-call cases. Raw output: reports/j-82e097bb724f/evidence/candidate-tests.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-82e097bb724f/venv/bin/python /job/review-evidence-j-82e097bb724f/adversarial_accept_sync.py",
+      "exit_code": 0,
+      "what_was_measured": "A single-process fake collective overwrote disagreeing local greedy predictions and sampled accept/bonus values with rank-0 values; the synchronized values were consumed before commit in both paths. Raw output: reports/j-82e097bb724f/evidence/adversarial-accept-sync.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-82e097bb724f/venv/bin/python -c <source import and ROCm tensor probe>",
+      "exit_code": 0,
+      "what_was_measured": "Imported sglang and dflash_worker_v2 from /job/repo/python and executed tensor multiplication on AMD Instinct MI350X with ROCm 7.2. Raw output: reports/j-82e097bb724f/evidence/base-import-gpu.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A real tensor operation executed on the assigned AMD Instinct MI350X/gfx950. No DFlash model, multi-rank collective, or Qwen3.8 checkpoint ran on GPU."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Target-only versus DFlash2 greedy token equality for Qwen3.8-27B with reasoning_effort=medium and preserve_thinking=true at TP=4 remains untested.",
+    "The reported deterministic first divergence at completion token 30 was not reproduced on the recorded base or candidate.",
+    "The no-thinking exact-equality control was not run.",
+    "No actual multi-rank broadcast or CUDA/NCCL execution was exercised; candidate coverage uses a recording mock and the independent adversarial case uses an in-process broadcast emulator."
+  ],
+  "remaining_limitations": [
+    "Assigned architecture is one AMD Instinct MI350X/gfx950 with ROCm 7.2; the report used four NVIDIA RTX 3090 GPUs with CUDA 13 and TP=4.",
+    "Qwen/Qwen3.8-27B and incoai/Qwen3.8-27B-DFlash2 weights are unavailable locally.",
+    "PR 872 changes only Python tests and reports; no native rebuild is applicable.",
+    "The earlier source fix's mechanism is verified, but semantic equivalence for the original model/thinking workload is not."
+  ]
+}
