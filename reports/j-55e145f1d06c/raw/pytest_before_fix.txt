@@ -1,0 +1,141 @@
+..                                                                   [100%]
+=================================== FAILURES ===================================
+_ ServingChatTestCase.test_dsv_encoders_keep_tools_when_tool_choice_is_auto (chat_encoding_spec='dsv32') _
+
+self = <test_serving_chat.ServingChatTestCase testMethod=test_dsv_encoders_keep_tools_when_tool_choice_is_auto>
+
+    def test_dsv_encoders_keep_tools_when_tool_choice_is_auto(self):
+        self.template_manager.chat_template_name = None
+        self.template_manager.jinja_template_content_format = "string"
+        self.chat._dsv4_reasoning_effort_profile = "preview"
+        self.chat.tool_call_parser = None
+    
+        tool = {
+            "type": "function",
+            "function": {
+                "name": "request_tool",
+                "parameters": {"type": "object"},
+            },
+        }
+        for chat_encoding_spec in ("dsv4", "dsv32"):
+            with self.subTest(chat_encoding_spec=chat_encoding_spec):
+                self.chat.chat_encoding_spec = chat_encoding_spec
+                self.tm.tokenizer.encode.reset_mock()
+                req = ChatCompletionRequest(
+                    model="x",
+                    messages=[{"role": "user", "content": "Use the tool."}],
+                    tools=[tool],
+                    tool_choice="auto",
+                )
+    
+                self.chat._process_messages(req, is_multimodal=False)
+    
+                prompt = self.tm.tokenizer.encode.call_args.args[0]
+                self.assertIn("## Tools", prompt)
+>               self.assertIn("<｜DSML｜tool_calls>", prompt)
+E               AssertionError: '<｜DSML｜tool_calls>' not found in '<｜begin▁of▁sentence｜>\n\n## Tools\nYou have access to a set of tools you can use to answer the user\'s question.\nYou can invoke functions by writing a "<｜DSML｜function_calls>" block like the following as part of your reply to the user:\n<｜DSML｜function_calls>\n<｜DSML｜invoke name="$FUNCTION_NAME">\n<｜DSML｜parameter name="$PARAMETER_NAME" string="true|false">$PARAMETER_VALUE</｜DSML｜parameter>\n...\n</｜DSML｜invoke>\n<｜DSML｜invoke name="$FUNCTION_NAME2">\n...\n</｜DSML｜invoke>\n</｜DSML｜function_calls>\nString and scalar parameters should be specified as is without any escaping or quotes, while lists and objects should use JSON format. The "string" attribute should be set to "true" for string type parameters and "false" for other types (numbers, booleans, arrays, objects).\nIf the thinking_mode is enabled, then after function results you should strongly consider outputting a thinking block. Here is an example:\n<｜DSML｜function_calls>\n...\n</｜DSML｜function_calls>\n<function_results>\n...\n</function_results>\n<think>...thinking about results</think>\nHere are the functions available in JSONSchema format:\n<functions>\n{"description": null, "name": "request_tool", "parameters": {"type": "object"}, "strict": false}\n</functions>\n<｜User｜>Use the tool.<｜Assistant｜></think>'
+
+test/registered/unit/entrypoints/openai/test_serving_chat.py:1638: AssertionError
+_ ServingChatTestCase.test_dsv_encoders_omit_tools_when_tool_choice_is_none (chat_encoding_spec='dsv4') _
+
+self = <test_serving_chat.ServingChatTestCase testMethod=test_dsv_encoders_omit_tools_when_tool_choice_is_none>
+
+    def test_dsv_encoders_omit_tools_when_tool_choice_is_none(self):
+        self.template_manager.chat_template_name = None
+        self.template_manager.jinja_template_content_format = "string"
+        self.chat._dsv4_reasoning_effort_profile = "preview"
+        self.chat.tool_call_parser = None
+    
+        def make_tool(name):
+            return {
+                "type": "function",
+                "function": {"name": name, "parameters": {"type": "object"}},
+            }
+    
+        for chat_encoding_spec in ("dsv4", "dsv32"):
+            with self.subTest(chat_encoding_spec=chat_encoding_spec):
+                self.chat.chat_encoding_spec = chat_encoding_spec
+                self.tm.tokenizer.encode.reset_mock()
+                req = ChatCompletionRequest(
+                    model="x",
+                    messages=[
+                        {
+                            "role": "developer",
+                            "content": "Follow the request.",
+                            "tools": [make_tool("message_tool")],
+                        },
+                        {"role": "user", "content": "Answer directly."},
+                    ],
+                    tools=[make_tool("request_tool")],
+                    tool_choice="none",
+                )
+    
+                self.chat._process_messages(req, is_multimodal=False)
+    
+                prompt = self.tm.tokenizer.encode.call_args.args[0]
+>               self.assertNotIn("## Tools", prompt)
+E               AssertionError: '## Tools' unexpectedly found in '<｜begin▁of▁sentence｜>\n\n## Tools\n\nYou have access to a set of tools to help answer the user\'s question. You can invoke tools by writing a "<｜DSML｜tool_calls>" block like the following:\n\n<｜DSML｜tool_calls>\n<｜DSML｜invoke name="$TOOL_NAME">\n<｜DSML｜parameter name="$PARAMETER_NAME" string="true|false">$PARAMETER_VALUE</｜DSML｜parameter>\n...\n</｜DSML｜invoke>\n<｜DSML｜invoke name="$TOOL_NAME2">\n...\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>\n\nString parameters should be specified as is and set `string="true"`. For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set `string="false"`.\n\nIf thinking_mode is enabled (triggered by <think>), you MUST output your complete reasoning inside <think>...</think> BEFORE any tool calls or final response.\n\nOtherwise, output directly after </think> with tool calls or final response.\n\n### Available Tool Schemas\n\n{"description": null, "name": "request_tool", "parameters": {"type": "object"}, "strict": false}\n\nYou MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.\n<｜User｜>Follow the request.\n\n## Tools\n\nYou have access to a set of tools to help answer the user\'s question. You can invoke tools by writing a "<｜DSML｜tool_calls>" block like the following:\n\n<｜DSML｜tool_calls>\n<｜DSML｜invoke name="$TOOL_NAME">\n<｜DSML｜parameter name="$PARAMETER_NAME" string="true|false">$PARAMETER_VALUE</｜DSML｜parameter>\n...\n</｜DSML｜invoke>\n<｜DSML｜invoke name="$TOOL_NAME2">\n...\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>\n\nString parameters should be specified as is and set `string="true"`. For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set `string="false"`.\n\nIf thinking_mode is enabled (triggered by <think>), you MUST output your complete reasoning inside <think>...</think> BEFORE any tool calls or final response.\n\nOtherwise, output directly after </think> with tool calls or final response.\n\n### Available Tool Schemas\n\n{"description": null, "name": "message_tool", "parameters": {"type": "object"}, "strict": false}\n\nYou MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.\n<｜User｜>Answer directly.<｜Assistant｜></think>'
+
+test/registered/unit/entrypoints/openai/test_serving_chat.py:1603: AssertionError
+_ ServingChatTestCase.test_dsv_encoders_omit_tools_when_tool_choice_is_none (chat_encoding_spec='dsv32') _
+
+self = <test_serving_chat.ServingChatTestCase testMethod=test_dsv_encoders_omit_tools_when_tool_choice_is_none>
+
+    def test_dsv_encoders_omit_tools_when_tool_choice_is_none(self):
+        self.template_manager.chat_template_name = None
+        self.template_manager.jinja_template_content_format = "string"
+        self.chat._dsv4_reasoning_effort_profile = "preview"
+        self.chat.tool_call_parser = None
+    
+        def make_tool(name):
+            return {
+                "type": "function",
+                "function": {"name": name, "parameters": {"type": "object"}},
+            }
+    
+        for chat_encoding_spec in ("dsv4", "dsv32"):
+            with self.subTest(chat_encoding_spec=chat_encoding_spec):
+                self.chat.chat_encoding_spec = chat_encoding_spec
+                self.tm.tokenizer.encode.reset_mock()
+                req = ChatCompletionRequest(
+                    model="x",
+                    messages=[
+                        {
+                            "role": "developer",
+                            "content": "Follow the request.",
+                            "tools": [make_tool("message_tool")],
+                        },
+                        {"role": "user", "content": "Answer directly."},
+                    ],
+                    tools=[make_tool("request_tool")],
+                    tool_choice="none",
+                )
+    
+                self.chat._process_messages(req, is_multimodal=False)
+    
+                prompt = self.tm.tokenizer.encode.call_args.args[0]
+>               self.assertNotIn("## Tools", prompt)
+E               AssertionError: '## Tools' unexpectedly found in '<｜begin▁of▁sentence｜>\n\n## Tools\nYou have access to a set of tools you can use to answer the user\'s question.\nYou can invoke functions by writing a "<｜DSML｜function_calls>" block like the following as part of your reply to the user:\n<｜DSML｜function_calls>\n<｜DSML｜invoke name="$FUNCTION_NAME">\n<｜DSML｜parameter name="$PARAMETER_NAME" string="true|false">$PARAMETER_VALUE</｜DSML｜parameter>\n...\n</｜DSML｜invoke>\n<｜DSML｜invoke name="$FUNCTION_NAME2">\n...\n</｜DSML｜invoke>\n</｜DSML｜function_calls>\nString and scalar parameters should be specified as is without any escaping or quotes, while lists and objects should use JSON format. The "string" attribute should be set to "true" for string type parameters and "false" for other types (numbers, booleans, arrays, objects).\nIf the thinking_mode is enabled, then after function results you should strongly consider outputting a thinking block. Here is an example:\n<｜DSML｜function_calls>\n...\n</｜DSML｜function_calls>\n<function_results>\n...\n</function_results>\n<think>...thinking about results</think>\nHere are the functions available in JSONSchema format:\n<functions>\n{"description": null, "name": "request_tool", "parameters": {"type": "object"}, "strict": false}\n</functions>\n<｜User｜>\n\n## Tools\nYou have access to a set of tools you can use to answer the user\'s question.\nYou can invoke functions by writing a "<｜DSML｜function_calls>" block like the following as part of your reply to the user:\n<｜DSML｜function_calls>\n<｜DSML｜invoke name="$FUNCTION_NAME">\n<｜DSML｜parameter name="$PARAMETER_NAME" string="true|false">$PARAMETER_VALUE</｜DSML｜parameter>\n...\n</｜DSML｜invoke>\n<｜DSML｜invoke name="$FUNCTION_NAME2">\n...\n</｜DSML｜invoke>\n</｜DSML｜function_calls>\nString and scalar parameters should be specified as is without any escaping or quotes, while lists and objects should use JSON format. The "string" attribute should be set to "true" for string type parameters and "false" for other types (numbers, booleans, arrays, objects).\nIf the thinking_mode is enabled, then after function results you should strongly consider outputting a thinking block. Here is an example:\n<｜DSML｜function_calls>\n...\n</｜DSML｜function_calls>\n<function_results>\n...\n</function_results>\n<think>...thinking about results</think>\nHere are the functions available in JSONSchema format:\n<functions>\n{"description": null, "name": "message_tool", "parameters": {"type": "object"}, "strict": false}\n</functions>\n\n\n# The user\'s message is: Follow the request.<｜Assistant｜></think><｜User｜>Answer directly.<｜Assistant｜></think>'
+
+test/registered/unit/entrypoints/openai/test_serving_chat.py:1603: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SUBFAILED(chat_encoding_spec='dsv32') test/registered/unit/entrypoints/openai/test_serving_chat.py::ServingChatTestCase::test_dsv_encoders_keep_tools_when_tool_choice_is_auto
+SUBFAILED(chat_encoding_spec='dsv4') test/registered/unit/entrypoints/openai/test_serving_chat.py::ServingChatTestCase::test_dsv_encoders_omit_tools_when_tool_choice_is_none
+SUBFAILED(chat_encoding_spec='dsv32') test/registered/unit/entrypoints/openai/test_serving_chat.py::ServingChatTestCase::test_dsv_encoders_omit_tools_when_tool_choice_is_none
+3 failed, 2 passed, 135 deselected, 17 warnings, 1 subtests passed in 26.84s
