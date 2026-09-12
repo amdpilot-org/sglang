@@ -58,6 +58,82 @@ logger = logging.getLogger(__name__)
 MAX_ROLLBACK_TOKENS = 200
 
 
+def has_xgrammar_unsupported_pattern_length_combination(schema: dict) -> bool:
+    """Return whether one subschema combines ``pattern`` and a length bound.
+
+    XGrammar 0.2.x accepts these keywords together but gives ``pattern``
+    precedence and silently drops ``minLength``/``maxLength``. Walk only
+    positions that contain subschemas so instance data and property names do
+    not produce false positives.
+    """
+
+    single_subschema_keywords = (
+        "additionalItems",
+        "additionalProperties",
+        "contains",
+        "contentSchema",
+        "else",
+        "if",
+        "items",
+        "not",
+        "propertyNames",
+        "then",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+    )
+    subschema_array_keywords = ("allOf", "anyOf", "oneOf", "prefixItems")
+    subschema_map_keywords = (
+        "$defs",
+        "definitions",
+        "dependentSchemas",
+        "patternProperties",
+        "properties",
+    )
+
+    def check_subschema(value) -> bool:
+        if not isinstance(value, dict):
+            return False
+
+        if "pattern" in value and ("minLength" in value or "maxLength" in value):
+            return True
+
+        for keyword in single_subschema_keywords:
+            child = value.get(keyword)
+            if check_subschema(child):
+                return True
+            # Draft-07 permits tuple validation through an array-valued items.
+            if (
+                keyword == "items"
+                and isinstance(child, list)
+                and any(check_subschema(item) for item in child)
+            ):
+                return True
+
+        for keyword in subschema_array_keywords:
+            children = value.get(keyword)
+            if isinstance(children, list) and any(
+                check_subschema(child) for child in children
+            ):
+                return True
+
+        for keyword in subschema_map_keywords:
+            children = value.get(keyword)
+            if isinstance(children, dict) and any(
+                check_subschema(child) for child in children.values()
+            ):
+                return True
+
+        dependencies = value.get("dependencies")
+        if isinstance(dependencies, dict) and any(
+            check_subschema(child) for child in dependencies.values()
+        ):
+            return True
+
+        return False
+
+    return check_subschema(schema)
+
+
 def _allocate_token_bitmask(vocab_size: int, batch_size: int) -> torch.Tensor:
     # Pin where pinning exists, so the later H2D can be a genuine non_blocking
     # copy (a pageable source silently downgrades it).  MPS torch has no
@@ -339,6 +415,14 @@ class XGrammarGrammarBackend(BaseGrammarBackend):
                 # Note: This builtin JSON grammar includes *all* valid JSON (including, for example, arrays at the root)
                 ctx = self.grammar_compiler.compile_builtin_json_grammar()
             else:
+                schema = json.loads(key_string)
+                if isinstance(
+                    schema, dict
+                ) and has_xgrammar_unsupported_pattern_length_combination(schema):
+                    raise RuntimeError(
+                        "JSON schema combines pattern with minLength or maxLength, "
+                        "which xgrammar 0.2.x cannot enforce together"
+                    )
                 ctx = self.grammar_compiler.compile_json_schema(
                     schema=key_string, any_whitespace=self.any_whitespace
                 )

@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37707",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced xgrammar 0.2.1 silently prioritizing pattern over co-located minLength and maxLength constraints. SGLang now rejects that measured lossy combination before xgrammar compilation while continuing to admit each standalone constraint.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-4453c4d19d72/venv/bin/python reports/j-4453c4d19d72/reproduce_schema_constraints.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before direct xgrammar reproduction: schema-violating short and long strings were accepted with pattern plus minLength/maxLength; standalone constraints rejected their respective violations. A split allOf form also weakened, which remains outside this narrow fix. Raw output: reports/j-4453c4d19d72/evidence/reproduce-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4453c4d19d72/venv/bin/python -m pytest -q test/registered/unit/constrained/test_xgrammar_pattern_length.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression and boundary coverage: minLength/maxLength combinations, nested schema traversal, standalone constraints, property-name and instance-data false positives, rejection before compiler invocation, and continued compiler admission for a supported schema. Result: 6 passed, 8 subtests passed. Raw output: reports/j-4453c4d19d72/evidence/unit-after-final.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4453c4d19d72/venv/bin/python < real-compiler admission probe recorded in evidence/backend-admission-after.log",
+      "exit_code": 0,
+      "what_was_measured": "Used the installed xgrammar GrammarCompiler through XGrammarGrammarBackend: the reported nested minLength combination and maxLength sibling returned InvalidGrammarObject, while pattern-only and minLength-only returned compiled XGrammarGrammar objects."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/constrained/xgrammar_backend.py test/registered/unit/constrained/test_xgrammar_pattern_length.py reports/j-4453c4d19d72/reproduce_schema_constraints.py",
+      "exit_code": 0,
+      "what_was_measured": "All repository formatting, lint, secret, AST, CI registry, and relevant file hooks passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4453c4d19d72/venv/bin/python -m pytest -q test/registered/unit/constrained",
+      "exit_code": 143,
+      "what_was_measured": "Broader constrained unit directory made no progress after 33 tests for more than two minutes and was terminated; it emitted no failure. This incomplete run is retained as a limitation, not counted as passing. Raw output: reports/j-4453c4d19d72/evidence/constrained-unit-after.log"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "No GPU execution was relevant to this CPU-side JSON Schema admission/compiler behavior. The assigned single AMD Instinct MI350X (gfx950) was inventoried only; raw environment output is in reports/j-4453c4d19d72/evidence/environment.log.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The underlying xgrammar 0.2.1 compiler is unchanged; direct use outside SGLang can still silently weaken the reported combination.",
+    "Semantically combining pattern and a length bound across separate allOf branches also weakened in the direct reproducer. This narrow admission check detects co-located keywords in any traversed subschema, but does not reason across composition branches.",
+    "The issue's separate Outlines backend observations were not changed; newer upstream PR https://github.com/sgl-project/sglang/pull/37839 proposes broader backend-specific validation and remains open.",
+    "No model-serving, model-architecture, semantic-accuracy, distributed, or multi-node claim is made; none is needed to reproduce the grammar compiler behavior.",
+    "The full test/registered/unit/constrained directory did not complete in the bounded run; the focused regression, real compiler admission probe, and pre-commit checks completed successfully."
+  ]
+}
