@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30781",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2591",
+  "candidate_commit": "4bf4438097a431ef3d4ded6e4deb5b812101aa0d",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review reproduced the original custom-tool deserialization failure on the recorded base, then verified that the exact candidate accepts all 12 Python-supported response tool types and preserves the complete payload through the typed deserialize/serialize boundary used by HTTP forwarding. Candidate regressions, independent adversarial round-trips, and the full protocol specification suite passed.",
+  "tests": [
+    {
+      "command": "cargo test --test spec_test review_baseline -- --nocapture (temporary exact-issue regression on 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 101,
+      "what_was_measured": "The exact issue payload with type=custom failed ResponsesRequest deserialization with unknown variant custom; expected only function, web_search_preview, code_interpreter, or mcp."
+    },
+    {
+      "command": "cargo test --test spec_test response_tool_types -- --nocapture (candidate 4bf4438097a431ef3d4ded6e4deb5b812101aa0d)",
+      "exit_code": 0,
+      "what_was_measured": "All 12 tool spellings accepted by Python deserialize in Rust, custom passes validation, and an unsupported spelling remains rejected (3/3 passed)."
+    },
+    {
+      "command": "cargo test --test spec_test review_roundtrip -- --nocapture (candidate 4bf4438097a431ef3d4ded6e4deb5b812101aa0d)",
+      "exit_code": 0,
+      "what_was_measured": "Exact custom payload, namespace with nested tools, and unmodeled fields on a known tool type survive typed request round-trip unchanged (3/3 passed)."
+    },
+    {
+      "command": "cargo test --test spec_test candidate_adversarial -- --nocapture (temporary independent tests on candidate 4bf4438097a431ef3d4ded6e4deb5b812101aa0d)",
+      "exit_code": 0,
+      "what_was_measured": "Codex-style custom grammar plus null extension, heterogeneous namespace nesting, and modeled MCP fields mixed with future object/null fields all round-trip unchanged and validate (3/3 passed)."
+    },
+    {
+      "command": "cargo test --test spec_test (candidate 4bf4438097a431ef3d4ded6e4deb5b812101aa0d)",
+      "exit_code": 0,
+      "what_was_measured": "Complete protocol specification binary: 95 passed, 0 failed, 1 ignored."
+    },
+    {
+      "command": "cargo tree -i openai-protocol (candidate 4bf4438097a431ef3d4ded6e4deb5b812101aa0d)",
+      "exit_code": 0,
+      "what_was_measured": "The built gateway resolved openai-protocol v1.0.0 from /job/repo/sgl-model-gateway/vendor/openai-protocol, confirming tests used the candidate source rather than the registry crate."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and candidate are CPU-only Rust JSON protocol serialization changes; no GPU execution is relevant to the reviewed contract."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The reporter's four-node TP8 gfx942 deployment, GLM-5.2 weights, and live end-to-end router/backend serving setup were unavailable; no model-semantic, distributed-serving, or gfx942 claim is made.",
+    "The prepared host exposed /root/.cargo/bin in PATH but denied this job user access. An isolated pinned Rust 1.90 toolchain was installed under /tmp/amdpilot-repo-j-f7ef115a11c1 for independent compilation.",
+    "The candidate intentionally continues to reject tool type spellings outside Python's current 12-value RESPONSE_TOOL_TYPES allowlist. This is consistent with the current Python contract, while additional fields on accepted types are preserved.",
+    "No C++, FlyDSL, Python extension, or other native source changed, so a native rebuild was not applicable."
+  ]
+}
