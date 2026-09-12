@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35564",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1780",
+  "candidate_pr": "https://github.com/amdpilot-org/sglang/pull/1745",
+  "candidate_commit": "648a8992ef222042ffac9cf931e929a1d3600427",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "Independent review reproduced the original parser failures on the recorded base and the remaining Mistral no-space separator failure across whole, character, and every two-way split delivery. Exact candidate 648a8992ef222042ffac9cf931e929a1d3600427 passed the original eight-parser reproduction, its focused regression, the full function-call unit suite, and 13,424 independent adversarial Mistral deliveries without leaking tool JSON into normal_text.",
+  "tests": [
+    {
+      "command": "git show 648a8992ef222042ffac9cf931e929a1d3600427:reports/j-570829e32467/reproduce_streaming_empty_args.py | PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-fff0162fc793/venv/bin/python -",
+      "exit_code": 1,
+      "what_was_measured": "On recorded base 358c163250ad3b1f62939b01ce1314a0a31a0365, reproduced original one-shot/character-stream parity failures for GLM, GLM45, GLM47, Minimax-M2, and Step3."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-fff0162fc793/venv/bin/python - <independent Mistral no-space driver>",
+      "exit_code": 0,
+      "what_was_measured": "On the recorded base, asserted that whole and character streaming lost calls after the first, leaked the remaining JSON, and all 122 two-way splits failed; the diagnostic assertion succeeded."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fff0162fc793/venv/bin/python reports/j-570829e32467/reproduce_streaming_empty_args.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, all eight parsers matched one-shot parsing under character-at-a-time delivery."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-fff0162fc793/venv/bin/python -m pytest -q test/registered/unit/function_call/test_streaming_parity.py test/registered/unit/function_call/test_mistral_detector.py",
+      "exit_code": 0,
+      "what_was_measured": "29 tests passed with 2,077 subtests, including the candidate's JSON-separator whitespace regression."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-fff0162fc793/venv/bin/python - <independent adversarial Mistral driver>",
+      "exit_code": 0,
+      "what_was_measured": "64 whitespace-pair variants and 13,424 deliveries matched one-shot parsing with no normal_text leakage; covered whole, character, fixed-size, every two-way split, randomized three-way splits, nested JSON, and commas in strings."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-fff0162fc793/venv/bin/python -m pytest -q test/registered/unit/function_call",
+      "exit_code": 0,
+      "what_was_measured": "Complete function-call unit suite: 551 tests passed with 2,098 subtests."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reviewed defect is deterministic Python string/JSON parser behavior; no model or GPU kernel is involved."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No model weights, tokenizer, HTTP serving process, semantic model accuracy, GPU kernel, multi-GPU, or distributed workload was exercised.",
+    "The prepared host is ROCm 7.2/gfx950 with PyTorch 2.11.0+rocm7.2 rather than the reporter's CUDA/RTX 4090 environment; no cross-architecture serving claim is made.",
+    "The candidate changes no native source, so a native rebuild was not applicable."
+  ],
+  "evidence_directory": "/job/review-evidence-j-fff0162fc793"
+}
