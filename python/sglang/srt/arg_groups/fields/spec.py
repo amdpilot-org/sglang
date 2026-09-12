@@ -248,7 +248,7 @@ class Spec(msgspec.Struct):
     ] = 18
     speculative_ngram_capacity: A[
         int,
-        "The cache capacity for ngram speculative decoding.",
+        "The cache capacity for ngram speculative decoding. It must be greater than speculative_ngram_max_trie_depth because the trie root also occupies one node.",
     ] = 10 * 1000 * 1000
     speculative_ngram_external_corpus_path: A[
         Optional[str],
