@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39087",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Added a targeted DFLASH startup warning for quantized draft models, including the implicit case where draft quantization is inherited from the target. The warning calls out near-zero acceptance and the explicit unquant workaround. This mitigates the reported silent failure but does not claim to repair quantized-draft acceptance.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-3fa85b9b5619/venv/bin/python -m pytest -q test/registered/unit/server_args/test_server_args.py -k 'DFlashDraftQuantizationWarning or draft_quantization_explicitness'",
+      "exit_code": 0,
+      "what_was_measured": "Four focused argument-resolution tests: explicit compressed-tensors warning, inherited target-quantization warning, unquantized no-warning boundary, and preservation of the explicitness provenance bit."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3fa85b9b5619/venv/bin/python -m pytest -q test/registered/unit/server_args/test_server_args.py --junitxml=reports/j-3fa85b9b5619/server_args.junit.xml",
+      "exit_code": 1,
+      "what_was_measured": "The complete server-argument unit module: 227 passed and 2 unrelated pre-existing context-parallel tests failed because this prepared environment is HIP and the implementation rejects prefill CP on HIP before those tests' expected assertions. Raw JUnit output is retained."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3fa85b9b5619/venv/bin/python -m ruff check python/sglang/srt/arg_groups/speculative_hook.py test/registered/unit/server_args/test_server_args.py",
+      "exit_code": 1,
+      "what_was_measured": "Lint invocation was unavailable because the prepared interpreter does not contain the ruff module; no lint result is claimed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned GPU was identified as one AMD Instinct MI350X (gfx950), but the reported acceptance collapse requires a 27B target plus draft at TP=2 on NVIDIA Marlin. Running a different single-GPU ROCm backend would not qualify that serving-path claim."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The quantized DFlash2 acceptance collapse itself remains unresolved; this change fixes the absence of a startup diagnostic only.",
+    "The reported Frozenlock 27B target weights and two-GPU TP=2 topology were not available, so no full-model acceptance-rate reproduction was claimed.",
+    "The assigned gfx950 ROCm GPU does not execute the NVIDIA Marlin path implicated by the original RTX 3090 report.",
+    "The actual syvai draft checkpoint was inspected outside JOB_WORKDIR: it declares DFlash2DraftModel with compressed-tensors W4A16 g128 and excludes candidate_selector and convolution projections from quantization."
+  ]
+}
