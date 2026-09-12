@@ -1205,3 +1205,113 @@ fn parse_label_selectors(selector_list: &[String]) -> HashMap<String, String> {
     }
     map
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_config(args: &[&str]) -> GatewayConfig {
+        Cli::try_parse_from(args)
+            .expect("CLI arguments should parse")
+            .try_into_config()
+            .expect("CLI arguments should resolve")
+    }
+
+    #[test]
+    fn root_and_launch_forms_resolve_identically() {
+        let options = [
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "31000",
+            "--worker-urls",
+            "http://worker-a:8000",
+            "http://worker-b:8000",
+            "--policy",
+            "round_robin",
+            "--request-id-headers",
+            "x-request-id",
+            "traceparent",
+            "--shutdown-grace-period-secs",
+            "17",
+        ];
+
+        let direct = parse_config(
+            &std::iter::once("smg")
+                .chain(options.iter().copied())
+                .collect::<Vec<_>>(),
+        );
+        let launch = parse_config(
+            &std::iter::once("smg")
+                .chain(std::iter::once("launch"))
+                .chain(options.iter().copied())
+                .collect::<Vec<_>>(),
+        );
+
+        assert_eq!(
+            serde_json::to_value(direct).unwrap(),
+            serde_json::to_value(launch).unwrap()
+        );
+    }
+
+    #[test]
+    fn legacy_cli_defaults_are_preserved_in_gateway_config() {
+        let config = parse_config(&["smg"]);
+
+        assert_eq!(config.server.host, "0.0.0.0");
+        assert_eq!(config.server.port, 30000);
+        assert_eq!(config.server.max_payload_size, 536_870_912);
+        assert_eq!(config.server.shutdown_grace_period_secs, 180);
+        assert!(config.server.request_id_headers.is_none());
+        assert!(matches!(
+            config.routing.policy,
+            PolicyConfig::CacheAware { .. }
+        ));
+        assert!(matches!(
+            config.routing.mode,
+            RoutingMode::Regular { ref worker_urls } if worker_urls.is_empty()
+        ));
+        assert!(matches!(
+            config.workers.connection_mode,
+            ConnectionMode::Http
+        ));
+    }
+
+    #[test]
+    fn pd_prefill_port_rejects_invalid_and_out_of_range_values() {
+        for port in ["not-a-port", "0", "65536"] {
+            let cli = Cli::try_parse_from([
+                "smg",
+                "--pd-disaggregation",
+                "--prefill",
+                "http://prefill:3000",
+                port,
+                "--decode",
+                "http://decode:3001",
+            ])
+            .expect("the optional bootstrap port is resolved after clap parsing");
+
+            assert!(
+                cli.try_into_config().is_err(),
+                "bootstrap port {port:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn openai_backend_keeps_http_transport_for_grpc_shaped_urls() {
+        let config = parse_config(&[
+            "smg",
+            "--backend",
+            "openai",
+            "--worker-urls",
+            "grpc://compatibility-sentinel:9000",
+        ]);
+
+        assert!(matches!(config.routing.mode, RoutingMode::OpenAI { .. }));
+        assert!(matches!(
+            config.workers.connection_mode,
+            ConnectionMode::Http
+        ));
+    }
+}

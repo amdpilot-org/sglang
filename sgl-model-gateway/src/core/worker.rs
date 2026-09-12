@@ -1240,29 +1240,35 @@ impl<T: Send + Unpin + 'static> http_body::Body for AttachedBody<T> {
 
 /// Health checker handle with graceful shutdown
 pub(crate) struct HealthChecker {
-    #[allow(dead_code)]
     handle: tokio::task::JoinHandle<()>,
-    shutdown: Arc<AtomicBool>,
+    shutdown: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 impl fmt::Debug for HealthChecker {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("HealthChecker")
-            .field("shutdown", &self.shutdown.load(Ordering::Relaxed))
+            .field("shutdown_requested", &self.shutdown.is_none())
             .finish()
     }
 }
 
 impl HealthChecker {
     /// Create a new HealthChecker
-    pub fn new(handle: tokio::task::JoinHandle<()>, shutdown: Arc<AtomicBool>) -> Self {
-        Self { handle, shutdown }
+    pub fn new(
+        handle: tokio::task::JoinHandle<()>,
+        shutdown: tokio::sync::oneshot::Sender<()>,
+    ) -> Self {
+        Self {
+            handle,
+            shutdown: Some(shutdown),
+        }
     }
 
     /// Shutdown the health checker gracefully
-    #[allow(dead_code)]
-    pub async fn shutdown(self) {
-        self.shutdown.store(true, Ordering::Release);
+    pub async fn shutdown(mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
         let _ = self.handle.await;
     }
 }
