@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31205",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a substantive partial fix: ordinary intrinsically oversized hybrid-SWA requests are rejected with HTTP 400 handling and no longer pin the queue, while transient pressure still defers. However, the reachable ignore_eos plus disabled-prefix-cache admission path bypasses the new rejection branch and continues to return NO_TOKEN forever for an intrinsically impossible request.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python:/job/repo /tmp/amdpilot-repo-j-cc8f265fd4d1/venv/bin/python /job/review-evidence-j-cc8f265fd4d1/reproduce_swa.py (base 358c163)",
+      "exit_code": 0,
+      "what_was_measured": "Base behavior for the reported 20,742/20,992 geometry, permanent 512- and 1,023-token zero-page-cap cases, and transient pressure; the permanent cases returned NO_TOKEN on three attempts."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cc8f265fd4d1/venv/bin/python -m pytest -q test/registered/unit/managers/test_prefill_adder.py (candidate 75b30f8)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression file: 34 passed, 12 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python:/job/repo /tmp/amdpilot-repo-j-cc8f265fd4d1/venv/bin/python /job/review-evidence-j-cc8f265fd4d1/reproduce_swa.py (candidate 75b30f8)",
+      "exit_code": 0,
+      "what_was_measured": "Independent permanent/transient boundaries and an adversarial ignore_eos disabled-prefix-cache case; the latter returned NO_TOKEN on three attempts without rejection."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cc8f265fd4d1/venv/bin/python -m compileall -q python/sglang/srt/managers/schedule_policy.py python/sglang/srt/managers/scheduler.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python source byte-compilation."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 75b30f8215eca5480055578e2bc4c02efcddcf18",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff whitespace validity."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "No GPU kernels were needed or launched by the deterministic PrefillAdder tests. rocminfo/rocm-smi enumerated the assigned GPU as AMD Instinct MI355X gfx950.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With a hybrid SWA pool of size_swa=rem_swa=512, page_size=512, a 2,000-token prompt, max_new_tokens=1, ignore_eos=True, and prefix caching disabled (tree_cache.disable=True), add_one_req dispatches to add_one_req_ignore_eos and returns NO_TOKEN indefinitely without terminal rejection."
+  ],
+  "remaining_limitations": [
+    "DeepSeek-V4-Pro/DSpark weights were unavailable.",
+    "The reported 1P1D TP4+TP4 mooncake TCP multi-node 8xB300 deployment was unavailable; only one assigned gfx950 MI355X was visible.",
+    "The deterministic scheduler-admission path did not launch GPU kernels and does not validate full HTTP transport, model semantics, transfer, or distributed behavior.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
