@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31133",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the MiniMax sparse-prefill score-buffer width defect in the checked-out implementation on one gfx950 GPU. With live seq_lens=[64,4096], changing only max_seqlen_k from 4096 to stale 64 corrupted top-k output in the long sequence. The fix enlarges the score allocation only when the live sequence lengths require more block columns and emits a warning. The regression fails on the unguarded base, passes with the fix, checks exact and same-block boundaries, and validates the correctly sized GPU result against an independent Torch reference.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-2fde59c65701/venv/bin/python /tmp/amdpilot-repo-j-2fde59c65701/repro_score_width.py",
+      "exit_code": 0,
+      "what_was_measured": "Actual unmodified Triton kernel on gfx950: correct-width and stale-width calls had identical shapes (1,65,16), but 34/1040 top-k entries differed, with 0 mismatches in the short sequence and all 34 in the long sequence. Raw log: raw/repro-before.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-2fde59c65701/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_minimax_sparse_prefill_score_width.py::test_stale_max_seqlen_k_matches_live_width_and_torch_reference (guard temporarily removed)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: the correctly sized call matched the independent Torch reference, while the stale call differed in 116/1040 entries on this allocator layout. Raw log: raw/regression-before.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-2fde59c65701/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_minimax_sparse_prefill_score_width.py",
+      "exit_code": 0,
+      "what_was_measured": "3 GPU tests passed: stale 64 versus live 4096 became bit-exact to the correct-width call; correct-width output matched an independent CPU Torch block-score/top-k reference; exact 4096 and same-block 4095 boundaries did not enlarge or warn. Raw log: raw/regression-final-registered.log."
+    },
+    {
+      "command": "SKIP=no-commit-to-branch pre-commit run --files python/sglang/kernels/ops/attention/minimax_sparse/prefill/flash_with_topk_idx.py test/registered/kernels/ops/attention/test_minimax_sparse_prefill_score_width.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository file checks passed, including AST, isort, ruff, ruff-format, codespell, and registered-test CI validation. Raw log: raw/precommit-final.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-2fde59c65701/venv/bin/python -m pytest -q python/sglang/srt/layers/attention/minimax_sparse_ops/tests/test_fp8_attn_gemm.py::test_indexer_prefill_all_fp8_vs_dequant_ref",
+      "exit_code": 4,
+      "what_was_measured": "Neighboring legacy FP8 test could not collect because it imports the removed pre-refactor sglang.srt.layers.attention.minimax_sparse_ops.decode module. No GPU assertion ran. Raw log: raw/neighboring-fp8-collection.log."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X (gfx950), unique ID 0x593d46f1dbb5dce5, executed the actual prefill and top-k Triton kernels. Device evidence: raw/gpu-info.log; numerical evidence: raw/repro-before.log and raw/regression-final-registered.log."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No GB200/SM100 was available, so the reported CUDA Xid 31 and compute-sanitizer trace were not reproduced.",
+    "No MiniMax-M3 model weights or production serving topology were used; model semantic accuracy, overlap-scheduler timing, TP=4, NCCL watchdog behavior, and multi-node behavior remain unverified.",
+    "The deterministic fixture validates the vulnerable score-buffer and top-k kernel path only.",
+    "The underlying producer of stale max_seqlen_k metadata remains unchanged; this patch hardens the allocation boundary and logs divergence.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable.",
+    "The neighboring legacy FP8 test is currently blocked at collection by a stale module import unrelated to this patch."
+  ]
+}
