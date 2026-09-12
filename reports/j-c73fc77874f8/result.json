@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32669",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "8574da7c83c3247d0029e5a63aeaf8dcc6521970",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "outcome": "candidate_verified",
+  "summary": "The prepared base reproduced the issue-specific unsafe strategy selection: DeepSeek-V4 non-EP TBO returned eligible for attention TP4. The exact candidate adds the narrow requested gate, its regression passes, and an independent 11-case topology/path truth table found no counterexample within the original contract. The candidate preserves non-EP attention-TP1 and EP TBO and routes only unsupported non-EP attention-TP>1 through the synchronous fallback.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-c73fc77874f8/venv/bin/python - <<'PY' (actual DeepseekV4Model._can_run_tbo assertion on prepared base)",
+      "exit_code": 1,
+      "what_was_measured": "Imported /job/repo/python/sglang/srt/models/deepseek_v4.py at the recorded base and observed non-EP attn_tp_size=4, attn_dp_size=4 return True instead of the required False, reproducing the original unsafe strategy selection."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c73fc77874f8/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v4_tbo_gate.py test/registered/unit/models/test_deepseek_v4_rope_policy.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, 5 tests and 2 subtests passed, including the candidate's affected topology and preservation cases."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c73fc77874f8/venv/bin/python - <<'PY' (independent 11-case _can_run_tbo truth table)",
+      "exit_code": 0,
+      "what_was_measured": "Rejected non-EP attention TP2, TP4, and TP8/DP2; preserved non-EP TP1 and EP TP4; preserved PP, CP, mode, feature, batch, and child eligibility gates."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c73fc77874f8/venv/bin/python -m py_compile python/sglang/srt/models/deepseek_v4.py test/registered/unit/models/test_deepseek_v4_tbo_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate source and regression test compile successfully."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X gfx950 GPU was visible, but the issue requires two hosts and 16 GPUs plus unavailable DeepSeek-V4-Pro-NVFP4 weights. Architecture was inspected only; no GPU execution is claimed as fix evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No TP16/DP4 or TP16/DP2 multi-node serving A/B was possible with one GPU.",
+    "DeepSeek-V4-Pro-NVFP4 weights were unavailable, so full-model numerical output was not validated.",
+    "The regression verifies the actual TBO strategy-selection defect and synchronous fallback selection; it does not execute the corrupt full-TP collective.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
