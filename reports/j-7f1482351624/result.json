@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31970",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The recorded base already contains the exact main-branch fix merged by upstream PR 31982: both reported Tensor.item() invariants are gated by SGLANG_MAMBA_DEBUG_ASSERTS, which is off by default. Added regression coverage for both source locations and environment-value boundaries. On the assigned gfx950, the actual HybridReqToTokenPool donation method produced zero local-scalar profiler operations with debug disabled and one with debug enabled, where the invalid-slot assertion fired.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7f1482351624/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_debug_asserts.py (with the two gates temporarily replaced by unconditional branches)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: the test rejected scalar reads not nested beneath _MAMBA_DEBUG_ASSERTS. Raw output: /tmp/amdpilot-repo-j-7f1482351624/failing-before.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7f1482351624/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_debug_asserts.py",
+      "exit_code": 0,
+      "what_was_measured": "Both reported item() calls are structurally guarded; the flag is false for unset, 0, and true, and true only for 1. Two tests passed. Raw output: /tmp/amdpilot-repo-j-7f1482351624/evidence/passing-after.log"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7f1482351624/venv/bin/python reports/j-7f1482351624/check_mamba_debug_assert_gpu.py",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, the actual HybridReqToTokenPool donation method returned with zero local_scalar_dense profiler events when debug was off; with debug on it emitted one local_scalar_dense event and asserted on the -1 slot. Raw output: /tmp/amdpilot-repo-j-7f1482351624/evidence/gpu-check.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Single assigned AMD Instinct MI350X, architecture gfx950:sramecc+:xnack-. Device tensors exercised the actual donation method; debug_off=('returned', 0, [11, 7]), debug_on=('asserted', 1, [-1, 7])."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Mamba or hybrid-SSM model weights were provided, so no full serving-path, sustained-load, throughput, detokenizer-heartbeat, or semantic-accuracy reproduction was performed.",
+    "The GPU fixture validates the reported synchronization primitive in one actual donation method, not the complete scheduler or mamba_radix_cache.cache_finished_req serving path.",
+    "No native sources changed and no native rebuild was applicable.",
+    "Source paths inspected: /job/repo/python/sglang/srt/mem_cache/mamba_radix_cache.py and /job/repo/python/sglang/srt/mem_cache/memory_pool.py."
+  ]
+}
