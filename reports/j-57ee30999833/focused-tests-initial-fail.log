@@ -1,0 +1,205 @@
+.............................F..F..................... [ 77%]
+................                                                         [100%]
+=================================== FAILURES ===================================
+____________ test_selector_sampler_preserves_selected_path_metadata ____________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x711b683fc5f0>
+
+    def test_selector_sampler_preserves_selected_path_metadata(monkeypatch):
+        from sglang.srt.speculative import dflash_worker_v2 as worker_mod
+
+        scores = torch.tensor([[[[0.0, 2.0]], [[1.0, 0.0]]]], dtype=torch.float32)
+        candidate_ids = torch.tensor([[[4], [5]]], dtype=torch.int64)
+
+        class Selector:
+            top_k = 1
+
+            @staticmethod
+            def sample_path(**kwargs):
+                del kwargs
+                return (
+                    torch.tensor([[4, 5]]),
+                    torch.zeros((1, 2), dtype=torch.int64),
+                    torch.ones((1, 2, 1)),
+                )
+
+        draft_model = SimpleNamespace(candidate_selector=Selector(), confidence_head=None)
+        monkeypatch.setattr(
+            worker_mod,
+            "_selector_lattice",
+            lambda draft_model, hs, anchors: (candidate_ids, scores),
+        )
+        sampler = worker_mod._SelectorDraftSampler(
+            draft_model=draft_model,
+            block_size=3,
+            max_bs=1,
+            device="cpu",
+            enable_confidence=True,
+        )
+>       sampler(torch.zeros((3, 2)), torch.tensor([9, 0, 0]))
+
+test/registered/unit/spec/test_dflash_logits.py:247:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sglang.srt.speculative.dflash_worker_v2._SelectorDraftSampler object at 0x711b683cd8b0>
+hidden_states = tensor([[0., 0.],
+        [0., 0.],
+        [0., 0.]])
+input_ids = tensor([9, 0, 0])
+
+    def __call__(self, hidden_states, input_ids):
+        bs = hidden_states.shape[0] // self.block_size
+        block_ids = input_ids.view(bs, self.block_size)
+        hs = hidden_states.view(bs, self.block_size, -1)[:, 1:, :]  # pos 0 = anchor
+        candidate_ids, scores = _selector_lattice(self.draft_model, hs, block_ids[:, 0])
+        # In-graph philox draw: each replay advances the generator and redraws.
+        tokens, path_indices, q_rows = self.selector.sample_path(
+            candidate_ids=candidate_ids,
+            scores=scores,
+            uniforms=self.uniforms[:bs].uniform_(),
+            temperatures=self.temperatures[:bs],
+            greedy_mask=self.greedy_mask[:bs],
+        )
+        self.out[: tokens.numel()].copy_(tokens.reshape(-1))
+        self.candidate_out[:bs].copy_(candidate_ids)
+        self.q_out[:bs].copy_(q_rows)
+        if self.enable_confidence:
+            assert self.path_indices_out is not None and self.scores_out is not None
+            # Selected-path confidence inputs; consumed only by
+            # DFLASH_CONFIDENCE's selector_selected_path_confidence.
+            self.path_indices_out[:bs].copy_(path_indices)
+>           self.scores_out[:bs].copy_(scores)
+E           RuntimeError: output with shape [1, 2, 1, 1] doesn't match the broadcast shape [1, 2, 1, 2]
+
+python/sglang/srt/speculative/dflash_worker_v2.py:402: RuntimeError
+_____________ test_disabled_selector_sampling_forces_greedy_draft ______________
+
+    def test_disabled_selector_sampling_forces_greedy_draft():
+        from sglang.srt.speculative import dflash_worker_v2 as worker_mod
+
+        sampling_info = SimpleNamespace(
+            temperatures=torch.tensor([[0.7]]),
+            top_ks=torch.tensor([[8]]),
+            is_all_greedy=False,
+        )
+
+        sampler = worker_mod._SelectorDraftSampler.__new__(worker_mod._SelectorDraftSampler)
+        sampler.temperatures = torch.zeros(1)
+        sampler.greedy_mask = torch.zeros(1, dtype=torch.bool)
+        sampler.sampling_enabled = False
+        sampler.stage_sampling_params(bs=1, sampling_info=sampling_info)
+        torch.testing.assert_close(sampler.temperatures, torch.ones(1))
+        assert sampler.greedy_mask.tolist() == [True]
+
+        sampler.sampling_enabled = True
+        sampler.stage_sampling_params(bs=1, sampling_info=sampling_info)
+        torch.testing.assert_close(sampler.temperatures, torch.tensor([0.7]))
+        assert sampler.greedy_mask.tolist() == [False]
+        observed = {}
+
+        def sample_path(**kwargs):
+            observed.update(kwargs)
+            return torch.zeros((1, 1), dtype=torch.int64), torch.zeros((1, 1, 2))
+
+        selector = SimpleNamespace(
+            build_lattice=lambda **kwargs: torch.zeros((1, 1, 2, 2)),
+            sample_path=sample_path,
+        )
+        draft_model = SimpleNamespace(
+            lm_head=None,
+            candidate_selector=selector,
+            compute_candidates=lambda hidden: (
+                torch.zeros((1, 2), dtype=torch.int64),
+                torch.zeros((1, 2)),
+            ),
+        )
+        worker = SimpleNamespace(
+            draft_model=draft_model,
+            selector=selector,
+            block_size=2,
+            _selector_sampling_enabled=False,
+            _selector_sample=None,
+        )
+        draft_logits_output = SimpleNamespace(hidden_states=torch.zeros((2, 4)))
+
+>       worker_mod.DFlashWorkerV2._propose_selector_block(
+            worker,
+            draft_logits_output=draft_logits_output,
+            bs=1,
+            lm_head=object(),
+            anchor_token_ids=torch.zeros(1, dtype=torch.int64),
+            sampling_info=sampling_info,
+        )
+
+test/registered/unit/spec/test_dflash_logits.py:392:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = namespace(draft_model=namespace(lm_head=<object object at 0x711b68d274e0>, candidate_selector=namespace(build_lattice=..._draft.<locals>.sample_path at 0x711b65b50720>), block_size=2, _selector_sampling_enabled=False, _selector_sample=None)
+
+    def _propose_selector_block(
+        self,
+        *,
+        draft_logits_output,
+        bs: int,
+        lm_head,
+        anchor_token_ids: torch.Tensor,
+        sampling_info,
+    ) -> torch.Tensor:
+        """The eager fallback for batches the draft graph cannot take."""
+        draft_model = self.draft_model
+        if draft_model.lm_head is None:
+            draft_model.lm_head = lm_head
+
+        draft_hidden = draft_logits_output.hidden_states
+        if draft_hidden is None:
+            raise RuntimeError("DFLASH selector draft returned no hidden states.")
+        draft_hidden = draft_hidden.view(bs, int(self.block_size), -1)
+        pred_hidden = draft_hidden[:, 1:, :]  # [bs, block_size-1, H]
+        num_pred = pred_hidden.shape[1]
+
+        candidate_ids, scores = _selector_lattice(
+            draft_model, pred_hidden, anchor_token_ids
+        )
+        device = pred_hidden.device
+        # Clamped like DSpark so greedy rows don't divide by zero.
+        temperatures = (
+            torch.ones(bs, dtype=torch.float32, device=device)
+            if sampling_info is None or not self._selector_sampling_enabled
+            else sampling_info.temperatures.view(-1).float().clamp_min(1e-5)
+        )
+        greedy_mask = (
+            torch.ones(bs, dtype=torch.bool, device=device)
+            if not self._selector_sampling_enabled
+            else resolve_greedy_mask(bs=bs, sampling_info=sampling_info, device=device)
+        )
+>       tokens, path_indices, q_rows = self.selector.sample_path(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            candidate_ids=candidate_ids,
+            scores=scores,
+            uniforms=torch.rand(bs, num_pred, dtype=torch.float32, device=device),
+            temperatures=temperatures,
+            greedy_mask=greedy_mask,
+        )
+E       ValueError: not enough values to unpack (expected 3, got 2)
+
+python/sglang/srt/speculative/dflash_worker_v2.py:1639: ValueError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/spec/test_dflash_logits.py::test_selector_sampler_preserves_selected_path_metadata
+FAILED test/registered/unit/spec/test_dflash_logits.py::test_disabled_selector_sampling_forces_greedy_draft
+2 failed, 68 passed, 17 warnings, 18 subtests passed in 35.67s
