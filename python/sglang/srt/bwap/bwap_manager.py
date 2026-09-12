@@ -12,15 +12,15 @@
 # limitations under the License.
 # ==============================================================================
 
-"""Batch-wise Adaptive Pruning (BWAP), Phase 1: functional integration.
+"""Batch-wise Adaptive Pruning (BWAP).
 
 Training-free, inference-time FFN neuron pruning for gated-MLP LLMs, built
 for batched decode (arXiv:2608.14003). The gated MLP's activation function
 (``SiluAndMul``) produces ``Z`` of shape ``[tokens, intermediate]``, which
 feeds ``down_proj``. BWAP scores the neurons of ``Z`` per layer, keeps the
 top-``k`` (``k = round((1 - sparsity) * D_FF)``) via a shared per-layer binary
-mask, and zeroes the rest: ``Z * mask`` (functional; numerically identical to
-gather-based pruning, without fused kernels).
+mask. The baseline path zeroes the omitted activations; the optional fused path
+gathers the retained projection weights and executes fixed-width smaller GEMMs.
 
 Per-request phase schedule (defaults ``T_init=8, T_E=4, T_p=16``):
 
@@ -55,14 +55,12 @@ Correctness notes:
 - Tensor parallelism: the intermediate dim is sharded across TP ranks and each
   rank's hook sees its local shard of ``Z``, so the top-k is per-shard
   ((1 - sparsity) of each rank's local neurons) with no cross-rank communication.
-- Eager mode only: CUDA-graph replay does not run Python forward hooks, so masks
-  only apply on the eager forward path. Hooks are registered after graph capture
-  so no capture ever traces them.
-
-Phase 2 (explicitly out of scope here): fused gather-GEMM kernels (the actual
-throughput win — ``Z * mask`` saves no compute), CUDA-graph capture of the
-dynamic mask, global cross-TP top-k. Phase 1 validates correctness,
-accuracy-retention, and realized sparsity, not throughput.
+- With ``--bwap-fused``, all-prune TP=1 decode steps use gathered GEMMs. Under
+  decode graphs, exploration and mixed-phase steps stay eager while all-prune
+  steps replay a fixed-topology graph whose gathered-weight buffers are updated
+  between replays.
+- Quantized/bias-bearing projections and TP>1 are not fused and fall back to the
+  activation-mask path. Global cross-TP top-k is not implemented.
 """
 
 import enum
@@ -266,9 +264,9 @@ class BWAPManager:
         self._real_gate_up: Dict[str, torch.Tensor] = {}
         self._real_down: Dict[str, torch.Tensor] = {}
         self._real_version: Dict[str, int] = {}  # mask_version _real reflects
-        self._delivered: Dict[Tuple[str, str], int] = (
-            {}
-        )  # (tag,name)->version in graph buf
+        self._delivered: Dict[
+            Tuple[str, str], int
+        ] = {}  # (tag,name)->version in graph buf
         self._regather_count = 0
         self._graph_buffers_registered = False
 

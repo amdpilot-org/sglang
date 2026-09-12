@@ -1,69 +1,62 @@
-# Batch-wise Adaptive Pruning (BWAP) — Phase-1 validation
+# Batch-wise Adaptive Pruning (BWAP)
 
-BWAP (`--enable-bwap`, arXiv:2608.14003) is a training-free, inference-time FFN
-neuron-pruning method for gated-MLP models, built for batched decode. This
-directory documents how to validate the **Phase-1 functional integration**.
+BWAP (`--enable-bwap`, arXiv:2608.14003) is an opt-in, default-off,
+training-free FFN-neuron-pruning mode for gated-MLP models. It scores each
+layer's `SiluAndMul` output, periodically builds a shared top-k mask from the
+maximum score across exploring batch rows, and applies that mask during each
+request's prune phase.
 
-## What Phase 1 validates (and what it does not)
+The default schedule is eight initial dense decode steps, then cycles of 16
+prune steps followed by four dense exploration steps. Scheduling is per request,
+so a request joining an active batch receives its own warmup. The neuron mask is
+shared across the batch.
 
-Phase 1 is **functional**: a post-forward hook on each `*.mlp.act_fn` masks
-low-importance neurons of the activation (`Z * mask`) during sparse decode
-steps. It validates:
+## Execution modes
 
-- **Correctness** — an all-ones mask reproduces the dense output; the schedule
-  and per-request phase gating behave as specified (unit tests,
-  `test/registered/unit/bwap/test_bwap_manager.py`).
-- **Accuracy retention** — pruned generation stays close to dense on a
-  reasoning benchmark, and stays *flat as batch size grows* (BWAP's central
-  claim vs. threshold methods that collapse under a shared batch mask).
-- **Realized sparsity** — `BWAPManager.realized_sparsity` (target sparsity
-  discounted by the dense prompt/exploration steps, which are never pruned).
+- `--enable-bwap`: always-correct activation masking. This is useful for
+  correctness and quality evaluation but does not reduce GEMM work.
+- `--enable-bwap --bwap-fused`: on eligible all-prune decode steps, gather the
+  retained gate/up rows and down-projection columns and execute reduced-width
+  GEMMs. Eligibility is currently unquantized floating-point, bias-free gated
+  MLPs with tensor parallel size 1. Other layers use activation masking.
+- Decode CUDA graphs are supported with fused BWAP. Exploration or mixed-phase
+  steps execute eagerly to update scores; all-prune steps replay a fixed-width
+  graph. Version-gated `post_fill` callbacks update fixed-address gathered-weight
+  buffers between replays when the adaptive mask changes.
+- `--bwap-probe` captures a frozen dummy mask to measure the throughput ceiling.
+  It deliberately produces invalid model output and requires both
+  `--enable-bwap` and `--bwap-fused`.
 
-Phase 1 does **not** measure throughput, and deliberately so: the masked path
-(`Z * mask`) does the *same* GEMM as dense, so it saves no compute. The actual
-speedup requires a **fused gather-GEMM** over the retained rows (adapting
-`layers/moe/fused_moe_triton`) plus CUDA-graph capture of the dynamic mask —
-that is Phase 2. Because CUDA-graph replay does not run Python forward hooks,
-Phase-1 pruning only applies on the eager path (`--disable-decode-cuda-graph`),
-so a Phase-1 dense-vs-pruned wall-clock comparison would be eager-vs-eager and
-is not meaningful.
+The current limitations are deliberate: no quantized fused path, no fused
+bias handling, no TP>1 reduced-width all-reduce path, and no global cross-TP
+top-k. The masked fallback remains available, but does not provide a speedup.
+The gathered weights and graph scratch buffers also add substantial memory
+overhead (approximately another copy of the pruned FFN weights at 50% sparsity).
 
-## Accuracy-retention protocol (GPU)
+## Validation
 
-Reuses the existing GSM8K benchmark (`benchmark/gsm8k`). Run it against a dense
-server and a BWAP-pruned server and compare accuracy; repeat at batch sizes 1
-and 4+ to check batch-invariance.
-
-```bash
-# 1) Dense baseline
-python -m sglang.launch_server \
-  --model-path deepseek-ai/DeepSeek-R1-Distill-Qwen-7B --port 30000
-python benchmark/gsm8k/bench_sglang.py --num-questions 200 --parallel 8
-
-# 2) BWAP-pruned (eager path; hooks do not run under CUDA-graph replay)
-python -m sglang.launch_server \
-  --model-path deepseek-ai/DeepSeek-R1-Distill-Qwen-7B --port 30000 \
-  --enable-bwap --bwap-sparsity 0.5 --disable-decode-cuda-graph
-python benchmark/gsm8k/bench_sglang.py --num-questions 200 --parallel 8
-```
-
-Expectation (from arXiv:2608.14003, Table 2, DS-R1-Distill-Qwen-7B @ 50%
-target sparsity, batch 4): the shared-mask method retains accuracy close to
-dense where a TEAL-style threshold baseline collapses. An independent CPU
-reference reproduction of the method (accuracy flat across batch 1→4, ~40%
-realized sparsity) is in the companion notebooks; the schedule/mask math here
-is unit-tested to match that reference.
-
-`--bwap-t-init`, `--bwap-t-explore`, `--bwap-t-prune` tune the schedule
-(defaults 8 / 4 / 16; `T_trans = T_E + T_p = 20`, near the paper's ~22-token
-median neuron re-firing period).
-
-## Unit tests (CPU)
+Run the focused unit suite:
 
 ```bash
 python -m pytest test/registered/unit/bwap/test_bwap_manager.py -v
 ```
 
-Covers Eq. 2/3 scoring, top-k mask selection, the per-request three-phase
-schedule, the continuous-batching case (a late-joining request explores before
-it is pruned), and the hook applying the shared mask only to in-cycle rows.
+It covers scoring, exact top-k cardinality, per-request scheduling, late joiners,
+mixed batches, hook behavior, gathered-weight layout, fused-vs-masked numerical
+equivalence, persistent graph buffers, adaptive graph gating, and invalid CLI
+combinations.
+
+For model-quality evaluation, compare a dense server with a BWAP server on the
+same model and request order. For example:
+
+```bash
+python -m sglang.launch_server \
+  --model-path deepseek-ai/DeepSeek-R1-Distill-Qwen-7B --port 30000 \
+  --enable-bwap --bwap-fused --bwap-sparsity 0.5
+python benchmark/gsm8k/bench_sglang.py --num-questions 200 --parallel 8
+```
+
+Accuracy is model- and sparsity-dependent; a transport/startup smoke test does
+not establish semantic quality or throughput improvement. Benchmark throughput
+against the same dense graph configuration and report model, hardware, batch
+shape, schedule, sparsity, and accuracy together.
