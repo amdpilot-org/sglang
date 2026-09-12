@@ -104,6 +104,18 @@ class _FakeNonStreamingOpenAI:
         return self._response
 
 
+class _FakeRequestConversionErrorOpenAI(_FakeOpenAIServingChat):
+    def __init__(self, message: str):
+        super().__init__()
+        self.message = message
+
+    def _validate_request(self, chat_request):
+        return None
+
+    def _convert_to_internal_request(self, chat_request, raw_request):
+        raise ValueError(self.message)
+
+
 def _chunk(choices=None, usage=None):
     data = {
         "id": "chatcmpl-test",
@@ -887,7 +899,7 @@ class TestAnthropicServing(unittest.TestCase):
             ("low", "low"),
             ("medium", "medium"),
             ("high", "high"),
-            ("xhigh", "max"),  # OpenAI Literal has no xhigh
+            ("xhigh", "xhigh"),
             ("max", "max"),
         ]:
             with self.subTest(anthropic_effort=anthropic_effort):
@@ -897,6 +909,25 @@ class TestAnthropicServing(unittest.TestCase):
                 )
                 chat_request = serving._convert_to_chat_completion_request(request)
                 self.assertEqual(chat_request.reasoning_effort, openai_effort)
+
+    def test_template_effort_validation_returns_400(self):
+        message = (
+            "Unexpected reasoning effort high. "
+            "Supported types are xhigh, medium, and low."
+        )
+        for stream in (False, True):
+            with self.subTest(stream=stream):
+                serving = AnthropicServing(_FakeRequestConversionErrorOpenAI(message))
+                request = self._anthropic_request(
+                    output_config={"effort": "high"}, stream=stream
+                )
+
+                response = asyncio.run(serving.handle_messages(request, object()))
+                payload = json.loads(response.body)
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(payload["error"]["type"], "invalid_request_error")
+                self.assertEqual(payload["error"]["message"], message)
 
     def test_request_output_config_task_budget_is_logged_not_enforced(self):
         """``task_budget`` is a soft hint; ``max_tokens`` is the hard cap."""
