@@ -7,7 +7,8 @@ import torch.nn.functional as F
 from torch import nn
 
 from sglang.srt.environ import envs
-from sglang.srt.utils import is_cuda
+from sglang.srt.model_loader.weight_utils import default_weight_loader
+from sglang.srt.utils import is_cuda, is_npu
 
 
 def tiny_router_gemm_max_tokens(
@@ -33,6 +34,23 @@ def router_linear_bf16_fp32(
 ) -> torch.Tensor:
     """bf16 router GEMM with an fp32 output and batch-invariant policy."""
     deterministic = envs.SGLANG_ENABLE_DETERMINISTIC_INFERENCE.get()
+    if is_npu():
+        # NPU does not implement aten::mm.dtype. Keep its established bf16
+        # kernel while normalizing the logits to the shared fp32 API.
+        return F.linear(hidden_states, weight).float()
+    if not deterministic and hidden_states.is_cuda:
+        try:
+            from sglang.kernels.ops.gemm.router_gemv import (
+                router_gemv,
+                router_gemv_supported,
+            )
+
+            if router_gemv_supported(hidden_states, weight):
+                output = router_gemv(hidden_states, weight)
+                if output.dtype == torch.float32:
+                    return output
+        except ImportError:
+            pass
     if (
         not deterministic
         and 0 < hidden_states.shape[0] <= tiny_max_tokens
@@ -78,6 +96,7 @@ class RouterGate(nn.Module):
         self.weight = nn.Parameter(
             torch.empty((num_experts, hidden_size), dtype=weight_dtype)
         )
+        self.weight.weight_loader = default_weight_loader
         if has_correction_bias:
             shape = correction_bias_shape or (num_experts,)
             self.e_score_correction_bias = nn.Parameter(

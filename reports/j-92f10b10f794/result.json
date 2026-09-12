@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38695",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate https://github.com/amdpilot-org/sglang/pull/2662 at 86a6658c7c3de43a5de96b8726423da0994df53b and corrected the independently reviewed counterexamples from https://github.com/amdpilot-org/sglang/pull/2666: removed the AITER bf16-output violation from the fp32-contract dispatcher; migrated Hunyuan-v3, MiniMax-M3, Sarvam-MoE, Step3.5, and Nemotron-H to RouterGate; preserved NPU and gfx95 dispatch inside the shared policy; and made the neutral GEMM module own the implementation with the DSv4 path retained as a compatibility import.",
+  "tests": [
+    {
+      "command": "SGLANG_USE_AITER=1 /tmp/amdpilot-repo-j-92f10b10f794/venv/bin/python reports/j-92f10b10f794/raw/reproduce_candidate_aiter.py (candidate 86a6658c)",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before MI350X reproduction at M=1,8,16,17,64. Candidate outputs were fp32 tensors populated by a bf16-output AITER GEMM; four shapes exactly matched an independent fp32 reference rounded through bf16, with maximum errors from 0.0539 to 0.1249. Source evidence records otype=x.dtype followed by .float()."
+    },
+    {
+      "command": "SGLANG_USE_AITER=1 /tmp/amdpilot-repo-j-92f10b10f794/venv/bin/python reports/j-92f10b10f794/raw/reproduce_candidate_aiter.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after MI350X output-store check at M=1,8,16,17,64. Outputs were fp32, were not bf16-representable, and differed from an independent CPU fp32 matmul by only 1.9e-6 to 7.6e-6."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-92f10b10f794/venv/bin/python -m pytest -q test/registered/unit/layers/test_router_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "Four focused tests passed: independent fp32 reference, fp32 output and correction-bias contracts, deterministic small-token bypass, checkpoint weight-loader availability, and legacy GEMM import identity."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-92f10b10f794/venv/bin/python reports/j-92f10b10f794/raw/audit_router_consumers.py",
+      "exit_code": 0,
+      "what_was_measured": "The five reviewed architecture files use RouterGate without the reported local gate tuple/direct gate matmul patterns; the neutral module owns the dispatcher and the old DSv4 module is a compatibility import."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-92f10b10f794/venv/bin/python imports for hunyuan_v3, minimax_m3, sarvam_moe, step3p5, nemotron_h",
+      "exit_code": 0,
+      "what_was_measured": "All corrected model modules imported successfully in the prepared environment."
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files <changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "Formatting, lint, AST, whitespace, secrets, CI registration, and repository policy hooks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X under ROCm 7.2 executed both failing-before and passing-after numerical checks; raw logs are under reports/j-92f10b10f794/raw/."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No model weights were available, so full-model semantic accuracy, checkpoint loading, serving, and performance benchmarks were not run.",
+    "CUDA-only tiny GEMM, DeepGEMM, HPC-Ops, AMX, NPU, XPU, distributed, and gfx95 router-GEMV execution were unavailable on the assigned MI350X and remain unverified; their source paths were preserved.",
+    "AITER tgemm was deliberately removed from the bf16-input/fp32-output dispatcher because the installed backend produced bf16-quantized stores even when asked for torch.float32. Its performance impact was not benchmarked.",
+    "The repository contains additional model-local routing implementations outside the consumers named by the issue and independent review; reports/j-92f10b10f794/raw/all_router_consumers_after.txt records the broad source audit rather than claiming those unrelated architectures were validated."
+  ]
+}

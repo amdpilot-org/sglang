@@ -8,7 +8,6 @@ from enum import IntEnum, auto
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 import torch
-import torch.nn.functional as F
 from torch import nn
 from transformers import PretrainedConfig
 
@@ -39,6 +38,7 @@ from sglang.srt.layers.logits_processor import LogitsProcessor, LogitsProcessorO
 from sglang.srt.layers.moe import should_skip_post_experts_all_reduce
 from sglang.srt.layers.moe.ep_moe.layer import get_moe_impl_class
 from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
+from sglang.srt.layers.moe.router_gate import RouterGate
 from sglang.srt.layers.moe.topk import TopK
 from sglang.srt.layers.moe.utils import RoutingMethodType
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
@@ -243,14 +243,6 @@ class SarvamMoESparseMoeBlock(nn.Module):
         self.topk_group = getattr(config, "topk_group", None)
         self.alt_stream = alt_stream
 
-        dtype_map = {
-            "fp32": torch.float32,
-            "bf16": torch.bfloat16,
-            "bfloat16": torch.bfloat16,
-        }
-        router_dtype_cfg = getattr(config, "router_dtype", "fp32")
-        self.router_dtype = dtype_map.get(router_dtype_cfg, None)
-
         if self.tp_size > config.num_experts:
             raise ValueError(
                 f"Tensor parallel size {self.tp_size} is greater than "
@@ -287,12 +279,11 @@ class SarvamMoESparseMoeBlock(nn.Module):
             routing_method_type=RoutingMethodType.Renormalize,
         )
 
-        self.gate = ReplicatedLinear(
+        self.gate = RouterGate(
             config.hidden_size,
             config.num_experts,
-            bias=False,
-            quant_config=None,
-            prefix=add_prefix("gate", prefix),
+            fp32_compute=False,
+            params_dtype=torch.bfloat16,
         )
 
         if (
@@ -346,13 +337,7 @@ class SarvamMoESparseMoeBlock(nn.Module):
         return self.shared_experts(hidden_states)
 
     def _forward_router_experts(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        if self.router_dtype is not None:
-            router_logits = F.linear(
-                hidden_states.to(self.router_dtype),
-                self.gate.weight.to(self.router_dtype),
-            )
-        else:
-            router_logits, _ = self.gate(hidden_states)
+        router_logits = self.gate(hidden_states)
         topk_output = self.topk(hidden_states, router_logits)
         return self.experts(hidden_states, topk_output)
 
@@ -388,13 +373,7 @@ class SarvamMoESparseMoeBlock(nn.Module):
             hidden_states.clone() if self.shared_experts is not None else hidden_states
         )
 
-        if self.router_dtype is not None:
-            router_logits = F.linear(
-                hidden_states.to(self.router_dtype),
-                self.gate.weight.to(self.router_dtype),
-            )
-        else:
-            router_logits, _ = self.gate(hidden_states)
+        router_logits = self.gate(hidden_states)
         topk_output = self.topk(hidden_states, router_logits)
         final_hidden_states = self.experts(hidden_states, topk_output)
 
