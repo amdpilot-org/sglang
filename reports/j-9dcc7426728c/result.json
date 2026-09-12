@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38695",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Added a shared RouterGate fp32-output contract and neutral router dispatch entry points; unified DeepSeek and Bailing-v3 small-token policy with deterministic bypass; migrated Ernie4, GLM4-MoE, Laguna, and MiMo-v2 gates; preserved fp32 correction bias in MiMo-v2, Ernie4, and Kimi Linear; and removed fp32-router output downcasts in Bailing MoE, Bailing MoE Linear, and LLaDA2.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-9dcc7426728c/venv/bin/python -m pytest -q test/registered/unit/layers/test_router_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent fp32 CPU reference, fp32 output/correction-bias contracts, and deterministic tiny-dispatch bypass. Three tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9dcc7426728c/venv/bin/python < reports/j-9dcc7426728c/raw/router_gate_gpu.txt generator",
+      "exit_code": 0,
+      "what_was_measured": "Real MI350X bf16 router GEMM at M=1,8,16,17,64 versus an independent CPU fp32 matmul; all outputs were fp32 and top-4 indices matched."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9dcc7426728c/venv/bin/python < reports/j-9dcc7426728c/raw/model_gate_gpu.txt generator",
+      "exit_code": 0,
+      "what_was_measured": "Prepared DeepSeek, Bailing-v3, Ernie4, GLM4, Laguna, and MiMo gate implementations on MI350X; fp32 outputs and top-2 agreement with independent fp32 references."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9dcc7426728c/venv/bin/python < reports/j-9dcc7426728c/raw/deterministic_batch_gpu.txt generator",
+      "exit_code": 0,
+      "what_was_measured": "Deterministic policy for the same token at batch sizes 1 and 16 on MI350X; exact logits and top-8 routing matched."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X, one visible device; raw numerical evidence retained under reports/j-9dcc7426728c/raw/."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No model weights were available, so full-model semantic accuracy and serving benchmarks were not run.",
+    "CUDA-only tiny GEMM, DeepGEMM, HPC-Ops, AMX, NPU, XPU, and distributed paths were not executable on the assigned MI350X.",
+    "Hunyuan-v3, Sarvam-MoE, Step3.5, MiniMax-M3, and Nemotron-H retain specialized ReplicatedLinear/model-local gate plumbing and remain future RouterGate migration consumers; their existing output behavior was not changed in this candidate.",
+    "The neutral bf16_fp32 module is a compatibility re-export of the existing DSv4 implementation so existing imports and the process-wide HPC cache remain intact; physically relocating that implementation should wait for CUDA/HPC validation."
+  ]
+}

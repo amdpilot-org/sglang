@@ -10,10 +10,6 @@ import torch.nn.functional as F
 from torch import nn
 from transformers import PretrainedConfig
 
-from sglang.kernels.ops.moe.router import (
-    ROUTER_GATE_MATVEC_MAX_M,
-    router_gate_matvec,
-)
 from sglang.kernels.ops.quantization.fp8_kernel import (
     is_fp8_fnuz,
 )
@@ -48,6 +44,7 @@ from sglang.srt.layers.moe import (
 )
 from sglang.srt.layers.moe.ep_moe.layer import get_moe_impl_class
 from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
+from sglang.srt.layers.moe.router_gate import RouterGate
 from sglang.srt.layers.moe.topk import TopK
 from sglang.srt.layers.moe.utils import is_shared_experts_fusion_disabled
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
@@ -369,45 +366,23 @@ class BailingMLP(nn.Module):
         return x
 
 
-class BailingMoEGate(nn.Module):
+class BailingMoEGate(RouterGate):
     def __init__(
         self,
         config,
         params_dtype: Optional[torch.dtype] = None,
         prefix: str = "",
     ):
-        super().__init__()
-
         if params_dtype is None:
             params_dtype = torch.get_default_dtype()
-        self.params_dtype = params_dtype
-        self.weight = nn.Parameter(
-            torch.empty(
-                (config.num_experts, config.hidden_size),
-                dtype=self.params_dtype,
-            ),
+        super().__init__(
+            config.hidden_size,
+            config.num_experts,
+            fp32_compute=params_dtype == torch.float32,
+            params_dtype=params_dtype,
+            has_correction_bias=getattr(config, "moe_router_enable_expert_bias", False),
+            correction_bias_name="expert_bias",
         )
-
-        if getattr(config, "moe_router_enable_expert_bias", False):
-            self.expert_bias = nn.Parameter(
-                torch.empty((config.num_experts,), dtype=torch.float32),
-            )
-        else:
-            self.expert_bias = None
-
-    def forward(self, hidden_states):
-        if (
-            hidden_states.is_cuda
-            and 0 < hidden_states.shape[0] <= ROUTER_GATE_MATVEC_MAX_M
-            and self.weight.dtype in (torch.float32, torch.bfloat16)
-        ):
-            # Decode-sized M: one fp32-accumulating triton matvec for either
-            # gate dtype. Cold-cache (rotating weights) it beats the library
-            # path up to M=8 — by ~2.6-3x at the bs=1 verify shape (M=4) —
-            # and ties it at M=1; see router_gate_matvec for the numbers.
-            return router_gate_matvec(hidden_states, self.weight)
-        logits = F.linear(hidden_states.to(self.weight.dtype), self.weight, None)
-        return logits
 
 
 class BailingMoE(nn.Module):

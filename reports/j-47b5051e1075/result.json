@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38695",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Reproduced the independent review against candidate ce113fb8d9d5b8a6fac88e0d2364dfcfc7ff2b6b, preserved its valid precision and dispatch fixes, and corrected the named Kimi Linear, Bailing-MoE, Bailing-MoE-Linear, LLaDA2, Bailing-MoE-v3, and DeepSeek-v2 consumers so their router projection policy is inherited from or directly implemented by RouterGate. The candidate remains rejected as a claim of repository-wide consolidation because additional model router implementations have not all been migrated and architecture-qualified.",
+  "tests": [
+    {
+      "command": "source audit at exact candidate ce113fb8d9d5b8a6fac88e0d2364dfcfc7ff2b6b",
+      "exit_code": 0,
+      "what_was_measured": "Kimi Linear used ReplicatedLinear; the five named model families declared local nn.Module gates; 60 model files contained ReplicatedLinear instantiations of mixed router and non-router purpose. Raw evidence: raw/candidate_counterexamples.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-47b5051e1075/venv/bin/python -m pytest -q test/registered/unit/layers/test_router_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "5 RouterGate precision, deterministic-dispatch, compatibility-alias, and checkpoint bias-name tests passed"
+    },
+    {
+      "command": "prepared Python import and constructor contract script",
+      "exit_code": 0,
+      "what_was_measured": "All six affected model modules imported; Bailing, LLaDA2, and DeepSeek adapters are RouterGate instances, preserve checkpoint state-dict names, and return fp32 logits"
+    },
+    {
+      "command": "prepared Python MI350X deterministic numerical script",
+      "exit_code": 0,
+      "what_was_measured": "RouterGate returned fp32, produced exactly equal first-token output at batch sizes 1 and 8 under deterministic policy, and was within 3.814697265625e-06 of an independent CPU fp32 reference"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-47b5051e1075/venv/bin/python -m compileall -q <changed Python sources>",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources compiled successfully"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-47b5051e1075/venv/bin/python -m ruff check <changed sources>",
+      "exit_code": 1,
+      "what_was_measured": "Environment limitation: ruff is not installed in the required prepared interpreter"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X execution recorded in raw/gpu_numerics.txt"
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No model weights were available, so full-model checkpoint loading, serving, semantic accuracy, and performance were not run.",
+    "CUDA tiny GEMM, DeepGEMM, HPC-Ops, AMX, NPU, XPU, distributed, NVIDIA, and non-gfx95 paths were unavailable and remain unverified.",
+    "DeepSeek-v2 retains a thin RouterGate subclass for its required AMX path and extended forward signature; Bailing and LLaDA2 retain thin subclasses for their expert_bias checkpoint name.",
+    "The repository contains additional model-local or ReplicatedLinear router consumers, including generic Mixtral/Qwen/Llama-family paths and architecture-specific gates. The candidate audit did not distinguish all router projections from unrelated replicated projections, and those architectures were not migrated without weights or architecture validation. Repository-wide single-class consolidation therefore remains incomplete."
+  ]
+}

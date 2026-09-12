@@ -17,7 +17,6 @@
 from typing import Iterable, List, Optional, Tuple, Union
 
 import torch
-import torch.nn.functional as F
 from torch import nn
 from transformers.models.ernie4_5_moe.configuration_ernie4_5_moe import (
     Ernie4_5_MoeConfig,
@@ -31,6 +30,7 @@ from sglang.srt.layers.layernorm import RMSNorm
 from sglang.srt.layers.logits_processor import LogitsProcessor
 from sglang.srt.layers.moe.ep_moe.layer import get_moe_impl_class
 from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
+from sglang.srt.layers.moe.router_gate import RouterGate
 from sglang.srt.layers.moe.topk import TopK
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
 from sglang.srt.layers.vocab_parallel_embedding import (
@@ -49,23 +49,19 @@ _is_cpu = is_cpu()
 _is_npu = is_npu()
 
 
-class MoEGate(nn.Module):
+class MoEGate(RouterGate):
     def __init__(
         self,
         config,
         prefix: str = "",
     ):
-        super().__init__()
-        self.weight = nn.Parameter(
-            torch.empty((config.moe_num_experts, config.hidden_size))
+        super().__init__(
+            config.hidden_size,
+            config.moe_num_experts,
+            fp32_compute=False,
+            has_correction_bias=True,
+            correction_bias_shape=(1, config.moe_num_experts),
         )
-        self.e_score_correction_bias = nn.Parameter(
-            torch.empty((1, config.moe_num_experts))
-        )
-
-    def forward(self, hidden_states):
-        logits = F.linear(hidden_states, self.weight, None)
-        return logits
 
 
 class Ernie4Moe(nn.Module):

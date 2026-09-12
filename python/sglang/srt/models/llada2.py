@@ -58,6 +58,7 @@ from sglang.srt.layers.moe import (
 )
 from sglang.srt.layers.moe.ep_moe.layer import get_moe_impl_class
 from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
+from sglang.srt.layers.moe.router_gate import RouterGate
 from sglang.srt.layers.moe.token_dispatcher import DeepEPDispatcher
 from sglang.srt.layers.moe.topk import TopK
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
@@ -154,35 +155,23 @@ class LLaDA2MoeMLP(nn.Module):
         return hidden_states
 
 
-class LLaDA2MoeGate(nn.Module):
+class LLaDA2MoeGate(RouterGate):
     def __init__(
         self,
         config,
         params_dtype: Optional[torch.dtype] = None,
         prefix: str = "",
     ):
-        super().__init__()
         if params_dtype is None:
             params_dtype = torch.get_default_dtype()
-        self.params_dtype = params_dtype
-        self.weight = nn.Parameter(
-            torch.empty(
-                (config.num_experts, config.hidden_size),
-                dtype=self.params_dtype,
-            ),
+        super().__init__(
+            config.hidden_size,
+            config.num_experts,
+            fp32_compute=params_dtype == torch.float32,
+            params_dtype=params_dtype,
+            has_correction_bias=getattr(config, "moe_router_enable_expert_bias", False),
+            correction_bias_name="expert_bias",
         )
-        if getattr(config, "moe_router_enable_expert_bias", False):
-            self.expert_bias = nn.Parameter(
-                torch.empty((config.num_experts,), dtype=torch.float32),
-            )
-        else:
-            self.expert_bias = None
-
-    def forward(self, hidden_states):
-        logits = F.linear(hidden_states.to(self.weight.dtype), self.weight, None).to(
-            hidden_states.dtype
-        )
-        return logits
 
 
 class LLaDA2MoeSparseMoeBlock(nn.Module):
