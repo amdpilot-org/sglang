@@ -601,6 +601,65 @@ class TestSRTEndpoint(CustomTestCase):
             self.assertIsInstance(memory_usage["graph"][phase], float)
             self.assertGreaterEqual(memory_usage["graph"][phase], 0)
 
+    def test_set_schedule_policy_runtime(self):
+        """Accepted and concurrent changes take effect without an engine reload."""
+        policies = [
+            "lpm",
+            "dfs-weight",
+            "hrrn",
+            "fcfs",
+            "lof",
+            "random",
+            "routing-key",
+        ]
+        try:
+            for policy in policies:
+                response = requests.post(
+                    self.base_url + "/set_internal_state",
+                    json={"server_args": {"schedule_policy": policy}},
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json(), [True])
+
+            invalid = requests.post(
+                self.base_url + "/set_internal_state",
+                json={"server_args": {"schedule_policy": "not-a-policy"}},
+            )
+            self.assertEqual(invalid.status_code, 200)
+            self.assertEqual(invalid.json(), [False])
+
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                results = list(
+                    executor.map(
+                        lambda policy: requests.post(
+                            self.base_url + "/set_internal_state",
+                            json={"server_args": {"schedule_policy": policy}},
+                        ),
+                        ["fcfs", "lpm", "lof", "fcfs"],
+                    )
+                )
+            self.assertTrue(all(response.json() == [True] for response in results))
+
+            state = requests.get(self.base_url + "/server_info")
+            self.assertEqual(state.status_code, 200)
+            self.assertIn(state.json()["schedule_policy"], {"fcfs", "lpm", "lof"})
+
+            # The same engine remains usable after accepted, rejected, and
+            # concurrent updates.
+            gen = requests.post(
+                self.base_url + "/generate",
+                json={
+                    "text": "The capital of France is",
+                    "sampling_params": {"temperature": 0, "max_new_tokens": 8},
+                },
+            )
+            self.assertEqual(gen.status_code, 200)
+        finally:
+            requests.post(
+                self.base_url + "/set_internal_state",
+                json={"server_args": {"schedule_policy": "fcfs"}},
+            )
+
     def test_logit_bias(self):
         """Test that a very high logit bias forces sampling of a specific token."""
         # Choose a token ID to bias (using 5 as an example)

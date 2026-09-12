@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31953",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared base did not allow schedule_policy through SetInternalStateReq or Scheduler.set_internal_state. The change accepts string-valued controls, validates schedule_policy against the CacheAwarePolicy and CacheAgnosticPolicy enum values, and replaces only the scheduler's SchedulePolicy object in its synchronous control handler between scheduling passes. Existing waiting/running request containers and the prefix cache are retained. Unit coverage verifies enum acceptance, rejection without side effects, retained object identity, and changed LOF ordering. A private one-GPU HTTP run verified all enum values, invalid rejection, concurrent updates during generation, unchanged startup identity, and a 15-token device-cache hit after switching.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-326f6c074471/venv/bin/python -m pytest -q test/registered/unit/managers/test_io_struct.py -k SetInternalStateReqSerialization",
+      "exit_code": 0,
+      "what_was_measured": "msgspec round trip for mixed string and numeric internal-state controls; 1 passed"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-326f6c074471/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_runtime_policy.py",
+      "exit_code": 0,
+      "what_was_measured": "all actual policy enum values accepted, invalid value rejected without mutation, waiting/running/cache identities preserved, and LOF reordered the existing queue in place; 3 passed"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-326f6c074471/venv/bin/python -m pytest -q test/registered/unit/managers/test_schedule_policy.py test/registered/unit/managers/test_scheduler_runtime_policy.py",
+      "exit_code": 0,
+      "what_was_measured": "existing schedule-policy behavior plus runtime transition regression; 6 passed"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-326f6c074471/venv/bin/python reports/j-326f6c074471/run_server_probe.py --fixture /tmp/amdpilot-repo-j-326f6c074471/models/tiny-random-llama --output reports/j-326f6c074471/evidence/http",
+      "exit_code": 0,
+      "what_was_measured": "real HTTP control path on one MI350X: seven accepted enum values, invalid rejection, four concurrent updates during a 96-token generation, unchanged startup_time, and 15 cached device tokens after policy switches"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-326f6c074471/venv/bin/python -m py_compile test/registered/core/test_srt_endpoint.py reports/j-326f6c074471/*.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Python syntax and patch whitespace"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "reports/j-326f6c074471/evidence/http/http-probe.json and server.log record execution on the assigned AMD Instinct MI350X (gfx950); gpu-before.csv and gpu-after.csv retain device identity and memory readings. The repeated prompt reported cached_tokens=15 after live policy updates.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The deterministic tiny random Llama validates transport, scheduler control, cache retention, and engine execution only; it does not validate semantic accuracy or another model architecture.",
+    "No distributed TP8 workload or GLM-5.2-NVFP4 model was available, so the source B300 production-traffic latency, starvation, 115K-token input, and 96% cache-hit measurements were not reproduced or claimed as current AMD measurements.",
+    "The concurrent HTTP updates were accepted and serialized by the scheduler control loop, but final-policy order is intentionally nondeterministic among concurrent callers.",
+    "No native code changed, so no native rebuild or compiler/ISA claim applies.",
+    "The prepared environment did not contain ruff or black; targeted tests, py_compile, and git diff --check passed."
+  ]
+}
