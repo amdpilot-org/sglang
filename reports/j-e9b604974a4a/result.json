@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35691",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Added --otlp-service-name to SRT and diffusion server arguments, propagated it through every tracing process entry point, and implemented explicit CLI > OTEL_SERVICE_NAME > compatibility-default precedence. SRT retains the default service name 'sglang'; diffusion retains 'sglang-diffusion'. The resolved name is also forwarded to the asynchronous exporter process.",
+  "tests": [
+    {
+      "command": "git grep -n '\"sglang\"' 358c163250ad3b1f62939b01ce1314a0a31a0365 -- python/sglang/srt/entrypoints/http_server.py python/sglang/srt/entrypoints/engine.py python/sglang/srt/managers/scheduler.py python/sglang/srt/managers/data_parallel_controller.py python/sglang/srt/disaggregation/encoder/runtime.py",
+      "exit_code": 0,
+      "what_was_measured": "Pre-change reproduction: the recorded base hardcoded the SRT OTLP service name in all five process entry points named by the current architecture."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e9b604974a4a/venv/bin/python -m pytest -q test/registered/unit/observability/test_trace.py test/registered/unit/test_server_args_cli_metadata.py --junitxml=reports/j-e9b604974a4a/focused-tests.xml",
+      "exit_code": 0,
+      "what_was_measured": "55 tests and 7 subtests passed, covering CLI parsing, explicit-name precedence, OTEL_SERVICE_NAME fallback, empty-value fallback, compatibility defaults, and propagation of the resolved name to the async exporter. Raw JUnit output is retained in focused-tests.xml."
+    },
+    {
+      "command": "SGLANG_OTLP_EXPORTER_SCHEDULE_DELAY_MILLIS=50 /tmp/amdpilot-repo-j-e9b604974a4a/venv/bin/python reports/j-e9b604974a4a/verify_otlp_service_name.py --configured-name cli-name --environment-name env-name --expected cli-name",
+      "exit_code": 0,
+      "what_was_measured": "A real OpenTelemetry SDK exporter sent a span to the repository's in-process OTLP gRPC collector; the exported Resource contained service.name=cli-name, proving CLI/configured precedence over the environment."
+    },
+    {
+      "command": "SGLANG_OTLP_EXPORTER_SCHEDULE_DELAY_MILLIS=50 /tmp/amdpilot-repo-j-e9b604974a4a/venv/bin/python reports/j-e9b604974a4a/verify_otlp_service_name.py --environment-name env-name --expected env-name",
+      "exit_code": 0,
+      "what_was_measured": "A real OpenTelemetry SDK exporter sent a span to the repository's in-process OTLP gRPC collector; the exported Resource contained service.name=env-name when no configured name was supplied."
+    },
+    {
+      "command": "pre-commit run --files <all changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "All repository formatting, lint, spelling, syntax, and applicable policy hooks passed after the formatter's initial one-file rewrite."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The feature only changes CLI/config propagation and OpenTelemetry Resource metadata. It has no GPU or numerical execution path; exercising a GPU would not add relevant evidence."
+  },
+  "native_rebuilt": {
+    "value": false,
+    "evidence": "No C++, FlyDSL, compiler, or native-library source changed. A native rebuild is not applicable."
+  },
+  "remaining_limitations": [
+    "No model-backed HTTP server was launched because service.name is established before model execution and was validated directly through the real OTLP SDK/exporter/collector path.",
+    "Distributed multi-node and disaggregated model workloads were not launched; their process entry points were updated and the common tracing initializer plus async-exporter handoff were regression tested.",
+    "The qualified tiny Llama fixture was not used because it only adds transport and engine execution coverage, while this feature is fully observable at OTLP resource export without model weights."
+  ]
+}

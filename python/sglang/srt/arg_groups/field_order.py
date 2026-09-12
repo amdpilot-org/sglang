@@ -199,6 +199,7 @@ POSITIONAL_FIELD_ORDER = (
     "enable_trace",
     "trace_modules",
     "otlp_traces_endpoint",
+    "otlp_service_name",
     "export_metrics_to_file",
     "export_metrics_to_file_dir",
     "stat_loggers",
