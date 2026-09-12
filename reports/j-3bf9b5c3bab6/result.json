@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35122",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1493",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1456",
+  "candidate_commit": "6893c04844bb113350c9a84936cf3bd48eccee49",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The base reproduces the reported AITER/ROCm ordering defect. At the exact candidate commit, requested FP4 expert dequantization runs before the native AITER FP4 early return and before FNUZ handling. Focused regressions and an independent real-GPU AITER post-load exercise pass.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3bf9b5c3bab6/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-3bf9b5c3bab6/review-evidence/candidate_test.py (at recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Issue-specific failing-before behavior: both FNUZ parameterizations entered AITER FP4 preparation without invoking the requested conversion; two boundary cases passed. See raw/base_candidate_test.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3bf9b5c3bab6/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_fp8_moe_fp4_dequant.py test/registered/unit/layers/quantization/test_deepgemm_ue8m0_requant.py (at candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Eleven focused tests passed, covering AITER with FNUZ on/off, flag-off and non-FP4 boundaries, and related block-FP8/DeepGEMM processing. See raw/candidate_focused.log."
+    },
+    {
+      "command": "SGLANG_USE_AITER=1 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3bf9b5c3bab6/venv/bin/python <independent inline GPU post-load exercise> (at candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "On one gfx950 GPU, real packed FP4 tensors were converted and real AITER shuffle/normalization completed for FNUZ false and true; is_fp4_expert became false and output shapes/dtypes were valid. See raw/candidate_gpu_method_aiter.log."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "raw/candidate_gpu_method_aiter.log records AMD Instinct MI350X, gfx950:sramecc+:xnack-, and successful real AITER post-load processing for both FNUZ branches."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The available hardware was one gfx950 MI350X rather than the reported eight gfx942 MI308X GPUs.",
+    "DeepSeek-V4-Flash-0731 weights were unavailable, so full server startup, graph capture, GSM8K, TP8, multi-rank dispatch, and multi-node behavior remain unverified.",
+    "The gfx942-relevant FNUZ control path was forced on gfx950 for branch validation; it was not executed on physical gfx942 hardware.",
+    "No native source changed, so native rebuilding was not applicable.",
+    "The candidate PR body cites https://github.com/amdpilot-org/sglang/issues/1433 instead of the requested mirror issue https://github.com/amdpilot-org/sglang/issues/1493."
+  ]
+}
