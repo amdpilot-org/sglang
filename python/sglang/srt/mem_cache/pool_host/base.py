@@ -35,7 +35,8 @@ def ranks_per_host() -> int:
     Derived as world_size // nnodes: the launcher slices ranks uniformly
     across nodes (resolution asserts divisibility), so no hostname collective
     is needed — a collective here would have to be issued the same number of
-    times on every rank, and ranks build different numbers of host pools.
+    times on every rank, and ranks on different pipeline stages build
+    different numbers of host pools.
     """
     if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
         return 1
@@ -48,15 +49,63 @@ def ranks_per_host() -> int:
     return max(world_group.world_size // get_parallel().nnodes, 1)
 
 
-def host_memory_budget_bytes() -> int:
-    """Host RAM this rank may claim for a HiCache pool.
+def host_memory_sync_group() -> Optional[torch.distributed.ProcessGroup]:
+    """Return the world CPU group used for the initial host-memory snapshot.
 
-    psutil reports the whole machine, so co-located ranks each see the same free
-    memory; without the split every rank sizes its pool against all of it and
-    the host is oversubscribed by the number of ranks it holds.
+    Every rank that enables HiCache constructs a primary host pool, so the first
+    sizing check is common even when later pipeline stages construct different
+    sidecar pools. Synchronizing that check across the whole job also covers
+    multiple TP or in-job DP groups co-located on one host.
     """
-    free = psutil.virtual_memory().available - HICACHE_HOST_MEMORY_RESERVE_BYTES
-    return free // ranks_per_host()
+    if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
+        return None
+    try:
+        world_group = get_world_group()
+    except AssertionError:
+        return None
+    if world_group.world_size <= 1:
+        return None
+    return world_group.cpu_group
+
+
+_initial_host_memory_available_bytes: Optional[int] = None
+_reserved_host_memory_bytes = 0
+_host_memory_budget_lock = threading.Lock()
+
+
+def host_memory_budget_bytes(requested_bytes: int = 0) -> int:
+    """Remaining per-rank host RAM before an optional pool reservation.
+
+    Take one job-wide synchronized snapshot before any rank allocates its first
+    pool, then keep that baseline for later pools. This makes the result
+    independent of allocation timing across TP, PP, and in-job DP groups while
+    avoiding collectives for sidecar pools that not every rank constructs.
+
+    Accepted requests are accumulated locally because the baseline no longer
+    falls as this process allocates its earlier pools. The equal per-rank split
+    is intentionally preserved from the original guard.
+    """
+    global _initial_host_memory_available_bytes, _reserved_host_memory_bytes
+
+    with _host_memory_budget_lock:
+        if _initial_host_memory_available_bytes is None:
+            free = psutil.virtual_memory().available
+            sync_group = host_memory_sync_group()
+            if sync_group is not None:
+                reading = torch.tensor(free, dtype=torch.int64)
+                torch.distributed.all_reduce(
+                    reading, op=torch.distributed.ReduceOp.MIN, group=sync_group
+                )
+                free = int(reading.item())
+            _initial_host_memory_available_bytes = free
+
+        total_budget = (
+            _initial_host_memory_available_bytes - HICACHE_HOST_MEMORY_RESERVE_BYTES
+        ) // ranks_per_host()
+        remaining_budget = total_budget - _reserved_host_memory_bytes
+        if requested_bytes <= remaining_budget:
+            _reserved_host_memory_bytes += requested_bytes
+        return remaining_budget
 
 
 def sync_fixed_hicache_size(size: int, host_size: int) -> int:
@@ -172,7 +221,7 @@ class HostKVCache(abc.ABC):
 
         # Verify there is enough available host memory.
         requested_bytes = self.size * self.size_per_token
-        available_bytes = host_memory_budget_bytes()
+        available_bytes = host_memory_budget_bytes(requested_bytes)
         if requested_bytes > available_bytes:
             raise ValueError(
                 f"Not enough host memory available. Requesting "
