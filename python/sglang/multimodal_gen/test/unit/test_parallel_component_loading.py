@@ -9,6 +9,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 import torch
+from transformers.modeling_utils import local_torch_dtype
 
 from sglang.multimodal_gen.runtime.disaggregation.roles import RoleType
 from sglang.multimodal_gen.runtime.loader.component_loaders.component_loader import (
@@ -106,25 +107,35 @@ def test_component_loads_overlap_and_preserve_results():
     }
 
 
-def test_native_loads_overlap_outside_model_construction_contexts():
+def test_native_library_construction_contexts_are_serialized():
     class NativeLoader(ComponentLoader):
         def load_customized(self, *args, **kwargs):
             raise NotImplementedError
 
     loader = NativeLoader()
-    barrier = threading.Barrier(2)
+    first_entered = threading.Event()
+    second_entered = threading.Event()
     active = 0
     max_active = 0
     active_lock = threading.Lock()
+    observed = {}
 
-    def load_native(*args, **kwargs):
+    def load_native(_path, _args, _library, component_name):
         nonlocal active, max_active
-        with active_lock:
-            active += 1
-            max_active = max(max_active, active)
-        barrier.wait(timeout=2)
-        with active_lock:
-            active -= 1
+        dtype = torch.float16 if component_name == "text_encoder" else torch.float64
+        with local_torch_dtype(dtype, component_name):
+            with active_lock:
+                active += 1
+                max_active = max(max_active, active)
+            if component_name == "text_encoder":
+                first_entered.set()
+                second_entered.wait(timeout=0.1)
+            else:
+                assert first_entered.wait(timeout=1)
+                second_entered.set()
+            observed[component_name] = torch.get_default_dtype()
+            with active_lock:
+                active -= 1
         return object()
 
     loader.load_native = load_native
@@ -137,7 +148,11 @@ def test_native_loads_overlap_outside_model_construction_contexts():
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         list(executor.map(run, ["text_encoder", "text_encoder_2"]))
 
-    assert max_active == 2
+    assert max_active == 1
+    assert observed == {
+        "text_encoder": torch.float16,
+        "text_encoder_2": torch.float64,
+    }
 
 
 def test_parallel_loading_can_be_disabled():
