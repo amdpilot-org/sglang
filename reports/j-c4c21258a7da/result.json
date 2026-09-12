@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38156",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The base implementation reproduced the timing-sensitive accounting defect in a deterministic regression: host_memory_budget_bytes used each rank's unsynchronized live reading while dividing by all co-located ranks. The correction synchronizes the reading with a MIN all-reduce over the multi-rank TP CPU group before applying the reserve and rank split; local, single-rank, and not-yet-initialized behavior remains unchanged.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-c4c21258a7da/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mem_pool_host.py::TestHostMemoryBudget::test_budget_uses_synchronized_minimum_reading",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression on the recorded base; the source lacked the TP synchronization helper and therefore could not perform the required collective. Raw output: reports/j-c4c21258a7da/raw/failing-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c4c21258a7da/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mem_pool_host.py::TestHostMemoryBudget",
+      "exit_code": 0,
+      "what_was_measured": "Seven focused tests passed after the change, covering the synchronized minimum and int64/MIN/group arguments plus local, single-rank, and initialization boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c4c21258a7da/venv/bin/python reports/j-c4c21258a7da/repro_gloo.py",
+      "exit_code": 0,
+      "what_was_measured": "A real three-process gloo collective with divergent 74/50/62 GiB total available readings gave every rank the same 40 GiB post-reserve minimum divided by three (14316557653 bytes)."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c4c21258a7da/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mem_pool_host.py",
+      "exit_code": 0,
+      "what_was_measured": "All 20 host memory-pool tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c4c21258a7da/venv/bin/python -m pre_commit run --files python/sglang/srt/mem_cache/pool_host/base.py test/registered/unit/mem_cache/test_mem_pool_host.py reports/j-c4c21258a7da/repro_gloo.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, safety, and registered-test validation hooks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The issue is host RAM accounting and CPU-process-group synchronization. The assigned single gfx950 GPU cannot reproduce the reported TP8 H200 GLM-5.2 workload; no GPU or model-serving claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported 8xH200 GLM-5.2-W4AFP8 startup was not reproduced because only one gfx950 GPU was assigned and the model weights were unavailable.",
+    "Pipeline stages on the same host are not synchronized with each other because different stages may construct different host pools; the correction narrows the race to each TP group.",
+    "A TP group spanning hosts uses the group-wide minimum and is conservative, and ranks in separately launched data-parallel process groups remain outside ranks_per_host accounting."
+  ]
+}

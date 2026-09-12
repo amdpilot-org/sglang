@@ -9,7 +9,7 @@ from typing import Optional
 import psutil
 import torch
 
-from sglang.srt.distributed.parallel_state import get_world_group
+from sglang.srt.distributed.parallel_state import get_tp_group, get_world_group
 from sglang.srt.mem_cache.memory_pool import KVCache
 from sglang.srt.mem_cache.pool_host.common import (
     _cuda_host_unregister,
@@ -35,7 +35,8 @@ def ranks_per_host() -> int:
     Derived as world_size // nnodes: the launcher slices ranks uniformly
     across nodes (resolution asserts divisibility), so no hostname collective
     is needed — a collective here would have to be issued the same number of
-    times on every rank, and ranks build different numbers of host pools.
+    times on every rank, and ranks on different pipeline stages build
+    different numbers of host pools.
     """
     if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
         return 1
@@ -48,15 +49,40 @@ def ranks_per_host() -> int:
     return max(world_group.world_size // get_parallel().nnodes, 1)
 
 
+def host_memory_sync_group() -> Optional[torch.distributed.ProcessGroup]:
+    """Return the TP CPU group used to synchronize host-memory readings.
+
+    TP ranks in one pipeline stage build matching host pools in the same order,
+    unlike the world group when pipeline stages own different layers. Single-rank
+    and not-yet-initialized runs keep using their local reading.
+    """
+    if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
+        return None
+    try:
+        tp_group = get_tp_group()
+    except AssertionError:
+        return None
+    if tp_group.world_size <= 1:
+        return None
+    return tp_group.cpu_group
+
+
 def host_memory_budget_bytes() -> int:
     """Host RAM this rank may claim for a HiCache pool.
 
-    psutil reports the whole machine, so co-located ranks each see the same free
-    memory; without the split every rank sizes its pool against all of it and
-    the host is oversubscribed by the number of ranks it holds.
+    Synchronize the reading before splitting it across co-located ranks. The
+    collective prevents a faster TP peer from allocating a pool before slower
+    peers have sampled memory, avoiding a second charge for the earlier pool.
     """
-    free = psutil.virtual_memory().available - HICACHE_HOST_MEMORY_RESERVE_BYTES
-    return free // ranks_per_host()
+    free = psutil.virtual_memory().available
+    sync_group = host_memory_sync_group()
+    if sync_group is not None:
+        reading = torch.tensor(free, dtype=torch.int64)
+        torch.distributed.all_reduce(
+            reading, op=torch.distributed.ReduceOp.MIN, group=sync_group
+        )
+        free = int(reading.item())
+    return (free - HICACHE_HOST_MEMORY_RESERVE_BYTES) // ranks_per_host()
 
 
 def sync_fixed_hicache_size(size: int, host_size: int) -> int:
