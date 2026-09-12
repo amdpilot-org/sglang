@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33388",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1972",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1939",
+  "candidate_commit": "aa9b9c3db97e485b64d2c7751e4f55c454920a2f",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduced the original 518.307x CPU pickle amplification. At the exact candidate commit, the original fixture measured 1.312x with owned per-slice storage. Independent non-contiguous feature and simple-split precomputed-embedding cases also eliminated retained parent storage. Accelerator slices remained views on the assigned gfx950 GPU.",
+  "tests": [
+    {
+      "command": "XDG_CACHE_HOME=/tmp/amdpilot-repo-j-ba68279b661a/cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ba68279b661a/venv/bin/python reports/j-ba68279b661a/review_cases.py (base commit)",
+      "exit_code": 0,
+      "what_was_measured": "Original fixture: 1,048,576 logical bytes, 543,484,451 pickle bytes, 518.307x; 2,048-byte slices retained 1,048,576-byte storage. Also recorded failing non-contiguous feature and simple precomputed-embedding controls. Imports resolved to the prepared checkout source."
+    },
+    {
+      "command": "XDG_CACHE_HOME=/tmp/amdpilot-repo-j-ba68279b661a/cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ba68279b661a/venv/bin/python reports/j-ba68279b661a/review_cases.py (candidate aa9b9c3db97e485b64d2c7751e4f55c454920a2f)",
+      "exit_code": 0,
+      "what_was_measured": "Original fixture: 1.312x and exact owned slice storage. Non-contiguous feature: 1.322x with exact owned storage. Simple precomputed embeddings: parent storage eliminated for every slice."
+    },
+    {
+      "command": "XDG_CACHE_HOME=/tmp/amdpilot-repo-j-ba68279b661a/cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ba68279b661a/venv/bin/python -m pytest -q test/registered/unit/managers/test_mm_utils_split.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 9 passed, including CPU pickle/storage checks for feature, precomputed embeddings, and split metadata."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 XDG_CACHE_HOME=/tmp/amdpilot-repo-j-ba68279b661a/cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ba68279b661a/venv/bin/python reports/j-b90e4216b064/verify_gpu_slice.py",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X gfx950 with ROCm/HIP 7.2.26015, accelerator slice values matched an independent reference and the slice retained the parent storage pointer."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-ba68279b661a/candidate-gpu.txt and gpu-arch.txt record execution on one AMD Instinct MI355X, gfx950:sramecc+:xnack-, with correct values and shared accelerator storage."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No full multimodal model, HTTP serving, production-size request, or model weights were exercised; the deterministic source-level split and pickle contract was tested directly.",
+    "The source report used NVIDIA H200/CUDA, while the available accelerator boundary check used one AMD Instinct MI355X/gfx950 GPU with ROCm 7.2.",
+    "No claims are made about model semantic accuracy, a different model architecture, or multi-node operation.",
+    "The candidate changed Python only, so no native rebuild was applicable."
+  ]
+}
