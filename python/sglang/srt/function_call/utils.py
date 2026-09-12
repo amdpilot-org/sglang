@@ -133,6 +133,14 @@ def normalize_json_schema_types(schema: Any) -> None:
     if not isinstance(schema, dict):
         return
 
+    # Some tool-schema exporters serialize an absent ``required`` field as
+    # JSON null. Omitting ``required`` means that no properties are required,
+    # but Draft 2020-12 rejects null because this keyword must be an array.
+    # Normalize only that equivalent sentinel; other invalid values remain for
+    # the schema validator to report.
+    if schema.get("required", ...) is None:
+        del schema["required"]
+
     if "type" in schema:
         t = schema["type"]
         if isinstance(t, str):
