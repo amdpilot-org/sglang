@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36698",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "not_reproduced",
+  "summary": "Current SGLang Req stop matching detected and trimmed <END> after both English and Chinese text with the exact DeepSeek-V4-Flash-0731 tokenizer. No production change was justified; the PR records an issue-specific executable probe and evidence.",
+  "tests": [
+    {
+      "command": "HF_HOME=/tmp/amdpilot-repo-j-103714608623/hf /tmp/amdpilot-repo-j-103714608623/venv/bin/python reports/j-103714608623/reproduce_stop_sequence.py /tmp/amdpilot-repo-j-103714608623/hf/hub/models--deepseek-ai--DeepSeek-V4-Flash-0731/snapshots/7872f01b1d1fe23eabc4c98b48bffcef5a386062",
+      "exit_code": 0,
+      "what_was_measured": "Real Req.update_finish_state behavior with the exact model tokenizer: English control, reported Chinese prefix, multibyte emoji plus Chinese prefix, and one-token-per-step stop completion all matched and trimmed <END>."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-103714608623/venv/bin/python test/registered/unit/managers/test_stop_str_speculative.py",
+      "exit_code": 0,
+      "what_was_measured": "Nine existing scheduler regressions covering multi-token speculative acceptance, stop/EOS precedence, cross-token stops, and independent no-match/regex boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-103714608623/venv/bin/python test/registered/unit/managers/test_trim_matched_stop.py",
+      "exit_code": 0,
+      "what_was_measured": "Eight existing detokenizer regressions covering matched-string and matched-token output trimming boundaries."
+    },
+    {
+      "command": "rocm-smi --showproductname --showuniqueid",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the assigned device is one AMD Instinct MI355X with gfx950; inventory only, not GPU execution."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Stop matching and trimming are CPU control flow. The assigned single gfx950 cannot host or reproduce the reported 285B model in a PD-disaggregated H20 deployment; no unrelated GPU smoke was substituted."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 model weights were not loaded and model generation was not tested.",
+    "The reported H20 PD-disaggregated multi-node/multi-GPU topology was unavailable and remains unverified.",
+    "The evidence qualifies the exact tokenizer and current SGLang scheduler/detokenizer stop path, not model semantic accuracy or distributed transport behavior."
+  ]
+}
