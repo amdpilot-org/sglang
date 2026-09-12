@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31598",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced sent_offset retreat in the real DetokenizerManager with the reported CJK/incomplete-UTF8 sequence. A recovery-only monotonic update prevents already-emitted printable text from being duplicated. Regression coverage verifies repeated recovery, independent chunk concatenation, batched clean and affected requests, finish-after-recovery, and direct non-streaming output.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-417759ff54e4/venv/bin/python -m pytest -q test/registered/unit/managers/test_detokenizer_stream_offset.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Actual manager-level reproduction. Three recovery-sensitive cases failed by duplicating the CJK character ('A 世世ab' or equivalent chunk tail); the direct non-streaming case passed. Raw output: reports/j-417759ff54e4/raw/pytest_before_fix.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-417759ff54e4/venv/bin/python -m pytest -q test/registered/unit/managers/test_detokenizer_stream_offset.py (after source fix)",
+      "exit_code": 0,
+      "what_was_measured": "Four manager-level regressions passed: repeated recovery produced exact chunks, batched request states remained isolated while clean text stayed exact, completion emitted only the unsent tail, and non-streaming materialized once. Raw output: reports/j-417759ff54e4/raw/pytest_after_fix.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-417759ff54e4/venv/bin/python -m pytest -q test/registered/unit/managers/test_trim_matched_stop.py",
+      "exit_code": 0,
+      "what_was_measured": "Eight adjacent stop-trimming manager tests passed. Raw output: reports/j-417759ff54e4/raw/pytest_trim_matched_stop.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-417759ff54e4/venv/bin/python -m pre_commit run --files python/sglang/srt/managers/detokenizer_manager.py test/registered/unit/managers/test_detokenizer_stream_offset.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, registry, and policy hooks passed for changed source and test files. Raw output: reports/j-417759ff54e4/raw/pre_commit.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The defect and fix are CPU-side Python detokenizer offset bookkeeping with a deterministic tokenizer fixture; no GPU kernel, numerical output, model architecture, or transport behavior is involved. No unrelated GPU smoke was used as evidence.",
+  "native_rebuilt": false,
+  "remaining_limitations": "The regression invokes the actual DetokenizerManager decoding implementation but uses a deterministic table tokenizer to force the reported decoded prefixes; no model-weight HTTP serving run was performed. This does not validate tokenizer behavior for every model family, distributed serving, or semantic model output. No native code changed. Upstream issue and prior-PR snapshots/diff are retained under reports/j-417759ff54e4/raw/.",
+  "source_paths": [
+    "python/sglang/srt/managers/detokenizer_manager.py",
+    "test/registered/unit/managers/test_detokenizer_stream_offset.py"
+  ],
+  "native_paths": []
+}

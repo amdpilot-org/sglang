@@ -1,0 +1,340 @@
+F.FF                                                                     [100%]
+=================================== FAILURES ===================================
+_ TestDetokenizerStreamOffset.test_finished_step_after_recovery_emits_only_unsent_tail _
+
+self = <test_detokenizer_stream_offset.TestDetokenizerStreamOffset testMethod=test_finished_step_after_recovery_emits_only_unsent_tail>
+
+    def test_finished_step_after_recovery_emits_only_unsent_tail(self):
+        manager = self._manager(
+            {
+                (): "",
+                (0,): "A 世�",
+                (0, 1): "A 世a�",
+                (0, 1, 2): "A 世ab",
+            }
+        )
+        chunks = []
+        for token, reason in [(0, None), (1, None), (2, {"type": "length"})]:
+            chunks.extend(
+                manager._decode_batch_token_id_output(
+                    _recv([("finish", "", [token], 0, reason)])
+                )
+            )
+
+>       self.assertEqual(chunks, ["A 世", "", "ab"])
+E       AssertionError: Lists differ: ['A 世', '', '世ab'] != ['A 世', '', 'ab']
+E
+E       First differing element 2:
+E       '世ab'
+E       'ab'
+E
+E       - ['A 世', '', '世ab']
+E       ?              -
+E
+E       + ['A 世', '', 'ab']
+
+test/registered/unit/managers/test_detokenizer_stream_offset.py:120: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f6a9987bb00>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f737da21bc0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestDetokenizerStreamOffset.test_finished_step_after_recovery_emits_only_unsent_tail
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/managers/test_detokenizer_stream_offset.py", line 120, in test_finished_step_after_recovery_emits_only_unsent_tail
+    self.assertEqual(chunks, ["A 世", "", "ab"])
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1091, in assertListEqual
+    self.assertSequenceEqual(list1, list2, msg, seq_type=list)
+  File "/usr/lib/python3.12/unittest/case.py", line 1073, in assertSequenceEqual
+    self.fail(msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: Lists differ: ['A 世', '', '世ab'] != ['A 世', '', 'ab']
+
+First differing element 2:
+'世ab'
+'ab'
+
+- ['A 世', '', '世ab']
+?              -
+
++ ['A 世', '', 'ab']
+_ TestDetokenizerStreamOffset.test_recovery_is_isolated_per_request_in_a_batch _
+
+self = <test_detokenizer_stream_offset.TestDetokenizerStreamOffset testMethod=test_recovery_is_isolated_per_request_in_a_batch>
+
+    def test_recovery_is_isolated_per_request_in_a_batch(self):
+        manager = self._manager(
+            {
+                (): "",
+                (0,): "A 世�",
+                (0, 1): "A 世a�",
+                (0, 1, 2): "A 世ab",
+                (10,): "x",
+                (10, 11): "xy",
+                (11,): "y",
+                (11, 12): "yz",
+                (12,): "z",
+            }
+        )
+        cjk_chunks, clean_chunks = [], []
+        for cjk_token, clean_token in zip(range(3), range(10, 13)):
+            output = manager._decode_batch_token_id_output(
+                _recv(
+                    [
+                        ("cjk", "", [cjk_token], 0, None),
+                        ("clean", "", [clean_token], 0, None),
+                    ]
+                )
+            )
+            cjk_chunks.append(output[0])
+            clean_chunks.append(output[1])
+
+>       self.assertEqual("".join(cjk_chunks), "A 世ab")
+E       AssertionError: 'A 世世ab' != 'A 世ab'
+E       - A 世世ab
+E       ?   -
+E       + A 世ab
+
+test/registered/unit/managers/test_detokenizer_stream_offset.py:99: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f6a998d7240>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f737da21bc0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestDetokenizerStreamOffset.test_recovery_is_isolated_per_request_in_a_batch
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/managers/test_detokenizer_stream_offset.py", line 99, in test_recovery_is_isolated_per_request_in_a_batch
+    self.assertEqual("".join(cjk_chunks), "A 世ab")
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1251, in assertMultiLineEqual
+    self.fail(self._formatMessage(msg, standardMsg))
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: 'A 世世ab' != 'A 世ab'
+- A 世世ab
+?   -
++ A 世ab
+
+__ TestDetokenizerStreamOffset.test_repeated_recovery_does_not_duplicate_cjk ___
+
+self = <test_detokenizer_stream_offset.TestDetokenizerStreamOffset testMethod=test_repeated_recovery_does_not_duplicate_cjk>
+
+    def test_repeated_recovery_does_not_duplicate_cjk(self):
+        manager = self._manager(
+            {
+                (): "",
+                (0,): "A 世�",
+                (0, 1): "A 世a�",
+                (0, 1, 2): "A 世ab�",
+                (0, 1, 2, 3): "A 世abc�",
+                (0, 1, 2, 3, 4): "A 世abcd",
+            }
+        )
+
+        chunks = []
+        for token in range(5):
+            chunks.extend(
+                manager._decode_batch_token_id_output(
+                    _recv([("cjk", "", [token], 0, None)])
+                )
+            )
+
+        # This expectation is deliberately independent of manager offsets: the
+        # client concatenates the chunks and must receive the decoded fixture once.
+>       self.assertEqual(chunks, ["A 世", "", "", "", "abcd"])
+E       AssertionError: Lists differ: ['A 世', '', '', '', '世abcd'] != ['A 世', '', '', '', 'abcd']
+E
+E       First differing element 4:
+E       '世abcd'
+E       'abcd'
+E
+E       - ['A 世', '', '', '', '世abcd']
+E       ?                      -
+E
+E       + ['A 世', '', '', '', 'abcd']
+
+test/registered/unit/managers/test_detokenizer_stream_offset.py:69: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f6a998d7100>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f737da21bc0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestDetokenizerStreamOffset.test_repeated_recovery_does_not_duplicate_cjk
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/managers/test_detokenizer_stream_offset.py", line 69, in test_repeated_recovery_does_not_duplicate_cjk
+    self.assertEqual(chunks, ["A 世", "", "", "", "abcd"])
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1091, in assertListEqual
+    self.assertSequenceEqual(list1, list2, msg, seq_type=list)
+  File "/usr/lib/python3.12/unittest/case.py", line 1073, in assertSequenceEqual
+    self.fail(msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: Lists differ: ['A 世', '', '', '', '世abcd'] != ['A 世', '', '', '', 'abcd']
+
+First differing element 4:
+'世abcd'
+'abcd'
+
+- ['A 世', '', '', '', '世abcd']
+?                      -
+
++ ['A 世', '', '', '', 'abcd']
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/managers/test_detokenizer_stream_offset.py::TestDetokenizerStreamOffset::test_finished_step_after_recovery_emits_only_unsent_tail
+FAILED test/registered/unit/managers/test_detokenizer_stream_offset.py::TestDetokenizerStreamOffset::test_recovery_is_isolated_per_request_in_a_batch
+FAILED test/registered/unit/managers/test_detokenizer_stream_offset.py::TestDetokenizerStreamOffset::test_repeated_recovery_does_not_duplicate_cjk
+3 failed, 1 passed, 17 warnings in 12.49s
