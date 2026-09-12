@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37022",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1323",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1285",
+  "candidate_commit": "e190107d29fdc776b6b0c9466b4561bc6d579ac9",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the two previously reported control-plane counterexamples and passes its regressions, but a new ABA race lets an older successful probe clear a new failure generation after session re-registration resets the failure counter. The underlying cause of the original distributed transfer failures remains unverified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-738fe92eee3c/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_mooncake_transfer_batching.py (candidate tests on recorded base source)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: 2 failed, 10 passed, 3 subtests passed; default probing was false and a stale successful probe cleared a newer N+1 failure."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-738fe92eee3c/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_mooncake_transfer_batching.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 12 passed, 3 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-738fe92eee3c/venv/bin/python - < independent ABA harness (exact candidate)",
+      "exit_code": 1,
+      "what_was_measured": "A probe snapshot at count 1, followed by registration clearing state and a new first failure at count 1, allowed the stale successful probe to erase the new blacklist and counter."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Prepared host exposes one AMD gfx950 GPU; the reported NVIDIA/XCCL multi-node RoCEv2 topology was unavailable. The reviewed defect is deterministic CPU control-plane state handling."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "ABA race: re-registration deletes the failure counter; a subsequent failure restarts at the same count, so an older successful probe can clear the new failure generation.",
+    "The recurring transfer failures in the reported 5P3D GLM5.2 NVIDIA/XCCL RoCEv2 deployment may continue because their underlying cause is neither identified nor corrected."
+  ],
+  "remaining_limitations": [
+    "The original 5-prefill/3-decode GLM5.2 workload and weights were unavailable.",
+    "The NVIDIA CUDA/XCCL multi-node RoCEv2 environment was unavailable; the host has one AMD gfx950 GPU.",
+    "No native source changed, so no native library was rebuilt. Mooncake imported from installed site-packages while reviewed SGLang Python imported from the checkout."
+  ]
+}
