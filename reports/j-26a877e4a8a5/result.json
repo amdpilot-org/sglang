@@ -1,0 +1,30 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36859",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1060",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The recorded base already contains merged PR https://github.com/sgl-project/sglang/pull/34820 (commit 13469c16d3e9f857c53c3f33da8d33268fd4f570), which fixes a KDA/Mamba radix-cache defect relevant to Kimi-family multi-turn cache resumes: an unaligned prefix checkpoint was read from the bf16 per-chunk output even when the recurrent-state pool was fp32. On the assigned gfx950, the included GPU regression verified that the new fp32 snapshot matches an independent truncated-run reference and that the former bf16 route is strictly lossy. This is a verified issue-relevant candidate already present in the source, not a reproduction of the report's full 16-GPU Kimi-K3 serving failure.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-26a877e4a8a5/venv/bin/python -m pytest -q -rs test/registered/kernel/ops/attention/test_kda_track_state.py test/registered/unit/layers/attention/test_mamba_track_state_dtype.py",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI355X (gfx950), the Triton KDA checkpoint snapshot matched the fp32 final state of an independently truncated 64-token run at rtol=1e-5/atol=1e-5, while the old bf16 intermediate-state representation was proven lossy. CPU boundary coverage verified single rounding into fp32, bf16, and fp16 pools, the fp16 double-rounding probe, destination-row ordering, untouched rows, and the aligned/no-unaligned-row case. Result: 4 passed, 1 skipped, 5 subtests passed; the skip was Helion because it is not installed. Raw log: reports/j-26a877e4a8a5/raw/kda_track_and_dtype.log"
+    },
+    {
+      "command": "git merge-base --is-ancestor 13469c16d3e9f857c53c3f33da8d33268fd4f570 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed that the issue-relevant KDA checkpoint fix is already an ancestor of the recorded base. Raw log: reports/j-26a877e4a8a5/raw/candidate_ancestry.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "The KDA numerical regression executed with HIP_VISIBLE_DEVICES=0 on the sole assigned AMD Instinct MI355X, ROCm 7.2.26015, reported by PyTorch as capability (9, 5). See reports/j-26a877e4a8a5/raw/gpu_environment.log and reports/j-26a877e4a8a5/raw/kda_track_and_dtype.log.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported deployment used Kimi-K3 on 16 B200 GPUs or 8 H800 GPUs with pipeline/tensor/expert parallelism and high concurrency. Only one AMD MI355X (gfx950) was assigned, so the distributed topology and NVIDIA-specific serving paths were not reproduced.",
+    "Kimi-K3 model weights were not available. The tiny Llama transport fixture cannot qualify Kimi-K3's KDA architecture or semantic multi-turn accuracy, so it was not substituted for the requested model reproduction.",
+    "The original report does not provide prompts, request traces, seeds/sampling parameters, cache-hit telemetry, or a deterministic pass/fail oracle. The full reported request-mixing symptom therefore remains not reproduced.",
+    "PR #34820 demonstrates and fixes a real KDA prefix-cache numerical divergence, including measurements on Kimi-Linear and historical v0.5.17, but that evidence does not prove it is the sole cause of issue #36859.",
+    "Helion is not installed in the prepared environment, so the Helion KDA snapshot implementation was skipped; the Triton implementation used on the assigned ROCm GPU was exercised.",
+    "No native C++ or FlyDSL source was changed, so no native rebuild was applicable."
+  ]
+}
