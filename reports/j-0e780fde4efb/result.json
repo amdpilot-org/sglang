@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33385",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1999",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1957",
+  "candidate_commit": "8a7f0fe8ed4c15e7700949898b3a77ca09a0b7fc",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate narrowly prevents DeepSeek-V4's unsupported CPU-copy NotImplementedError from terminating the scheduler by converting it into the existing backup-failure signal. However, with disaggregation_decode_enable_offload_kvcache=false it still attempts CPU offload and consequently aborts the affected request after freeing its device KV. This is partial crash containment, not a full fix of the original disabled-offload retraction contract.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-0e780fde4efb/venv/bin/python - <<'PY' (base retraction_backup probe)",
+      "exit_code": 1,
+      "what_was_measured": "On recorded base, DeepSeekV4TokenToKVPool.get_cpu_copy is KVCache.get_cpu_copy and cpu_tensor retraction backup propagates NotImplementedError."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0e780fde4efb/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_retraction_backup_failure.py",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate commit, all four candidate regression cases passed: method ownership, unsupported-copy containment, supported-copy success, and unrelated-error propagation."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0e780fde4efb/venv/bin/python - <<'PY' (independent release_req adversarial probe)",
+      "exit_code": 0,
+      "what_was_measured": "With decode mode and disaggregation_decode_enable_offload_kvcache=false, release_req still attempted offload once, returned false, released device KV, and reset the request."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0e780fde4efb/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_decode_retraction_backup.py",
+      "exit_code": 0,
+      "what_was_measured": "Two existing GPU tests passed, covering host-pool exhaustion and exact MHA target/draft KV backup and restore on the assigned AMD GPU."
+    },
+    {
+      "command": "git diff 8a7f0fe^ 8a7f0fe --check && /tmp/amdpilot-repo-j-0e780fde4efb/venv/bin/python -m compileall -q python/sglang/srt/mem_cache/common.py test/registered/unit/mem_cache/test_retraction_backup_failure.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace and changed Python syntax."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The existing decode retraction backup suite performed exact torch.equal checks after GPU KV overwrite/restore on one AMD Instinct MI355X reporting capability (9, 5), ROCm 7.2. This validates supported MHA host-pool mechanics, not DSV4 or distributed execution."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "When disaggregation_decode_enable_offload_kvcache is false and the resolved retraction backend is cpu_tensor, release_req still invokes req.offload_kv_cache.",
+    "For DeepSeekV4TokenToKVPool that invocation remains unsupported; the candidate aborts the retracted request instead of preserving it for resume/recompute.",
+    "The original tp8/dp8 DeepSeek-V4 speculative HiSparse workload was not run, so full serving behavior and race timing remain unverified."
+  ],
+  "remaining_limitations": [
+    "No DeepSeek-V4 weights or tp8/dp8 multi-node PD environment were available.",
+    "Only one assigned gfx950-class AMD Instinct MI355X was available; no H20/CUDA comparison was performed.",
+    "The candidate changes Python only, so no native source changed and no native rebuild was applicable.",
+    "The GPU suite exercises MHA host-pool backup/restore, not DeepSeekV4TokenToKVPool, HiSparse kernels, MTP4 speculation, semantic accuracy, or sustained KV-full load."
+  ]
+}
