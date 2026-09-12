@@ -9,6 +9,7 @@ from sglang.srt.configs import (
     InklingMMConfig,
     InklingModelConfig,
     InternS2PreviewConfig,
+    JambaConfig,
     JetNemotronConfig,
     JetVLMConfig,
     KimiLinearConfig,
@@ -101,6 +102,11 @@ def mamba2_config(model_config: ModelConfig):
     return None
 
 
+def mamba1_config(model_config: ModelConfig):
+    config = model_config.hf_config
+    return config if isinstance(config, JambaConfig) else None
+
+
 def kimi_linear_config(model_config: ModelConfig):
     config = model_config.hf_config
     if isinstance(config, KimiLinearConfig):
@@ -130,7 +136,8 @@ def linear_attn_model_spec(model_config: ModelConfig):
 
 def mambaish_config(model_config: ModelConfig):
     existing = (
-        mamba2_config(model_config)
+        mamba1_config(model_config)
+        or mamba2_config(model_config)
         or hybrid_gdn_config(model_config)
         or kimi_linear_config(model_config)
         or glm5_next_config(model_config)

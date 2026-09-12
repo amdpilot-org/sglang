@@ -92,6 +92,13 @@ class HfModelConfigParser(ModelConfigParserBase):
                 **kwargs,
             )
 
+        # Transformers ships a Jamba config, but SGLang needs the additional
+        # recurrent-state layout properties used by its hybrid cache manager.
+        if getattr(config, "model_type", None) == "jamba":
+            from sglang.srt.configs.jamba import JambaConfig
+
+            config = JambaConfig.from_dict(config.to_dict())
+
         if (
             config.architectures is not None
             and config.architectures[0] == "Phi4MMForCausalLM"

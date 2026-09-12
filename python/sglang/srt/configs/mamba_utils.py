@@ -327,3 +327,32 @@ class KimiLinearCacheParams(BaseLinearStateParams):
     @property
     def is_kda(self) -> bool:
         return True
+
+
+@dataclass(kw_only=True, frozen=True)
+class Mamba1StateShape:
+    """Per-request recurrent state layout used by Mamba-1 models."""
+
+    conv: List[tuple[int, int]]
+    temporal: tuple[int, int]
+    intermediate_size: int
+    state_size: int
+    conv_kernel: int
+
+    @staticmethod
+    def create(
+        *, tp_world_size: int, intermediate_size: int, state_size: int, conv_kernel: int
+    ):
+        intermediate_size_tp = divide(intermediate_size, tp_world_size)
+        return Mamba1StateShape(
+            conv=[(intermediate_size_tp, conv_kernel - 1)],
+            temporal=(intermediate_size_tp, state_size),
+            intermediate_size=intermediate_size,
+            state_size=state_size,
+            conv_kernel=conv_kernel,
+        )
+
+
+@dataclass(kw_only=True, frozen=True)
+class Mamba1CacheParams(BaseLinearStateParams):
+    shape: Mamba1StateShape

@@ -459,6 +459,16 @@ def attn_backend_wrapper(runner: "ModelRunner", full_attn_backend: "AttentionBac
 
                 logger.info("Using QSA for sparse full-attention layers.")
                 full_attn_backend = QwenSparseAttnBackend(runner)
+        elif getattr(cfg, "model_type", None) == "jamba":
+            if is_npu():
+                raise NotImplementedError(
+                    "Jamba's Mamba-1 backend is not implemented on NPU"
+                )
+            from sglang.srt.layers.attention.hybrid_linear_attn_backend import (
+                Mamba1AttnBackend,
+            )
+
+            linear_attn_backend = Mamba1AttnBackend(runner)
         elif mamba2_config(runner.model_config) is not None:
             from sglang.srt.configs.lfm2 import Lfm2Config
             from sglang.srt.configs.lfm2_moe import Lfm2MoeConfig
