@@ -59,6 +59,14 @@ class TestTargetCheckpointBundlesDsparkDraft(CustomTestCase):
 
 
 class TestDsparkDraftPathDefaulting(CustomTestCase):
+    def test_empty_draft_lora_path_is_rejected(self):
+        server_args = _make_dspark_server_args(
+            model_path=_BUNDLED_MODEL_PATH, hf_config=_bundled_hf_config()
+        )
+        server_args.speculative_dspark_lora_path = "   "
+        with self.assertRaisesRegex(ValueError, "must not be empty"):
+            _handle_dspark(server_args)
+
     def test_bundled_checkpoint_defaults_draft_path_to_model_path(self):
         server_args = _make_dspark_server_args(
             model_path=_BUNDLED_MODEL_PATH, hf_config=_bundled_hf_config()
