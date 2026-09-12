@@ -1,0 +1,88 @@
+F.                                                                       [100%]
+=================================== FAILURES ===================================
+_________ test_first_target_verify_graph_init_launches_metadata_kernel _________
+
+    def test_first_target_verify_graph_init_launches_metadata_kernel():
+        """Buffer creation must not defer the Triton module load to first replay."""
+        backend = object.__new__(DeepseekSparseAttnBackend)
+        backend.decode_cuda_graph_metadata = {}
+        backend.dsa_index_kpool = 1
+        backend.dsa_index_topk = 4
+        backend.speculative_num_draft_tokens = 2
+        backend.real_page_size = 1
+        backend.dsa_decode_impl = "trtllm"
+        backend.req_to_token = torch.arange(32, dtype=torch.int32).reshape(2, 16)
+        backend.set_dsa_prefill_impl = Mock()
+        backend._update_kpool_metadata_replay = Mock()
+    
+        metadata = SimpleNamespace(
+            cache_seqlens_int32=torch.empty(1, dtype=torch.int32),
+            cu_seqlens_k=torch.empty(2, dtype=torch.int32),
+            page_table_1=torch.empty((2, 16), dtype=torch.int32),
+            dsa_seqlens_expanded=torch.empty(2, dtype=torch.int32),
+            dsa_cache_seqlens_int32=torch.empty(2, dtype=torch.int32),
+            dsa_cu_seqlens_k=torch.empty(3, dtype=torch.int32),
+            real_page_table=None,
+            paged_mqa_ctx_lens_2d=None,
+            page_size=1,
+        )
+        metadata.real_page_table = metadata.page_table_1
+    
+        def build(*args, **kwargs):
+            backend.decode_cuda_graph_metadata[1] = metadata
+    
+        backend._build_forward_metadata_cuda_graph = Mock(side_effect=build)
+    
+        with (
+            patch.object(backend_module, "_is_hip", True),
+            patch.object(backend_module, "is_cuda", return_value=False),
+            patch.object(backend_module, "fused_dsa_target_verify_metadata") as fused,
+        ):
+            backend._apply_cuda_graph_metadata(
+                bs=1,
+                req_pool_indices=torch.tensor([0]),
+                seq_lens=torch.tensor([3]),
+                seq_lens_cpu=torch.tensor([3]),
+                forward_mode=ForwardMode.TARGET_VERIFY,
+                spec_info=None,
+            )
+    
+        backend._build_forward_metadata_cuda_graph.assert_called_once()
+>       fused.assert_called_once()
+
+test/registered/attention/test_dsa_graph_metadata_warmup.py:57: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock name='fused_dsa_target_verify_metadata' id='139487255440528'>
+
+    def assert_called_once(self):
+        """assert that the mock was called only once.
+        """
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to have been called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'fused_dsa_target_verify_metadata' to have been called once. Called 0 times.
+
+/usr/lib/python3.12/unittest/mock.py:923: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/attention/test_dsa_graph_metadata_warmup.py::test_first_target_verify_graph_init_launches_metadata_kernel
+1 failed, 1 passed, 17 warnings in 8.83s
