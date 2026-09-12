@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37846",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "40c96033f4d6c04788d573231d7ffaa259d49da9",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "Verified partial production fix: the candidate fixes get_hf_text_config and compressed-tensors linear_fp8_config null handling, but issue-named Muse Glimmer and ModelOpt paths still distinguish null from missing and raise internal AttributeError exceptions.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d0932cdf092a/venv/bin/python /job/review-evidence-j-d0932cdf092a/base/reproduce.py (base checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Independent per-case harness reproduced the MiniMax text_config=None AssertionError and compressed-tensors linear_fp8_config=None AttributeError while their missing-section controls succeeded. The harness catches per-case exceptions, so process exit 0 is expected."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d0932cdf092a/venv/bin/python -m pytest -q test/registered/unit/utils/test_hf_transformers.py test/registered/unit/layers/quantization/test_compressed_tensors_mixed_precision.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 76 passed and 2 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d0932cdf092a/venv/bin/python /job/review-evidence-j-d0932cdf092a/base/reproduce.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "The unchanged independent harness confirmed both base failures pass at the exact candidate commit."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d0932cdf092a/venv/bin/python /job/review-evidence-j-d0932cdf092a/candidate/adversarial.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Per-case harness found remaining Muse Glimmer text_config=None and ModelOpt quantization=None AttributeErrors compared with their missing-section controls. The harness catches per-case exceptions, so process exit 0 is expected."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 40c96033f4d6c04788d573231d7ffaa259d49da9",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff contains no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI355X was visible through PyTorch/ROCm, but no GPU kernel was executed because the defect and counterexamples are CPU-side config parsing."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "muse_glimmer_config_kwargs_from_hf treats a missing text_config as acceptable but dereferences text_config=None with None.items().",
+    "ModelOptFp8Config.from_config gives a descriptive ValueError when quantization is missing but dereferences quantization=None with None.get()."
+  ],
+  "remaining_limitations": [
+    "No RedHatAI/Llama-3.2-1B-Instruct-FP8 weights were provided, so the live-server reproduction was not run.",
+    "The available AMD Instinct MI355X/ROCm environment differs from the reporter's RTX 4090/CUDA environment and the task's stated gfx950 assignment.",
+    "No full-model serving, semantic-accuracy, or distributed-workload claim is made.",
+    "No native rebuild was applicable because the candidate changes only Python and tests."
+  ]
+}
