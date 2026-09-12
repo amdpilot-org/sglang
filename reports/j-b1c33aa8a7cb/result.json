@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38428",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/756",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the HiCache backup daemon exiting on a storage backend exception. Updated both HiCache backup workers to log backend exceptions, annotate failed or partial StorageOperation outcomes, and still acknowledge each operation so the queue continues draining and the existing ack consumer can release host memory. Added CPU regressions for exception recovery, continued queue progress, partial progress, batch_set false at the 128-page boundary, success, backup_skip, the HybridCache worker, and partial sidecar failure.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-b1c33aa8a7cb/venv/bin/python reports/j-b1c33aa8a7cb/reproduce_backup_thread_failure.py (before fix)",
+      "exit_code": 0,
+      "what_was_measured": "Production HiCacheController.backup_thread_func died on the first RuntimeError, acknowledged zero of two operations, and left one operation queued. Raw traceback: reports/j-b1c33aa8a7cb/raw/reproduction_before.log. The original reproducer reported state rather than asserting it, so its process exit was zero despite reproducing the defect."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b1c33aa8a7cb/venv/bin/python reports/j-b1c33aa8a7cb/reproduce_backup_thread_failure.py (after fix)",
+      "exit_code": 0,
+      "what_was_measured": "Production worker remained alive, acknowledged both operations, logged the exception, and drained the queue. Raw output: reports/j-b1c33aa8a7cb/raw/reproduction_after.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b1c33aa8a7cb/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_backup_resilience.py",
+      "exit_code": 0,
+      "what_was_measured": "Six production-path CPU regression and boundary tests passed, covering both worker implementations and failure metadata. Raw output: reports/j-b1c33aa8a7cb/raw/pytest_final.log."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/managers/cache_controller.py python/sglang/srt/mem_cache/hybrid_cache/hybrid_cache_controller.py test/registered/unit/mem_cache/test_hicache_backup_resilience.py reports/j-b1c33aa8a7cb/reproduce_backup_thread_failure.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, AST, spelling, and registered-test validation all passed. Raw output: reports/j-b1c33aa8a7cb/raw/precommit.log."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors. Raw output: reports/j-b1c33aa8a7cb/raw/git_diff_check.log."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reported failure and correction are confined to Python queue/thread exception handling and were deterministically reproduced with CPU tensors. No model, kernel, or accelerator execution is involved, so the assigned gfx950 GPU was not used."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No real remote storage backend was made unreachable; tests inject representative RuntimeError and false/partial backend results into the production worker and page-backup paths.",
+    "No model-serving or distributed workload was run because the issue-specific reproduction requires neither weights nor a server.",
+    "Failure metadata is exposed on acknowledged StorageOperation objects but is not yet exported as a metric."
+  ],
+  "source_paths": [
+    "python/sglang/srt/managers/cache_controller.py",
+    "python/sglang/srt/mem_cache/hybrid_cache/hybrid_cache_controller.py"
+  ],
+  "native_paths": []
+}
