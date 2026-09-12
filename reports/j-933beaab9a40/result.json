@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31711",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "cedc90e4f8b6847af919ad7d0cc13ebc8136823f",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduced both original defects in the repository implementation: positive rollback replaced and copied the retained accepted-token history, with one-token append/rollback time growing from 1.410 us at 1,000 tokens to 2,113.055 us at 1,000,000 tokens, and rollback(0) cleared the debug history. At the exact candidate commit, rollback deletes the tail in place only for nonzero counts. The candidate regression plus existing EAGLE traversal tests passed, and an independent probe confirmed stable list identity, correct zero/multi/full rollback behavior, and 0.222-0.287 us one-token rollback across histories from 1,000 to 1,000,000 tokens. This directly fixes the complete implementation-level contract in the original issue; no unrelated smoke is used as proof.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-933beaab9a40/venv/bin/python /job/review-evidence-j-933beaab9a40/rollback_probe.py (at base commit 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before repository import, state boundaries, list identity, tracemalloc peak, and scaling. rollback(0) produced []; all positive rollbacks replaced the list; one-token append/rollback increased from 1.410 us at 1k to 2,113.055 us at 1M. Evidence: reports/j-933beaab9a40/raw/base-probe.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-933beaab9a40/venv/bin/python -m pytest -q test/registered/unit/constrained/test_xgrammar_backend.py test/registered/unit/spec/test_spec_utils_traverse_tree.py (at candidate commit cedc90e4f8b6847af919ad7d0cc13ebc8136823f)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression for in-place rollback and zero-count behavior plus existing speculative EAGLE grammar-tree traversal coverage; 7 tests passed. Evidence: reports/j-933beaab9a40/raw/candidate-pytest.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-933beaab9a40/venv/bin/python /job/review-evidence-j-933beaab9a40/rollback_probe.py (at candidate commit cedc90e4f8b6847af919ad7d0cc13ebc8136823f)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial zero, one, multi-token, and full-history boundaries, list identity, and scaling through 1M retained tokens. All state cases were correct and one-token rollback stayed at 0.222-0.287 us. Evidence: reports/j-933beaab9a40/raw/candidate-probe.txt"
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 cedc90e4f8b6847af919ad7d0cc13ebc8136823f",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff has no whitespace errors; commit parent is exactly the recorded base and the production change is confined to Python list mutation."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned device was visible as one AMD Instinct MI355X, gfx950. The defect is deterministic Python list mutation on the scheduler CPU path and the candidate changes no GPU/native code. No EAGLE-compatible model weights were supplied, so no GPU serving or end-to-end TPOT claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No full EAGLE-compatible model serving run or service-level TPOT/profile comparison was performed because compatible model weights were not supplied.",
+    "The qualified tiny Llama fixture would validate transport and engine execution only and cannot qualify EAGLE speculative decoding or the reported long structured-output performance contract, so it was not substituted as evidence.",
+    "GPU execution was not needed for the implementation-level CPU regression; the available architecture was recorded but not used.",
+    "No native rebuild was applicable because the candidate changes only Python and test/report files."
+  ]
+}
