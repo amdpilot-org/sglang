@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31207",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3501",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3500",
+  "candidate_commit": "fb34ada0b8d8b9db3ee04ecd4c82c563db4c0cdd",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate removes the initial DeepSeek-V4 decode-offload type rejection and its focused unit/GPU transfer checks pass, but it does not fully preserve the composite layout: an independently exposed DEEPSEEK_V4_C128_STATE host entry is omitted from decode sidecar transfers. LMCache remains unsupported and only gains a proposed grouped-pool capability probe and clearer NotImplementedError; the required LMCache connector API is absent and LMCache is not installed in this image. This is a partial decode fix plus diagnostic hardening, not a full original-issue fix.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-30283e8483cb/venv/bin/python /job/review-evidence-j-30283e8483cb/base_decode_repro.py",
+      "exit_code": 1,
+      "what_was_measured": "On the recorded base, the actual DecodeKVCacheOffloadManager constructor rejects a real DeepSeekV4TokenToKVPool instance shell with ValueError: Unsupported KV cache type for decode offload."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-30283e8483cb/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_specv2_kvcache_offloading.py test/registered/unit/mem_cache/test_linker_pool_assembler.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit: 26 tests and 8 subtests passed, including mocked composite enumeration/lifetime checks and existing linker-pool coverage."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-30283e8483cb/venv/bin/python reports/j-d983ad39217a/gpu_composite_transfer.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit: exact byte equality for three paged and two state D2H buffer copies on AMD Instinct MI355X. This is a primitive transfer check, not a V4 model/storage round trip."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-30283e8483cb/venv/bin/python /job/review-evidence-j-30283e8483cb/adversarial_c128_state.py",
+      "exit_code": 1,
+      "what_was_measured": "At exact candidate commit: DecodeKVCacheOffloadManager omitted DEEPSEEK_V4_C128_STATE from its transfer list even when that entry was present in the composite host group."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Candidate helper ran on AMD Instinct MI355X with torch 2.11.0+rocm7.2 / HIP 7.2.26015 and reported exact=True for all five tested buffers; raw output is candidate-gpu.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A composite host group containing PoolName.DEEPSEEK_V4_C128_STATE loses that state in decode offload because the candidate's fixed sidecar tuple never enumerates it.",
+    "LMCache DeepSeek-V4 operation still raises NotImplementedError unless an external LMCache connector accepts pool_group; no grouped connector or end-to-end LMCache transfer exists in the candidate.",
+    "No DeepSeek-V4 model weights/B300 distributed PD environment was available, so actual V4 attention correctness, request lifetime behavior, storage restore, unified-KV, HiSparse, and multi-rank behavior remain unverified."
+  ],
+  "remaining_limitations": [
+    "LMCache is absent from the prepared interpreter, so only source/API inspection establishes that the candidate cannot interoperate with current k_pool/v_pool connectors.",
+    "The assigned architecture is one AMD Instinct MI355X, not the reporter's 8xB300 environment.",
+    "No native source changed in the candidate and repository-environment.json declares native=null, so no native rebuild was applicable.",
+    "The GPU helper tests synthetic transfer buffers only; it does not validate a DeepSeek-V4 forward pass, PD decode serving, storage daemon, or numerical model output."
+  ]
+}
