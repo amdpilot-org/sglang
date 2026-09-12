@@ -1,0 +1,28 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31118",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared main-base checkout already contains the cross-chunk prefix holdback fix from upstream PR #34458. Added Qwen3-specific regression coverage comparing accumulated streaming channels with whole-message parsing across every two-chunk split and all 128 partitions of the internal </think> boundaries. A temporary restoration of the pre-fix flush behavior reproduced tag leakage, final-answer misclassification, and the detector remaining in reasoning until a later tool token; restoring the current implementation makes the regression pass.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-10a8b99853ad/venv/bin/python -m pytest -q test/registered/unit/parser/test_reasoning_parser.py::TestStreamingChunkSizeInvariance::test_qwen3_all_two_chunk_splits_match_whole_message test/registered/unit/parser/test_reasoning_parser.py::TestStreamingChunkSizeInvariance::test_qwen3_adversarial_tag_splits_match_whole_message",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before simulation using the historical behavior that flushed all mixed reasoning/tag-prefix text. Fourteen subcases failed: </think> and final content leaked into reasoning, including chunks ending in reasoning</th. Raw output: reports/j-10a8b99853ad/raw/pre_fix_qwen3_regression.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-10a8b99853ad/venv/bin/python -m pytest -q test/registered/unit/parser/test_reasoning_parser.py::TestStreamingChunkSizeInvariance",
+      "exit_code": 0,
+      "what_was_measured": "Current checked-out parser with the new Qwen3 regression: 11 tests and 246 subtests passed, including every two-chunk boundary and all 128 internal </think> partition masks compared with one-shot parsing. Raw output: reports/j-10a8b99853ad/raw/final_chunk_invariance.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and regression are deterministic CPU-only string parsing in python/sglang/srt/parser/reasoning_parser.py; no model inference, kernel, numerical GPU output, or GPU claim was needed or performed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No live Qwen3 model server was launched; verification covers the actual checked-out parser implementation directly rather than end-to-end generation.",
+    "The infinite-generation symptom is not time-reproduced with a model; the exact causal parser failure is reproduced as loss of the end marker and misclassification of final content.",
+    "The runtime fix predates this branch; this change adds missing Qwen3-specific regression coverage rather than a new production-code fix."
+  ]
+}

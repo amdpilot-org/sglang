@@ -1066,6 +1066,15 @@ class TestStreamingChunkSizeInvariance(CustomTestCase):
         result = detector.finish()
         return reasoning + result.reasoning_text, normal + result.normal_text
 
+    def _feed_chunks(self, detector, chunks):
+        reasoning = normal = ""
+        for chunk in chunks:
+            result = detector.parse_streaming_increment(chunk)
+            reasoning += result.reasoning_text
+            normal += result.normal_text
+        result = detector.finish()
+        return reasoning + result.reasoning_text, normal + result.normal_text
+
     def _assert_invariant(self, make_detector, text, expected):
         for chunk_size in self.CHUNK_SIZES:
             with self.subTest(chunk_size=chunk_size):
@@ -1082,6 +1091,46 @@ class TestStreamingChunkSizeInvariance(CustomTestCase):
             "<think>abc reasoning</think>normal text",
             ("abc reasoning", "normal text"),
         )
+
+    def test_qwen3_all_two_chunk_splits_match_whole_message(self):
+        """Qwen3 must retain partial tags attached to preceding reasoning text.
+
+        Checking every boundary includes the reported failure shape, such as a
+        first chunk ending in ``reasoning</th`` rather than containing only the
+        partial tag.  The accumulated streaming channels must equal one-shot
+        parsing without leaking or dropping any tag fragments.
+        """
+        text = "<think>abc reasoning</think>normal <tool_call>payload"
+        whole = Qwen3Detector().detect_and_parse(text)
+        expected = (whole.reasoning_text, whole.normal_text)
+
+        for split in range(len(text) + 1):
+            with self.subTest(split=split):
+                self.assertEqual(
+                    self._feed_chunks(Qwen3Detector(), [text[:split], text[split:]]),
+                    expected,
+                )
+
+    def test_qwen3_adversarial_tag_splits_match_whole_message(self):
+        text = "<think>abc reasoning</think>normal text"
+        whole = Qwen3Detector().detect_and_parse(text)
+        expected = (whole.reasoning_text, whole.normal_text)
+        end_start = text.index("</think>")
+        end_token = "</think>"
+
+        # Exhaust every way the seven internal boundaries of </think> can be
+        # split, while keeping the first fragment attached to prior reasoning.
+        for split_mask in range(1 << (len(end_token) - 1)):
+            chunks = [text[:end_start]]
+            for index, character in enumerate(end_token):
+                chunks[-1] += character
+                if split_mask & (1 << index):
+                    chunks.append("")
+            chunks[-1] += text[end_start + len(end_token) :]
+            with self.subTest(split_mask=split_mask, chunks=chunks):
+                self.assertEqual(
+                    self._feed_chunks(Qwen3Detector(), chunks), expected
+                )
 
     def test_think_end_split_buffered_mode(self):
         self._assert_invariant(
