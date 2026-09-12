@@ -44,6 +44,26 @@ class TestRouterArgs:
         assert args.disable_retries is False
         assert args.disable_circuit_breaker is False
 
+    def test_max_payload_size_from_environment(self, monkeypatch):
+        monkeypatch.setenv("SGLANG_MAX_PAYLOAD_SIZE", "12582912")
+
+        args = parse_router_args([])
+
+        assert args.max_payload_size == 12 * 1024 * 1024
+
+    def test_max_payload_size_cli_overrides_environment(self, monkeypatch):
+        monkeypatch.setenv("SGLANG_MAX_PAYLOAD_SIZE", "12582912")
+
+        args = parse_router_args(["--max-payload-size", "16777216"])
+
+        assert args.max_payload_size == 16 * 1024 * 1024
+
+    def test_invalid_max_payload_size_environment_is_rejected(self, monkeypatch):
+        monkeypatch.setenv("SGLANG_MAX_PAYLOAD_SIZE", "not-a-size")
+
+        with pytest.raises(ValueError, match="invalid literal for int"):
+            parse_router_args([])
+
     def test_parse_selector_valid(self):
         """Test parsing valid selector arguments."""
         # Test single key-value pair

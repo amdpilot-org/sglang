@@ -96,6 +96,9 @@ impl MockWorker {
             )
             .route("/flush_cache", post(flush_cache_handler))
             .route("/v1/models", get(v1_models_handler))
+            // Mock workers must not impose Axum's unrelated 2 MiB default;
+            // payload-limit tests exercise the gateway boundary itself.
+            .layer(axum::extract::DefaultBodyLimit::disable())
             .with_state(config);
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
