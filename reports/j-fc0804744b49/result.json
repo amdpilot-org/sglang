@@ -1,0 +1,53 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38029",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "At exact candidate commit 399f520f72ea5ad85c33546a60c317f2c42759f8, DeepseekSparseAttnBackend copies the owning runner's KVIndexTranslator during construction. Independent failing-before/passing-after GPU tests verify the late-created EAGLE draft-extend backend and all multi-step draft-decode children, and an adversarial non-identity translator check verifies actual delegation rather than only static passthrough.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-fc0804744b49/venv/bin/python -m pytest -q /job/review-evidence-j-fc0804744b49/test/registered/amd/test_eagle_dsa_kv_index_translator.py (on base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Independent reproduction on the recorded base: both late-created DSA shapes retained kv_index_translator=None. Raw output: reports/j-fc0804744b49/evidence/base-regression.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-fc0804744b49/venv/bin/python -m pytest -q test/registered/amd/test_eagle_dsa_kv_index_translator.py (on exact candidate 399f520f72ea5ad85c33546a60c317f2c42759f8)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression passed: draft-extend and two draft-decode children share the runner translator, with non-empty prefix passthrough on a real FP8 DSA pool. Two tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-fc0804744b49/venv/bin/python /job/review-evidence-j-fc0804744b49/adversarial_translator.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial case: a non-identity recording translator was preserved by draft-extend and three draft-decode children and transformed GPU prefix IDs as expected."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-fc0804744b49/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_dsa_indexer.py::TestDSAIndexer::test_indexer_basic_creation",
+      "exit_code": 1,
+      "what_was_measured": "Compatibility test was environment-blocked before backend construction: the optional deep_gemm symbol patched by the test was absent. This does not measure candidate behavior."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-fc0804744b49/venv/bin/python -m py_compile python/sglang/srt/layers/attention/dsa_backend.py test/registered/amd/test_eagle_dsa_kv_index_translator.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate source and regression test syntax/import compilation."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 399f520f72ea5ad85c33546a60c317f2c42759f8",
+      "exit_code": 2,
+      "what_was_measured": "Candidate-wide whitespace check found trailing whitespace only in committed raw pytest evidence logs, not in source or test code."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Tests ran on one assigned AMD Instinct MI355X, gfx950:sramecc+:xnack-, with Torch 2.11.0+rocm7.2 and HIP 7.2.26015. They allocated the repository's FP8 DSA token pool and CUDA tensors. See reports/j-fc0804744b49/evidence/base-import-gpu.log."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The reported four-GPU TP/EP GLM-5.3 EAGLE server workload was not run because only one GPU was assigned and GLM-5.3 weights/configuration were unavailable.",
+    "The single-GPU fixture verifies the backend lifecycle, translator identity/delegation, non-empty read indices, and FP8 DSA allocation; it does not qualify full-model semantic accuracy or distributed behavior.",
+    "No native source changed, so no native rebuild was applicable.",
+    "The existing CUDA DSA indexer compatibility test was blocked before backend construction by a missing optional deep_gemm module attribute in the prepared environment.",
+    "Candidate-wide git diff --check reports trailing whitespace in committed raw pytest logs only."
+  ]
+}
