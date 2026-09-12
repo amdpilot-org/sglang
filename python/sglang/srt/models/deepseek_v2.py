@@ -159,6 +159,9 @@ from sglang.srt.models.deepseek_common.attention_forward_methods import (
 from sglang.srt.models.deepseek_common.deepseek_weight_loader import (
     DeepseekV2WeightLoaderMixin,
 )
+from sglang.srt.models.deepseek_common.hardware_backend.deepseek_v2_npu_mixin import (
+    DeepseekV2NPUAttentionMixin,
+)
 from sglang.srt.models.deepseek_common.utils import (
     _get_llama_4_scaling,
     _is_block_scale_fp8,
@@ -216,15 +219,6 @@ if _use_aiter:
 
 if _is_cuda:
     from sglang.kernels.ops.gemm.tiny_gemm import tiny_gemm_bf16
-elif _is_npu:
-    from sglang.srt.hardware_backend.npu.modules.deepseek_v2_attention_mla_npu import (
-        forward_dsa_core_npu,
-        forward_dsa_prepare_npu,
-        forward_mha_core_npu,
-        forward_mha_prepare_npu,
-        forward_mla_core_npu,
-        forward_mla_prepare_npu,
-    )
 else:
     pass
 
@@ -1705,6 +1699,7 @@ class DeepseekV2MoE(nn.Module):
 class DeepseekV2AttentionMLA(
     nn.Module,
     DeepseekV32AttentionMixin,
+    DeepseekV2NPUAttentionMixin,
     DeepseekMHAForwardMixin,
     DeepseekMHARocmForwardMixin,
     DeepseekMLAForwardMixin,
@@ -2110,27 +2105,13 @@ class DeepseekV2AttentionMLA(
             inner_state = self.forward_absorb_fused_mla_rope_cpu_prepare(
                 positions, hidden_states, forward_batch, zero_allocator
             )
-        elif attn_forward_method == AttnForwardMethod.MHA_NPU:
-            inner_state = forward_mha_prepare_npu(
-                self,
-                positions,
-                hidden_states,
-                forward_batch,
-                zero_allocator,
-                layer_scatter_modes,
-            )
-        elif attn_forward_method == AttnForwardMethod.MLA_NPU:
-            inner_state = forward_mla_prepare_npu(
-                self,
-                positions,
-                hidden_states,
-                forward_batch,
-                zero_allocator,
-                layer_scatter_modes,
-            )
-        elif attn_forward_method == AttnForwardMethod.DSA_NPU:
-            inner_state = forward_dsa_prepare_npu(
-                self,
+        elif attn_forward_method in (
+            AttnForwardMethod.MHA_NPU,
+            AttnForwardMethod.MLA_NPU,
+            AttnForwardMethod.DSA_NPU,
+        ):
+            inner_state = self.forward_npu_prepare(
+                attn_forward_method,
                 positions,
                 hidden_states,
                 forward_batch,
@@ -2169,12 +2150,12 @@ class DeepseekV2AttentionMLA(
             return self.forward_absorb_fused_mla_rope_core(*inner_state)
         elif attn_forward_method == AttnForwardMethod.MLA_FUSED_ROPE_CPU:
             return self.forward_absorb_fused_mla_rope_cpu_core(*inner_state)
-        elif attn_forward_method == AttnForwardMethod.MHA_NPU:
-            return forward_mha_core_npu(self, *inner_state)
-        elif attn_forward_method == AttnForwardMethod.MLA_NPU:
-            return forward_mla_core_npu(self, *inner_state)
-        elif attn_forward_method == AttnForwardMethod.DSA_NPU:
-            return forward_dsa_core_npu(self, *inner_state)
+        elif attn_forward_method in (
+            AttnForwardMethod.MHA_NPU,
+            AttnForwardMethod.MLA_NPU,
+            AttnForwardMethod.DSA_NPU,
+        ):
+            return self.forward_npu_core(attn_forward_method, inner_state)
         else:
             raise NotImplementedError
 
