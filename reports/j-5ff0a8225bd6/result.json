@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35252",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1477",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1445",
+  "candidate_commit": "aa3d942320f7ea135b518733eb9a8381c002064e",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproducibly generates int4_w4a16 tuner keys with an extra factor-of-two reduction (reported E=256,N=128 versus runtime E=256,N=256). At the exact candidate commit, both tuner output naming and the tuner's existing-config lookup derive N as shard_intermediate_size // 2, matching the runtime w2.shape[2] contract. The candidate regression and an independent seven-case probe pass. This is a source fix with regression coverage, not test-only hardening.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python:benchmark/kernels/fused_moe_triton /tmp/amdpilot-repo-j-5ff0a8225bd6/venv/bin/python /job/review-evidence-j-5ff0a8225bd6/key_contract_probe.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Original failure: reported, minimal, and large int4 cases mismatched runtime keys; plain, fp8, int8_w8a8, and int8_w8a16 controls matched. The reported case was tuner N=128 versus runtime N=256. Source paths resolved to the prepared checkout. Evidence: raw/base_key_probe.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-5ff0a8225bd6/venv/bin/python -m pytest -q test/registered/unit/layers/moe/test_fused_moe_tuning_config.py (base with candidate test temporarily materialized)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before candidate regression: 2 int4 cases failed and 4 unaffected dtype controls passed. Evidence: raw/base_regression_realpath.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-5ff0a8225bd6/venv/bin/python -m pytest -q test/registered/unit/layers/moe/test_fused_moe_tuning_config.py (candidate aa3d942320f7ea135b518733eb9a8381c002064e)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression passed all 6 cases. Evidence: raw/candidate_regression.txt"
+    },
+    {
+      "command": "PYTHONPATH=python:benchmark/kernels/fused_moe_triton /tmp/amdpilot-repo-j-5ff0a8225bd6/venv/bin/python /job/review-evidence-j-5ff0a8225bd6/key_contract_probe.py (candidate aa3d942320f7ea135b518733eb9a8381c002064e)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial probe passed the reported E=256/shard=512 case, minimal E=1/shard=2 and large E=8/shard=28672 int4 boundaries, plus four unaffected dtype controls. Evidence: raw/candidate_key_probe.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-5ff0a8225bd6/venv/bin/python -m py_compile benchmark/kernels/fused_moe_triton/common_utils.py benchmark/kernels/fused_moe_triton/tuning_fused_moe_triton.py test/registered/unit/layers/moe/test_fused_moe_tuning_config.py",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python source/test modules compiled. Evidence: raw/candidate_py_compile.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The assigned single GPU is AMD Instinct MI355X gfx950 and its real device-qualified filename was exercised. No GPU kernel was needed or run because the defect and correction are deterministic host-side config-key construction. Evidence: raw/environment.txt",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The reported cyankiwi/Qwen3.5-35B-A3B-AWQ-4bit weights were unavailable, so full tuning followed by server launch was not performed.",
+    "No model semantic, performance, HTTP serving, or distributed-workload claim is made; those are outside what the host-side key comparison establishes.",
+    "Validation hardware was gfx950, not the reporter's gfx1151. The filename mismatch is device-independent, but architecture-specific kernel performance was not evaluated.",
+    "No native files changed in the candidate, so no native rebuild was applicable."
+  ]
+}
