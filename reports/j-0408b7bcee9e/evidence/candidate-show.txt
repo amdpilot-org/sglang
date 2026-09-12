@@ -1,0 +1,189 @@
+commit 760ef21de6b20abcf4ee851c4e895d1c9467d512
+Author:     AMDPilot Agent <amdpilot-agent@users.noreply.github.com>
+AuthorDate: Sat Sep 12 21:43:10 2026 +0000
+Commit:     AMDPilot Agent <amdpilot-agent@users.noreply.github.com>
+CommitDate: Sat Sep 12 21:43:10 2026 +0000
+
+    rust: reject malformed bracketed kv event hosts
+
+diff --git a/reports/j-e4438b826eaf/evidence/counterexample-before.txt b/reports/j-e4438b826eaf/evidence/counterexample-before.txt
+new file mode 100644
+index 0000000..20b9c3f
+--- /dev/null
++++ b/reports/j-e4438b826eaf/evidence/counterexample-before.txt
+@@ -0,0 +1,14 @@
++Exact candidate: c5812a14220bf0d4ebe1cf98cd2c63b818c98aa8
++Command:
++PATH=/job/.cargo/bin:$PATH CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-e4438b826eaf/cargo-target cargo test -p sglang-server bracketed_non_ipv6_host_is_not_advertisable --manifest-path rust/Cargo.toml
++
++Result: exit 101
++
++running 1 test
++test api_server::common::tests::bracketed_non_ipv6_host_is_not_advertisable ... FAILED
++
++assertion `left == right` failed
++  left: Some(("[not-ipv6]", 5557))
++ right: None
++
++test result: FAILED. 0 passed; 1 failed; 0 ignored; 267 filtered out
+diff --git a/reports/j-e4438b826eaf/evidence/focused-tests-after.txt b/reports/j-e4438b826eaf/evidence/focused-tests-after.txt
+new file mode 100644
+index 0000000..4b9ec24
+--- /dev/null
++++ b/reports/j-e4438b826eaf/evidence/focused-tests-after.txt
+@@ -0,0 +1,24 @@
++Command:
++PATH=/job/.cargo/bin:$PATH CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-e4438b826eaf/cargo-target cargo test -p sglang-server api_server::common::tests --manifest-path rust/Cargo.toml
++
++Result: exit 0
++
++running 5 tests
++test api_server::common::tests::bracketed_ipv6_endpoint_is_advertisable ... ok
++test api_server::common::tests::bracketed_non_ipv6_host_is_not_advertisable ... ok
++test api_server::common::tests::shape_server_info_excludes_secrets_and_dump ... ok
++test api_server::common::tests::shape_server_info_advertises_valid_kv_events_without_raw_config ... ok
++test api_server::common::tests::unsafe_kv_events_configurations_serialize_as_null ... ok
++
++test result: ok. 5 passed; 0 failed; 0 ignored; 263 filtered out
++
++Command:
++/tmp/amdpilot-repo-j-e4438b826eaf/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_server_info.py
++
++Result: exit 0
++29 passed, 17 warnings, 12 subtests passed in 27.77s
++
++Python reference probe:
++tcp://[not-ipv6]:5557 -> None
++tcp://[2001:db8::5]:5557 -> ('[2001:db8::5]', 5557)
++tcp://[::]:5557 -> ('[::]', 5557)
+diff --git a/reports/j-e4438b826eaf/evidence/native-rebuild.txt b/reports/j-e4438b826eaf/evidence/native-rebuild.txt
+new file mode 100644
+index 0000000..e2c5060
+--- /dev/null
++++ b/reports/j-e4438b826eaf/evidence/native-rebuild.txt
+@@ -0,0 +1,17 @@
++Toolchain:
++rustc 1.92.0 (ded5c06cf 2025-12-08)
++
++Command:
++PATH=/job/.cargo/bin:$PATH PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e4438b826eaf/venv/bin/python <forced load_rust_extension probe using mode='force' and cache_dir=Path('/tmp/amdpilot-repo-j-e4438b826eaf/rust-extension-cache-final')>
++
++Result: exit 0
++Finished `release` profile [optimized] target(s) in 1m 38s
++native_extension=/tmp/amdpilot-repo-j-e4438b826eaf/rust-extension-cache-final/artifacts/sglang-server/2af13072eba92fdb45d82d0e0a4b8458dafe61c76492f529b8459761ef8aef4a/_server.cpython-312-x86_64-linux-gnu.so
++
++The compile output identified source crates at:
++/job/repo/rust/sglang-mm
++/job/repo/rust/sglang-server
++
++Formatting:
++cd /job/repo/rust && PATH=/job/.cargo/bin:$PATH cargo fmt --all -- --check
++Result: exit 0 after applying rustfmt.
+diff --git a/reports/j-e4438b826eaf/result.json b/reports/j-e4438b826eaf/result.json
+new file mode 100644
+index 0000000..29bb134
+--- /dev/null
++++ b/reports/j-e4438b826eaf/result.json
+@@ -0,0 +1,45 @@
++{
++  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33055",
++  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
++  "outcome": "fixed",
++  "summary": "Preserved candidate https://github.com/amdpilot-org/sglang/pull/3414 at c5812a14220bf0d4ebe1cf98cd2c63b818c98aa8 and corrected the concrete counterexample independently reported by https://github.com/amdpilot-org/sglang/pull/3433. Rust now validates bracketed endpoint contents as an actual IPv6 address before advertising /server_info.kv_events, so tcp://[not-ipv6]:5557 produces null like Python while valid bracketed IPv6 remains supported. The candidate's typed ServerArgs plumbing, additive field, allowlist, redaction, malformed-config handling, and secret-canary coverage remain intact.",
++  "tests": [
++    {
++      "command": "PATH=/job/.cargo/bin:$PATH CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-e4438b826eaf/cargo-target cargo test -p sglang-server bracketed_non_ipv6_host_is_not_advertisable --manifest-path rust/Cargo.toml (before parser correction)",
++      "exit_code": 101,
++      "what_was_measured": "Independent failing-before reproduction on the exact candidate implementation: Rust returned Some((\"[not-ipv6]\", 5557)) where Python returns None."
++    },
++    {
++      "command": "PATH=/job/.cargo/bin:$PATH CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-e4438b826eaf/cargo-target cargo test -p sglang-server api_server::common::tests --manifest-path rust/Cargo.toml",
++      "exit_code": 0,
++      "what_was_measured": "Passing-after Rust serializer contract: 5 focused tests cover the counterexample, valid IPv6, valid metadata, malformed/disabled configurations, page sizes, port bounds, allowlisting, and secret canaries."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-e4438b826eaf/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_server_info.py",
++      "exit_code": 0,
++      "what_was_measured": "Real Python /server_info route contract: 29 tests and 12 subtests passed, including endpoint, port, page-size, IPv6, field-preservation, and malformed configuration behavior."
++    },
++    {
++      "command": "Python parse_advertisable_tcp reference probe for tcp://[not-ipv6]:5557, tcp://[2001:db8::5]:5557, and tcp://[::]:5557",
++      "exit_code": 0,
++      "what_was_measured": "Python returned None for the malformed bracketed hostname and accepted both concrete and wildcard bracketed IPv6 endpoints."
++    },
++    {
++      "command": "load_rust_extension('sglang.srt.rust_extensions._server', mode='force', cache_dir=Path('/tmp/amdpilot-repo-j-e4438b826eaf/rust-extension-cache-final'))",
++      "exit_code": 0,
++      "what_was_measured": "Forced a release native rebuild from /job/repo/rust using rustc 1.92.0 and imported the resulting extension from the private runtime cache."
++    },
++    {
++      "command": "cd /job/repo/rust && PATH=/job/.cargo/bin:$PATH cargo fmt --all -- --check && git diff --check",
++      "exit_code": 0,
++      "what_was_measured": "Rust formatting and patch whitespace validation."
++    }
++  ],
++  "gpu_execution": false,
++  "gpu_evidence": "No GPU execution was performed because this correction is CPU-only endpoint parsing and JSON metadata serialization. Torch 2.11.0+rocm7.2 and HIP 7.2 were left unchanged; model weights or architecture execution cannot add evidence for this parser defect.",
++  "native_rebuilt": true,
++  "remaining_limitations": [
++    "The corrected Rust serializer and freshly rebuilt PyO3 native extension were exercised, but a live model-backed Axum server was not launched. The deterministic tiny-Llama fixture would add transport/engine smoke coverage but is not needed to establish this endpoint-parser correction.",
++    "KV-event publishing remains intentionally out of scope and was not exercised."
++  ]
++}
+diff --git a/rust/sglang-server/src/api_server/common.rs b/rust/sglang-server/src/api_server/common.rs
+index 8795503..9c5c5a1 100644
+--- a/rust/sglang-server/src/api_server/common.rs
++++ b/rust/sglang-server/src/api_server/common.rs
+@@ -13,7 +13,7 @@ use axum::{
+     routing::get,
+ };
+ use serde::Deserialize;
+-use std::sync::Arc;
++use std::{net::Ipv6Addr, sync::Arc};
+ 
+ use super::app::AppState;
+ use super::guard::AbortGuard;
+@@ -218,6 +218,7 @@ fn parse_advertisable_tcp(endpoint: &str) -> Option<(&str, u16)> {
+     let address = endpoint.strip_prefix("tcp://")?;
+     let (host, port_text) = if let Some(bracketed) = address.strip_prefix('[') {
+         let close = bracketed.find(']')?;
++        bracketed[..close].parse::<Ipv6Addr>().ok()?;
+         let host = &address[..close + 2];
+         let port = address.get(close + 2..)?.strip_prefix(':')?;
+         (host, port)
+@@ -337,14 +338,17 @@ mod tests {
+         assert!(!text.contains("API_SECRET_CANARY"));
+         let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
+         assert_eq!(value["internal_states"][0]["last_gen_throughput"], 2.5);
+-        assert_eq!(value["kv_events"], serde_json::json!({
+-            "publisher": "zmq",
+-            "endpoint_host": "*",
+-            "endpoint_port_base": 5557,
+-            "topic": "kv",
+-            "block_size": 64,
+-            "dp_size": 2,
+-        }));
++        assert_eq!(
++            value["kv_events"],
++            serde_json::json!({
++                "publisher": "zmq",
++                "endpoint_host": "*",
++                "endpoint_port_base": 5557,
++                "topic": "kv",
++                "block_size": 64,
++                "dp_size": 2,
++            })
++        );
+         assert!(value.get("kv_events_config").is_none());
+     }
+ 
+@@ -390,4 +394,9 @@ mod tests {
+             Some(("[2001:db8::5]", 5557))
+         );
+     }
++
++    #[test]
++    fn bracketed_non_ipv6_host_is_not_advertisable() {
++        assert_eq!(parse_advertisable_tcp("tcp://[not-ipv6]:5557"), None);
++    }
+ }
