@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35565",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1429",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1390",
+  "candidate_commit": "a99886a78d232e0d0bf3c7034f66061c26002874",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review reproduced the original direct detect_and_parse data loss on all 13 named parsers at the recorded base, then verified that the exact candidate preserves the complete source text whenever marker recognition produces zero calls. Complete valid calls continue to parse in the candidate regression suite. The change directly fixes the original detector-level contract rather than relying on a serving smoke or wrapper-only workaround.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9dfca2ed87d5/venv/bin/python /job/review-evidence-j-9dfca2ed87d5/reproduce_and_adversarial.py (base commit)",
+      "exit_code": 1,
+      "what_was_measured": "The recorded base lost text for bare markers and visible-prefix-plus-marker inputs for every one of the 13 parsers (26 required failures)."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9dfca2ed87d5/venv/bin/python /job/review-evidence-j-9dfca2ed87d5/reproduce_and_adversarial.py (candidate commit a99886a78d232e0d0bf3c7034f66061c26002874)",
+      "exit_code": 0,
+      "what_was_measured": "All 13 parsers preserved bare markers, marker-prefixed visible text, marker-like ordinary text, and unparseable/unknown-function blocks when zero calls were returned."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9dfca2ed87d5/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py test/registered/unit/function_call/test_mistral_detector.py",
+      "exit_code": 0,
+      "what_was_measured": "265 tests and 17 subtests passed, including all 13 marker regressions, visible-prefix preservation, plain text, valid complete-call parsing, and Mistral invalid JSON."
+    },
+    {
+      "command": "git diff 358c163250ad3b1f62939b01ce1314a0a31a0365 a99886a78d232e0d0bf3c7034f66061c26002874 --check",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The failing and fixed code is deterministic Python text parsing in detect_and_parse; no GPU kernel, model execution, or HTTP serving path is involved. The assigned gfx950 GPU was therefore not used and no GPU claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No full model, HTTP serving, semantic-accuracy, or distributed-workload run was performed; those paths are outside the directly reproducible parser contract and no such claim is made.",
+    "No native rebuild was performed because the candidate changes only Python parser and test/report files and introduces no C++, FlyDSL, kernel, or compiled-extension change.",
+    "The environment is ROCm 7.2 with one assigned gfx950 GPU, whereas the source report used CUDA on an RTX 4090; this architecture difference does not affect the exercised CPU-only parser path.",
+    "The separate upstream PR https://github.com/sgl-project/sglang/pull/35636 remains open and changes the serving wrapper rather than these detector implementations."
+  ]
+}
