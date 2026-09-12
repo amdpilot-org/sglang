@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38773",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced all concrete review counterexamples against candidate https://github.com/amdpilot-org/sglang/pull/642 at 68e241ce2eeac7398ab60c704d16bb1c69363e73, then preserved its valid empty-input fix while adding configured top_k and hidden_size width validation. This consolidates the correction requested by review https://github.com/amdpilot-org/sglang/pull/705.",
+  "tests": [
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-16c1672384ab/venv/bin/python -m pytest -vv test/registered/unit/layers/quantization/test_mxfp4_empty_review_counterexamples.py",
+      "exit_code": 1,
+      "what_was_measured": "At exact candidate commit 68e241ce2eeac7398ab60c704d16bb1c69363e73, all four independent GPU counterexamples failed because malformed empty routing widths 0, 1, and 3 and hidden width 15 returned without raising."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-16c1672384ab/venv/bin/python -m pytest -vv test/registered/moe/test_mxfp4_empty_input.py",
+      "exit_code": 0,
+      "what_was_measured": "Six GPU wrapper tests passed after correction: valid empty contract, nonempty boundary control, mismatched token dimension, routing widths 0/1/3 against top_k=2, and hidden width 15 against hidden_size=16."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "The consolidated source, regression, and report changes contain no whitespace errors."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py test/registered/moe/test_mxfp4_empty_input.py reports/j-16c1672384ab/result.json reports/j-16c1672384ab/raw/gpu_environment.txt reports/j-16c1672384ab/raw/candidate_counterexamples_before.txt reports/j-16c1672384ab/raw/consolidated_after.txt",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository hooks passed, including isort, ruff, ruff-format, codespell, and registered-test CI taxonomy validation."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "Tests allocated and checked real tensors on one AMD Instinct MI350X with torch 2.11.0+rocm7.2 and HIP 7.2.26015; only the unavailable NVIDIA FlashInfer CUTLASS boundary was instrumented.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "H20/SM90 FlashInfer CUTLASS kernel execution remains unverified because the assigned GPU is ROCm MI350X.",
+    "The four-rank DeepSeek-V4-Flash DP-attention plus TBO end-to-end scenario and real distributed collectives remain unverified because four H20 GPUs and model weights were unavailable.",
+    "The regression validates the real SGLang MoeRunner and GPU tensor contract with an instrumented external kernel boundary; it does not claim NVIDIA kernel execution.",
+    "No native source changed, so no native rebuild was applicable."
+  ],
+  "source_paths": [
+    "python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py",
+    "test/registered/moe/test_mxfp4_empty_input.py"
+  ],
+  "raw_output_paths": [
+    "reports/j-16c1672384ab/raw/gpu_environment.txt",
+    "reports/j-16c1672384ab/raw/candidate_counterexamples_before.txt",
+    "reports/j-16c1672384ab/raw/consolidated_after.txt"
+  ]
+}
