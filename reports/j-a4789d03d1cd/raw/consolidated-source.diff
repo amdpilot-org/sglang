@@ -1,0 +1,359 @@
+diff --git a/docs/cookbook/autoregressive/DeepSeek/DeepSeek-V4.mdx b/docs/cookbook/autoregressive/DeepSeek/DeepSeek-V4.mdx
+index bdab2b9..0997af7 100644
+--- a/docs/cookbook/autoregressive/DeepSeek/DeepSeek-V4.mdx
++++ b/docs/cookbook/autoregressive/DeepSeek/DeepSeek-V4.mdx
+@@ -692,7 +692,20 @@ Larger blocks can improve decode latency when acceptance stays high, but they al
+
+ For every candidate, compare with the same recipe without `--speculative-algorithm DSPARK`. Restart the server between the DSpark and non-speculative legs, keep the request corpus, sampling, concurrency, and warmup identical, and give each `bench_serving` leg its own `--flush-cache`. Leave `--speculative-draft-attention-backend` unset unless a separate profiling run justifies an override.
+
+-DSpark currently requires CUDA and `pp_size == 1`. It is not compatible with PD disaggregation on current SGLang releases; selecting a prefill or decode role in the Playground automatically removes the inherited DSpark flags. The MI355X Flash Official recipes therefore run target-only, and so do the DP-Attention recipes in the Deploy panel — for a DP-Attention configuration that does run DSpark, see the [agentic recipe below](#3-6-agentic-long-context-with-hicache-dram-offload-b200-fp4-dspark). If a larger draft block or concurrency causes graph-capture OOM, lower `--mem-fraction-static`, the draft block size, or the configured maximum running requests, then rerun both performance and accuracy gates.
++DSpark currently requires CUDA or NPU and `pp_size == 1`. The PD transport can
++map the pending C2 row by logical boundary position when prefill and decode use
++different local C2 ring capacities. End-to-end DeepSeek-V4.1 PD + DSpark has not
++yet been qualified with Mooncake or NIXL, so this row-transfer support alone must
++not be treated as a supported deployment configuration. Decode radix cache,
++dynamic/ragged verification, multimodal rebootstrap, and heterogeneous parallel
++layouts remain unsupported; keep the existing startup guards for those
++combinations. The ROCm Flash Official recipes
++therefore run target-only, and so do the DP-Attention recipes in the Deploy panel
++— for a DP-Attention configuration that does run DSpark, see the
++[agentic recipe below](#3-6-agentic-long-context-with-hicache-dram-offload-b200-fp4-dspark).
++If a larger draft block or concurrency causes graph-capture OOM, lower
++`--mem-fraction-static`, the draft block size, or the configured maximum running
++requests, then rerun both performance and accuracy gates.
+
+ ### 3.5 Vision (Image Inputs)
+
+diff --git a/python/sglang/srt/disaggregation/base/conn.py b/python/sglang/srt/disaggregation/base/conn.py
+index dcaf4c9..fae5121 100644
+--- a/python/sglang/srt/disaggregation/base/conn.py
++++ b/python/sglang/srt/disaggregation/base/conn.py
+@@ -25,6 +25,10 @@ class StateType(str, enum.Enum):
+     # DeepSeek-V4 unified_kv SWA ring: addressed per-row by ring slot
+     # (req_pool_idx * ring_stride + pos % ring_stride), needs its own component.
+     SWA_RING = "swa_ring"
++    # DeepSeek-V4 C2 pending (kv, score) pair. Buffers are registered one FP32
++    # row at a time so peers with different speculative ring capacities can
++    # map the same logical boundary position independently.
++    DSV4_C2_STATE = "dsv4_c2_state"
+     # DeepSeek-V4 request-scoped compression state; preserve the legacy wire value.
+     DSV4_REQUEST_STATE = "c128_state"
+     # A block-scaled KV dtype keeps its per-block scales in buffers parallel to
+diff --git a/python/sglang/srt/disaggregation/common/conn.py b/python/sglang/srt/disaggregation/common/conn.py
+index 5ebcaf8..f9bbdf6 100644
+--- a/python/sglang/srt/disaggregation/common/conn.py
++++ b/python/sglang/srt/disaggregation/common/conn.py
+@@ -999,7 +999,8 @@ class CommonKVManager(BaseKVManager):
+     ) -> Tuple[List[int], List[int]]:
+         # Match the pool's flat buffer order, with layers grouped by ratio:
+         # KV: [C4 KV, C4 indexer KV, C128 KV].
+-        # SWA state: [SWA KV, C4 compressor state, C4 indexer state].
++        # SWA state: [SWA KV].
++        # DSV4_C2_STATE: [C4 compressor state, C4 indexer state].
+         # DSV4_REQUEST_STATE: [C128 compressor state]; SWA_RING: [SWA rings].
+         # Prefill src is stage-local; decode dst may cover the full model.
+         start_layer = self.kv_args.prefill_start_layer
+@@ -1020,6 +1021,12 @@ class CommonKVManager(BaseKVManager):
+         if state_type == StateType.DSV4_REQUEST_STATE:
+             return src_kv_ptrs, list(dst_kv_ptrs[c128_off_s:c128_off_e])
+
++        if state_type == StateType.DSV4_C2_STATE:
++            return src_kv_ptrs, (
++                list(dst_kv_ptrs[c4_off_s:c4_off_e])
++                + list(dst_kv_ptrs[c4_full + c4_off_s : c4_full + c4_off_e])
++            )
++
+         if state_type == StateType.SWA_RING:
+             swa_s = min(start_layer, len(dst_kv_ptrs))
+             swa_e = min(end_layer, len(dst_kv_ptrs))
+diff --git a/python/sglang/srt/disaggregation/decode.py b/python/sglang/srt/disaggregation/decode.py
+index b16c5ce..87c78f6 100644
+--- a/python/sglang/srt/disaggregation/decode.py
++++ b/python/sglang/srt/disaggregation/decode.py
+@@ -55,6 +55,7 @@ from sglang.srt.disaggregation.utils import (
+     build_kv_layer_ids,
+     build_staging_slot_metadata,
+     get_dsa_tail_state_indices,
++    get_dsv4_c4_state_indices,
+     get_dsv4_c128_state_indices,
+     get_kv_class,
+     is_dsv4_c128_online_enabled,
+@@ -1448,6 +1449,13 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
+                     ring_size=ring_size,
+                 )
+
++            def _c2_state_payload():
++                return get_dsv4_c4_state_indices(
++                    int(decode_req.req.kv.req_pool_idx),
++                    seq_len,
++                    ring_size=self.token_to_kv_pool.get_ring_size(4),
++                )
++
+             state_types = self.kv_manager.kv_args.state_types
+             if StateType.DSV4_REQUEST_STATE in state_types:
+                 clear_c128_state = getattr(
+@@ -1462,6 +1470,7 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
+                 StateType.DSA_TAIL: _dsa_tail_payload,
+                 StateType.MINIMAX_INDEX_K: _full_kv_pages_payload,
+                 StateType.SWA_RING: _swa_ring_payload,
++                StateType.DSV4_C2_STATE: _c2_state_payload,
+                 StateType.DSV4_REQUEST_STATE: _c128_state_payload,
+                 StateType.BLOCK_SCALE: _full_kv_pages_payload,
+                 StateType.BLOCK_SCALE_SWA: _swa_payload,
+diff --git a/python/sglang/srt/disaggregation/mooncake/conn.py b/python/sglang/srt/disaggregation/mooncake/conn.py
+index a37600e..33e0ac3 100644
+--- a/python/sglang/srt/disaggregation/mooncake/conn.py
++++ b/python/sglang/srt/disaggregation/mooncake/conn.py
+@@ -1343,6 +1343,7 @@ class MooncakeKVManager(StagingManagerMixin, CommonKVManager):
+             StateType.SWA,
+             StateType.DSA,
+             StateType.SWA_RING,
++            StateType.DSV4_C2_STATE,
+             StateType.DSV4_REQUEST_STATE,
+             StateType.BLOCK_SCALE,
+             StateType.BLOCK_SCALE_SWA,
+@@ -1350,7 +1351,11 @@ class MooncakeKVManager(StagingManagerMixin, CommonKVManager):
+
+     def _requires_exact_state_index_match(self, st: StateType) -> bool:
+         """State types whose page lists are positional and must not be truncated."""
+-        return st in (StateType.SWA_RING, StateType.DSV4_REQUEST_STATE)
++        return st in (
++            StateType.SWA_RING,
++            StateType.DSV4_C2_STATE,
++            StateType.DSV4_REQUEST_STATE,
++        )
+
+     def maybe_send_extra(
+         self,
+diff --git a/python/sglang/srt/disaggregation/nixl/conn.py b/python/sglang/srt/disaggregation/nixl/conn.py
+index 6bf84a1..2da270c 100644
+--- a/python/sglang/srt/disaggregation/nixl/conn.py
++++ b/python/sglang/srt/disaggregation/nixl/conn.py
+@@ -2461,6 +2461,7 @@ class NixlKVManager(StagingManagerMixin, CommonKVManager):
+             elif st in (
+                 StateType.SWA,
+                 StateType.SWA_RING,
++                StateType.DSV4_C2_STATE,
+                 StateType.DSV4_REQUEST_STATE,
+             ):
+                 if not self.is_mla_backend and self.attn_tp_size != decode_tp_size:
+diff --git a/python/sglang/srt/disaggregation/prefill.py b/python/sglang/srt/disaggregation/prefill.py
+index 1afebb2..bb59c70 100644
+--- a/python/sglang/srt/disaggregation/prefill.py
++++ b/python/sglang/srt/disaggregation/prefill.py
+@@ -46,6 +46,7 @@ from sglang.srt.disaggregation.utils import (
+     build_kv_layer_ids,
+     build_staging_slot_metadata,
+     get_dsa_tail_state_indices,
++    get_dsv4_c4_state_indices,
+     get_dsv4_c128_state_indices,
+     get_kv_class,
+     is_aborted,
+@@ -1374,6 +1375,14 @@ class SchedulerDisaggregationPrefillMixin:
+                     ring_size=ring_size,
+                 )
+
++            def _c2_state_payload():
++                pool = self.token_to_kv_pool_allocator.get_kvcache()
++                return get_dsv4_c4_state_indices(
++                    int(req.kv.req_pool_idx),
++                    seq_len,
++                    ring_size=pool.get_ring_size(4),
++                )
++
+             state_types = (
+                 self.disagg_prefill_bootstrap_queue.kv_manager.kv_args.state_types
+             )
+@@ -1384,6 +1393,7 @@ class SchedulerDisaggregationPrefillMixin:
+                 StateType.DSA_TAIL: _dsa_tail_payload,
+                 StateType.MINIMAX_INDEX_K: _full_kv_pages_payload,
+                 StateType.SWA_RING: _swa_ring_payload,
++                StateType.DSV4_C2_STATE: _c2_state_payload,
+                 StateType.DSV4_REQUEST_STATE: _c128_state_payload,
+                 StateType.BLOCK_SCALE: _full_kv_pages_payload,
+                 StateType.BLOCK_SCALE_SWA: _swa_payload,
+diff --git a/python/sglang/srt/disaggregation/utils.py b/python/sglang/srt/disaggregation/utils.py
+index 4ed4044..ac7bbdf 100644
+--- a/python/sglang/srt/disaggregation/utils.py
++++ b/python/sglang/srt/disaggregation/utils.py
+@@ -89,18 +89,23 @@ def get_dsv4_c4_state_indices(
+     *,
+     ring_size: int,
+ ) -> np.ndarray:
+-    # Prefill and decode can have different ring sizes (8 or 16 with EAGLE/MTP);
+-    # pair the overlap compressor's live rows by logical token position.
+-    if ring_size < 8 or ring_size % 4 != 0:
+-        raise ValueError(
+-            f"C4 ring_size must be a multiple of 4 and at least 8, got {ring_size}"
+-        )
++    """Return the single pending C2 row at a committed PD boundary.
++
++    The C4 compressor consumes pairs.  An even boundary therefore has no
++    pending state; an odd boundary carries the row produced by position N-1.
++    Each endpoint calls this with its own request slot and ring capacity.
++    """
++    if ring_size < 2 or ring_size & (ring_size - 1):
++        raise ValueError(f"C2 ring_size must be a power of two >= 2, got {ring_size}")
+
+     seq_len = max(0, int(seq_len))
+-    state_len = seq_len % 4 + 4
+-    positions = np.arange(max(0, seq_len - state_len), seq_len, dtype=np.int64)
+-    rows = int(req_pool_idx) * int(ring_size) + positions % int(ring_size)
+-    return rows.astype(np.int32)
++    if seq_len % 2 == 0:
++        return np.empty((0,), dtype=np.int32)
++    position = seq_len - 1
++    return np.array(
++        [int(req_pool_idx) * int(ring_size) + position % int(ring_size)],
++        dtype=np.int32,
++    )
+
+
+ def get_dsv4_c128_state_indices(
+@@ -1331,6 +1336,20 @@ def setup_state_kv_args(
+             append_state_component(
+                 kv_args, StateType.SWA, data_ptrs, data_lens, item_lens
+             )
++            if isinstance(token_to_kv_pool, DeepSeekV4TokenToKVPool) and hasattr(
++                token_to_kv_pool, "get_c2_state_buf_infos"
++            ):
++                c2_ptrs, c2_lens, c2_item_lens = (
++                    token_to_kv_pool.get_c2_state_buf_infos()
++                )
++                if c2_ptrs:
++                    append_state_component(
++                        kv_args,
++                        StateType.DSV4_C2_STATE,
++                        c2_ptrs,
++                        c2_lens,
++                        c2_item_lens,
++                    )
+             # MXFP8 KV: each sub-pool's block scales ride as their own component
+             # so they inherit the index payload of the KV they describe.
+             # Only the concrete SWAKVPool owns a full sub-pool; other
+diff --git a/python/sglang/srt/mem_cache/deepseek_v4_memory_pool.py b/python/sglang/srt/mem_cache/deepseek_v4_memory_pool.py
+index c96085d..e64e0f4 100644
+--- a/python/sglang/srt/mem_cache/deepseek_v4_memory_pool.py
++++ b/python/sglang/srt/mem_cache/deepseek_v4_memory_pool.py
+@@ -881,21 +881,25 @@ class DeepSeekV4TokenToKVPool(BaseSWAKVPool):
+                 data_lens.append(buf.nbytes)
+                 item_lens.append(buf[0].nbytes)
+
+-        for pools in [
+-            self.compress_state_pools,
+-            self.indexer_compress_state_pools,
+-        ]:
++        return data_ptrs, data_lens, item_lens
++
++    def get_c2_state_buf_infos(self) -> Tuple[List[int], List[int], List[int]]:
++        """Register C4 compressors' pending C2 state at row granularity."""
++        data_ptrs: List[int] = []
++        data_lens: List[int] = []
++        item_lens: List[int] = []
++        for pools in (
++            getattr(self, "compress_state_pools", ()),
++            getattr(self, "indexer_compress_state_pools", ()),
++        ):
+             for pool in pools:
+-                if pool is None:
+-                    continue
+-                if pool.ratio == 128:
++                if pool is None or pool.ratio != 4:
+                     continue
+                 t = pool.kv_score_buffer.kv_score
+                 assert t.ndim == 2, f"expected 2D buffer, got {t.ndim}D"
+                 data_ptrs.append(t.data_ptr())
+                 data_lens.append(t.nbytes)
+-                item_lens.append(t[0].nbytes * pool.ring_size)
+-
++                item_lens.append(t[0].nbytes)
+         return data_ptrs, data_lens, item_lens
+
+     def get_request_state_buf_infos(
+diff --git a/test/registered/unit/disaggregation/test_disaggregation_wire.py b/test/registered/unit/disaggregation/test_disaggregation_wire.py
+index c5cb2bd..365e9c6 100644
+--- a/test/registered/unit/disaggregation/test_disaggregation_wire.py
++++ b/test/registered/unit/disaggregation/test_disaggregation_wire.py
+@@ -640,35 +640,41 @@ class TestEagleDsaSeedTransfer(CustomTestCase):
+
+ class TestDSV4C4StateIndices(unittest.TestCase):
+     def test_non_mtp_to_mtp_maps_the_same_logical_positions(self):
+-        # seq_len=13 keeps logical positions [8, 13) for the overlap C4 state.
++        # N=13 has pending position 12; each side maps it into its own ring.
+         src = get_dsv4_c4_state_indices(2, 13, ring_size=8)
+         dst = get_dsv4_c4_state_indices(2, 13, ring_size=16)
+
+-        np.testing.assert_array_equal(src, np.array([16, 17, 18, 19, 20]))
+-        np.testing.assert_array_equal(dst, np.array([40, 41, 42, 43, 44]))
++        np.testing.assert_array_equal(src, np.array([20]))
++        np.testing.assert_array_equal(dst, np.array([44]))
+         self.assertEqual(src.size, dst.size)
+
+     def test_ring_wrap_preserves_position_order(self):
+         np.testing.assert_array_equal(
+-            get_dsv4_c4_state_indices(0, 10, ring_size=8),
+-            np.array([4, 5, 6, 7, 0, 1], dtype=np.int32),
++            get_dsv4_c4_state_indices(3, 101, ring_size=8),
++            np.array([28], dtype=np.int32),
+         )
+
+     def test_short_and_empty_sequences(self):
+         np.testing.assert_array_equal(
+             get_dsv4_c4_state_indices(3, 3, ring_size=8),
+-            np.array([24, 25, 26], dtype=np.int32),
++            np.array([26], dtype=np.int32),
+         )
+         np.testing.assert_array_equal(
+             get_dsv4_c4_state_indices(3, 0, ring_size=8),
+             np.empty((0,), dtype=np.int32),
+         )
+
++    def test_even_boundary_has_no_payload(self):
++        np.testing.assert_array_equal(
++            get_dsv4_c4_state_indices(3, 102, ring_size=8),
++            np.empty((0,), dtype=np.int32),
++        )
++
+     def test_invalid_ring_size_is_rejected(self):
+         with self.assertRaises(ValueError):
+-            get_dsv4_c4_state_indices(0, 8, ring_size=4)
++            get_dsv4_c4_state_indices(0, 8, ring_size=1)
+         with self.assertRaises(ValueError):
+-            get_dsv4_c4_state_indices(0, 8, ring_size=10)
++            get_dsv4_c4_state_indices(0, 8, ring_size=6)
+
+
+ class TestDSV4C128StateIndices(unittest.TestCase):
+@@ -715,6 +721,7 @@ def _make_dsv4_target(*, unified, mapping=None):
+         _buf_infos(12) if unified else ([], [], [])
+     )
+     pool.get_request_state_buf_infos = lambda: ([], [], [])
++    pool.get_c2_state_buf_infos = lambda: ([], [], [])
+     return pool
+
+
+@@ -743,6 +750,24 @@ def _make_dsv4_draft(*, unified, mapping=None):
+
+
+ class TestDSV4DraftStateRegistration(unittest.TestCase):
++    def test_target_c2_state_is_row_granular_component(self):
++        target = _make_dsv4_target(unified=False, mapping=torch.arange(16))
++        target.get_c2_state_buf_infos = lambda: ([21, 22, 23], [8192] * 3, [4096] * 3)
++        draft = _make_dsv4_draft(
++            unified=False, mapping=target.full_to_swa_index_mapping
++        )
++        kv_args = KVArgs()
++
++        setup_state_kv_args(kv_args, target, draft)
++
++        self.assertEqual(
++            kv_args.state_types,
++            [StateType.SWA, StateType.DSV4_C2_STATE, StateType.SWA],
++        )
++        self.assertEqual(kv_args.state_data_ptrs[1], [21, 22, 23])
++        self.assertEqual(kv_args.state_item_lens[1], [4096, 4096, 4096])
++        self.assertEqual(sum(kv_args.state_item_lens[1]), 12 * 1024)
++
+     def test_draft_state_is_a_separate_component(self):
+         mapping = torch.arange(16)
+         cases = [
