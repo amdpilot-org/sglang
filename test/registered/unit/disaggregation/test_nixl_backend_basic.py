@@ -13,7 +13,10 @@ import numpy as np
 
 from sglang.srt.disaggregation.base.conn import KVPoll
 from sglang.srt.disaggregation.common.conn import CommonKVManager
-from sglang.srt.disaggregation.common.staging_handler import PrefillStagingContext
+from sglang.srt.disaggregation.common.staging_handler import (
+    DecodeStagingHandler,
+    PrefillStagingContext,
+)
 from sglang.srt.disaggregation.common.utils import pack_int_lists
 from sglang.srt.disaggregation.nixl.conn import (
     KVArgsRegisterInfo,
@@ -909,6 +912,45 @@ class TestNixlNodeFailure(CustomTestCase):
         )
         return mgr
 
+    def test_handle_node_failure_removes_watermark_subscriber(self):
+        mgr = self._make_manager()
+        failed_infos = mgr.connection_pool["10.0.0.1:8998_0_0_0"]
+        mgr._staging_handler = object.__new__(DecodeStagingHandler)
+        mgr._staging_handler._wm_subscribers = {}
+        mgr._staging_handler._wm_subscribers_lock = threading.Lock()
+        mgr._staging_handler._wm_next_generation = 0
+        mgr._staging_handler.staging_allocator = SimpleNamespace(
+            get_watermark=lambda: (0, 0)
+        )
+        mgr._staging_handler.register_wm_subscriber(
+            SimpleNamespace(bootstrap_infos=failed_infos), "failed-session"
+        )
+
+        mgr._handle_node_failure("10.0.0.1:8998")
+
+        self.assertEqual(mgr._staging_handler._wm_subscribers, {})
+
+    def test_handle_node_failure_removes_multi_cp_watermark_subscriber(self):
+        mgr = self._make_manager()
+        cp0_infos = mgr.connection_pool["10.0.0.1:8998_0_0_0"]
+        cp1_infos = [{"rank_ip": "10.0.0.1", "rank_port": 10002}]
+        mgr.connection_pool["10.0.0.1:8998_0_1_0"] = cp1_infos
+        mgr._staging_handler = object.__new__(DecodeStagingHandler)
+        mgr._staging_handler._wm_subscribers = {}
+        mgr._staging_handler._wm_subscribers_lock = threading.Lock()
+        mgr._staging_handler._wm_next_generation = 0
+        mgr._staging_handler.staging_allocator = SimpleNamespace(
+            get_watermark=lambda: (0, 0)
+        )
+        mgr._staging_handler.register_wm_subscriber(
+            SimpleNamespace(bootstrap_infos=cp0_infos + cp1_infos),
+            "multi-cp-session",
+        )
+
+        mgr._handle_node_failure("10.0.0.1:8998")
+
+        self.assertEqual(mgr._staging_handler._wm_subscribers, {})
+
     def test_handle_node_failure_removes_connections_and_marks_pending_rooms(self):
         mgr = self._make_manager()
 
@@ -933,6 +975,67 @@ class TestNixlNodeFailure(CustomTestCase):
         CommonKVManager.update_status(mgr, 9, KVPoll.Failed)
 
         self.assertNotIn(9, mgr.request_status)
+
+
+class TestStagingWatermarkSubscriberLifecycle(CustomTestCase):
+    def _make_handler(self):
+        handler = object.__new__(DecodeStagingHandler)
+        handler._wm_subscribers = {}
+        handler._wm_subscribers_lock = threading.Lock()
+        handler._wm_next_generation = 0
+        handler.staging_allocator = SimpleNamespace(get_watermark=lambda: (0, 0))
+        return handler
+
+    def test_register_refreshes_receiver_for_same_endpoint(self):
+        handler = self._make_handler()
+        bootstrap_infos = [{"rank_ip": "10.0.0.1", "rank_port": 1234}]
+        old_receiver = SimpleNamespace(bootstrap_infos=bootstrap_infos)
+        new_receiver = SimpleNamespace(bootstrap_infos=bootstrap_infos)
+
+        handler.register_wm_subscriber(old_receiver, "old-session")
+        handler.register_wm_subscriber(new_receiver, "new-session")
+
+        subscriber = next(iter(handler._wm_subscribers.values()))
+        self.assertIs(subscriber[0], new_receiver)
+        self.assertEqual(subscriber[1], "new-session")
+
+    def test_stale_cleanup_token_preserves_reregistered_subscriber(self):
+        handler = self._make_handler()
+        bootstrap_infos = [{"rank_ip": "10.0.0.1", "rank_port": 1234}]
+        old_receiver = SimpleNamespace(bootstrap_infos=bootstrap_infos)
+        new_receiver = SimpleNamespace(bootstrap_infos=bootstrap_infos)
+        handler.register_wm_subscriber(old_receiver, "old-session")
+        stale_tokens = handler.snapshot_wm_subscribers([bootstrap_infos])
+
+        handler.register_wm_subscriber(new_receiver, "new-session")
+        removed = handler.unregister_wm_subscribers(stale_tokens)
+
+        self.assertEqual(removed, 0)
+        subscriber = next(iter(handler._wm_subscribers.values()))
+        self.assertIs(subscriber[0], new_receiver)
+
+    def test_unregister_removes_only_matching_subscriber(self):
+        handler = self._make_handler()
+        failed_infos = [{"rank_ip": "10.0.0.1", "rank_port": 1234}]
+        healthy_infos = [{"rank_ip": "10.0.0.2", "rank_port": 5678}]
+        handler.register_wm_subscriber(
+            SimpleNamespace(bootstrap_infos=failed_infos), "failed-session"
+        )
+        handler.register_wm_subscriber(
+            SimpleNamespace(bootstrap_infos=healthy_infos), "healthy-session"
+        )
+
+        removed = handler.unregister_wm_subscribers(
+            handler.snapshot_wm_subscribers([failed_infos])
+        )
+
+        self.assertEqual(removed, 1)
+        self.assertNotIn(
+            tuple(str(info) for info in failed_infos), handler._wm_subscribers
+        )
+        self.assertIn(
+            tuple(str(info) for info in healthy_infos), handler._wm_subscribers
+        )
 
 
 class TestNixlStaging(CustomTestCase):
