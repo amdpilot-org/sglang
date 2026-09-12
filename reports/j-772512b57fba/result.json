@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33901",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1821",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1771",
+  "candidate_commit": "9cbb2c10d016f2a29780af58a81fd626960544dd",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduced loss of complete second and third GLM-4.7 tool calls in a final streaming increment. At the exact candidate commit, the checked-out source drained all complete calls with sequential indices, preserved a partial suffix for later completion, and passed focused and related parser tests.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-772512b57fba/venv/bin/python /job/review-evidence/review_glm47_streaming.py 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "On the actual recorded base, a final increment with two no-argument calls emitted only index 0 and retained the complete second call. Independent argument-bearing and three-call inputs showed the same one-call-only behavior."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-772512b57fba/venv/bin/python /job/review-evidence/review_glm47_streaming.py 9cbb2c10d016f2a29780af58a81fd626960544dd",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate, two no-argument calls, two typed-argument calls, and three complete calls were all emitted in one invocation with sequential indices; a partial second call remained resumable and completed on the next increment."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-772512b57fba/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py::TestGlm47MoeDetector",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's focused GLM-4.7 regression suite passed: 15 tests."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-772512b57fba/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py::TestGlm4MoeDetector test/registered/unit/function_call/test_function_call_parser.py::TestGlm47MoeDetector",
+      "exit_code": 0,
+      "what_was_measured": "The related GLM-4 and GLM-4.7 parser suites passed: 29 tests."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The reviewed defect and candidate change are CPU-only incremental text parsing. One assigned AMD Instinct MI350X (gfx950:sramecc+:xnack-) was visible through Torch 2.11.0+rocm7.2/HIP 7.2.26015, but no GPU execution is relevant or claimed.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No GLM-4.7 model weights or full HTTP serving reproduction was used; validation covers the actual streaming detector implementation and its integration-level unit suite, not model semantic accuracy.",
+    "No distributed or multi-node workload was run.",
+    "No native rebuild was performed because the candidate changes only Python parser source, tests, and reports; no C++, FlyDSL, compiler, or native library path changed.",
+    "Ordinary text after the last tool call remains buffered pending another increment, a pre-existing single-call behavior outside the original multiple-complete-call contract."
+  ]
+}
