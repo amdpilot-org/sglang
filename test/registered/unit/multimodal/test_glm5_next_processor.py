@@ -94,6 +94,22 @@ def test_collapse_glm5_next_image_tokens_preserves_distinct_spans():
     assert _collapse_glm5_next_image_tokens([], 99) == []
 
 
+def test_collapse_glm5_next_image_tokens_respects_image_count():
+    assert _collapse_glm5_next_image_tokens([10, 99, 99, 11], 99, 2) == [
+        10,
+        99,
+        99,
+        11,
+    ]
+    assert _collapse_glm5_next_image_tokens([10, 99, 99, 99, 11], 99, 2) == [
+        10,
+        99,
+        99,
+        11,
+    ]
+    assert _collapse_glm5_next_image_tokens([10, 99, 11], 99, 2) == [10, 99, 11]
+
+
 @pytest.mark.parametrize(
     ("model_type", "expected_prompt"),
     [
@@ -135,3 +151,38 @@ def test_processor_expanded_image_span_is_collapsed_only_for_glm5_next(
 
     assert processor.load_mm_data.await_args.kwargs["prompt"] == expected_prompt
     assert output.input_ids == expanded
+
+
+def test_adjacent_pretokenized_image_placeholders_preserve_media_cardinality(
+    monkeypatch,
+):
+    adjacent = [1, 10, 99, 99, 11, 2]
+    processor = object.__new__(Glm4vImageProcessor)
+    processor.hf_config = SimpleNamespace(model_type="glm5_next")
+    processor.IM_TOKEN_ID = 99
+    processor.mm_tokens = MultimodalSpecialTokens(image_token_id=99, video_token_id=98)
+    processor.video_config = {}
+    processor._processor = SimpleNamespace(video_processor=None)
+    processor.load_mm_data = AsyncMock(
+        return_value=BaseMultiModalProcessorOutput(
+            input_text="unused", input_ids=adjacent
+        )
+    )
+    processor.process_and_combine_mm_data_async = AsyncMock(
+        return_value=([], torch.tensor(adjacent), SimpleNamespace())
+    )
+    monkeypatch.setattr(
+        MRotaryEmbedding,
+        "get_rope_index_glm4v",
+        MagicMock(return_value=(torch.zeros((3, 1, len(adjacent))), torch.zeros(1))),
+    )
+
+    asyncio.run(
+        processor.process_mm_data_async(
+            image_data=["first", "second"],
+            input_text=adjacent,
+            request_obj=SimpleNamespace(video_data=None),
+        )
+    )
+
+    assert processor.load_mm_data.await_args.kwargs["prompt"] == adjacent
