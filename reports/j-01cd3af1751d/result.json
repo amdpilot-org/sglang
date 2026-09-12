@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34676",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1961",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1922",
+  "candidate_commit": "a91b8669fd1c60e0fa98ee81dabb8e78a93c85ca",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The base lets a late prefill allocation RuntimeError escape. The exact candidate converts KV allocation misses to a typed exception, rolls back newly allocated request slots, restores scheduler ownership, and permits an empty scheduler to retry; focused and independent boundary tests passed.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-01cd3af1751d/venv/bin/python /job/review-evidence-j-01cd3af1751d/base_repro.py",
+      "exit_code": 1,
+      "what_was_measured": "On recorded base, an injected post-admission allocation RuntimeError escaped the real Scheduler._get_new_batch_prefill_raw call."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-01cd3af1751d/venv/bin/python -m pytest -q test/registered/unit/managers/test_prefill_alloc_oom_requeue.py test/registered/unit/managers/test_prefill_adder.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit: 39 tests and 12 subtests passed, covering typed allocation failure, request-slot rollback, requeue/retry, chunk ownership, backpressure, and admission boundaries."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-01cd3af1751d/venv/bin/python /job/review-evidence-j-01cd3af1751d/adversarial.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent transient-OOM retry succeeds without duplicate ownership, and unrelated RuntimeError remains uncaught."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X gfx950 was visible via ROCm 7.2, but the issue-specific deterministic control-flow tests executed on CPU."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The reported eight-NVIDIA-B300 TP8/DCP4 Kimi-K3 workload and weights were unavailable.",
+    "CUDA/B300, distributed, sustained-traffic, and model-semantic behavior remain unverified.",
+    "No native source changed; a native rebuild was not applicable."
+  ]
+}
