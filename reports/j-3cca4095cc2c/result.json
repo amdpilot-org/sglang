@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38156",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved the candidate's synchronized initial reading and corrected its TP-local/accounting-domain mismatch by taking one world-group initial snapshot, caching it, and cumulatively reserving accepted pools against the existing per-rank share. This covers co-located TP, PP, and in-job DP groups without requiring later collectives with mismatched pool counts.",
+  "tests": [
+    {
+      "command": "At candidate commit 3d10c70a56be17ed89300d26ffb77faf67ad992e: PYTHONPATH=$PWD/python /tmp/amdpilot-repo-j-3cca4095cc2c/venv/bin/python -m pytest -q /path/to/correction/reports/j-3cca4095cc2c/candidate_regression.py",
+      "exit_code": 1,
+      "what_was_measured": "At exact candidate commit 3d10c70a56be17ed89300d26ffb77faf67ad992e, a four-process Gloo regression with two co-located TP-like groups failed: budgets were 22.5, 22.5, 12.5, and 12.5 GiB for a 20 GiB fitting request. Raw output: raw/failing-before-candidate.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3cca4095cc2c/venv/bin/python reports/j-3cca4095cc2c/repro_two_tp_groups.py",
+      "exit_code": 0,
+      "what_was_measured": "A real four-process Gloo run gave all ranks a 22.5 GiB initial budget and the later group a cached 2.5 GiB remaining budget for a 2 GiB sidecar, with no second collective. Raw output: raw/corrected-two-groups.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3cca4095cc2c/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mem_pool_host.py",
+      "exit_code": 0,
+      "what_was_measured": "All 22 host-pool tests passed, including synchronized minimum, world-group selection, single-rank/uninitialized boundaries, cached later-pool accounting, and rejected-reservation behavior. Raw output: raw/test-mem-pool-host-full.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3cca4095cc2c/venv/bin/python -m pre_commit run --files python/sglang/srt/mem_cache/pool_host/base.py python/sglang/srt/mem_cache/memory_pool_host.py python/sglang/srt/mem_cache/pool_host/mha.py python/sglang/srt/mem_cache/pool_host/mamba.py python/sglang/srt/mem_cache/pool_host/dsa.py test/registered/unit/mem_cache/test_mem_pool_host.py reports/j-3cca4095cc2c/repro_two_tp_groups.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, safety, and registered-test checks passed. Raw output: raw/pre-commit.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The prepared environment exposed one AMD Instinct MI355X (gfx950), but this host-memory accounting correction and its Gloo regressions execute on CPU. No model weights were available. Environment details: raw/gpu-environment.txt"
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The exact 8xH200 GLM-5.2-W4AFP8 serving workload and its model weights were unavailable, so no full-model, H200, or multi-node reproduction is claimed.",
+    "The existing equal per-rank split is preserved; heterogeneous pipeline stages with unequal per-rank host-pool requirements may be rejected conservatively even if the aggregate host allocation would fit.",
+    "The world-group minimum is conservative when nodes have different available host memory.",
+    "Separately launched data-parallel jobs are outside the process group and remain outside this job's ranks_per_host accounting."
+  ]
+}

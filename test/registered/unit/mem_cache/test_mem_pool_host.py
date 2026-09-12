@@ -238,6 +238,10 @@ class TestHostMemoryBudget(CustomTestCase):
     # psutil value drifts between calls and would flake the equality checks.
     _AVAILABLE = base.HICACHE_HOST_MEMORY_RESERVE_BYTES + 64 * (1024**3)
 
+    def setUp(self):
+        base._initial_host_memory_available_bytes = None
+        base._reserved_host_memory_bytes = 0
+
     def _budget_with_ranks(self, ranks):
         # Deliberate single-accessor stub: isolates the budget math from the
         # topology derivation, which the ranks_per_host case below covers.
@@ -252,6 +256,7 @@ class TestHostMemoryBudget(CustomTestCase):
 
     def test_budget_is_split_across_co_located_ranks(self):
         solo = self._budget_with_ranks(1)
+        base._initial_host_memory_available_bytes = None
         self.assertEqual(self._budget_with_ranks(4), solo // 4)
 
     def test_reserve_is_taken_before_the_split(self):
@@ -326,20 +331,20 @@ class TestHostMemoryBudget(CustomTestCase):
             budget, (self._AVAILABLE - base.HICACHE_HOST_MEMORY_RESERVE_BYTES) // 8
         )
 
-    def test_sync_group_is_multi_rank_tp_cpu_group(self):
+    def test_sync_group_is_multi_rank_world_cpu_group(self):
         cpu_group = object()
-        fake_tp_group = unittest.mock.Mock(world_size=8, cpu_group=cpu_group)
+        fake_world_group = unittest.mock.Mock(world_size=8, cpu_group=cpu_group)
         with (
             unittest.mock.patch.object(
                 torch.distributed, "is_initialized", return_value=True
             ),
             unittest.mock.patch.object(
-                base, "get_tp_group", return_value=fake_tp_group
+                base, "get_world_group", return_value=fake_world_group
             ),
         ):
             self.assertIs(base.host_memory_sync_group(), cpu_group)
 
-    def test_sync_group_is_none_for_single_rank_or_uninitialized_tp(self):
+    def test_sync_group_is_none_for_single_rank_or_uninitialized_world(self):
         with unittest.mock.patch.object(
             torch.distributed, "is_initialized", return_value=False
         ):
@@ -350,7 +355,7 @@ class TestHostMemoryBudget(CustomTestCase):
                 torch.distributed, "is_initialized", return_value=True
             ),
             unittest.mock.patch.object(
-                base, "get_tp_group", return_value=unittest.mock.Mock(world_size=1)
+                base, "get_world_group", return_value=unittest.mock.Mock(world_size=1)
             ),
         ):
             self.assertIsNone(base.host_memory_sync_group())
@@ -360,10 +365,42 @@ class TestHostMemoryBudget(CustomTestCase):
                 torch.distributed, "is_initialized", return_value=True
             ),
             unittest.mock.patch.object(
-                base, "get_tp_group", side_effect=AssertionError("not initialized")
+                base, "get_world_group", side_effect=AssertionError("not initialized")
             ),
         ):
             self.assertIsNone(base.host_memory_sync_group())
+
+    def test_later_pool_uses_initial_snapshot_and_remaining_budget(self):
+        gib = 1024**3
+        reserve = base.HICACHE_HOST_MEMORY_RESERVE_BYTES
+        readings = iter([reserve + 100 * gib, reserve + 60 * gib])
+
+        with (
+            unittest.mock.patch.object(base, "ranks_per_host", return_value=4),
+            unittest.mock.patch.object(
+                base, "host_memory_sync_group", return_value=None
+            ),
+            unittest.mock.patch.object(
+                base.psutil,
+                "virtual_memory",
+                side_effect=lambda: unittest.mock.Mock(available=next(readings)),
+            ) as virtual_memory,
+        ):
+            first = base.host_memory_budget_bytes(20 * gib)
+            second = base.host_memory_budget_bytes(5 * gib)
+
+        self.assertEqual(first, 25 * gib)
+        self.assertEqual(second, 5 * gib)
+        virtual_memory.assert_called_once()
+
+    def test_rejected_pool_is_not_reserved(self):
+        gib = 1024**3
+        base._initial_host_memory_available_bytes = (
+            base.HICACHE_HOST_MEMORY_RESERVE_BYTES + 40 * gib
+        )
+        with unittest.mock.patch.object(base, "ranks_per_host", return_value=2):
+            self.assertEqual(base.host_memory_budget_bytes(21 * gib), 20 * gib)
+            self.assertEqual(base.host_memory_budget_bytes(20 * gib), 20 * gib)
 
 
 class TestHostPoolGroup(CustomTestCase):
