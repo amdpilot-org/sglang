@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32065",
+  "candidate_mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2149",
+  "review_mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2212",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2176",
+  "candidate_commit": "3f71362934a47e8ad49b2ca1025e500f95f0ea28",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "unsupported_architecture",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review found that the base retains both invalid-launch paths and that the exact candidate adds all four required guards in the actual migrated launcher source: a positive/<=1024 thread check in both launchers, a zero-token no-op in both, and a zero-topk no-op in the masked launcher. Validation and parameter construction remain before the no-op returns. Source regressions fail before and pass after. CUDA runtime execution remains unverified because the assigned ROCm gfx950 toolchain cannot compile the CUDA-specific header.",
+  "tests": [
+    {
+      "command": "SGLANG_SILU_MUL_POST_QUANT_SOURCE=/job/repo/python/sglang/kernels/jit/csrc/deepseek_v4/silu_and_mul_masked_post_quant.cuh /tmp/amdpilot-repo-j-3b7b912c936f/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-3b7b912c936f/extracted/test/registered/unit/kernels/test_silu_mul_post_quant_launch_guards.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before on the exact recorded base: both launcher contract tests failed because the common block-limit guard was absent (2 failed)."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3b7b912c936f/venv/bin/python -m pytest -q test/registered/unit/kernels/test_silu_mul_post_quant_launch_guards.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression at exact commit 3f713629: both source-contract tests passed (2 passed)."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3b7b912c936f/venv/bin/python - <<'PY' # independently inspect both launcher bodies and assert params < block guard < warp guard < empty guard < sole LaunchKernel",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial structural check of both launcher bodies, including validation ordering and a sole launch site; both passed."
+    },
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-3b7b912c936f/base-jit ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-3b7b912c936f/venv/bin/python reproduce_post_quant_launch.py {contig --tokens 0 --hidden 512 | masked --tokens 0 --hidden 512 --topk 1 | masked --tokens 1 --hidden 512 --topk 0 | contig --tokens 1 --hidden 8704}",
+      "exit_code": 1,
+      "what_was_measured": "Four direct base cases allocated tensors on gfx950 and entered the actual SGLang native JIT build. All stopped before launch because hipcc could not find cuda_fp8.h."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-3b7b912c936f/venv/bin/python reports/j-b5df533cf10f/reproduce_post_quant_launch.py {contig --tokens 0 --hidden 512 | masked --tokens 0 --hidden 512 --topk 1}",
+      "exit_code": 1,
+      "what_was_measured": "Direct candidate cases reached the native build and hit the same unchanged cuda_fp8.h architecture prerequisite before the candidate launcher could execute."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "PyTorch detected exactly one AMD Instinct MI350X with gcnArchName gfx950:sramecc+:xnack-. Reproduction tensors were allocated on that device and hipcc was invoked with --offload-arch=gfx950, but the reviewed kernels did not execute because compilation failed first.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No CUDA GPU or CUDA toolkit was assigned, so the original cudaErrorInvalidConfiguration and the candidate's CUDA no-op/RuntimeCheck behavior were not observed at runtime.",
+    "The real candidate JIT native library could not be rebuilt on ROCm because the CUDA-specific source unconditionally includes cuda_fp8.h, which is absent from ROCm 7.2.",
+    "No DeepSeek weights or multi-rank deployment were available; the DP-attention idle-rank serving path was not reproduced.",
+    "Non-empty GPU numerical equivalence was not measured because compilation failed before kernel execution.",
+    "The included regression and independent checks establish the source launch contract, not compiled CUDA execution."
+  ]
+}
