@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38408",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Confirmed that candidate 4f47bef only covers stale/dead advisory-lock owners and leaves the registered MXFP4 test unbounded for live compiler or kernel stalls. Added a process-group-isolated, 120-second-per-attempt supervisor with fresh SGLANG_JIT_CACHE_DIR and TORCH_EXTENSIONS_DIR and one timeout retry, while retaining the candidate's valid lock regressions.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-51be59b6eebc/venv/bin/python -m pytest -q test/registered/kernels/test_jit_cache.py -k 'build_lock_ignores_an_orphaned_lock_file or build_lock_is_released_when_the_holder_process_dies' (candidate 4f47bef)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's two advisory-lock recovery regressions passed: 2 passed, 42 deselected."
+    },
+    {
+      "command": "timeout 2s <independent live-holder _build_lock reproduction> (candidate 4f47bef)",
+      "exit_code": 124,
+      "what_was_measured": "A live owner held _build_lock beyond the independent deadline; the contender had no internal timeout."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-51be59b6eebc/venv/bin/python -m pytest -q test/registered/kernels/test_jit_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "45 passed, including dead-owner recovery and the registered MXFP4 supervisor killing a stalled first process group and succeeding with a second fresh cache."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 SGLANG_MXFP4_TEST_TIMEOUT_SECONDS=120 timeout 180s /tmp/amdpilot-repo-j-51be59b6eebc/venv/bin/python test/registered/expert_pack/test_expert_pack_mxfp4.py",
+      "exit_code": 1,
+      "what_was_measured": "The actual registered entry used a fresh cache and reached hipcc targeting gfx950, then failed because the NVIDIA-specific source includes unavailable cuda_bf16.h; no kernel executed."
+    },
+    {
+      "command": "pre-commit run ruff --files test/registered/expert_pack/test_expert_pack_mxfp4.py test/registered/kernels/test_jit_cache.py && pre-commit run ruff-format --files test/registered/expert_pack/test_expert_pack_mxfp4.py test/registered/kernels/test_jit_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "Both changed Python files passed lint and formatting."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The assigned gfx950 was selected and hipcc was invoked with --offload-arch=gfx950:sramecc+:xnack-, but compilation stopped at missing cuda_bf16.h before any MXFP4 GPU kernel ran.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No NVIDIA H200 was available, so the intermittent H200 event and MXFP4 numerical behavior were not reproduced.",
+    "The available ROCm toolchain cannot compile this NVIDIA-specific source because cuda_bf16.h is absent.",
+    "The supervisor regression deterministically validates timeout, process-group termination, fresh-cache retry, and the registered executable path; hardware prevented a passing end-to-end MXFP4 JIT/kernel run."
+  ]
+}
