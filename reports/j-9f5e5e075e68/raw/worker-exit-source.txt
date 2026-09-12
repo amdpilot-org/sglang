@@ -1,0 +1,32 @@
+  1585	    assert result_pipes_from_slaves is not None
+  1586	    from sglang.multimodal_gen.runtime.managers.scheduler import Scheduler
+  1587
+  1588	    try:
+  1589	        scheduler = Scheduler(
+  1590	            server_args,
+  1591	            gpu_id=rank,
+  1592	            port_args=port_args,
+  1593	            task_pipes_to_slaves=task_pipes_to_slaves,
+  1594	            result_pipes_from_slaves=result_pipes_from_slaves,
+  1595	            local_rank=local_rank,
+  1596	        )
+  1597	        logger.info(f"Worker {rank}: Scheduler loop started.")
+  1598	        pipe_writer.send(
+  1599	            {
+  1600	                "status": "ready",
+  1601	            }
+  1602	        )
+  1603	        scheduler.event_loop()
+  1604	    except _oom_exceptions() as _e:
+  1605	        logger.warning(OOM_MSG)
+  1606	        raise
+  1607	    finally:
+  1608	        # Clean up resources to speed up shutdown
+  1609	        if "scheduler" in locals():
+  1610	            del scheduler
+  1611	        gc.collect()
+  1612	        if torch.cuda.is_initialized():
+  1613	            torch.cuda.empty_cache()
+  1614	        if torch.distributed.is_available() and torch.distributed.is_initialized():
+  1615	            torch.distributed.destroy_process_group()
+  1616	        logger.info(f"Worker {rank}: Shutdown complete.")

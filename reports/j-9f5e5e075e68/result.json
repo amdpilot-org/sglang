@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38167",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "f0cb5a958e600a68ea16a35b98b877f781e2046a",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "outcome": "candidate_rejected",
+  "summary": "The exact candidate is verified as partial hardening: it recognizes the two reported fatal strings, gives the triggering request a restart-required message, and stops the monolithic scheduler before another dispatch. It does not fully resolve the original issue because the worker exits normally while the HTTP process remains available and scheduler RPCs are unbounded by default, allowing subsequent requests to hang indefinitely rather than fail fast. The original CUDA/12 GB MiniMax-H3 failure was not reproducible on the assigned ROCm/258 GB GPU without weights.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-9f5e5e075e68/venv/bin/python /job/review-evidence-j-9f5e5e075e68/event_loop_probe.py (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "Behavioral failing-before reproduction: after a synthetic exception with the exact reported device-not-ready text, the base returned the error and dispatched a second request. Evidence: raw/base-event-loop.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9f5e5e075e68/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_scheduler_device_failure.py python/sglang/multimodal_gen/test/unit/test_warmup_probe_degradation.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 19 tests passed, covering marker classification, state transition, ordinary OOM boundary, unrelated errors, and adjacent warmup behavior. Evidence: raw/candidate-tests.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9f5e5e075e68/venv/bin/python /job/review-evidence-j-9f5e5e075e68/event_loop_probe.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent passing-after behavior: the triggering request got restart-required text and only one dispatch occurred. Evidence: raw/candidate-event-loop.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9f5e5e075e68/venv/bin/python inline scheduler-client timeout probe (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial boundary: the default scheduler RPC timeout resolves to None and leaves ZMQ RCVTIMEO at -1 (unbounded), while the stopped scheduler worker returns normally. Evidence: raw/default-timeout-evidence.txt, raw/worker-exit-source.txt, raw/http-lifecycle-source.txt, raw/client-timeout-source.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned AMD Instinct MI350X was enumerated, but no GPU workload was used as proof because its ROCm architecture and 258 GB memory do not reproduce the reported CUDA RTX 5070 12 GB condition. Evidence: raw/import-paths.txt"
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "After the fatal request stops the scheduler, the HTTP process remains alive and a later request can block indefinitely because scheduler_rpc_timeout defaults to None and ZMQ RCVTIMEO remains -1.",
+    "The candidate does not convert the initial 1344x768 resource ceiling into a clean insufficient-memory/admission error; it only string-matches the resulting fatal CUDA error.",
+    "The fatal-state handling is placed only in the monolithic event loop; disaggregated event loops return before this code path and were not shown to have equivalent behavior.",
+    "The original RTX 5070 12 GB / WSL2 / CUDA 13.0 MiniMax-H3 workload and post-failure 480p request were not reproduced on the available AMD ROCm system without model weights."
+  ],
+  "remaining_limitations": [
+    "Assigned architecture: AMD Instinct MI350X (gfx950), ROCm 7.2, torch 2.11.0+rocm7.2, approximately 258 GB device memory.",
+    "Reported architecture: RTX 5070 12 GB, WSL2, CUDA 13.0. CUDA driver and CUDACachingAllocator failure behavior cannot be validated on this host.",
+    "MiniMax-H3 weights and the reporter's turbo LoRA were unavailable; no full-model, semantic, 1344x768, or real post-failure 480p serving claim is made.",
+    "No native source changed in the candidate, so native rebuild was not applicable."
+  ]
+}
