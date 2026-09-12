@@ -1,0 +1,67 @@
+Independent review of https://github.com/amdpilot-org/sglang/pull/3274
+Exact candidate: 32c938d42440087ac742d24790a8c0b9cc9cf6b3
+Recorded/prepared base: 358c163250ad3b1f62939b01ce1314a0a31a0365
+Review date: 2026-09-12 UTC
+
+Base reproduction
+  node docs/scripts/check_cookbook_configs.mjs
+  exit 0: cookbook config check: OK
+
+  Added three temporary unsafe documentation fixtures:
+    uv pip install \
+      sglang
+    uv pip install SGLang
+    docs/docs/review-scope.md containing uv pip install sglang
+  node docs/scripts/check_cookbook_configs.mjs
+  exit 0: all three unsafe recommendations bypassed the prepared-base checker.
+
+Exact candidate regression
+  git switch --detach 32c938d42440087ac742d24790a8c0b9cc9cf6b3
+  node docs/scripts/check_cookbook_configs.mjs
+  exit 0 on the clean candidate.
+
+  Added the same three temporary fixtures.
+  node docs/scripts/check_cookbook_configs.mjs
+  exit 1 and identified all three files. The inherited case, continuation, and
+  docs/docs scope counterexamples are fixed.
+
+Independent candidate counterexample
+  uv 0.11.16 accepts this valid global-option form (install help exits 0):
+    uv --no-cache pip install sglang
+  Added that command to docs/docs/review-global-option.md.
+  node docs/scripts/check_cookbook_configs.mjs
+  exit 0: the candidate guard missed it because isUvInstall requires the exact
+  adjacent token sequence `uv pip install`. This remains an unsafe old-uv
+  recommendation and contradicts the checker's stated all-documentation scope.
+
+Resolver reproduction (private tools under /tmp, resolution only)
+  printf 'sglang\n' | uv-0.11.16 pip compile - \
+    --python-platform x86_64-manylinux_2_34 --python-version 3.12
+  exit 0: selected sglang==0.5.9 and torch==2.9.1.
+
+  printf 'sglang<0.5.18\n' | uv-0.12.0 pip compile - \
+    --python-platform x86_64-manylinux_2_34 --python-version 3.12
+  exit 0: selected sglang==0.5.17, flash-attn-4==4.0.0b19, torch==2.11.0.
+
+  printf 'sglang<0.5.18\n' | uv-0.11.16 pip compile - \
+    --prerelease=allow --python-platform x86_64-manylinux_2_34 \
+    --python-version 3.12
+  exit 0: selected sglang==0.5.17, flash-attn-4==4.0.0b19, torch==2.11.0.
+
+Classification and limitations
+  The candidate is a partial documentation fix plus incomplete test hardening.
+  It corrects the known repository recommendation and the three inherited
+  checker gaps, but does not alter uv 0.11.16 and does not fully enforce its own
+  all-docs unsafe-command contract. A manually entered plain command remains
+  vulnerable by design.
+
+  No source/native import path changed. The prepared measured Python source path
+  was /job/repo/python/sglang/srt/layers/layernorm.py; no native library existed
+  in repository-environment.json and no native rebuild was applicable.
+  No GPU execution was relevant to package resolution or static documentation.
+  The Qwen3.8-27B-FP8 TP=2 semantic symptom was not reproduced: the required
+  model weights and two-GPU topology were unavailable, while the assignment
+  provides one GPU. That architecture limitation is not evidence of a fix.
+
+All temporary fixtures were removed. Review evidence was retained outside the
+checkout in /job/review-evidence while revisions were switched.

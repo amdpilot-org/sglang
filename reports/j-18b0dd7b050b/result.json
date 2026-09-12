@@ -1,0 +1,64 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35912",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "Exact candidate 32c938d42440087ac742d24790a8c0b9cc9cf6b3 fixes the inherited case-insensitive package-name, backslash-continuation, and docs/docs scope counterexamples and corrects the known Qwen documentation. It is only a partial documentation mitigation: uv 0.11.16 still resolves a plain install to 0.5.9, and the candidate's all-docs guard misses valid uv syntax with global options before the pip subcommand, such as uv --no-cache pip install sglang.",
+  "tests": [
+    {
+      "command": "At prepared base, add backslash-continuation, SGLang case variant, and docs/docs unsafe fixtures; node docs/scripts/check_cookbook_configs.mjs",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced the three inherited checker failures: all unsafe fixtures passed undetected."
+    },
+    {
+      "command": "At exact candidate 32c938d42440087ac742d24790a8c0b9cc9cf6b3, node docs/scripts/check_cookbook_configs.mjs",
+      "exit_code": 0,
+      "what_was_measured": "Candidate clean-tree regression and embedded classifier cases passed."
+    },
+    {
+      "command": "At exact candidate, add backslash-continuation, SGLang case variant, and docs/docs unsafe fixtures; node docs/scripts/check_cookbook_configs.mjs",
+      "exit_code": 1,
+      "what_was_measured": "Candidate rejected all three inherited adversarial cases."
+    },
+    {
+      "command": "uv-0.11.16 --no-cache pip install --help",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed that placing a valid global uv option before the pip subcommand is accepted syntax."
+    },
+    {
+      "command": "At exact candidate, add docs/docs/review-global-option.md containing uv --no-cache pip install sglang; node docs/scripts/check_cookbook_configs.mjs",
+      "exit_code": 0,
+      "what_was_measured": "Independent unsafe old-uv documentation command bypassed the candidate's claimed all-docs guard."
+    },
+    {
+      "command": "printf 'sglang\\n' | uv-0.11.16 pip compile - --python-platform x86_64-manylinux_2_34 --python-version 3.12",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced the original resolver failure: sglang==0.5.9 and torch==2.9.1 were silently selected."
+    },
+    {
+      "command": "printf 'sglang<0.5.18\\n' | uv-0.12.0 pip compile - --python-platform x86_64-manylinux_2_34 --python-version 3.12",
+      "exit_code": 0,
+      "what_was_measured": "New uv selected sglang==0.5.17 and flash-attn-4==4.0.0b19 in the historical bounded comparison."
+    },
+    {
+      "command": "printf 'sglang<0.5.18\\n' | uv-0.11.16 pip compile - --prerelease=allow --python-platform x86_64-manylinux_2_34 --python-version 3.12",
+      "exit_code": 0,
+      "what_was_measured": "The documented flag made old uv select sglang==0.5.17 and flash-attn-4==4.0.0b19."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Package resolution and the documentation checker are CPU-only. The reported Qwen3.8-27B-FP8 TP=2 semantic consequence requires unavailable weights and two GPUs; the assigned single GPU cannot qualify it."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A valid command with a global uv option, for example uv --no-cache pip install sglang, passes the candidate checker while uv 0.11.16 remains vulnerable.",
+    "A user manually running plain uv pip install sglang with uv 0.11.16 still silently resolves to sglang==0.5.9; the repository change is documentation mitigation only."
+  ],
+  "remaining_limitations": [
+    "The Qwen3.8-27B-FP8 TP=2 wrong-output consequence was not reproduced because model weights and a two-GPU topology were unavailable; one assigned GPU cannot validate it.",
+    "No source or native code changed, repository-environment.json supplied no native library, and no native rebuild was applicable.",
+    "The prepared checkout exactly matched the recorded base commit."
+  ]
+}
