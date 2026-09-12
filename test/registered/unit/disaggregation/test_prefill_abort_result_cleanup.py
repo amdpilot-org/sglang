@@ -4,9 +4,10 @@ from unittest.mock import Mock, patch
 import pytest
 import torch
 
+from sglang.srt.disaggregation.base import KVPoll
 from sglang.srt.disaggregation.prefill import SchedulerDisaggregationPrefillMixin
 from sglang.srt.layers.logits_processor import LogitsProcessorOutput, SamplingMaskStatus
-from sglang.srt.managers.schedule_batch import FINISH_ABORT, ReqKvInfo
+from sglang.srt.managers.schedule_batch import FINISH_ABORT, FINISH_LENGTH, ReqKvInfo
 from sglang.srt.managers.scheduler_components.batch_result_processor import (
     SchedulerBatchResultProcessor,
 )
@@ -69,6 +70,20 @@ class _Scheduler(SchedulerDisaggregationPrefillMixin):
         self.req_to_metadata_buffer_idx_allocator = Mock()
         self.enable_hicache_storage = True
         self.chunked_req = None
+        self.scheduler_stage_metrics = None
+
+
+def _inflight_req(*, pending_abort=False, finished_abort=False):
+    req = _Req(inflight_middle_chunks=0)
+    req.pending_bootstrap = False
+    req.bootstrap_host = "fake"
+    req.return_logprob = False
+    req.time_stats.set_prefill_kv_transfer_finish_time = Mock()
+    req.to_finish = (
+        FINISH_ABORT("request timed out", status_code=503) if pending_abort else None
+    )
+    req.finished_reason = FINISH_ABORT("already aborted") if finished_abort else None
+    return req
 
 
 def _batch(req):
@@ -89,6 +104,49 @@ def _free_req(req, _tree_cache, *, is_insert):
     req.kv.req_pool_idx = None
     req.kv.mark_kv_released()
     req.kv.mamba_pool_idx = None
+
+
+@pytest.mark.parametrize(
+    "pending_abort,finished_abort,expected_type,expected_status",
+    [
+        (True, False, FINISH_ABORT, 503),
+        (False, True, FINISH_ABORT, None),
+        (False, False, FINISH_LENGTH, None),
+    ],
+)
+@patch(
+    "sglang.srt.disaggregation.prefill.poll_and_all_reduce_attn_cp_tp_group",
+    return_value=[KVPoll.Success],
+)
+@patch("sglang.srt.disaggregation.prefill.release_kv_cache")
+def test_successful_transfer_preserves_abort_reason(
+    release_kv_cache,
+    poll,
+    pending_abort,
+    finished_abort,
+    expected_type,
+    expected_status,
+):
+    scheduler = _Scheduler()
+    scheduler.attn_cp_cpu_group = None
+    scheduler.attn_tp_cpu_group = None
+    scheduler.req_to_metadata_buffer_idx_allocator = Mock()
+    req = _inflight_req(
+        pending_abort=pending_abort, finished_abort=finished_abort
+    )
+    scheduler.disagg_prefill_inflight_queue = [req]
+
+    done = scheduler.process_disagg_prefill_inflight_queue()
+
+    assert done == [req]
+    assert isinstance(req.finished_reason, expected_type)
+    if expected_status is not None:
+        assert req.finished_reason.status_code == expected_status
+        assert req.finished_reason.message == "request timed out"
+    assert req.to_finish is None
+    release_kv_cache.assert_called_once_with(req, scheduler.tree_cache)
+    req.disagg_kv_sender.clear.assert_called_once_with()
+    scheduler.output_streamer.stream_output.assert_called_once_with([req], False, None)
 
 
 @patch("sglang.srt.disaggregation.prefill.release_kv_cache", side_effect=_free_req)
