@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/18891",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Consolidated candidate PR 2955 and corrected both independently reviewed false-success paths from PR 3038. Disk/server comparison now includes checkpoint-present buffers while excluding runtime-only state absent from disk, and explicit empty module selections are rejected at both HTTP validation and worker boundaries.",
+  "tests": [
+    {
+      "command": "At exact candidate 9d08a826d6e9149cb8df17ea3c91ece7d550dc6b: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7bfc3d935f00/venv/bin/python - <<'PY' ... buffer mismatch and empty selection reproductions ... PY",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced both reviewed counterexamples before correction: a differing checkpoint-present running_mean returned match=true, and module_names=[] returned success=true with no comparisons. Raw output: reports/j-7bfc3d935f00/raw/failing_before.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7bfc3d935f00/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_disk_server_checksum.py python/sglang/multimodal_gen/test/unit/test_layerwise_offload.py -k 'disk_server_checksum or mapped_weights_are_visible_to_checksums or explicit_empty_module_selection'",
+      "exit_code": 0,
+      "what_was_measured": "Six focused tests passed: renamed/fused parameters, parameter corruption, no matched state, checkpoint-present buffer corruption, explicit empty selection rejection, and offload checksum visibility."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7bfc3d935f00/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_disk_server_checksum.py",
+      "exit_code": 0,
+      "what_was_measured": "All five disk/server comparison unit regressions passed."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7bfc3d935f00/venv/bin/python - <<'PY' ... independent CPU checkpoint checksum versus live GPU parameter and buffer, then one-value GPU buffer mutation ... PY",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI355X, live GPU parameter+buffer checksum exactly matched an independently computed CPU checkpoint checksum, then diverged after a one-value live buffer mutation. Raw output: reports/j-7bfc3d935f00/raw/gpu_validation.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7bfc3d935f00/venv/bin/python -m compileall -q python/sglang/multimodal_gen/runtime/entrypoints/post_training python/sglang/multimodal_gen/runtime/post_training && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python modules compile and the patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI355X with Torch 2.11.0+rocm7.2 and HIP 7.2.26015; reports/j-7bfc3d935f00/raw/gpu_validation.txt",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "FLUX.2-klein and Qwen-Image model weights were not available locally, so model-specific VAE/text-encoder end-to-end parity remains unverified.",
+    "Only one GPU was assigned; TP/SP/DTensor multi-rank behavior was not exercised.",
+    "No native source changed, so a native rebuild was not applicable.",
+    "The deterministic tiny Llama fixture was not used because it cannot qualify a diffusion VAE/text-encoder architecture."
+  ]
+}

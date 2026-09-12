@@ -371,27 +371,28 @@ def _make_checksum_scratch(param: torch.Tensor) -> torch.nn.Parameter:
 def compare_module_weights_with_disk(
     module: torch.nn.Module, weights_dir: str
 ) -> dict[str, Any]:
-    """Compare checkpoint tensors with live tensors in model-parameter space.
+    """Compare checkpoint tensors with live tensors in model-state space.
 
     Checkpoint names are passed through the exact same name mapping and custom
     ``weight_loader`` callbacks as a real update. This makes the comparison
     valid for renamed and fused QKV/gate-up parameters without architecture-
-    specific checksum rules. Only parameters represented by the checkpoint are
-    included, so runtime-only parameters and buffers cannot create false
-    mismatches.
+    specific checksum rules. Checkpoint-present buffers are also compared;
+    runtime-only state absent from the checkpoint remains excluded.
     """
     model_params = dict(module.named_parameters())
-    expected: dict[str, torch.nn.Parameter] = {}
+    model_buffers = dict(module.named_buffers())
+    model_state = {**model_buffers, **model_params}
+    expected: dict[str, torch.Tensor] = {}
 
     for name, loaded_weight, shard_id in _iter_module_weight_updates(
-        module, _get_weights_iter(weights_dir), model_params
+        module, _get_weights_iter(weights_dir), model_state
     ):
-        param = model_params[name]
-        weight_loader = getattr(param, "weight_loader", None)
+        live_tensor = model_state[name]
+        weight_loader = getattr(live_tensor, "weight_loader", None)
         if callable(weight_loader):
             scratch = expected.get(name)
             if scratch is None:
-                scratch = _make_checksum_scratch(param)
+                scratch = _make_checksum_scratch(live_tensor)
                 expected[name] = scratch
             value = loaded_weight.to(device="cpu", dtype=scratch.dtype)
             if shard_id is None:
@@ -399,22 +400,24 @@ def compare_module_weights_with_disk(
             else:
                 weight_loader(scratch, value, shard_id)
         else:
-            local = _local_parameter_tensor(param)
+            local = _local_parameter_tensor(live_tensor)
             if tuple(local.shape) != tuple(loaded_weight.shape):
                 raise ValueError(
                     f"Cannot compare {name}: server shape {tuple(local.shape)} "
                     f"does not match disk shape {tuple(loaded_weight.shape)}"
                 )
-            scratch = _make_checksum_scratch(param)
+            scratch = torch.zeros(local.shape, dtype=local.dtype, device="cpu")
             scratch.data.copy_(loaded_weight.to(dtype=scratch.dtype, device="cpu"))
             expected[name] = scratch
 
     if not expected:
         raise ValueError(
-            f"No checkpoint parameters matched module {type(module).__name__}"
+            f"No checkpoint state matched module {type(module).__name__}"
         )
 
     materialized = dict(iter_materialized_weights(module))
+    for name, buffer in model_buffers.items():
+        materialized.setdefault(name, buffer)
     missing_live = sorted(set(expected) - set(materialized))
     if missing_live:
         raise ValueError(f"Loaded parameters are not materialized: {missing_live}")
@@ -427,7 +430,9 @@ def compare_module_weights_with_disk(
         "match": server_checksum == expected_checksum,
         "server_checksum": server_checksum,
         "disk_checksum": expected_checksum,
-        "parameter_count": len(expected),
+        "parameter_count": len(set(expected) & set(model_params)),
+        "buffer_count": len(set(expected) & set(model_buffers)),
+        "tensor_count": len(expected),
     }
 
 
