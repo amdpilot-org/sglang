@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37848",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Verified and corrected the missing qualified lm_head prefix in BailingMoELinearForCausalLM. The broader audit still finds 52 other sites, so this is a narrow candidate rather than a claim that the full source issue is solved.",
+  "tests": [
+    {
+      "command": "pre-fix constructor probe for BailingMoELinearForCausalLM with prefix='language_model'",
+      "exit_code": 1,
+      "what_was_measured": "ParallelLMHead received no prefix keyword, causing its empty-string default to bypass per-module matching."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-627b2d148875/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_lm_head.py",
+      "exit_code": 0,
+      "what_was_measured": "10 compressed-tensors lm_head tests passed, including 2 new Bailing prefix subtests for root and nested prefixes."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-627b2d148875/venv/bin/python reports/j-627b2d148875/reproduce_missing_quant_prefixes.py",
+      "exit_code": 0,
+      "what_was_measured": "The corrected Bailing site is absent; 52 other quantization-aware constructor sites still omit an explicit prefix."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-627b2d148875/venv/bin/python -m compileall -q python/sglang/srt/models/bailing_moe_linear.py test/registered/unit/layers/quantization/test_compressed_tensors_lm_head.py reports/j-627b2d148875/reproduce_missing_quant_prefixes.py",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python sources compile successfully."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reproduced defect is CPU-only constructor/configuration name routing and occurs before model weights or GPU kernels execute."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Bailing model weights were available, so no full-model semantic or serving reproduction was attempted.",
+    "The retained audit reports 52 additional omitted-prefix sites that need independent model-specific validation.",
+    "The prepared interpreter does not contain the ruff module, so Ruff was not run.",
+    "No GPU numerical check was performed because this patch does not alter numerical computation or GPU code."
+  ]
+}

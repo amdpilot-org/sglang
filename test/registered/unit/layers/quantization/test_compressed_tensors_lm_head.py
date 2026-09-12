@@ -5,6 +5,7 @@ from sglang.test.ci.ci_register import register_cpu_ci
 register_cpu_ci(est_time=11, suite="base-a-test-cpu")
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import torch
@@ -159,6 +160,48 @@ class TestGetQuantMethodLmHead(CustomTestCase):
         config = _config(["Linear"])
         head = self._head()
         self.assertIsNone(config.get_quant_method(head, "lm_head"))
+
+
+class TestBailingMoELinearLmHeadPrefix(CustomTestCase):
+    def test_lm_head_receives_qualified_prefix(self):
+        from sglang.srt.models import bailing_moe_linear
+
+        class FakeModel:
+            def __init__(self, config, quant_config, prefix):
+                self.word_embeddings = object()
+
+        class FakePPGroup:
+            is_last_rank = True
+
+        config = SimpleNamespace(
+            tie_word_embeddings=False, vocab_size=8, hidden_size=4
+        )
+        parallel = SimpleNamespace(enable_dp_lm_head=False)
+
+        for model_prefix, expected_head_prefix in (
+            ("", "lm_head"),
+            ("language_model", "language_model.lm_head"),
+        ):
+            with self.subTest(model_prefix=model_prefix), patch.object(
+                bailing_moe_linear, "get_pp_group", return_value=FakePPGroup()
+            ), patch.object(
+                bailing_moe_linear, "BailingMoELinearModel", FakeModel
+            ), patch.object(
+                bailing_moe_linear, "ParallelLMHead"
+            ) as mock_head, patch.object(
+                bailing_moe_linear, "LogitsProcessor", return_value=object()
+            ), patch.object(
+                bailing_moe_linear, "get_parallel", return_value=parallel
+            ):
+                bailing_moe_linear.BailingMoELinearForCausalLM(
+                    config=config,
+                    quant_config=object(),
+                    prefix=model_prefix,
+                )
+
+            self.assertEqual(
+                mock_head.call_args.kwargs["prefix"], expected_head_prefix
+            )
 
 
 if __name__ == "__main__":
