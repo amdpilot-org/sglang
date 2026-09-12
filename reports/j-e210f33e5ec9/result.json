@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38236",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/855",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/810",
+  "candidate_commit": "ffca52cd2b4fd46c6a290434b7c35a34fde1daa4",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the reported DeepSeek-V4 assertion before NEXTN alias resolution. At the exact candidate commit, the model hook accepts NEXTN, applies the same top-k constraint as EAGLE, and the later speculative hook canonicalizes NEXTN to EAGLE. The candidate's focused regression and independent boundary cases pass. No native source changed. Full DeepSeek-V4-Flash TP=2 server loading was not run because the assigned host has one AMD gfx950 GPU and no model weights, rather than the reported two NVIDIA sm_120 GPUs.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-e210f33e5ec9/venv/bin/python /job/review-evidence-j-e210f33e5ec9/adversarial_check.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Actual DeepSeek-V4 model-hook then speculative-hook ordering. NEXTN failed in apply_deepseek_v4_defaults with the issue's assertion before alias resolution."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e210f33e5ec9/venv/bin/python -m pytest -q test/registered/unit/server_args/test_deepseek_v4_hook.py (candidate ffca52cd2b4fd46c6a290434b7c35a34fde1daa4)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: NEXTN acceptance and canonicalization, NEXTN top-k rejection, existing EAGLE/DSPARK acceptance, and unrelated NGRAM rejection; 4 tests and 2 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e210f33e5ec9/venv/bin/python /job/review-evidence-j-e210f33e5ec9/adversarial_check.py (candidate ffca52cd2b4fd46c6a290434b7c35a34fde1daa4)",
+      "exit_code": 0,
+      "what_was_measured": "Independent direct path: NEXTN topk=1 and EAGLE topk=1 both resolve to EAGLE; NEXTN/EAGLE topk=2 reject; DSPARK remains accepted by the model hook; NGRAM and noncanonical lowercase nextn reject."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e210f33e5ec9/venv/bin/python -m pytest -q test/registered/unit/server_args (candidate ffca52cd2b4fd46c6a290434b7c35a34fde1daa4)",
+      "exit_code": 1,
+      "what_was_measured": "Broader server-argument regressions: 302 passed and 2 platform-sensitive context-parallel tests failed because HIP explicitly rejects deprecated prefill CP. The failures are outside the changed DeepSeek-V4/speculative path."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Torch enumerated one AMD Instinct MI355X with gfx950:sramecc+:xnack-. The reviewed defect is deterministic argument processing and required no GPU kernel execution; no full model or numerical GPU claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The reported DeepSeek-V4-Flash weights were unavailable, so model loading and generation were not exercised.",
+    "The host has one AMD Instinct MI355X (gfx950), not two RTX PRO 6000 Blackwell GPUs (sm_120); TP=2 and the reported NVIDIA backend combination were not reproduced.",
+    "No native files differ between base and candidate, so no native rebuild was applicable.",
+    "The broader server-argument suite has two unrelated HIP-specific context-parallel failures (302 passed, 2 failed)."
+  ]
+}
