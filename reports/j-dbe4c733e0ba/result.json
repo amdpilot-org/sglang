@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37710",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Current main reproduces the missing feature by rejecting --kv-cache-dtype int8. The issue does not define an integer quantization/storage contract, and the only related phase-1 Triton-MHA proposal was closed unmerged, intentionally omitted major paths, and no longer applies to the current runtime architecture. No implementation is claimed.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-dbe4c733e0ba/venv/bin/python -m sglang.launch_server --model-path /nonexistent --kv-cache-dtype int8",
+      "exit_code": 2,
+      "what_was_measured": "Current CLI dtype contract; parser rejected int8 before model loading."
+    },
+    {
+      "command": "git diff 8c3d80eabec2d2a41ccff4d15b5fc81e59d24fbe..8ad549a91e5cb1f98cbeefb60a30175fe8933496 | git apply --check --verbose",
+      "exit_code": 1,
+      "what_was_measured": "Applicability of closed upstream PR #22004 to the recorded base; obsolete/removed paths and changed integration points prevent direct application."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-dbe4c733e0ba/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_kv_cache.py test/registered/unit/layers/quantization/test_fp4_kv_cache_quant_method.py",
+      "exit_code": 0,
+      "what_was_measured": "Existing quantized KV-cache compatibility tests: 22 passed, 1 skipped; this does not test INT8."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "One AMD Instinct MI350X gfx950 was available and a Torch GPU smoke succeeded, but no INT8 KV-cache implementation existed to execute; unrelated GPU activity is not counted as feature evidence.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No INT8 KV-cache implementation was accepted or added.",
+    "Integer width/signedness, quantization convention, granularity, scale/zero-point metadata, and GGUF mapping are unspecified.",
+    "No backend/model/cache-feature support matrix is defined.",
+    "No INT8 GPU attention numerical validation or serving-path accuracy validation was possible.",
+    "Closed upstream PR #22004 covered only MHA Triton page-size-1 and explicitly excluded MLA, hybrid SWA, double sparsity, PD disaggregation, hierarchical cache, deterministic inference, and Ascend; it does not apply cleanly to current main."
+  ]
+}
