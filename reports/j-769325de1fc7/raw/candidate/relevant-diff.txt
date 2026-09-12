@@ -1,0 +1,174 @@
+diff --git a/3rdparty/amd/wheel/sglang/pyproject.toml b/3rdparty/amd/wheel/sglang/pyproject.toml
+index d039b1b..bf76afa 100644
+--- a/3rdparty/amd/wheel/sglang/pyproject.toml
++++ b/3rdparty/amd/wheel/sglang/pyproject.toml
+@@ -62,7 +62,7 @@ runtime_common = [
+   "transformers==5.12.1",
+   "uvicorn",
+   "uvloop",
+-  "xgrammar==0.2.1",
++  "xgrammar==0.2.2",
+   "smg-grpc-servicer>=0.9.0",
+ ]
+
+diff --git a/python/pyproject.toml b/python/pyproject.toml
+index a112528..cdfc2f2 100755
+--- a/python/pyproject.toml
++++ b/python/pyproject.toml
+@@ -96,7 +96,7 @@ dependencies = [
+   "uvicorn",
+   "uvloop",
+   "watchfiles",
+-  "xgrammar==0.2.1",
++  "xgrammar==0.2.2",
+   "xxhash",
+   "zstandard",
+ ]
+diff --git a/python/pyproject_cpu.toml b/python/pyproject_cpu.toml
+index cebef45..22bfd77 100644
+--- a/python/pyproject_cpu.toml
++++ b/python/pyproject_cpu.toml
+@@ -70,7 +70,7 @@ dependencies = [
+   "uvicorn",
+   "uvloop",
+   "xxhash",
+-  "xgrammar==0.2.1",
++  "xgrammar==0.2.2",
+   "zstandard",
+ ]
+
+diff --git a/python/pyproject_npu.toml b/python/pyproject_npu.toml
+index 6796a4c..ec3616e 100644
+--- a/python/pyproject_npu.toml
++++ b/python/pyproject_npu.toml
+@@ -67,7 +67,7 @@ dependencies = [
+   "uvicorn",
+   "uvloop",
+   "xxhash",
+-  "xgrammar==0.2.1",
++  "xgrammar==0.2.2",
+ ]
+
+ [project.optional-dependencies]
+diff --git a/python/pyproject_other.toml b/python/pyproject_other.toml
+index 2822693..14bacd5 100755
+--- a/python/pyproject_other.toml
++++ b/python/pyproject_other.toml
+@@ -73,7 +73,7 @@ runtime_common = [
+   "compressed-tensors",
+   "outlines==0.1.11",
+   "timm==1.0.16",
+-  "xgrammar==0.2.1",
++  "xgrammar==0.2.2",
+ ]
+
+ # srt_empty: device-agnostic install — pure Python packages only, no torch dependency chain.
+diff --git a/test/registered/unit/function_call/test_kimik3_structural_tag.py b/test/registered/unit/function_call/test_kimik3_structural_tag.py
+index 9bef313..ab3cb63 100644
+--- a/test/registered/unit/function_call/test_kimik3_structural_tag.py
++++ b/test/registered/unit/function_call/test_kimik3_structural_tag.py
+@@ -160,6 +160,104 @@ def test_strict_schema_accepts_native_xtml_values():
+     )
+
+
++def test_strict_nested_additional_properties_preserve_named_property_schema():
++    case_schema = {
++        "type": "object",
++        "properties": {"data": {"type": "integer"}},
++        "additionalProperties": {
++            "type": "object",
++            "properties": {"data": {"type": "string"}},
++            "additionalProperties": True,
++        },
++    }
++    tool = Tool(
++        type="function",
++        function=Function(
++            name="case",
++            strict=True,
++            parameters={
++                "type": "object",
++                "required": ["value"],
++                "additionalProperties": False,
++                "properties": {"value": case_schema},
++            },
++        ),
++    )
++    grammar = _grammar([tool], tool_choice="required")
++
++    assert _accepts(
++        grammar,
++        _tools_section(
++            _call("case", 1, _argument("value", "object", '{"data":0}'))
++        ),
++    )
++    assert not _accepts(
++        grammar,
++        _tools_section(
++            _call(
++                "case",
++                1,
++                _argument("value", "object", '{"data":{"data":""}}'),
++            )
++        ),
++    )
++    assert _accepts(
++        grammar,
++        _tools_section(
++            _call(
++                "case",
++                1,
++                _argument("value", "object", '{"extra":{"data":"ok"}}'),
++            )
++        ),
++    )
++
++
++@pytest.mark.xfail(
++    strict=True,
++    reason=(
++        "xgrammar 0.2.2 through 0.2.6 reject a valid additional property "
++        "when it precedes a declared property"
++    ),
++)
++def test_strict_nested_additional_properties_allow_either_member_order():
++    case_schema = {
++        "type": "object",
++        "properties": {"data": {"type": "integer"}},
++        "additionalProperties": {
++            "type": "object",
++            "properties": {"data": {"type": "string"}},
++            "required": ["data"],
++            "additionalProperties": True,
++        },
++    }
++    tool = Tool(
++        type="function",
++        function=Function(
++            name="case",
++            strict=True,
++            parameters={
++                "type": "object",
++                "required": ["value"],
++                "additionalProperties": False,
++                "properties": {"value": case_schema},
++            },
++        ),
++    )
++    grammar = _grammar([tool], tool_choice="required")
++
++    for value in (
++        '{"data":2,"extra":{"data":"ok"}}',
++        '{"extra":{"data":"ok"},"data":2}',
++    ):
++        assert _accepts(
++            grammar,
++            _tools_section(
++                _call("case", 1, _argument("value", "object", value))
++            ),
++        )
++
++
+ @pytest.mark.parametrize(
+     "arguments",
+     [
