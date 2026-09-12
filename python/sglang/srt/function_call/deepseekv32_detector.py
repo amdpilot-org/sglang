@@ -185,6 +185,16 @@ class DeepSeekV32Detector(BaseFormatDetector):
 
         return json.dumps(parameters, ensure_ascii=False)
 
+    def _normalize_parameters(
+        self, func_name: str, parameters: str, tools: list[Tool]
+    ) -> str:
+        """Model-specific post-processing for a complete argument object."""
+        return parameters
+
+    def _stream_partial_parameters(self, invoke_content: str) -> bool:
+        """Whether incomplete argument objects may be emitted incrementally."""
+        return True
+
     def detect_and_parse(self, text: str, tools: list[Tool]) -> StreamingParseResult:
         """
         One-time parsing: Detects and parses tool calls in the provided text.
@@ -213,6 +223,7 @@ class DeepSeekV32Detector(BaseFormatDetector):
                         invoke_match
                     )
                     func_args = self._parse_parameters_from_xml(invoke_content)
+                    func_args = self._normalize_parameters(func_name, func_args, tools)
                     # construct match_result for parse_base_json
                     match_result = {
                         "name": func_name,
@@ -311,6 +322,10 @@ class DeepSeekV32Detector(BaseFormatDetector):
                 current_params = self._parse_parameters_from_xml(
                     invoke_content, allow_partial=not is_tool_end
                 )
+                if is_tool_end:
+                    current_params = self._normalize_parameters(
+                        func_name, current_params, tools
+                    )
 
                 # 3. Calculate and send incremental arguments
                 sent_len = len(self.streamed_args_for_tool[self.current_tool_id])
@@ -323,7 +338,10 @@ class DeepSeekV32Detector(BaseFormatDetector):
                 if is_tool_end:
                     # If complete, send everything remaining
                     argument_diff = current_params[sent_len:]
-                elif prev_params is not None:
+                elif (
+                    self._stream_partial_parameters(invoke_content)
+                    and prev_params is not None
+                ):
                     # If partial, send stable prefix diff
                     if current_params != prev_params:
                         prefix = _find_common_prefix(current_params, prev_params)
