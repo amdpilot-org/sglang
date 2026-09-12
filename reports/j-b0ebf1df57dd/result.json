@@ -1,0 +1,27 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38452",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Reproduced the independent review against candidate 4728bc00c490439134d4ddcc2782ad291effb5d9. The candidate test passes, but it does not construct the reported backup-only stub or call scheduler._prefetch_kvcache: this base defines backuped from live host_value, and host-leaf eviction frees the host value and removes the leaf. The candidate instead directly prefetches an absent suffix from a live L2 anchor and then directly prefetches the full key from root, with prefetch_threshold=1. Production sources are identical between candidate and base, so no justified production correction is possible on this prepared revision.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-b0ebf1df57dd/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py -k 'hicache_l3_prefetch_after_device_and_host_eviction or hicache_host_leaf_eviction' -vv",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate test plus existing host-leaf eviction coverage on all collected configurations: 22 passed, 16 skipped. The passing candidate assertions show the suffix node is removed after host eviction and the complete case anchors at root; storage is invoked directly rather than through the scheduler."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b0ebf1df57dd/venv/bin/python -c 'import torch; ...'",
+      "exit_code": 0,
+      "what_was_measured": "Prepared interpreter reported torch 2.11.0+rocm7.2, HIP 7.2.26015, one available AMD Instinct MI355X device, capability (9, 5)."
+    },
+    {
+      "command": "git diff --name-only 358c163250ad3b1f62939b01ce1314a0a31a0365 4728bc00c490439134d4ddcc2782ad291effb5d9",
+      "exit_code": 0,
+      "what_was_measured": "Candidate changes only one unit test and prior-job report artifacts; it changes no production source."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "The candidate and host-eviction tests executed with the prepared ROCm PyTorch environment, which detected one AMD Instinct MI355X. KV round-trip assertions compared actual device tensors and passed.",
+  "native_rebuilt": false,
+  "remaining_limitations": "The reported NVIDIA L40S/CUDA 13 server/model workload was not reproduced because this prepared revision's UnifiedTreeNode.backuped property requires a non-null Full host_value, while _evict_host_leaf frees all host component values and removes the leaf. Therefore an evicted && backuped node cannot survive host eviction here. No unavailable architecture or missing weights were used to justify a speculative change. The original issue may describe an older/different tree implementation whose storage-backup state was independent of host residency; that implementation is not present at the recorded base."
+}
