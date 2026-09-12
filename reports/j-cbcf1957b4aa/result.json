@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38104",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/898",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/865",
+  "candidate_commit": "01e371c94736e20b568185c1c947c03a69fd1c3a",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproducibly lets the server default reasoning_effort override both supported request forms at the actual chat-template render boundary. The exact candidate preserves whether the request supplied an effort before normalization and skips only the conflicting server default. Its regression tests, the full serving-chat unit file, and six independent precedence/boundary cases pass. This is a source fix plus regression hardening, not test-only hardening.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-cbcf1957b4aa/venv/bin/python -m pytest -q /tmp/j-cbcf1957b4aa-test_serving_chat-candidate.py -k 'request_reasoning_effort_beats_default_after_conversion or top_level_reasoning_effort_beats_default_after_conversion or default_reasoning_effort_survives_conversion_when_request_is_silent'",
+      "exit_code": 1,
+      "what_was_measured": "Candidate regression file executed against untouched base source: nested and top-level explicit xhigh both rendered as medium (2 failed), while the silent-request default case passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-cbcf1957b4aa/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py -k 'request_reasoning_effort_beats_default_after_conversion or top_level_reasoning_effort_beats_default_after_conversion or default_reasoning_effort_survives_conversion_when_request_is_silent'",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate at the chat-template render boundary: both request forms beat medium and a silent request receives medium (3 passed)."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-cbcf1957b4aa/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py",
+      "exit_code": 0,
+      "what_was_measured": "Full serving-chat unit suite on exact candidate: 138 passed and 68 subtests passed."
+    },
+    {
+      "command": "Independent Python render-boundary probe recorded in raw/candidate-adversarial.log",
+      "exit_code": 0,
+      "what_was_measured": "Six cases: nested none, nested numeric 0.0, top-level max, silent request default, preservation of unrelated request kwargs/defaults, and conflicting request locations (nested request value retains existing precedence)."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-cbcf1957b4aa/venv/bin/python -c 'import inspect,sglang.srt.entrypoints.openai.serving_chat as m; print(inspect.getfile(m))'",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed tests imported /job/repo/python/sglang/srt/entrypoints/openai/serving_chat.py rather than an installed copy."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU kernels or model serving were needed or executed for this deterministic Python merge/render-boundary defect. The assigned device was detected as one AMD Instinct MI350X (gfx950) under torch 2.11.0+rocm7.2; this does not reproduce the report's 2x NVIDIA H200/CUDA/Qwen3.8 deployment."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Qwen/Qwen3.8-Flash-Next-FP8 weights were not available, so no full-model semantic or reasoning-length comparison was run.",
+    "The prepared environment has one AMD Instinct MI350X/gfx950 with ROCm 7.2, whereas the report used two NVIDIA H200 NVL GPUs with CUDA 13.0 and TP/EP=2; distributed and architecture-specific behavior remains untested.",
+    "No native files changed in the candidate, so a native rebuild was neither applicable nor performed.",
+    "The verification establishes request/default precedence through the real conversion and tokenizer apply_chat_template boundary; it does not claim model-output quality or reasoning-length equivalence."
+  ]
+}
