@@ -306,6 +306,12 @@ class ComponentLoader(ABC):
         component_attn_name: str | None,
         require_backend_selection: bool,
     ) -> AutoModel:
+        # Do not serialize the complete native from_pretrained call here: it includes
+        # checkpoint I/O and weight materialization, which are the expensive phases
+        # parallel component loading is intended to overlap. SGLang constructors that
+        # mutate process-global PyTorch state take model_construction_lock in their
+        # narrower construction contexts (for example set_default_torch_dtype and
+        # initialize_model).
         with self.component_attention_backend_context(
             attn_backend,
             component_attn_name,

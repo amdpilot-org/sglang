@@ -9,6 +9,7 @@ import glob
 import json
 import os
 import re
+import threading
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator
 from itertools import chain
@@ -38,16 +39,23 @@ _QUANTIZED_DTYPES = {
     torch.int8,
 }
 
+# Model constructors temporarily mutate process-global PyTorch state (the default
+# dtype and, through skip_init_modules/accelerate, nn.Module registration hooks).
+# Keep construction serialized while allowing checkpoint I/O and weight transfer
+# to overlap between component loader threads.
+model_construction_lock = threading.RLock()
+
 
 @contextlib.contextmanager
 def set_default_torch_dtype(dtype: torch.dtype):
     """Sets the default torch dtype to the given dtype."""
-    old_dtype = torch.get_default_dtype()
-    torch.set_default_dtype(dtype)
-    try:
-        yield
-    finally:
-        torch.set_default_dtype(old_dtype)
+    with model_construction_lock:
+        old_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(dtype)
+        try:
+            yield
+        finally:
+            torch.set_default_dtype(old_dtype)
 
 
 def initialize_model(

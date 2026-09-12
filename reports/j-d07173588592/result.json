@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19092",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Implemented opt-out, single-rank parallel loading for native SGLang diffusion pipeline components. Model construction that mutates process-global PyTorch state is serialized, while checkpoint I/O and weight placement can overlap. Multi-rank loading remains sequential to avoid mismatched distributed collectives. The implementation is covered by compatibility, concurrency, failure, thread-safety, CLI, and one-GPU numerical tests. Full Qwen-Image cold-start timing was not run because its weights were not available in the prepared runtime.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-d07173588592/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_parallel_component_loading.py (before implementation)",
+      "exit_code": 1,
+      "what_was_measured": "Regression reproduced: component loads were sequential (barrier broke) and concurrent default-dtype contexts overlapped. Two tests failed and three compatibility controls passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d07173588592/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_parallel_component_loading.py python/sglang/multimodal_gen/test/unit/test_plain_component_loader.py python/sglang/multimodal_gen/test/unit/test_component_loader_identity.py python/sglang/multimodal_gen/test/unit/test_component_loading_order.py",
+      "exit_code": 0,
+      "what_was_measured": "31 tests passed: true component overlap, deterministic result ordering, explicit sequential opt-out, multi-rank sequential fallback, exception propagation, serialized global dtype mutation, CLI compatibility, exact alias/loader identity, loading-order compatibility, and plain checkpoint loading."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d07173588592/venv/bin/python -m pytest -vv python/sglang/multimodal_gen/test/unit/test_parallel_component_loading.py::test_parallel_loaded_gpu_modules_match_numpy_reference",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X, three concurrently created and transferred GPU modules produced outputs matching an independent NumPy CPU matrix-multiplication reference (rtol 1e-5, atol 1e-6)."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d07173588592/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_utility_ownership.py python/sglang/multimodal_gen/test/unit/test_component_quantization_admission.py python/sglang/multimodal_gen/test/unit/test_disagg_roles.py",
+      "exit_code": 0,
+      "what_was_measured": "68 tests and 9 subtests passed across thread-local utility state, component admission, server-argument behavior, and disaggregated-role compatibility."
+    },
+    {
+      "command": "256 MiB pageable and pinned CPU-to-GPU transfer probe with torch.cuda.synchronize()",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned MI350X, pageable source memory measured 6.378 GB/s and pinned source memory measured 55.702 GB/s; checksums matched. This confirms the issue's pinned-memory concern is material but does not validate a production loader change."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d07173588592/venv/bin/python -m compileall -q <changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python source and tests compiled successfully."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X, torch 2.11.0+rocm7.2 / HIP 7.2.26015; GPU numerical test passed against NumPy and the host-transfer probe completed with matching checksums."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Qwen/Qwen-Image weights were unavailable, so the reported 63-second real-model load and end-to-end cold-start speedup were not reproduced on this node.",
+    "The patch parallelizes initial ComposedPipelineBase module loading. Existing sleep/wake restoration and post-training refit code paths are separate and were not changed or benchmarked.",
+    "Multi-rank launches deliberately retain sequential component loading because component initialization can invoke distributed collectives in rank-dependent thread order.",
+    "Parallel loading can increase peak host memory and storage pressure; --parallel-loading false is the supported fallback. No automatic host-memory admission controller was added.",
+    "Production safetensor CPU mappings remain pageable on relevant loader paths. Pinned-memory or direct-to-device checkpoint loading is not implemented by this contribution.",
+    "No native source changed, so no native rebuild was applicable. Ruff and Black were unavailable in the pinned interpreter; git diff --check and compileall passed."
+  ]
+}
