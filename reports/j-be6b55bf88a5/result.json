@@ -1,0 +1,60 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37848",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1279",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1240",
+  "candidate_commit": "87d106c558fb4472f0821013762ee19d6189b765",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes the 13 concrete constructor sites carried forward from the prior independent review, and its focused regression suite passes. It does not fully resolve the original issue: the original source scan still fails, with 25 syntactic omissions. Seven pass quant_config=None, but 18 pass a live quantization configuration without a prefix. An independent SolarForCausalLM constructor probe demonstrates the original empty-prefix behavior on the candidate.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-be6b55bf88a5/venv/bin/python -c '<run retained scan against /job/repo/python/sglang/srt/models>' at base 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced the original source contract with 53 quantization-aware constructor calls passing quant_config without an explicit prefix."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-be6b55bf88a5/venv/bin/python -m pytest -q test/registered/unit/models/test_reviewed_quantization_prefixes.py test/registered/unit/models/test_phi_quantization_prefix.py test/registered/unit/layers/quantization/test_compressed_tensors_lm_head.py at candidate 87d106c558fb4472f0821013762ee19d6189b765",
+      "exit_code": 0,
+      "what_was_measured": "40 tests and 42 subtests passed, covering the candidate's reviewed prefixes and earlier PR regressions."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-be6b55bf88a5/venv/bin/python reports/j-1243ec051691/reproduce_review_counterexamples.py /job/repo/python/sglang/srt/models at candidate 87d106c558fb4472f0821013762ee19d6189b765",
+      "exit_code": 0,
+      "what_was_measured": "All 13 concrete counterexamples from the prior independent review have an explicit qualified prefix."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-be6b55bf88a5/venv/bin/python -c '<run retained original scan against /job/repo/python/sglang/srt/models>' at candidate 87d106c558fb4472f0821013762ee19d6189b765",
+      "exit_code": 1,
+      "what_was_measured": "The original contract still reports 25 omissions: 7 literal quant_config=None sites and 18 sites supplied a non-None-capable quant_config expression."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-be6b55bf88a5/venv/bin/python < independent SolarForCausalLM constructor-boundary probe at candidate 87d106c558fb4472f0821013762ee19d6189b765",
+      "exit_code": 1,
+      "what_was_measured": "With outer prefix nested and a live quant_config object, ParallelLMHead received quant_config but no prefix keyword; expected nested.lm_head."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is deterministic constructor/name routing before weights or kernels execute. The prepared host exposed one AMD Instinct MI350X (gfx950-class) through ROCm 7.2, but no architecture weights were available and no numerical or serving claim was needed or made."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "python/sglang/srt/models/solar.py:431: SolarForCausalLM ParallelLMHead omits prefix; independently reproduced at the constructor boundary (expected nested.lm_head).",
+    "python/sglang/srt/models/deepseek_vl2.py:42,54,64,76,88,96,107: seven ReplicatedLinear projector/token-pooling calls pass quant_config without qualified prefixes.",
+    "python/sglang/srt/models/gpt2.py:75: RadixAttention passes quant_config without an attention prefix.",
+    "python/sglang/srt/models/lfm2_vl.py:67,74: multimodal projector ColumnParallelLinear and RowParallelLinear pass quant_config without prefixes.",
+    "python/sglang/srt/models/longcat_flash_nextn.py:299: ParallelLMHead passes self.quant_config without a prefix.",
+    "python/sglang/srt/models/mimo_mtp.py:101: ParallelLMHead passes quant_config without a prefix.",
+    "python/sglang/srt/models/nemotron_nas.py:183: VocabParallelEmbedding passes quant_config without an embed_tokens prefix.",
+    "python/sglang/srt/models/qwen3_omni_moe.py:241,247,251: three audio encoder ReplicatedLinear calls pass quant_config without prefixes.",
+    "python/sglang/srt/models/step3p5_mtp.py:51: ParallelLMHead passes quant_config without a prefix."
+  ],
+  "remaining_limitations": [
+    "No Solar, DeepSeek-VL2, GPT-2, LFM2-VL, LongCat, MiMo, Nemotron-NAS, Qwen3-Omni, or Step3.5 model weights were available, so full-model semantic and serving tests were not run.",
+    "Only the Solar remaining failure was independently executed at a constructor boundary; the other 17 live-config omissions are source-level counterexamples requiring architecture-specific runtime qualification before correction.",
+    "The prepared environment is ROCm 7.2 on one AMD Instinct MI350X, whereas the issue snapshot used CUDA on an RTX 4090. This does not affect the CPU-only prefix-routing reproduction but prevents claiming cross-architecture model execution.",
+    "No native files differ between the base and candidate, so there was no native library to rebuild. The imported sglang source was /job/repo/python/sglang/__init__.py."
+  ]
+}
