@@ -7,7 +7,7 @@ from __future__ import annotations
 import re
 from copy import deepcopy
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Dict, Iterable, List, Mapping, Optional, Tuple, Union
 
 import numpy
 import torch
@@ -123,6 +123,27 @@ def is_layer_skipped(
 
     assert is_skipped is not None
     return is_skipped
+
+
+def are_linear_prefixes_unquantized(
+    quant_config: Optional[QuantizationConfig], prefixes: Iterable[str]
+) -> bool:
+    """Return whether every linear prefix resolves to an unquantized method."""
+    if quant_config is None:
+        return True
+
+    from sglang.srt.layers.linear import LinearBase
+    from sglang.srt.layers.quantization.unquant import UnquantizedLinearMethod
+
+    # LinearBase allocates no weights itself. Using an unquantized probe lets
+    # each config apply its own per-prefix exclusion rules through the same
+    # get_quant_method entry point used by real linear layers.
+    probe = LinearBase(input_size=1, output_size=1, quant_config=None)
+    for prefix in prefixes:
+        method = quant_config.get_quant_method(probe, prefix=prefix)
+        if method is not None and not isinstance(method, UnquantizedLinearMethod):
+            return False
+    return True
 
 
 def per_tensor_dequantize(
