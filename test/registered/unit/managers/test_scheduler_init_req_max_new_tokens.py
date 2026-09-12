@@ -1,7 +1,9 @@
 import logging
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
+import sglang.srt.managers.scheduler as scheduler_module
 from sglang.srt.environ import envs
 from sglang.srt.managers.scheduler import Scheduler
 from sglang.srt.runtime_context import get_parallel
@@ -179,6 +181,60 @@ class TestSchedulerInitReqMaxNewTokens(unittest.TestCase):
                                         max_new_tokens=requested, input_len=input_len
                                     )
                                     self._init_and_check(scheduler, req)
+
+
+class TestDeterministicChunkedPrefillAlignment(unittest.TestCase):
+    def _init_config(
+        self,
+        *,
+        chunked_prefill_size,
+        deterministic=True,
+        prefill_backend="triton",
+        alignment=4096,
+    ):
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.chunked_prefill_size = chunked_prefill_size
+        exec_config = SimpleNamespace(
+            deterministic=SimpleNamespace(enable_deterministic_inference=deterministic)
+        )
+        with (
+            patch.object(scheduler_module, "get_exec", return_value=exec_config),
+            patch.object(
+                scheduler_module,
+                "attention_backends",
+                return_value=(prefill_backend, prefill_backend),
+            ),
+            patch.object(scheduler_module, "get_int_env_var", return_value=alignment),
+        ):
+            scheduler.init_deterministic_inference_config()
+        return scheduler
+
+    def test_rejects_positive_chunk_smaller_than_alignment(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "chunked_prefill_size must be at least the deterministic prefill",
+        ):
+            self._init_config(chunked_prefill_size=128)
+
+    def test_accepts_alignment_boundary_and_larger_chunk(self):
+        for chunked_prefill_size in (4096, 8192):
+            with self.subTest(chunked_prefill_size=chunked_prefill_size):
+                scheduler = self._init_config(chunked_prefill_size=chunked_prefill_size)
+                self.assertEqual(scheduler.truncation_align_size, 4096)
+
+    def test_accepts_disabled_chunking(self):
+        scheduler = self._init_config(chunked_prefill_size=-1)
+        self.assertEqual(scheduler.truncation_align_size, 4096)
+
+    def test_non_deterministic_configuration_has_no_alignment(self):
+        scheduler = self._init_config(chunked_prefill_size=128, deterministic=False)
+        self.assertIsNone(scheduler.truncation_align_size)
+
+    def test_backend_without_deterministic_alignment_is_unaffected(self):
+        scheduler = self._init_config(
+            chunked_prefill_size=128, prefill_backend="torch_native"
+        )
+        self.assertIsNone(scheduler.truncation_align_size)
 
 
 if __name__ == "__main__":
