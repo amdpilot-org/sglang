@@ -443,6 +443,19 @@ class TestParseRouterArgs:
         assert router_args.worker_urls == ["http://worker1:8000", "http://worker2:8000"]
         assert router_args.policy == "round_robin"
 
+    def test_parse_bounded_hashing_threshold(self):
+        router_args = parse_router_args(
+            [
+                "--policy",
+                "bounded_consistent_hashing",
+                "--max-load-skew",
+                "1.75",
+            ]
+        )
+
+        assert router_args.policy == "bounded_consistent_hashing"
+        assert router_args.max_load_skew == 1.75
+
     def test_parse_pd_args(self):
         """Test parsing PD disaggregated mode arguments."""
         args = [
