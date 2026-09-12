@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32485",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 2808's requested-layer RunAI shard selection and corrected the independently reviewed incomplete-index counterexample. The selector now falls back to the complete prepared shard list whenever the index does not account for every prepared shard, including an mtp.safetensors deliberately appended by maybe_add_mtp_safetensors.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1392978ae8ec/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_runai_model_streamer_loader.py::TestRunaiModelStreamerLoader::test_incomplete_index_keeps_auto_added_mtp_safetensors",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction at exact candidate commit 8c799873170db6688e35734e591e36a5f188eaa5: the real compatibility helper auto-added mtp.safetensors, but the exact RunAI iterator input retained only draft-1.safetensors."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1392978ae8ec/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_runai_model_streamer_loader.py::TestRunaiModelStreamerLoader::test_incomplete_index_keeps_auto_added_mtp_safetensors",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression: an incomplete index causes the exact RunAI iterator input to fall back to target.safetensors, draft-1.safetensors, and the auto-added mtp.safetensors."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1392978ae8ec/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_runai_model_streamer_loader.py",
+      "exit_code": 0,
+      "what_was_measured": "Complete focused suite: 16 tests and 6 subtests passed, preserving native and Hugging Face selection, remote cached-index behavior, and all fallback cases."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validation."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The affected behavior is deterministic JSON metadata parsing and Python file-list selection before the RunAI iterator. It performs no tensor computation, and GPU execution would not validate this contract."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No live object-storage credentials or large production MTP checkpoint were available; remote behavior is covered through URI-shaped paths and cached local index metadata rather than provider I/O counters.",
+    "No model weights were required or used. Distributed loading and end-to-end model semantic accuracy remain unverified.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
