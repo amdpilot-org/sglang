@@ -49,6 +49,12 @@ class BaseKVCacheMethod(QuantizeMethodBase):
         raise RuntimeError(f"{self.__class__.__name__}.apply should not be called.")
 
     def process_weights_after_loading(self, layer) -> None:
+        # Record provenance before replacing the invalid checkpoint sentinel
+        # with the runtime fallback. Runtime values alone cannot distinguish a
+        # calibrated scale of exactly 1.0 from that fallback.
+        layer.kv_scale_calibration_loaded = bool(
+            layer.k_scale > 0.0 or layer.v_scale > 0.0
+        )
         if layer.k_scale > 0.0 and layer.v_scale > 0.0:
             # We prefer to use separate k_scale and v_scale if present
             k_scale = layer.k_scale.to("cpu").tolist()
