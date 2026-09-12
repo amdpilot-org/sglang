@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39096",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "reject",
+  "fully_resolves_original": false,
+  "summary": "Exact commit d6959386c233a1fcb0d27030bc9f576ddd7ca26e is test/report-only and retains the base implementation. Both direct request-path reproduction and its own live regression show that omitted /v1/chat/completions sampling fields still override --preferred-sampling-params. The report's candidate_verified claim concerns a different commit, fc25fb0ed902605ed7aaf5592a72e42979219965, and cannot verify the reviewed candidate.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-4592259bb161/venv/bin/python direct ChatCompletionRequest.to_sampling_params reproduction on base 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "The imported checkout source eagerly produced temperature=1.0, top_p=1.0, top_k=-1, and presence_penalty=0.0, overwriting preferred values 0.7, 0.8, 20, and 1.5."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4592259bb161/venv/bin/python -m py_compile scripts/ci/generate_tiny_sampling_model.py scripts/ci/probe_sampling_precedence.py at d6959386c233a1fcb0d27030bc9f576ddd7ca26e",
+      "exit_code": 0,
+      "what_was_measured": "Both candidate-added utilities are syntactically valid."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4592259bb161/venv/bin/python scripts/ci/generate_tiny_sampling_model.py /tmp/amdpilot-repo-j-4592259bb161/review-tiny-llama-d695938",
+      "exit_code": 0,
+      "what_was_measured": "Regenerated the deterministic fixture; model.safetensors SHA256 was 1407483bbc21bd0a4f84eb72acb2eb0d4b23019e5db843029e151f348e8fe108."
+    },
+    {
+      "command": "exact-candidate server with torch_native attention, disabled graphs, max-total-tokens 4096, then probe_sampling_precedence.py --expect-chat-precedence",
+      "exit_code": 1,
+      "what_was_measured": "GPU execution returned HTTP 200 for chat/completions, explicit/omitted requests, batching, and streaming, but omitted chat output differed from explicit-preferred output, so the candidate's original-contract assertion failed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X with gfx950 executed the exact-candidate tiny Llama server. Logs showed weight loading, a 4096-token KV cache, prefill/decode execution, torch_native attention, cuda graph false, and HTTP 200 responses."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "On exact commit d6959386c233a1fcb0d27030bc9f576ddd7ca26e, an omitted chat request still resolves temperature to 1.0 instead of preferred 0.7.",
+    "On exact commit d6959386c233a1fcb0d27030bc9f576ddd7ca26e, an omitted chat request still resolves top_p to 1.0 instead of preferred 0.8.",
+    "On exact commit d6959386c233a1fcb0d27030bc9f576ddd7ca26e, an omitted chat request still resolves top_k to -1 instead of preferred 20.",
+    "On exact commit d6959386c233a1fcb0d27030bc9f576ddd7ca26e, an omitted chat request still resolves presence_penalty to 0.0 instead of preferred 1.5.",
+    "The candidate's live probe returns HTTP 200 for all paths but exits 1 because omitted chat output does not match explicit preferred sampling."
+  ],
+  "remaining_limitations": [
+    "Tiny random weights validate request handling and ROCm engine execution, not semantic model quality.",
+    "The candidate changed no native source, so a native rebuild was neither applicable nor performed.",
+    "Prefill and decode graph backends were disabled; graph-enabled behavior was not measured.",
+    "The first live start failed from default KV-cache over-allocation on the 288-GB device; explicit 4096-token sizing succeeded.",
+    "A non-fatal Torch Dynamo metrics serialization error occurred during warmup."
+  ]
+}
