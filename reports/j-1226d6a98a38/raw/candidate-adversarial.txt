@@ -1,0 +1,62 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+__________ test_transformers_auto_remote_image_emits_per_item_metrics __________
+
+    def test_transformers_auto_remote_image_emits_per_item_metrics():
+        output = io.BytesIO()
+        Image.new("RGB", (2, 2)).save(output, format="PNG")
+        ImageHandler.payload = output.getvalue()
+        server = ThreadingHTTPServer(("127.0.0.1", 0), ImageHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            processor = TransformersAutoMultimodalProcessor.__new__(
+                TransformersAutoMultimodalProcessor
+            )
+            processor.metrics_collector = RecordingCollector()
+            processor._load_images(
+                [f"http://127.0.0.1:{server.server_port}/fixture.png"]
+            )
+>           assert len(processor.metrics_collector.media) == 1
+E           assert 0 == 1
+E            +  where 0 = len([])
+E            +    where [] = <test_independent_adversarial.RecordingCollector object at 0x7fac07da3140>.media
+E            +      where <test_independent_adversarial.RecordingCollector object at 0x7fac07da3140> = <sglang.srt.multimodal.processors.transformers_auto.TransformersAutoMultimodalProcessor object at 0x7fac07da3110>.metrics_collector
+
+../review-evidence-j-1226d6a98a38/test_independent_adversarial.py:55: AssertionError
+____________ test_async_override_direct_processor_call_is_observed _____________
+
+    def test_async_override_direct_processor_call_is_observed():
+        class DirectAsyncProcessor(BaseMultimodalProcessor):
+            async def process_mm_data_async(self, *args, **kwargs):
+                return self.process_mm_data()
+    
+            def process_mm_data(self, **kwargs):
+                time.sleep(0.01)
+                return {"input_ids": [[1]]}
+    
+        processor = DirectAsyncProcessor.__new__(DirectAsyncProcessor)
+        processor.metrics_collector = RecordingCollector()
+        asyncio.run(processor.process_mm_data_async())
+>       assert len(processor.metrics_collector.processor) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+E        +    where [] = <test_independent_adversarial.RecordingCollector object at 0x7fac07da36b0>.processor
+E        +      where <test_independent_adversarial.RecordingCollector object at 0x7fac07da36b0> = <test_independent_adversarial.test_async_override_direct_processor_call_is_observed.<locals>.DirectAsyncProcessor object at 0x7fac07da3710>.metrics_collector
+
+../review-evidence-j-1226d6a98a38/test_independent_adversarial.py:73: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../review-evidence-j-1226d6a98a38/test_independent_adversarial.py::test_transformers_auto_remote_image_emits_per_item_metrics
+FAILED ../review-evidence-j-1226d6a98a38/test_independent_adversarial.py::test_async_override_direct_processor_call_is_observed
+2 failed, 16 warnings in 9.30s
