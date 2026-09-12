@@ -41,7 +41,7 @@ from sglang.srt.multimodal.processors.mimo_audio import (
 from sglang.srt.multimodal.processors.qwen_vl import smart_nframes
 from sglang.srt.runtime_context import get_device
 from sglang.srt.utils import ImageData, VideoData
-from sglang.srt.utils.common import download_remote_media
+from sglang.srt.utils.common import download_remote_media, observe_media_load
 from sglang.utils import logger
 
 
@@ -485,8 +485,12 @@ class MiMoProcessor:
         kwargs.update(overrides)
         return cls(**kwargs)
 
+    def has_audio_track(self, path_or_data) -> bool:
+        with observe_media_load(getattr(self, "metrics_collector", None), "video"):
+            return self._has_audio_track(path_or_data)
+
     @staticmethod
-    def has_audio_track(path_or_data) -> bool:
+    def _has_audio_track(path_or_data) -> bool:
         # Never hand a client-supplied URL to ffprobe: its internal HTTP client
         # would bypass the shared domain and redirect policy. Resolve it through
         # the guarded downloader first, then probe the resulting bytes in-process.
@@ -1443,8 +1447,12 @@ class MiMoProcessor:
 
         return img_standardized, w_bar, h_bar
 
+    def fetch_image(self, image: Image.Image | str | bytes):
+        with observe_media_load(getattr(self, "metrics_collector", None), "image"):
+            return self._fetch_image(image)
+
     @classmethod
-    def fetch_image(cls, image: Image.Image | str | bytes):
+    def _fetch_image(cls, image: Image.Image | str | bytes):
         image_obj = None
         if isinstance(image, Image.Image):
             image_obj = image
@@ -1630,6 +1638,8 @@ class MiMoV2Processor(BaseMultimodalProcessor):
             device=device,
         )
         self._processor = self.mimo_processor
+        self.mimo_processor.metrics_collector = self.metrics_collector
+        self.mimo_processor.audio_pipeline.metrics_collector = self.metrics_collector
 
         self.AUDIO_TOKEN_REGEX = re.compile(
             r"<\|mimo_audio_start\|>(?:<\|audio_pad\|>)+<\|mimo_audio_end\|>"
@@ -2000,10 +2010,11 @@ class MiMoV2Processor(BaseMultimodalProcessor):
 
         loop = asyncio.get_running_loop()
         try:
-            input_sample = await loop.run_in_executor(
-                self.io_executor,
-                lambda: self.mimo_processor.process(contents, verbose=False),
-            )
+            with self._observe_mm_processor():
+                input_sample = await loop.run_in_executor(
+                    self.io_executor,
+                    lambda: self.mimo_processor.process(contents, verbose=False),
+                )
         except RuntimeError as e:
             logger.error(f"MiMo processor failed in process_mm_data_async: {e}")
             raise ValueError(f"Multimodal data is corrupted or cannot be decoded: {e}")

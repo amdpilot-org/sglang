@@ -250,15 +250,16 @@ class MiMoV2ASRProcessor(BaseMultimodalProcessor):
 
         loop = asyncio.get_running_loop()
         try:
-            (
-                input_ids,
-                audio_inputs,
-                position_ids,
-                rope_deltas,
-            ) = await loop.run_in_executor(
-                self.io_executor,
-                lambda: self._process_contents(contents),
-            )
+            with self._observe_mm_processor():
+                (
+                    input_ids,
+                    audio_inputs,
+                    position_ids,
+                    rope_deltas,
+                ) = await loop.run_in_executor(
+                    self.io_executor,
+                    lambda: self._process_contents(contents),
+                )
         except RuntimeError as e:
             logger.error(f"MiMo ASR processor failed in process_mm_data_async: {e}")
             raise ValueError(f"Multimodal data is corrupted or cannot be decoded: {e}")

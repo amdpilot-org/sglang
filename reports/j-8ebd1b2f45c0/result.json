@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38676",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 612's five multimodal metric families and corrected the independently reviewed bypasses from PR 650. Processor latency is now measured at the common dispatch used by overriding processors, with explicit coverage for MiMoV2's custom async processing paths. A reusable media-load observer now covers the base loader plus specialized Moss, MiMo image/audio/video, and Inkling URL loading paths while preserving absent download values and finally-based error observations.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8ebd1b2f45c0/venv/bin/python <bounded MiDashengLM override reproduction> (at exact candidate e72aee61955df18f5d2f5b4ddc1f7529b3f1dffd)",
+      "exit_code": 1,
+      "what_was_measured": "A delayed real MiDashengLMMultimodalProcessor override completed but emitted zero processor observations; the assertion requiring one observation failed. Raw output: raw/candidate-override-failing.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8ebd1b2f45c0/venv/bin/python <bounded MiDashengLM shared-dispatch reproduction>",
+      "exit_code": 0,
+      "what_was_measured": "The same override through the production shared dispatch emitted one measured processor observation of about 10 ms. Raw output: raw/corrected-override-passing.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8ebd1b2f45c0/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_mm_latency_metrics.py test/registered/unit/multimodal/test_base_processor_bad_input.py test/registered/unit/multimodal/test_base_processor_image_decode.py test/registered/unit/observability/test_stat_loggers_di.py",
+      "exit_code": 0,
+      "what_was_measured": "39 tests and 15 subtests passed, including the candidate behavior, override timing, specialized Moss download/load metrics, absent-versus-zero behavior, errors, and existing decode/collector coverage. Raw output: raw/focused-tests.txt"
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files <changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, syntax, spelling, and test-registration hooks passed. Raw output: raw/pre-commit.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8ebd1b2f45c0/venv/bin/python <torch ROCm matmul compared with NumPy>",
+      "exit_code": 0,
+      "what_was_measured": "The assigned AMD Instinct MI350X executed FP32 matmul with maximum absolute error 0.0 against NumPy. This validates the prepared GPU environment; the corrected metrics paths are host-side. Raw output: raw/gpu-numerical-check.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No model weights were downloaded and no full model server was started. The exact candidate failure and corrected dispatch were exercised with the real supported MiDashengLM processor class and bounded fake processor input.",
+    "The specialized media regression executes the real Moss normalization and timing path with a bounded fake downloader. MiMo and Inkling wiring was import-, lint-, and source-validated without unavailable model-specific weights.",
+    "No native, C++, FlyDSL, or LLVM files changed, so a native rebuild was not applicable."
+  ]
+}

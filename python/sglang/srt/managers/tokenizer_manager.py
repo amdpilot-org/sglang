@@ -733,6 +733,8 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                 bucket_e2e_request_latency=get_observability().bucket_e2e_request_latency,
                 bucket_inter_token_latency=get_observability().bucket_inter_token_latency,
             )
+            if self.mm_processor is not None:
+                self.mm_processor.metrics_collector = self.metrics_collector
 
             start_cpu_monitor_thread("tokenizer")
 
