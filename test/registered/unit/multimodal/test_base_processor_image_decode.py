@@ -52,10 +52,12 @@ def _png_bytes(mode: str = "RGB", size=(8, 8)) -> bytes:
     return buf.getvalue()
 
 
-def _jpeg_bytes(size=(8, 8)) -> bytes:
+def _jpeg_bytes(mode: str = "RGB", size=(8, 8)) -> bytes:
     arr = (np.random.RandomState(0).rand(size[1], size[0], 3) * 255).astype("uint8")
     buf = io.BytesIO()
-    Image.fromarray(arr, "RGB").save(buf, format="JPEG", quality=90, subsampling=2)
+    Image.fromarray(arr, "RGB").convert(mode).save(
+        buf, format="JPEG", quality=90, subsampling=2
+    )
     return buf.getvalue()
 
 
@@ -148,6 +150,29 @@ class TestLoadSingleItemImageDecode(CustomTestCase):
 
         self.assertIs(image, expected)
         decode.assert_called_once_with(data)
+
+    def test_standard_gpu_jpeg_decoder_normalizes_grayscale_to_rgb(self):
+        decode_jpeg = common.decode_jpeg
+
+        def decode_on_cpu(encoded_image, *, mode, device):
+            self.assertEqual(mode, common.ImageReadMode.RGB)
+            self.assertEqual(device, "cuda")
+            return decode_jpeg(encoded_image, mode=mode, device="cpu")
+
+        with (
+            patch.object(common, "is_cuda", return_value=True),
+            patch.object(common, "decode_jpeg", side_effect=decode_on_cpu),
+        ):
+            grayscale = common._load_image(
+                image_bytes=_jpeg_bytes("L"), gpu_image_decode=True
+            )
+            rgb = common._load_image(
+                image_bytes=_jpeg_bytes("RGB"), gpu_image_decode=True
+            )
+
+        self.assertEqual(tuple(grayscale.shape), (3, 8, 8))
+        self.assertEqual(tuple(rgb.shape), (3, 8, 8))
+        self.assertEqual(tuple(torch.stack([grayscale, rgb]).shape), (2, 3, 8, 8))
 
     def test_high_fidelity_gpu_jpeg_decoder_falls_back_to_pil(self):
         data = _jpeg_bytes()

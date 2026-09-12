@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/26751",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced Bug A in the checked-out implementation: the standard JPEG GPU-decode call omitted ImageReadMode.RGB, so a grayscale decode remained one-channel, failed mixed-image stacking, and produced 256-wide Gemma-4-style patches for a 768-input projection. The narrow fix explicitly requests RGB from torchvision. Bug B (scheduler blast radius) was not changed or qualified.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-87740c602657/venv/bin/python reports/j-87740c602657/reproduce_grayscale_gpu.py",
+      "exit_code": 0,
+      "what_was_measured": "Before: recorded the implementation calling decode_jpeg with only device=cuda, grayscale/RGB shapes (1,48,64)/(3,48,64), mixed-stack failure, and the gfx950 matmul failure (12x256 and 768x1152). After: recorded explicit ImageReadMode.RGB, both shapes (3,48,64), successful stacking, and a gfx950 projection result of (12,1152). Raw logs: reproduction-before.log and reproduction-after.log."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-87740c602657/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_base_processor_image_decode.py",
+      "exit_code": 0,
+      "what_was_measured": "12 focused image-decoding tests passed, including grayscale-to-RGB normalization, unchanged RGB channel count, and mixed grayscale/RGB stackability. Raw output: unit-tests.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-87740c602657/venv/bin/python -m pre_commit run --files python/sglang/srt/utils/common.py test/registered/unit/multimodal/test_base_processor_image_decode.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository formatting, lint, security, and test-registration hooks passed. Raw output: pre-commit.log."
+    },
+    {
+      "command": "torchvision.io.decode_jpeg(encoded_grayscale_jpeg, device='cuda') on HIP_VISIBLE_DEVICES=0",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the assigned device is AMD Instinct MI355X gfx950 and captured the environment limitation: this torchvision build raises 'not compiled with nvJPEG support'. Raw output: nvjpeg-gfx950-limitation.log."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "On HIP_VISIBLE_DEVICES=0, torch 2.11.0+rocm7.2 identified AMD Instinct MI355X gfx950:sramecc+:xnack-. The pre-fix Gemma-4-shaped Linear(768,1152) projection failed on-device for 256-wide grayscale patches; after RGB normalization it succeeded with output shape (12,1152).",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The ROCm torchvision build lacks nvJPEG, so the real standard GPU JPEG decoder could not run on gfx950; the checked-out _load_image control flow and decoder arguments were tested deterministically by substituting torchvision's CPU decoder at that boundary.",
+    "Gemma-4 weights and the reported 2xH200 TP=2 environment were unavailable, so no full model or HTTP serving reproduction is claimed.",
+    "The scheduler blast-radius Bug B and true per-request isolation were not changed or verified; this PR is limited to Bug A, consistent with the upstream maintainer request to split the fixes.",
+    "No native C++ or FlyDSL source was changed, so no native rebuild was applicable."
+  ],
+  "source_paths": [
+    "python/sglang/srt/utils/common.py",
+    "test/registered/unit/multimodal/test_base_processor_image_decode.py",
+    "reports/j-87740c602657/reproduce_grayscale_gpu.py"
+  ],
+  "native_paths": []
+}
