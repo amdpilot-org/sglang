@@ -352,6 +352,10 @@ class CustomAllReduceV2:
         """Check if the input tensor is suitable for custom all-reduce."""
         if self.disabled:
             return False
+        # Graph replay does not call the Python stream guard. Let the caller
+        # choose its graph-safe collective instead of capturing custom AR.
+        if torch.cuda.is_current_stream_capturing():
+            return False
         inp_size = inp.numel() * inp.element_size()
         # custom allreduce requires input byte size to be multiples of 16
         if inp_size % 16 != 0:

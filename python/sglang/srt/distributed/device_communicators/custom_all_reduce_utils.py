@@ -438,9 +438,9 @@ class SingleStreamGuard:
     When eager calls move between streams, record the previous stream and make
     the new stream wait for it before launching another collective.
 
-    CUDA graph capture is deliberately ignored: capture records work instead of
-    executing it, and concurrent graph replay does not call this host guard.
-    Callers must not replay graphs sharing a communicator concurrently.
+    CUDA graph capture cannot be made safe by this host guard: replay does not
+    call Python, so independently captured graphs could bypass the ordering.
+    Callers must route capture to a graph-safe collective instead.
     """
 
     def __init__(self, device: torch.device) -> None:
@@ -462,9 +462,12 @@ class SingleStreamGuard:
 
     def maybe_serialize(self) -> None:
         """Order this launch after the prior launch when its stream changes."""
-        if self._raw_stream(self.device_index) == self._last_raw_stream:
-            return
         if torch.cuda.is_current_stream_capturing():
+            raise RuntimeError(
+                "custom all-reduce cannot be captured because concurrent graph "
+                "replay can violate its single-in-flight communicator contract"
+            )
+        if self._raw_stream(self.device_index) == self._last_raw_stream:
             return
 
         stream = torch.cuda.current_stream(self.device_index)

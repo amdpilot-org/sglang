@@ -2,6 +2,7 @@ import threading
 import time
 from unittest.mock import MagicMock, patch
 
+import pytest
 import torch
 
 from sglang.kernels.ops.communication.all_reduce import AllReduceAlgo
@@ -61,16 +62,36 @@ def test_same_stream_is_fast_path(current_stream, event_cls, _):
 @patch("torch.cuda.is_current_stream_capturing", return_value=True)
 @patch("torch.cuda.Event")
 @patch("torch.cuda.current_stream")
-def test_capture_does_not_add_external_dependency(current_stream, event_cls, _):
+def test_capture_is_rejected_without_changing_guard_state(current_stream, event_cls, _):
     stream = MagicMock(cuda_stream=11)
     guard = _guard_with_streams(stream)
 
-    guard.maybe_serialize()
+    with pytest.raises(RuntimeError, match="concurrent graph replay"):
+        guard.maybe_serialize()
 
     current_stream.assert_not_called()
     event_cls.assert_not_called()
     assert guard._last_stream is None
     assert guard._last_raw_stream is None
+
+
+@patch("torch.cuda.is_current_stream_capturing", return_value=True)
+def test_legacy_capture_is_not_selected(_):
+    comm = object.__new__(custom_all_reduce.CustomAllreduce)
+    comm.disabled = False
+    comm._ptr = None
+
+    assert not comm.should_custom_ar(torch.ones(4))
+    comm.disabled = True
+
+
+@patch("torch.cuda.is_current_stream_capturing", return_value=True)
+def test_v2_capture_is_not_selected(_):
+    comm = object.__new__(custom_all_reduce_v2.CustomAllReduceV2)
+    comm.disabled = False
+
+    assert not comm.should_custom_ar(torch.ones(4))
+    comm.disabled = True
 
 
 def test_launch_lock_covers_kernel_enqueue():
