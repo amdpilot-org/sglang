@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34677",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1631",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1595",
+  "candidate_commit": "f19a67ec7f042a4c7836ca468b50e99926a76987",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a substantive partial fix: the exact JsonArrayParser and Qwen25Detector character-stream reproducer passes, but Mistral still loses the trailing valid call and final chunks can leave preserved valid calls stranded because finish() does not drain the buffer.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f9d0a2f9759f/venv/bin/python /job/review-evidence-j-f9d0a2f9759f/reproduce.py",
+      "exit_code": 0,
+      "what_was_measured": "On the recorded base, reproduced the exact issue outputs: empty JsonArrayParser result and a corrupt merged Qwen25Detector result. On the candidate, both valid calls were preserved with stable indices."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f9d0a2f9759f/venv/bin/python -m pytest -q test/registered/unit/function_call/test_unknown_tool_name.py test/registered/unit/function_call/test_function_call_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate focused regression suite: 248 passed and 4 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f9d0a2f9759f/venv/bin/python /job/review-evidence-j-f9d0a2f9759f/adversarial.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent ordering/chunk-boundary checks across JsonArrayParser, Qwen25, Hermes, Llama32, Mistral, and Trinity; demonstrated Mistral failure and end-of-stream buffered-call loss."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The affected implementation and candidate changes are pure Python request parsing; no GPU execution is involved in the original reproducer or contract."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Mistral canonical-array streaming with valid, unknown, valid calls returns only the first valid call and exposes the remainder as normal text, even with one-character chunks.",
+    "A final chunk containing a complete unknown call followed by a valid call leaves that valid call buffered after finish() for JsonArrayParser, Qwen25, Hermes, Llama32, and Trinity; Mistral separately flushes/losses the remainder.",
+    "Coarse chunks can leave a trailing valid tool's arguments buffered at end-of-stream because the parser processes only one transition per increment and finish() is a no-op."
+  ],
+  "remaining_limitations": [
+    "No full model, HTTP serving, GPU, model-architecture, semantic-accuracy, or distributed-workload validation was performed; none is needed to establish the deterministic parser counterexamples.",
+    "The prepared environment has one gfx950 GPU, but using it would not validate this CPU-only parser path.",
+    "No native rebuild was performed because neither the candidate nor the relevant implementation changes native code."
+  ]
+}
