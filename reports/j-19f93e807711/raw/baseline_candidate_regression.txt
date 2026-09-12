@@ -1,0 +1,156 @@
+FFF.                                                                     [100%]
+=================================== FAILURES ===================================
+_______ test_move_logprobs_to_cpu_accepts_mixed_tensor_and_list_entries ________
+
+    def test_move_logprobs_to_cpu_accepts_mixed_tensor_and_list_entries():
+        logits_output = _logits_output(
+            next_token_top_logprobs_val=[torch.tensor([-0.5]), []],
+            next_token_top_logprobs_idx=[torch.tensor([7]), []],
+            next_token_token_ids_logprobs_val=[torch.tensor([-0.25]), []],
+        )
+    
+>       SchedulerBatchResultProcessor.move_logprobs_to_cpu(
+            None,
+            batch=SimpleNamespace(return_logprob=True),
+            logits_output=logits_output,
+        )
+
+../review-evidence-j-19f93e807711/test_candidate.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = None
+
+    def move_logprobs_to_cpu(
+        self,
+        *,
+        batch: ScheduleBatch,
+        logits_output: LogitsProcessorOutput,
+    ) -> None:
+        if batch.return_logprob:
+            if logits_output.next_token_logprobs is not None:
+                logits_output.next_token_logprobs = (
+                    logits_output.next_token_logprobs.tolist()
+                )
+            if logits_output.input_token_logprobs is not None:
+                logits_output.input_token_logprobs = tuple(
+                    logits_output.input_token_logprobs.tolist()
+                )
+            if logits_output.next_token_top_logprobs_val:
+                logits_output.next_token_top_logprobs_val = [
+>                   v.tolist() for v in logits_output.next_token_top_logprobs_val
+                    ^^^^^^^^
+                ]
+E               AttributeError: 'list' object has no attribute 'tolist'
+
+python/sglang/srt/managers/scheduler_components/batch_result_processor.py:532: AttributeError
+_____ test_normalize_decode_outputs_accepts_mixed_tensor_and_list_entries ______
+
+    def test_normalize_decode_outputs_accepts_mixed_tensor_and_list_entries():
+        logits_output = _logits_output(
+            next_token_top_logprobs_val=[torch.tensor([-0.5]), []],
+            next_token_top_logprobs_idx=[torch.tensor([7]), []],
+            next_token_token_ids_logprobs_val=[torch.tensor([-0.25]), []],
+        )
+    
+>       next_token_ids, next_token_logprobs = _normalize_decode_outputs(logits_output)
+                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+../review-evidence-j-19f93e807711/test_candidate.py:65: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../review-evidence-j-19f93e807711/test_candidate.py:31: in _normalize_decode_outputs
+    return SchedulerBatchResultProcessor._normalize_decode_outputs(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = None
+
+    def _normalize_decode_outputs(
+        self,
+        *,
+        batch: ScheduleBatch,
+        result: GenerationBatchResult,
+        logits_output: LogitsProcessorOutput,
+        next_token_ids: Union[torch.Tensor, List[int]],
+    ) -> Tuple[Union[List[int], List[List[int]]], Optional[List[float]]]:
+        next_token_logprobs = None
+        # Normalize to a uniform per-req list of accepted tokens (List[List[int]]):
+        # spec unpacks the padded verify output; non-spec wraps its single token.
+        if not batch.spec_algorithm.is_none():
+            next_token_ids = self._resolve_spec_v2_tokens(result, batch)
+        else:
+            # CUDA workers return a device tensor, MLX a host list[int]; both -> list.
+            ids = (
+                next_token_ids.tolist()
+                if torch.is_tensor(next_token_ids)
+                else next_token_ids
+            )
+            next_token_ids = [[t] for t in ids]
+    
+        if batch.return_logprob:
+            next_token_logprobs = logits_output.next_token_logprobs.tolist()
+            if logits_output.next_token_top_logprobs_val:
+                logits_output.next_token_top_logprobs_val = [
+>                   v.tolist() for v in logits_output.next_token_top_logprobs_val
+                    ^^^^^^^^
+                ]
+E               AttributeError: 'list' object has no attribute 'tolist'
+
+python/sglang/srt/managers/scheduler_components/batch_result_processor.py:1105: AttributeError
+________ test_move_logprobs_to_cpu_preserves_already_host_side_entries _________
+
+    def test_move_logprobs_to_cpu_preserves_already_host_side_entries():
+        logits_output = _logits_output(
+            next_token_top_logprobs_val=[[-0.5], []],
+            next_token_top_logprobs_idx=[[7], []],
+            next_token_token_ids_logprobs_val=[[-0.25], []],
+        )
+    
+>       SchedulerBatchResultProcessor.move_logprobs_to_cpu(
+            None,
+            batch=SimpleNamespace(return_logprob=True),
+            logits_output=logits_output,
+        )
+
+../review-evidence-j-19f93e807711/test_candidate.py:81: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = None
+
+    def move_logprobs_to_cpu(
+        self,
+        *,
+        batch: ScheduleBatch,
+        logits_output: LogitsProcessorOutput,
+    ) -> None:
+        if batch.return_logprob:
+            if logits_output.next_token_logprobs is not None:
+                logits_output.next_token_logprobs = (
+                    logits_output.next_token_logprobs.tolist()
+                )
+            if logits_output.input_token_logprobs is not None:
+                logits_output.input_token_logprobs = tuple(
+                    logits_output.input_token_logprobs.tolist()
+                )
+            if logits_output.next_token_top_logprobs_val:
+                logits_output.next_token_top_logprobs_val = [
+>                   v.tolist() for v in logits_output.next_token_top_logprobs_val
+                    ^^^^^^^^
+                ]
+E               AttributeError: 'list' object has no attribute 'tolist'
+
+python/sglang/srt/managers/scheduler_components/batch_result_processor.py:532: AttributeError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../review-evidence-j-19f93e807711/test_candidate.py::test_move_logprobs_to_cpu_accepts_mixed_tensor_and_list_entries
+FAILED ../review-evidence-j-19f93e807711/test_candidate.py::test_normalize_decode_outputs_accepts_mixed_tensor_and_list_entries
+FAILED ../review-evidence-j-19f93e807711/test_candidate.py::test_move_logprobs_to_cpu_preserves_already_host_side_entries
+3 failed, 1 passed, 16 warnings in 26.41s
