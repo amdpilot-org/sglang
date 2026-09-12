@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35241",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/874",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/829",
+  "candidate_commit": "8e704efbc07b4cb2fe1a3772f8d525f75e9fdb17",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a valid partial fix. It isolates generation-health probes from mutable DP user round-robin and load-budget state while preserving real idle generation admission and busy-probe deferral. It does not demonstrate that the original distributed PrefillDelayer LOW-throughput regime is eliminated.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ea6b08828b8e/venv/bin/python -m pytest /tmp/amdpilot-review-j-ea6b08828b8e/test_data_parallel_controller_candidate.py /tmp/amdpilot-review-j-ea6b08828b8e/test_scheduler_health_check_admission_candidate.py -q (recorded base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction at exact base: 5 failed, 23 passed. Health probes consumed user round-robin/load-budget state and health-only batches refreshed the user load snapshot. Raw output: raw/base-candidate-regressions.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ea6b08828b8e/venv/bin/python -m pytest test/registered/unit/managers/test_scheduler_health_check_admission.py test/registered/unit/managers/test_data_parallel_controller.py -q (candidate 8e704efbc07b4cb2fe1a3772f8d525f75e9fdb17)",
+      "exit_code": 0,
+      "what_was_measured": "28 passed. Candidate regression coverage verifies probe/user routing counter separation, budget isolation, real idle admission, and busy-probe deferral. Raw output: raw/candidate-focused.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ea6b08828b8e/venv/bin/python -m pytest test_review_adversarial.py -q (temporary independent test at candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "3 passed. Independent mixed-batch, stale-active-worker, and all-workers-unavailable cases preserved user routing/load-refresh invariants. Raw output: raw/candidate-adversarial.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The available device is one AMD Instinct MI355X, gfx950, with ROCm 7.2; the issue requires 8x NVIDIA B30Z TP8/DP8 with unavailable DeepSeek-V4-Pro weights. No GPU result is claimed as evidence for the distributed performance issue.",
+  "native_rebuilt": false,
+  "source_paths": [
+    "/job/repo/python/sglang/srt/entrypoints/http_server.py",
+    "/job/repo/python/sglang/srt/managers/data_parallel_controller.py",
+    "/job/repo/python/sglang/srt/managers/scheduler.py"
+  ],
+  "native_paths": [],
+  "remaining_counterexamples": [
+    "No TP8/DP8 run on 8x NVIDIA B30Z with DeepSeek-V4-Pro demonstrates elimination of the 62-79k tok/s LOW regime, 16,384-token rank divergence, persistent mixed/delay state, or running-request collapse.",
+    "An idle health probe deliberately enters real scheduler admission, so the candidate does not prove that real distributed PrefillDelayer state is entirely unperturbed.",
+    "The focused scheduler test uses a MagicMock dispatcher and establishes admission versus bypass, not synchronization of real distributed PrefillDelayer counters under the reported workload."
+  ],
+  "remaining_limitations": [
+    "The required NVIDIA topology and model weights are unavailable in the assigned environment.",
+    "The deterministic tiny Llama fixture cannot qualify the reported model architecture or distributed throughput behavior.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
