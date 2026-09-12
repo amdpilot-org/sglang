@@ -16,6 +16,7 @@ from sglang.multimodal_gen.runtime.post_training.tensor_update_checker import (
 )
 from sglang.multimodal_gen.runtime.post_training.weights_updater import (
     WeightsUpdater,
+    compare_module_weights_with_disk,
     get_updatable_modules,
 )
 from sglang.srt.platforms import current_platform
@@ -162,6 +163,61 @@ class GPUWorkerPostTrainingMixin:
                 iter_materialized_weights(module)
             )
         return checksums
+
+    def compare_weights_with_disk(
+        self, model_path: str, module_names: list[str] | None = None
+    ) -> dict:
+        """Compare live parameters with checkpoint values after load transforms."""
+        if not self.pipeline:
+            return {"success": False, "message": "Pipeline is not initialized"}
+
+        from pathlib import Path
+
+        from sglang.multimodal_gen.runtime.utils.hf_diffusers_utils import (
+            maybe_download_model,
+        )
+
+        modules = get_updatable_modules(self.pipeline)
+        names = module_names if module_names is not None else list(modules)
+        if not names:
+            return {
+                "success": False,
+                "message": "At least one module must be selected",
+                "modules": {},
+            }
+        unknown = [name for name in names if name not in modules]
+        if unknown:
+            return {
+                "success": False,
+                "message": f"Module(s) not found: {unknown}",
+                "modules": {},
+            }
+
+        try:
+            local_path = Path(maybe_download_model(model_path))
+        except Exception as e:
+            return {"success": False, "message": str(e), "modules": {}}
+
+        results = {}
+        for name in names:
+            try:
+                results[name] = compare_module_weights_with_disk(
+                    modules[name], str(local_path / name)
+                )
+            except Exception as e:
+                results[name] = {"match": False, "error": str(e)}
+
+        mismatched = [name for name, result in results.items() if not result["match"]]
+        success = not mismatched
+        return {
+            "success": success,
+            "message": (
+                "All requested modules match the checkpoint"
+                if success
+                else f"Checksum mismatch for modules: {mismatched}"
+            ),
+            "modules": results,
+        }
 
     def _select_own_gpu_payload(
         self,

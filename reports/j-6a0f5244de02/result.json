@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/18891",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 3107 and corrected the independently reviewed BasevLLMParameter counterexample. Checksum scratch parameters now preserve the live parameter subclass, allowing production-style loaders that call load_column_parallel_weight to run during disk comparison.",
+  "tests": [
+    {
+      "command": "At candidate e866f0bc4107875d64c299bef69e78d94e3507a2: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6a0f5244de02/venv/bin/python -c '<production-style BasevLLMParameter load and comparison reproducer>'",
+      "exit_code": 1,
+      "what_was_measured": "The normal update loaded [5.0, 6.0], then compare_module_weights_with_disk raised AttributeError because its plain Parameter scratch lacked load_column_parallel_weight. Raw output: raw/failing_before_parameter_subclass.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6a0f5244de02/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_disk_server_checksum.py python/sglang/multimodal_gen/test/unit/test_layerwise_offload.py -k 'disk_server_checksum or mapped_weights_are_visible_to_checksums or explicit_empty_module_selection'",
+      "exit_code": 0,
+      "what_was_measured": "Seven focused checksum, loader compatibility, buffer, empty-selection, and offload regressions passed; 149 tests were deselected."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6a0f5244de02/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_disk_server_checksum.py",
+      "exit_code": 0,
+      "what_was_measured": "All six disk/server checksum unit tests passed."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6a0f5244de02/venv/bin/python -c '<GPU BasevLLMParameter load, independent equality, comparison, and mutation check>'",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X, a production-style subclass loader populated a GPU parameter; independent CPU equality and checksum comparison both matched, then both detected a one-value live mutation."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6a0f5244de02/venv/bin/python -m compileall -q python/sglang/multimodal_gen/runtime/post_training/weights_updater.py python/sglang/multimodal_gen/test/unit/test_disk_server_checksum.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python files compiled and the diff had no whitespace errors."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "reports/j-6a0f5244de02/raw/gpu_parameter_subclass_validation.txt records AMD Instinct MI350X execution with torch 2.11.0+rocm7.2 and HIP 7.2.26015, independent equality before mutation, and independent inequality after mutation.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "FLUX.2-klein and Qwen-Image weights were unavailable, so model-specific VAE/text-encoder end-to-end and HTTP serving validation remain unverified.",
+    "Only one GPU was assigned; multi-rank TP/SP/DTensor behavior was not exercised.",
+    "No native source changed, so no native rebuild was applicable.",
+    "The deterministic tiny Llama fixture cannot qualify diffusion VAE/text-encoder architecture or semantics and was not used."
+  ]
+}
