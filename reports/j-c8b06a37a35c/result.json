@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38516",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source still attempted diffusion QKNorm/RoPE and residual-gate JIT builds on pre-Ampere CUDA. Added an sm_80 minimum gate before either reported probe, while preserving ROCm behavior. Mocked sm_75 regression tests fail before and pass after; sm_80, sm_90, sm_121, and ROCm are independent boundaries.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-c8b06a37a35c/venv/bin/python -m pytest -q test/registered/kernels/ops/diffusion/test_jit_arch_gate.py (before implementation)",
+      "exit_code": 1,
+      "what_was_measured": "The regression was absent: all 11 initial architecture-gate assertions failed. Raw output: reports/j-c8b06a37a35c/raw/failing_before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c8b06a37a35c/venv/bin/python -m pytest -q test/registered/kernels/ops/diffusion/test_jit_arch_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "12 tests passed: sm_75 rejection occurs before QKNorm loader or residual tensor inspection; sm_80/sm_90/sm_121 and ROCm remain accepted. Raw output: reports/j-c8b06a37a35c/raw/passing_after_unit_final.txt"
+    },
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-c8b06a37a35c/jit-cache /tmp/amdpilot-repo-j-c8b06a37a35c/venv/bin/python <direct gfx950 residual-gate check>",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X/gfx950, the gate remained enabled and the HIP JIT kernel executed. The existing bf16 bit-exact expectation differed by max_abs=0.03125. Raw output: reports/j-c8b06a37a35c/raw/gfx950_direct_check.txt"
+    },
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-c8b06a37a35c/jit-cache /tmp/amdpilot-repo-j-c8b06a37a35c/venv/bin/python <gfx950 fp32 residual-gate vs CPU fp64 reference>",
+      "exit_code": 0,
+      "what_was_measured": "The real HIP JIT output matched an independent CPU float64 expression with max_abs=3.086158244514081e-07 and passed atol=rtol=1e-5. Raw output: reports/j-c8b06a37a35c/raw/gfx950_fp32_numerical.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c8b06a37a35c/venv/bin/python -m compileall -q <changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python sources compiled successfully."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c8b06a37a35c/venv/bin/python -m ruff check <changed Python files>",
+      "exit_code": 1,
+      "what_was_measured": "Environment limitation: the prepared interpreter does not contain the ruff module. Raw output: reports/j-c8b06a37a35c/raw/ruff.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "One assigned AMD Instinct MI355X (gfx950, torch capability tuple 9.5, ROCm 7.2) executed the residual-gate HIP JIT kernel; see reports/j-c8b06a37a35c/raw/gfx950_direct_check.txt and gfx950_fp32_numerical.txt.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No NVIDIA sm_75 GPU, CUDA 13 pip toolkit, or nvcc was available, so the reported glibc/CUDA CRT rsqrt compiler diagnostic and 49-second Flux latency were not reproduced directly.",
+    "FLUX.2-klein-4B weights were unavailable; no full diffusion-model generation or semantic-quality claim is made.",
+    "The fix is therefore candidate_verified through actual source control flow, failing-before/passing-after architecture regressions, and a gfx950 non-CUDA boundary, rather than a full reporter-environment reproduction.",
+    "The prepared ROCm stack showed an unrelated existing bf16 residual-gate bit-exact discrepancy (max_abs 0.03125); this change neither caused nor addresses it."
+  ],
+  "source_paths": [
+    "python/sglang/kernels/ops/diffusion/rope/qknorm_rope_jit.py",
+    "python/sglang/kernels/kda_kernels/residual_gate_add_jit.py",
+    "test/registered/kernels/ops/diffusion/test_jit_arch_gate.py"
+  ],
+  "native_paths": [],
+  "raw_output_directory": "reports/j-c8b06a37a35c/raw"
+}
