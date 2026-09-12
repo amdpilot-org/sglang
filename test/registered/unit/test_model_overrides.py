@@ -2651,6 +2651,63 @@ class TestGoldenModelOverrides(_IsolatedPublish):
             self.assertEqual(ov["attention_backend"], "fa4")
             self.assertEqual(ov["page_size"], 128)
 
+    def test_kimi_k3_hopper_dspark_flashmla_verify_uses_decode(self):
+        from sglang.srt.arg_groups.model_overrides.kimi_k3 import _kimi_k3_overrides
+
+        def _args(**kw):
+            defaults = dict(
+                dcp_size=1,
+                speculative_algorithm="DSPARK",
+                speculative_num_draft_tokens=None,
+                speculative_dspark_block_size=7,
+                attention_backend=None,
+                prefill_attention_backend=None,
+                decode_attention_backend="flashmla",
+                kv_cache_dtype="fp8_e4m3",
+            )
+            defaults.update(kw)
+            return SimpleNamespace(**defaults)
+
+        with override_platform(
+            is_sm100=False, device_sm=90, is_hopper_with_cuda_12_3=True
+        ):
+            # Regression for #32938: the reported explicit FlashMLA decode
+            # backend must also carry target verification, instead of routing
+            # FP8 KV through the FA3 prefill path and widening it to BF16.
+            self.assertEqual(
+                _kimi_k3_overrides(_args(), SimpleNamespace()),
+                {"speculative_attention_mode": "decode"},
+            )
+
+            # An unsupported decode backend remains on the prefill path.
+            with self.assertLogs(
+                "sglang.srt.arg_groups.model_overrides.kimi_k3", level="WARNING"
+            ):
+                self.assertEqual(
+                    _kimi_k3_overrides(
+                        _args(decode_attention_backend="fa3"), SimpleNamespace()
+                    ),
+                    {},
+                )
+
+            # BF16 did not exhibit the conversion regression, so retain its
+            # existing prefill verification route.
+            with self.assertLogs(
+                "sglang.srt.arg_groups.model_overrides.kimi_k3", level="WARNING"
+            ):
+                self.assertEqual(
+                    _kimi_k3_overrides(
+                        _args(kv_cache_dtype="bfloat16"), SimpleNamespace()
+                    ),
+                    {},
+                )
+
+        # The Hopper-specific correction does not alter AMD/non-Hopper routing.
+        with override_platform(
+            is_sm100=False, device_sm=95, is_hopper_with_cuda_12_3=False
+        ):
+            self.assertEqual(_kimi_k3_overrides(_args(), SimpleNamespace()), {})
+
     def test_page_constraint_passes_at_callable_level(self):
         from sglang.srt.arg_groups.overrides import (
             ResolvedView,
