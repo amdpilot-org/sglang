@@ -1,0 +1,58 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35912",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 3274's valid documentation correction and all-docs guard, reproduced review PR 3304's global-uv-option bypass, and corrected the guard to recognize valid uv global options before `pip install`. This fixes the repository mitigation, not uv 0.11.16 itself.",
+  "tests": [
+    {
+      "command": "node docs/scripts/check_cookbook_configs.mjs (exact candidate plus temporary `uv --no-cache pip install sglang` fixture)",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before evidence: the exact candidate incorrectly accepted the unsafe valid command."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-10b3092eaa1e/uv-011/bin/uv --no-cache pip install --help",
+      "exit_code": 0,
+      "what_was_measured": "uv 0.11.16 accepts a global option before the pip subcommand."
+    },
+    {
+      "command": "printf 'sglang\\n' | uv-0.11.16 pip compile - --no-cache --python-platform x86_64-manylinux_2_34 --python-version 3.12",
+      "exit_code": 0,
+      "what_was_measured": "Plain old-uv resolution selected sglang==0.5.9 and torch==2.9.1."
+    },
+    {
+      "command": "printf 'sglang<0.5.18\\n' | uv-0.12.0 pip compile - --no-cache --python-platform x86_64-manylinux_2_34 --python-version 3.12",
+      "exit_code": 0,
+      "what_was_measured": "The fixed resolver selected sglang==0.5.17 and flash-attn-4==4.0.0b19."
+    },
+    {
+      "command": "printf 'sglang<0.5.18\\n' | uv-0.11.16 pip compile - --no-cache --prerelease=allow --python-platform x86_64-manylinux_2_34 --python-version 3.12",
+      "exit_code": 0,
+      "what_was_measured": "The documented mitigation selected sglang==0.5.17 and flash-attn-4==4.0.0b19."
+    },
+    {
+      "command": "node docs/scripts/check_cookbook_configs.mjs (corrected checker plus three unsafe global-option forms and two negative boundaries)",
+      "exit_code": 1,
+      "what_was_measured": "Passing-after regression: exactly the three unsafe global-option commands were rejected."
+    },
+    {
+      "command": "node docs/scripts/check_cookbook_configs.mjs",
+      "exit_code": 0,
+      "what_was_measured": "The corrected clean documentation tree passes all checker self-tests and repository checks."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "The consolidated change has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Package resolution and the static documentation checker do not execute GPU code."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "A manually entered plain `uv pip install sglang` still silently selects sglang==0.5.9 under uv 0.11.16; a repository documentation change cannot alter an installed resolver.",
+    "The Qwen3.8-27B-FP8 TP=2 semantic symptom was not reproduced because its weights and required two-GPU topology were unavailable; one assigned GPU cannot qualify it.",
+    "No source/native implementation changed. The prepared measured source path was /job/repo/python/sglang/srt/layers/layernorm.py and repository-environment.json supplied no native library."
+  ]
+}
