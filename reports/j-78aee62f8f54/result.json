@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32038",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source already contains the ring-capacity-derived DeepSeek-V4 compress write-plan fix and regression coverage. Temporarily restoring the historical four-token pad reproduced an omitted committed position at the issue boundary; the checked-in implementation passes the same boundary and independent cases on gfx950. No additional source change was justified.",
+  "tests": [
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-78aee62f8f54/jit-cache-before /tmp/amdpilot-repo-j-78aee62f8f54/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py::TestCompressWritePlanDraftPad::test_c4_ring_residency (with only mtp_pad temporarily restored to the historical hard-coded value 4)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before planner residency invariant. At D=5 and prefix=515, plan_w omitted committed position 515; eight wider boundary/residue subtests also failed. Raw output: raw/historical_pad_failing_before.log."
+    },
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-78aee62f8f54/jit-cache-after /tmp/amdpilot-repo-j-78aee62f8f54/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py::TestCompressWritePlanDraftPad::test_c4_ring_residency",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after c4 residency invariant with the checked-in ring-derived pad: 1 test and 28 subtests passed, including the original D=5 boundary and independent widths/residues. Raw output: raw/current_pad_passing_after.log."
+    },
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-78aee62f8f54/jit-cache /tmp/amdpilot-repo-j-78aee62f8f54/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py",
+      "exit_code": 0,
+      "what_was_measured": "Actual JIT GPU planner and host planner invariants on gfx950: c4/c128 residency, CPU/GPU agreement, non-speculative write-set preservation, and over-capacity boundary behavior; 5 tests and 82 subtests passed. Raw output: raw/compress_plan_regression.log."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "PyTorch 2.11.0+rocm7.2 reported one AMD Instinct MI355X, gcnArchName gfx950:sramecc+:xnack-. test_cpu_and_gpu_planner_agree moved planner inputs to the device and passed for c4/c128 across draft widths and sequence residues."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash model weights were unavailable, so AIME25 quality and the deterministic B300 echo workload were not run.",
+    "The assigned system has one AMD gfx950 GPU, not four NVIDIA B300 GPUs; TP=4, CUDA/SM103a, MXFP4 MoE, and the exact serving topology remain unverified.",
+    "The evidence qualifies the actual compress planner invariant and GPU execution only; it does not claim full-model semantic parity or distributed serving reproduction.",
+    "No native library rebuild was required or available (repository-environment.json records native=null); the relevant C++ header was compiled through the repository JIT into private runtime caches."
+  ]
+}

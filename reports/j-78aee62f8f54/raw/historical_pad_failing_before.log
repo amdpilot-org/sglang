@@ -1,0 +1,485 @@
+.                                            [100%]
+=================================== FAILURES ===================================
+_ TestCompressWritePlanDraftPad.test_c4_ring_residency (cr=4, D=5, prefix=515) _
+
+self = <test_deepseek_v4_compress_plan_draft_pad.TestCompressWritePlanDraftPad testMethod=test_c4_ring_residency>
+compress_ratio = 4, ring_size = 16
+
+    def _assert_ring_residency(self, compress_ratio: int, ring_size: int):
+        """Every committed token must be written, for each (D, sl mod cr) combo.
+
+        This is the sufficient condition, which is why there is no multi-step replay
+        test: if a step writes all of `[prefix, prefix + D)`, then whatever the accept
+        length, the tokens the next compression window needs are either from this step
+        (written here) or older (written by an earlier step, same invariant by
+        induction).
+        """
+        max_d = _max_draft_tokens(compress_ratio, ring_size)
+        # Vary `seq_len % compress_ratio`: that residue decides whether the unpadded rule
+        # alone would have sufficed. Four is enough -- with the pad in place it dominates
+        # `last_c_pos` for every residue, so the rest repeat one branch. Bases are
+        # page-aligned so the swa-page-boundary clause does not mask the pad.
+        bases = [512 + off for off in range(min(compress_ratio, 4))]
+        draft_counts = sorted(
+            {1, 2, 3, 4, 5, max_d - 1, max_d} & set(range(1, max_d + 1))
+        )
+        for num_draft_tokens in draft_counts:
+            for prefix_len in bases:
+                with self.subTest(
+                    cr=compress_ratio,
+                    D=num_draft_tokens,
+                    prefix=prefix_len,
+                ):
+                    written = self._make_plan_positions(
+                        compress_ratio=compress_ratio,
+                        ring_size=ring_size,
+                        prefix_len=prefix_len,
+                        num_draft_tokens=num_draft_tokens,
+                    )
+                    seq_len = prefix_len + num_draft_tokens
+                    missing = set(range(prefix_len, seq_len)) - written
+>                   self.assertEqual(
+                        missing,
+                        set(),
+                        f"plan_w skipped committed positions {sorted(missing)}; "
+                        f"a later compression would read stale ring slots",
+                    )
+E                   AssertionError: Items in the first set but not the second:
+E                   515 : plan_w skipped committed positions [515]; a later compression would read stale ring slots
+
+test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py:120: AssertionError
+_ TestCompressWritePlanDraftPad.test_c4_ring_residency (cr=4, D=9, prefix=512) _
+
+self = <test_deepseek_v4_compress_plan_draft_pad.TestCompressWritePlanDraftPad testMethod=test_c4_ring_residency>
+compress_ratio = 4, ring_size = 16
+
+    def _assert_ring_residency(self, compress_ratio: int, ring_size: int):
+        """Every committed token must be written, for each (D, sl mod cr) combo.
+
+        This is the sufficient condition, which is why there is no multi-step replay
+        test: if a step writes all of `[prefix, prefix + D)`, then whatever the accept
+        length, the tokens the next compression window needs are either from this step
+        (written here) or older (written by an earlier step, same invariant by
+        induction).
+        """
+        max_d = _max_draft_tokens(compress_ratio, ring_size)
+        # Vary `seq_len % compress_ratio`: that residue decides whether the unpadded rule
+        # alone would have sufficed. Four is enough -- with the pad in place it dominates
+        # `last_c_pos` for every residue, so the rest repeat one branch. Bases are
+        # page-aligned so the swa-page-boundary clause does not mask the pad.
+        bases = [512 + off for off in range(min(compress_ratio, 4))]
+        draft_counts = sorted(
+            {1, 2, 3, 4, 5, max_d - 1, max_d} & set(range(1, max_d + 1))
+        )
+        for num_draft_tokens in draft_counts:
+            for prefix_len in bases:
+                with self.subTest(
+                    cr=compress_ratio,
+                    D=num_draft_tokens,
+                    prefix=prefix_len,
+                ):
+                    written = self._make_plan_positions(
+                        compress_ratio=compress_ratio,
+                        ring_size=ring_size,
+                        prefix_len=prefix_len,
+                        num_draft_tokens=num_draft_tokens,
+                    )
+                    seq_len = prefix_len + num_draft_tokens
+                    missing = set(range(prefix_len, seq_len)) - written
+>                   self.assertEqual(
+                        missing,
+                        set(),
+                        f"plan_w skipped committed positions {sorted(missing)}; "
+                        f"a later compression would read stale ring slots",
+                    )
+E                   AssertionError: Items in the first set but not the second:
+E                   512
+E                   513
+E                   514
+E                   515 : plan_w skipped committed positions [512, 513, 514, 515]; a later compression would read stale ring slots
+
+test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py:120: AssertionError
+_ TestCompressWritePlanDraftPad.test_c4_ring_residency (cr=4, D=9, prefix=513) _
+
+self = <test_deepseek_v4_compress_plan_draft_pad.TestCompressWritePlanDraftPad testMethod=test_c4_ring_residency>
+compress_ratio = 4, ring_size = 16
+
+    def _assert_ring_residency(self, compress_ratio: int, ring_size: int):
+        """Every committed token must be written, for each (D, sl mod cr) combo.
+
+        This is the sufficient condition, which is why there is no multi-step replay
+        test: if a step writes all of `[prefix, prefix + D)`, then whatever the accept
+        length, the tokens the next compression window needs are either from this step
+        (written here) or older (written by an earlier step, same invariant by
+        induction).
+        """
+        max_d = _max_draft_tokens(compress_ratio, ring_size)
+        # Vary `seq_len % compress_ratio`: that residue decides whether the unpadded rule
+        # alone would have sufficed. Four is enough -- with the pad in place it dominates
+        # `last_c_pos` for every residue, so the rest repeat one branch. Bases are
+        # page-aligned so the swa-page-boundary clause does not mask the pad.
+        bases = [512 + off for off in range(min(compress_ratio, 4))]
+        draft_counts = sorted(
+            {1, 2, 3, 4, 5, max_d - 1, max_d} & set(range(1, max_d + 1))
+        )
+        for num_draft_tokens in draft_counts:
+            for prefix_len in bases:
+                with self.subTest(
+                    cr=compress_ratio,
+                    D=num_draft_tokens,
+                    prefix=prefix_len,
+                ):
+                    written = self._make_plan_positions(
+                        compress_ratio=compress_ratio,
+                        ring_size=ring_size,
+                        prefix_len=prefix_len,
+                        num_draft_tokens=num_draft_tokens,
+                    )
+                    seq_len = prefix_len + num_draft_tokens
+                    missing = set(range(prefix_len, seq_len)) - written
+>                   self.assertEqual(
+                        missing,
+                        set(),
+                        f"plan_w skipped committed positions {sorted(missing)}; "
+                        f"a later compression would read stale ring slots",
+                    )
+E                   AssertionError: Items in the first set but not the second:
+E                   513
+E                   514
+E                   515 : plan_w skipped committed positions [513, 514, 515]; a later compression would read stale ring slots
+
+test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py:120: AssertionError
+_ TestCompressWritePlanDraftPad.test_c4_ring_residency (cr=4, D=9, prefix=514) _
+
+self = <test_deepseek_v4_compress_plan_draft_pad.TestCompressWritePlanDraftPad testMethod=test_c4_ring_residency>
+compress_ratio = 4, ring_size = 16
+
+    def _assert_ring_residency(self, compress_ratio: int, ring_size: int):
+        """Every committed token must be written, for each (D, sl mod cr) combo.
+
+        This is the sufficient condition, which is why there is no multi-step replay
+        test: if a step writes all of `[prefix, prefix + D)`, then whatever the accept
+        length, the tokens the next compression window needs are either from this step
+        (written here) or older (written by an earlier step, same invariant by
+        induction).
+        """
+        max_d = _max_draft_tokens(compress_ratio, ring_size)
+        # Vary `seq_len % compress_ratio`: that residue decides whether the unpadded rule
+        # alone would have sufficed. Four is enough -- with the pad in place it dominates
+        # `last_c_pos` for every residue, so the rest repeat one branch. Bases are
+        # page-aligned so the swa-page-boundary clause does not mask the pad.
+        bases = [512 + off for off in range(min(compress_ratio, 4))]
+        draft_counts = sorted(
+            {1, 2, 3, 4, 5, max_d - 1, max_d} & set(range(1, max_d + 1))
+        )
+        for num_draft_tokens in draft_counts:
+            for prefix_len in bases:
+                with self.subTest(
+                    cr=compress_ratio,
+                    D=num_draft_tokens,
+                    prefix=prefix_len,
+                ):
+                    written = self._make_plan_positions(
+                        compress_ratio=compress_ratio,
+                        ring_size=ring_size,
+                        prefix_len=prefix_len,
+                        num_draft_tokens=num_draft_tokens,
+                    )
+                    seq_len = prefix_len + num_draft_tokens
+                    missing = set(range(prefix_len, seq_len)) - written
+>                   self.assertEqual(
+                        missing,
+                        set(),
+                        f"plan_w skipped committed positions {sorted(missing)}; "
+                        f"a later compression would read stale ring slots",
+                    )
+E                   AssertionError: Items in the first set but not the second:
+E                   514
+E                   515 : plan_w skipped committed positions [514, 515]; a later compression would read stale ring slots
+
+test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py:120: AssertionError
+_ TestCompressWritePlanDraftPad.test_c4_ring_residency (cr=4, D=9, prefix=515) _
+
+self = <test_deepseek_v4_compress_plan_draft_pad.TestCompressWritePlanDraftPad testMethod=test_c4_ring_residency>
+compress_ratio = 4, ring_size = 16
+
+    def _assert_ring_residency(self, compress_ratio: int, ring_size: int):
+        """Every committed token must be written, for each (D, sl mod cr) combo.
+
+        This is the sufficient condition, which is why there is no multi-step replay
+        test: if a step writes all of `[prefix, prefix + D)`, then whatever the accept
+        length, the tokens the next compression window needs are either from this step
+        (written here) or older (written by an earlier step, same invariant by
+        induction).
+        """
+        max_d = _max_draft_tokens(compress_ratio, ring_size)
+        # Vary `seq_len % compress_ratio`: that residue decides whether the unpadded rule
+        # alone would have sufficed. Four is enough -- with the pad in place it dominates
+        # `last_c_pos` for every residue, so the rest repeat one branch. Bases are
+        # page-aligned so the swa-page-boundary clause does not mask the pad.
+        bases = [512 + off for off in range(min(compress_ratio, 4))]
+        draft_counts = sorted(
+            {1, 2, 3, 4, 5, max_d - 1, max_d} & set(range(1, max_d + 1))
+        )
+        for num_draft_tokens in draft_counts:
+            for prefix_len in bases:
+                with self.subTest(
+                    cr=compress_ratio,
+                    D=num_draft_tokens,
+                    prefix=prefix_len,
+                ):
+                    written = self._make_plan_positions(
+                        compress_ratio=compress_ratio,
+                        ring_size=ring_size,
+                        prefix_len=prefix_len,
+                        num_draft_tokens=num_draft_tokens,
+                    )
+                    seq_len = prefix_len + num_draft_tokens
+                    missing = set(range(prefix_len, seq_len)) - written
+>                   self.assertEqual(
+                        missing,
+                        set(),
+                        f"plan_w skipped committed positions {sorted(missing)}; "
+                        f"a later compression would read stale ring slots",
+                    )
+E                   AssertionError: Items in the first set but not the second:
+E                   515
+E                   516
+E                   517
+E                   518
+E                   519 : plan_w skipped committed positions [515, 516, 517, 518, 519]; a later compression would read stale ring slots
+
+test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py:120: AssertionError
+_ TestCompressWritePlanDraftPad.test_c4_ring_residency (cr=4, D=10, prefix=512) _
+
+self = <test_deepseek_v4_compress_plan_draft_pad.TestCompressWritePlanDraftPad testMethod=test_c4_ring_residency>
+compress_ratio = 4, ring_size = 16
+
+    def _assert_ring_residency(self, compress_ratio: int, ring_size: int):
+        """Every committed token must be written, for each (D, sl mod cr) combo.
+
+        This is the sufficient condition, which is why there is no multi-step replay
+        test: if a step writes all of `[prefix, prefix + D)`, then whatever the accept
+        length, the tokens the next compression window needs are either from this step
+        (written here) or older (written by an earlier step, same invariant by
+        induction).
+        """
+        max_d = _max_draft_tokens(compress_ratio, ring_size)
+        # Vary `seq_len % compress_ratio`: that residue decides whether the unpadded rule
+        # alone would have sufficed. Four is enough -- with the pad in place it dominates
+        # `last_c_pos` for every residue, so the rest repeat one branch. Bases are
+        # page-aligned so the swa-page-boundary clause does not mask the pad.
+        bases = [512 + off for off in range(min(compress_ratio, 4))]
+        draft_counts = sorted(
+            {1, 2, 3, 4, 5, max_d - 1, max_d} & set(range(1, max_d + 1))
+        )
+        for num_draft_tokens in draft_counts:
+            for prefix_len in bases:
+                with self.subTest(
+                    cr=compress_ratio,
+                    D=num_draft_tokens,
+                    prefix=prefix_len,
+                ):
+                    written = self._make_plan_positions(
+                        compress_ratio=compress_ratio,
+                        ring_size=ring_size,
+                        prefix_len=prefix_len,
+                        num_draft_tokens=num_draft_tokens,
+                    )
+                    seq_len = prefix_len + num_draft_tokens
+                    missing = set(range(prefix_len, seq_len)) - written
+>                   self.assertEqual(
+                        missing,
+                        set(),
+                        f"plan_w skipped committed positions {sorted(missing)}; "
+                        f"a later compression would read stale ring slots",
+                    )
+E                   AssertionError: Items in the first set but not the second:
+E                   512
+E                   513
+E                   514
+E                   515 : plan_w skipped committed positions [512, 513, 514, 515]; a later compression would read stale ring slots
+
+test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py:120: AssertionError
+_ TestCompressWritePlanDraftPad.test_c4_ring_residency (cr=4, D=10, prefix=513) _
+
+self = <test_deepseek_v4_compress_plan_draft_pad.TestCompressWritePlanDraftPad testMethod=test_c4_ring_residency>
+compress_ratio = 4, ring_size = 16
+
+    def _assert_ring_residency(self, compress_ratio: int, ring_size: int):
+        """Every committed token must be written, for each (D, sl mod cr) combo.
+
+        This is the sufficient condition, which is why there is no multi-step replay
+        test: if a step writes all of `[prefix, prefix + D)`, then whatever the accept
+        length, the tokens the next compression window needs are either from this step
+        (written here) or older (written by an earlier step, same invariant by
+        induction).
+        """
+        max_d = _max_draft_tokens(compress_ratio, ring_size)
+        # Vary `seq_len % compress_ratio`: that residue decides whether the unpadded rule
+        # alone would have sufficed. Four is enough -- with the pad in place it dominates
+        # `last_c_pos` for every residue, so the rest repeat one branch. Bases are
+        # page-aligned so the swa-page-boundary clause does not mask the pad.
+        bases = [512 + off for off in range(min(compress_ratio, 4))]
+        draft_counts = sorted(
+            {1, 2, 3, 4, 5, max_d - 1, max_d} & set(range(1, max_d + 1))
+        )
+        for num_draft_tokens in draft_counts:
+            for prefix_len in bases:
+                with self.subTest(
+                    cr=compress_ratio,
+                    D=num_draft_tokens,
+                    prefix=prefix_len,
+                ):
+                    written = self._make_plan_positions(
+                        compress_ratio=compress_ratio,
+                        ring_size=ring_size,
+                        prefix_len=prefix_len,
+                        num_draft_tokens=num_draft_tokens,
+                    )
+                    seq_len = prefix_len + num_draft_tokens
+                    missing = set(range(prefix_len, seq_len)) - written
+>                   self.assertEqual(
+                        missing,
+                        set(),
+                        f"plan_w skipped committed positions {sorted(missing)}; "
+                        f"a later compression would read stale ring slots",
+                    )
+E                   AssertionError: Items in the first set but not the second:
+E                   513
+E                   514
+E                   515 : plan_w skipped committed positions [513, 514, 515]; a later compression would read stale ring slots
+
+test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py:120: AssertionError
+_ TestCompressWritePlanDraftPad.test_c4_ring_residency (cr=4, D=10, prefix=514) _
+
+self = <test_deepseek_v4_compress_plan_draft_pad.TestCompressWritePlanDraftPad testMethod=test_c4_ring_residency>
+compress_ratio = 4, ring_size = 16
+
+    def _assert_ring_residency(self, compress_ratio: int, ring_size: int):
+        """Every committed token must be written, for each (D, sl mod cr) combo.
+
+        This is the sufficient condition, which is why there is no multi-step replay
+        test: if a step writes all of `[prefix, prefix + D)`, then whatever the accept
+        length, the tokens the next compression window needs are either from this step
+        (written here) or older (written by an earlier step, same invariant by
+        induction).
+        """
+        max_d = _max_draft_tokens(compress_ratio, ring_size)
+        # Vary `seq_len % compress_ratio`: that residue decides whether the unpadded rule
+        # alone would have sufficed. Four is enough -- with the pad in place it dominates
+        # `last_c_pos` for every residue, so the rest repeat one branch. Bases are
+        # page-aligned so the swa-page-boundary clause does not mask the pad.
+        bases = [512 + off for off in range(min(compress_ratio, 4))]
+        draft_counts = sorted(
+            {1, 2, 3, 4, 5, max_d - 1, max_d} & set(range(1, max_d + 1))
+        )
+        for num_draft_tokens in draft_counts:
+            for prefix_len in bases:
+                with self.subTest(
+                    cr=compress_ratio,
+                    D=num_draft_tokens,
+                    prefix=prefix_len,
+                ):
+                    written = self._make_plan_positions(
+                        compress_ratio=compress_ratio,
+                        ring_size=ring_size,
+                        prefix_len=prefix_len,
+                        num_draft_tokens=num_draft_tokens,
+                    )
+                    seq_len = prefix_len + num_draft_tokens
+                    missing = set(range(prefix_len, seq_len)) - written
+>                   self.assertEqual(
+                        missing,
+                        set(),
+                        f"plan_w skipped committed positions {sorted(missing)}; "
+                        f"a later compression would read stale ring slots",
+                    )
+E                   AssertionError: Items in the first set but not the second:
+E                   514
+E                   515
+E                   516
+E                   517
+E                   518
+E                   519 : plan_w skipped committed positions [514, 515, 516, 517, 518, 519]; a later compression would read stale ring slots
+
+test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py:120: AssertionError
+_ TestCompressWritePlanDraftPad.test_c4_ring_residency (cr=4, D=10, prefix=515) _
+
+self = <test_deepseek_v4_compress_plan_draft_pad.TestCompressWritePlanDraftPad testMethod=test_c4_ring_residency>
+compress_ratio = 4, ring_size = 16
+
+    def _assert_ring_residency(self, compress_ratio: int, ring_size: int):
+        """Every committed token must be written, for each (D, sl mod cr) combo.
+
+        This is the sufficient condition, which is why there is no multi-step replay
+        test: if a step writes all of `[prefix, prefix + D)`, then whatever the accept
+        length, the tokens the next compression window needs are either from this step
+        (written here) or older (written by an earlier step, same invariant by
+        induction).
+        """
+        max_d = _max_draft_tokens(compress_ratio, ring_size)
+        # Vary `seq_len % compress_ratio`: that residue decides whether the unpadded rule
+        # alone would have sufficed. Four is enough -- with the pad in place it dominates
+        # `last_c_pos` for every residue, so the rest repeat one branch. Bases are
+        # page-aligned so the swa-page-boundary clause does not mask the pad.
+        bases = [512 + off for off in range(min(compress_ratio, 4))]
+        draft_counts = sorted(
+            {1, 2, 3, 4, 5, max_d - 1, max_d} & set(range(1, max_d + 1))
+        )
+        for num_draft_tokens in draft_counts:
+            for prefix_len in bases:
+                with self.subTest(
+                    cr=compress_ratio,
+                    D=num_draft_tokens,
+                    prefix=prefix_len,
+                ):
+                    written = self._make_plan_positions(
+                        compress_ratio=compress_ratio,
+                        ring_size=ring_size,
+                        prefix_len=prefix_len,
+                        num_draft_tokens=num_draft_tokens,
+                    )
+                    seq_len = prefix_len + num_draft_tokens
+                    missing = set(range(prefix_len, seq_len)) - written
+>                   self.assertEqual(
+                        missing,
+                        set(),
+                        f"plan_w skipped committed positions {sorted(missing)}; "
+                        f"a later compression would read stale ring slots",
+                    )
+E                   AssertionError: Items in the first set but not the second:
+E                   515
+E                   516
+E                   517
+E                   518
+E                   519 : plan_w skipped committed positions [515, 516, 517, 518, 519]; a later compression would read stale ring slots
+
+test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py:120: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SUBFAILED(cr=4, D=5, prefix=515) test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py::TestCompressWritePlanDraftPad::test_c4_ring_residency
+SUBFAILED(cr=4, D=9, prefix=512) test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py::TestCompressWritePlanDraftPad::test_c4_ring_residency
+SUBFAILED(cr=4, D=9, prefix=513) test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py::TestCompressWritePlanDraftPad::test_c4_ring_residency
+SUBFAILED(cr=4, D=9, prefix=514) test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py::TestCompressWritePlanDraftPad::test_c4_ring_residency
+SUBFAILED(cr=4, D=9, prefix=515) test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py::TestCompressWritePlanDraftPad::test_c4_ring_residency
+SUBFAILED(cr=4, D=10, prefix=512) test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py::TestCompressWritePlanDraftPad::test_c4_ring_residency
+SUBFAILED(cr=4, D=10, prefix=513) test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py::TestCompressWritePlanDraftPad::test_c4_ring_residency
+SUBFAILED(cr=4, D=10, prefix=514) test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py::TestCompressWritePlanDraftPad::test_c4_ring_residency
+SUBFAILED(cr=4, D=10, prefix=515) test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py::TestCompressWritePlanDraftPad::test_c4_ring_residency
+9 failed, 1 passed, 17 warnings, 19 subtests passed in 11.61s
