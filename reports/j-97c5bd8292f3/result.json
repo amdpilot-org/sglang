@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35692",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1763",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1726",
+  "candidate_commit": "7c31b3a6dde6cd93d9ba8f6238740db6c89122aa",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the reported Qwen-like failure and both inherited PR 1642 counterexamples, but its AST heuristic still admits unrelated *.content.type comparisons and misses native loop-alias dispatch. The original unexpected-item rendering failure remains reachable, so this is a partial fix.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-97c5bd8292f3/venv/bin/python /job/review_probe.py (base)",
+      "exit_code": 0,
+      "what_was_measured": "Conversion plus real Jinja render reproduced ValueError: Unexpected item type in content on the recorded base."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-97c5bd8292f3/venv/bin/python /job/review_probe.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "The issue-shaped strict generic template received text fallback and rendered without error."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-97c5bd8292f3/venv/bin/python -m pytest -q test/registered/unit/entrypoints/anthropic/test_tool_reference.py test/registered/unit/entrypoints/anthropic/test_serving.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 80 passed and 5 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-97c5bd8292f3/venv/bin/python /job/adversarial_probe.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent false-positive classification reproduced the original render error; independent alias-based native template was classified as generic."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 7c31b3a6dde6cd93d9ba8f6238740db6c89122aa",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is deterministic Python conversion and Jinja template rendering; no GPU kernel or model generation is involved."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A generic strict template that filters tool.function.defer_loading and compares unrelated telemetry.content.type to 'tool_reference' is classified native-capable; structured tool_reference is forwarded and rendering raises ValueError: Unexpected item type in content.",
+    "A genuinely native template that iterates message.content and checks a loop alias such as part.type == 'tool_reference' is classified generic; the structured reference and deferred metadata are not preserved."
+  ],
+  "remaining_limitations": [
+    "No full HTTP server or model weights were used; endpoint transport and generation are not claimed.",
+    "The prepared host is gfx950/ROCm 7.2, not the reporter's H100/CUDA environment, but GPU architecture is not relevant to the reproduced conversion/Jinja defect.",
+    "No native files changed, so no native rebuild was applicable."
+  ]
+}
