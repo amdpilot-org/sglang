@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/21443",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Replaced uncapped host-RAM reporting in all three current MPS paths with shared accounting based on torch.mps.recommended_max_memory(). Available memory is capped by both host availability and the remaining Metal working-set headroom after driver allocations. Older or failing PyTorch MPS APIs retain the prior host-memory fallback. Existing MLX serving code already sets mx.set_wired_limit() and independently budgets against max_recommended_working_set_size, so it was not duplicated.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ccb0ac7fc044/venv/bin/python -m pytest -q test/registered/unit/utils/test_mps_memory.py",
+      "exit_code": 0,
+      "what_was_measured": "10 compatibility, regression, integration, system-pressure, and over-allocation tests covering the shared helper, SRT serving path, MPS device-property stub, and multimodal MPS platform."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/_mps_memory.py python/sglang/_platform_stubs.py python/sglang/srt/utils/common.py python/sglang/multimodal_gen/runtime/platforms/mps.py test/registered/unit/utils/test_mps_memory.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, syntax, conflict, secret, and registered-test policy checks."
+    },
+    {
+      "command": "git diff --check && /tmp/amdpilot-repo-j-ccb0ac7fc044/venv/bin/python -m compileall -q python/sglang/_mps_memory.py python/sglang/_platform_stubs.py python/sglang/srt/utils/common.py python/sglang/multimodal_gen/runtime/platforms/mps.py test/registered/unit/utils/test_mps_memory.py",
+      "exit_code": 0,
+      "what_was_measured": "Whitespace validity and Python bytecode compilation of every changed Python file."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ccb0ac7fc044/venv/bin/python -c 'import platform, torch; print(platform.platform(), platform.machine(), torch.__version__, torch.backends.mps.is_built(), torch.backends.mps.is_available(), torch.version.hip)'",
+      "exit_code": 0,
+      "what_was_measured": "Execution environment: Linux x86_64, Torch 2.11.0+rocm7.2, MPS not built and unavailable, ROCm 7.2.26015."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The assigned node is Linux/x86_64 and torch.backends.mps reports is_built=False and is_available=False. AMD GPU execution would not validate Apple Metal memory accounting, and this change has no numerical GPU kernel output requiring a ROCm reference.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Apple Silicon/MPS device was available, so torch.mps.recommended_max_memory() was not compared directly with MTLDevice.recommendedMaxWorkingSetSize on hardware.",
+    "No MPS model-loading or KV-cache serving workload was run; the regression tests exercise the same production call paths with deterministic memory API values.",
+    "Paging and machine-stability behavior cannot be safely qualified without Apple hardware under controlled memory pressure.",
+    "On older PyTorch builds where recommended_max_memory is missing, invalid, or raises an error, SGLang intentionally falls back to host memory reporting for compatibility and therefore cannot enforce the Metal guardrail.",
+    "No native rebuild was applicable because all changes are Python-only."
+  ]
+}
