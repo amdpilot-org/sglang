@@ -1912,6 +1912,13 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
             # Cache the common prefix for parallel sampling
             for i in range(batch_size):
                 tmp_obj = copy.copy(objs[i])
+                # The parent request acquired one LoRA reference for each real
+                # sample. The prefix warm-up is an additional scheduler request,
+                # so its tokenizer-side state must not release another reference.
+                # Keep the LoRA fields on tokenized_obj so the scheduler still
+                # caches the prefix under the correct adapter.
+                tmp_obj.lora_path = None
+                tmp_obj.lora_id = None
                 tokenized_obj = copy.copy(tokenized_objs[i])
                 # Ensure independent mm_items so wrap_shm_features won't mutate the original
                 if hasattr(tokenized_obj, "mm_inputs") and tokenized_obj.mm_inputs:
