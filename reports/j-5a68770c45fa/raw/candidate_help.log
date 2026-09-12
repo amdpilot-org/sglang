@@ -1,0 +1,202 @@
+`sgl-router` — slim KV-aware OpenAI-compatible router for SGLang workers.
+
+Discovery is mutually exclusive: pass `--worker-urls` for a static worker list, or `--service-discovery` for Kubernetes EndpointSlice discovery — exactly one is required.
+
+Usage: sgl-router [OPTIONS] --model-id <MODEL_ID>
+
+Options:
+      --host <HOST>
+          Address to bind the HTTP server to
+          
+          [default: 127.0.0.1]
+
+      --port <PORT>
+          Port to bind the HTTP server to
+          
+          [default: 30000]
+
+      --admin-api-key <ADMIN_API_KEY>
+          Require `Authorization: Bearer <key>` on router admin endpoints. When omitted, admin endpoints remain unauthenticated for compatibility
+
+      --model-id <MODEL_ID>
+          Model id this router serves (the OpenAI `model` field)
+
+      --tokenizer-path <TOKENIZER_PATH>
+          Tokenizer source: a local `tokenizer.json` path, or a HuggingFace repo id to download from. When omitted, falls back to `--model-id` as the repo id (download honors `HF_TOKEN` / `HF_HOME`)
+
+      --policy <POLICY>
+          Routing policy
+
+          Possible values:
+          - round_robin
+          - random
+          - power_of_two
+          - load_based:    Selects the currently least-loaded worker
+          - fused_score:   Weighted sum of `--fuse` terms
+          - score_policy:  Composes compatible scoring terms into a single routing policy
+          - session_aware: Selects a worker from session affinity
+          - cache_aware:   Selects cache-affine prefill candidates from the configured prefix provider
+          - sticky:        Sticky-session routing: pins a routing key (read from a configurable request header) to a worker via an in-memory map, so stateful sessions land on the same backend. Tuning — header name, keyless-fallback policy, and TTL eviction — lives on `ModelConfig::sticky`
+          
+          [default: round_robin]
+
+      --decode-policy <DECODE_POLICY>
+          Policy used to select decode workers for PD requests
+          
+          [default: power_of_two]
+          [possible values: power_of_two, legacy_host_affinity]
+
+      --bucket-config <BUCKET_CONFIG>
+          Static P/D bucket configuration. Omit to use the global candidate domain
+
+      --cb-threshold <CB_THRESHOLD>
+          Consecutive upstream failures before the circuit breaker opens. Setting this enables the circuit breaker; `0` is rejected
+
+      --cb-cool-down-secs <CB_COOL_DOWN_SECS>
+          Circuit-breaker cool-down in seconds. Only meaningful with `--cb-threshold`; defaults to 30 when the breaker is enabled
+
+      --kv-indexer-endpoint <KV_INDEXER_ENDPOINT>
+          External KV indexer gRPC endpoint used as the authoritative cache signal. Needs an explicit scheme, e.g. `http://10.0.0.1:50051`
+
+      --kv-indexer-query-timeout-ms <KV_INDEXER_QUERY_TIMEOUT_MS>
+          KV Indexer query timeout in milliseconds. Requires `--kv-indexer-endpoint`; defaults to 100
+
+      --kv-indexer-query-max-inflight <KV_INDEXER_QUERY_MAX_INFLIGHT>
+          Maximum concurrent KV Indexer queries issued by this Router. Requires `--kv-indexer-endpoint`; defaults to 32
+
+      --cache-prefix-provider <CACHE_PREFIX_PROVIDER>
+          Prefix-match source for native Cache-Aware
+          
+          [possible values: radix_tree, indexer]
+
+      --session-id-header <SESSION_ID_HEADER>
+          Header carrying the session ID for `--policy session_aware`
+
+      --session-idle-secs <SESSION_IDLE_SECS>
+          Idle timeout for a session assignment, in seconds
+
+      --session-eviction-interval-secs <SESSION_EVICTION_INTERVAL_SECS>
+          Session-assignment eviction cadence, in seconds
+
+      --stable-pair
+          Use a deterministic backup for the affinity key and candidate range
+
+      --affinity-mode <AFFINITY_MODE>
+          Session-affinity admission mode
+
+          Possible values:
+          - strict: Keep the primary after it passes admission
+          - soft:   Allow the admitted backup to relieve pressure
+
+      --session-affinity-mode <SESSION_AFFINITY_MODE>
+          Session-affinity primary lookup and fallback behavior
+
+          Possible values:
+          - bucket:          Search only within the target bucket
+          - global-rebind:   Rebind to a target-bucket fallback when the global primary is unavailable
+          - global-preserve: Keep a valid global assignment when a bucket fallback is used
+
+      --disable-pressure-guard
+          Disables the Session/Cache-Aware pressure guard
+
+      --pressure-abs-threshold-tokens <PRESSURE_ABS_THRESHOLD_TOKENS>
+          Absolute waiting-uncached-token gap required by the pressure guard
+
+      --pressure-abs-threshold-ms <PRESSURE_ABS_THRESHOLD_MS>
+          Absolute millisecond gap when a Prefill queue estimate is available
+
+      --pressure-rel-threshold <PRESSURE_REL_THRESHOLD>
+          Relative waiting-uncached-token multiplier required by the pressure guard
+
+      --cache-affinity-min-matched-tokens <CACHE_AFFINITY_MIN_MATCHED_TOKENS>
+          Minimum cache-hit tokens for a cache-aware candidate
+
+      --cache-affinity-min-match-ratio <CACHE_AFFINITY_MIN_MATCH_RATIO>
+          Minimum cache-hit ratio for a cache-aware candidate
+
+      --cache-candidate-min-workers <CACHE_CANDIDATE_MIN_WORKERS>
+          Minimum number of cache-aware candidates to try
+
+      --cache-candidate-ratio <CACHE_CANDIDATE_RATIO>
+          Fraction of healthy prefill workers considered as cache-aware candidates
+
+      --cache-candidate-max-workers <CACHE_CANDIDATE_MAX_WORKERS>
+          Maximum number of cache-aware candidates to try
+
+      --cache-switch-margin-tokens <CACHE_SWITCH_MARGIN_TOKENS>
+          Maximum uncached-work difference that pressure may override
+
+      --fuse <FUSE>
+          Policies to sum, spelled exactly as `--policy` spells them and each optionally weighted: `--fuse prefix_cache=2.0,load_based=0.3`. An omitted weight keeps that policy's own default. Requires `--policy score_policy` or `fused_score`; when either policy is set and this flag is omitted, the terms default to `prefix_cache,load_based`
+
+      --filter <FILTER>
+          Ordered hard constraints applied before policy selection
+
+          Possible values:
+          - overloaded:   Router-local in-flight capacity limit
+          - prefix_cache: Requires a minimum share of cached prompt blocks
+
+      --max-in-flight <MAX_IN_FLIGHT>
+          Router-local in-flight limit for `--filter overloaded`
+
+      --prefix-cache-min-share <PREFIX_CACHE_MIN_SHARE>
+          Minimum cached prompt share for `--filter prefix_cache`
+
+      --routing-key-header <ROUTING_KEY_HEADER>
+          Request header carrying the routing key for sticky-session routing. Defaults to `x-sgl-routing-key` when `--policy sticky` is set
+
+      --sticky-fallback-policy <STICKY_FALLBACK_POLICY>
+          Policy used to select a worker for requests with no routing key, and to pick the initial worker when a new key is first seen. One of `round_robin` / `random` / `power_of_two` / `load_based`. Defaults to `round_robin`
+          
+          [possible values: round_robin, random, power_of_two, load_based]
+
+      --sticky-idle-secs <STICKY_IDLE_SECS>
+          Evict a sticky assignment after it has been idle (unreferenced) this many seconds. Defaults to 600
+
+      --sticky-eviction-interval-secs <STICKY_EVICTION_INTERVAL_SECS>
+          Wall-clock cadence of the sticky idle-eviction sweep, in seconds. Defaults to 60
+
+      --worker-urls <WORKER_URLS>...
+          Static worker URLs (space-separated or repeated). Mutually exclusive with `--service-discovery`
+
+      --service-discovery
+          Enable Kubernetes EndpointSlice discovery
+
+      --service-discovery-namespace <SERVICE_DISCOVERY_NAMESPACE>
+          Namespace to watch. Unset/empty watches all namespaces (requires cluster-wide RBAC)
+
+      --selector <SELECTOR>...
+          Plain-mode label selector terms, e.g. `app=engines-qwen3` (space-separated or repeated `key=value`, AND-joined). Mutually exclusive with the prefill/decode selectors
+
+      --prefill-selector <PREFILL_SELECTOR>...
+          PD-mode prefill label selector terms. Requires `--decode-selector`
+
+      --decode-selector <DECODE_SELECTOR>...
+          PD-mode decode label selector terms. Requires `--prefill-selector`
+
+      --request-timeout-secs <REQUEST_TIMEOUT_SECS>
+          Per-request upstream timeout in seconds
+          
+          [default: 300]
+
+      --stale-request-timeout-secs <STALE_REQUEST_TIMEOUT_SECS>
+          Max lifetime of an in-flight request entry before the janitor reaps it (returns 504 `stale_request_expired`)
+          
+          [default: 600]
+
+      --log-level <LOG_LEVEL>
+          Default tracing level (overridden by `RUST_LOG`)
+          
+          [default: info]
+
+      --log-format <LOG_FORMAT>
+          Log output format
+          
+          [default: text]
+          [possible values: text, json]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version

@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32772",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2825",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2796",
+  "candidate_commit": "0dfd71f2a9eb205f4e6fd7f06c6fc999322a5e29",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review verified that the exact candidate fully implements the original optional inbound admin-auth contract for the experimental Rust router's POST /flush_cache endpoint. The recorded base permits unauthenticated fan-out. The candidate preserves that behavior when no key is configured, adds --admin-api-key, accepts only the exact configured Bearer credential, returns 401 before worker fan-out for missing or malformed credentials, and does not forward the inbound credential to workers.",
+  "tests": [
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-5a68770c45fa/cargo-target cargo test --manifest-path experimental/sgl-router/Cargo.toml server::routes::cache::tests::all_workers_succeed_returns_200 -- --exact --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "On the exact recorded base, an unauthenticated POST /flush_cache reached two real loopback HTTP workers and returned 200, reproducing the original insecure-by-default behavior before the optional control existed. Raw output: reports/j-5a68770c45fa/raw/base_unauthenticated_fanout.log"
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-5a68770c45fa/cargo-target cargo test --manifest-path experimental/sgl-router/Cargo.toml server::routes::cache::tests -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, all nine cache-route tests passed, including candidate regression tests for zero fan-out on unauthorized requests, exact bearer success, backward compatibility, and absence of the inbound Authorization header at the worker. Raw output: reports/j-5a68770c45fa/raw/candidate_cache_tests.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5a68770c45fa/venv/bin/python reports/j-5a68770c45fa/raw/blackbox_auth.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent black-box execution of the freshly rebuilt router against a separate Python loopback worker: no configured key returned 200 and fanned out; missing, raw, Basic, lowercase bearer, wrong-key, and extra-suffix credentials all returned 401 with WWW-Authenticate: Bearer and zero worker calls; the exact bearer key returned 200 with one worker call and no forwarded Authorization header. Raw output: reports/j-5a68770c45fa/raw/blackbox_auth.log"
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-5a68770c45fa/cargo-target cargo test --manifest-path experimental/sgl-router/Cargo.toml",
+      "exit_code": 0,
+      "what_was_measured": "Complete candidate router suite passed: 549 library tests, 4 binary tests, 58 component tests, and 90 proxy tests. Raw output: reports/j-5a68770c45fa/raw/candidate_full_test.log"
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-5a68770c45fa/cargo-target cargo build --release --manifest-path experimental/sgl-router/Cargo.toml",
+      "exit_code": 0,
+      "what_was_measured": "Fresh optimized native x86-64 Rust router built from the exact candidate with rustc 1.90.0. Binary path: /tmp/amdpilot-repo-j-5a68770c45fa/cargo-target/release/sgl-router; SHA-256 d58ea68388fae7a7d5759a6a25299da29cdccc0e8bd40904474a66d18aa8cb18. Build, file, and linkage evidence are retained under reports/j-5a68770c45fa/raw/."
+    },
+    {
+      "command": "cargo fmt --manifest-path experimental/sgl-router/Cargo.toml -- --check",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Rust source passes rustfmt 1.90.0. Raw output: reports/j-5a68770c45fa/raw/candidate_fmt.log"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "No GPU was used. This issue is an architecture-independent Rust HTTP authorization and fan-out boundary; the relevant native executable and real loopback HTTP transport were exercised directly. GPU/model numerical output is not part of the original contract.",
+  "native_rebuilt": true,
+  "source_and_native_paths": {
+    "candidate_source": "/job/repo/experimental/sgl-router",
+    "native_binary": "/tmp/amdpilot-repo-j-5a68770c45fa/cargo-target/release/sgl-router",
+    "python_harness_interpreter": "/tmp/amdpilot-repo-j-5a68770c45fa/venv/bin/python"
+  },
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Validation was performed on x86-64 Linux; no alternate CPU architecture was available.",
+    "No GPU or model-serving workload was run because neither is involved in the router inbound authentication contract.",
+    "The issue explicitly starts with /flush_cache; other routes were not evaluated as newly protected admin endpoints."
+  ]
+}
