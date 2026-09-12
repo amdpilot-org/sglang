@@ -1,0 +1,203 @@
+.FFF                                                                     [100%]
+=================================== FAILURES ===================================
+_ test_set_mamba_track_indices_skips_freed_rows[next_track_indices1-None-expected_positions1-expected_slots1] _
+
+next_track_indices = [None, 1], track_positions = None
+expected_positions = [0, 1], expected_slots = [-1, 22]
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a GPU")
+    @pytest.mark.parametrize(
+        ("next_track_indices", "track_positions", "expected_positions", "expected_slots"),
+        [
+            ([0, 1], None, [0, 1], [11, 22]),
+            ([None, 1], None, [0, 1], [-1, 22]),
+            ([None, None], [1, 0], [1, 0], [-1, -1]),
+        ],
+    )
+    def test_set_mamba_track_indices_skips_freed_rows(
+        next_track_indices, track_positions, expected_positions, expected_slots
+    ):
+        """A verify row whose request state was freed must not reuse its stale slot."""
+        device = torch.device("cuda")
+        mapping = torch.tensor([[11, 12], [21, 22]], dtype=torch.int64, device=device)
+        batch_size = len(next_track_indices)
+        batch = SimpleNamespace(
+            req_to_token_pool=SimpleNamespace(
+                req_index_to_mamba_ping_pong_track_buffer_mapping=mapping
+            ),
+            req_pool_indices=torch.arange(batch_size, device=device),
+            reqs=[
+                SimpleNamespace(kv=SimpleNamespace(mamba_next_track_idx=position))
+                for position in next_track_indices
+            ],
+        )
+    
+        set_mamba_track_indices_from_reqs(batch, track_positions)
+        torch.cuda.synchronize()
+    
+        assert batch.mamba_track_buffer_indices == expected_positions
+>       assert batch.mamba_track_indices.cpu().tolist() == expected_slots
+E       assert [11, 22] == [-1, 22]
+E         
+E         At index 0 diff: 11 != -1
+E         Use -v to get more diff
+
+test/registered/unit/managers/test_mamba_track_indices.py:40: AssertionError
+_ test_set_mamba_track_indices_skips_freed_rows[next_track_indices2-track_positions2-expected_positions2-expected_slots2] _
+
+next_track_indices = [None, None], track_positions = [1, 0]
+expected_positions = [1, 0], expected_slots = [-1, -1]
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a GPU")
+    @pytest.mark.parametrize(
+        ("next_track_indices", "track_positions", "expected_positions", "expected_slots"),
+        [
+            ([0, 1], None, [0, 1], [11, 22]),
+            ([None, 1], None, [0, 1], [-1, 22]),
+            ([None, None], [1, 0], [1, 0], [-1, -1]),
+        ],
+    )
+    def test_set_mamba_track_indices_skips_freed_rows(
+        next_track_indices, track_positions, expected_positions, expected_slots
+    ):
+        """A verify row whose request state was freed must not reuse its stale slot."""
+        device = torch.device("cuda")
+        mapping = torch.tensor([[11, 12], [21, 22]], dtype=torch.int64, device=device)
+        batch_size = len(next_track_indices)
+        batch = SimpleNamespace(
+            req_to_token_pool=SimpleNamespace(
+                req_index_to_mamba_ping_pong_track_buffer_mapping=mapping
+            ),
+            req_pool_indices=torch.arange(batch_size, device=device),
+            reqs=[
+                SimpleNamespace(kv=SimpleNamespace(mamba_next_track_idx=position))
+                for position in next_track_indices
+            ],
+        )
+    
+        set_mamba_track_indices_from_reqs(batch, track_positions)
+        torch.cuda.synchronize()
+    
+        assert batch.mamba_track_buffer_indices == expected_positions
+>       assert batch.mamba_track_indices.cpu().tolist() == expected_slots
+E       assert [12, 21] == [-1, -1]
+E         
+E         At index 0 diff: 12 != -1
+E         Use -v to get more diff
+
+test/registered/unit/managers/test_mamba_track_indices.py:40: AssertionError
+_ TestNgramMambaVerifyUpdate.test_backend_masks_non_track_commit_for_freed_verify_row _
+
+self = <test_ngram_mamba_verify_update.TestNgramMambaVerifyUpdate testMethod=test_backend_masks_non_track_commit_for_freed_verify_row>
+
+    def test_backend_masks_non_track_commit_for_freed_verify_row(self):
+        from sglang.srt.layers.attention.hybrid_linear_attn_backend import (
+            HybridLinearAttnBackend,
+        )
+    
+        backend = object.__new__(HybridLinearAttnBackend)
+        backend.linear_attn_backend = MagicMock()
+        backend.linear_attn_backend._translate_mamba_indices.side_effect = lambda x: x
+        backend.linear_attn_backend.forward_metadata.mamba_cache_indices = torch.tensor(
+            [7, 8], dtype=torch.int64
+        )
+        backend.linear_attn_backend.req_to_token_pool.get_speculative_mamba2_params_all_layers.return_value = MagicMock()
+        backend.linear_attn_backend.req_to_token_pool.mamba_pool.replayssm_is_kda = False
+        backend.linear_attn_backend.accept_lens_pool = None
+        backend._update_ple_state_after_mtp_verify = MagicMock()
+    
+        with patch(
+            "sglang.srt.layers.attention.hybrid_linear_attn_backend.scatter_mamba_states_after_mtp_verify"
+        ) as scatter:
+            backend.update_mamba_state_after_mtp_verify(
+                last_correct_step_indices=torch.tensor([3, 2], dtype=torch.int32),
+                mamba_track_indices=torch.tensor([-1, 202], dtype=torch.int64),
+                mamba_steps_to_track=torch.tensor([-1, 1], dtype=torch.int32),
+                model=MagicMock(),
+            )
+    
+>       self.assertTrue(
+            torch.equal(
+                scatter.call_args.args[2], torch.tensor([-1, 2], dtype=torch.int32)
+            )
+        )
+E       AssertionError: False is not true
+
+test/registered/unit/spec/test_ngram_mamba_verify_update.py:259: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f46b76d2840>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f4f98fd2ac0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestNgramMambaVerifyUpdate.test_backend_masks_non_track_commit_for_freed_verify_row
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/spec/test_ngram_mamba_verify_update.py", line 259, in test_backend_masks_non_track_commit_for_freed_verify_row
+    self.assertTrue(
+  File "/usr/lib/python3.12/unittest/case.py", line 727, in assertTrue
+    raise self.failureException(msg)
+AssertionError: False is not true
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/managers/test_mamba_track_indices.py::test_set_mamba_track_indices_skips_freed_rows[next_track_indices1-None-expected_positions1-expected_slots1]
+FAILED test/registered/unit/managers/test_mamba_track_indices.py::test_set_mamba_track_indices_skips_freed_rows[next_track_indices2-track_positions2-expected_positions2-expected_slots2]
+FAILED test/registered/unit/spec/test_ngram_mamba_verify_update.py::TestNgramMambaVerifyUpdate::test_backend_masks_non_track_commit_for_freed_verify_row
+3 failed, 1 passed, 17 warnings in 27.71s

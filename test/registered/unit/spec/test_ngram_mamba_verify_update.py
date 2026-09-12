@@ -230,6 +230,40 @@ class TestNgramMambaVerifyUpdate(CustomTestCase):
             )
         )
 
+    def test_backend_masks_non_track_commit_for_freed_verify_row(self):
+        from sglang.srt.layers.attention.hybrid_linear_attn_backend import (
+            HybridLinearAttnBackend,
+        )
+
+        backend = object.__new__(HybridLinearAttnBackend)
+        backend.linear_attn_backend = MagicMock()
+        backend.linear_attn_backend._translate_mamba_indices.side_effect = lambda x: x
+        backend.linear_attn_backend.forward_metadata.mamba_cache_indices = torch.tensor(
+            [7, 8], dtype=torch.int64
+        )
+        backend.linear_attn_backend.req_to_token_pool.get_speculative_mamba2_params_all_layers.return_value = MagicMock()
+        backend.linear_attn_backend.req_to_token_pool.mamba_pool.replayssm_is_kda = (
+            False
+        )
+        backend.linear_attn_backend.accept_lens_pool = None
+        backend._update_ple_state_after_mtp_verify = MagicMock()
+
+        with patch(
+            "sglang.srt.layers.attention.hybrid_linear_attn_backend.scatter_mamba_states_after_mtp_verify"
+        ) as scatter:
+            backend.update_mamba_state_after_mtp_verify(
+                last_correct_step_indices=torch.tensor([3, 2], dtype=torch.int32),
+                mamba_track_indices=torch.tensor([-1, 202], dtype=torch.int64),
+                mamba_steps_to_track=torch.tensor([-1, 1], dtype=torch.int32),
+                model=MagicMock(),
+            )
+
+        self.assertTrue(
+            torch.equal(
+                scatter.call_args.args[2], torch.tensor([-1, 2], dtype=torch.int32)
+            )
+        )
+
 
 class TestConvWindowDedupLayout(CustomTestCase):
     """KDA stores conv_state as (K-1, channel), unlike GDN; partial-accept
