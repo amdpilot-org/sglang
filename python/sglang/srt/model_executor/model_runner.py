@@ -37,6 +37,9 @@ from sglang.srt.distributed import bootstrap
 from sglang.srt.distributed.device_communicators.mooncake_transfer_engine import (
     maybe_init_shared_mooncake_transfer_engine,
 )
+from sglang.srt.distributed.device_communicators.pynccl_allocator import (
+    prealloc_symmetric_memory_pool,
+)
 from sglang.srt.distributed.parallel_state_wrapper import ParallelState
 from sglang.srt.dllm.config import DllmConfig
 from sglang.srt.elastic_ep.elastic_ep import (
@@ -890,6 +893,15 @@ class ModelRunner:
         """Allocate KV cache memory pools only (no backends or cuda graphs)."""
         if memory_pool_config is not None:
             self.memory_pool_config = memory_pool_config
+
+        # Reserve symmetric memory before profiling sizes the KV cache so this
+        # fixed allocation is included in the observed available-memory budget.
+        prealloc_symmetric_memory_pool(
+            is_draft_worker=self.is_draft_worker,
+            enable_symm_mem=get_exec().comm.enable_symm_mem,
+            device=self.device,
+            forward_stream=self.forward_stream,
+        )
 
         self.init_kv_cache_configurator()
         result = self.kv_cache_configurator.configure(

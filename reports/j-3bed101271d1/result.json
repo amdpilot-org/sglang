@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33577",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The base source reproduced both reported control-flow defects in focused regressions. The patch temporarily enables pynccl for all-to-all and reserves symmetric memory before KV-cache budget profiling.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-3bed101271d1/venv/bin/python -m pytest -q test/registered/unit/test_dcp_a2a_and_symm_mem_init.py (base source, new regression retained)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before behavior: disabled pynccl took the torch.distributed path and symmetric-memory reservation was absent before KV profiling; 2 failed, 2 passed. Raw output: reports/j-3bed101271d1/raw/failing-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3bed101271d1/venv/bin/python -m pytest -q test/registered/unit/test_dcp_a2a_and_symm_mem_init.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after behavior and boundary cases: temporary enable plus state restoration, already-enabled state preservation, no-pynccl fallback, and symmetric reservation before KV profiling; 4 passed. Raw output: reports/j-3bed101271d1/raw/passing-after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3bed101271d1/venv/bin/python -m compileall -q python/sglang/srt/distributed/parallel_state.py python/sglang/srt/model_executor/model_runner.py python/sglang/srt/model_executor/model_runner_components/cuda_graph_setup.py test/registered/unit/test_dcp_a2a_and_symm_mem_init.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python modules and regression test compile successfully."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3bed101271d1/venv/bin/python -m pytest -q test/registered/dcp/test_dcp_layout_unit.py test/registered/unit/test_dcp_a2a_and_symm_mem_init.py",
+      "exit_code": 0,
+      "what_was_measured": "Focused DCP unit suite plus the new regression: 21 passed and 18 subtests passed. Raw output: reports/j-3bed101271d1/raw/focused-suite.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-3bed101271d1/venv/bin/python < single-GPU torch probe",
+      "exit_code": 0,
+      "what_was_measured": "Detected one AMD Instinct MI350X with ROCm 7.2 and verified a simple GPU numerical sum (1240.0, matching the independent CPU reference). Raw output: reports/j-3bed101271d1/raw/gpu-probe.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-3bed101271d1/raw/gpu-probe.txt records one gfx950-class AMD Instinct MI350X and a matching GPU/CPU numerical result. This did not exercise multi-rank DCP.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original TP=8/DCP=8 concurrency-64 serving workload could not be run on the assigned single GPU.",
+    "The assigned ROCm/RCCL environment cannot reproduce the reporter's CUDA/NCCL 2.27.7 failure mode.",
+    "No model weights were available; no full-model serving or semantic-accuracy claim is made.",
+    "Ruff was not installed in the prepared interpreter; reports/j-3bed101271d1/raw/ruff.txt records that tooling limitation."
+  ]
+}
