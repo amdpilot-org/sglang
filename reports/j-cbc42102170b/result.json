@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35752",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2782",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2750",
+  "candidate_commit": "91a3ec14ad2c529148e9414102b0f53fbccaebe6",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review reproduced the original multiprocess name[] filtering failure on the recorded base and verified that the exact candidate fixes it. Repeated requested names return exactly the requested existing metric families, an unknown name is omitted, a single requested family works, and an unfiltered scrape remains complete. The dependency floor is updated across all six SGLang package variants found in the repository.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-cbc42102170b/venv/bin/python /tmp/amdpilot-review-j-cbc42102170b/check_metrics_filter.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Actual SGLang add_prometheus_middleware with multiprocess files: unfiltered scrape returned three SGLang families, while repeated-name, single-name, and unknown-only filtered requests all returned empty bodies, reproducing the issue. Raw output: /tmp/amdpilot-review-j-cbc42102170b/evidence/base-reproduction.json"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cbc42102170b/venv/bin/python /tmp/amdpilot-review-j-cbc42102170b/check_metrics_filter.py (candidate 91a3ec14ad2c529148e9414102b0f53fbccaebe6, prometheus-client 0.26.0)",
+      "exit_code": 0,
+      "what_was_measured": "Repeated two-name plus unknown request returned only sglang:num_running_reqs and sglang:prompt_tokens_total; single-name returned only that family; unknown-only was empty; unfiltered retained all three families. Raw output: /tmp/amdpilot-review-j-cbc42102170b/evidence/candidate-regression.json"
+    },
+    {
+      "command": "PYTHONPATH=/tmp/amdpilot-review-j-cbc42102170b/prom025:/job/repo/python /tmp/amdpilot-repo-j-cbc42102170b/venv/bin/python /tmp/amdpilot-review-j-cbc42102170b/check_metrics_filter.py",
+      "exit_code": 0,
+      "what_was_measured": "The same regression and adversarial cases passed with an isolated exact prometheus-client 0.25.0 install, validating the proposed minimum. Raw output: /tmp/amdpilot-review-j-cbc42102170b/evidence/candidate-prom025.json"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cbc42102170b/venv/bin/python -m py_compile python/sglang/srt/utils/common.py test/registered/observability/test_metrics.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source and regression test compile successfully."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cbc42102170b/venv/bin/python -m pytest -q test/registered/observability/test_metrics.py --collect-only",
+      "exit_code": 0,
+      "what_was_measured": "All 10 tests in the candidate's registered metrics module collect successfully. Raw output: /tmp/amdpilot-review-j-cbc42102170b/evidence/collect.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "No GPU execution was needed for this Python ASGI/Prometheus registry contract. The prepared host exposes one AMD Instinct MI350X with torch 2.11.0+rocm7.2 and HIP 7.2, but no numerical or model-architecture claim is part of this review. Environment evidence: /tmp/amdpilot-review-j-cbc42102170b/evidence/environment.txt",
+  "native_rebuilt": false,
+  "native_rebuild_reason": "The exact candidate diff contains no C, C++, HIP, CUDA, or other native source changes; repository-environment.json also declares native=null. A native rebuild is not applicable.",
+  "source_import_path": "/job/repo/python/sglang/srt/utils/common.py",
+  "python_interpreter": "/tmp/amdpilot-repo-j-cbc42102170b/venv/bin/python",
+  "prometheus_client_import_path": "/opt/venv/lib/python3.12/site-packages/prometheus_client/__init__.py",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The candidate's external Qwen-backed registered server test was collected but not executed in this independent review; the original failure and fix were instead exercised directly through SGLang's actual ASGI middleware with real prometheus multiprocess files.",
+    "No distributed serving workload was run. This does not limit the registry-level contract under review.",
+    "The separate gRPC aiohttp metrics sidecar is not implemented through make_asgi_app and is outside the original issue's stated HTTP endpoint contract."
+  ]
+}
