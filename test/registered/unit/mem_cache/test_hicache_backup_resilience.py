@@ -76,9 +76,13 @@ def test_worker_survives_exception_and_drains_following_operation():
     assert ack1 is first
     assert ack1.failed
     assert ack1.failure_kind == "exception"
+    assert ack1.failure_exception_type == "RuntimeError"
+    assert ack1.failure_exception_message == "storage backend I/O error"
     assert ack1.unwritten_pages == 4
     assert ack2 is second
     assert not ack2.failed
+    assert ack2.failure_exception_type is None
+    assert ack2.failure_exception_message is None
     assert ack2.completed_tokens == 32
     assert controller.backup_queue.empty()
 
@@ -97,6 +101,28 @@ def test_exception_after_partial_progress_counts_only_remaining_pages():
 
     assert ack.failed
     assert ack.unwritten_pages == 1
+
+
+def test_exception_ack_preserves_distinct_causes():
+    failures = iter(
+        [TimeoutError("remote timed out"), ValueError("malformed response")]
+    )
+
+    def fail(operation):
+        raise next(failures)
+
+    controller = make_controller(fail)
+    controller.backup_queue.put(make_op(1))
+    controller.backup_queue.put(make_op(1))
+    thread = run_worker(HiCacheController, controller)
+    timeout_ack = controller.ack_backup_queue.get(timeout=5)
+    malformed_ack = controller.ack_backup_queue.get(timeout=5)
+    stop_worker(controller, thread)
+
+    assert timeout_ack.failure_exception_type == "TimeoutError"
+    assert timeout_ack.failure_exception_message == "remote timed out"
+    assert malformed_ack.failure_exception_type == "ValueError"
+    assert malformed_ack.failure_exception_message == "malformed response"
 
 
 def test_backend_false_marks_all_unwritten_pages_after_completed_batches():
@@ -156,6 +182,8 @@ def test_hybrid_worker_survives_exception_and_acks_operation():
     assert ack is operation
     assert ack.failed
     assert ack.failure_kind == "exception"
+    assert ack.failure_exception_type == "RuntimeError"
+    assert ack.failure_exception_message == "sidecar backend I/O error"
     assert ack.unwritten_pages == 2
 
 

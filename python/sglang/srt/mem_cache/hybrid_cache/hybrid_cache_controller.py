@@ -761,9 +761,11 @@ class HybridCacheController(BaseHiCacheController):
                     continue
                 try:
                     self._page_backup(operation)
-                except Exception:
+                except Exception as exc:
                     operation.failed = True
                     operation.failure_kind = "exception"
+                    operation.failure_exception_type = type(exc).__name__
+                    operation.failure_exception_message = str(exc)
                     operation.unwritten_pages = (
                         0
                         if self.backup_skip

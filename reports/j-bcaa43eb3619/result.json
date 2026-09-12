@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38428",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/887",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/791",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/856",
+  "candidate_commit": "e4c781e77f4537963484861602ee68910efab9d4",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved the candidate's backup-worker survival, acknowledgement, partial-write accounting, and hybrid sidecar fixes, then corrected the independently reproduced ambiguity by recording the backend exception type and message on each acknowledged StorageOperation.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bcaa43eb3619/venv/bin/python /tmp/amdpilot-repo-j-bcaa43eb3619/reproduce_review_counterexample.py (candidate e4c781e77f4537963484861602ee68910efab9d4)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction against the exact candidate: TimeoutError('remote timed out') and ValueError('malformed response') produced identical generic exception metadata for both HiCacheController and HybridCacheController acknowledgements."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bcaa43eb3619/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_backup_resilience.py",
+      "exit_code": 0,
+      "what_was_measured": "Seven focused tests passed, covering worker continuation, queue draining, exception cause metadata, partial progress, backend false returns, clean success/skip state, and hybrid sidecar failures."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bcaa43eb3619/venv/bin/python reports/j-bcaa43eb3619/reproduce_review_counterexample.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after reproduction: both standard and hybrid workers acknowledged TimeoutError and ValueError with distinct type/message metadata, continued to a following success, and left success metadata unset."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and correction concern CPU-only Python queue/thread and metadata behavior; no GPU execution was needed or claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No real remote storage service was disrupted; backend exceptions and false returns were deterministically injected through the production worker methods.",
+    "No model-serving, model-architecture, semantic-accuracy, GPU-kernel, or distributed-workload claim is made.",
+    "Exception messages are retained as strings on in-process acknowledgement objects; no cross-process serialization contract was investigated because these queues are local thread queues."
+  ]
+}

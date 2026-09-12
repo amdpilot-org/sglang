@@ -234,6 +234,9 @@ class StorageOperation:
         self.failed: bool = False
         # "backend_false" | "exception" | "sidecar_backend_false"
         self.failure_kind: Optional[str] = None
+        # Safe, serializable details for an exception raised by the backend.
+        self.failure_exception_type: Optional[str] = None
+        self.failure_exception_message: Optional[str] = None
         self.unwritten_pages: int = 0
         # Pool name -> number of sidecar pages the backend did not write.
         self.sidecar_unwritten_by_pool: dict = {}
@@ -1326,11 +1329,13 @@ class HiCacheController:
                 if not self.backup_skip:
                     try:
                         self._page_backup(operation)
-                    except Exception:
+                    except Exception as exc:
                         # Backend failures must not kill the worker. Ack the
                         # operation so its host memory can still be released.
                         operation.failed = True
                         operation.failure_kind = "exception"
+                        operation.failure_exception_type = type(exc).__name__
+                        operation.failure_exception_message = str(exc)
                         operation.unwritten_pages = max(
                             0,
                             len(operation.hash_value)
