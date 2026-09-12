@@ -638,6 +638,62 @@ class TestParallelStreamTaskCleanup(CustomTestCase):
         asyncio.run(drive())
 
 
+class TestCreateAbortTask(CustomTestCase):
+    """Regression coverage for streaming-response background cleanup."""
+
+    @staticmethod
+    async def _run_abort_task(tm, obj):
+        with patch(
+            "sglang.srt.managers.tokenizer_manager.asyncio.sleep",
+            new=AsyncMock(),
+        ):
+            await tm.create_abort_task(obj)()
+
+    def test_unstarted_single_stream_cleanup_is_a_no_op(self):
+        tm = _make_tokenizer_manager(self)
+        tm._dispatch_to_scheduler = Mock()
+        obj = GenerateReqInput(text="hello", rid="unstarted-rid")
+
+        asyncio.run(self._run_abort_task(tm, obj))
+
+        tm._dispatch_to_scheduler.assert_not_called()
+
+    def test_unnormalized_active_single_stream_cleanup_aborts_request(self):
+        tm = _make_tokenizer_manager(self)
+        tm._dispatch_to_scheduler = Mock()
+        obj = GenerateReqInput(text="hello", rid="active-rid")
+        tm.rid_to_state[obj.rid] = Mock(abort_sent=False)
+
+        asyncio.run(self._run_abort_task(tm, obj))
+
+        abort_req = tm._dispatch_to_scheduler.call_args.args[0]
+        self.assertEqual(abort_req.rid, obj.rid)
+        self.assertFalse(abort_req.abort_all)
+
+    def test_started_batch_stream_cleanup_aborts_each_active_request(self):
+        tm = _make_tokenizer_manager(self)
+        tm._dispatch_to_scheduler = Mock()
+        obj = GenerateReqInput(text=["one", "two"], rid=["batch-0", "batch-1"])
+        obj.normalize_batch_and_arguments()
+        tm._init_req_state(obj)
+
+        asyncio.run(self._run_abort_task(tm, obj))
+
+        abort_rids = [
+            call.args[0].rid for call in tm._dispatch_to_scheduler.call_args_list
+        ]
+        self.assertEqual(abort_rids, obj.rid)
+
+    def test_empty_batch_stream_cleanup_is_a_no_op(self):
+        tm = _make_tokenizer_manager(self)
+        tm._dispatch_to_scheduler = Mock()
+        obj = GenerateReqInput(text=[], rid=[])
+
+        asyncio.run(self._run_abort_task(tm, obj))
+
+        tm._dispatch_to_scheduler.assert_not_called()
+
+
 class TestGenerateRequestCleanupOnDispatchFailure(CustomTestCase):
     """generate_request must not leak rid_to_state when dispatch fails.
 

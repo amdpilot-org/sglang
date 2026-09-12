@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34113",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Independent reproduction confirms that candidate 38c4cbff fixes a real pre-normalization streaming cleanup AttributeError, so that narrow fix is preserved with stronger coverage. It does not fix the reported public /abort_request path: the endpoint directly dispatches TokenizerManager.abort_request, never calls create_abort_task, and an identical live GPU probe aborted cleanly on both the recorded base and corrected tree. No speculative downstream acknowledgement protocol was added without a reproduced endpoint failure or an existing completion signal.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-7376eac89cf6/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py -k TestCreateAbortTask (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Recorded base raised AttributeError for unstarted single, active unnormalized single, and empty-batch cleanup; 3 failed and 1 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7376eac89cf6/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py -k TestCreateAbortTask",
+      "exit_code": 0,
+      "what_was_measured": "4 cleanup cases passed after deriving cardinality from rid: unstarted single, active unnormalized single, active normalized batch, and empty batch."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7376eac89cf6/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py",
+      "exit_code": 0,
+      "what_was_measured": "30 tests and 3 subtests passed for the complete tokenizer-manager cleanup test file."
+    },
+    {
+      "command": "run_http_abort.py against recorded base behavior with the qualified deterministic tiny Llama fixture",
+      "exit_code": 0,
+      "what_was_measured": "Public /abort_request returned HTTP 200; the live stream ended with finish_reason.type=abort after four tokens; no reported AttributeError appeared in the server log."
+    },
+    {
+      "command": "run_http_abort.py against the corrected tree with the same fixture",
+      "exit_code": 0,
+      "what_was_measured": "Public /abort_request returned HTTP 200; the live stream ended with finish_reason.type=abort after three tokens; no reported AttributeError appeared in the server log."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Both HTTP probes executed real generation on one AMD Instinct MI350X/gfx950 using Torch 2.11.0+rocm7.2 and the deterministic tiny random Llama fixture (weight SHA-256 6632fab7c351a0bd85518d80a89ec673f68139587f5ad3fa8d5ab38fad87e75f)."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original meta-llama/Llama-3.2-1B-Instruct weights were unavailable.",
+    "The report used RTX 4090/CUDA; reproduction used one AMD gfx950 with ROCm 7.2.",
+    "The tiny random Llama fixture validates transport and engine execution only, not semantic accuracy, the original model setup, or distributed execution.",
+    "HTTP 200 still acknowledges successful local dispatch, not confirmed scheduler cancellation. The current request path has no downstream completion acknowledgement to propagate, and the reported endpoint failure was not reproduced, so no speculative protocol change was made.",
+    "Both owned server processes exceeded the 30-second graceful shutdown window, were killed, and had their descendants reaped.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
