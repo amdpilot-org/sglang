@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35673",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Gemma 4's dense vision attention omitted its already-known host max sequence length, forcing the ROCm Triton vision backend to recover it from a GPU tensor with .item() in every encoder block at the function named in the reported watchdog stack. The change forwards seq_len as max_seqlen. Contract regressions fail before and pass after; the real gfx950 Triton path agrees with an independent PyTorch SDPA reference. The original Gemma-4-31B-it TP=8 server hang was not reproduced because this job has one GPU and no model weights.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ad639cc3195c/venv/bin/python -m pytest -q test/registered/unit/models/test_gemma4_vision_attention.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Both single-item and batched Gemma 4 forwarding regressions failed because max_seqlen was absent; raw output: reports/j-ad639cc3195c/raw/regression-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ad639cc3195c/venv/bin/python -m pytest -q test/registered/unit/models/test_gemma4_vision_attention.py test/registered/unit/layers/attention/test_vision_max_seqlen.py",
+      "exit_code": 0,
+      "what_was_measured": "Nine tests passed, covering Gemma 4 single-item and batched forwarding plus existing precomputed-max contracts for Triton, FA3, FA4, and MoonViT; raw output: reports/j-ad639cc3195c/raw/focused-tests-after.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-ad639cc3195c/venv/bin/python <inline VisionTritonAttention numerical comparison>",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, dense cases (bsz=1, seq_len=7) and (bsz=3, seq_len=5) matched torch.nn.functional.scaled_dot_product_attention with maximum absolute errors 0.00081396 and 0.00091529; raw output: reports/j-ad639cc3195c/raw/gfx950-triton-numerical.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X (gfx950) executed the actual VisionTritonAttention kernel for two dense-shape cases; see reports/j-ad639cc3195c/raw/gfx950-triton-numerical.txt"
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one gfx950 GPU was assigned, so TP=8 collective behavior and the reported eight-GPU PCIe topology were not reproduced.",
+    "Gemma-4-31B-it weights were unavailable, so full model loading, multimodal preprocessing, hybrid SWA allocation, HTTP readiness, and semantic output were not tested.",
+    "The GPU fixture validates the implicated Triton attention execution and numerical output only; it does not prove that every possible cause of the original distributed hang is removed.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable."
+  ]
+}
