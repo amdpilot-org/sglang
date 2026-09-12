@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/1932",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "4b29cbe7f919d23dd82ff76f65257a85a72889a2",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate correctly caches and single-flights exact repeated Qwen image requests, but it is only a partial optimization. It does not provide explicit save/load operations or prompt-independent reuse by caller-selected ID, and its cache remains process-local and ephemeral.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-1ba9be2937d7/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_qwen_preprocess_request_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate: trusted exact-request hit, single-flight concurrency, key scoping, and bypass conditions; 4 passed. On the recorded base the copied regression immediately failed and later hung waiting for a candidate-only entrypoint, so that baseline run was terminated and retained as raw evidence."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1ba9be2937d7/venv/bin/python /job/review-evidence-j-1ba9be2937d7/adversarial.py",
+      "exit_code": 0,
+      "what_was_measured": "Same content ID with two prompts generated different keys and invoked preprocessing twice; a second processor instance could not reuse the first instance's entry."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1ba9be2937d7/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_preprocess_cache.py test/registered/unit/entrypoints/openai/test_protocol.py",
+      "exit_code": 0,
+      "what_was_measured": "Existing cache and OpenAI protocol compatibility: 70 passed, 30 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1ba9be2937d7/venv/bin/python -m compileall -q python/sglang/srt/multimodal/processors/qwen_vl.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python source compiles."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "AMD Instinct MI350X gfx950 was visible, but no Qwen-VL weights were available and the tiny Llama fixture cannot validate this architecture."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The same saved image content ID cannot reuse preprocessing when the rendered prompt changes because prompt text is part of the cache key.",
+    "There is no OpenAI API operation to explicitly save a preprocessing result and later load it by a caller-selected ID.",
+    "Cache entries are owned by each processor/tokenizer-worker process and are not shared across workers or preserved across restart.",
+    "Qwen video and audio requests explicitly bypass the new cache path."
+  ],
+  "remaining_limitations": [
+    "No Qwen-VL weights were available for an end-to-end serving or performance measurement.",
+    "The visible MI350X GPU and tiny Llama transport fixture cannot qualify Qwen-VL preprocessing semantics.",
+    "No native files changed, so native rebuild validation was not applicable."
+  ]
+}
