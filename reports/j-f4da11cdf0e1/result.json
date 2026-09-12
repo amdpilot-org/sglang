@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/1932",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Added content-addressed, exact-request Qwen2-VL preprocessing reuse through the existing bounded CPU multimodal cache. Trusted OpenAI image_url.content_hash values can select a hot entry before URL access. This is a verified candidate, not the complete original proposal: changed-prompt image-only reuse and durable/distributed cache IDs remain unimplemented.",
+  "tests": [
+    {
+      "command": "Run test/registered/unit/multimodal/test_qwen_preprocess_request_cache.py against a git archive of base 358c163250ad3b1f62939b01ce1314a0a31a0365 with the prepared interpreter",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: all 3 tests failed because QwenVLImageProcessor had no request preprocessing cache key or pre-load lookup path. Raw output: reports/j-f4da11cdf0e1/raw/baseline-regression.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f4da11cdf0e1/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_qwen_preprocess_request_cache.py test/registered/unit/multimodal/test_media_artifact_processor.py test/registered/unit/multimodal/test_preprocess_cache.py test/registered/unit/managers/test_mm_hashes.py test/registered/unit/parser/test_jinja_template_utils.py test/registered/unit/entrypoints/openai/test_protocol.py",
+      "exit_code": 0,
+      "what_was_measured": "114 tests and 30 subtests passed. The regression proves a trusted content-ID hit returns before opening an unreachable replacement URL; compatibility tests cover cache accounting, hash normalization, OpenAI validation, parser propagation, mutation isolation, prompt/order/config scoping, incomplete IDs, mixed media, untrusted IDs, and GPU feature transport exclusion. Raw output: reports/j-f4da11cdf0e1/raw/focused-tests.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f4da11cdf0e1/venv/bin/python -m compileall -q python/sglang/srt/multimodal/processors/qwen_vl.py test/registered/unit/multimodal/test_qwen_preprocess_request_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources compile successfully. Raw output: reports/j-f4da11cdf0e1/raw/compileall.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors. Raw output: reports/j-f4da11cdf0e1/raw/diff-check.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f4da11cdf0e1/venv/bin/python -m ruff check ... && python -m ruff format --check ...",
+      "exit_code": 1,
+      "what_was_measured": "Unavailable validation path: the pinned prepared interpreter does not contain the ruff module. No package installation or stack mutation was performed. Raw output: reports/j-f4da11cdf0e1/raw/ruff-check.log and ruff-format.log"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The assigned GPU is an AMD Instinct MI355X (gfx950), recorded in reports/j-f4da11cdf0e1/raw/gpu-inventory.log. No Qwen2-VL weights were available; the provided tiny Llama fixture cannot validate Qwen multimodal preprocessing. This candidate changes CPU preprocessing cache control flow, so no unrelated GPU smoke is claimed.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Changed rendered prompts miss the Qwen cache because the current Hugging Face processor fuses prompt tokenization and image preprocessing; image-only reuse across prompts is not implemented.",
+    "Cache entries are in-process and bounded; they are not durable across restarts, shared across tokenizer workers, or backed by an external cache service.",
+    "Qwen video/audio and CUDA IPC/VMM feature-transport requests bypass this request-output cache.",
+    "The trusted hash mode relies on the caller to bind SHA-256 IDs to immutable bytes; incorrect IDs can select incorrect cached preprocessing.",
+    "Qwen2-VL end-to-end serving and GPU numerical equivalence were not run because no qualifying model weights were available.",
+    "Ruff was unavailable in the pinned interpreter; the environment was preserved instead of installing it."
+  ]
+}
