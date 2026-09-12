@@ -434,6 +434,53 @@ def _passthrough_video_metadata(video, video_config):
     return _glm_video_metadata(num_frames, fps, num_frames / fps, range(num_frames))
 
 
+def _collapse_glm5_next_image_tokens(
+    input_ids: list[int], image_token_id: int, image_count: int = 1
+) -> list[int]:
+    """Normalize expanded GLM-5.3 spans without losing image cardinality."""
+    run_lengths = []
+    index = 0
+    while index < len(input_ids):
+        if input_ids[index] != image_token_id:
+            index += 1
+            continue
+        run_end = index + 1
+        while run_end < len(input_ids) and input_ids[run_end] == image_token_id:
+            run_end += 1
+        run_lengths.append(run_end - index)
+        index = run_end
+
+    if not run_lengths:
+        return input_ids
+
+    # Each separated run represents at least one image. Extra media items can be
+    # adjacent pretokenized placeholders, which are indistinguishable from one
+    # processor-expanded run using tokens alone. Preserve enough tokens to match
+    # the request's image cardinality instead of unconditionally keeping one.
+    keep_count = min(sum(run_lengths), max(len(run_lengths), image_count))
+    kept_per_run = [1] * len(run_lengths)
+    remaining = keep_count - len(run_lengths)
+    for run_index, run_length in enumerate(run_lengths):
+        extra = min(run_length - 1, remaining)
+        kept_per_run[run_index] += extra
+        remaining -= extra
+
+    output = []
+    run_index = 0
+    index = 0
+    while index < len(input_ids):
+        token_id = input_ids[index]
+        if token_id != image_token_id:
+            output.append(token_id)
+            index += 1
+            continue
+        output.extend([image_token_id] * kept_per_run[run_index])
+        while index < len(input_ids) and input_ids[index] == image_token_id:
+            index += 1
+        run_index += 1
+    return output
+
+
 class Glm4vImageProcessor(SGLangBaseProcessor):
     smart_rgb_conversion = True
     video_preprocessing_device = "cpu"
@@ -543,6 +590,14 @@ class Glm4vImageProcessor(SGLangBaseProcessor):
         *args,
         **kwargs,
     ):
+        # GLM-5.3's processor expands one image placeholder into a consecutive
+        # token span while retaining the original image. Media loading expects
+        # one placeholder per item and expands it again during preprocessing.
+        if self.hf_config.model_type == "glm5_next" and isinstance(input_text, list):
+            input_text = _collapse_glm5_next_image_tokens(
+                input_text, self.IM_TOKEN_ID, max(1, len(image_data))
+            )
+
         # Bare base64 video must use SGLang's decoder because HF treats it as a path-like string.
         video_urls, video_configs = split_glm_video_items(request_obj.video_data)
         video_processor = getattr(self._processor, "video_processor", None)
