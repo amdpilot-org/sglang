@@ -1923,6 +1923,59 @@ class TestAdaptiveSpecArgs(CustomTestCase):
         self.assertEqual(resolution_result(args, "speculative_num_draft_tokens"), 4)
 
 
+class TestMultiLayerEagleArgs(CustomTestCase):
+    @staticmethod
+    def _make_args(architecture, *, enable_multi_layer_eagle):
+        args = ServerArgs(model_path="dummy")
+        args.speculative_algorithm = "EAGLE"
+        args.enable_multi_layer_eagle = enable_multi_layer_eagle
+        args.device = "cuda"
+        args.page_size = 1
+        args._model_config = SimpleNamespace(
+            hf_config=SimpleNamespace(
+                architectures=[architecture],
+                get_text_config=lambda: SimpleNamespace(),
+            )
+        )
+        return args
+
+    def test_rejects_llama_before_incompatible_autofill(self):
+        args = self._make_args(
+            "LlamaForCausalLM", enable_multi_layer_eagle=True
+        )
+
+        with self.assertRaisesRegex(
+            ValueError, "not supported for LlamaForCausalLM"
+        ):
+            handle_speculative_decoding(args)
+
+    def test_regular_llama_eagle_keeps_tree_autofill(self):
+        args = self._make_args(
+            "LlamaForCausalLM", enable_multi_layer_eagle=False
+        )
+
+        handle_speculative_decoding(args)
+
+        self.assertEqual(resolution_result(args, "speculative_num_steps"), 5)
+        self.assertEqual(resolution_result(args, "speculative_eagle_topk"), 4)
+        self.assertEqual(
+            resolution_result(args, "speculative_num_draft_tokens"), 8
+        )
+
+    def test_embedded_mtp_architecture_remains_supported(self):
+        args = self._make_args(
+            "MiMoV2ForCausalLM", enable_multi_layer_eagle=True
+        )
+
+        handle_speculative_decoding(args)
+
+        self.assertEqual(resolution_result(args, "speculative_num_steps"), 3)
+        self.assertEqual(resolution_result(args, "speculative_eagle_topk"), 1)
+        self.assertEqual(
+            resolution_result(args, "speculative_num_draft_tokens"), 4
+        )
+
+
 class TestWaterfillArgs(CustomTestCase):
     def test_waterfill_enforces_shared_experts_fusion(self):
         server_args = ServerArgs(

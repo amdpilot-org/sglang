@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36536",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced both LlamaForCausalLM startup crashes on the actual serving path and added early argument/model validation rejecting --enable-multi-layer-eagle for ordinary Llama checkpoints before weights or draft workers are loaded.",
+  "tests": [
+    {
+      "command": "python -m pytest -q test/registered/unit/server_args/test_server_args.py -k 'TestMultiLayerEagleArgs and rejects_llama' (with source patch reversed)",
+      "exit_code": 1,
+      "what_was_measured": "The regression failed before the fix because no ValueError was raised."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/server_args/test_server_args.py -k TestMultiLayerEagleArgs",
+      "exit_code": 0,
+      "what_was_measured": "The new rejection and two boundary cases passed: ordinary Llama EAGLE retains (5,4,8), and MiMoV2 multi-layer EAGLE retains (3,1,4)."
+    },
+    {
+      "command": "python -m sglang.launch_server --model-path <private-tiny-llama> --skip-tokenizer-init --mem-fraction-static 0.01 --context-length 128 --max-total-tokens 256 --attention-backend triton --disable-cuda-graph --speculative-algorithm EAGLE --enable-multi-layer-eagle --port 38471 (base source)",
+      "exit_code": 137,
+      "what_was_measured": "On gfx950, target weights loaded and startup reproduced the reported (8,5) MultiLayerEagleDraftWorker assertion. Raw log: evidence/before-server.log."
+    },
+    {
+      "command": "python -m sglang.launch_server --model-path <private-tiny-llama> --skip-tokenizer-init --mem-fraction-static 0.01 --context-length 128 --max-total-tokens 256 --attention-backend triton --disable-cuda-graph --speculative-algorithm EAGLE --enable-multi-layer-eagle --speculative-num-steps 5 --speculative-eagle-topk 1 --speculative-num-draft-tokens 6 --port 38473 (base source)",
+      "exit_code": 137,
+      "what_was_measured": "On gfx950, startup passed the invariant and reproduced the reported unexpected draft_model_idx constructor keyword. Raw log: evidence/before-explicit-server.log."
+    },
+    {
+      "command": "python -m sglang.launch_server --model-path <private-tiny-llama> --skip-tokenizer-init --mem-fraction-static 0.01 --context-length 128 --max-total-tokens 256 --attention-backend triton --disable-cuda-graph --speculative-algorithm EAGLE --enable-multi-layer-eagle --port 38472 (fixed source)",
+      "exit_code": 1,
+      "what_was_measured": "The real launch path rejected LlamaForCausalLM during argument resolution with the intended clear ValueError, before weight loading. Raw log: evidence/after-server.log."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The deterministic two-layer random Llama fixture validates the serving startup and GPU model-loading path only; it does not establish TinyLlama semantic accuracy or full-model behavior.",
+    "No embedded-MTP model weights were available, so supported multi-layer EAGLE runtime generation was not exercised; its existing configuration behavior is covered by an independent MiMoV2 boundary test.",
+    "The fix intentionally addresses ordinary LlamaForCausalLM only and does not attempt a general capability registry for every model architecture."
+  ]
+}

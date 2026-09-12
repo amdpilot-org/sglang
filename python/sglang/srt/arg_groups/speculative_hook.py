@@ -858,6 +858,13 @@ def _handle_eagle_family(server_args: ServerArgs) -> None:
         )
 
     model_arch = model_config_of(server_args).hf_config.architectures[0]
+    if cfg.enable_multi_layer_eagle and model_arch == "LlamaForCausalLM":
+        raise ValueError(
+            "--enable-multi-layer-eagle is not supported for "
+            "LlamaForCausalLM. Multi-layer EAGLE requires a checkpoint with "
+            "embedded MTP draft layers; use a separate EAGLE draft model "
+            "without --enable-multi-layer-eagle instead."
+        )
     if model_arch in [
         "DeepseekV32ForCausalLM",
         "DeepseekV3ForCausalLM",
