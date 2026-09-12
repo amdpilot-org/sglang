@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30936",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared main checkout already contains the source-level fix for the reported CUDA 13.x cicc segmentation fault. Upstream PR #32910 changed the Hopper topk_v2 small-batch cluster path so the cluster-mapped shared-memory alias could not flow into the later problem_transform load. Current main retains the same compiler invariant in a refactored form with __builtin_assume(problem.out == s_topk_indices), explicitly documenting CUDA 13.1+ issue #32830 and the earlier #32910 workaround. No new source correction was justified. The assigned machine is AMD gfx950 with ROCm 7.2 and has no nvcc, so the original H800/sm_90 CUDA 13.1 compilation and eight-GPU DeepSeek-V4 serving reproduction remain unverified here.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-145b7ff0724b/jit-cache /tmp/amdpilot-repo-j-145b7ff0724b/venv/bin/python -m pytest -q 'test/registered/kernels/ops/attention/test_topk_v2.py::test_topk_v2[8-8192-512-identity]' 'test/registered/kernels/ops/attention/test_topk_v2.py::test_topk_v2[8-8193-512-perm]' 'test/registered/kernels/ops/attention/test_topk_v2.py::test_topk_v2[8-16385-1024-identity]'",
+      "exit_code": 0,
+      "what_was_measured": "Three real gfx950 GPU numerical comparisons against the independent torch.topk reference at the Register2 upper boundary (8192), Register4 lower boundary (8193), and Streaming lower boundary (16385), including identity and permuted page tables; 3 passed. This validates HIP kernel behavior only, not the CUDA cluster compiler fix."
+    },
+    {
+      "command": "command -v nvcc",
+      "exit_code": 1,
+      "what_was_measured": "Confirmed that no NVCC executable is available in the prepared ROCm environment, blocking the issue-specific CUDA 13.1 sm_90 compilation regression."
+    },
+    {
+      "command": "git show 28a2472f9 -- python/sglang/kernels/jit/csrc/deepseek_v4/topk_v2.cuh",
+      "exit_code": 0,
+      "what_was_measured": "Recovered the already-merged issue-specific source fix from upstream PR #32910: keep the cluster-mapped DSMEM alias in a copy so CUDA 13.x cicc does not merge it into the later epilogue load."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI355X (gfx950), ROCm 7.2, executed three topk_v2 numerical boundary cases successfully; raw output is reports/j-145b7ff0724b/raw/gfx950_topk_boundaries.log. The CUDA-only Hopper cluster branch is excluded by USE_ROCM and was not executed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No NVIDIA H800/sm_90 GPU or CUDA toolkit/NVCC is installed, so the original nvcc 13.1 exit-139 failure and the fixed translation-unit compilation could not be rerun.",
+    "The DeepSeek-V4-Flash weights are unavailable and the report requires TP=8/EP=8 while only one AMD GPU is assigned; full model startup, CUDA graph capture, and distributed serving were not attempted.",
+    "The gfx950 tests cover HIP numerical behavior and do not qualify CUDA compiler behavior, Hopper DSMEM/cluster execution, model semantic accuracy, or a distributed workload.",
+    "No native library rebuild was relevant: the affected source is a runtime CUDA JIT kernel, and the prepared environment declares no native FlyDSL component."
+  ]
+}
