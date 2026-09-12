@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33454",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the DSpark verify-position overflow in the prepared checkout and added a per-request context/generation clamp. Clipped requests use a compact ragged target layout, while unused fixed-width draft rows repeat the final legal position.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-6cbc28ce321f/venv/bin/python -m pytest -q test/registered/spec/dspark/test_dspark_context_boundary.py (before implementation)",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before regression: collection failed because clamp_verify_lens was absent from the prepared source."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6cbc28ce321f/venv/bin/python -m pytest -q test/registered/spec/dspark/test_dspark_context_boundary.py test/registered/spec/dspark/test_dspark_scheduler.py test/registered/spec/dspark/test_ragged_verify.py",
+      "exit_code": 0,
+      "what_was_measured": "39 tests and 18 subtests passed, covering the reported boundary, mixed per-request context/generation budgets, an exhausted-request guard, padded draft positions, selection of the model context rather than the larger allocation width, existing DSpark scheduling, and ragged layout behavior."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-6cbc28ce321f/venv/bin/python < reports/j-6cbc28ce321f/raw/gpu_boundary_check.txt-described fixture",
+      "exit_code": 0,
+      "what_was_measured": "On AMD MI350X gfx950, GPU tensors produced verify lengths [6, 2, 1, 2] and a maximum padded position of 1,048,575 for a 1,048,576-token context, matching an independent literal reference."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-6cbc28ce321f/venv/bin/python < reports/j-6cbc28ce321f/raw/gpu_ragged_layout_check.txt-described fixture",
+      "exit_code": 0,
+      "what_was_measured": "The actual GPU ragged-layout builder produced verify_lens [6, 2, 1, 2], extend_start_loc [0, 6, 8, 9], and qo_indptr [0, 6, 8, 9, 11]."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6cbc28ce321f/venv/bin/python scripts/lint/check_registered_tests.py",
+      "exit_code": 0,
+      "what_was_measured": "The new registered test satisfies repository test-registration validation."
+    },
+    {
+      "command": "pre-commit run ruff --files <changed Python files> && pre-commit run ruff-format --files <changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "Lint and formatting passed for all changed Python files."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-6cbc28ce321f/raw/gpu_boundary_check.txt and gpu_ragged_layout_check.txt record successful execution on AMD Instinct MI350X, gfx950:sramecc+:xnack-.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 weights were unavailable.",
+    "The reported two-GPU NVIDIA B300 TP2/CUDA serving workload was not reproduced on the assigned single AMD gfx950 GPU.",
+    "GPU validation covers the boundary tensor arithmetic and ragged-layout kernel, not full-model semantic accuracy or distributed execution."
+  ]
+}
