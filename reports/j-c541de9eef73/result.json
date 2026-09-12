@@ -1,0 +1,56 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37848",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/970",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/935",
+  "candidate_commit": "4379f80a1126404096aed27bc3fbe37833ff1f04",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "Verified partial fix: the BailingMoELinear lm_head now receives its qualified prefix and its regression fails on base/passes on candidate, but 52 other quantization-aware construction sites still omit prefix, so the original repository-wide issue remains open.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-c541de9eef73/venv/bin/python /tmp/amdpilot-repo-j-c541de9eef73/review-evidence/scan_missing_prefixes.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Independent AST audit of quantization-aware calls; 53 missing-prefix sites, including bailing_moe_linear lm_head."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c541de9eef73/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-c541de9eef73/review-evidence/candidate_test_compressed_tensors_lm_head.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Candidate regression copied outside checkout; Bailing LM-head assertion failed because no prefix keyword was passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c541de9eef73/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_lm_head.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate focused suite: 10 tests and 2 subtests passed, including root and nested Bailing prefixes."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c541de9eef73/venv/bin/python /tmp/amdpilot-repo-j-c541de9eef73/review-evidence/scan_missing_prefixes.py (candidate)",
+      "exit_code": 1,
+      "what_was_measured": "Original repository-wide contract remained failing with 52 missing-prefix sites."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c541de9eef73/venv/bin/python reports/j-627b2d148875/reproduce_missing_quant_prefixes.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate's audit printed 52 remaining sites but did not fail its process."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X gfx950 was detected, but this CPU-reproducible constructor/source-routing review did not execute GPU kernels."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "python/sglang/srt/models/bailing_moe_v3.py:1332 ParallelLMHead omits prefix",
+    "python/sglang/srt/models/whisper.py:369 ParallelLMHead omits prefix",
+    "python/sglang/srt/models/grok.py:151 FusedMoE omits prefix",
+    "python/sglang/srt/models/exaone.py:152 RadixAttention omits prefix",
+    "48 additional sites listed by the retained candidate audit"
+  ],
+  "remaining_limitations": [
+    "No affected model weights were available, so full-model semantic and serving behavior was not exercised.",
+    "The static audit identifies omitted keywords; individual runtime reachability and exact checkpoint naming for all 52 remaining sites were not exhaustively instantiated.",
+    "No native rebuild was applicable because the candidate changes Python and reports/tests only.",
+    "The visible gfx950 GPU was not used because no GPU computation is involved in the reproduced defect."
+  ]
+}
