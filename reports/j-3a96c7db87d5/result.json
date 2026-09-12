@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38676",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/864",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/825",
+  "candidate_commit": "e2d7a142c48233c30f194b4f16ca5d460bb805c5",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "Partial fix: the candidate regression suite passes, but TransformersAutoMultimodalProcessor's real non-audio async path calls _apply_hf_processor directly and emits no mm_processor_seconds observation.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3a96c7db87d5/venv/bin/python -m pytest -q /job/review-evidence-j-3a96c7db87d5/test_mm_latency_metrics.py",
+      "revision": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 1,
+      "what_was_measured": "Candidate regression suite on recorded base; 7/7 failed, reproducing absent metrics and missing observation hooks."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3a96c7db87d5/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_mm_latency_metrics.py",
+      "revision": "e2d7a142c48233c30f194b4f16ca5d460bb805c5",
+      "exit_code": 0,
+      "what_was_measured": "Candidate's regression suite; 7/7 passed, including bounded HTTP media and direct process_mm_data override cases."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3a96c7db87d5/venv/bin/python -m pytest -q /job/review-evidence-j-3a96c7db87d5/test_adversarial_async_bypass.py",
+      "revision": "e2d7a142c48233c30f194b4f16ca5d460bb805c5",
+      "exit_code": 1,
+      "what_was_measured": "Actual TransformersAuto async override with a 20 ms _apply_hf_processor interval; request completed but collector recorded zero processor observations."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reproduced defect is CPU-side tokenizer-manager instrumentation and requires no model weights or GPU execution."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "TransformersAutoMultimodalProcessor.process_mm_data_async directly invokes _apply_hf_processor on the non-audio path; the candidate wraps process_mm_data only, so mm_processor_seconds remains absent for this real specialized async path.",
+    "The design still does not enforce processor timing around process_mm_data_async as a whole; specialized async implementations that invoke processor-specific helpers instead of process_mm_data can bypass the metric."
+  ],
+  "remaining_limitations": [
+    "No model weights were available or required; model-specific semantic correctness was not evaluated.",
+    "No GPU or distributed serving validation was performed because the failing contract occurs in CPU-side preprocessing before model execution.",
+    "No native sources changed in the candidate, so native rebuild validation was not applicable."
+  ]
+}
