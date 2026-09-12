@@ -1,0 +1,67 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37912",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/959",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/923",
+  "candidate_commit": "9e190f3070c97e9aa680919ed29d96ddf08239af",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate compiles and fixes two gateway-local behaviors: Harmony clamps the seven OpenAI strings to its three supported levels, and Responses-to-Chat preserves the four tiers representable by openai-protocol 1.0.0. It does not change the pinned protocol dependency, so actual ResponsesRequest deserialization still rejects none, xhigh, and max before handler execution. This is a partial fix, not a full resolution of the original issue.",
+  "tests": [
+    {
+      "command": "cargo test --lib review_full_reasoning_tier_deserialization -- --nocapture (temporary independent regression on recorded base)",
+      "exit_code": 101,
+      "what_was_measured": "The production ResponsesRequest type rejected reasoning.effort=none and reported that only minimal/low/medium/high are valid. Raw log: /tmp/j-803615524856-review-evidence/base-deserialization.log"
+    },
+    {
+      "command": "cargo test --lib review_reasoning_effort_forwarding -- --nocapture (temporary independent regression on recorded base)",
+      "exit_code": 101,
+      "what_was_measured": "The real responses_to_chat conversion returned reasoning_effort=None for an input containing minimal. Raw log: /tmp/j-803615524856-review-evidence/base-forwarding.log"
+    },
+    {
+      "command": "cargo test --lib reasoning_effort -- --nocapture (exact candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate forwarded all four ReasoningEffort variants available in openai-protocol 1.0.0. Raw log: /tmp/j-803615524856-review-evidence/candidate-reasoning-effort.log"
+    },
+    {
+      "command": "cargo test --lib harmony_effort -- --nocapture (exact candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate mapped the seven requested string tiers to Harmony Low/Medium/High and mapped an unknown boundary value to Medium. Raw log: /tmp/j-803615524856-review-evidence/candidate-harmony.log"
+    },
+    {
+      "command": "cargo test --lib review_full_reasoning_tier_deserialization -- --nocapture (temporary independent regression on exact candidate commit)",
+      "exit_code": 101,
+      "what_was_measured": "The production ResponsesRequest type still rejected none with the same four-variant error, proving the original seven-tier entry-point contract remains broken. Raw log: /tmp/j-803615524856-review-evidence/candidate-deserialization.log"
+    },
+    {
+      "command": "cargo test --test api_tests reasoning -- --nocapture (exact candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Seven existing focused Responses and reasoning-parser tests passed. Raw log: /tmp/j-803615524856-review-evidence/candidate-api-reasoning.log"
+    },
+    {
+      "command": "cargo fmt --all -- --check (exact candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Rust formatting passed; stable rustfmt emitted warnings for existing nightly-only formatting options. Raw log: /tmp/j-803615524856-review-evidence/candidate-fmt.log"
+    },
+    {
+      "command": "cargo tree -i openai-protocol (exact candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "The compiled dependency graph resolved openai-protocol v1.0.0. Raw log: /tmp/j-803615524856-review-evidence/candidate-cargo-tree.log"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The x86_64 host exposed the assigned AMD gfx950 agent, but the defect is in CPU-side Rust request deserialization and conversion before model execution; GPU execution would not validate this contract.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A /v1/responses-shaped request with reasoning.effort=none still fails to deserialize before handler execution.",
+    "The same pinned four-variant ReasoningEffort enum necessarily rejects reasoning.effort=xhigh.",
+    "The same pinned four-variant ReasoningEffort enum necessarily rejects reasoning.effort=max."
+  ],
+  "remaining_limitations": [
+    "The candidate does not bump or replace openai-protocol =1.0.0, so full seven-tier Responses acceptance remains unresolved.",
+    "No model weights or HTTP server were needed or used: the failure is deterministically reproduced at the production request type before handler or engine execution.",
+    "No GPU, semantic model-accuracy, alternate model architecture, multi-node, or distributed workload claims are made.",
+    "No native source changed; native rebuild is not applicable."
+  ]
+}
