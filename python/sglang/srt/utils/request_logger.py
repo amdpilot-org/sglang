@@ -250,11 +250,26 @@ def _dataclass_to_string_truncated(
         else:
             return f"{repr(data)}"
     elif isinstance(data, (list, tuple)):
+        def format_collection(values: Union[list, tuple]) -> str:
+            opening, closing = (
+                ("[", "]") if isinstance(values, list) else ("(", ")")
+            )
+            items = ", ".join(
+                _dataclass_to_string_truncated(v, max_length) for v in values
+            )
+            if isinstance(values, tuple) and len(values) == 1:
+                items += ","
+            return opening + items + closing
+
         if len(data) > max_length:
             half_length = max_length // 2
-            return str(data[:half_length]) + " ... " + str(data[-half_length:])
+            return (
+                format_collection(data[:half_length])
+                + " ... "
+                + format_collection(data[-half_length:])
+            )
         else:
-            return str(data)
+            return format_collection(data)
     elif isinstance(data, dict):
         return (
             "{"
@@ -293,7 +308,7 @@ def _transform_data_for_logging(
     elif isinstance(data, (list, tuple)):
         if len(data) > max_length:
             half_length = max_length // 2
-            return list(data[:half_length]) + ["..."] + list(data[-half_length:])
+            data = list(data[:half_length]) + ["..."] + list(data[-half_length:])
         return [_transform_data_for_logging(v, max_length) for v in data]
     elif isinstance(data, dict):
         return {
