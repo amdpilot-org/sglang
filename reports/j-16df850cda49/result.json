@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34448",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the MXFP4 Triton post-load state_dict omission on the prepared base and applied the existing upstream PR #34558 candidate. The registered Parameters now share the postprocessed runtime storage, sharded-state saving snapshots non-contiguous tensors contiguously on CPU, and CPU offload skips Parameters retained by external Triton wrappers.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-16df850cda49/venv/bin/python /tmp/test_mxfp4_sharded_state.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression on the recorded base: after real Mxfp4MoEMethod.create_weights and process_weights_after_loading with only layout conversion mocked, w13_weight was absent from state_dict; the independent offload guard also failed. Raw log: reports/j-16df850cda49/raw/failing_before_issue_specific.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-16df850cda49/venv/bin/python test/registered/unit/model_loader/test_mxfp4_sharded_state.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after two-case regression: packed weights and scales survive a safetensors sharded-state round trip into zero-initialized runtime wrapper storage, and wrapper-backed Parameters are excluded from CPU offload. Raw log: reports/j-16df850cda49/raw/passing_after_unit.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-16df850cda49/venv/bin/python <gfx950 storage round-trip script>",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned MI355X (gfx950), all four non-contiguous CUDA runtime tensors remained registered, were serialized to safetensors, loaded into a fresh layer, and retained pointer identity with the tensors consumed by wrapper objects. Raw log: reports/j-16df850cda49/raw/gfx950_storage_roundtrip.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-16df850cda49/venv/bin/python -m py_compile test/registered/unit/model_loader/test_mxfp4_sharded_state.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Regression syntax and patch whitespace integrity."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-16df850cda49/venv/bin/python scripts/lint/check_registered_tests.py",
+      "exit_code": 0,
+      "what_was_measured": "Registered-test metadata consistency. Raw log: reports/j-16df850cda49/raw/check_registered_tests.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-16df850cda49/venv/bin/python -m black --check <changed Python files>",
+      "exit_code": 1,
+      "what_was_measured": "Formatting tool availability; the prepared interpreter does not contain the black module. Raw log: reports/j-16df850cda49/raw/black_check.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-16df850cda49/venv/bin/python -m ruff check --select F401,F821,UP037 <changed Python files>",
+      "exit_code": 1,
+      "what_was_measured": "Lint tool availability; the prepared interpreter does not contain the ruff module. Raw log: reports/j-16df850cda49/raw/ruff_check.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The storage/save/load boundary test executed tensors on the single assigned AMD Instinct MI355X, reported gcnArchName gfx950:sramecc+:xnack-, and passed. This did not execute NVIDIA triton_kernels MXFP4 kernels."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The openai/gpt-oss-20b weights were not available, so the original 13G-versus-4G full-checkpoint export and a save/reload logits comparison were not run.",
+    "The assigned GPU is AMD gfx950, while the reported triton_kernels path and original GH200 reproduction are NVIDIA-specific. The layout conversion was deterministically mocked; GPU validation covered storage aliasing and safetensors transport, not NVIDIA kernel execution.",
+    "TP=2 and multi-node behavior were not exercised; no claim is made beyond the focused single-GPU fixture.",
+    "The prepared interpreter lacks Black and Ruff, so those checks could not run."
+  ]
+}
