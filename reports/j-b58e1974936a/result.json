@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39042",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "ebabac5380b40bbade69cab1830b00db27e2183a",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The base defect was reproduced and the candidate fixes delayed-versus-cached OFFLINE TTFT when time.time() and time.perf_counter() advance equally, while preserving BLOCKING behavior. It is not a complete fix because it adds a perf_counter duration to a time.time timestamp. When the wall clock and monotonic clock diverge, last_real_time_ts moves into the future and legitimate non-predictor CPU overhead is suppressed. The candidate should measure and update the exclusion in one clock domain.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/tmp/amdpilot-review-deps:/job/repo/tools/sglang-simulator/src:/job/repo/tools/sglang-simulator/test /tmp/amdpilot-repo-j-b58e1974936a/venv/bin/python -m pytest -q /job/review_predictor_clock.py -vv (base)",
+      "exit_code": 1,
+      "what_was_measured": "Actual scheduler hooks on the prepared base. The normal-clock OFFLINE cold/cached test failed (0.440/0.141 seconds rather than 0.190/0.140), reproducing predictor wall-time contamination; the BLOCKING semantics case passed. Evidence: /job/review-evidence/base/reproduction-final.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job:/tmp/amdpilot-review-deps:/job/repo/tools/sglang-simulator/src:/job/repo/tools/sglang-simulator/test /tmp/amdpilot-repo-j-b58e1974936a/venv/bin/python -m pytest -p review_predictor_clock -q tools/sglang-simulator/test/test_simulation_offline_blocking.py -k predictor_query_wall_time -vv (candidate ebabac5)",
+      "exit_code": 0,
+      "what_was_measured": "All four candidate regression cases passed with optional AIConfigurator imports stubbed: OFFLINE and BLOCKING, with cold-first and cached-first predictor delays. Evidence: /job/review-evidence/candidate/candidate-regression-with-dependency-stubs.txt"
+    },
+    {
+      "command": "PYTHONPATH=/tmp/amdpilot-review-deps:/job/repo/tools/sglang-simulator/src:/job/repo/tools/sglang-simulator/test /tmp/amdpilot-repo-j-b58e1974936a/venv/bin/python -m pytest -q /job/review_predictor_clock.py -vv (candidate ebabac5)",
+      "exit_code": 1,
+      "what_was_measured": "Normal-clock OFFLINE invariance and BLOCKING preservation passed. The independent mismatched-clock case failed: expected 0.145/0.095 seconds but got 0.100/0.0945, proving legitimate CPU overhead can be removed by combining perf_counter duration with a time.time timestamp. Evidence: /job/review-evidence/candidate/independent-clock-tests.txt"
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 ebabac5380b40bbade69cab1830b00db27e2183a -- tools/sglang-simulator/src/sglang_simulator/simulation/sglang/scheduler.py tools/sglang-simulator/test/test_simulation_offline_blocking.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate source and regression-test changes have no whitespace errors. Candidate-added raw report artifacts were excluded because they contain pre-existing captured trailing whitespace."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The prepared interpreter sees an AMD Instinct MI355X with Torch 2.11.0+rocm7.2, but this host-clock scheduler review did not execute GPU kernels. The reported NVIDIA H200/CUDA 13.0 benchmark cannot be reproduced on this architecture.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "If perf_counter advances 250 ms while time.time advances 125 ms during a predictor call, the candidate advances last_real_time_ts by 250 ms. The following OFFLINE accounting clamps CPU overhead to zero and reports 100 ms TTFT instead of the 145 ms modeled-plus-legitimate-host-overhead reference.",
+    "The timestamp remains ahead after the first iteration, so the clock-domain error can leak into later iterations and suppress additional legitimate overhead."
+  ],
+  "remaining_limitations": [
+    "The exact H200, Qwen3.6-27B weights, and h200_sxm AIConfigurator database were unavailable; the original end-to-end numerical benchmark was not rerun.",
+    "The prepared host is AMD Instinct MI355X/ROCm 7.2 rather than NVIDIA H200/CUDA 13.0.",
+    "The prepared interpreter lacked simulator optional dependencies. The focused scheduler-hook tests used minimal import stubs and isolated joblib/scikit-learn packages; no real AIConfigurator database query was executed.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
