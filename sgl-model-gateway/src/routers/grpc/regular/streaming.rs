@@ -254,6 +254,7 @@ impl StreamingProcessor {
                 tokenizer.thinking_key_name(),
             ),
             tokenizer.thinking_toggle(),
+            tokenizer.think_in_prefill(),
         );
         let think_in_prefill = tokenizer.think_in_prefill();
 
@@ -1130,11 +1131,9 @@ impl StreamingProcessor {
                 model,
             )
             .expect("Parser should be available - checked upfront");
-            if thinking_override {
+            if thinking_override && think_in_prefill {
                 parser.mark_reasoning_started();
-                if think_in_prefill {
-                    parser.mark_think_start_stripped();
-                }
+                parser.mark_think_start_stripped();
             }
             Arc::new(tokio::sync::Mutex::new(parser))
         });

@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35148",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved PR 1508's valid gRPC Qwen3 prefill parsing, corrected its non-prefill state initialization, and added non-streaming reasoning parsing to the HTTP worker route selected by the original reproduction.",
+  "tests": [
+    {
+      "command": "cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib qwen3_prefill_reasoning -- --nocapture (candidate ac23f039)",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate focused regressions passed: 2 passed, 0 failed. Raw output: /tmp/amdpilot-repo-j-69f78580ee6c/evidence/candidate-regression.log"
+    },
+    {
+      "command": "cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib review_non_prefilled_tag_free_answer_stays_content -- --nocapture (temporary test on candidate ac23f039)",
+      "exit_code": 101,
+      "what_was_measured": "Reproduced the independent review counterexample: candidate-style initialization returned 'plain answer' as reasoning instead of content. Raw output: /tmp/amdpilot-repo-j-69f78580ee6c/evidence/candidate-counterexample.log"
+    },
+    {
+      "command": "cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib http_chat_response -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "HTTP response parsing split issue-shaped prefilled Qwen3 output and preserved already parsed worker reasoning: 2 passed, 0 failed. Raw output: /tmp/amdpilot-repo-j-69f78580ee6c/evidence/final-http-tests.log"
+    },
+    {
+      "command": "cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib test_reasoning_parser_start_follows_thinking_toggle -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Parser initialization now requires think_in_prefill and preserves the tag-free boundary. Raw output: /tmp/amdpilot-repo-j-69f78580ee6c/evidence/final-boundary-test.log"
+    },
+    {
+      "command": "cargo test --manifest-path sgl-model-gateway/Cargo.toml --lib",
+      "exit_code": 0,
+      "what_was_measured": "Full Rust gateway library suite passed: 398 passed, 0 failed. Raw output: /tmp/amdpilot-repo-j-69f78580ee6c/evidence/final-full-lib.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reproduced defects and correction are deterministic CPU-side Rust routing/response parsing. No model weights were available and no GPU inference claim is made."
+  },
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "Qwen/Qwen3.8-27B-FP8 weights and the reporter's NVIDIA L40S environment were unavailable, so full-model semantic behavior was not validated.",
+    "The HTTP correction covers the exact non-streaming curl reproduction. HTTP streaming remains passthrough and was not claimed fixed; the preserved gRPC path has separate streaming parsing.",
+    "The tiny Llama fixture cannot qualify Qwen3.8 chat-template semantics and was not substituted for the unavailable model."
+  ]
+}
