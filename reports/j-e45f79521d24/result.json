@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/9674",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 2995's embedding benchmark workflows and corrected the three independently reviewed loader counterexamples: token-ID lists and batches are accepted and counted, while whitespace-only strings are rejected consistently with the serving layer.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-e45f79521d24/venv/bin/python /tmp/repro_embedding_counterexamples.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 7f23d0cd29dafc0637e85ac6c211752948711a29 before correction, both valid token-ID forms raised ValueError and whitespace-only input was accepted with zero tokens; after correction, both token-ID forms were accepted with three tokens and whitespace-only input raised ValueError. Raw before/after output is retained outside the checkout."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-e45f79521d24/venv/bin/python -m pytest test/registered/bench_fn/test_benchmark_datasets_api.py -q -k 'embedding_dataset or offline_embedding'",
+      "exit_code": 0,
+      "what_was_measured": "All six focused embedding dataset/offline encode tests passed, including the new token-ID and whitespace regressions; two subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-e45f79521d24/venv/bin/python -m pytest test/registered/bench_fn/test_benchmark_datasets_api.py -q",
+      "exit_code": 0,
+      "what_was_measured": "The complete benchmark dataset API module passed: 51 tests and 8 subtests."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-e45f79521d24/venv/bin/python -m py_compile python/sglang/benchmark/datasets/embedding.py python/sglang/benchmark/offline_throughput.py python/sglang/benchmark/serving.py",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python implementation modules compiled successfully."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "The consolidated working-tree diff contained no whitespace errors."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The correction concerns deterministic JSONL validation and token counting and required no model execution. Missing model weights were not treated as evidence for source changes.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The candidate's prior GPU numerical validation was not repeated because it is unrelated to the reproduced loader counterexamples and its private model artifacts are unavailable.",
+    "vLLM server interoperability was not executed.",
+    "Offline embedding mode intentionally remains limited to one string per JSONL record; token-ID arrays are supported by the online bench_serving workflow addressed by the review."
+  ]
+}

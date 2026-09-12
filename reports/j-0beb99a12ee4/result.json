@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/9674",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Added strict OpenAI-compatible embedding JSONL datasets to bench_serving and real encode-mode support to offline_throughput, with embedding-only metrics, Ray compatibility, documentation, and adversarial regressions.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-0beb99a12ee4/venv/bin/python -m pytest test/registered/bench_fn/test_benchmark_datasets_api.py -q",
+      "exit_code": 0,
+      "what_was_measured": "49 tests and 6 subtests covering embedding dataset dispatch, payload preservation, token counts, malformed and undersized inputs, backend compatibility, and offline encode-vs-generate behavior."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-0beb99a12ee4/precommit /opt/venv/bin/pre-commit run --files <changed files>",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, syntax, and registered-test policy hooks for every changed file."
+    },
+    {
+      "command": "python -m sglang.benchmark.serving --backend sglang-embedding --dataset-name embedding --dataset-path /tmp/amdpilot-repo-j-0beb99a12ee4/embedding_requests.jsonl ...",
+      "exit_code": 0,
+      "what_was_measured": "Real MI355X HTTP transport and engine execution with Qwen3-Embedding-0.6B, including per-record OpenAI parameters and expected rejection of unsupported dimensions."
+    },
+    {
+      "command": "Independent transformers AutoModel GPU forward compared with SGLang /v1/embeddings",
+      "exit_code": 0,
+      "what_was_measured": "Two 1024-dimensional outputs had cosine similarity 0.9997416 and 0.9998755 against independent last-token-pooled, L2-normalized references."
+    },
+    {
+      "command": "python -m sglang.benchmark.offline_throughput --model-path <Qwen3-Embedding-0.6B> --is-embedding --dataset-name embedding --num-prompts 2 --skip-warmup",
+      "exit_code": 0,
+      "what_was_measured": "Fresh-engine offline encoding completed two requests, 19 input tokens, and reported encoding throughput without generation metrics."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "vLLM request compatibility is unit-tested, but no vLLM server was installed or executed.",
+    "Offline embedding JSONL accepts one string per record and a common optional dimensions value; input arrays and other OpenAI-only fields explicitly require the online benchmark.",
+    "No native C++ changed, so no native rebuild was applicable."
+  ]
+}

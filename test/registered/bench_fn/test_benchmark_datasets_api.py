@@ -33,6 +33,7 @@ from sglang.benchmark.datasets.agentic_trace import (
 )
 from sglang.benchmark.datasets.common import DatasetRow, gen_mm_prompt
 from sglang.benchmark.datasets.custom import sample_custom_requests
+from sglang.benchmark.datasets.embedding import sample_embedding_requests
 from sglang.benchmark.datasets.generated_shared_prefix import (
     GeneratedSharedPrefixDataset,
     _zipf_group_probs,
@@ -49,6 +50,7 @@ from sglang.benchmark.datasets.mooncake import get_mooncake_request_over_time
 from sglang.benchmark.datasets.openai_dataset import sample_openai_requests
 from sglang.benchmark.datasets.random import sample_random_requests
 from sglang.benchmark.datasets.sharegpt import sample_sharegpt_requests
+from sglang.benchmark.offline_throughput import throughput_test_once
 from sglang.benchmark.serving import (
     _BACKEND_API_PATHS,
     _EMBEDDING_BACKENDS,
@@ -941,6 +943,7 @@ class TestBenchmarkDatasetsAPI(CustomTestCase):
             "sharegpt",
             "custom",
             "openai",
+            "embedding",
             "random",
             "random-ids",
             "generated-shared-prefix",
@@ -1030,6 +1033,105 @@ class TestBenchmarkDatasetsAPI(CustomTestCase):
         agentic_rows = get_dataset(agentic_args, self.tokenizer, model_id="dummy-model")
         self.assertEqual(len(agentic_rows), 2)
         self.assertTrue(all(isinstance(row, DatasetRow) for row in agentic_rows))
+
+    def test_embedding_dataset_preserves_payload_and_batch_token_count(self):
+        path = self.tmpdir_path / "embedding.jsonl"
+        records = [
+            {"input": "single input", "encoding_format": "float"},
+            {"input": ["batch one", "batch two"], "dimensions": 128},
+        ]
+        path.write_text("".join(json.dumps(row) + "\n" for row in records))
+
+        rows = sample_embedding_requests(str(path), 2, self.tokenizer)
+
+        self.assertEqual(rows[0].prompt, "single input")
+        self.assertEqual(rows[0].extra_request_body, {"encoding_format": "float"})
+        self.assertEqual(rows[1].prompt, ["batch one", "batch two"])
+        self.assertEqual(rows[1].output_len, 0)
+        self.assertEqual(rows[1].extra_request_body, {"dimensions": 128})
+        self.assertEqual(
+            rows[1].prompt_len,
+            len(self.tokenizer.encode("batch one"))
+            + len(self.tokenizer.encode("batch two")),
+        )
+
+    def test_embedding_dataset_rejects_bad_or_short_workloads(self):
+        path = self.tmpdir_path / "embedding-invalid.jsonl"
+        path.write_text('{"input": "ok"}\n{"input": ["", "bad"]}\n')
+        with self.assertRaisesRegex(ValueError, "line 2"):
+            sample_embedding_requests(str(path), 2, self.tokenizer)
+
+        path.write_text('{"input": "only one"}\n')
+        with self.assertRaisesRegex(ValueError, "fewer than --num-prompts=2"):
+            sample_embedding_requests(str(path), 2, self.tokenizer)
+
+    def test_embedding_dataset_supports_token_id_inputs(self):
+        path = self.tmpdir_path / "embedding-token-ids.jsonl"
+        records = [
+            {"input": [101, 102, 103]},
+            {"input": [[101, 102], [103]]},
+        ]
+        path.write_text("".join(json.dumps(row) + "\n" for row in records))
+
+        rows = sample_embedding_requests(str(path), 2, self.tokenizer)
+
+        self.assertEqual(rows[0].prompt, [101, 102, 103])
+        self.assertEqual(rows[0].prompt_len, 3)
+        self.assertEqual(rows[1].prompt, [[101, 102], [103]])
+        self.assertEqual(rows[1].prompt_len, 3)
+
+    def test_embedding_dataset_rejects_whitespace_only_inputs(self):
+        path = self.tmpdir_path / "embedding-whitespace.jsonl"
+        for input_value in ["   ", ["valid", "\t"]]:
+            path.write_text(json.dumps({"input": input_value}) + "\n")
+            with self.subTest(input_value=input_value):
+                with self.assertRaisesRegex(ValueError, "line 1"):
+                    sample_embedding_requests(str(path), 1, self.tokenizer)
+
+    def test_offline_embedding_benchmark_calls_encode_not_generate(self):
+        backend = MagicMock()
+        backend.encode.return_value = [{"embedding": [1.0, 0.0]}]
+        backend.get_server_info.return_value = {"internal_states": [{}]}
+        rows = [
+            DatasetRow(
+                prompt="hello",
+                prompt_len=3,
+                output_len=0,
+                extra_request_body={"dimensions": 2},
+            )
+        ]
+
+        result = throughput_test_once(
+            "engine", backend, rows, True, {}, False, is_embedding=True
+        )
+
+        backend.encode.assert_called_once_with(prompt=["hello"], dimensions=2)
+        backend.generate.assert_not_called()
+        self.assertEqual(result["total_output_tokens"], 0)
+        self.assertIsNone(result["last_gen_throughput"])
+
+    def test_offline_embedding_rejects_http_batch_only_features(self):
+        backend = MagicMock()
+        rows = [DatasetRow(prompt=["one", "two"], prompt_len=2, output_len=0)]
+        with self.assertRaisesRegex(ValueError, "use bench_serving"):
+            throughput_test_once(
+                "engine", backend, rows, True, {}, False, is_embedding=True
+            )
+        backend.encode.assert_not_called()
+
+        rows = [
+            DatasetRow(
+                prompt="one",
+                prompt_len=1,
+                output_len=0,
+                extra_request_body={"encoding_format": "base64"},
+            )
+        ]
+        with self.assertRaisesRegex(ValueError, "encoding_format"):
+            throughput_test_once(
+                "engine", backend, rows, True, {}, False, is_embedding=True
+            )
+        backend.encode.assert_not_called()
 
     def test_get_dataset_unknown_dataset(self):
         args = make_args(dataset_name="not-a-dataset")
