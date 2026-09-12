@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37215",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Verified and adapted the open upstream candidate from https://github.com/sgl-project/sglang/pull/37458. Automatically selected TCPStore rendezvous ports now avoid Linux's ephemeral client-port range when possible and exclude ports planned for other SGLang listeners. Explicit --nccl-port values are unchanged.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ae4788091d67/venv/bin/python -m pytest -q test/registered/utils/test_socket_utils.py (before implementation)",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before regression: collection failed because the non-ephemeral rendezvous allocator did not exist."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ae4788091d67/venv/bin/python -m pytest -q test/registered/utils/test_socket_utils.py test/registered/unit/server_args/test_server_args.py -k 'socket or port or PortArgs'",
+      "exit_code": 0,
+      "what_was_measured": "67 focused socket/PortArgs tests plus 4 subtests passed, including reported range 10000-61000, listener exclusions, full-range exhaustion, and missing-procfs fallback."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ae4788091d67/venv/bin/python TCPStore probe (64 bind(0) samples, 8 rendezvous selections, 8 concurrent world_size=1 TCPStores)",
+      "exit_code": 0,
+      "what_was_measured": "Host ephemeral range was 32768-60999; 64/64 ordinary bind(0) ports were inside it, 8/8 rendezvous ports were outside it, and all 8 real PyTorch TCPStore servers bound concurrently."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ae4788091d67/venv/bin/python -m compileall -q python/sglang/srt/utils/network.py python/sglang/srt/server_args.py test/registered/utils/test_socket_utils.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources compile and the patch has no whitespace errors."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ae4788091d67/venv/bin/python -m pytest -q test/registered/utils/test_socket_utils.py test/registered/unit/server_args/test_server_args.py",
+      "exit_code": 1,
+      "what_was_measured": "252 passed and 2 unrelated existing ROCm context-parallel tests failed because HIP rejects deprecated prefill CP before their expected validation point."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported 8x NVIDIA H800 hardware and Qwen3-Embedding weights were unavailable, so the full model-serving workload was not reproduced.",
+    "Only one gfx950 GPU was assigned, so this does not claim an 8-GPU or architecture-equivalent reproduction.",
+    "The assigned AMD Instinct MI355X gfx950 was visible through Torch 2.11.0+rocm7.2, but no GPU kernels were executed because the defect and deterministic checks are CPU TCP socket/TCPStore startup behavior.",
+    "The original failure is intermittent. Evidence validates its concrete port-allocation mechanism and real TCPStore binding, not its production frequency.",
+    "The related upstream fix remains an open candidate at https://github.com/sgl-project/sglang/pull/37458."
+  ]
+}

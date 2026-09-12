@@ -3,8 +3,10 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
+import random
 import socket
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 
@@ -50,7 +52,9 @@ def find_process_using_port(port: int) -> Optional[psutil.Process]:
     return None
 
 
+MIN_UNPRIVILEGED_PORT = 1024
 MAX_VALID_PORT = 65535
+LINUX_EPHEMERAL_PORT_RANGE = "/proc/sys/net/ipv4/ip_local_port_range"
 
 
 def wait_port_available(
@@ -192,6 +196,78 @@ def get_free_port():
     port = sock.getsockname()[1]
     sock.close()
     return port
+
+
+def _read_linux_ephemeral_port_range() -> tuple[int, int] | None:
+    """Return Linux's inclusive automatic ephemeral-port range, if available."""
+    try:
+        with open(LINUX_EPHEMERAL_PORT_RANGE, encoding="utf-8") as file:
+            fields = file.read().split()
+        if len(fields) < 2:
+            return None
+        start, end = int(fields[0]), int(fields[1])
+        if 0 <= start <= end <= MAX_VALID_PORT:
+            return start, end
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _iter_ports_outside_ephemeral_range(ephemeral_start: int, ephemeral_end: int):
+    candidates = list(
+        range(MIN_UNPRIVILEGED_PORT, min(ephemeral_start, MAX_VALID_PORT + 1))
+    )
+    candidates.extend(
+        range(max(ephemeral_end + 1, MIN_UNPRIVILEGED_PORT), MAX_VALID_PORT + 1)
+    )
+    if not candidates:
+        return
+
+    start = random.randrange(len(candidates))
+    for offset in range(len(candidates)):
+        yield candidates[(start + offset) % len(candidates)]
+
+
+def _get_free_port_excluding(excluded: set[int]) -> int:
+    for _ in range(128):
+        port = get_free_port()
+        if port not in excluded:
+            return port
+
+    for port in range(MIN_UNPRIVILEGED_PORT, MAX_VALID_PORT + 1):
+        if port not in excluded and is_port_available(port):
+            return port
+    raise RuntimeError("No free rendezvous port available")
+
+
+def get_free_rendezvous_port(exclude_ports: Iterable[int] | None = None) -> int:
+    """Choose a free TCPStore port outside Linux's ephemeral range.
+
+    TCPStore binds after process startup, so a port returned by ``bind(0)`` can
+    be reassigned to an unrelated outgoing connection in that interval.  A
+    non-ephemeral port avoids that OS allocation race. Ports planned for other
+    SGLang listeners can be excluded from consideration.
+    """
+    excluded = {
+        port
+        for port in (exclude_ports or ())
+        if MIN_UNPRIVILEGED_PORT <= port <= MAX_VALID_PORT
+    }
+    ephemeral_range = _read_linux_ephemeral_port_range()
+    if ephemeral_range is None:
+        return _get_free_port_excluding(excluded)
+
+    for port in _iter_ports_outside_ephemeral_range(*ephemeral_range):
+        if port not in excluded and is_port_available(port):
+            return port
+
+    logger.warning(
+        "No free rendezvous port outside Linux ephemeral range %s-%s; "
+        "falling back to an OS-assigned port",
+        ephemeral_range[0],
+        ephemeral_range[1],
+    )
+    return _get_free_port_excluding(excluded)
 
 
 def bind_port(port):
