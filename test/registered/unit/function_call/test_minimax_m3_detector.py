@@ -581,6 +581,125 @@ class TestMinimaxM3TopLevelOneOf(CustomTestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["args"], self.expected)
 
+    def test_reported_number_and_array_types_streaming(self):
+        tools = [
+            Tool(
+                type="function",
+                function=Function(
+                    name="ExampleFunction",
+                    description="Exercise each top-level oneOf branch.",
+                    parameters={
+                        "oneOf": [
+                            {
+                                "type": "object",
+                                "properties": {"number": {"type": "number"}},
+                                "required": ["number"],
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "stringList": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    }
+                                },
+                                "required": ["stringList"],
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "numberList": {
+                                        "type": "array",
+                                        "items": {"type": "number"},
+                                    }
+                                },
+                                "required": ["numberList"],
+                            },
+                        ]
+                    },
+                ),
+            )
+        ]
+        segments = (
+            "<tool_call>",
+            '<invoke name="ExampleFunction">',
+            "<number>42",
+            "</number>",
+            "</invoke>",
+            '<invoke name="ExampleFunction">',
+            "<stringList>",
+            "<item>12",
+            "</item>",
+            "<item>34",
+            "</item>",
+            "</stringList>",
+            "</invoke>",
+            '<invoke name="ExampleFunction">',
+            "<numberList>",
+            "<item>12",
+            "</item>",
+            "<item>34",
+            "</item>",
+            "</numberList>",
+            "</invoke>",
+            "</tool_call>",
+        )
+
+        calls = _stream_segments(segments, tools)
+
+        self.assertEqual(
+            calls,
+            [
+                {"name": "ExampleFunction", "args": {"number": 42}},
+                {
+                    "name": "ExampleFunction",
+                    "args": {"stringList": ["12", "34"]},
+                },
+                {"name": "ExampleFunction", "args": {"numberList": [12, 34]}},
+            ],
+        )
+        self.assertIsInstance(calls[0]["args"]["number"], int)
+        self.assertTrue(
+            all(isinstance(value, str) for value in calls[1]["args"]["stringList"])
+        )
+        self.assertTrue(
+            all(isinstance(value, int) for value in calls[2]["args"]["numberList"])
+        )
+
+    def test_other_top_level_composition_keywords(self):
+        segments = (
+            "<tool_call>",
+            '<invoke name="composed">',
+            "<count>7",
+            "</count>",
+            "</invoke>",
+            "</tool_call>",
+        )
+        for keyword in ("anyOf", "allOf"):
+            with self.subTest(keyword=keyword):
+                tools = [
+                    Tool(
+                        type="function",
+                        function=Function(
+                            name="composed",
+                            description="Exercise a top-level composition keyword.",
+                            parameters={
+                                keyword: [
+                                    {
+                                        "type": "object",
+                                        "properties": {
+                                            "count": {"type": "integer"}
+                                        },
+                                    }
+                                ]
+                            },
+                        ),
+                    )
+                ]
+                calls = _stream_segments(segments, tools)
+                self.assertEqual(calls[0]["args"], {"count": 7})
+                self.assertIsInstance(calls[0]["args"]["count"], int)
+
 
 if __name__ == "__main__":
     unittest.main()
