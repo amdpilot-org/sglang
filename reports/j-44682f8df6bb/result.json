@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35096",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1490",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1452",
+  "candidate_commit": "dec541903732fd188d1e4c22d7790fb99571c10d",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base writes padded flat-kernel lanes past rope_dim. The exact candidate prevents padded x/frequency accesses and stores; its regression and independent adversarial GPU cases pass.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-44682f8df6bb/venv/bin/python -m pytest -q /job/review-evidence-j-44682f8df6bb/candidate/test_deepseek_v4_rope_flat.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Candidate regression on recorded base: 5 failed, 10 passed; non-power-of-two numerical and sentinel-overwrite failures."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-44682f8df6bb/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_rope_flat.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression: 15 passed on gfx950."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-44682f8df6bb/venv/bin/python - (independent adversarial script; see raw/adversarial.log)",
+      "exit_code": 0,
+      "what_was_measured": "120 independent PyTorch-reference cases across rank, width, dtype, positions, and inverse mode, plus five strided sentinel boundary cases."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..dec541903732fd188d1e4c22d7790fb99571c10d",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Real Triton kernels ran on AMD Instinct MI350X gfx950:sramecc+:xnack-; logs record base corruption and candidate passes."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No NVIDIA B200 was available, so the reported compute-sanitizer trace was not reproduced.",
+    "The exact contiguous rope_dim=6 wrong-value race did not manifest on gfx950, although deterministic out-of-contract writes did.",
+    "No full-model, serving, or distributed workload was run; the affected path is opt-in and the review is kernel-level.",
+    "No native rebuild was applicable because the candidate changes only Python/Triton and the prepared environment records no native component."
+  ]
+}
