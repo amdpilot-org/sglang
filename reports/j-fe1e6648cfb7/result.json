@@ -1,0 +1,28 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31252",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Current main already contains upstream PR #30393's issue-specific packed HiCache draft-cache design. Standard NextN EAGLE draft pools, including GLM-5.x, are appended to the target host pool and transferred in one operation, so the separate mem_pool_host_draft backup call that failed in v0.5.15.post1 no longer exists. No further production change was justified.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-fe1e6648cfb7/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_asymmetric_mha_pool_host_unit.py test/registered/unit/mem_cache/test_hicache_host_register.py",
+      "exit_code": 0,
+      "what_was_measured": "Current direct-backup K/V dispatch, asymmetric K/V boundary behavior, and page_first/page_first_direct host-registration granularity; 20 tests and 12 subtests passed. Raw output: reports/j-fe1e6648cfb7/unit_tests.log"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-fe1e6648cfb7/venv/bin/python -m pytest -q 'python/sglang/kernels/aot/tests/test_kvcacheio.py::test_transfer_kv_pf_direct[True-False-20480-256-64-128-dtype1]' 'python/sglang/kernels/aot/tests/test_kvcacheio.py::test_transfer_kv_pf_direct[True-True-20480-256-64-128-dtype1]'",
+      "exit_code": 0,
+      "what_was_measured": "Real gfx950 direct all-layer D2H transfers for MHA and MLA at page size 64, compared against independent PyTorch indexed-copy references; 2 passed. Raw output: reports/j-fe1e6648cfb7/gpu_direct_transfer.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "PyTorch 2.11.0+rocm7.2 reported one AMD Instinct MI355X with capability (9, 5); the two real sgl_kernel direct-transfer numerical tests passed. Raw environment: reports/j-fe1e6648cfb7/environment.log",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No NVIDIA CUDA device was available, so the reported cudaMemcpyBatchAsync failure itself was not executed.",
+    "GLM-5.2-FP8 and EAGLE draft weights were unavailable.",
+    "The environment has one gfx950 GPU, not the reported TP8 prefill and TP8 decode nodes.",
+    "Mooncake/RDMA and the two-node PD serving topology were not reproduced.",
+    "The GPU fixture validates the direct transfer primitive, not GLM semantic accuracy or distributed serving."
+  ]
+}
