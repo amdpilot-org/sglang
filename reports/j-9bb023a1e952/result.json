@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38645",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/851",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/803",
+  "candidate_commit": "120e7d5efcba370a58285d9ad76d0150877e14b1",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "The recorded base reproduces both out-of-range failure and silent in-range wrong-row access when DCP-widened logical MLA indices reach the rank-local physical buffer. The exact candidate localizes indices on both backup and restore, passes failing-before/passing-after regression coverage, independent adversarial cases, and a real gfx950 numerical gather/restore check. Full TP8/DCP8 Kimi-K3 serving reproduction was unavailable.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-9bb023a1e952/venv/bin/python -m pytest -q /job/review-evidence/j-9bb023a1e952/candidate-regression-copy.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before control of the candidate regression on the recorded base: DCP backup and restore cases failed at the unlocalized physical gather; DCP=1 passed (2 failed, 1 passed)."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9bb023a1e952/venv/bin/python /job/review-evidence/j-9bb023a1e952/independent_retraction_review.py (base)",
+      "exit_code": 0,
+      "what_was_measured": "Independent negative-control harness confirmed the expected out-of-range exception and silent in-range wrong-row behavior on the base, plus DCP=1 identity."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9bb023a1e952/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mla_retraction_dcp.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: owner selection/localization, chunking, restore into new logical locations, and DCP=1 identity (3 passed)."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9bb023a1e952/venv/bin/python /job/review-evidence/j-9bb023a1e952/independent_retraction_review.py --expect-fixed (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial verification of out-of-range prevention, silent in-range correctness, new-location restore, chunking, and DCP=1 identity."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9bb023a1e952/venv/bin/python /job/review-evidence/j-9bb023a1e952/candidate_gpu_check.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Real GPU numerical backup to CPU and restore into new DCP-widened locations on AMD Instinct MI350X gfx950; copied/restored values matched an explicit reference."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..120e7d5efcba370a58285d9ad76d0150877e14b1",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "candidate-gpu.log records PASS on AMD Instinct MI350X gfx950:sramecc+:xnack- with Torch 2.11.0+rocm7.2. This is a single-rank tensor-path check, not the reported B300 multi-rank workload."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one AMD Instinct MI350X gfx950 GPU was available; the reported environment uses 8 NVIDIA B300 GPUs with TP8/DCP8.",
+    "Kimi-K3 weights and the PD-disaggregated DSPARK/ReplaySSM serving deployment were unavailable, so capacity-triggered retract_decode was not exercised end to end.",
+    "The observed base exception used CPU tensors; the reported NVIDIA CUDA device-side assert was not reproduced on this architecture.",
+    "The candidate changes only Python source, so no native rebuild was applicable."
+  ]
+}
