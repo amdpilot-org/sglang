@@ -1,0 +1,29 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/28887",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "not_reproduced",
+  "summary": "The reported HTTP 500 is already prevented at the recorded base: _get_fastapi_request_path uses getattr(route, \"path\", request.url.path) when a matching FastAPI route lacks .path. With FastAPI 0.141.1, a real include_router() request produced a FULL-matching _IncludedRouter without .path; direct access raised the reported AttributeError, while the checked-out helper returned normally and the Prometheus middleware served HTTP 200. Added regression coverage for the included-router case and independent direct-route and unmatched-route boundaries; no production change was justified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-613ab93b6dd6/venv/bin/python -m pytest -q test/registered/unit/utils/test_common.py -k GetFastAPIRequestPath",
+      "exit_code": 0,
+      "what_was_measured": "Three route-resolution regressions passed: a real FastAPI _IncludedRouter lacking .path does not crash, a direct parameterized route retains its template label, and an unmatched route returns the concrete request path with handled=false."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-613ab93b6dd6/venv/bin/python reports/j-613ab93b6dd6/reproduce_http_middleware.py",
+      "exit_code": 0,
+      "what_was_measured": "A real FastAPI included route traversed SGLang's Prometheus response-tracking middleware, returned HTTP 200, and incremented sglang:http_requests_total instead of raising AttributeError."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is in CPU-only FastAPI/Starlette route inspection before model execution; GPU execution would not add issue-specific evidence and no unrelated GPU smoke was used."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The report's 4-node Ascend/NPU GLM workload was not run because that hardware and model weights are unavailable; the failing middleware condition was reproduced directly with the installed FastAPI 0.141.1 route implementation.",
+    "For an included router, the existing guard falls back to the concrete request URL rather than recovering a parameterized route template. This prevents the reported HTTP 500 but can increase Prometheus label cardinality; changing that separate behavior was not necessary to resolve the reported crash.",
+    "The prepared interpreter does not provide the Ruff module or executable, so lint could not be run; pytest, the retained HTTP reproduction, JSON parsing, and git diff whitespace validation passed.",
+    "No GPU or native compiler path is involved in this Python HTTP middleware defect."
+  ]
+}
