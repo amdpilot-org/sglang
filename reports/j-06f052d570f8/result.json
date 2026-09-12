@@ -1,0 +1,67 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19092",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/2914",
+  "candidate_commit": "1baf5337c192902f8f19b56e05d713945b5ab4ff",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a meaningful partial improvement to initial single-rank diffusion pipeline loading, and its focused tests pass. It does not fully implement or verify the original issue: native from_pretrained component loads are serialized by a lock covering the entire native load, Qwen-Image cold-start was not exercised, refit/wake-up paths are unchanged, production pageable-memory loading is unchanged, and multi-rank loading is explicitly sequential. Request changes so the scope and tests match the original contract or the contribution is clearly narrowed and the native-load serialization is corrected.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-06f052d570f8/venv/bin/python reports/j-06f052d570f8/raw/independent_parallel_probe.py at base 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction of the loading contract: three top-level component loads were sequential (max_active=1, elapsed 0.452 s for three 0.15 s loads)."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-06f052d570f8/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_parallel_component_loading.py python/sglang/multimodal_gen/test/unit/test_plain_component_loader.py python/sglang/multimodal_gen/test/unit/test_component_loader_identity.py python/sglang/multimodal_gen/test/unit/test_component_loading_order.py at candidate 1baf5337c192902f8f19b56e05d713945b5ab4ff",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and compatibility suite: 31 passed. Most overlap coverage mocks PipelineComponentLoader.load_component and therefore does not establish overlap through real native from_pretrained paths."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-06f052d570f8/venv/bin/python reports/j-06f052d570f8/raw/independent_parallel_probe.py at candidate 1baf5337c192902f8f19b56e05d713945b5ab4ff",
+      "exit_code": 0,
+      "what_was_measured": "Independent top-level overlap control: mocked components overlapped (max_active=3, elapsed 0.152 s)."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-06f052d570f8/venv/bin/python reports/j-06f052d570f8/raw/native_loader_overlap_probe.py at candidate 1baf5337c192902f8f19b56e05d713945b5ab4ff",
+      "exit_code": 1,
+      "what_was_measured": "Independent adversarial counterexample: two native loads entering _load_native_with_context were serialized (max_active_native_loads=1, elapsed 0.401 s for two 0.20 s loads) because model_construction_lock wraps the complete load_native/from_pretrained call."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-06f052d570f8/venv/bin/python -m pytest -vv python/sglang/multimodal_gen/test/unit/test_parallel_component_loading.py::test_parallel_loaded_gpu_modules_match_numpy_reference at candidate",
+      "exit_code": 0,
+      "what_was_measured": "One AMD MI355X executed three mocked concurrently transferred Linear modules and matched NumPy. This validates GPU execution and arithmetic only, not a real diffusion checkpoint loader or Qwen-Image semantics."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-06f052d570f8/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_utility_ownership.py python/sglang/multimodal_gen/test/unit/test_component_quantization_admission.py python/sglang/multimodal_gen/test/unit/test_disagg_roles.py at candidate",
+      "exit_code": 0,
+      "what_was_measured": "Extended compatibility: 68 passed and 9 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-06f052d570f8/venv/bin/python -m compileall -q <candidate changed Python files>; git diff --check 358c163... 1baf533...",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python compiled and the candidate diff passed whitespace validation."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Assigned AMD Instinct MI355X (gfx950:sramecc+:xnack-), one visible GPU, Torch 2.11.0+rocm7.2, HIP 7.2.26015. The candidate's mocked Linear/NumPy numerical test passed. No Qwen-Image weights or end-to-end serving run was available."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Two native transformers/diffusers component loads do not overlap: _load_native_with_context holds model_construction_lock across the full load_native call, and load_native calls from_pretrained including checkpoint I/O and weight materialization.",
+    "The reported Qwen-Image 63.20-second module-load bottleneck and launch-time reduction were not reproduced or measured with real model weights.",
+    "Sleep/wake restoration and post-training refit paths are not changed or tested, despite being part of the original requested benefit.",
+    "Production checkpoint mappings remain pageable; the pinned-memory concern raised in the issue is measured only by an unrelated transfer microbenchmark and is not fixed.",
+    "Multi-rank component loading remains sequential by design, so the feature does not cover distributed launches.",
+    "Peak host-memory behavior under concurrent real checkpoint loading is neither bounded automatically nor measured with representative weights."
+  ],
+  "remaining_limitations": [
+    "No Qwen/Qwen-Image weights were present, so architecture-specific loading, numerical correctness, peak memory, and end-to-end cold-start speedup remain unverified.",
+    "Only one AMD MI355X (gfx950) was assigned; CUDA/NVIDIA behavior and multi-GPU execution were unavailable.",
+    "The tiny Llama serving fixture is not applicable evidence for a diffusion architecture and was not used.",
+    "No native C++, HIP, FlyDSL, or generated native source changed in the candidate; native rebuild was not applicable. Imports resolved to /job/repo/python/sglang and the pinned prepared interpreter.",
+    "NUMA balancing was enabled on the node; it was not changed because node-wide state changes were outside scope."
+  ]
+}
