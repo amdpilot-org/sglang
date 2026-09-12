@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32485",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "c7ed070a5f7f0d414863f34edb901badf32e453e",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a valid partial fix: it selects only requested native/Hugging Face MTP shards for recognized indexes and fixes the parent review's exact model.nextn.layers mixed-layout counterexample. It does not fully satisfy the original safe-fallback contract because other clearly draft-signaling unknown layouts, including model.mtp_layers.* already represented in this repository and model.nextn_predict_layers.*, are not classified as unknown. When mixed with a recognized requested-layer key, their shards are silently dropped instead of falling back to the complete prepared list.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1de4e777e677/venv/bin/python /job/review-evidence-j-1de4e777e677/probe_selection.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Original failure reproduced: for a recognized native MTP index the exact list passed to runai_safetensors_weights_iterator contained all five prepared shards, including target and non-requested-layer shards. Raw output: /job/review-evidence-j-1de4e777e677/base-probe.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1de4e777e677/venv/bin/python /job/review-evidence-j-1de4e777e677/probe_selection.py (parent candidate e9952a5825d098de1c068d061062fe2522981d27)",
+      "exit_code": 0,
+      "what_was_measured": "Independently reproduced the parent review: the exact model.nextn.layers mixed index passed only draft-1.safetensors to RunAI and dropped the unknown draft shard. Raw output: /job/review-evidence-j-1de4e777e677/pr2946-probe.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1de4e777e677/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_runai_model_streamer_loader.py (candidate c7ed070a5f7f0d414863f34edb901badf32e453e)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite passed: 17 tests, 18 warnings, and 6 subtests. It covers recognized layouts, shared shards, cached object-storage metadata, incomplete/malformed indexes, and the reported mixed model.nextn.layers case. Raw output: /job/review-evidence-j-1de4e777e677/candidate-focused-pytest.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1de4e777e677/venv/bin/python /job/review-evidence-j-1de4e777e677/probe_selection.py (candidate c7ed070a5f7f0d414863f34edb901badf32e453e)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate pruned recognized-only input correctly and fell back for model.nextn.layers.*, but returned only draft-1.safetensors for mixed model.mtp_layers.* and model.nextn_predict_layers.* indexes, dropping the unknown draft shard. Raw output: /job/review-evidence-j-1de4e777e677/candidate-probe.txt."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 c7ed070a5f7f0d414863f34edb901badf32e453e",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is deterministic JSON key classification and Python filename selection before tensor streaming; GPU numerical execution would not measure it. The prepared x86_64 environment exposes one AMD Instinct MI350X with Torch 2.11.0+rocm7.2 / HIP 7.2.26015, but it was intentionally not used for an unrelated smoke."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "An index containing mtp.1.decoder.weight plus model.mtp_layers.1.shared.weight, with every prepared filename represented, selects only the recognized requested-layer shard and drops the model.mtp_layers shard instead of falling back to all prepared shards.",
+    "An index containing mtp.1.decoder.weight plus model.nextn_predict_layers.1.shared.weight, with every prepared filename represented, selects only the recognized requested-layer shard and drops the nextn_predict_layers shard instead of falling back to all prepared shards."
+  ],
+  "remaining_limitations": [
+    "No live object-storage credentials or production sharded MTP checkpoint were available, so provider header-read counts, distributed streaming, and end-to-end model semantics remain unverified.",
+    "No native source changed in the candidate (only Python source, tests, and reports), and repository-environment.json defines no native rebuild target; native rebuilding is not applicable.",
+    "The imported candidate source was /job/repo/python/sglang/srt/model_loader/loader.py under the pinned prepared interpreter, not an installed wheel copy.",
+    "The review establishes a source-level contract violation without model weights; it does not claim semantic accuracy for any MTP architecture."
+  ]
+}
