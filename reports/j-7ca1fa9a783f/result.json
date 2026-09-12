@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35331",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "e3af256016618895e5e59a98a79c454d5ba80bfb",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate adds an opt-in contract and reducer tests, but the real Cosmos3 candidate path fails during latent creation because a per-candidate generator list is passed to torch.randn and the latent batch dimension remains one.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-7ca1fa9a783f/venv/bin/python - <<'PY' ... base contract import check ... PY",
+      "exit_code": 0,
+      "what_was_measured": "On the recorded base, SamplingParams lacks candidate_trajectory and the candidate contract module cannot be imported."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-7ca1fa9a783f/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_candidate_trajectory.py python/sglang/multimodal_gen/test/unit/test_cosmos3.py python/sglang/multimodal_gen/test/unit/test_pi05_action_api.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate-provided focused unit/regression suite: 153 tests and 43 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-7ca1fa9a783f/venv/bin/python reports/j-7ca1fa9a783f/adversarial_candidate.py",
+      "exit_code": 1,
+      "what_was_measured": "Actual Cosmos3LatentPreparationStage with one conditioning observation and two independently seeded generators fails at torch.randn(generator=list); conditioning/noise batch dimension is also one."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-7ca1fa9a783f/venv/bin/python reports/j-8e31ad6a7177/gpu_numerical_script.py",
+      "exit_code": 0,
+      "what_was_measured": "Standalone candidate GPU arithmetic check on MI350X; deterministic draws matched and mean error versus CPU float64 reference was 1.1920928955078125e-07, but no Cosmos3 pipeline code executed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X executed the candidate's standalone RNG/reducer script under Torch 2.11.0+rocm7.2 and HIP 7.2.26015; this was not an end-to-end model or pipeline validation."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Cosmos3LatentPreparationStage passes the list of per-candidate generators to torch.randn, which raises TypeError before denoising.",
+    "For one conditioning image, Cosmos3LatentPreparationStage chooses batch_dim=1 rather than candidate count, so it does not construct the promised physical candidate batch."
+  ],
+  "remaining_limitations": [
+    "Cosmos3 action model weights were unavailable, so end-to-end serving and semantic action quality were not tested.",
+    "TP/SP, CFG, cancellation/failure recovery, dynamic co-batching, and N={1,2,4,8,10} performance benchmarks were not exercised.",
+    "No native source changed; a native rebuild was not applicable."
+  ]
+}
