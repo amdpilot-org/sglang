@@ -402,7 +402,12 @@ class DetokenizerManager(MultiHttpWorkerDetokenizerMixin):
                     # commit (token offsets stay so the next iteration retries
                     # with more tokens).
                     printable = find_printable_text(new_text)
-                    s.sent_offset = s.decoded_text_len + len(printable)
+                    # find_printable_text is non-monotonic across recovery
+                    # retries, but text already emitted in this recovery run
+                    # must remain accounted for until the text is committed.
+                    s.sent_offset = max(
+                        s.sent_offset, s.decoded_text_len + len(printable)
+                    )
                     output_strs.append(printable[pending:] if pending else printable)
                 continue
 
