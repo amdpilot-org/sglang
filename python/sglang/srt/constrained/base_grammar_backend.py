@@ -15,6 +15,7 @@
 
 import json
 import logging
+import os
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -22,6 +23,7 @@ from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import torch
 
+from sglang.srt.environ import envs
 from sglang.srt.parser.reasoning_parser import ReasoningParser
 from sglang.srt.runtime_context import (
     get_context,
@@ -198,11 +200,24 @@ class InvalidGrammarObject(BaseGrammarObject):
         return f"InvalidGrammarObject(error_message={self.error_message!r})"
 
 
+def get_grammar_compile_max_workers(cpu_count: Optional[int] = None) -> int:
+    """Return the configured, bounded grammar-compilation worker count."""
+    override = envs.SGLANG_GRAMMAR_COMPILE_MAX_WORKERS.get()
+    if override > 0:
+        return override
+
+    if cpu_count is None:
+        cpu_count = os.cpu_count() or 1
+    return max(1, min(cpu_count // 2, 8))
+
+
 class BaseGrammarBackend:
     _enable_strict_thinking: bool = False
 
     def __init__(self):
-        self.executor = ThreadPoolExecutor()
+        self.executor = ThreadPoolExecutor(
+            max_workers=get_grammar_compile_max_workers()
+        )
         self.cache: Dict[Tuple[str, str], BaseGrammarObject] = {}
 
     def initialize_vocab_mask_buffer(
