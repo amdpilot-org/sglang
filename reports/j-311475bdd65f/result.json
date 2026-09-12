@@ -1,0 +1,67 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33625",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2841",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2809",
+  "candidate_commit": "16c841bb1b6f1e5bb44ec52e3b97d701e85c5149",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a substantial partial implementation: it adds the opt-in policy, explicit-key-only spill path, strict target-worker and implicit-key behavior, metrics, request-lifetime load guards, deterministic ring traversal, configuration surfaces, tests, and a rebuildable Python native binding. It does not implement the original issue's stated overload contract. The issue specifies candidate_load <= average_healthy_worker_load * max_load_skew as the bound, but the candidate additionally requires preferred_load - minimum_healthy_load > min_load_gap (default 2) before spilling. An independent adversarial test at loads [2,0,0,0] with max_load_skew=1.5 fails: the preferred load 2 exceeds the specified bound 0.75, yet the candidate retains it. Request changes to remove the extra gate or obtain an explicit contract change before claiming the original issue fully fixed.",
+  "tests": [
+    {
+      "command": "On recorded base, pinned Python import of RouterArgs/PolicyType and attempt to select bounded_consistent_hashing",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before reproduction: the base source policy choices omit bounded_consistent_hashing and the source package exposes no PolicyType binding without a rebuilt extension. Evidence: /tmp/amdpilot-repo-j-311475bdd65f/review-evidence/base-reproduction.txt."
+    },
+    {
+      "command": "cargo test bounded_consistent_hashing --lib at candidate 16c841bb1b6f1e5bb44ec52e3b97d701e85c5149",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 18 policy/config/router tests passed using privately installed pinned Rust 1.90 and a private target directory."
+    },
+    {
+      "command": "cargo test review_original_contract_spills_when_relative_bound_is_exceeded --lib (temporary independent test, removed afterward)",
+      "exit_code": 101,
+      "what_was_measured": "Independent original-contract counterexample. With four healthy workers loaded [2,0,0,0] and max_load_skew 1.5, average load is 0.5 and the preferred worker exceeds the 0.75 bound, but candidate selection returned Some(0) instead of spilling. Evidence: /tmp/amdpilot-repo-j-311475bdd65f/review-evidence/adversarial-relative-bound.log."
+    },
+    {
+      "command": "cargo test --test load_guard_raii_test",
+      "exit_code": 0,
+      "what_was_measured": "8 tests passed for streaming/non-streaming request load-counter lifetime and drop behavior."
+    },
+    {
+      "command": "cargo test --test routing_tests non_igw_bounded",
+      "exit_code": 0,
+      "what_was_measured": "Real two-worker HTTP routing integration test passed for deterministic key-relative clockwise spillover when the candidate's two thresholds are both met."
+    },
+    {
+      "command": "maturin develop --manifest-path bindings/python/Cargo.toml; pytest bindings/python/tests/test_arg_parser.py bindings/python/tests/test_pyo3_binding.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Rebuilt the candidate PyO3 native extension and ran source-path Python compatibility tests: 100 passed, 1 skipped. Imports resolved to /job/repo/sgl-model-gateway/bindings/python/src/sglang_router and its rebuilt sglang_router_rs.abi3.so."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU kernel or model numerical behavior is changed by this Rust HTTP routing patch. No model weights or qualified model-backed benchmark were available or needed to establish the routing-contract counterexample; rocminfo exposed no assigned GPU agent in this environment."
+  },
+  "native_rebuilt": true,
+  "native_rebuild_evidence": "The Rust gateway library and PyO3 extension were compiled from exact candidate commit 16c841bb1b6f1e5bb44ec52e3b97d701e85c5149 with Rust 1.90 under /tmp/amdpilot-repo-j-311475bdd65f. Import evidence names the checkout-built sglang_router_rs.abi3.so.",
+  "remaining_counterexamples": [
+    "Loads [2,0,0,0], max_load_skew=1.5, default min_load_gap=2: the specified relative bound is exceeded (2 > 0.5 * 1.5), but the candidate does not spill.",
+    "Loads [1,0,0,0], max_load_skew=1.5, default min_load_gap=2: the specified relative bound is exceeded (1 > 0.25 * 1.5), but the candidate does not spill.",
+    "Any configuration where the preferred worker exceeds average_healthy_worker_load * max_load_skew but its gap over the least-loaded worker is at most min_load_gap violates the original selection rule."
+  ],
+  "remaining_limitations": [
+    "The candidate was not benchmarked with model-backed GPU workers, so throughput, p95 latency, cache/prefill work, semantic accuracy, model architecture, and distributed workload claims remain unverified.",
+    "The active-request counter remains local to one gateway process; multi-gateway spill decisions are not coordinated.",
+    "The prepared image did not include cargo; Rust 1.90 was installed only in the private runtime. No node-wide packages, Torch, or ROCm were changed.",
+    "The repository has no committed gateway Cargo.lock, so dependency resolution was generated privately during review.",
+    "The candidate's extra min_load_gap may be a defensible alternative design, but it is not the reviewed original contract and therefore cannot be accepted as a full fix without issue-level agreement."
+  ],
+  "evidence_paths": {
+    "raw_logs": "/tmp/amdpilot-repo-j-311475bdd65f/review-evidence/",
+    "native_target": "/tmp/amdpilot-repo-j-311475bdd65f/target/",
+    "candidate_source_root": "/job/repo/sgl-model-gateway (while detached at the candidate; restored afterward to amdpilot/j-311475bdd65f)",
+    "rebuilt_python_extension": "/job/repo/sgl-model-gateway/bindings/python/src/sglang_router/sglang_router_rs.abi3.so (created during candidate checkout and ignored by git)"
+  }
+}
