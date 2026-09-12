@@ -1,0 +1,59 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37904",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3358",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/3354",
+  "candidate_commit": "8b48178f4a476e73c205c7aee1991e48fcc37be8",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "The candidate contains the issue-specific design: PDMux-active Marlin layers opt into lazily allocated workspaces keyed by the executing GPU stream, and active FP8/FP4/compressed-tensors/ModelOpt/GPTQ/AWQ Marlin call sites select those workspaces. On the recorded base, the candidate regression fails during collection because the selector is absent; at the exact candidate commit its host-side fallback, opt-in, sizing, and two-stream isolation cases pass on gfx950. This does not independently establish that the original NVIDIA SM80 green-context Marlin deadlock is fixed: the actual Marlin deep-queue test is skipped on ROCm and the canonical serving reproducer could not run without an NVIDIA A100/H100 and Qwen3.8-27B-FP8 weights. The candidate is therefore mechanism-supported but the original contract remains unverified in this review environment.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-fa78cbfd550e/venv/bin/python -m pytest -q /job/review-evidence-j-fa78cbfd550e/test_marlin_workspace_pdmux.py -vv (base checkout)",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before regression evidence on recorded base: collection raises ImportError because get_marlin_workspace_for_forward is absent. This proves the base lacks the proposed isolation mechanism, but is not an end-to-end reproduction of the original CUDA deadlock. Raw output: reports/j-fa78cbfd550e/base_regression.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fa78cbfd550e/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_marlin_workspace_pdmux.py -vv (candidate 8b48178f4a476e73c205c7aee1991e48fcc37be8)",
+      "exit_code": 0,
+      "what_was_measured": "Four host-side regression/boundary cases passed, including two real gfx950 GPU streams receiving distinct correctly sized workspaces. The sole actual Marlin deep-queue kernel test was skipped because ROCm cannot execute NVIDIA Marlin. Raw output: reports/j-fa78cbfd550e/candidate_regression.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fa78cbfd550e/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_marlin_utils_fp8.py -vv (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Existing FP8-Marlin logical output/bias-order unit regression remained passing; it does not execute the original concurrent CUDA/PDMux failure. Raw output: reports/j-fa78cbfd550e/fp8_regression.log"
+    },
+    {
+      "command": "git grep -nE 'workspace=(layer\\.|self\\.)?workspace|\\.workspace[,)]' 8b48178f4a476e73c205c7aee1991e48fcc37be8 -- 'python/sglang/**/*.py'",
+      "exit_code": 0,
+      "what_was_measured": "Independent source audit of remaining direct workspace consumers. Remaining matches were non-Marlin paths, per-call Marlin MoE allocation, or the separate multimodal-generation runtime outside the SRT PDMux scheduler contract. Evidence: reports/j-fa78cbfd550e/workspace_consumers_candidate.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fa78cbfd550e/venv/bin/python -m py_compile python/sglang/srt/layers/quantization/marlin_utils.py python/sglang/srt/hardware_backend/gpu/quantization/gptq_kernels.py python/sglang/srt/hardware_backend/gpu/quantization/awq_kernels.py test/registered/unit/layers/quantization/test_marlin_workspace_pdmux.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate changed Python sources and regression compile successfully from the repository source tree."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 8b48178f4a476e73c205c7aee1991e48fcc37be8",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI355X, gfx950, ROCm 7.2: two real torch GPU streams exercised workspace-key isolation and 4x-CU sizing. No NVIDIA Marlin kernel or CUDA green-context execution occurred."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The original mixed decode+split-prefill service sequence after a >=4K-token prefill was not executed at the candidate commit.",
+    "The candidate's deep-queue test that could expose shared-workspace Marlin spinning was skipped, so no failing-before/passing-after NVIDIA kernel result was independently obtained.",
+    "No independent evidence was obtained for other NVIDIA Marlin variants beyond source wiring; the gfx950 allocation test cannot validate their kernel synchronization behavior."
+  ],
+  "remaining_limitations": [
+    "Assigned hardware is AMD Instinct MI355X (gfx950), while the issue requires NVIDIA A100/H100 CUDA green contexts and Marlin on SM80/SM90.",
+    "Qwen/Qwen3.8-27B-FP8 weights were unavailable; no full-model serving, token-equivalence, semantic-accuracy, throughput, or multi-node claim is made.",
+    "The candidate is Python-only and repository-environment.json specifies no prepared native build. No native source changed, so no native rebuild was applicable.",
+    "The source import path was confirmed as /job/repo/python/sglang; tests used the prepared interpreter /tmp/amdpilot-repo-j-fa78cbfd550e/venv/bin/python."
+  ]
+}
