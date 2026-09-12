@@ -1,0 +1,64 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38075",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2873",
+  "candidate_commit": "19b9f743bf6d251f666f43cc6c165a7d375b3efd",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "Exact candidate 19b9f743 independently verifies as a valid partial fix for the standard grpc.health.v1 portion: a rebuilt native library implements Check and Watch, suppresses duplicate unchanged NOT_SERVING events, keeps unknown-service Watch open with SERVICE_UNKNOWN, and passes its focused Rust and grpcio regression tests. It does not fully resolve upstream issue 38075 because native gRPC image/audio/video support, aggregated and encoder-disaggregated multimodal coverage, and explicit RL pause/drain, weight-update, ready-to-serve, and resume lifecycle semantics are absent from the candidate diff and remain unverified.",
+  "tests": [
+    {
+      "command": "RUSTUP_HOME=/tmp/amdpilot-repo-j-f2399b3900a4/rustup CARGO_HOME=/tmp/amdpilot-repo-j-f2399b3900a4/cargo CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-f2399b3900a4/base-target cargo +1.92.0 build --release --locked -p sglang-grpc (checkout 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Fresh optimized native build of the recorded base source; artifact path was /tmp/amdpilot-repo-j-f2399b3900a4/base-target/release/libsglang_grpc_core.so."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f2399b3900a4/venv/bin/python /job/review-evidence-j-f2399b3900a4/health_probe.py /tmp/amdpilot-repo-j-f2399b3900a4/base-target/release/libsglang_grpc_core.so",
+      "exit_code": 0,
+      "what_was_measured": "Original failure reproduced on the recorded base: standard Health/Check, Watch, and unknown-service Watch all returned UNIMPLEMENTED."
+    },
+    {
+      "command": "RUSTUP_HOME=/tmp/amdpilot-repo-j-f2399b3900a4/rustup CARGO_HOME=/tmp/amdpilot-repo-j-f2399b3900a4/cargo CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-f2399b3900a4/candidate-target cargo +1.92.0 test -p sglang-grpc (checkout 19b9f743bf6d251f666f43cc6c165a7d375b3efd)",
+      "exit_code": 0,
+      "what_was_measured": "All 16 Rust tests passed, including unchanged-status suppression and late service registration state-machine tests."
+    },
+    {
+      "command": "RUSTUP_HOME=/tmp/amdpilot-repo-j-f2399b3900a4/rustup CARGO_HOME=/tmp/amdpilot-repo-j-f2399b3900a4/cargo CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-f2399b3900a4/candidate-target cargo +1.92.0 build --release --locked -p sglang-grpc (checkout 19b9f743bf6d251f666f43cc6c165a7d375b3efd)",
+      "exit_code": 0,
+      "what_was_measured": "Fresh optimized native candidate build; subsequent live tests explicitly loaded /tmp/amdpilot-repo-j-f2399b3900a4/candidate-target/release/libsglang_grpc_core.so."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-f2399b3900a4/venv/bin/python /job/review-evidence-j-f2399b3900a4/health_probe.py /tmp/amdpilot-repo-j-f2399b3900a4/candidate-target/release/libsglang_grpc_core.so",
+      "exit_code": 0,
+      "what_was_measured": "Independent live grpcio adversarial probe with engine health fixed false: Check and first Watch returned NOT_SERVING (wire value 2); no unchanged second event arrived before a 2.4-second deadline; unknown Watch returned SERVICE_UNKNOWN (wire value 3) and remained open until its 2.4-second deadline."
+    },
+    {
+      "command": "Preload exact candidate release .so; pytest -q test/registered/unit/entrypoints/test_grpc_standard_health.py test/registered/unit/entrypoints/test_grpc_bridge.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and bridge compatibility suite passed: 7 tests and 2 subtests, with the printed preloaded native path confirming the rebuilt candidate library rather than a wheel artifact."
+    },
+    {
+      "command": "git diff --name-only 358c163250ad3b1f62939b01ce1314a0a31a0365..19b9f743bf6d251f666f43cc6c165a7d375b3efd; inspect proto/sglang/runtime/v1/sglang.proto and rust/sglang-grpc request conversion paths",
+      "exit_code": 0,
+      "what_was_measured": "Contract audit: candidate production changes are limited to the Rust health server and dependency lockfiles. No proto or implementation changes add native image/audio/video inputs, encoder-disaggregated multimodal behavior, RL operations, drain state, ready-to-serve state, or a defined pause/update/resume lifecycle."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "No GPU execution was used because the candidate changes only the CPU gRPC health control plane and makes no numerical/model-path change. The assigned device was visible as one AMD Instinct MI350X under Torch 2.11.0+rocm7.2 / HIP 7.2.26015, but exercising it would not validate the omitted multimodal architectures or distributed/RL contracts without their implementations and model workloads.",
+  "native_rebuilt": true,
+  "remaining_counterexamples": [
+    "The original issue's native gRPC multimodal contract remains unmet: the candidate adds no image, audio, or video request fields or conversion path.",
+    "Aggregated and encoder-disaggregated native gRPC multimodal coverage remains absent and unverified.",
+    "The original issue's RL operability contract remains unmet: no explicit accepting-new-requests/draining/ready-to-serve state is exposed.",
+    "No end-to-end lifecycle semantics or adversarial coverage ties pause/drain, weight update, readiness, and resume together.",
+    "The health mapping is verified only against a deterministic RuntimeHandle.health_check boolean, not a real model server lifecycle under load or shutdown."
+  ],
+  "remaining_limitations": [
+    "This review verifies a partial standard-health implementation, not the complete umbrella feature request.",
+    "No model weights, multimodal model architecture, encoder-disaggregated deployment, RL workload, distributed workload, or inference correctness path was exercised.",
+    "The host is x86_64 with one visible AMD Instinct MI350X. The candidate has no GPU/native-kernel change; therefore no GPU numerical reference was applicable.",
+    "The prepared checkout initially had no importable bundled sglang.srt.rust_extensions._grpc and no Rust toolchain on PATH. Rust 1.92.0 was installed only in /tmp/amdpilot-repo-j-f2399b3900a4, and both revisions were rebuilt into separate private target directories.",
+    "Raw base and candidate build/test outputs are preserved outside the checkout at /job/review-evidence-j-f2399b3900a4."
+  ]
+}
