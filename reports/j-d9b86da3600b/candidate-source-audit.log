@@ -1,0 +1,183 @@
+candidate_sha
+8c5412debaf308d3c7ffc28a84727f324955a689
+changed_native_files
+generate_timer_context
+     1	import argparse
+     2	import os
+     3	import time
+     4	
+     5	from sglang.cli.utils import get_is_diffusion_model, get_model_path
+     6	
+     7	
+     8	def generate(args, extra_argv):
+     9	    if os.getenv("SGLANG_DIFFUSION_STARTUP_PROFILE", "0").lower() in (
+    10	        "1",
+    11	        "true",
+    12	    ):
+    13	        os.environ["SGLANG_DIFFUSION_STARTUP_BEGIN"] = str(time.perf_counter())
+    14	    # If help is requested, show generate subcommand help without requiring --model-path
+    15	    if any(h in extra_argv for h in ("-h", "--help")):
+    16	        from sglang.multimodal_gen.runtime.entrypoints.cli.generate import (
+    17	            add_multimodal_gen_generate_args,
+    18	        )
+    19	
+    20	        parser = argparse.ArgumentParser(description="SGLang Multimodal Generation")
+    21	        add_multimodal_gen_generate_args(parser)
+    22	        parser.parse_args(extra_argv)
+    23	        return
+    24	
+    25	    model_path = get_model_path(extra_argv)
+    26	    is_diffusion_model = get_is_diffusion_model(model_path)
+    27	    if is_diffusion_model:
+    28	        from sglang.multimodal_gen.runtime.entrypoints.cli.generate import (
+    29	            add_multimodal_gen_generate_args,
+    30	            generate_cmd,
+    31	        )
+    32	
+    33	        parser = argparse.ArgumentParser(description="SGLang Multimodal Generation")
+    34	        add_multimodal_gen_generate_args(parser)
+    35	        parsed_args, unknown_args = parser.parse_known_args(extra_argv)
+    36	        generate_cmd(parsed_args, unknown_args)
+    37	    else:
+    38	        raise Exception(
+    39	            f"Generate subcommand is not yet supported for model: {model_path}"
+    40	        )
+prepare_scope
+   145	    launch_begin_s = time.perf_counter() if profiler.enabled else 0.0
+   146	    if profiler.enabled:
+   147	        cli_begin = os.environ.pop("SGLANG_DIFFUSION_STARTUP_BEGIN", None)
+   148	        if cli_begin is not None:
+   149	            profiler.record(
+   150	                "cli_and_import_preparation",
+   151	                (launch_begin_s - float(cli_begin)) * 1000,
+   152	            )
+   153	        else:
+   154	            profiler.record(
+   155	                "launch_module_imports",
+   156	                (launch_begin_s - _MODULE_IMPORT_BEGIN_S) * 1000,
+   157	            )
+   158	
+   159	    configure_logger(server_args)
+   160	
+   161	    # Start a new server with multiple worker processes
+   162	    logger.info("Starting server...")
+   163	
+   164	    # num_gpus is the total world size across every node; each node runs
+   165	    # its own num_gpus // nnodes local workers, offset by node_rank into the
+   166	    # global rank space (mirrors srt's tp_size_per_node convention). With
+   167	    # nnodes == 1 this is exactly the prior single-node arithmetic.
+   168	    num_gpus = server_args.num_gpus
+   169	    nnodes = server_args.nnodes
+   170	    node_rank = server_args.node_rank
+   171	    local_num_gpus = num_gpus // nnodes
+   172	    rank_offset = node_rank * local_num_gpus
+   173	    processes = []
+   174	
+   175	    with startup_phase("launch_server.prepare_processes"):
+   176	        # Pipes for master to talk to slaves (local to this node)
+   177	        task_pipes_to_slaves_w = []
+   178	        task_pipes_to_slaves_r = []
+   179	        for _ in range(local_num_gpus - 1):
+   180	            r, w = mp.Pipe(duplex=False)
+   181	            task_pipes_to_slaves_r.append(r)
+   182	            task_pipes_to_slaves_w.append(w)
+   183	
+   184	    # Pipes for slaves to talk to master (local to this node)
+   185	    result_pipes_from_slaves_w = []
+   186	    result_pipes_from_slaves_r = []
+   187	    for _ in range(local_num_gpus - 1):
+   188	        r, w = mp.Pipe(duplex=False)
+   189	        result_pipes_from_slaves_r.append(r)
+   190	        result_pipes_from_slaves_w.append(w)
+   191	
+   192	    # Launch this node's local worker processes
+   193	    master_port = server_args.master_port
+   194	    scheduler_pipe_readers = []
+   195	    scheduler_pipe_writers = []
+   196	
+   197	    for i in range(local_num_gpus):
+   198	        rank = rank_offset + i
+   199	        reader, writer = mp.Pipe(duplex=False)
+   200	        worker_startup_begin_s = time.perf_counter() if profiler.enabled else None
+   201	        scheduler_pipe_writers.append(writer)
+   202	        if i == 0:  # This node's local pipe master
+   203	            process = mp.Process(
+   204	                target=run_scheduler_process,
+   205	                args=(
+   206	                    i,  # local_rank
+   207	                    rank,
+   208	                    master_port,
+   209	                    server_args,
+   210	                    writer,
+   211	                    None,  # No task pipe to read from master
+   212	                    None,  # No result pipe to write to master
+   213	                    task_pipes_to_slaves_w,
+   214	                    result_pipes_from_slaves_r,
+   215	                    worker_startup_begin_s,
+   216	                ),
+   217	                name=f"sglang-diffusionWorker-{rank}",
+   218	                daemon=True,
+   219	            )
+   220	        else:  # Slave workers
+   221	            process = mp.Process(
+   222	                target=run_scheduler_process,
+   223	                args=(
+   224	                    i,  # local_rank
+   225	                    rank,
+   226	                    master_port,
+   227	                    server_args,
+   228	                    writer,
+   229	                    None,  # No task pipe to read from master
+   230	                    None,  # No result pipe to write to master
+   231	                    task_pipes_to_slaves_r[i - 1],
+   232	                    result_pipes_from_slaves_w[i - 1],
+   233	                    worker_startup_begin_s,
+   234	                ),
+   235	                name=f"sglang-diffusionWorker-{rank}",
+   236	                daemon=True,
+   237	            )
+   238	        scheduler_pipe_readers.append(reader)
+   239	        with startup_phase(f"launch_server.start_worker_{rank}"):
+   240	            process.start()
+   241	        processes.append(process)
+   242	
+   243	    # Wait for all workers to be ready
+   244	    scheduler_infos = []
+   245	    for writer in scheduler_pipe_writers:
+   246	        writer.close()
+   247	
+   248	    # Close unused pipe ends in parent process
+   249	    for p in task_pipes_to_slaves_w:
+   250	        p.close()
+worker_import_and_use
+    92	)
+    93	from sglang.multimodal_gen.runtime.utils.perf_logger import (
+    94	    PerformanceLogger,
+    95	    capture_memory_snapshot,
+    96	)
+    97	from sglang.multimodal_gen.runtime.utils.process import kill_itself_when_parent_died
+    98	from sglang.multimodal_gen.runtime.utils.profiler import maybe_record_function
+    99	from sglang.multimodal_gen.runtime.utils.startup_profiler import (
+   100	    log_startup_summary,
+   101	    startup_phase,
+   102	)
+   103	from sglang.multimodal_gen.runtime.utils.trace_wrapper import (
+   104	    DiffStage,
+   105	    init_diffusion_tracing,
+   106	    trace_slice,
+   107	)
+   108	from sglang.srt.environ import third_party_cache_defaults
+  1594	
+  1595	    # start the scheduler event loop
+  1596	    assert task_pipes_to_slaves is not None
+  1597	    assert result_pipes_from_slaves is not None
+  1598	    from sglang.multimodal_gen.runtime.managers.scheduler import Scheduler
+  1599	
+  1600	    try:
+  1601	        profiler = get_startup_profiler()
+  1602	        if startup_begin_s is not None:
+  1603	            profiler.record(
+  1604	                "worker_process_start_and_imports",
+  1605	                (time.perf_counter() - startup_begin_s) * 1000,
+  1606	            )
+  1607	        with startup_phase("init_scheduler"):

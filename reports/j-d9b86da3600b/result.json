@@ -1,0 +1,53 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19087",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3106",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3079",
+  "candidate_commit": "8c5412debaf308d3c7ffc28a84727f324955a689",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate adds substantive startup profiling and its submitted mocked tests pass, but the real diffusion worker entry deterministically raises NameError because get_startup_profiler is called without being imported. The exact commit is therefore an unshippable partial fix and does not resolve the original launch-profiling request.",
+  "tests": [
+    {
+      "command": "base source inspection at 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before contract evidence: the prepared recorded base has no startup_profiler.py and no SGLANG_DIFFUSION_STARTUP_PROFILE instrumentation under multimodal_gen."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d9b86da3600b/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_startup_profiler.py python/sglang/multimodal_gen/test/unit/test_launch_server_shutdown.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's submitted regression suite passed 11 tests, including its mocked launch_server test; that test never invokes the Process target."
+    },
+    {
+      "command": "candidate import-path inspection with inspect.getfile at exact commit 8c5412debaf308d3c7ffc28a84727f324955a689",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed gpu_worker.py and startup_profiler.py were imported from /job/repo/python; confirmed gpu_worker has no get_startup_profiler global."
+    },
+    {
+      "command": "independent adversarial invocation of gpu_worker.run_scheduler_process with heavyweight scheduler/platform operations isolated",
+      "exit_code": 1,
+      "what_was_measured": "The actual worker entry reached candidate line 1601 and raised NameError: name 'get_startup_profiler' is not defined before Scheduler construction or readiness signaling."
+    },
+    {
+      "command": "git diff --name-only 358c163250ad3b1f62939b01ce1314a0a31a0365 8c5412debaf308d3c7ffc28a84727f324955a689 | rg native extensions",
+      "exit_code": 0,
+      "what_was_measured": "No C/C++/CUDA/HIP/native source files changed."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "ROCm tooling exposed an AMD GPU, but Qwen-Image weights were absent from the job runtime. GPU execution was unnecessary to verify the pre-scheduler NameError and was not represented as candidate validation.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Every diffusion worker launch reaches an unconditional call to an undefined get_startup_profiler name, including when SGLANG_DIFFUSION_STARTUP_PROFILE is disabled.",
+    "The cli_and_import_preparation clock begins inside generate(), after generate.py and its top-level dependencies have already imported, so it omits part of the requested CLI/import preparation time.",
+    "launch_server.prepare_processes excludes result-pipe creation, scheduler-pipe creation, Process construction, and parent pipe cleanup; those costs are only implicit in launch_server.total.",
+    "Parent and worker timings are logged in separate process-local trees and are not aggregated into a single end-to-end breakdown."
+  ],
+  "remaining_limitations": [
+    "Qwen-Image weights were unavailable in the prepared private runtime, so the exact candidate was not rerun with that model.",
+    "Multi-GPU, CUDA, XPU, MPS, NPU, and disaggregated launch paths were not exercised.",
+    "No native code changed, so a native rebuild was not applicable.",
+    "The prior candidate-retained GPU log was inspected as provenance only and was not treated as proof that this exact broken worker entry launches successfully."
+  ]
+}
