@@ -108,6 +108,9 @@ class TestPrefillAdder(CustomTestCase):
         req.fulfilled_storage_hit_len.return_value = 0
         req.finished.return_value = False
         req.needs_host_load_back.return_value = False
+        req.set_extend_range.side_effect = lambda start, end: setattr(
+            req, "extend_range", Range(start, end)
+        )
         return req
 
     def create_adder(self, running_batch, **kwargs):
@@ -124,6 +127,79 @@ class TestPrefillAdder(CustomTestCase):
         )
         defaults.update(kwargs)
         return PrefillAdder(**defaults)
+
+    def test_chunked_prefill_keeps_uncached_encoder_atomic(self):
+        for chunk_size, encoder_len, page_size, align_size, expected_extend_len in (
+            (512, 1500, 1, None, 1500),
+            (1024, 1500, 1, None, 1500),
+            (512, 1500, 16, None, 1504),
+            (512, 1500, 16, 128, 1536),
+            (1536, 1500, 1, None, 1536),
+            (2048, 1024, 1, None, 1536),
+        ):
+            with self.subTest(chunk_size=chunk_size, encoder_len=encoder_len):
+                self.mock_token_allocator.available_size.return_value = 100_000
+                req = self.create_mock_req("encoder", 0, 1)
+                req.sampling_params.ignore_eos = False
+                req.last_node = MagicMock()
+                req.full_untruncated_fill_ids = [0] * 1536
+                req.multimodal_inputs = SimpleNamespace(num_image_tokens=encoder_len)
+                adder = self.create_adder(
+                    self.create_running_batch(),
+                    page_size=page_size,
+                    rem_chunk_tokens=chunk_size,
+                    rem_input_tokens=100_000,
+                    is_encoder_decoder=True,
+                )
+
+                adder.add_one_req(
+                    req,
+                    has_chunked_req=False,
+                    truncation_align_size=align_size,
+                )
+
+                self.assertGreaterEqual(req.extend_range.end, encoder_len)
+                self.assertEqual(req.extend_range.length, expected_extend_len)
+
+    def test_chunked_prefill_defers_encoder_when_batch_budget_is_partly_used(self):
+        self.mock_token_allocator.available_size.return_value = 100_000
+        req = self.create_mock_req("encoder", 0, 1)
+        req.sampling_params.ignore_eos = False
+        req.last_node = MagicMock()
+        req.full_untruncated_fill_ids = [0] * 1502
+        req.multimodal_inputs = SimpleNamespace(num_image_tokens=1500)
+        adder = self.create_adder(
+            self.create_running_batch(),
+            rem_chunk_tokens=1024,
+            rem_input_tokens=100_000,
+            is_encoder_decoder=True,
+        )
+        adder.can_run_list.append(self.create_mock_req("already-admitted", 0, 1))
+
+        result = adder.add_one_req(
+            req, has_chunked_req=False, truncation_align_size=None
+        )
+
+        self.assertEqual(result, AddReqResult.OTHER)
+        self.assertNotIn(req, adder.can_run_list)
+
+    def test_decoder_only_multimodal_chunking_is_unchanged(self):
+        self.mock_token_allocator.available_size.return_value = 100_000
+        req = self.create_mock_req("multimodal", 0, 1)
+        req.sampling_params.ignore_eos = False
+        req.last_node = MagicMock()
+        req.full_untruncated_fill_ids = [0] * 1502
+        req.multimodal_inputs = SimpleNamespace(num_image_tokens=1500)
+        adder = self.create_adder(
+            self.create_running_batch(),
+            rem_chunk_tokens=512,
+            rem_input_tokens=100_000,
+            is_encoder_decoder=False,
+        )
+
+        adder.add_one_req(req, has_chunked_req=False, truncation_align_size=None)
+
+        self.assertEqual(req.extend_range, Range(0, 512))
 
     def test_storage_prefetch_fulfillment_resolves_at_admission(self):
         adder = self.create_adder(self.create_running_batch())
