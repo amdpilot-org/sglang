@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39096",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/979",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/939",
+  "candidate_commit": "80c019da6db285e88d02ea4c6dbf26e93435bf5a",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The prepared base reproduced the original preferred-sampling-params loss for omitted chat fields and the generation-2 counterexample for explicit JSON null. At the exact candidate commit, server preferences win over eager generation/OpenAI defaults for omitted fields and for null temperature, top_p, top_k, min_p, and repetition_penalty, while explicit client values still win. Independent tests exercised all preference-supported chat sampling keys, mixed explicit/unset/null inputs, max-token aliases, metadata propagation, and legacy native-request precedence.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-fc605d2a5532/venv/bin/python < base reproduction script",
+      "exit_code": 0,
+      "what_was_measured": "On base 358c163, omitted and explicit-null chat sampler fields resolved to generation/OpenAI defaults and overwrote server preferences."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fc605d2a5532/venv/bin/python -m pytest -q test/registered/unit/managers/test_chat_preferred_sampling_params.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 6 passed, covering explicit-key tracking, preferred/default precedence, explicit null, generation config fallback, and legacy native requests."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fc605d2a5532/venv/bin/python < independent adversarial script",
+      "exit_code": 0,
+      "what_was_measured": "JSON request parsing and actual GenerateReqInput metadata path for all preference-supported chat sampling keys; explicit null, mixed values, max-token aliases, batch item propagation, and legacy native behavior all passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fc605d2a5532/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai",
+      "exit_code": 0,
+      "what_was_measured": "Nearby OpenAI protocol and serving behavior: 349 tests and 127 subtests passed."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..80c019da6db285e88d02ea4c6dbf26e93435bf5a",
+      "exit_code": 2,
+      "what_was_measured": "One trailing-whitespace line exists in a candidate raw report artifact; no product source or test file whitespace error was reported."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The original issue is deterministic in CPU-only request conversion and tokenizer-manager merge logic. One ROCm GPU was visible, but no model execution was needed or used as proof."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No live HTTP server or model-weight run was performed; the affected contract is upstream of model execution and was directly exercised through JSON request parsing, ChatCompletionRequest conversion, GenerateReqInput metadata, and the tokenizer merge function.",
+    "No native sources changed, so a native rebuild was not applicable.",
+    "Candidate diff-check is non-clean only because of trailing whitespace in reports/j-d347b4015ea2/raw/focused-tests-after.txt."
+  ]
+}
