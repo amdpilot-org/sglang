@@ -221,6 +221,22 @@ def _handle_dflash(server_args: ServerArgs) -> None:
             "DFLASH speculative decoding requires setting --speculative-draft-model-path."
         )
 
+    if cfg.speculative_draft_model_quantization is not None:
+        source = (
+            "explicitly selected"
+            if cfg._speculative_draft_quantization_explicitly_set
+            else "inherited from --quantization"
+        )
+        logger.warning(
+            "DFLASH draft quantization %r was %s. Quantized DFlash drafts may "
+            "load successfully but produce near-zero speculative acceptance; "
+            "monitor the accept_len/accept_rate metrics. If the draft "
+            "checkpoint is unquantized, pass "
+            "--speculative-draft-model-quantization unquant explicitly.",
+            cfg.speculative_draft_model_quantization,
+            source,
+        )
+
     # DFLASH does not use EAGLE-style `num_steps`/`topk`, but those fields still
     # affect generic scheduler/KV-cache accounting (buffer sizing, KV freeing,
     # RoPE reservation). Force them to 1 to avoid surprising memory behavior.

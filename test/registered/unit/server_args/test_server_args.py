@@ -63,7 +63,10 @@ from sglang.srt.arg_groups.serving_hook import (
     handle_tokenizer_batching,
     ssl_verify_of,
 )
-from sglang.srt.arg_groups.speculative_hook import handle_speculative_decoding
+from sglang.srt.arg_groups.speculative_hook import (
+    _handle_dflash,
+    handle_speculative_decoding,
+)
 from sglang.srt.arg_groups.validation_hook import (
     check_two_batch_overlap,
 )
@@ -1921,6 +1924,48 @@ class TestAdaptiveSpecArgs(CustomTestCase):
         self.assertEqual(resolution_result(args, "speculative_eagle_topk"), 1)
         self.assertEqual(resolution_result(args, "speculative_num_steps"), 3)
         self.assertEqual(resolution_result(args, "speculative_num_draft_tokens"), 4)
+
+
+class TestDFlashDraftQuantizationWarning(CustomTestCase):
+    def _handle(self, draft_quantization, explicitly_set):
+        args = ServerArgs(
+            model_path="dummy",
+            speculative_algorithm="DFLASH",
+            speculative_draft_model_path="dummy-draft",
+            speculative_draft_model_quantization=draft_quantization,
+            speculative_num_draft_tokens=8,
+            max_running_requests=48,
+            device="cuda",
+        )
+        args._speculative_draft_quantization_explicitly_set = explicitly_set
+        _handle_dflash(args)
+
+    def test_warns_for_explicit_quantized_draft(self):
+        with self.assertLogs(
+            "sglang.srt.arg_groups.speculative_hook", level="WARNING"
+        ) as logs:
+            self._handle("compressed-tensors", explicitly_set=True)
+
+        message = "\n".join(logs.output)
+        self.assertIn("near-zero speculative acceptance", message)
+        self.assertIn("explicitly selected", message)
+        self.assertIn("compressed-tensors", message)
+
+    def test_warns_when_target_quantization_was_inherited(self):
+        with self.assertLogs(
+            "sglang.srt.arg_groups.speculative_hook", level="WARNING"
+        ) as logs:
+            self._handle("auto-round", explicitly_set=False)
+
+        message = "\n".join(logs.output)
+        self.assertIn("inherited from --quantization", message)
+        self.assertIn("pass --speculative-draft-model-quantization unquant", message)
+
+    def test_unquantized_draft_does_not_warn(self):
+        with self.assertNoLogs(
+            "sglang.srt.arg_groups.speculative_hook", level="WARNING"
+        ):
+            self._handle(None, explicitly_set=True)
 
 
 class TestWaterfillArgs(CustomTestCase):
