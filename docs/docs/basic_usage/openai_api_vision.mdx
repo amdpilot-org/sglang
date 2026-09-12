@@ -171,6 +171,66 @@ response = client.chat.completions.create(
 print_highlight(response.choices[0].message.content)
 ```
 
+## Reuse Qwen image preprocessing by content ID
+
+For repeated identical Qwen vision requests, start the server with a bounded
+CPU preprocessing cache and trusted caller-provided content hashes:
+
+```bash
+python3 -m sglang.launch_server \
+  --model-path Qwen/Qwen2.5-VL-7B-Instruct \
+  --mm-preprocess-cache-size-mb 256 \
+  --trust-mm-content-hashes
+```
+
+Compute the SHA-256 digest from the exact image bytes, then include it in the
+OpenAI-compatible `image_url` object:
+
+```python Example
+import hashlib
+import requests
+
+image_bytes = requests.get(example_image_url).content
+content_id = "sha256:" + hashlib.sha256(image_bytes).hexdigest()
+
+data = {
+    "model": "Qwen/Qwen2.5-VL-7B-Instruct",
+    "messages": [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What’s in this image?"},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": example_image_url,
+                        "content_hash": content_id,
+                    },
+                },
+            ],
+        }
+    ],
+    "max_tokens": 300,
+}
+
+first = requests.post(url, json=data)
+second = requests.post(url, json=data)
+first.raise_for_status()
+second.raise_for_status()
+```
+
+The first request stores the CPU preprocessing result. An in-process cache hit
+uses `content_hash` as the media ID and returns before opening the URL. The ID,
+image order, rendered prompt, and processor configuration must all match.
+Entries are bounded by the configured LRU budget and are lost on eviction,
+cache flush, or server restart.
+
+Only enable `--trust-mm-content-hashes` when your application computes hashes
+from immutable media bytes. SGLang intentionally does not re-read the URL to
+verify a cache hit; supplying the same hash for different content can therefore
+return the wrong cached preprocessing result. Qwen video/audio requests and
+changed prompts currently use the normal preprocessing path.
+
 ```python Example
 terminate_process(vision_process)
 ```

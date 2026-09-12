@@ -1,3 +1,6 @@
+import copy
+import hashlib
+import json
 import math
 import os
 import re
@@ -291,6 +294,10 @@ async def preprocess_video(
 # Compatible with Qwen-VL & Qwen-Omni Series
 class QwenVLImageProcessor(SGLangBaseProcessor):
     supports_transformers_backend = True
+    # Qwen's processor is particularly expensive for large images.  Keep the
+    # cache opt-in at the service level, but give it the same useful default as
+    # the artifact-based Kimi path when the argument is left unspecified.
+    auto_mm_preprocess_cache_size_mb = 256
     models = [
         Qwen2VLForConditionalGeneration,
         Qwen2_5_VLForConditionalGeneration,
@@ -740,6 +747,16 @@ class QwenVLImageProcessor(SGLangBaseProcessor):
         *args,
         **kwargs,
     ):
+        cache_key = self._request_preprocess_cache_key(
+            image_data, input_text, request_obj
+        )
+        if cache_key is not None:
+            cached = self.mm_preprocess_cache.get(cache_key)
+            if cached is not None:
+                # Scheduler-side code annotates multimodal items while the
+                # request is running.  Never expose the retained value itself.
+                return copy.deepcopy(cached)
+
         entry_time = time.perf_counter()
         base_output = await self.load_mm_data(
             prompt=input_text,
@@ -889,7 +906,7 @@ class QwenVLImageProcessor(SGLangBaseProcessor):
             f"total_time: {(get_rope_index_time - entry_time) * 1000:.2f} ms"
         )
 
-        return MultimodalProcessorOutput(
+        output = MultimodalProcessorOutput(
             input_ids=input_ids_list,
             padded_input_ids=padded_input_ids,
             mm_items=mm_items,
@@ -901,6 +918,51 @@ class QwenVLImageProcessor(SGLangBaseProcessor):
             mrope_positions=mrope_positions,
             mrope_position_delta=mrope_position_delta,
         )
+        if cache_key is not None:
+            # Cache only CPU-sized values. MultimodalPreprocessCache rejects
+            # CUDA-backed outputs (including CUDA IPC/VMM transport) rather
+            # than retaining GPU memory accidentally.
+            self.mm_preprocess_cache.put(cache_key, copy.deepcopy(output))
+        return output
+
+    def _request_preprocess_cache_key(self, image_data, input_text, request_obj):
+        """Build an explicit, content-addressed Qwen preprocessing cache key.
+
+        A trusted ``image_url.content_hash`` is the caller's load ID.  Requiring
+        every image to have one means a hit can be decided before opening URLs;
+        without ``--trust-mm-content-hashes`` the normal verified path remains
+        in force and no source-read bypass is attempted.
+
+        Qwen's HF processor currently combines prompt tokenization and image
+        preprocessing in one call, so the prompt is intentionally part of the
+        key.  This preserves exact output while still eliminating repeated
+        large-image preprocessing for retries and identical requests.
+        """
+        if (
+            not self.mm_preprocess_cache.enabled
+            or not self.trust_mm_content_hashes
+            or getattr(self, "keep_mm_features_on_device", False)
+            or request_obj.video_data
+            or request_obj.audio_data
+        ):
+            return None
+
+        hashes = getattr(request_obj, "mm_content_hashes", None)
+        if not image_data or not hashes or len(hashes) != len(image_data):
+            return None
+        if any(value is None for value in hashes):
+            return None
+
+        payload = {
+            "kind": "qwen-request-preprocess-v1",
+            "processor": self.processor_fingerprint,
+            "content_hashes": list(hashes),
+            "prompt": input_text,
+        }
+        encoded = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        return "qwen-request:" + hashlib.sha256(encoded).hexdigest()
 
     def _mark_dp_encoder_features_for_deferred_reconstruction(self, mm_items):
         if not (
