@@ -95,7 +95,6 @@ def test_tree_speculative_sampling_target_only(
 
     expanded_temperature = temperatures.unsqueeze(1).unsqueeze(1)
     target_probs = F.softmax(target_logits / expanded_temperature, dim=-1)
-    draft_probs = torch.full_like(target_probs, 0, dtype=torch.float32, device=device)
     coins = torch.rand(bs, num_draft_tokens, device=device, dtype=torch.float32)
     coins_for_final_sampling = torch.rand(bs, device=device).to(torch.float32)
 
@@ -110,7 +109,6 @@ def test_tree_speculative_sampling_target_only(
         uniform_samples=coins,
         uniform_samples_for_final_sampling=coins_for_final_sampling,
         target_probs=target_probs,
-        draft_probs=draft_probs,
         threshold_single=threshold_single,
         threshold_acc=threshold_acc,
         deterministic=True,
@@ -125,6 +123,45 @@ def test_tree_speculative_sampling_target_only(
     assert accept_token_num.tolist() == expected_accept_token_num, (
         f"Accept token num mismatch for thresholds ({threshold_single}, {threshold_acc})"
     )
+
+
+def test_tree_speculative_sampling_target_only_masks_rejected_siblings():
+    """A rejected top-k=1 candidate must not be drawn as the final token."""
+    device = "cuda"
+    candidates = torch.tensor([[0, 2]], dtype=torch.int64, device=device)
+    retrive_index = torch.tensor([[0, 1]], dtype=torch.int64, device=device)
+    retrive_next_token = torch.tensor([[1, -1]], dtype=torch.int64, device=device)
+    retrive_next_sibling = torch.full((1, 2), -1, dtype=torch.int64, device=device)
+    target_probs = torch.tensor(
+        [[[0.0, 0.2, 0.6, 0.2], [0.1, 0.2, 0.3, 0.4]]],
+        dtype=torch.float32,
+        device=device,
+    )
+    predicts = torch.full((2,), -1, dtype=torch.int32, device=device)
+    accept_index = torch.full((1, 2), -1, dtype=torch.int32, device=device)
+    accept_token_num = torch.zeros((1,), dtype=torch.int32, device=device)
+
+    tree_speculative_sampling_target_only(
+        predicts,
+        accept_index,
+        accept_token_num,
+        candidates,
+        retrive_index,
+        retrive_next_token,
+        retrive_next_sibling,
+        torch.tensor([[0.9, 0.0]], dtype=torch.float32, device=device),
+        torch.tensor([0.7], dtype=torch.float32, device=device),
+        target_probs,
+        threshold_single=1.0,
+        threshold_acc=1.0,
+        deterministic=True,
+    )
+
+    # Independent CDF reference after masking token 2: [0, .2, 0, .2],
+    # total=.4 and u=.28, so token 3 is selected.
+    assert predicts.tolist() == [3, -1]
+    assert accept_index.tolist() == [[0, -1]]
+    assert accept_token_num.tolist() == [0]
 
 
 if __name__ == "__main__":
