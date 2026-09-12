@@ -1,0 +1,122 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0 -- /tmp/amdpilot-repo-j-0796a3a0b351/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /job/repo/test
+configfile: pytest.ini
+plugins: hypothesis-6.155.0, anyio-4.15.1
+collecting ... collected 1 item
+
+test/registered/unit/managers/test_prefill_alloc_oom_requeue.py::TestSchedulerPrefillOOM::test_existing_chunked_req_is_not_duplicated_in_waiting_queue FAILED [100%]
+
+=================================== FAILURES ===================================
+_ TestSchedulerPrefillOOM.test_existing_chunked_req_is_not_duplicated_in_waiting_queue _
+
+self = <test_prefill_alloc_oom_requeue.TestSchedulerPrefillOOM testMethod=test_existing_chunked_req_is_not_duplicated_in_waiting_queue>
+
+    def test_existing_chunked_req_is_not_duplicated_in_waiting_queue(self):
+        req = MagicMock(name="active_chunked_req")
+        req.inflight_middle_chunks = 0
+        scheduler = _scheduler(req)
+        scheduler.waiting_queue = []
+        scheduler.chunked_req = req
+        adder = MagicMock(can_run_list=[req], preempt_list=[], new_chunked_req=None)
+        adder.add_chunked_req.return_value = req
+        batch = MagicMock()
+        batch.prepare_for_extend.side_effect = KVCacheOOMError("injected")
+        batch_cls = MagicMock()
+        batch_cls.init_new.return_value = batch
+        running_batch = MagicMock(reqs=[], batch_is_full=False)
+
+        with patch.object(scheduler_mod, "PrefillAdder", return_value=adder), patch.object(
+            scheduler_mod, "ScheduleBatch", batch_cls
+        ):
+            result, returned_running = Scheduler._get_new_batch_prefill_raw(
+                scheduler, None, running_batch
+            )
+
+        self.assertIsNone(result)
+        self.assertIs(returned_running, running_batch)
+        self.assertIs(scheduler.chunked_req, req)
+        self.assertEqual(req.inflight_middle_chunks, 0)
+>       self.assertNotIn(req, scheduler.waiting_queue)
+E       AssertionError: <MagicMock name='active_chunked_req' id='140537283419248'> unexpectedly found in [<MagicMock name='active_chunked_req' id='140537283419248'>]
+
+test/registered/unit/managers/test_prefill_alloc_oom_requeue.py:220: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7fd162d92160>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7fda49b1f240>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/managers/test_prefill_alloc_oom_requeue.py", line 220, in test_existing_chunked_req_is_not_duplicated_in_waiting_queue
+    self.assertNotIn(req, scheduler.waiting_queue)
+  File "/usr/lib/python3.12/unittest/case.py", line 1159, in assertNotIn
+    self.fail(self._formatMessage(msg, standardMsg))
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: <MagicMock name='active_chunked_req' id='140537283419248'> unexpectedly found in [<MagicMock name='active_chunked_req' id='140537283419248'>]
+------------------------------ Captured log call -------------------------------
+WARNING  sglang.srt.managers.scheduler:scheduler.py:3986 Prefill allocation missed after admission for 1 request(s); returning them to the waiting queue. injected
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/managers/test_prefill_alloc_oom_requeue.py::TestSchedulerPrefillOOM::test_existing_chunked_req_is_not_duplicated_in_waiting_queue - Exception: retry() exceed maximum number of retries.
+======================= 1 failed, 17 warnings in 12.18s ========================
