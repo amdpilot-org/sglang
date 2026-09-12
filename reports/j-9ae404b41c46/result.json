@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31766",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Bound CommonKVManager's prefill-side ZMQ endpoint cache with configurable LRU eviction, close PUSH and monitor sockets as one lifecycle, skip sockets with an active sender, and clean up atomically when monitor creation fails.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-9ae404b41c46/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_common_kv_manager_socket_cache.py (before implementation)",
+      "exit_code": 1,
+      "what_was_measured": "The actual checked-out _connect retained all six unique endpoint PUSH/monitor pairs rather than the configured three; endpoint reuse passed. Raw output: /tmp/amdpilot-repo-j-9ae404b41c46/evidence/failing-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9ae404b41c46/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_common_kv_manager_socket_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "Five focused tests passed: bounded unique endpoints, paired close, stable reuse, LRU recency, active-sender protection, and atomic monitor-creation failure cleanup. Raw output: /tmp/amdpilot-repo-j-9ae404b41c46/evidence/passing-after-focused-final.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9ae404b41c46/venv/bin/python -c '<real CommonKVManager._connect PyZMQ 200-endpoint FD probe>'",
+      "exit_code": 0,
+      "what_was_measured": "With cache_limit=8, 200 unique endpoints ended with 8 PUSH entries and 8 monitor entries; /proc/self/fd was 9 before, 39 after, and peaked at 48. Raw output: /tmp/amdpilot-repo-j-9ae404b41c46/evidence/fd-bounded.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9ae404b41c46/venv/bin/python -m pytest -q test/registered/unit/disaggregation test/registered/unit/test_environ.py",
+      "exit_code": 0,
+      "what_was_measured": "376 tests passed with 47 subtests, covering the complete registered disaggregation unit directory and environment descriptors. Raw output: /tmp/amdpilot-repo-j-9ae404b41c46/evidence/disaggregation-unit-suite.txt"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/disaggregation/common/conn.py python/sglang/srt/environ.py test/registered/unit/disaggregation/test_common_kv_manager_socket_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "All configured formatting, lint, security, and registered-test checks passed."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reporter's 16x NVIDIA H800 model-serving and multi-node workload was not available and was not claimed as reproduced.",
+    "The assigned single GPU was detected as AMD Instinct MI350X with Torch 2.11.0+rocm7.2, but no GPU kernel was run because the defect is host-side PyZMQ lifecycle behavior. Inventory: /tmp/amdpilot-repo-j-9ae404b41c46/evidence/gpu-inventory.txt",
+    "The deterministic reproduction covers the actual CommonKVManager._connect implementation and real PyZMQ descriptors, not full-model semantic accuracy or distributed transfer behavior.",
+    "No native code changed, so no native rebuild was applicable. Source checkout: /job/repo; prepared native path: null."
+  ]
+}
