@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36338",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Preserved candidate PR 2856's valid selective dequantization and tests, independently reproduced the remaining MI gfx950 heuristic counterexamples, and rejected a synchronization-based overlap discriminator after it worsened latency. No further default-policy source change is justified without executing the target NVIDIA Hopper/Blackwell FlashMLA path.",
+  "tests": [
+    {
+      "command": "At candidate 6fbcae3: PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-cd3c6e02b34b/triton-candidate /tmp/amdpilot-repo-j-cd3c6e02b34b/venv/bin/python reports/j-cd3c6e02b34b/evidence/reproduce_candidate_boundaries.py",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X/gfx950, random 8/16/24/32-query compact cases measured 1.012x/1.126x/1.239x/1.285x warmed full latency. The default shared 33-query case used the 150994944-byte full buffer; forcing the 2048-row union peaked at 4930048 bytes."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-cd3c6e02b34b/triton-final /tmp/amdpilot-repo-j-cd3c6e02b34b/venv/bin/python -m pytest -q test/registered/kernel/ops/attention/test_selective_dsa_kv_dequant.py -s",
+      "exit_code": 0,
+      "what_was_measured": "Four exact-candidate GPU tests passed: independent FP8 numerical reference, physical alias deduplication/remapping, fallback behavior, pre-dedup gate, and invalid sentinels."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-cd3c6e02b34b/triton-final /tmp/amdpilot-repo-j-cd3c6e02b34b/venv/bin/python reports/j-f631daba9e47/benchmark_selective_dequant.py",
+      "exit_code": 0,
+      "what_was_measured": "At 262144 logical rows and 8 queries, the candidate selected 4029 compact rows, reduced BF16 staging from 301989888 to 4641408 bytes, and measured a 2.540x speedup."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-cd3c6e02b34b/triton-final /tmp/amdpilot-repo-j-cd3c6e02b34b/venv/bin/python -m pytest -q test/registered/attention/unittests/dsa/test_dsa.py -k sparse_fp8_prefill_cases -s",
+      "exit_code": 1,
+      "what_was_measured": "The flashmla_sparse and flashmla_kv subtests stopped before attention because the available HIP legacy DSA path requires page_size == 1 while the fixture uses 64; one compatible subtest passed and unsupported variants skipped."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Checked-out Python/Triton source compiled with private caches and ran on one AMD Instinct MI350X (gfx950) with Torch 2.11.0+rocm7.2.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "BF16 flashmla_sparse attention output correctness and end-to-end sparse-prefill performance remain unverified because the assigned AMD gfx950 device is not NVIDIA Hopper/Blackwell.",
+    "The ROCm integration fixture stops before attention because page size 64 is unsupported by the available legacy HIP DSA path, which requires page size 1.",
+    "The candidate's fixed gate still selects slower compact staging for some 131072-row inputs and rejects a complete-overlap 33-query union with a large memory benefit.",
+    "Determining overlap before deduplication requires additional device work and a host-visible policy decision in the current Python implementation; the tested torch.equal discriminator measurably worsened both fallback and shared-case latency.",
+    "No C++, CUDA, HIP, or FlyDSL source changed, so a native rebuild was not applicable."
+  ]
+}
