@@ -1,0 +1,62 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/22889",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2932",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2899",
+  "candidate_commit": "4caa276b9291e874d88cfae66295ec3cac2e1a65",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a verified, narrowly scoped Phase 4 synchronization fix, not a complete implementation of Python 3.14t support. The recorded base reproducibly allows room teardown to free a staging allocation while scatter is paused between launch and completion-event publication. The exact candidate serializes that lifecycle and passes both its submitted regression and an independently retained reproduction. It does not change packaging, dependencies, native extensions, CI, wheels, or most Python shared state, and it was not executable under cp314t on this prepared node. Acceptance is recommended only as an honest incremental hardening patch; it must not close or be represented as fully resolving the original issue.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8c9731ffea90/venv/bin/python -m pytest -q /job/review-evidence-j-8c9731ffea90/test_candidate_race.py (base 358c163)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction of the candidate's claimed scatter-publication/teardown race. Teardown completed during the forced launch-to-event-publication window and freed allocation 17."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8c9731ffea90/venv/bin/python -m pytest -q /job/review-evidence-j-8c9731ffea90/test_candidate_race.py (candidate 4caa276)",
+      "exit_code": 0,
+      "what_was_measured": "Independent passing-after reproduction: teardown remained blocked until scatter/event publication completed, and the allocation was freed exactly once."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8c9731ffea90/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_disaggregation_wire.py -k 'StagingWatermark or DecodeStagingFreeThreading'",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and compatibility selection: 4 passed, 35 deselected."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8c9731ffea90/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_disaggregation_wire.py",
+      "exit_code": 0,
+      "what_was_measured": "Full affected unit file: 39 passed and 12 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8c9731ffea90/venv/bin/python -m compileall -q python/sglang/srt/disaggregation/common/staging_handler.py test/registered/unit/disaggregation/test_disaggregation_wire.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source and tests compile under the pinned interpreter."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 4caa276b9291e874d88cfae66295ec3cac2e1a65",
+      "exit_code": 2,
+      "what_was_measured": "One trailing-whitespace line exists in the candidate's committed raw test log; no source-code whitespace error was reported."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The pinned Torch 2.11.0+rocm7.2 environment reports one available ROCm GPU, but the reviewed change is host-side lifecycle locking and its tests mock the scatter/event boundary. No unrelated GPU smoke or numerical claim was used as proof.",
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "The exact diff changes only two Python files and candidate report artifacts. repository-environment.json declares native=null and wheel=null. No native library changed, so a rebuild was not applicable.",
+  "source_import_evidence": "At candidate commit, sglang.srt.disaggregation.common.staging_handler.__file__ resolved to /job/repo/python/sglang/srt/disaggregation/common/staging_handler.py.",
+  "remaining_counterexamples": [
+    "A clean Linux x86-64 Python 3.14t environment still has no demonstrated `uv pip install sglang`, import, or serving execution path from this candidate.",
+    "sglang-kernel still has no demonstrated cp314t wheel/source build, Py_GIL_DISABLED audit, or free-threaded native test result.",
+    "cpp_radix_tree, ngram_corpus_ffi, hf3fs_utils, multimodal CUDA kernels, and other SGLang-owned native components remain unaudited or unverified under free-threading.",
+    "The broader Python shared-state inventory remains open, including tokenizer management, cache controllers, KV event threads, threaded weight loading, registries, and other disaggregation callbacks/backends.",
+    "No actual Mooncake/NIXL distributed staging workload was run under a free-threaded interpreter; the verified regression controls mocked host/GPU boundaries under GIL-enabled CPython 3.12.",
+    "No cp314t CI job, wheel publication path, dependency resolution proof, or performance validation is added."
+  ],
+  "remaining_limitations": [
+    "The prepared interpreter is CPython 3.12.3, SOABI cpython-312-x86_64-linux-gnu, with Py_GIL_DISABLED unset; no python3.14 or python3.14t executable was found.",
+    "The node is AMD ROCm 7.2 rather than the CUDA architecture named by the original issue, so CUDA builds and runtime paths were unavailable.",
+    "The candidate's lock can cover stream synchronization and watermark sends. The focused tests establish safety for the reported race, but do not measure contention, callback latency, or distributed deadlock behavior.",
+    "Raw review evidence is retained outside the switched checkout at /job/review-evidence-j-8c9731ffea90/."
+  ]
+}
