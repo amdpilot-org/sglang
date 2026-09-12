@@ -10,7 +10,7 @@ Requires: torch, sglang (run in an environment with sglang installed)
 import gc
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from weakref import WeakKeyDictionary as WeakKeyDict
 
 import torch
@@ -122,6 +122,65 @@ class _FinishedEvent:
 
 
 class TestDeepSeekV4DecodeOffload(unittest.TestCase):
+    def test_constructor_keeps_c128_state_when_host_group_exposes_it(self):
+        from sglang.srt.mem_cache.deepseek_v4_memory_pool import (
+            DeepSeekV4TokenToKVPool,
+        )
+
+        kvcache = object.__new__(DeepSeekV4TokenToKVPool)
+        allocator = MagicMock()
+        allocator.get_kvcache.return_value = kvcache
+        host_pool = SimpleNamespace(
+            entry_map={
+                PoolName.KV: object(),
+                PoolName.SWA: object(),
+                PoolName.DEEPSEEK_V4_C128_STATE: object(),
+            }
+        )
+        config = SimpleNamespace(
+            page_size=1,
+            hicache_storage_backend_extra_config=None,
+            hicache_storage_backend=None,
+            hicache_io_backend=None,
+        )
+
+        with (
+            patch(
+                "sglang.srt.disaggregation.decode_kvcache_offload_manager.get_schedule",
+                return_value=config,
+            ),
+            patch(
+                "sglang.srt.disaggregation.decode_kvcache_offload_manager.get_memory",
+                return_value=config,
+            ),
+            patch(
+                "sglang.srt.disaggregation.decode_kvcache_offload_manager.get_serving",
+                return_value=SimpleNamespace(served_model_name="test"),
+            ),
+            patch(
+                "sglang.srt.disaggregation.decode_kvcache_offload_manager.build_deepseek_v4_hicache_stack",
+                return_value=(host_pool, MagicMock()),
+            ),
+            patch(
+                "sglang.srt.disaggregation.decode_kvcache_offload_manager.torch.distributed.get_world_size",
+                return_value=1,
+            ),
+        ):
+            manager = DecodeKVCacheOffloadManager(
+                MagicMock(), allocator, MagicMock(), MagicMock()
+            )
+
+        transfers = {transfer.name: transfer for transfer in manager._dsv4_sidecars}
+        self.assertIn(PoolName.DEEPSEEK_V4_C128_STATE, transfers)
+        self.assertEqual(
+            transfers[PoolName.DEEPSEEK_V4_C128_STATE].indices_from_pool,
+            PoolName.SWA,
+        )
+        self.assertEqual(
+            transfers[PoolName.DEEPSEEK_V4_C128_STATE].hit_policy,
+            PoolHitPolicy.TRAILING_PAGES,
+        )
+
     def test_composite_transfers_keep_swa_and_all_derived_pools(self):
         manager = object.__new__(DecodeKVCacheOffloadManager)
         manager._is_deepseek_v4 = True
@@ -130,7 +189,10 @@ class TestDeepSeekV4DecodeOffload(unittest.TestCase):
             translate_loc_from_full_to_swa=lambda indices: indices + 100
         )
         manager.decode_host_mem_pool = SimpleNamespace(
-            entry_map={PoolName.SWA: object()}
+            entry_map={
+                PoolName.SWA: object(),
+                PoolName.DEEPSEEK_V4_C128_STATE: object(),
+            }
         )
         manager._dsv4_sidecars = [
             PoolTransfer(
@@ -142,13 +204,23 @@ class TestDeepSeekV4DecodeOffload(unittest.TestCase):
                 indices_from_pool=PoolName.SWA,
                 hit_policy=PoolHitPolicy.TRAILING_PAGES,
             ),
+            PoolTransfer(
+                name=PoolName.DEEPSEEK_V4_C128_STATE,
+                indices_from_pool=PoolName.SWA,
+                hit_policy=PoolHitPolicy.TRAILING_PAGES,
+            ),
         ]
 
         transfers = manager._build_extra_transfers(torch.tensor([1, 2]))
 
         self.assertEqual(
             [transfer.name for transfer in transfers],
-            [PoolName.SWA, PoolName.DEEPSEEK_V4_C4, PoolName.DEEPSEEK_V4_C4_STATE],
+            [
+                PoolName.SWA,
+                PoolName.DEEPSEEK_V4_C4,
+                PoolName.DEEPSEEK_V4_C4_STATE,
+                PoolName.DEEPSEEK_V4_C128_STATE,
+            ],
         )
         self.assertEqual(transfers[0].device_indices.tolist(), [101, 102])
         self.assertEqual(transfers[1].indices_from_pool, PoolName.KV)

@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31207",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 3500's valid composite decode-offload and LMCache diagnostic changes, then corrected its concrete omission of DEEPSEEK_V4_C128_STATE from decode sidecar enumeration. The correction was reproduced against exact candidate commit fb34ada0b8d8b9db3ee04ecd4c82c563db4c0cdd and adds a constructor-level regression. LMCache grouped transfer remains externally unsupported and is not claimed fixed.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-33ba2a8679f0/venv/bin/python -c '<constructor reproduction against exact candidate>'",
+      "exit_code": 1,
+      "what_was_measured": "Before correction, the actual DecodeKVCacheOffloadManager constructor omitted DEEPSEEK_V4_C128_STATE even though the composite host group exposed that entry; raw output is candidate_c128_before.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-33ba2a8679f0/venv/bin/python -c '<same constructor reproduction after correction>'",
+      "exit_code": 0,
+      "what_was_measured": "After correction, DecodeKVCacheOffloadManager enumerated DEEPSEEK_V4_C128_STATE as an SWA-derived sidecar; raw output is candidate_c128_after.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-33ba2a8679f0/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_specv2_kvcache_offloading.py test/registered/unit/mem_cache/test_linker_pool_assembler.py",
+      "exit_code": 0,
+      "what_was_measured": "27 tests and 8 subtests passed, covering decode offload lifetime/accounting, constructor enumeration, and composite device-pool layouts."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-33ba2a8679f0/venv/bin/python reports/j-d983ad39217a/gpu_composite_transfer.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact device-to-pinned-host byte equality for three paged and two ring-state synthetic buffers on one AMD Instinct MI350X; this does not qualify V4 model correctness."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "gpu_composite_transfer_after.txt reports exact=True for all five tested buffers on AMD Instinct MI350X with HIP 7.2.26015."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "LMCache DeepSeek-V4 operation remains blocked on an external grouped connector and transfer protocol accepting pool_group; the candidate provides capability probing and a precise NotImplementedError only.",
+    "No DeepSeek-V4 weights or B300 distributed PD environment were available, so V4 attention correctness, real request lifetime behavior, storage restore, unified-KV, HiSparse, and multi-rank behavior remain unverified.",
+    "The GPU evidence is a synthetic transfer-primitive test, not an end-to-end model or LMCache daemon test.",
+    "No native source changed and repository-environment.json specifies native=null, so no native rebuild was applicable."
+  ]
+}

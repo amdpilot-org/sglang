@@ -122,6 +122,7 @@ class DecodeKVCacheOffloadManager:
                     (PoolName.DEEPSEEK_V4_C128, PoolName.KV),
                     (PoolName.DEEPSEEK_V4_C4_STATE, PoolName.SWA),
                     (PoolName.DEEPSEEK_V4_C4_INDEXER_STATE, PoolName.SWA),
+                    (PoolName.DEEPSEEK_V4_C128_STATE, PoolName.SWA),
                 )
                 if name in self.decode_host_mem_pool.entry_map
             ]
