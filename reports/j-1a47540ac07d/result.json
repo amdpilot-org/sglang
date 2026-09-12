@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30015",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2480",
+  "candidate_mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2394",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2445",
+  "candidate_commit": "c276f578f02392cda2d4766ca4a846f5ab33e3f2",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "The recorded base reproduces the exact TP-shard interleaving corruption. The exact candidate preserves model-specific sharded proxy entries and retains all-gather reconstruction for established replicated keys in both ordinary and paired scheduler transport paths.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1a47540ac07d/venv/bin/python -m torch.distributed.run --standalone --nproc-per-node=4 /job/review-evidence-j-1a47540ac07d/repro_pp_tp_tensor_dict.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: both receivers obtained [1,1,1,1,2,2,2,2] rather than their TP-corresponding sender payload; replicated control passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1a47540ac07d/venv/bin/python -m torch.distributed.run --standalone --nproc-per-node=4 /job/review-evidence-j-1a47540ac07d/repro_pp_tp_tensor_dict.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after through actual GroupCoordinator one-way send/receive: each TP rank retained its distinct full tensor and replicated data remained correct."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1a47540ac07d/venv/bin/python -m pytest -q test/registered/unit/distributed/test_parallel_state.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and surrounding unit suite: 7 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1a47540ac07d/venv/bin/python -m torch.distributed.run --standalone --nproc-per-node=4 /job/review-evidence-j-1a47540ac07d/paired_roundtrip.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent paired send_recv_tensor_dict boundary case on all four ranks: custom TP shard, replicated hidden_states, and non-tensor metadata all preserved."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1a47540ac07d/venv/bin/python reports/j-300a724a2692/gpu_send_allowlist.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate source on AMD Instinct MI355X/gfx950 selected 4 elements for replicated hidden_states and all 8 for a sharded custom key."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 c276f578f02392cda2d4766ca4a846f5ab33e3f2",
+      "exit_code": 2,
+      "what_was_measured": "Only candidate raw log artifacts had trailing whitespace/newline-at-EOF diagnostics; modified source and test files were not identified."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI355X, gfx950, ROCm 7.2. GPU tensors exercised actual candidate send-side selection; no multi-GPU collective was possible."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one GPU was assigned, so tp=2 x pp=2 transport was validated with four Gloo CPU processes, not RCCL/NCCL across four GPUs.",
+    "No RWKV-7 weights/model integration was available; semantic accuracy and greedy decoding were not tested.",
+    "The candidate low-level API relies on matching sender/receiver allowlists, though all scheduler call sites were verified to pass the same constant.",
+    "No native code changed; native rebuild was not applicable.",
+    "Candidate raw evidence logs contain whitespace diagnostics under git diff --check."
+  ]
+}
