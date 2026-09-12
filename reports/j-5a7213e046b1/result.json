@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34259",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "e977642913f3b015120029ff075e207d84f299a0",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "PR 1783 is valid test-only hardening and accurately rejects returned-hidden-state slicing as proof of the ordinary Kimi-K3 generated-reasoning leak. It contains no production fix, the candidate tests already pass on the recorded base, and the original intermittent Kimi-K3 failure remains unverified in the available environment.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5a7213e046b1/venv/bin/python -m pytest -q /job/review-evidence-j-5a7213e046b1/candidate_test.py (recorded base checkout)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's complete regression file passes unchanged on base 358c163: 10 passed, 2 subtests. There is no candidate-attributable failing-before/passing-after production change."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5a7213e046b1/venv/bin/python -m pytest -q test/registered/unit/managers/test_batch_result_processor_hidden_states.py (detached e977642)",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate regression passes: 10 passed, 2 subtests."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5a7213e046b1/venv/bin/python /job/review-evidence-j-5a7213e046b1/adversarial_review.py (detached e977642)",
+      "exit_code": 0,
+      "what_was_measured": "On MI355X/gfx950, 100 randomized packed-offset cases and a two-request ordinary token-commit boundary passed; the harness also captured the zero-row return_hidden_states='last' IndexError as a remaining counterexample."
+    },
+    {
+      "command": "git diff --name-only 358c163250ad3b1f62939b01ce1314a0a31a0365 e977642913f3b015120029ff075e207d84f299a0 | rg '\\.(c|cc|cpp|cu|hip|h|hpp)$'",
+      "exit_code": 1,
+      "what_was_measured": "No native source paths changed; rg exit 1 means no matching path, so a native rebuild was not applicable."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Independent adversarial tensor checks ran on one AMD Instinct MI355X with gfx950:sramecc+:xnack- using torch 2.11.0+rocm7.2. This does not qualify Kimi-K3 or the reported NVIDIA topology."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Full capture with return_hidden_states='last' and extend_input_len=0 raises IndexError on an empty hidden-state slice; the candidate's zero-row test uses return_hidden_states=False and misses this combination.",
+    "No test generates Kimi-K3 reasoning from distinct prompts, so semantic cross-prompt isolation remains untested.",
+    "No candidate test exercises concurrent HTTP requests, eight-way tensor parallelism, NVIDIA B300/CUDA 13, or repeated randomized server scheduling."
+  ],
+  "remaining_limitations": [
+    "Kimi-K3 weights and a deterministic request corpus were unavailable.",
+    "The environment provides one AMD MI355X/gfx950 GPU with ROCm 7.2 instead of eight NVIDIA B300 GPUs with CUDA 13.0.",
+    "The source issue is intermittent and supplies no deterministic reproducer.",
+    "The tiny-Llama fixture can qualify transport and engine execution only and cannot validate Kimi-K3 architecture or reasoning semantics.",
+    "The official v0.5.17 tag already contains the tested hidden-state offset ordering, so rollback failure is not reproduction of the v0.5.17 report."
+  ]
+}
