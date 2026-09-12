@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38536",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "not_reproduced",
+  "summary": "The checked-out Rust TreeCore was faster than Python in an alternating-order GPU-backed cache benchmark and in two independent, reverse-order tiny-Llama streaming server sessions at concurrency 8 and 64. No issue-specific production correction was justified.",
+  "tests": [
+    {
+      "command": "cargo test --locked --release (with LIBTORCH_USE_PYTORCH=1, the prepared interpreter's Torch libraries, and the repository compatibility header)",
+      "exit_code": 0,
+      "what_was_measured": "Native Rust TreeCore correctness: 846 passed, 0 failed, 1 ignored."
+    },
+    {
+      "command": "alternating five-round run_all_benchmarks(num_seqs=1200, chunk_len=96, kv_size=180000, FULL, page_size=1, verify=True, match/lock/cache_finished)",
+      "exit_code": 0,
+      "what_was_measured": "GPU-backed TreeCore operation throughput and correctness. Rust median throughput exceeded Python by 129.7% for match, 486.0% for lock/unlock, and 59.3% for cache_finished."
+    },
+    {
+      "command": "run_server_benchmark.py twice per backend in python,rust,rust,python order; three rounds each at concurrency 8 and 64",
+      "exit_code": 0,
+      "what_was_measured": "Actual HTTP streaming and engine execution using the qualified deterministic tiny Llama. After excluding each level's first compilation/warmup round, Rust median e2e/TTFT/stream-span were respectively 6.6%/4.3%/2.1% lower at concurrency 8 and 2.3%/3.7%/2.3% lower at concurrency 64. Every request returned HTTP 200 with 12 streaming events."
+    },
+    {
+      "command": "python -m py_compile reports/j-bf530aa0711b/*.py",
+      "exit_code": 0,
+      "what_was_measured": "Syntax validity of the retained fixture and benchmark runners."
+    },
+    {
+      "command": "rocm-smi --showmemuse --showuse",
+      "exit_code": 0,
+      "what_was_measured": "Post-test cleanup: 0% GPU use and 0% allocated VRAM."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X, gfx950:sramecc+:xnack-. Four real SGLang server processes executed streaming requests; server logs identify the Python and Rust TreeCore classes."
+  },
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "Qwen2.5-1.5B-Instruct weights were unavailable; the random tiny Llama cannot validate Qwen semantics or the qwen tool-call parser.",
+    "The assigned AMD Instinct MI350X (gfx950) is not the reported RTX 4090, so the original GPU-specific end-to-end result remains unverified.",
+    "The tiny fixture covered concurrency 8 and 64, not 256, and validates transport and engine execution only.",
+    "Each server's first round showed compilation/warmup transients and was excluded according to a declared rule; four post-warmup rounds per backend remain too small for a broad performance claim.",
+    "Server shutdown required SIGKILL after the runner's 30-second graceful timeout, but the subreaper removed descendants and ROCm reported no remaining GPU allocation."
+  ]
+}
