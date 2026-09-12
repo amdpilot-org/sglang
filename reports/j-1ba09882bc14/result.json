@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34448",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1648",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1612",
+  "candidate_commit": "2a6bd87dc7b815d722007836a68ecfa7efc7a386",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The recorded base independently reproduces the MXFP4 Triton post-load state_dict omission. At the exact candidate, its regression and independent GPU-backed storage, serialization, missing-key, and offload boundary cases pass. The patch is an issue-specific source fix rather than test-only hardening. Full GH200/gpt-oss-20b/TP=2 qualification remains unavailable on this AMD-only host.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-1ba09882bc14/venv/bin/python /job/review-evidence-j-1ba09882bc14/candidate_test.py (at base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before issue-specific reproduction: w13_weight was absent from state_dict after Triton-path post-processing, and wrapper-retained parameters were not protected from CPU offload."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-1ba09882bc14/venv/bin/python test/registered/unit/model_loader/test_mxfp4_sharded_state.py (at candidate 2a6bd87dc7b815d722007836a68ecfa7efc7a386)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: all runtime weights/scales remain registered and survive a safetensors sharded-state round trip; wrapper-backed parameters are excluded from OffloaderV1."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-1ba09882bc14/venv/bin/python /job/review-evidence-j-1ba09882bc14/adversarial_review.py (at candidate 2a6bd87dc7b815d722007836a68ecfa7efc7a386)",
+      "exit_code": 0,
+      "what_was_measured": "Independent MI355X/gfx950 cases: GPU storage pointer aliasing and strides, contiguous CPU safetensors snapshots, checkpoint-copy visibility in wrapper storage, detection of an omitted w2_weight, and mixed keep/offload behavior."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 2a6bd87dc7b815d722007836a68ecfa7efc7a386 && /tmp/amdpilot-repo-j-1ba09882bc14/venv/bin/python scripts/lint/check_registered_tests.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate whitespace integrity and registered-test metadata consistency."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Independent adversarial storage and safetensors transport ran on the single assigned AMD Instinct MI355X, gcnArchName gfx950:sramecc+:xnack-. This was not NVIDIA triton_kernels execution."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The openai/gpt-oss-20b weights were unavailable, so the reported 13G-versus-4G export comparison, full save/reload, and semantic output comparison were not run.",
+    "The assigned GPU is AMD gfx950, while the original report used GH200 and the affected runtime backend is NVIDIA triton_kernels. Layout conversion was mocked with the same wrapper storage interface; real NVIDIA swizzle and kernel execution remain unverified.",
+    "TP=2, multi-GPU, and multi-node behavior were not exercised.",
+    "The candidate changes no native source; native rebuild was not applicable."
+  ]
+}
