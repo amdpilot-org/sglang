@@ -1,0 +1,76 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33625",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Added a separate opt-in bounded_consistent_hashing Model Gateway policy. Explicit X-SMG-Routing-Key requests retain their consistent-hash preference unless both the configured absolute active-request gap and relative max_load_skew bound are exceeded, then spill to the first eligible healthy worker clockwise on the cached ring. Strict consistent_hashing, X-SMG-Target-Worker, implicit authorization/forwarded-for/cookie affinity, one-worker behavior, and no-eligible-candidate behavior remain strict/safe. Added metrics, standalone and Python configuration surfaces, full HTTP request-lifetime load tracking, and a cached aggregate non-IGW regular-HTTP ring.",
+  "tests": [
+    {
+      "command": "cargo fmt --all -- --check (Rust 1.90 toolchain under /tmp/amdpilot-repo-j-67f607c4b6ab)",
+      "exit_code": 0,
+      "what_was_measured": "Rust formatting for the complete gateway workspace."
+    },
+    {
+      "command": "cargo test bounded_consistent_hashing --lib",
+      "exit_code": 0,
+      "what_was_measured": "18 bounded-policy/config/router tests: below-bound affinity, absolute-plus-relative spill threshold, deterministic clockwise spill, implicit-key strictness, target-worker strictness, unhealthy failover/recovery, one/no-worker behavior, missing-ring fallback, near-idle adversarial vectors, candidate gap placement, and request-load tracking."
+    },
+    {
+      "command": "cargo test consistent_hashing --lib",
+      "exit_code": 0,
+      "what_was_measured": "32 matching tests, including the unchanged strict consistent-hashing behavior and explicit load-invariance regression."
+    },
+    {
+      "command": "cargo test --test load_guard_raii_test",
+      "exit_code": 0,
+      "what_was_measured": "8 native tests covering streaming completion, client disconnect/drop, non-streaming upstream body reads, empty bodies, multiple guards, and explicit routing-key load lifetime."
+    },
+    {
+      "command": "cargo test --test routing_tests non_igw_bounded",
+      "exit_code": 0,
+      "what_was_measured": "A real Router-to-two-HTTP-worker integration regression proving spill follows key-relative clockwise ring order in non-IGW mode."
+    },
+    {
+      "command": "cargo test --lib",
+      "exit_code": 0,
+      "what_was_measured": "Full native gateway library regression suite: 415 passed."
+    },
+    {
+      "command": "cargo check --locked --all-targets",
+      "exit_code": 0,
+      "what_was_measured": "All Rust library, binary, test, example, and benchmark targets against the privately generated resolution lock."
+    },
+    {
+      "command": "maturin develop; PYTHONPATH=/job/repo/sgl-model-gateway/bindings/python/src:/job/repo/python python -m pytest bindings/python/tests/test_arg_parser.py bindings/python/tests/test_pyo3_binding.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Rebuilt native PyO3 extension and source Python package: 100 passed, 1 skipped; validates enum conversion, CLI choices and threshold propagation."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-67f607c4b6ab/target/debug/sgl-model-gateway --help | rg 'bounded_consistent_hashing|max-load-skew|min-load-gap'",
+      "exit_code": 0,
+      "what_was_measured": "The newly built standalone native binary advertises the policy and both configuration knobs."
+    },
+    {
+      "command": "Initial source/interpreter path Python tests before rebuilding and selecting the checkout extension",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before compatibility evidence: the preinstalled gateway rejected bounded_consistent_hashing and lacked PolicyType.BoundedConsistentHashing; after the native rebuild and explicit checkout path, the same tests passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU kernels or model numerical outputs are changed by this Rust HTTP routing feature. No model-backed GPU benchmark was run; CPU-native policy tests and a real two-worker HTTP transport regression cover the implementation boundary."
+  },
+  "native_rebuilt": true,
+  "evidence_paths": {
+    "raw_logs": "/tmp/amdpilot-repo-j-67f607c4b6ab/evidence/",
+    "native_target": "/tmp/amdpilot-repo-j-67f607c4b6ab/target/",
+    "rebuilt_python_extension": "/job/repo/sgl-model-gateway/bindings/python/src/sglang_router/sglang_router_rs.abi3.so",
+    "source_root": "/job/repo/sgl-model-gateway"
+  },
+  "remaining_limitations": [
+    "Worker::load() is an active-request counter local to one gateway process; separate gateway replicas can make different best-effort spill decisions.",
+    "Spillover sacrifices backend-local KV/cache locality and is unsafe when routing-key affinity is an application correctness requirement; those clients must use strict consistent_hashing or X-SMG-Target-Worker.",
+    "The model-backed two-worker GPU A/B benchmark requested as suggested validation was not rerun in this job. Therefore this contribution makes no new throughput, p95 latency, cache-hit, prefill-work, semantic-accuracy, model-architecture, or distributed-workload claim.",
+    "The repository did not contain a checked-in sgl-model-gateway/Cargo.lock. The first --locked attempt therefore failed before compilation; dependency resolution was generated privately for the subsequent locked all-target check and was not added to the contribution.",
+    "The prepared image initially lacked cargo despite rust-toolchain.toml pinning Rust 1.90. Rust 1.90 and build caches were installed only under /tmp/amdpilot-repo-j-67f607c4b6ab; node-wide Torch/ROCm and host state were not changed."
+  ]
+}
