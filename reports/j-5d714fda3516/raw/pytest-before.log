@@ -1,0 +1,159 @@
+F.F.......F.F.F                                                          [100%]
+=================================== FAILURES ===================================
+___________________ test_flat_matches_torch_reference[4-8-6] ___________________
+
+rope_dim = 6, batch = 4, n_heads = 8
+
+    @pytest.mark.parametrize("rope_dim", [6, 64, 96, 128, 192])
+    @pytest.mark.parametrize("batch,n_heads", [(4, 8), (1, 1)])
+    def test_flat_matches_torch_reference(rope_dim: int, batch: int, n_heads: int):
+        """Cover padded widths plus power-of-two and final-row boundary controls."""
+        x, freqs = _inputs(batch, n_heads, rope_dim)
+        expected = _torch_reference(x, freqs)
+
+        set_batched_rope(True)
+        actual = apply_rotary_emb_triton(x.clone(), freqs)
+
+>       torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-5)
+E       AssertionError: Tensor-likes are not close!
+E
+E       Mismatched elements: 2 / 192 (1.0%)
+E       Greatest absolute difference: 2.4748899936676025 at index (2, 0, 0) (up to 1e-05 allowed)
+E       Greatest relative difference: 1.7709702253341675 at index (2, 0, 0) (up to 1e-05 allowed)
+
+test/registered/kernels/ops/attention/test_deepseek_v4_rope_flat.py:49: AssertionError
+__________________ test_flat_matches_torch_reference[4-8-96] ___________________
+
+rope_dim = 96, batch = 4, n_heads = 8
+
+    @pytest.mark.parametrize("rope_dim", [6, 64, 96, 128, 192])
+    @pytest.mark.parametrize("batch,n_heads", [(4, 8), (1, 1)])
+    def test_flat_matches_torch_reference(rope_dim: int, batch: int, n_heads: int):
+        """Cover padded widths plus power-of-two and final-row boundary controls."""
+        x, freqs = _inputs(batch, n_heads, rope_dim)
+        expected = _torch_reference(x, freqs)
+
+        set_batched_rope(True)
+        actual = apply_rotary_emb_triton(x.clone(), freqs)
+
+>       torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-5)
+E       AssertionError: Tensor-likes are not close!
+E
+E       Mismatched elements: 512 / 3072 (16.7%)
+E       Greatest absolute difference: 4.713756084442139 at index (3, 3, 23) (up to 1e-05 allowed)
+E       Greatest relative difference: 174.181396484375 at index (1, 5, 30) (up to 1e-05 allowed)
+
+test/registered/kernels/ops/attention/test_deepseek_v4_rope_flat.py:49: AssertionError
+____________ test_flat_does_not_overwrite_columns_past_rope_dim[6] _____________
+
+rope_dim = 6
+
+    @pytest.mark.parametrize("rope_dim", [6, 64, 96, 128, 192])
+    def test_flat_does_not_overwrite_columns_past_rope_dim(rope_dim: int):
+        """Expose padded-column stores through a wider backing allocation."""
+        batch, n_heads = 2, 4
+        x, freqs = _inputs(batch, n_heads, rope_dim)
+        sentinel = -12345.0
+        backing = torch.full(
+            (batch, n_heads, 2 * rope_dim),
+            sentinel,
+            device="cuda",
+            dtype=torch.float32,
+        )
+        backing[:, :, :rope_dim] = x
+
+        set_batched_rope(True)
+        apply_rotary_emb_triton(backing[:, :, :rope_dim], freqs)
+
+        tail = backing[:, :, rope_dim:]
+>       assert torch.equal(tail, torch.full_like(tail, sentinel)), (
+            f"{int((tail != sentinel).sum())} elements past rope_dim were overwritten"
+        )
+E       AssertionError: 16 elements past rope_dim were overwritten
+E       assert False
+E        +  where False = <built-in method equal of type object at 0x7fb34371b220>(tensor([[[  3717.9272, -17057.9902, -12345.0000, -12345.0000, -12345.0000,\n          -12345.0000],\n         [  3717.92...,\n         [ -5934.8672,  -2460.4863, -12345.0000, -12345.0000, -12345.0000,\n          -12345.0000]]], device='cuda:0'), tensor([[[-12345., -12345., -12345., -12345., -12345., -12345.],\n         [-12345., -12345., -12345., -12345., -12345.... -12345., -12345., -12345.],\n         [-12345., -12345., -12345., -12345., -12345., -12345.]]],\n       device='cuda:0'))
+E        +    where <built-in method equal of type object at 0x7fb34371b220> = torch.equal
+E        +    and   tensor([[[-12345., -12345., -12345., -12345., -12345., -12345.],\n         [-12345., -12345., -12345., -12345., -12345.... -12345., -12345., -12345.],\n         [-12345., -12345., -12345., -12345., -12345., -12345.]]],\n       device='cuda:0') = <built-in method full_like of type object at 0x7fb34371b220>(tensor([[[  3717.9272, -17057.9902, -12345.0000, -12345.0000, -12345.0000,\n          -12345.0000],\n         [  3717.92...,\n         [ -5934.8672,  -2460.4863, -12345.0000, -12345.0000, -12345.0000,\n          -12345.0000]]], device='cuda:0'), -12345.0)
+E        +      where <built-in method full_like of type object at 0x7fb34371b220> = torch.full_like
+
+test/registered/kernels/ops/attention/test_deepseek_v4_rope_flat.py:70: AssertionError
+____________ test_flat_does_not_overwrite_columns_past_rope_dim[96] ____________
+
+rope_dim = 96
+
+    @pytest.mark.parametrize("rope_dim", [6, 64, 96, 128, 192])
+    def test_flat_does_not_overwrite_columns_past_rope_dim(rope_dim: int):
+        """Expose padded-column stores through a wider backing allocation."""
+        batch, n_heads = 2, 4
+        x, freqs = _inputs(batch, n_heads, rope_dim)
+        sentinel = -12345.0
+        backing = torch.full(
+            (batch, n_heads, 2 * rope_dim),
+            sentinel,
+            device="cuda",
+            dtype=torch.float32,
+        )
+        backing[:, :, :rope_dim] = x
+
+        set_batched_rope(True)
+        apply_rotary_emb_triton(backing[:, :, :rope_dim], freqs)
+
+        tail = backing[:, :, rope_dim:]
+>       assert torch.equal(tail, torch.full_like(tail, sentinel)), (
+            f"{int((tail != sentinel).sum())} elements past rope_dim were overwritten"
+        )
+E       AssertionError: 256 elements past rope_dim were overwritten
+E       assert False
+E        +  where False = <built-in method equal of type object at 0x7fb34371b220>(tensor([[[  3717.9275, -17057.9902,    698.2569, -17444.4961,  -1814.2513,\n          -17363.9434,  -3862.0183, -17025....,\n          -12345.0000, -12345.0000, -12345.0000, -12345.0000, -12345.0000,\n          -12345.0000]]], device='cuda:0'), tensor([[[-12345., -12345., -12345., -12345., -12345., -12345., -12345.,\n          -12345., -12345., -12345., -12345.,...-12345., -12345., -12345., -12345., -12345.,\n          -12345., -12345., -12345., -12345., -12345.]]], device='cuda:0'))
+E        +    where <built-in method equal of type object at 0x7fb34371b220> = torch.equal
+E        +    and   tensor([[[-12345., -12345., -12345., -12345., -12345., -12345., -12345.,\n          -12345., -12345., -12345., -12345.,...-12345., -12345., -12345., -12345., -12345.,\n          -12345., -12345., -12345., -12345., -12345.]]], device='cuda:0') = <built-in method full_like of type object at 0x7fb34371b220>(tensor([[[  3717.9275, -17057.9902,    698.2569, -17444.4961,  -1814.2513,\n          -17363.9434,  -3862.0183, -17025....,\n          -12345.0000, -12345.0000, -12345.0000, -12345.0000, -12345.0000,\n          -12345.0000]]], device='cuda:0'), -12345.0)
+E        +      where <built-in method full_like of type object at 0x7fb34371b220> = torch.full_like
+
+test/registered/kernels/ops/attention/test_deepseek_v4_rope_flat.py:70: AssertionError
+___________ test_flat_does_not_overwrite_columns_past_rope_dim[192] ____________
+
+rope_dim = 192
+
+    @pytest.mark.parametrize("rope_dim", [6, 64, 96, 128, 192])
+    def test_flat_does_not_overwrite_columns_past_rope_dim(rope_dim: int):
+        """Expose padded-column stores through a wider backing allocation."""
+        batch, n_heads = 2, 4
+        x, freqs = _inputs(batch, n_heads, rope_dim)
+        sentinel = -12345.0
+        backing = torch.full(
+            (batch, n_heads, 2 * rope_dim),
+            sentinel,
+            device="cuda",
+            dtype=torch.float32,
+        )
+        backing[:, :, :rope_dim] = x
+
+        set_batched_rope(True)
+        apply_rotary_emb_triton(backing[:, :, :rope_dim], freqs)
+
+        tail = backing[:, :, rope_dim:]
+>       assert torch.equal(tail, torch.full_like(tail, sentinel)), (
+            f"{int((tail != sentinel).sum())} elements past rope_dim were overwritten"
+        )
+E       AssertionError: 512 elements past rope_dim were overwritten
+E       assert False
+E        +  where False = <built-in method equal of type object at 0x7fb34371b220>(tensor([[[  3717.9275, -17057.9902,   2144.0488,  ..., -12345.0000,\n          -12345.0000, -12345.0000],\n         [  3...     [  6164.0898,  16665.8320,  34430.5664,  ..., -12345.0000,\n          -12345.0000, -12345.0000]]], device='cuda:0'), tensor([[[-12345., -12345., -12345.,  ..., -12345., -12345., -12345.],\n         [-12345., -12345., -12345.,  ..., -123...5., -12345., -12345.],\n         [-12345., -12345., -12345.,  ..., -12345., -12345., -12345.]]],\n       device='cuda:0'))
+E        +    where <built-in method equal of type object at 0x7fb34371b220> = torch.equal
+E        +    and   tensor([[[-12345., -12345., -12345.,  ..., -12345., -12345., -12345.],\n         [-12345., -12345., -12345.,  ..., -123...5., -12345., -12345.],\n         [-12345., -12345., -12345.,  ..., -12345., -12345., -12345.]]],\n       device='cuda:0') = <built-in method full_like of type object at 0x7fb34371b220>(tensor([[[  3717.9275, -17057.9902,   2144.0488,  ..., -12345.0000,\n          -12345.0000, -12345.0000],\n         [  3...     [  6164.0898,  16665.8320,  34430.5664,  ..., -12345.0000,\n          -12345.0000, -12345.0000]]], device='cuda:0'), -12345.0)
+E        +      where <built-in method full_like of type object at 0x7fb34371b220> = torch.full_like
+
+test/registered/kernels/ops/attention/test_deepseek_v4_rope_flat.py:70: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/kernels/ops/attention/test_deepseek_v4_rope_flat.py::test_flat_matches_torch_reference[4-8-6]
+FAILED test/registered/kernels/ops/attention/test_deepseek_v4_rope_flat.py::test_flat_matches_torch_reference[4-8-96]
+FAILED test/registered/kernels/ops/attention/test_deepseek_v4_rope_flat.py::test_flat_does_not_overwrite_columns_past_rope_dim[6]
+FAILED test/registered/kernels/ops/attention/test_deepseek_v4_rope_flat.py::test_flat_does_not_overwrite_columns_past_rope_dim[96]
+FAILED test/registered/kernels/ops/attention/test_deepseek_v4_rope_flat.py::test_flat_does_not_overwrite_columns_past_rope_dim[192]
+5 failed, 10 passed, 1 warning in 8.57s
