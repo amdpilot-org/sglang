@@ -1,0 +1,847 @@
+........sss.FFFF......................................                [100%]
+=================================== FAILURES ===================================
+_ test_native_encoder_restoration_checks_checkpoint_before_fallback[False-False] _
+
+self = <sglang.multimodal_gen.runtime.loader.component_loaders.text_encoder_loader.TextEncoderLoader object at 0x7f763af7cc50>
+component_model_path = '/tmp/pytest-of-qinwu/pytest-0/test_native_encoder_restoratio0'
+server_args = ServerArgs(model_path='x', model_subfolder=None, model_variant=None, model_id=None, served_model_name='x', backend=<Ba...='localhost:4317', srt_encoder_url=None, srt_encoder_connect_timeout=3.05, srt_encoder_timeout=100, pe_server_url=None)
+component_name = 'text_encoder', transformers_or_diffusers = 'transformers'
+
+    def load(
+        self,
+        component_model_path: str,
+        server_args: ServerArgs,
+        component_name: str,
+        transformers_or_diffusers: str,
+        *,
+        component_attn_backend: Any = None,
+        component_attn_name: str | None = None,
+        allow_native_fallback: bool = True,
+    ) -> tuple[AutoModel, float]:
+        """
+        Template method that standardizes logging around the core load implementation.
+        The priority of loading method is:
+            1. load customized component
+            2. load native diffusers/transformers component
+        If all of the above methods failed, an error will be thrown
+    
+        """
+        self._native_load_manages_placement = False
+        self.component_load_precision(server_args, component_name)
+        component_weight_override = self.resolve_component_weight_override(
+            server_args, component_name
+        )
+        self.resolve_component_quantization_override(server_args, component_name)
+        self.resolve_component_direct_gpu_loading(server_args, component_name)
+        fsdp_requested = server_args.should_use_fsdp_for_component(component_name)
+    
+        gpu_mem_before_loading = current_platform.get_available_gpu_memory()
+        logger.info(
+            "Loading %s from %s. avail mem: %.2f GB",
+            component_name,
+            component_model_path,
+            gpu_mem_before_loading,
+        )
+        if (
+            component_attn_backend is None
+            and component_attn_name is None
+            and get_component_attn_backend_context() is None
+        ):
+            component_attn_backend, matched_backend_key = (
+                server_args.resolve_component_attention_backend(component_name)
+            )
+            component_attn_name = matched_backend_key or component_name
+            if component_attn_backend is not None:
+                logger.info(
+                    "Using %s backend for component: %s",
+                    component_attn_backend.name.lower(),
+                    matched_backend_key,
+                )
+        requested_backend = (
+            server_args.requested_component_attention_backend(component_attn_name)
+            if component_attn_name is not None
+            else None
+        )
+        require_backend_selection = requested_backend is not None
+        if require_backend_selection and (
+            component_attn_backend is None
+            or component_attn_backend.name.lower() != requested_backend
+        ):
+            raise ValueError(
+                f"Component attention backend for {component_attn_name!r} no longer "
+                f"matches the explicit request {requested_backend!r}"
+            )
+        try:
+>           component = self._load_customized_with_context(
+                component_model_path,
+                server_args,
+                component_name,
+                component_attn_backend,
+                component_attn_name,
+                require_backend_selection,
+            )
+
+python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py:387: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py:295: in _load_customized_with_context
+    return self.load_customized(
+python/sglang/multimodal_gen/runtime/loader/component_loaders/text_encoder_loader.py:528: in load_customized
+    encoder_dp_group = get_encoder_data_parallel_group()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/multimodal_gen/runtime/distributed/parallel_state.py:394: in get_encoder_data_parallel_group
+    return get_world_group()
+           ^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def get_world_group() -> GroupCoordinator:
+>       assert _WORLD is not None, "world group is not initialized"
+               ^^^^^^^^^^^^^^^^^^
+E       AssertionError: world group is not initialized
+
+python/sglang/multimodal_gen/runtime/distributed/parallel_state.py:132: AssertionError
+
+During handling of the above exception, another exception occurred:
+
+tmp_path = PosixPath('/tmp/pytest-of-qinwu/pytest-0/test_native_encoder_restoratio0')
+missing = False, competing_index = False
+
+    @pytest.mark.parametrize("missing", [False, True])
+    @pytest.mark.parametrize("competing_index", [False, True])
+    def test_native_encoder_restoration_checks_checkpoint_before_fallback(
+        tmp_path, missing, competing_index
+    ):
+        config = transformers.T5Config(
+            vocab_size=32,
+            d_model=8,
+            d_kv=4,
+            d_ff=16,
+            num_layers=1,
+            num_heads=2,
+            architectures=["T5EncoderModel"],
+        )
+        reference = transformers.T5EncoderModel(config)
+        config.save_pretrained(tmp_path)
+        weights = {name: tensor.clone() for name, tensor in reference.state_dict().items()}
+        required = "encoder.final_layer_norm.weight"
+        if missing:
+            weights.pop(required)
+        save_file(weights, tmp_path / "model.safetensors")
+        if competing_index:
+            # LTX-2 ships both indexes in text_encoder; only the HF one owns this model
+            (tmp_path / "model.safetensors.index.json").write_text(
+                json.dumps({"weight_map": {name: "model.safetensors" for name in weights}})
+            )
+            alternate = "diffusion_pytorch_model.safetensors"
+            save_file({"diffusion.weight": torch.ones(2, 2)}, tmp_path / alternate)
+            (tmp_path / "diffusion_pytorch_model.safetensors.index.json").write_text(
+                json.dumps({"weight_map": {"diffusion.weight": alternate}})
+            )
+            alternate_weights = dict(checkpoint_weights_iterator(str(tmp_path)))
+            assert set(alternate_weights) == {"diffusion.weight"}
+        args = ServerArgs(
+            model_path="x",
+            component_precisions={"text_encoder": "fp32"},
+            component_residency={"text_encoder": "component-offload"},
+        )
+        args.pipeline_config.text_encoder_configs = (T5Config(),)
+        loader = TextEncoderLoader()
+        with mock.patch.object(
+            loader, "load_native", side_effect=AssertionError("fallback")
+        ):
+            if missing:
+                with pytest.raises(ComponentCheckpointUnsupportedError, match=required):
+                    loader.load(str(tmp_path), args, "text_encoder", "transformers")
+            else:
+>               model, _ = loader.load(str(tmp_path), args, "text_encoder", "transformers")
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+python/sglang/multimodal_gen/test/unit/test_text_encoder_loader.py:274: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py:444: in load
+    component = self._load_native_with_context(
+python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py:314: in _load_native_with_context
+    component = self.load_native(
+/usr/lib/python3.12/unittest/mock.py:1134: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1138: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock name='load_native' id='140145767555984'>
+args = ('/tmp/pytest-of-qinwu/pytest-0/test_native_encoder_restoratio0', ServerArgs(model_path='x', model_subfolder=None, mod...l=None, srt_encoder_connect_timeout=3.05, srt_encoder_timeout=100, pe_server_url=None), 'transformers', 'text_encoder')
+kwargs = {}, effect = AssertionError('fallback')
+
+    def _execute_mock_call(self, /, *args, **kwargs):
+        # separate from _increment_mock_call so that awaited functions are
+        # executed separately from their call, also AsyncMock overrides this method
+    
+        effect = self.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+>               raise effect
+E               AssertionError: fallback
+
+/usr/lib/python3.12/unittest/mock.py:1193: AssertionError
+----------------------------- Captured stdout call -----------------------------
+[09-12 09:27:20] Disabling component offload for PipelineConfig because minimum available memory on selected GPUs is 251.38 GiB: dit_cpu_offload=False
+[09-12 09:27:20] Attention backend not specified. Using 'aiter' by default on ROCm to match SGLang SRT defaults.
+[09-12 09:27:20] server_args: {"model_path": "x", "model_subfolder": null, "model_variant": null, "model_id": null, "served_model_name": "x", "backend": "auto", "attention_backend": "aiter", "attention_backend_config": {}, "component_attention_backends": {}, "cache_dit_config": null, "nccl_port": null, "enable_nccl_nvls": false, "trust_remote_code": false, "revision": null, "num_gpus": 1, "performance_mode": "auto", "base_gpu_id": 0, "gpu_ids": null, "nnodes": 1, "node_rank": 0, "dist_init_addr": null, "tp_size": 1, "sp_degree": 1, "ulysses_degree": 1, "ring_degree": 1, "kv_gather_degree": 1, "sp_split_auto": false, "dp_size": 1, "enable_cfg_parallel": false, "cfg_parallel_degree": 1, "encoder_parallel": "auto", "hsdp_replicate_dim": 1, "hsdp_shard_dim": 1, "dist_timeout": 3600, "scheduler_rpc_timeout": null, "pipeline_class_name": null, "lora_path": null, "lora_nickname": "default", "lora_scale": 1.0, "lora_alpha": null, "lora_merge_mode": "auto", "lora_weight_name": null, "component_paths": {}, "component_weights_paths": {}, "component_direct_gpu_weight_loading": {}, "component_quantizations": {}, "component_precisions": {"text_encoder": "fp32"}, "component_quantization_ignored_layers": {}, "load_diffusion_decoder": false, "transformer_weights_path": null, "minimax_h3_adaln_cache_path": null, "minimax_h3_adaln_online": false, "minimax_h3_adaln_plan_width": 4, "minimax_h3_adaln_host_cache_gb": 8.0, "quantization": null, "quantization_ignored_layers": null, "lora_target_modules": null, "component_residency": {"text_encoder": "component-offload"}, "cpu_offload_components": null, "dit_cpu_offload": false, "direct_gpu_weight_loading": false, "dit_layerwise_offload": false, "layerwise_offload_components": null, "dit_offload_prefetch_size": 0.0, "dit_layerwise_resident_layers": 0.0, "dit_layerwise_residency_policy": "leading", "layerwise_prefetch_size": {}, "layerwise_resident_layers": {}, "layerwise_residency_policy": {}, "offload_during_compile": true, "text_encoder_cpu_offload": true, "image_encoder_cpu_offload": false, "vae_cpu_offload": false, "use_fsdp_inference": false, "pin_cpu_memory": true, "ltx2_two_stage_device_mode": null, "comfyui_mode": false, "enable_torch_compile": false, "regional_compile": false, "enable_breakable_cuda_graph": false, "bcg_text_buckets": null, "enable_layerwise_nvtx_marker": false, "warmup_mode": "off", "warmup_resolutions": null, "warmup_num_frames": null, "warmup_steps": 1, "warmup_sampling_params": null, "disable_autocast": false, "master_port": 30005, "host": "127.0.0.1", "port": 30000, "webui": false, "webui_port": 12312, "scheduler_port": 5577, "scheduler_ports": [5577], "batching_mode": "dynamic", "batching_max_size": 1, "batching_delay_ms": 0.0, "batching_config": null, "enable_batching_metrics": false, "strict_ports": false, "output_path": "outputs/", "input_save_path": "inputs/uploads", "prompt_file_path": null, "model_paths": {}, "model_loaded": {"transformer": true, "vae": true, "video_vae": true, "audio_vae": true, "video_dit": true, "audio_dit": true, "dual_tower_bridge": true}, "boundary_ratio": null, "disagg_role": "monolithic", "disagg_timeout": 3600, "disagg_downstream_wait_timeout": 1800, "disagg_dispatch_policy": "round_robin", "disagg_mode": false, "disagg_instance_id": 0, "disagg_max_slots_per_instance": 8, "disagg_transfer_redundancy": 1.25, "disagg_role_device": "auto", "disagg_transfer_backend": "auto", "disagg_transfer_pool_size": 268435456, "disagg_transfer_pin_memory": "auto", "disagg_p2p_hostname": "127.0.0.1", "disagg_ib_device": null, "disagg_server_addr": null, "encoder_urls": null, "denoiser_urls": null, "decoder_urls": null, "encoder_tp": null, "denoiser_tp": null, "denoiser_sp": null, "denoiser_ulysses": null, "denoiser_ring": null, "decoder_sp": null, "pool_work_endpoint": null, "pool_result_endpoint": null, "pool_control_endpoint": null, "pool_control_advertised_endpoint": null, "log_level": "info", "log_requests": false, "log_requests_level": 2, "log_requests_format": "text", "log_requests_target": null, "uvicorn_access_log_exclude_prefixes": [], "enable_cache_report": false, "enable_trace": false, "otlp_traces_endpoint": "localhost:4317", "srt_encoder_url": null, "srt_encoder_connect_timeout": 3.05, "srt_encoder_timeout": 100, "pe_server_url": null}
+[09-12 09:27:20] Loading text_encoder from /tmp/pytest-of-qinwu/pytest-0/test_native_encoder_restoratio0. avail mem: 251.38 GB
+[91m[09-12 09:27:21] Error while loading customized text_encoder, falling back to native version[0;0m
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py", line 387, in load
+    component = self._load_customized_with_context(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py", line 295, in _load_customized_with_context
+    return self.load_customized(
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/multimodal_gen/runtime/loader/component_loaders/text_encoder_loader.py", line 528, in load_customized
+    encoder_dp_group = get_encoder_data_parallel_group()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/multimodal_gen/runtime/distributed/parallel_state.py", line 394, in get_encoder_data_parallel_group
+    return get_world_group()
+           ^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/multimodal_gen/runtime/distributed/parallel_state.py", line 132, in get_world_group
+    assert _WORLD is not None, "world group is not initialized"
+           ^^^^^^^^^^^^^^^^^^
+AssertionError: world group is not initialized
+_ test_native_encoder_restoration_checks_checkpoint_before_fallback[False-True] _
+
+self = <sglang.multimodal_gen.runtime.loader.component_loaders.text_encoder_loader.TextEncoderLoader object at 0x7f763ab32b70>
+component_model_path = '/tmp/pytest-of-qinwu/pytest-0/test_native_encoder_restoratio1'
+server_args = ServerArgs(model_path='x', model_subfolder=None, model_variant=None, model_id=None, served_model_name='x', backend=<Ba...='localhost:4317', srt_encoder_url=None, srt_encoder_connect_timeout=3.05, srt_encoder_timeout=100, pe_server_url=None)
+component_name = 'text_encoder', transformers_or_diffusers = 'transformers'
+
+    def load(
+        self,
+        component_model_path: str,
+        server_args: ServerArgs,
+        component_name: str,
+        transformers_or_diffusers: str,
+        *,
+        component_attn_backend: Any = None,
+        component_attn_name: str | None = None,
+        allow_native_fallback: bool = True,
+    ) -> tuple[AutoModel, float]:
+        """
+        Template method that standardizes logging around the core load implementation.
+        The priority of loading method is:
+            1. load customized component
+            2. load native diffusers/transformers component
+        If all of the above methods failed, an error will be thrown
+    
+        """
+        self._native_load_manages_placement = False
+        self.component_load_precision(server_args, component_name)
+        component_weight_override = self.resolve_component_weight_override(
+            server_args, component_name
+        )
+        self.resolve_component_quantization_override(server_args, component_name)
+        self.resolve_component_direct_gpu_loading(server_args, component_name)
+        fsdp_requested = server_args.should_use_fsdp_for_component(component_name)
+    
+        gpu_mem_before_loading = current_platform.get_available_gpu_memory()
+        logger.info(
+            "Loading %s from %s. avail mem: %.2f GB",
+            component_name,
+            component_model_path,
+            gpu_mem_before_loading,
+        )
+        if (
+            component_attn_backend is None
+            and component_attn_name is None
+            and get_component_attn_backend_context() is None
+        ):
+            component_attn_backend, matched_backend_key = (
+                server_args.resolve_component_attention_backend(component_name)
+            )
+            component_attn_name = matched_backend_key or component_name
+            if component_attn_backend is not None:
+                logger.info(
+                    "Using %s backend for component: %s",
+                    component_attn_backend.name.lower(),
+                    matched_backend_key,
+                )
+        requested_backend = (
+            server_args.requested_component_attention_backend(component_attn_name)
+            if component_attn_name is not None
+            else None
+        )
+        require_backend_selection = requested_backend is not None
+        if require_backend_selection and (
+            component_attn_backend is None
+            or component_attn_backend.name.lower() != requested_backend
+        ):
+            raise ValueError(
+                f"Component attention backend for {component_attn_name!r} no longer "
+                f"matches the explicit request {requested_backend!r}"
+            )
+        try:
+>           component = self._load_customized_with_context(
+                component_model_path,
+                server_args,
+                component_name,
+                component_attn_backend,
+                component_attn_name,
+                require_backend_selection,
+            )
+
+python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py:387: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py:295: in _load_customized_with_context
+    return self.load_customized(
+python/sglang/multimodal_gen/runtime/loader/component_loaders/text_encoder_loader.py:528: in load_customized
+    encoder_dp_group = get_encoder_data_parallel_group()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/multimodal_gen/runtime/distributed/parallel_state.py:394: in get_encoder_data_parallel_group
+    return get_world_group()
+           ^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def get_world_group() -> GroupCoordinator:
+>       assert _WORLD is not None, "world group is not initialized"
+               ^^^^^^^^^^^^^^^^^^
+E       AssertionError: world group is not initialized
+
+python/sglang/multimodal_gen/runtime/distributed/parallel_state.py:132: AssertionError
+
+During handling of the above exception, another exception occurred:
+
+tmp_path = PosixPath('/tmp/pytest-of-qinwu/pytest-0/test_native_encoder_restoratio1')
+missing = True, competing_index = False
+
+    @pytest.mark.parametrize("missing", [False, True])
+    @pytest.mark.parametrize("competing_index", [False, True])
+    def test_native_encoder_restoration_checks_checkpoint_before_fallback(
+        tmp_path, missing, competing_index
+    ):
+        config = transformers.T5Config(
+            vocab_size=32,
+            d_model=8,
+            d_kv=4,
+            d_ff=16,
+            num_layers=1,
+            num_heads=2,
+            architectures=["T5EncoderModel"],
+        )
+        reference = transformers.T5EncoderModel(config)
+        config.save_pretrained(tmp_path)
+        weights = {name: tensor.clone() for name, tensor in reference.state_dict().items()}
+        required = "encoder.final_layer_norm.weight"
+        if missing:
+            weights.pop(required)
+        save_file(weights, tmp_path / "model.safetensors")
+        if competing_index:
+            # LTX-2 ships both indexes in text_encoder; only the HF one owns this model
+            (tmp_path / "model.safetensors.index.json").write_text(
+                json.dumps({"weight_map": {name: "model.safetensors" for name in weights}})
+            )
+            alternate = "diffusion_pytorch_model.safetensors"
+            save_file({"diffusion.weight": torch.ones(2, 2)}, tmp_path / alternate)
+            (tmp_path / "diffusion_pytorch_model.safetensors.index.json").write_text(
+                json.dumps({"weight_map": {"diffusion.weight": alternate}})
+            )
+            alternate_weights = dict(checkpoint_weights_iterator(str(tmp_path)))
+            assert set(alternate_weights) == {"diffusion.weight"}
+        args = ServerArgs(
+            model_path="x",
+            component_precisions={"text_encoder": "fp32"},
+            component_residency={"text_encoder": "component-offload"},
+        )
+        args.pipeline_config.text_encoder_configs = (T5Config(),)
+        loader = TextEncoderLoader()
+        with mock.patch.object(
+            loader, "load_native", side_effect=AssertionError("fallback")
+        ):
+            if missing:
+                with pytest.raises(ComponentCheckpointUnsupportedError, match=required):
+>                   loader.load(str(tmp_path), args, "text_encoder", "transformers")
+
+python/sglang/multimodal_gen/test/unit/test_text_encoder_loader.py:272: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py:444: in load
+    component = self._load_native_with_context(
+python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py:314: in _load_native_with_context
+    component = self.load_native(
+/usr/lib/python3.12/unittest/mock.py:1134: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1138: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock name='load_native' id='140145766073264'>
+args = ('/tmp/pytest-of-qinwu/pytest-0/test_native_encoder_restoratio1', ServerArgs(model_path='x', model_subfolder=None, mod...l=None, srt_encoder_connect_timeout=3.05, srt_encoder_timeout=100, pe_server_url=None), 'transformers', 'text_encoder')
+kwargs = {}, effect = AssertionError('fallback')
+
+    def _execute_mock_call(self, /, *args, **kwargs):
+        # separate from _increment_mock_call so that awaited functions are
+        # executed separately from their call, also AsyncMock overrides this method
+    
+        effect = self.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+>               raise effect
+E               AssertionError: fallback
+
+/usr/lib/python3.12/unittest/mock.py:1193: AssertionError
+----------------------------- Captured stdout call -----------------------------
+[09-12 09:27:21] Disabling component offload for PipelineConfig because minimum available memory on selected GPUs is 251.38 GiB: dit_cpu_offload=False
+[09-12 09:27:21] Attention backend not specified. Using 'aiter' by default on ROCm to match SGLang SRT defaults.
+[09-12 09:27:21] server_args: {"model_path": "x", "model_subfolder": null, "model_variant": null, "model_id": null, "served_model_name": "x", "backend": "auto", "attention_backend": "aiter", "attention_backend_config": {}, "component_attention_backends": {}, "cache_dit_config": null, "nccl_port": null, "enable_nccl_nvls": false, "trust_remote_code": false, "revision": null, "num_gpus": 1, "performance_mode": "auto", "base_gpu_id": 0, "gpu_ids": null, "nnodes": 1, "node_rank": 0, "dist_init_addr": null, "tp_size": 1, "sp_degree": 1, "ulysses_degree": 1, "ring_degree": 1, "kv_gather_degree": 1, "sp_split_auto": false, "dp_size": 1, "enable_cfg_parallel": false, "cfg_parallel_degree": 1, "encoder_parallel": "auto", "hsdp_replicate_dim": 1, "hsdp_shard_dim": 1, "dist_timeout": 3600, "scheduler_rpc_timeout": null, "pipeline_class_name": null, "lora_path": null, "lora_nickname": "default", "lora_scale": 1.0, "lora_alpha": null, "lora_merge_mode": "auto", "lora_weight_name": null, "component_paths": {}, "component_weights_paths": {}, "component_direct_gpu_weight_loading": {}, "component_quantizations": {}, "component_precisions": {"text_encoder": "fp32"}, "component_quantization_ignored_layers": {}, "load_diffusion_decoder": false, "transformer_weights_path": null, "minimax_h3_adaln_cache_path": null, "minimax_h3_adaln_online": false, "minimax_h3_adaln_plan_width": 4, "minimax_h3_adaln_host_cache_gb": 8.0, "quantization": null, "quantization_ignored_layers": null, "lora_target_modules": null, "component_residency": {"text_encoder": "component-offload"}, "cpu_offload_components": null, "dit_cpu_offload": false, "direct_gpu_weight_loading": false, "dit_layerwise_offload": false, "layerwise_offload_components": null, "dit_offload_prefetch_size": 0.0, "dit_layerwise_resident_layers": 0.0, "dit_layerwise_residency_policy": "leading", "layerwise_prefetch_size": {}, "layerwise_resident_layers": {}, "layerwise_residency_policy": {}, "offload_during_compile": true, "text_encoder_cpu_offload": true, "image_encoder_cpu_offload": false, "vae_cpu_offload": false, "use_fsdp_inference": false, "pin_cpu_memory": true, "ltx2_two_stage_device_mode": null, "comfyui_mode": false, "enable_torch_compile": false, "regional_compile": false, "enable_breakable_cuda_graph": false, "bcg_text_buckets": null, "enable_layerwise_nvtx_marker": false, "warmup_mode": "off", "warmup_resolutions": null, "warmup_num_frames": null, "warmup_steps": 1, "warmup_sampling_params": null, "disable_autocast": false, "master_port": 30005, "host": "127.0.0.1", "port": 30000, "webui": false, "webui_port": 12312, "scheduler_port": 5592, "scheduler_ports": [5592], "batching_mode": "dynamic", "batching_max_size": 1, "batching_delay_ms": 0.0, "batching_config": null, "enable_batching_metrics": false, "strict_ports": false, "output_path": "outputs/", "input_save_path": "inputs/uploads", "prompt_file_path": null, "model_paths": {}, "model_loaded": {"transformer": true, "vae": true, "video_vae": true, "audio_vae": true, "video_dit": true, "audio_dit": true, "dual_tower_bridge": true}, "boundary_ratio": null, "disagg_role": "monolithic", "disagg_timeout": 3600, "disagg_downstream_wait_timeout": 1800, "disagg_dispatch_policy": "round_robin", "disagg_mode": false, "disagg_instance_id": 0, "disagg_max_slots_per_instance": 8, "disagg_transfer_redundancy": 1.25, "disagg_role_device": "auto", "disagg_transfer_backend": "auto", "disagg_transfer_pool_size": 268435456, "disagg_transfer_pin_memory": "auto", "disagg_p2p_hostname": "127.0.0.1", "disagg_ib_device": null, "disagg_server_addr": null, "encoder_urls": null, "denoiser_urls": null, "decoder_urls": null, "encoder_tp": null, "denoiser_tp": null, "denoiser_sp": null, "denoiser_ulysses": null, "denoiser_ring": null, "decoder_sp": null, "pool_work_endpoint": null, "pool_result_endpoint": null, "pool_control_endpoint": null, "pool_control_advertised_endpoint": null, "log_level": "info", "log_requests": false, "log_requests_level": 2, "log_requests_format": "text", "log_requests_target": null, "uvicorn_access_log_exclude_prefixes": [], "enable_cache_report": false, "enable_trace": false, "otlp_traces_endpoint": "localhost:4317", "srt_encoder_url": null, "srt_encoder_connect_timeout": 3.05, "srt_encoder_timeout": 100, "pe_server_url": null}
+[09-12 09:27:21] Loading text_encoder from /tmp/pytest-of-qinwu/pytest-0/test_native_encoder_restoratio1. avail mem: 251.38 GB
+[91m[09-12 09:27:21] Error while loading customized text_encoder, falling back to native version[0;0m
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py", line 387, in load
+    component = self._load_customized_with_context(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py", line 295, in _load_customized_with_context
+    return self.load_customized(
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/multimodal_gen/runtime/loader/component_loaders/text_encoder_loader.py", line 528, in load_customized
+    encoder_dp_group = get_encoder_data_parallel_group()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/multimodal_gen/runtime/distributed/parallel_state.py", line 394, in get_encoder_data_parallel_group
+    return get_world_group()
+           ^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/multimodal_gen/runtime/distributed/parallel_state.py", line 132, in get_world_group
+    assert _WORLD is not None, "world group is not initialized"
+           ^^^^^^^^^^^^^^^^^^
+AssertionError: world group is not initialized
+_ test_native_encoder_restoration_checks_checkpoint_before_fallback[True-False] _
+
+self = <sglang.multimodal_gen.runtime.loader.component_loaders.text_encoder_loader.TextEncoderLoader object at 0x7f763a9aac90>
+component_model_path = '/tmp/pytest-of-qinwu/pytest-0/test_native_encoder_restoratio2'
+server_args = ServerArgs(model_path='x', model_subfolder=None, model_variant=None, model_id=None, served_model_name='x', backend=<Ba...='localhost:4317', srt_encoder_url=None, srt_encoder_connect_timeout=3.05, srt_encoder_timeout=100, pe_server_url=None)
+component_name = 'text_encoder', transformers_or_diffusers = 'transformers'
+
+    def load(
+        self,
+        component_model_path: str,
+        server_args: ServerArgs,
+        component_name: str,
+        transformers_or_diffusers: str,
+        *,
+        component_attn_backend: Any = None,
+        component_attn_name: str | None = None,
+        allow_native_fallback: bool = True,
+    ) -> tuple[AutoModel, float]:
+        """
+        Template method that standardizes logging around the core load implementation.
+        The priority of loading method is:
+            1. load customized component
+            2. load native diffusers/transformers component
+        If all of the above methods failed, an error will be thrown
+    
+        """
+        self._native_load_manages_placement = False
+        self.component_load_precision(server_args, component_name)
+        component_weight_override = self.resolve_component_weight_override(
+            server_args, component_name
+        )
+        self.resolve_component_quantization_override(server_args, component_name)
+        self.resolve_component_direct_gpu_loading(server_args, component_name)
+        fsdp_requested = server_args.should_use_fsdp_for_component(component_name)
+    
+        gpu_mem_before_loading = current_platform.get_available_gpu_memory()
+        logger.info(
+            "Loading %s from %s. avail mem: %.2f GB",
+            component_name,
+            component_model_path,
+            gpu_mem_before_loading,
+        )
+        if (
+            component_attn_backend is None
+            and component_attn_name is None
+            and get_component_attn_backend_context() is None
+        ):
+            component_attn_backend, matched_backend_key = (
+                server_args.resolve_component_attention_backend(component_name)
+            )
+            component_attn_name = matched_backend_key or component_name
+            if component_attn_backend is not None:
+                logger.info(
+                    "Using %s backend for component: %s",
+                    component_attn_backend.name.lower(),
+                    matched_backend_key,
+                )
+        requested_backend = (
+            server_args.requested_component_attention_backend(component_attn_name)
+            if component_attn_name is not None
+            else None
+        )
+        require_backend_selection = requested_backend is not None
+        if require_backend_selection and (
+            component_attn_backend is None
+            or component_attn_backend.name.lower() != requested_backend
+        ):
+            raise ValueError(
+                f"Component attention backend for {component_attn_name!r} no longer "
+                f"matches the explicit request {requested_backend!r}"
+            )
+        try:
+>           component = self._load_customized_with_context(
+                component_model_path,
+                server_args,
+                component_name,
+                component_attn_backend,
+                component_attn_name,
+                require_backend_selection,
+            )
+
+python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py:387: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py:295: in _load_customized_with_context
+    return self.load_customized(
+python/sglang/multimodal_gen/runtime/loader/component_loaders/text_encoder_loader.py:528: in load_customized
+    encoder_dp_group = get_encoder_data_parallel_group()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/multimodal_gen/runtime/distributed/parallel_state.py:394: in get_encoder_data_parallel_group
+    return get_world_group()
+           ^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def get_world_group() -> GroupCoordinator:
+>       assert _WORLD is not None, "world group is not initialized"
+               ^^^^^^^^^^^^^^^^^^
+E       AssertionError: world group is not initialized
+
+python/sglang/multimodal_gen/runtime/distributed/parallel_state.py:132: AssertionError
+
+During handling of the above exception, another exception occurred:
+
+tmp_path = PosixPath('/tmp/pytest-of-qinwu/pytest-0/test_native_encoder_restoratio2')
+missing = False, competing_index = True
+
+    @pytest.mark.parametrize("missing", [False, True])
+    @pytest.mark.parametrize("competing_index", [False, True])
+    def test_native_encoder_restoration_checks_checkpoint_before_fallback(
+        tmp_path, missing, competing_index
+    ):
+        config = transformers.T5Config(
+            vocab_size=32,
+            d_model=8,
+            d_kv=4,
+            d_ff=16,
+            num_layers=1,
+            num_heads=2,
+            architectures=["T5EncoderModel"],
+        )
+        reference = transformers.T5EncoderModel(config)
+        config.save_pretrained(tmp_path)
+        weights = {name: tensor.clone() for name, tensor in reference.state_dict().items()}
+        required = "encoder.final_layer_norm.weight"
+        if missing:
+            weights.pop(required)
+        save_file(weights, tmp_path / "model.safetensors")
+        if competing_index:
+            # LTX-2 ships both indexes in text_encoder; only the HF one owns this model
+            (tmp_path / "model.safetensors.index.json").write_text(
+                json.dumps({"weight_map": {name: "model.safetensors" for name in weights}})
+            )
+            alternate = "diffusion_pytorch_model.safetensors"
+            save_file({"diffusion.weight": torch.ones(2, 2)}, tmp_path / alternate)
+            (tmp_path / "diffusion_pytorch_model.safetensors.index.json").write_text(
+                json.dumps({"weight_map": {"diffusion.weight": alternate}})
+            )
+            alternate_weights = dict(checkpoint_weights_iterator(str(tmp_path)))
+            assert set(alternate_weights) == {"diffusion.weight"}
+        args = ServerArgs(
+            model_path="x",
+            component_precisions={"text_encoder": "fp32"},
+            component_residency={"text_encoder": "component-offload"},
+        )
+        args.pipeline_config.text_encoder_configs = (T5Config(),)
+        loader = TextEncoderLoader()
+        with mock.patch.object(
+            loader, "load_native", side_effect=AssertionError("fallback")
+        ):
+            if missing:
+                with pytest.raises(ComponentCheckpointUnsupportedError, match=required):
+                    loader.load(str(tmp_path), args, "text_encoder", "transformers")
+            else:
+>               model, _ = loader.load(str(tmp_path), args, "text_encoder", "transformers")
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+python/sglang/multimodal_gen/test/unit/test_text_encoder_loader.py:274: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py:444: in load
+    component = self._load_native_with_context(
+python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py:314: in _load_native_with_context
+    component = self.load_native(
+/usr/lib/python3.12/unittest/mock.py:1134: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1138: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock name='load_native' id='140145766082960'>
+args = ('/tmp/pytest-of-qinwu/pytest-0/test_native_encoder_restoratio2', ServerArgs(model_path='x', model_subfolder=None, mod...l=None, srt_encoder_connect_timeout=3.05, srt_encoder_timeout=100, pe_server_url=None), 'transformers', 'text_encoder')
+kwargs = {}, effect = AssertionError('fallback')
+
+    def _execute_mock_call(self, /, *args, **kwargs):
+        # separate from _increment_mock_call so that awaited functions are
+        # executed separately from their call, also AsyncMock overrides this method
+    
+        effect = self.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+>               raise effect
+E               AssertionError: fallback
+
+/usr/lib/python3.12/unittest/mock.py:1193: AssertionError
+----------------------------- Captured stdout call -----------------------------
+[09-12 09:27:21] Disabling component offload for PipelineConfig because minimum available memory on selected GPUs is 251.38 GiB: dit_cpu_offload=False
+[09-12 09:27:21] Attention backend not specified. Using 'aiter' by default on ROCm to match SGLang SRT defaults.
+[09-12 09:27:21] server_args: {"model_path": "x", "model_subfolder": null, "model_variant": null, "model_id": null, "served_model_name": "x", "backend": "auto", "attention_backend": "aiter", "attention_backend_config": {}, "component_attention_backends": {}, "cache_dit_config": null, "nccl_port": null, "enable_nccl_nvls": false, "trust_remote_code": false, "revision": null, "num_gpus": 1, "performance_mode": "auto", "base_gpu_id": 0, "gpu_ids": null, "nnodes": 1, "node_rank": 0, "dist_init_addr": null, "tp_size": 1, "sp_degree": 1, "ulysses_degree": 1, "ring_degree": 1, "kv_gather_degree": 1, "sp_split_auto": false, "dp_size": 1, "enable_cfg_parallel": false, "cfg_parallel_degree": 1, "encoder_parallel": "auto", "hsdp_replicate_dim": 1, "hsdp_shard_dim": 1, "dist_timeout": 3600, "scheduler_rpc_timeout": null, "pipeline_class_name": null, "lora_path": null, "lora_nickname": "default", "lora_scale": 1.0, "lora_alpha": null, "lora_merge_mode": "auto", "lora_weight_name": null, "component_paths": {}, "component_weights_paths": {}, "component_direct_gpu_weight_loading": {}, "component_quantizations": {}, "component_precisions": {"text_encoder": "fp32"}, "component_quantization_ignored_layers": {}, "load_diffusion_decoder": false, "transformer_weights_path": null, "minimax_h3_adaln_cache_path": null, "minimax_h3_adaln_online": false, "minimax_h3_adaln_plan_width": 4, "minimax_h3_adaln_host_cache_gb": 8.0, "quantization": null, "quantization_ignored_layers": null, "lora_target_modules": null, "component_residency": {"text_encoder": "component-offload"}, "cpu_offload_components": null, "dit_cpu_offload": false, "direct_gpu_weight_loading": false, "dit_layerwise_offload": false, "layerwise_offload_components": null, "dit_offload_prefetch_size": 0.0, "dit_layerwise_resident_layers": 0.0, "dit_layerwise_residency_policy": "leading", "layerwise_prefetch_size": {}, "layerwise_resident_layers": {}, "layerwise_residency_policy": {}, "offload_during_compile": true, "text_encoder_cpu_offload": true, "image_encoder_cpu_offload": false, "vae_cpu_offload": false, "use_fsdp_inference": false, "pin_cpu_memory": true, "ltx2_two_stage_device_mode": null, "comfyui_mode": false, "enable_torch_compile": false, "regional_compile": false, "enable_breakable_cuda_graph": false, "bcg_text_buckets": null, "enable_layerwise_nvtx_marker": false, "warmup_mode": "off", "warmup_resolutions": null, "warmup_num_frames": null, "warmup_steps": 1, "warmup_sampling_params": null, "disable_autocast": false, "master_port": 30005, "host": "127.0.0.1", "port": 30000, "webui": false, "webui_port": 12312, "scheduler_port": 5625, "scheduler_ports": [5625], "batching_mode": "dynamic", "batching_max_size": 1, "batching_delay_ms": 0.0, "batching_config": null, "enable_batching_metrics": false, "strict_ports": false, "output_path": "outputs/", "input_save_path": "inputs/uploads", "prompt_file_path": null, "model_paths": {}, "model_loaded": {"transformer": true, "vae": true, "video_vae": true, "audio_vae": true, "video_dit": true, "audio_dit": true, "dual_tower_bridge": true}, "boundary_ratio": null, "disagg_role": "monolithic", "disagg_timeout": 3600, "disagg_downstream_wait_timeout": 1800, "disagg_dispatch_policy": "round_robin", "disagg_mode": false, "disagg_instance_id": 0, "disagg_max_slots_per_instance": 8, "disagg_transfer_redundancy": 1.25, "disagg_role_device": "auto", "disagg_transfer_backend": "auto", "disagg_transfer_pool_size": 268435456, "disagg_transfer_pin_memory": "auto", "disagg_p2p_hostname": "127.0.0.1", "disagg_ib_device": null, "disagg_server_addr": null, "encoder_urls": null, "denoiser_urls": null, "decoder_urls": null, "encoder_tp": null, "denoiser_tp": null, "denoiser_sp": null, "denoiser_ulysses": null, "denoiser_ring": null, "decoder_sp": null, "pool_work_endpoint": null, "pool_result_endpoint": null, "pool_control_endpoint": null, "pool_control_advertised_endpoint": null, "log_level": "info", "log_requests": false, "log_requests_level": 2, "log_requests_format": "text", "log_requests_target": null, "uvicorn_access_log_exclude_prefixes": [], "enable_cache_report": false, "enable_trace": false, "otlp_traces_endpoint": "localhost:4317", "srt_encoder_url": null, "srt_encoder_connect_timeout": 3.05, "srt_encoder_timeout": 100, "pe_server_url": null}
+[09-12 09:27:21] Loading text_encoder from /tmp/pytest-of-qinwu/pytest-0/test_native_encoder_restoratio2. avail mem: 251.38 GB
+[91m[09-12 09:27:21] Error while loading customized text_encoder, falling back to native version[0;0m
+----------------------------- Captured stderr call -----------------------------
+Loading safetensors checkpoint shards: 0%|          | 0/1Loading safetensors checkpoint shards: 100%|██████████| 1/1
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py", line 387, in load
+    component = self._load_customized_with_context(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py", line 295, in _load_customized_with_context
+    return self.load_customized(
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/multimodal_gen/runtime/loader/component_loaders/text_encoder_loader.py", line 528, in load_customized
+    encoder_dp_group = get_encoder_data_parallel_group()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/multimodal_gen/runtime/distributed/parallel_state.py", line 394, in get_encoder_data_parallel_group
+    return get_world_group()
+           ^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/multimodal_gen/runtime/distributed/parallel_state.py", line 132, in get_world_group
+    assert _WORLD is not None, "world group is not initialized"
+           ^^^^^^^^^^^^^^^^^^
+AssertionError: world group is not initialized
+_ test_native_encoder_restoration_checks_checkpoint_before_fallback[True-True] _
+
+self = <sglang.multimodal_gen.runtime.loader.component_loaders.text_encoder_loader.TextEncoderLoader object at 0x7f763a9ae780>
+component_model_path = '/tmp/pytest-of-qinwu/pytest-0/test_native_encoder_restoratio3'
+server_args = ServerArgs(model_path='x', model_subfolder=None, model_variant=None, model_id=None, served_model_name='x', backend=<Ba...='localhost:4317', srt_encoder_url=None, srt_encoder_connect_timeout=3.05, srt_encoder_timeout=100, pe_server_url=None)
+component_name = 'text_encoder', transformers_or_diffusers = 'transformers'
+
+    def load(
+        self,
+        component_model_path: str,
+        server_args: ServerArgs,
+        component_name: str,
+        transformers_or_diffusers: str,
+        *,
+        component_attn_backend: Any = None,
+        component_attn_name: str | None = None,
+        allow_native_fallback: bool = True,
+    ) -> tuple[AutoModel, float]:
+        """
+        Template method that standardizes logging around the core load implementation.
+        The priority of loading method is:
+            1. load customized component
+            2. load native diffusers/transformers component
+        If all of the above methods failed, an error will be thrown
+    
+        """
+        self._native_load_manages_placement = False
+        self.component_load_precision(server_args, component_name)
+        component_weight_override = self.resolve_component_weight_override(
+            server_args, component_name
+        )
+        self.resolve_component_quantization_override(server_args, component_name)
+        self.resolve_component_direct_gpu_loading(server_args, component_name)
+        fsdp_requested = server_args.should_use_fsdp_for_component(component_name)
+    
+        gpu_mem_before_loading = current_platform.get_available_gpu_memory()
+        logger.info(
+            "Loading %s from %s. avail mem: %.2f GB",
+            component_name,
+            component_model_path,
+            gpu_mem_before_loading,
+        )
+        if (
+            component_attn_backend is None
+            and component_attn_name is None
+            and get_component_attn_backend_context() is None
+        ):
+            component_attn_backend, matched_backend_key = (
+                server_args.resolve_component_attention_backend(component_name)
+            )
+            component_attn_name = matched_backend_key or component_name
+            if component_attn_backend is not None:
+                logger.info(
+                    "Using %s backend for component: %s",
+                    component_attn_backend.name.lower(),
+                    matched_backend_key,
+                )
+        requested_backend = (
+            server_args.requested_component_attention_backend(component_attn_name)
+            if component_attn_name is not None
+            else None
+        )
+        require_backend_selection = requested_backend is not None
+        if require_backend_selection and (
+            component_attn_backend is None
+            or component_attn_backend.name.lower() != requested_backend
+        ):
+            raise ValueError(
+                f"Component attention backend for {component_attn_name!r} no longer "
+                f"matches the explicit request {requested_backend!r}"
+            )
+        try:
+>           component = self._load_customized_with_context(
+                component_model_path,
+                server_args,
+                component_name,
+                component_attn_backend,
+                component_attn_name,
+                require_backend_selection,
+            )
+
+python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py:387: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py:295: in _load_customized_with_context
+    return self.load_customized(
+python/sglang/multimodal_gen/runtime/loader/component_loaders/text_encoder_loader.py:528: in load_customized
+    encoder_dp_group = get_encoder_data_parallel_group()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/multimodal_gen/runtime/distributed/parallel_state.py:394: in get_encoder_data_parallel_group
+    return get_world_group()
+           ^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def get_world_group() -> GroupCoordinator:
+>       assert _WORLD is not None, "world group is not initialized"
+               ^^^^^^^^^^^^^^^^^^
+E       AssertionError: world group is not initialized
+
+python/sglang/multimodal_gen/runtime/distributed/parallel_state.py:132: AssertionError
+
+During handling of the above exception, another exception occurred:
+
+tmp_path = PosixPath('/tmp/pytest-of-qinwu/pytest-0/test_native_encoder_restoratio3')
+missing = True, competing_index = True
+
+    @pytest.mark.parametrize("missing", [False, True])
+    @pytest.mark.parametrize("competing_index", [False, True])
+    def test_native_encoder_restoration_checks_checkpoint_before_fallback(
+        tmp_path, missing, competing_index
+    ):
+        config = transformers.T5Config(
+            vocab_size=32,
+            d_model=8,
+            d_kv=4,
+            d_ff=16,
+            num_layers=1,
+            num_heads=2,
+            architectures=["T5EncoderModel"],
+        )
+        reference = transformers.T5EncoderModel(config)
+        config.save_pretrained(tmp_path)
+        weights = {name: tensor.clone() for name, tensor in reference.state_dict().items()}
+        required = "encoder.final_layer_norm.weight"
+        if missing:
+            weights.pop(required)
+        save_file(weights, tmp_path / "model.safetensors")
+        if competing_index:
+            # LTX-2 ships both indexes in text_encoder; only the HF one owns this model
+            (tmp_path / "model.safetensors.index.json").write_text(
+                json.dumps({"weight_map": {name: "model.safetensors" for name in weights}})
+            )
+            alternate = "diffusion_pytorch_model.safetensors"
+            save_file({"diffusion.weight": torch.ones(2, 2)}, tmp_path / alternate)
+            (tmp_path / "diffusion_pytorch_model.safetensors.index.json").write_text(
+                json.dumps({"weight_map": {"diffusion.weight": alternate}})
+            )
+            alternate_weights = dict(checkpoint_weights_iterator(str(tmp_path)))
+            assert set(alternate_weights) == {"diffusion.weight"}
+        args = ServerArgs(
+            model_path="x",
+            component_precisions={"text_encoder": "fp32"},
+            component_residency={"text_encoder": "component-offload"},
+        )
+        args.pipeline_config.text_encoder_configs = (T5Config(),)
+        loader = TextEncoderLoader()
+        with mock.patch.object(
+            loader, "load_native", side_effect=AssertionError("fallback")
+        ):
+            if missing:
+                with pytest.raises(ComponentCheckpointUnsupportedError, match=required):
+>                   loader.load(str(tmp_path), args, "text_encoder", "transformers")
+
+python/sglang/multimodal_gen/test/unit/test_text_encoder_loader.py:272: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py:444: in load
+    component = self._load_native_with_context(
+python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py:314: in _load_native_with_context
+    component = self.load_native(
+/usr/lib/python3.12/unittest/mock.py:1134: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1138: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock name='load_native' id='140145766097904'>
+args = ('/tmp/pytest-of-qinwu/pytest-0/test_native_encoder_restoratio3', ServerArgs(model_path='x', model_subfolder=None, mod...l=None, srt_encoder_connect_timeout=3.05, srt_encoder_timeout=100, pe_server_url=None), 'transformers', 'text_encoder')
+kwargs = {}, effect = AssertionError('fallback')
+
+    def _execute_mock_call(self, /, *args, **kwargs):
+        # separate from _increment_mock_call so that awaited functions are
+        # executed separately from their call, also AsyncMock overrides this method
+    
+        effect = self.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+>               raise effect
+E               AssertionError: fallback
+
+/usr/lib/python3.12/unittest/mock.py:1193: AssertionError
+----------------------------- Captured stdout call -----------------------------
+[09-12 09:27:21] Disabling component offload for PipelineConfig because minimum available memory on selected GPUs is 251.38 GiB: dit_cpu_offload=False
+[09-12 09:27:21] Attention backend not specified. Using 'aiter' by default on ROCm to match SGLang SRT defaults.
+[09-12 09:27:21] server_args: {"model_path": "x", "model_subfolder": null, "model_variant": null, "model_id": null, "served_model_name": "x", "backend": "auto", "attention_backend": "aiter", "attention_backend_config": {}, "component_attention_backends": {}, "cache_dit_config": null, "nccl_port": null, "enable_nccl_nvls": false, "trust_remote_code": false, "revision": null, "num_gpus": 1, "performance_mode": "auto", "base_gpu_id": 0, "gpu_ids": null, "nnodes": 1, "node_rank": 0, "dist_init_addr": null, "tp_size": 1, "sp_degree": 1, "ulysses_degree": 1, "ring_degree": 1, "kv_gather_degree": 1, "sp_split_auto": false, "dp_size": 1, "enable_cfg_parallel": false, "cfg_parallel_degree": 1, "encoder_parallel": "auto", "hsdp_replicate_dim": 1, "hsdp_shard_dim": 1, "dist_timeout": 3600, "scheduler_rpc_timeout": null, "pipeline_class_name": null, "lora_path": null, "lora_nickname": "default", "lora_scale": 1.0, "lora_alpha": null, "lora_merge_mode": "auto", "lora_weight_name": null, "component_paths": {}, "component_weights_paths": {}, "component_direct_gpu_weight_loading": {}, "component_quantizations": {}, "component_precisions": {"text_encoder": "fp32"}, "component_quantization_ignored_layers": {}, "load_diffusion_decoder": false, "transformer_weights_path": null, "minimax_h3_adaln_cache_path": null, "minimax_h3_adaln_online": false, "minimax_h3_adaln_plan_width": 4, "minimax_h3_adaln_host_cache_gb": 8.0, "quantization": null, "quantization_ignored_layers": null, "lora_target_modules": null, "component_residency": {"text_encoder": "component-offload"}, "cpu_offload_components": null, "dit_cpu_offload": false, "direct_gpu_weight_loading": false, "dit_layerwise_offload": false, "layerwise_offload_components": null, "dit_offload_prefetch_size": 0.0, "dit_layerwise_resident_layers": 0.0, "dit_layerwise_residency_policy": "leading", "layerwise_prefetch_size": {}, "layerwise_resident_layers": {}, "layerwise_residency_policy": {}, "offload_during_compile": true, "text_encoder_cpu_offload": true, "image_encoder_cpu_offload": false, "vae_cpu_offload": false, "use_fsdp_inference": false, "pin_cpu_memory": true, "ltx2_two_stage_device_mode": null, "comfyui_mode": false, "enable_torch_compile": false, "regional_compile": false, "enable_breakable_cuda_graph": false, "bcg_text_buckets": null, "enable_layerwise_nvtx_marker": false, "warmup_mode": "off", "warmup_resolutions": null, "warmup_num_frames": null, "warmup_steps": 1, "warmup_sampling_params": null, "disable_autocast": false, "master_port": 30005, "host": "127.0.0.1", "port": 30000, "webui": false, "webui_port": 12312, "scheduler_port": 5623, "scheduler_ports": [5623], "batching_mode": "dynamic", "batching_max_size": 1, "batching_delay_ms": 0.0, "batching_config": null, "enable_batching_metrics": false, "strict_ports": false, "output_path": "outputs/", "input_save_path": "inputs/uploads", "prompt_file_path": null, "model_paths": {}, "model_loaded": {"transformer": true, "vae": true, "video_vae": true, "audio_vae": true, "video_dit": true, "audio_dit": true, "dual_tower_bridge": true}, "boundary_ratio": null, "disagg_role": "monolithic", "disagg_timeout": 3600, "disagg_downstream_wait_timeout": 1800, "disagg_dispatch_policy": "round_robin", "disagg_mode": false, "disagg_instance_id": 0, "disagg_max_slots_per_instance": 8, "disagg_transfer_redundancy": 1.25, "disagg_role_device": "auto", "disagg_transfer_backend": "auto", "disagg_transfer_pool_size": 268435456, "disagg_transfer_pin_memory": "auto", "disagg_p2p_hostname": "127.0.0.1", "disagg_ib_device": null, "disagg_server_addr": null, "encoder_urls": null, "denoiser_urls": null, "decoder_urls": null, "encoder_tp": null, "denoiser_tp": null, "denoiser_sp": null, "denoiser_ulysses": null, "denoiser_ring": null, "decoder_sp": null, "pool_work_endpoint": null, "pool_result_endpoint": null, "pool_control_endpoint": null, "pool_control_advertised_endpoint": null, "log_level": "info", "log_requests": false, "log_requests_level": 2, "log_requests_format": "text", "log_requests_target": null, "uvicorn_access_log_exclude_prefixes": [], "enable_cache_report": false, "enable_trace": false, "otlp_traces_endpoint": "localhost:4317", "srt_encoder_url": null, "srt_encoder_connect_timeout": 3.05, "srt_encoder_timeout": 100, "pe_server_url": null}
+[09-12 09:27:21] Loading text_encoder from /tmp/pytest-of-qinwu/pytest-0/test_native_encoder_restoratio3. avail mem: 251.38 GB
+[91m[09-12 09:27:21] Error while loading customized text_encoder, falling back to native version[0;0m
+----------------------------- Captured stderr call -----------------------------
+Loading safetensors checkpoint shards: 0%|          | 0/1Loading safetensors checkpoint shards: 100%|██████████| 1/1
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py", line 387, in load
+    component = self._load_customized_with_context(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/multimodal_gen/runtime/loader/component_loaders/component_loader.py", line 295, in _load_customized_with_context
+    return self.load_customized(
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/multimodal_gen/runtime/loader/component_loaders/text_encoder_loader.py", line 528, in load_customized
+    encoder_dp_group = get_encoder_data_parallel_group()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/multimodal_gen/runtime/distributed/parallel_state.py", line 394, in get_encoder_data_parallel_group
+    return get_world_group()
+           ^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/multimodal_gen/runtime/distributed/parallel_state.py", line 132, in get_world_group
+    assert _WORLD is not None, "world group is not initialized"
+           ^^^^^^^^^^^^^^^^^^
+AssertionError: world group is not initialized
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED python/sglang/multimodal_gen/test/unit/test_text_encoder_loader.py::test_native_encoder_restoration_checks_checkpoint_before_fallback[False-False]
+FAILED python/sglang/multimodal_gen/test/unit/test_text_encoder_loader.py::test_native_encoder_restoration_checks_checkpoint_before_fallback[False-True]
+FAILED python/sglang/multimodal_gen/test/unit/test_text_encoder_loader.py::test_native_encoder_restoration_checks_checkpoint_before_fallback[True-False]
+FAILED python/sglang/multimodal_gen/test/unit/test_text_encoder_loader.py::test_native_encoder_restoration_checks_checkpoint_before_fallback[True-True]
+4 failed, 47 passed, 3 skipped, 16 warnings, 3 subtests passed in 2.28s
