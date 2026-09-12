@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32169",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "7b1b516e688f0832e363c86dc34eb8f29ed54528",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The recorded base reproduces the reported CLIPImageProcessor.tokenizer AttributeError. The exact candidate removes that failure and correctly loads and attaches a separate tokenizer in real-processor and independent boundary tests. Full InternVL2_5-2B startup remains unverified because the prepared SentencePiece 0.2.2 rejects the model tokenizer's literal-NUL vocabulary piece after the candidate passes the original failure point.",
+  "tests": [
+    {
+      "command": "HF_HOME=/tmp/amdpilot-repo-j-ac167ba004b4/hf-cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ac167ba004b4/venv/bin/python /job/review-evidence/j-ac167ba004b4/reproduce_real_model.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Real Hugging Face metadata resolved to CLIPImageProcessor without tokenizer; base raised the reported AttributeError in get_tokenizer_from_processor."
+    },
+    {
+      "command": "HF_HOME=/tmp/amdpilot-repo-j-ac167ba004b4/hf-cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ac167ba004b4/venv/bin/python /job/review-evidence/j-ac167ba004b4/reproduce_real_model.py (candidate)",
+      "exit_code": 1,
+      "what_was_measured": "Candidate bypassed the original AttributeError and invoked get_tokenizer; execution then stopped at the distinct SentencePiece literal-NUL error."
+    },
+    {
+      "command": "HF_HOME=/tmp/amdpilot-repo-j-ac167ba004b4/hf-cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ac167ba004b4/venv/bin/python -m pytest -q test/registered/unit/utils/test_hf_transformers.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite and surrounding processor/tokenizer behavior: 69 passed, 2 subtests passed."
+    },
+    {
+      "command": "HF_HOME=/tmp/amdpilot-repo-j-ac167ba004b4/hf-cache PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ac167ba004b4/venv/bin/python /job/review-evidence/j-ac167ba004b4/adversarial_candidate.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent real-image-processor controlled-tokenizer path, downstream extraction, revision/backend propagation, combined processor, and tokenizer-as-processor boundaries."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..7b1b516e688f0832e363c86dc34eb8f29ed54528",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X (gfx950) was visible, but this processor-resolution defect and candidate change are CPU/Python-only; no model weights or GPU inference were used."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With transformers 5.12.1 and SentencePiece 0.2.2 in the prepared environment, the real InternVL2_5-2B path still does not reach server readiness: tokenizer loading fails with 'piece must not include null character' after the original AttributeError is bypassed.",
+    "Full HTTP serving, model inference, semantic accuracy, and distributed behavior were not validated because model weights were not available or required for this device-independent review."
+  ],
+  "remaining_limitations": [
+    "The candidate fixes the exact missing-tokenizer failure, but full original-model startup could not be independently demonstrated in the prepared dependency environment.",
+    "No GPU numerical execution was relevant or performed despite one assigned gfx950 GPU being visible.",
+    "No native source changed, so there was no native artifact to rebuild or validate."
+  ]
+}
