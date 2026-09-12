@@ -1,0 +1,160 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+___ TestDSparkLoRARouting.test_distinct_request_draft_adapters_are_preserved ___
+
+self = <test_dspark_lora.TestDSparkLoRARouting testMethod=test_distinct_request_draft_adapters_are_preserved>
+
+    def test_distinct_request_draft_adapters_are_preserved(self):
+        proposer = DraftBlockProposer.__new__(DraftBlockProposer)
+        proposer.gamma = 1
+        proposer.query_token_num = 1
+        proposer._mask_token_id = 7
+        proposer._draft_block_ids_buf = None
+        proposer._draft_block_spec_info = object()
+        proposer._dp_moe_sync = False
+        proposer._num_token_non_padded = None
+        proposer.draft_model = object()
+        proposer.sample_from_anchor = True
+    
+        manager = Mock()
+        runner = SimpleNamespace(
+            device=torch.device("cpu"),
+            lora_manager=manager,
+            dspark_lora_id="server-wide-fixed-adapter",
+            decode_cuda_graph_runner=None,
+            forward=Mock(
+                return_value=SimpleNamespace(
+                    logits_output=SimpleNamespace(hidden_states=torch.zeros((2, 1))),
+                    can_run_graph=False,
+                )
+            ),
+        )
+        proposer.draft_model_runner = runner
+        batch = SimpleNamespace(
+            seq_lens=torch.tensor([3, 5]),
+            seq_lens_cpu=torch.tensor([3, 5]),
+            req_pool_indices=torch.tensor([0, 1]),
+            can_run_decode_cuda_graph=False,
+            dspark_lora_ids=["task-a-adapter", "task-b-adapter"],
+        )
+        draft_input = SimpleNamespace(
+            bonus_tokens=torch.tensor([1, 2]), nxt_kv_lens_cpu=None
+        )
+        verify_window = SimpleNamespace(
+            positions_2d=torch.tensor([[3], [5]]),
+            verify_cache_loc_2d=torch.tensor([[10], [11]]),
+        )
+    
+        with patch(
+            "sglang.srt.speculative.dspark_components.dspark_draft.enable_num_token_non_padded",
+            return_value=False,
+        ):
+            proposer._run_forward(
+                batch=batch,
+                draft_input=draft_input,
+                verify_window=verify_window,
+                bs=2,
+                device="cpu",
+                embed_module=lambda ids: torch.zeros((*ids.shape, 1)),
+            )
+    
+        forward_batch = runner.forward.call_args.args[0]
+>       self.assertEqual(forward_batch.lora_ids, batch.dspark_lora_ids)
+E       AssertionError: Lists differ: ['server-wide-fixed-adapter', 'server-wide-fixed-adapter'] != ['task-a-adapter', 'task-b-adapter']
+E       
+E       First differing element 0:
+E       'server-wide-fixed-adapter'
+E       'task-a-adapter'
+E       
+E       - ['server-wide-fixed-adapter', 'server-wide-fixed-adapter']
+E       + ['task-a-adapter', 'task-b-adapter']
+
+test/registered/unit/spec/test_dspark_lora.py:107: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7fc7241cf420>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7fd008161800>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestDSparkLoRARouting.test_distinct_request_draft_adapters_are_preserved
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/spec/test_dspark_lora.py", line 107, in test_distinct_request_draft_adapters_are_preserved
+    self.assertEqual(forward_batch.lora_ids, batch.dspark_lora_ids)
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1091, in assertListEqual
+    self.assertSequenceEqual(list1, list2, msg, seq_type=list)
+  File "/usr/lib/python3.12/unittest/case.py", line 1073, in assertSequenceEqual
+    self.fail(msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: Lists differ: ['server-wide-fixed-adapter', 'server-wide-fixed-adapter'] != ['task-a-adapter', 'task-b-adapter']
+
+First differing element 0:
+'server-wide-fixed-adapter'
+'task-a-adapter'
+
+- ['server-wide-fixed-adapter', 'server-wide-fixed-adapter']
++ ['task-a-adapter', 'task-b-adapter']
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/spec/test_dspark_lora.py::TestDSparkLoRARouting::test_distinct_request_draft_adapters_are_preserved
+1 failed, 17 warnings in 12.38s
