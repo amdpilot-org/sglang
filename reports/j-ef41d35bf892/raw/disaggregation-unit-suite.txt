@@ -1,0 +1,184 @@
+................F............................................. [ 17%]
+.................................................................. [ 35%]
+........................................................................ [ 55%]
+............................................... [ 68%]
+...................................................................... [ 88%]
+...........................................                            [100%]
+=================================== FAILURES ===================================
+_ TestDecodeQueueCleanup.test_unresolved_prefill_dp_rank_queries_are_rate_limited _
+
+self = <test_decode_queue_cleanup.TestDecodeQueueCleanup testMethod=test_unresolved_prefill_dp_rank_queries_are_rate_limited>
+
+    def test_unresolved_prefill_dp_rank_queries_are_rate_limited(self):
+        addr = "127.0.0.1:11500"
+        decode_req = SimpleNamespace(
+            req=SimpleNamespace(
+                bootstrap_host="127.0.0.1",
+                bootstrap_port=11500,
+                bootstrap_room=7,
+            ),
+            kv_receiver=MagicMock(),
+        )
+        queue = DecodePreallocQueue.__new__(DecodePreallocQueue)
+        queue.pending_reqs = [decode_req]
+        queue._prefill_dp_rank_queries = {}
+        queue._dp_rank_query_last_attempt_time = {}
+        queue._dp_rank_query_interval = 0.01
+        executor = MagicMock()
+    
+        def completed_query(*args):
+            future = Future()
+            future.set_result({})
+            return future
+    
+        executor.submit.side_effect = completed_query
+        queue.kv_manager = SimpleNamespace(
+            prefill_info_table={addr: object()},
+            _ensure_prefill_recompute_executor=lambda: executor,
+        )
+        queue._resolve_prefill_dp_rank = MagicMock(return_value=None)
+        queue._ensure_prefill_info = lambda groups: (groups, [])
+    
+        with patch(
+            "sglang.srt.disaggregation.decode.time.monotonic",
+            side_effect=[1.0, 1.001, 1.011],
+        ):
+            for _ in range(3):
+>               queue.prefetch_prefill_dp_rank_queries()
+
+test/registered/unit/disaggregation/test_decode_queue_cleanup.py:363: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/srt/disaggregation/decode.py:1013: in prefetch_prefill_dp_rank_queries
+    if not self._can_query_prefill_dp_ranks(bootstrap_addr):
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/disaggregation/decode.py:1025: in _can_query_prefill_dp_ranks
+    now = time.monotonic()
+          ^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1134: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1138: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock name='monotonic' id='140502578672752'>, args = (), kwargs = {}
+effect = <list_iterator object at 0x7fc94e4aa500>
+
+    def _execute_mock_call(self, /, *args, **kwargs):
+        # separate from _increment_mock_call so that awaited functions are
+        # executed separately from their call, also AsyncMock overrides this method
+    
+        effect = self.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+                raise effect
+            elif not _callable(effect):
+>               result = next(effect)
+                         ^^^^^^^^^^^^
+E               StopIteration
+
+/usr/lib/python3.12/unittest/mock.py:1195: StopIteration
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7fc94e5e94e0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7fd23834dee0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/disaggregation/test_decode_queue_cleanup.py", line 363, in test_unresolved_prefill_dp_rank_queries_are_rate_limited
+    queue.prefetch_prefill_dp_rank_queries()
+  File "/job/repo/python/sglang/srt/disaggregation/decode.py", line 1013, in prefetch_prefill_dp_rank_queries
+    if not self._can_query_prefill_dp_ranks(bootstrap_addr):
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/disaggregation/decode.py", line 1025, in _can_query_prefill_dp_ranks
+    now = time.monotonic()
+          ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1134, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1138, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1195, in _execute_mock_call
+    result = next(effect)
+             ^^^^^^^^^^^^
+StopIteration
+------------------------------ Captured log call -------------------------------
+ERROR    sglang.srt.disaggregation.common.conn:conn.py:1532 Error querying dp_ranks from bootstrap:
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+<frozen abc>:106
+  <frozen abc>:106: DeprecationWarning: MultiPlatformOp is deprecated; subclass sglang.kernels.fused_op.BaseFusedOp instead (RFC #29630).
+
+registered/unit/disaggregation/test_encode_server.py::TestEncoderMetaRegistry::test_http_send_counts_the_normalized_destination
+  /job/repo/test/registered/unit/disaggregation/test_encode_server.py:226: FastAPIDeprecationWarning: ORJSONResponse is deprecated, FastAPI now serializes data directly to JSON bytes via Pydantic when a return type or response model is set, which is faster and doesn't need a custom response class. Read more in the FastAPI docs: https://fastapi.tiangolo.com/advanced/custom-response/#orjson-or-response-model and https://fastapi.tiangolo.com/tutorial/response-model/
+    response = await http_server.handle_send_request(request)
+
+registered/unit/disaggregation/test_encode_server.py::TestEncoderDelivery::test_destination_registration_rendezvous_with_encode
+  /usr/lib/python3.12/asyncio/runners.py:118: FastAPIDeprecationWarning: ORJSONResponse is deprecated, FastAPI now serializes data directly to JSON bytes via Pydantic when a return type or response model is set, which is faster and doesn't need a custom response class. Read more in the FastAPI docs: https://fastapi.tiangolo.com/advanced/custom-response/#orjson-or-response-model and https://fastapi.tiangolo.com/tutorial/response-model/
+    return self._loop.run_until_complete(task)
+
+registered/unit/disaggregation/test_encode_server.py::TestEncoderDelivery::test_destination_registration_timeout_does_not_create_state
+  /job/repo/test/registered/unit/disaggregation/test_encode_server.py:2171: FastAPIDeprecationWarning: ORJSONResponse is deprecated, FastAPI now serializes data directly to JSON bytes via Pydantic when a return type or response model is set, which is faster and doesn't need a custom response class. Read more in the FastAPI docs: https://fastapi.tiangolo.com/advanced/custom-response/#orjson-or-response-model and https://fastapi.tiangolo.com/tutorial/response-model/
+    response = await http_server.handle_scheduler_receive_url_request(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/disaggregation/test_decode_queue_cleanup.py::TestDecodeQueueCleanup::test_unresolved_prefill_dp_rank_queries_are_rate_limited
+1 failed, 359 passed, 21 warnings, 45 subtests passed in 15.80s
