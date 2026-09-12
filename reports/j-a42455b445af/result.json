@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36344",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1260",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1222",
+  "candidate_commit": "df73bd27dd394396dd07f8d154f42c9c34006488",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate adds scheduler-source validation that rejects a positive chunked prefill size below the selected deterministic Triton or FlashInfer prefill alignment. Candidate regressions failed on the recorded base and passed at the exact candidate. Independent boundaries confirm the reported 128/129/4096 failure is replaced by a clear startup ValueError while equality, larger chunks, disabled chunking, non-deterministic operation, and a 128 alignment override remain accepted.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a42455b445af/venv/bin/python -m pytest -q /job/review-evidence-j-a42455b445af/candidate_scheduler_test.py /job/review-evidence-j-a42455b445af/candidate_prefill_test.py (on base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before execution of the candidate regressions against the recorded base: 1 failed, 41 passed, 556 subtests passed. The base did not raise for deterministic Triton chunk 128 below alignment 4096; repeated lower-level admission remained no-progress."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a42455b445af/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_init_req_max_new_tokens.py test/registered/unit/managers/test_prefill_adder.py (at candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate focused suite: 42 passed and 556 subtests passed, including the reported no-progress mechanism and startup validation boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a42455b445af/venv/bin/python -m pytest -q /job/review-evidence-j-a42455b445af/test_independent_contract.py (at candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Eleven independent cases covering below/equal/above alignment, disabled chunking, environment alignment override, FlashInfer, and post-validation DSA alignment composition."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..df73bd27dd394396dd07f8d154f42c9c34006488",
+      "exit_code": 2,
+      "what_was_measured": "The complete candidate diff has trailing whitespace in retained raw logs, contradicting its report's clean-diff claim; scheduler source itself was not implicated."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No model/kernel workload was executed. Device discovery identified the assigned AMD Instinct MI350X gfx950 under ROCm 7.2, which cannot reproduce the reporter's NVIDIA L40S/CUDA Triton serving environment."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Outside the original Triton/L40S case, a later init_dsa_kpool_truncation_align call can enlarge the final alignment after candidate validation. A synthetic supported-code-path example with chunk 4096, deterministic alignment 4096, and DSA index_kpool 3 yields final alignment 12288 without revalidation."
+  ],
+  "remaining_limitations": [
+    "No full HTTP/model reproduction was performed on NVIDIA L40S/CUDA/Triton because only one AMD gfx950/ROCm GPU was assigned and reporter weights were unavailable.",
+    "The deterministic scheduler/admission contract was validated directly; no model semantic accuracy or distributed-workload claim is made.",
+    "No native code changed, so native rebuilding was not applicable.",
+    "The candidate's complete diff has whitespace errors in raw evidence files despite its result report claiming git diff --check passed."
+  ]
+}
