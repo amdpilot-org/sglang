@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38587",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate commit 8c342b1aea310267115f223bfbb9573791147543 upgrades xgrammar from 0.2.1 to 0.2.2 and adds a focused regression. With the real 0.2.2 compiler/native binding, it rejects the issue's invalid named object while accepting the named integer and a valid additional field. However, it still rejects a valid object when the additional field precedes the named field. Because JSON object member order is semantically irrelevant, the candidate only partially restores properties + schema-valued additionalProperties semantics and its regression does not cover this remaining contract failure.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-68ab44ca5334/venv/bin/python /job/review_evidence/repro_and_adversarial.py (base with xgrammar 0.2.1)",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced the original named-property dilution through SGLang's actual structural-tag builder and xgrammar compiler: invalid data-as-object was accepted. Also established ordering behavior on the prepared base."
+    },
+    {
+      "command": "PYTHONPATH=/tmp/amdpilot-repo-j-68ab44ca5334/xgrammar-0.2.2:/job/repo/python /tmp/amdpilot-repo-j-68ab44ca5334/venv/bin/python -m pytest -q test/registered/unit/function_call/test_kimik3_structural_tag.py -k strict_nested_additional_properties_preserve_named_property_schema",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's focused regression passed against exact candidate source and the xgrammar 0.2.2 native wheel: valid named integer accepted, invalid named object rejected, and one valid unknown property accepted."
+    },
+    {
+      "command": "PYTHONPATH=/tmp/amdpilot-repo-j-68ab44ca5334/xgrammar-0.2.2:/job/repo/python /tmp/amdpilot-repo-j-68ab44ca5334/venv/bin/python /job/review_evidence/repro_and_adversarial.py",
+      "exit_code": 1,
+      "what_was_measured": "Independent contract cases against the real compiler. Nine cases behaved as expected, but a valid object with the additional property before the named property was rejected."
+    },
+    {
+      "command": "PYTHONPATH=/tmp/amdpilot-repo-j-68ab44ca5334/xgrammar-0.2.2:/job/repo/python /tmp/amdpilot-repo-j-68ab44ca5334/venv/bin/python -m pytest -q test/registered/unit/function_call/test_kimik3_structural_tag.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Kimi-K3 structural-tag unit file: 36 passed. This suite does not cover the remaining order-dependent valid case."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The original issue and all relevant validation are deterministic CPU-only grammar compilation/matching; no model inference or GPU kernel is involved."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "For schema {properties: {data: integer}, additionalProperties: object-with-required-string-data}, the valid JSON value {\"extra\":{\"data\":\"ok\"},\"data\":2} is rejected by the xgrammar 0.2.2 grammar, while the semantically equivalent member order {\"data\":2,\"extra\":{\"data\":\"ok\"}} is accepted."
+  ],
+  "remaining_limitations": [
+    "No Kimi-K3 weights or server deployment were exercised; the issue's authoritative deterministic path is the actual SGLang structural-tag builder plus xgrammar compiler.",
+    "Candidate source changes are Python manifests and tests only. No SGLang or FlyDSL native source changed, so a native rebuild was not applicable.",
+    "xgrammar 0.2.2 was validated from its released CPython 3.12 x86_64 manylinux wheel and native library at /tmp/amdpilot-repo-j-68ab44ca5334/xgrammar-0.2.2/xgrammar/libxgrammar_bindings.so. Other architectures were not tested.",
+    "The prepared host is x86_64 with Torch 2.11.0+rocm7.2 and HIP 7.2.26015, but GPU execution is unrelated to this CPU-only grammar defect."
+  ]
+}
