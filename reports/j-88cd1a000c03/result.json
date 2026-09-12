@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36127",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 2743's valid dynamic DFlash2 scheduling and ragged-verification work, reproduced review PR 2794's missing trained confidence-head and STS paths at exact commit 9a7fdb8c7f520ec561be7c7f45a4a5352cc7a7a3, and added opt-in checkpoint head construction/loading/inference plus per-position STS calibration. Head-less checkpoints continue to use selector-lattice confidence.",
+  "tests": [
+    {
+      "command": "git grep source audit at candidate 9a7fdb8 plus pytest of the five new regression tests against that exact checkout",
+      "exit_code": 1,
+      "what_was_measured": "The candidate contained no DFlash2 trained-head or STS implementation; all five head/loading/calibration regressions failed before the correction. See candidate-source-reproduction.log and failing-before.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-88cd1a000c03/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-88cd1a000c03/test_dflash_confidence_regression.py -k 'trained_head or dflash_sts_loader or enabled_confidence_head'",
+      "exit_code": 0,
+      "what_was_measured": "The identical five regressions passed after the correction: trained-head inference, strict checkpoint-weight loading, STS loading, head-less STS rejection, and head precedence over selector fallback."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-88cd1a000c03/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_confidence.py test/registered/unit/spec/test_dflash_logits.py test/registered/spec/dspark/test_dspark_scheduler.py test/registered/spec/dspark/test_dspark_sts.py",
+      "exit_code": 0,
+      "what_was_measured": "74 tests and 18 subtests passed for DFlash confidence/configuration, logits compatibility, shared scheduler behavior, and STS parsing/application."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-88cd1a000c03/venv/bin/python -m pytest -q test/registered/spec/dspark/test_dspark_kernel_parity.py",
+      "exit_code": 0,
+      "what_was_measured": "One ROCm GPU test with 22 subtests passed against independent PyTorch references for shared scheduling/verify kernels."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 inline DFlash trained-head plus STS numerical comparison",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X, calibrated head probabilities matched an independent sigmoid(logit / per-position-temperature) reference exactly."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 pytest ragged verify/backend capability and DFlash overlap/buffer compatibility suites; compileall; git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "26 tests and 3 subtests passed; modified Python compiled and the patch was whitespace-clean."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X executed the corrected confidence-head/STS numerical reference and the shared kernel parity suite (22 GPU subtests)."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No compatible DFlash2 target/draft checkpoint or trained confidence-head checkpoint was supplied or cached, so real model weight loading and end-to-end DFlash2 serving were not run.",
+    "Lossless end-to-end semantics for sampling, grammar, continuous batching, overlap relay, and live compact graph replay remain unverified without a compatible DFlash2 model pair.",
+    "Mixed-workload throughput remains unmeasured locally; no claim is made from the tiny Llama transport fixture because it cannot qualify DFlash2 architecture or semantics.",
+    "No native C/C++/CUDA/HIP/FlyDSL source changed, so a native rebuild was not applicable."
+  ]
+}

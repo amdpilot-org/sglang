@@ -1,5 +1,5 @@
-import unittest
 import tempfile
+import unittest
 from types import SimpleNamespace
 from unittest import mock
 
@@ -86,7 +86,10 @@ class TestDFlashConfidence(unittest.TestCase):
         weight = torch.tensor([[3.0, 4.0]])
         bias = torch.tensor([5.0])
         model.load_weights(
-            [("confidence_head.proj.weight", weight), ("confidence_head.proj.bias", bias)]
+            [
+                ("confidence_head.proj.weight", weight),
+                ("confidence_head.proj.bias", bias),
+            ]
         )
         torch.testing.assert_close(model.confidence_head.proj.weight, weight)
         torch.testing.assert_close(model.confidence_head.proj.bias, bias)
