@@ -1,0 +1,61 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36734",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1885",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1847",
+  "candidate_commit": "f7c757917edcdfe4e0bd36a6501abc41d93a386e",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "prepared_checkout_difference": "none; prepared branch HEAD equaled the recorded base",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes and tests a concrete GLM parser-level empty-content mechanism: a direct answer following a template-opened <think> is reclassified from reasoning_content to content only when generation ends on model EOS. The implementation and serving-path plumbing passed focused and independent tests. This is a justified partial fix, not verification of the full stochastic GLM-5.1/Kimi-K2.5 TP8 LongBench V2 report.",
+  "tests": [
+    {
+      "command": "candidate tests checked out over base production code; python -m pytest test/registered/unit/parser/test_reasoning_parser.py::TestSkippedThinkAsContent -q",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before behavior at the recorded base: 27 failed, 2 passed because the base lacks finish-reason-aware skipped-thinking classification."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-673e3763f12e/venv/bin/python -m pytest test/registered/unit/parser/test_reasoning_parser.py::TestSkippedThinkAsContent -q",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression: 26 passed and 3 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-673e3763f12e/venv/bin/python -m pytest test/registered/unit/parser/test_reasoning_parser.py test/registered/unit/entrypoints/openai/test_serving_chat.py test/registered/unit/entrypoints/openai/test_serving_responses.py test/registered/unit/entrypoints/openai/test_serving_responses_stream.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate parser and OpenAI chat/Responses integration: 330 passed and 146 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-673e3763f12e/venv/bin/python /job/review-evidence-j-673e3763f12e/adversarial_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent EOS integer/list, user-stop string, length, opt-out, Qwen isolation, and streaming re-emission boundaries."
+    },
+    {
+      "command": "qualified PR649 tiny-Llama create_tiny_llama.py and run_server_probe.py --fixture /tmp/amdpilot-repo-j-673e3763f12e/review-fixture --output /job/review-evidence-j-673e3763f12e/server",
+      "exit_code": 0,
+      "what_was_measured": "Real gfx950 engine and HTTP transport execution: four probes returned HTTP 200 and streaming produced 8 events; not a GLM/Kimi semantic test."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Candidate checkout launched on AMD Instinct MI350X gfx950 with Torch 2.11.0+rocm7.2/HIP 7.2.26015; server log records GPU prefill/decode, all probes returned 200, and the owned process group was removed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A genuine GLM reasoning trace that ends on model EOS without </think> is reclassified as content because it is indistinguishable from skipped thinking.",
+    "Kimi-K2.5 empty outputs are not addressed or verified by the glm45-specific default.",
+    "The TP8 long-context 503-client stochastic workload may contain engine, model, or concurrency causes outside this parser mechanism."
+  ],
+  "remaining_limitations": [
+    "GLM-5.1 and Kimi-K2.5 weights and LongBench V2 inputs were unavailable.",
+    "Only one gfx950 GPU was assigned, so TP8 and multi-node behavior could not be tested.",
+    "The deterministic tiny-Llama fixture validates transport and engine execution only, not target architecture or semantic accuracy.",
+    "No native code changed; native rebuild and compiler/ISA validation were not applicable."
+  ],
+  "source_paths": {
+    "sglang": "/job/repo/python/sglang/__init__.py",
+    "reasoning_parser": "/job/repo/python/sglang/srt/parser/reasoning_parser.py",
+    "python": "/tmp/amdpilot-repo-j-673e3763f12e/venv/bin/python",
+    "raw_evidence": "/job/review-evidence-j-673e3763f12e"
+  }
+}
