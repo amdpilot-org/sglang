@@ -1,0 +1,31 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35498",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared main source already contains the issue's performance-preserving solution: Engine creates one independent MultiprocessingSerializer payload per TP rank and TPWorker deserializes only the payload indexed by its rank. A new regression uses real CPU tensor storage handles and four spawned consumers; all ranks succeed. The original serialize-once payload still reproduces one success and seven EOFError failures, confirming the test targets the reported defect.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-3461c967711b/venv/bin/python reports/j-3461c967711b/reproduce_one_shot_payload.py",
+      "exit_code": 0,
+      "what_was_measured": "Issue-specific legacy topology with one ForkingPickler tensor payload shared by eight spawned consumers: one restored 1048576 bf16 elements and seven raised EOFError; the resource_sharer logged seven KeyError failures. Raw output: reports/j-3461c967711b/evidence/legacy_one_payload.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3461c967711b/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_lora_tensor_serialization.py",
+      "exit_code": 0,
+      "what_was_measured": "Three tests passed: four independently serialized CPU tensor payloads were consumed concurrently by four spawned TP-rank stand-ins; TP1 retained one valid multiprocessing payload; raw and base64 pre-serialized flattened_bucket inputs normalized without reserialization. Raw output: reports/j-3461c967711b/evidence/regression_test.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The defect and regression concern CPU tensor ForkingPickler/resource_sharer file-descriptor ownership. No GPU operation was relevant or used.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one gfx950 GPU was assigned, so the reported TP8 server topology could not be reproduced.",
+    "No model weights were used; this does not validate LoRA semantic accuracy, Qwen3 behavior, HTTP transport, or a full scheduler/model-worker lifecycle.",
+    "The evidence qualifies the per-rank serialization/deserialization mechanism with real spawned processes, not a multi-node workload."
+  ]
+}
