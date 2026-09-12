@@ -1,6 +1,17 @@
-"""CUDA unit tests for the MXFP4 expert-pack kernels."""
+"""CUDA unit tests for the MXFP4 expert-pack kernels.
 
+The file supervises its unittest process because the first kernel call may
+need to compile the extension.  A compiler or kernel stall must not consume
+the enclosing CI shard's much larger timeout.
+"""
+
+import os
+import signal
+import subprocess
+import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 import torch
 
@@ -11,7 +22,58 @@ from sglang.kernels.ops.moe.expert_pack_mxfp4 import (
 )
 from sglang.test.ci.ci_register import register_cuda_ci
 
-register_cuda_ci(est_time=7, stage="base-b", runner_config="1-gpu-small")
+register_cuda_ci(est_time=130, stage="base-b", runner_config="1-gpu-small")
+
+
+_WORKER_ARG = "--mxfp4-test-worker"
+_ATTEMPT_TIMEOUT_SECONDS = 120
+_MAX_ATTEMPTS = 2
+
+
+def _run_isolated() -> int:
+    """Run the registered test with a bounded lifetime and one clean retry."""
+    timeout = float(
+        os.environ.get("SGLANG_MXFP4_TEST_TIMEOUT_SECONDS", _ATTEMPT_TIMEOUT_SECONDS)
+    )
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        with tempfile.TemporaryDirectory(
+            prefix=f"sglang-mxfp4-attempt-{attempt}-"
+        ) as root:
+            env = os.environ.copy()
+            env["SGLANG_JIT_CACHE_DIR"] = str(Path(root) / "sglang-jit")
+            env["TORCH_EXTENSIONS_DIR"] = str(Path(root) / "torch-extensions")
+            env["SGLANG_MXFP4_TEST_ATTEMPT"] = str(attempt)
+            print(
+                f"Starting MXFP4 test attempt {attempt}/{_MAX_ATTEMPTS} "
+                f"with fresh cache {root}",
+                flush=True,
+            )
+            process = subprocess.Popen(
+                [sys.executable, __file__, _WORKER_ARG, *sys.argv[1:]],
+                env=env,
+                start_new_session=True,
+            )
+            try:
+                returncode = process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                print(
+                    f"MXFP4 test attempt {attempt}/{_MAX_ATTEMPTS} timed out "
+                    f"after {timeout:g}s; killing process group {process.pid}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait()
+                if attempt < _MAX_ATTEMPTS:
+                    continue
+                return 124
+            if returncode != 0:
+                return returncode
+            return 0
+    raise AssertionError("unreachable")
 
 
 _FP4_VALUES = (
@@ -357,4 +419,17 @@ class TestExpertPackMxfp4(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    if _WORKER_ARG in sys.argv:
+        sys.argv.remove(_WORKER_ARG)
+        # Test-only fault injection validates the supervisor without requiring
+        # NVIDIA hardware. It is inert in normal registered runs.
+        if os.environ.get("SGLANG_MXFP4_TEST_STALL_ATTEMPT") == os.environ.get(
+            "SGLANG_MXFP4_TEST_ATTEMPT"
+        ):
+            signal.pause()
+        if os.environ.get("SGLANG_MXFP4_TEST_SUPERVISOR_SELF_TEST"):
+            print("MXFP4 supervisor self-test worker passed", flush=True)
+            raise SystemExit(0)
+        unittest.main()
+    else:
+        raise SystemExit(_run_isolated())
