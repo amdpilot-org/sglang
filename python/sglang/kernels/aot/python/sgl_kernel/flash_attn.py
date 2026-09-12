@@ -14,18 +14,28 @@ except:
 
 @lru_cache(maxsize=1)
 def is_fa3_supported(device=None) -> bool:
-    #  There some fa3 FYI
-    #  FA3 can fail without a enough shared memory for a some shapes, such as higher
-    #  hidden_dim or some special cases.
-    #  Right now, fa3 is supported for sm80/sm87 and sm86/sm89. The main different
-    #  Between sm80/sm87 and sm86/sm89 is the shared memory size. you can follow the link below for more information
-    #  https://docs.nvidia.com/cuda/cuda-c-programming-guide/#shared-memory-8-x
-    #  And for sgl-kernel right now, we can build fa3 on sm80/sm86/sm89/sm90a.
-    #  That means if you use A100/A*0/L20/L40/L40s/4090 you can use fa3.
-    return (torch.version.cuda >= "12.3") and (
-        torch.cuda.get_device_capability(device)[0] == 9
-        or torch.cuda.get_device_capability(device)[0] == 8
-    )
+    cuda_version = torch.version.cuda
+    if cuda_version is None:
+        return False
+
+    version_parts = tuple(int(part) for part in cuda_version.split(".")[:2])
+    if version_parts < (12, 3):
+        return False
+
+    # Keep this list aligned with SGL_FLASH_KERNEL_CUDA_FLAGS in CMakeLists.txt.
+    # Do not assume that a cubin built for one minor capability will execute on
+    # another capability unless that target is also built and tested.
+    return torch.cuda.get_device_capability(device) in {(8, 0), (8, 6), (9, 0)}
+
+
+def _validate_fa3_contract(ver) -> None:
+    if ver != 3:
+        raise ValueError(f"sgl_kernel flash attention only supports ver=3, got {ver!r}")
+    if not is_fa3_supported():
+        raise NotImplementedError(
+            "sgl_kernel FA3 is not supported on this CUDA version or GPU architecture; "
+            "the packaged kernels target sm80, sm86, and sm90a"
+        )
 
 
 def maybe_contiguous(x):
@@ -159,6 +169,8 @@ def flash_attn_with_kvcache(
             logsumexp of each row of the matrix QK^T * scaling (e.g., log of the softmax
             normalization factor).
     """
+
+    _validate_fa3_contract(ver)
 
     if v_cache is None:
         raise ValueError("v_cache must be provided")
@@ -303,10 +315,7 @@ def flash_attn_varlen_func(
     out=None,
 ):
 
-    if not is_fa3_supported():
-        raise NotImplementedError(
-            "flash_attn at sgl-kernel is only supported on sm90 and above"
-        )
+    _validate_fa3_contract(ver)
 
     # FA3 requires max_seqlen_q and max_seqlen_k
     if max_seqlen_q is None or max_seqlen_k is None:
