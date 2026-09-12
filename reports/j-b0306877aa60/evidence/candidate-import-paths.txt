@@ -1,0 +1,17 @@
+sglang: /job/repo/python/sglang/__init__.py
+data_parallel_controller: /job/repo/python/sglang/srt/managers/data_parallel_controller.py
+scheduler source:
+    def follow_bootstrap_room_scheduler(self, req: Req):
+        if self.maybe_external_dp_rank_routing(req):
+            return
+
+        assert req.bootstrap_room is not None, (
+            "req.bootstrap_room should not be None. Do not send requests directly to "
+            "prefill or decode instances; send to the router instead."
+        )
+        active = self._active_workers
+        if not active:
+            raise RuntimeError("No active DP workers are available for routing.")
+        target_rank = active[req.bootstrap_room % len(active)]
+        sock_send(self.workers[target_rank], req)
+

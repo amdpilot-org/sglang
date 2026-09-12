@@ -1,0 +1,133 @@
+diff --git a/python/sglang/srt/managers/data_parallel_controller.py b/python/sglang/srt/managers/data_parallel_controller.py
+index c4b078b..9feea1d 100644
+--- a/python/sglang/srt/managers/data_parallel_controller.py
++++ b/python/sglang/srt/managers/data_parallel_controller.py
+@@ -793,7 +793,10 @@ class DataParallelController:
+             "req.bootstrap_room should not be None. Do not send requests directly to "
+             "prefill or decode instances; send to the router instead."
+         )
+-        target_rank = req.bootstrap_room % len(self.workers)
++        active = self._active_workers
++        if not active:
++            raise RuntimeError("No active DP workers are available for routing.")
++        target_rank = active[req.bootstrap_room % len(active)]
+         sock_send(self.workers[target_rank], req)
+ 
+     def total_requests_scheduler(self, req: Req):
+diff --git a/reports/j-e6974907a585/result.json b/reports/j-e6974907a585/result.json
+new file mode 100644
+index 0000000..2a7a525
+--- /dev/null
++++ b/reports/j-e6974907a585/result.json
+@@ -0,0 +1,31 @@
++{
++  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34104",
++  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
++  "outcome": "fixed",
++  "summary": "Reproduced the reserved-slot crash in follow_bootstrap_room_scheduler and changed bootstrap-room modulo routing to use the active-worker domain. Added regression coverage for reserved None sockets plus sparse and empty active-worker boundaries.",
++  "tests": [
++    {
++      "command": "/tmp/amdpilot-repo-j-e6974907a585/venv/bin/python -m pytest -q test/registered/unit/managers/test_data_parallel_controller.py::TestFollowBootstrapRoomScheduler",
++      "exit_code": 1,
++      "what_was_measured": "Failing-before run with the regression tests applied but the source unchanged: 3 failed, 3 passed. bootstrap_room=2 selected reserved workers[2]=None and raised AttributeError from sock_send; sparse and empty active-worker boundary tests also failed."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-e6974907a585/venv/bin/python -m pytest -q test/registered/unit/managers/test_data_parallel_controller.py",
++      "exit_code": 0,
++      "what_was_measured": "Passing-after focused controller suite: 20 passed, including reserved-slot routing to worker 0, sparse active-slot mapping, empty-active explicit failure, existing direct-rank behavior, and other scheduler budget tests."
++    },
++    {
++      "command": "git diff --check",
++      "exit_code": 0,
++      "what_was_measured": "Patch whitespace validation."
++    }
++  ],
++  "gpu_execution": false,
++  "gpu_execution_evidence": "The defect is deterministic Python controller selection before any GPU/model execution. The regression uses mocked worker sockets and no GPU kernels; a gfx950 run would not add evidence for this routing calculation.",
++  "native_rebuilt": false,
++  "remaining_limitations": [
++    "No live multi-worker disaggregated serving deployment was run; validation is the issue-specific controller regression and independent routing boundaries.",
++    "No model weights or semantic model output were exercised because the failure occurs before worker execution.",
++    "Upstream PR https://github.com/sgl-project/sglang/pull/34105 is open and has expanded into broader elastic-topology changes; this mirror patch intentionally addresses only the reported reserved-slot routing defect on the recorded base."
++  ]
++}
+diff --git a/reports/j-e6974907a585/test-output.txt b/reports/j-e6974907a585/test-output.txt
+new file mode 100644
+index 0000000..3a3b8a6
+--- /dev/null
++++ b/reports/j-e6974907a585/test-output.txt
+@@ -0,0 +1,35 @@
++Failing-before
++==============
++Command: /tmp/amdpilot-repo-j-e6974907a585/venv/bin/python -m pytest -q test/registered/unit/managers/test_data_parallel_controller.py::TestFollowBootstrapRoomScheduler
++Exit code: 1
++Result: 3 failed, 3 passed, 17 warnings in 9.00s
++
++Issue-specific traceback excerpt:
++  test_reserved_slots_are_excluded_from_bootstrap_room_mapping
++  python/sglang/srt/managers/data_parallel_controller.py:797
++    sock_send(self.workers[target_rank], req)
++  python/sglang/srt/managers/io_struct.py:2477
++    socket.send_pyobj(...)
++  AttributeError: 'NoneType' object has no attribute 'send_pyobj'
++
++The same run independently showed that sparse active slots were indexed through
++the allocated worker array and that an empty active domain did not fail explicitly.
++
++Passing-after
++=============
++Command: /tmp/amdpilot-repo-j-e6974907a585/venv/bin/python -m pytest -q test/registered/unit/managers/test_data_parallel_controller.py
++Exit code: 0
++Result: 20 passed, 17 warnings in 9.34s
++
++Static validation
++=================
++Command: git diff --check
++Exit code: 0
++
++Environment
++===========
++Checkout: /job/repo
++Python: /tmp/amdpilot-repo-j-e6974907a585/venv/bin/python
++Base: 358c163250ad3b1f62939b01ce1314a0a31a0365
++GPU execution: false; controller-only routing path, before GPU/model execution.
++Native rebuild: false; no native source changed.
+diff --git a/test/registered/unit/managers/test_data_parallel_controller.py b/test/registered/unit/managers/test_data_parallel_controller.py
+index 85c373f..bf507ff 100644
+--- a/test/registered/unit/managers/test_data_parallel_controller.py
++++ b/test/registered/unit/managers/test_data_parallel_controller.py
+@@ -234,6 +234,34 @@ class TestFollowBootstrapRoomScheduler(CustomTestCase):
+         ctl.workers[3].send_pyobj.assert_called_once()
+         ctl.workers[1].send_pyobj.assert_not_called()
+ 
++    def test_reserved_slots_are_excluded_from_bootstrap_room_mapping(self):
++        ctl = _make_controller(dp_size=4)
++        ctl.workers[2:] = [None, None]
++        ctl.status[2:] = [False, False]
++        ctl._active_workers = [0, 1]
++
++        ctl.follow_bootstrap_room_scheduler(_req(bootstrap_room=2))
++
++        ctl.workers[0].send_pyobj.assert_called_once()
++        ctl.workers[1].send_pyobj.assert_not_called()
++
++    def test_sparse_active_slots_preserve_logical_dp_rank_mapping(self):
++        ctl = _make_controller(dp_size=5)
++        ctl._active_workers = [1, 4]
++
++        ctl.follow_bootstrap_room_scheduler(_req(bootstrap_room=3))
++
++        ctl.workers[4].send_pyobj.assert_called_once()
++        for rank in (0, 1, 2, 3):
++            ctl.workers[rank].send_pyobj.assert_not_called()
++
++    def test_no_active_workers_fails_explicitly(self):
++        ctl = _make_controller(dp_size=2)
++        ctl._active_workers = []
++
++        with self.assertRaisesRegex(RuntimeError, "No active DP workers"):
++            ctl.follow_bootstrap_room_scheduler(_req(bootstrap_room=0))
++
+ 
+ class TestTotalRequestsScheduler(CustomTestCase):
+     def test_dispatches_to_min_request_worker(self):

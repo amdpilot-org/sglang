@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34104",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1781",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1740",
+  "candidate_commit": "9af7b07e1fd3d27c76f1ea374bff8d39b746d734",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "Independent review reproduced the original reserved-slot AttributeError on the recorded base and verified that the exact candidate maps bootstrap rooms through the ordered active-worker domain. The candidate's focused regression, the complete controller unit module, and an independent adversarial harness all pass. This is a full fix for the original deterministic controller-routing contract, not merely test hardening.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-b0306877aa60/venv/bin/python /job/review_candidate_adversarial.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction with four allocated slots, active workers [0,1], reserved None sockets [2,3], and bootstrap_room=2. The base selected workers[2] and raised AttributeError: 'NoneType' object has no attribute 'send_pyobj'."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b0306877aa60/venv/bin/python -m pytest -q test/registered/unit/managers/test_data_parallel_controller.py::TestFollowBootstrapRoomScheduler (candidate 9af7b07e1fd3d27c76f1ea374bff8d39b746d734)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression set: 6 passed, including reserved slots, sparse active slots, empty active domain, modulo routing, missing bootstrap room, and explicit routed-rank behavior."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b0306877aa60/venv/bin/python -m pytest -q test/registered/unit/managers/test_data_parallel_controller.py (candidate 9af7b07e1fd3d27c76f1ea374bff8d39b746d734)",
+      "exit_code": 0,
+      "what_was_measured": "Complete controller unit module: 20 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b0306877aa60/venv/bin/python /job/review_candidate_adversarial.py (candidate 9af7b07e1fd3d27c76f1ea374bff8d39b746d734)",
+      "exit_code": 0,
+      "what_was_measured": "Independent cases passed for the original reserved-slot topology, rooms 2 and 3, a very large room ID, sparse active slots [1,4] with inactive sockets absent, repeated modulo mapping, and an empty active domain."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "One AMD Instinct MI350X gfx950 GPU was visible through Torch 2.11.0+rocm7.2, but the reviewed failure and fix are deterministic Python controller routing before worker or GPU execution. No GPU kernel or model-output claim is made.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No live multi-worker disaggregated serving deployment or model-weight execution was run; validation uses the actual controller method with mocked sockets and checks the precise routing contract.",
+    "The tiny Llama transport fixture was not used because transport/engine startup cannot strengthen evidence for this pre-dispatch modulo/indexing defect.",
+    "No native source changed in the candidate, repository-environment.json declares no job native artifact, and therefore no native rebuild was applicable.",
+    "Validation qualifies the reported follow-bootstrap-room behavior only; it does not qualify unrelated load-aware schedulers, semantic model accuracy, or multi-node operation."
+  ]
+}
