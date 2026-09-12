@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/29272",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate correctly changes device selection from global process-group rank to the process-selected local CUDA device and its one-rank test demonstrates a non-GDS retry for the reported constructor error. It does not coordinate fallback across ranks: if GDS copy fails on one rank after another rank succeeds, ranks take different loader/copy paths before entering SPMD tensor collectives. This leaves a multi-node hang or desynchronization counterexample, so the change is a partial rather than full original-issue fix.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a745992d3306/venv/bin/python -m pytest -q /job/review-evidence/candidate/test_prefetch_checkpoints.py -k 'fastsafetensors_uses_local_device_not_global_rank or fastsafetensors_retries_without_gds_when_unavailable' (at base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: both candidate regressions fail on the recorded base. The base chooses cuda:11 for global rank 11/local device 0 and propagates is_gds_supported(0) failed without retry. Raw output: reports/j-a745992d3306/raw/base_original_contract_failures.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a745992d3306/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_prefetch_checkpoints.py (at candidate 04c853b98a9abea4e7f4ad1186613e59abeb8f0b)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's focused suite passed 25 tests, including its local-device and single-rank GDS fallback regressions. Raw output: reports/j-a745992d3306/raw/candidate_unit.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a745992d3306/venv/bin/python /job/review-evidence/adversarial_fastsafetensors.py (at candidate 04c853b98a9abea4e7f4ad1186613e59abeb8f0b)",
+      "exit_code": 0,
+      "what_was_measured": "Independent boundary simulation showed an asymmetric GDS copy failure makes the healthy rank perform one copy while the failing rank performs two, proving the fallback choice is rank-local rather than group-coordinated. Raw output: reports/j-a745992d3306/raw/adversarial_uncoordinated_retry.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a745992d3306/venv/bin/python GPU arithmetic fixture",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI350X gfx950, GPU arithmetic produced 1578496.0 and matched the independent CPU value 1578496. Raw output: reports/j-a745992d3306/raw/gpu_environment.log"
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 04c853b98a9abea4e7f4ad1186613e59abeb8f0b",
+      "exit_code": 2,
+      "what_was_measured": "Candidate source/test changes are inspectable, but committed raw pytest logs contain trailing whitespace. This is not the substantive rejection reason."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Real torch arithmetic executed on the single assigned AMD Instinct MI350X gfx950 and matched a CPU reference; this was not a fastsafetensors or multi-node model run."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "In a multi-rank process group, GDS copy succeeds on one rank but raises a GDS-specific error on another. The candidate lets the healthy rank proceed toward FilesBufferOnDevice broadcasts while only the failing rank reconstructs a nogds loader and repeats the copy. Because the library requires identical SPMD operation order, this can hang or desynchronize the load.",
+    "No real fastsafetensors installation, multi-node process group, or GLM-5.2 weights were available to demonstrate that the exact deployment completes after the candidate."
+  ],
+  "remaining_limitations": [
+    "The environment provided one AMD Instinct MI350X gfx950 GPU on one node, not the reported four-node deployment.",
+    "GLM-5.2/DeepSeek-V2 weights were unavailable; no full model load or semantic validation was performed.",
+    "fastsafetensors was not installed in the prepared interpreter, so source behavior was exercised with deterministic loader doubles and the upstream library's documented SPMD contract was inspected.",
+    "No native sources changed, so no native rebuild was applicable."
+  ]
+}
