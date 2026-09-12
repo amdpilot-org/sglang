@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37059",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1090",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1051",
+  "candidate_commit": "0ba6f8161b30353024ef292d56d29c5385b6b81d",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the issue-specific source defect: MiMo audio weights are sharded over attention TP while AudioEncoderAttention omits the flag that routes its output reduction to that group. At the exact candidate commit, the focused regression passes and independent checks verify attention-TP weight sharding plus the actual RowParallelLinear communicator branch for enabled and disabled DP attention. The change resolves the reported communicator mismatch without altering the non-DP path.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-1c37fce5c001/venv/bin/python <base constructor-routing regression>",
+      "exit_code": 1,
+      "what_was_measured": "On recorded base 358c1632, AudioEncoderAttention did not provide use_dp_attention_reduce; the issue-specific assertion failed. Raw output retained outside the revision-switching checkout at /tmp/amdpilot-repo-j-1c37fce5c001/review-evidence/base-constructor-regression.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1c37fce5c001/venv/bin/python -m pytest -q test/srt/models/test_mimo_audio_dp_attention.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 0ba6f816, both enabled and disabled construction boundaries passed (2 tests). Imported code came from /job/repo/python/sglang/srt/models/mimo_audio.py."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1c37fce5c001/venv/bin/python <independent sharding and communicator adversarial probes>",
+      "exit_code": 0,
+      "what_was_measured": "Synthetic audio projection weights split into distinct attention-TP rank shards that reconstructed the original tensor; direct RowParallelLinear execution selected the attention-TP all-reduce sentinel when enabled and the full-TP sentinel when disabled. The first harness attempt exited 1 because its test mock omitted get_tp_group initialization; the corrected communicator probe passed and that harness-only error is retained in the evidence directory."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1c37fce5c001/venv/bin/python -m compileall -q python/sglang/srt/models/mimo_audio.py test/srt/models/test_mimo_audio_dp_attention.py && git diff --check 358c1632..0ba6f816",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources compiled and the candidate diff had no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The issue-specific tests were deterministic source/CPU contract probes. One AMD Instinct MI355X gfx950 device was visible, but a single ROCm GPU cannot execute the reported TP=8/DP=2 CUDA/NCCL collective topology, so an unrelated GPU smoke was not counted as issue evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Only one AMD Instinct MI355X (gfx950) with ROCm 7.2 was available, rather than the reported 8xH200 CUDA/NCCL topology.",
+    "MiMo-V2.5 weights were unavailable, so the full HTTP audio request, FP8 model execution, 600-second NCCL watchdog signature, and post-request server recovery were not reproduced.",
+    "The regression and independent adversarial probes validate the complete source-level communicator-selection contract but do not execute a real multi-rank collective.",
+    "No native code changed, so a native rebuild was not applicable."
+  ]
+}
