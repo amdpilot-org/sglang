@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34023",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the DSpark compact confidence-path shape failure when runtime gamma differs from checkpoint-native gamma, then changed compute_confidence() to derive the window from x_post_hc and use it for both reshaping and Markov context. Added regression coverage for runtime gamma below, equal to, and above the checkpoint value.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-b04fe5a75687/venv/bin/python -m pytest -q test/registered/spec/dspark/test_deepseek_v4_dspark_confidence.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: checkpoint gamma 5 failed with the reported invalid reshape for runtime gamma 3 and 7, while gamma 5 passed. Raw output: reports/j-b04fe5a75687/failing-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b04fe5a75687/venv/bin/python -m pytest -q test/registered/spec/dspark/test_deepseek_v4_dspark_confidence.py test/registered/spec/dspark/test_dspark_draft_path_default.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after focused regression and DSpark CLI-to-verify-window resolution coverage: 10 tests passed. Raw output: reports/j-b04fe5a75687/focused-tests.log"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-b04fe5a75687/venv/bin/python < focused gfx950 numerical script",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI350X (gfx950), gamma 3, 5, and 7 confidence outputs matched an independently assembled reshape-plus-Markov reference exactly (maximum absolute error 0.0). Raw output: reports/j-b04fe5a75687/gpu-numerical.log"
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-b04fe5a75687/pre-commit /opt/venv/bin/pre-commit run --files python/sglang/srt/models/deepseek_v4_dspark.py test/registered/spec/dspark/test_deepseek_v4_dspark_confidence.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, registry, and hygiene hooks passed for the changed source and regression test."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The focused confidence computation executed on the single assigned AMD Instinct MI350X, reported arch gfx950:sramecc+:xnack-, and matched independent references at runtime gamma 3, 5, and 7; see reports/j-b04fe5a75687/gpu-numerical.log."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 weights were not available, so full model loading, decode-graph capture, serving, and semantic accuracy were not exercised.",
+    "The assigned hardware was one gfx950 GPU, not the four-GPU SM120 configuration cited by the reporter; no multi-GPU or SM120 corruption screen is claimed.",
+    "The GPU check validates the affected tensor reshape, Markov context construction, and confidence output only; it is not a full serving-path reproduction."
+  ]
+}
