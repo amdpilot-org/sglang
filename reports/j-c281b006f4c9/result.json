@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34631",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2003",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1996",
+  "candidate_commit": "322cfb45762e9f6586a9751c073bb607142b1c41",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "prepared_checkout_difference": "The prepared branch began exactly at the recorded base and was fast-forwarded to mirror main a207786205bff0919eb2c8c9126c67f302ccff34 before the review-report commit.",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The base independently reproduces five channel-header positions being constrained. The parent candidate fixes that boundary but reproduces the reviewed rollback(0) corruption. Exact candidate 322cfb4 preserves the boundary fix and makes rollback(0) a complete no-op; focused tests and 20,397 independent replay-equivalence transitions pass.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c281b006f4c9/venv/bin/python /tmp/j-c281b006f4c9-original-repro.py (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "Original Muse stream began masking at position 6 while answer body began at 11; five header tokens were fed to the inner grammar."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c281b006f4c9/venv/bin/python /tmp/j-c281b006f4c9-adversarial.py (parent b52daa1)",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced PR 1935 counterexample: rollback(0) emptied [20, 21] and called inner rollback(2)."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c281b006f4c9/venv/bin/python /tmp/j-c281b006f4c9-original-repro.py && .../python /tmp/j-c281b006f4c9-adversarial.py (candidate 322cfb4)",
+      "exit_code": 0,
+      "what_was_measured": "Masking began exactly at answer body position 11 and rollback(0) preserved wrapper/history/inner state with no inner rollback call."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c281b006f4c9/venv/bin/python -m pytest -q test/registered/unit/constrained/test_reasoner_grammar_backend.py test/registered/unit/parser/test_reasoning_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "156 tests passed with 64 subtests, covering candidate regressions and parser behavior."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c281b006f4c9/venv/bin/python /tmp/j-c281b006f4c9-fuzz.py",
+      "exit_code": 0,
+      "what_was_measured": "20,397 seeded valid accept/rollback transitions matched a replay-from-prefix oracle."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..322cfb45762e9f6586a9751c073bb607142b1c41",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X was visible through Torch ROCm, but the issue and correction are deterministic CPU-side grammar state transitions; no GPU/model claim was made."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Muse Glimmer 30B NVFP4 weights were unavailable, so production placeholder frequency, semantic quality, and full HTTP serving were not reproduced.",
+    "GPT-OSS channel-framing behavior remains unverified.",
+    "Negative and oversized rollback counts are unchecked but were not found in the valid caller contract and are not original-issue counterexamples."
+  ]
+}
