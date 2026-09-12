@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import (
     Annotated,
     Any,
+    ClassVar,
     Dict,
     List,
     Literal,
@@ -977,6 +978,64 @@ class ChatCompletionRequest(BaseModel):
         "min_p": 0.0,
         "repetition_penalty": 1.0,
     }
+
+    _FIELD_TO_SAMPLING_KEY: ClassVar[Dict[str, str]] = {
+        "max_completion_tokens": "max_new_tokens",
+        "max_tokens": "max_new_tokens",
+        "min_tokens": "min_new_tokens",
+        "stop": "stop",
+        "stop_token_ids": "stop_token_ids",
+        "stop_regex": "stop_regex",
+        "temperature": "temperature",
+        "top_p": "top_p",
+        "top_k": "top_k",
+        "min_p": "min_p",
+        "presence_penalty": "presence_penalty",
+        "frequency_penalty": "frequency_penalty",
+        "repetition_penalty": "repetition_penalty",
+        "regex": "regex",
+        "ebnf": "ebnf",
+        "n": "n",
+        "no_stop_trim": "no_stop_trim",
+        "ignore_eos": "ignore_eos",
+        "skip_special_tokens": "skip_special_tokens",
+        "logit_bias": "logit_bias",
+        "custom_params": "custom_params",
+        "seed": "sampling_seed",
+        "response_format": "json_schema",
+    }
+    _CONSTRAINT_SAMPLING_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {"json_schema", "regex", "ebnf", "structural_tag"}
+    )
+
+    def get_explicit_sampling_keys(
+        self, tool_call_constraint: Optional[ToolCallConstraint] = None
+    ) -> List[str]:
+        """Return sampling keys whose values were explicitly supplied by the client."""
+        keys = {
+            sampling_key
+            for field, sampling_key in self._FIELD_TO_SAMPLING_KEY.items()
+            if field in self.model_fields_set
+        }
+        has_explicit_constraint = bool(
+            {"response_format", "regex", "ebnf"} & self.model_fields_set
+        )
+        if tool_call_constraint and (
+            self.tool_choice == "required" or isinstance(self.tool_choice, ToolChoice)
+        ):
+            has_explicit_constraint = True
+        if has_explicit_constraint:
+            # Constraint kinds are mutually exclusive. Mark the whole group so an
+            # explicit selection also removes server preferences of another kind;
+            # response_format=text intentionally selects no constraint.
+            keys.update(self._CONSTRAINT_SAMPLING_KEYS)
+        if (
+            "chat_template_kwargs" in self.model_fields_set
+            and self.chat_template_kwargs is not None
+            and "spaces_between_special_tokens" in self.chat_template_kwargs
+        ):
+            keys.add("spaces_between_special_tokens")
+        return sorted(keys)
 
     @model_validator(mode="before")
     @classmethod

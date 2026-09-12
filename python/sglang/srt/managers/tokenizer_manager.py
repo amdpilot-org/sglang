@@ -179,6 +179,27 @@ asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 _REQUEST_STATE_WAIT_TIMEOUT = envs.SGLANG_REQUEST_STATE_WAIT_TIMEOUT.get()
 
+
+def merge_preferred_sampling_params(
+    sampling_params: Dict[str, Any],
+    preferred_sampling_params: Dict[str, Any],
+    explicit_keys: Optional[List[str]],
+) -> Dict[str, Any]:
+    """Merge defaults, server preferences, and explicit client values in order."""
+    if explicit_keys is None:
+        return {**preferred_sampling_params, **sampling_params}
+
+    merged = {**sampling_params, **preferred_sampling_params}
+    for key in explicit_keys:
+        if key in sampling_params:
+            merged[key] = sampling_params[key]
+        else:
+            # Absence can itself be explicit, notably response_format=text clearing
+            # a preferred output constraint.
+            merged.pop(key, None)
+    return merged
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -1370,7 +1391,11 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
         # Note: if there are preferred sampling params, we use them if they are not
         # explicitly passed in sampling_params
         if self.preferred_sampling_params:
-            sampling_kwargs = {**self.preferred_sampling_params, **obj.sampling_params}
+            sampling_kwargs = merge_preferred_sampling_params(
+                obj.sampling_params,
+                self.preferred_sampling_params,
+                getattr(obj, "sampling_params_explicit_keys", None),
+            )
         else:
             sampling_kwargs = obj.sampling_params
         if isinstance(obj, GenerateReqInput) and obj.max_thinking_tokens is not None:
