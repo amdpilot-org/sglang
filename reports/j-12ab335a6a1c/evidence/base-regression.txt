@@ -1,0 +1,129 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+____ TestGoldenModelOverrides.test_deepseek_v4_overrides_at_callable_level _____
+
+self = <test_model_overrides.TestGoldenModelOverrides testMethod=test_deepseek_v4_overrides_at_callable_level>
+
+    def test_deepseek_v4_overrides_at_callable_level(self):
+        from sglang.srt.arg_groups.model_overrides.deepseek_v4 import (
+            _deepseek_v4_overrides,
+        )
+    
+        hf = SimpleNamespace(architectures=["DeepseekV4ForCausalLM"])
+    
+        def _args(**kw):
+            defaults = dict(
+                device="cuda",
+                swa_full_tokens_ratio=_declared_default("swa_full_tokens_ratio"),
+                moe_a2a_backend="none",
+                moe_runner_backend="auto",
+                _model_config=SimpleNamespace(is_fp4_experts=True, nvfp4_moe_meta=None),
+            )
+            defaults.update(kw)
+            return SimpleNamespace(**defaults)
+    
+        with (
+            envs.SGLANG_DSV4_FP4_DEQUANT.override(False),
+            override_platform(is_sm100=True),
+        ):
+>           self.assertEqual(
+                _deepseek_v4_overrides(_args(), hf),
+                {
+                    "attention_backend": "dsv4",
+                    "moe_runner_backend": "flashinfer_mxfp4",
+                    "page_size": 256,
+                    "swa_full_tokens_ratio": 0.1,
+                },
+            )
+E           AssertionError: {'att[21 chars]4', 'page_size': 256, 'swa_full_tokens_ratio': 0.1} != {'att[21 chars]4', 'moe_runner_backend': 'flashinfer_mxfp4', [42 chars] 0.1}
+E           - {'attention_backend': 'dsv4', 'page_size': 256, 'swa_full_tokens_ratio': 0.1}
+E           + {'attention_backend': 'dsv4',
+E           +  'moe_runner_backend': 'flashinfer_mxfp4',
+E           +  'page_size': 256,
+E           +  'swa_full_tokens_ratio': 0.1}
+
+test/registered/unit/test_model_overrides.py:1661: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f180a4d2840>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f20e9b979c0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestGoldenModelOverrides.test_deepseek_v4_overrides_at_callable_level
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/test_model_overrides.py", line 1661, in test_deepseek_v4_overrides_at_callable_level
+    self.assertEqual(
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1184, in assertDictEqual
+    self.fail(self._formatMessage(msg, standardMsg))
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: {'att[21 chars]4', 'page_size': 256, 'swa_full_tokens_ratio': 0.1} != {'att[21 chars]4', 'moe_runner_backend': 'flashinfer_mxfp4', [42 chars] 0.1}
+- {'attention_backend': 'dsv4', 'page_size': 256, 'swa_full_tokens_ratio': 0.1}
++ {'attention_backend': 'dsv4',
++  'moe_runner_backend': 'flashinfer_mxfp4',
++  'page_size': 256,
++  'swa_full_tokens_ratio': 0.1}
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/test_model_overrides.py::TestGoldenModelOverrides::test_deepseek_v4_overrides_at_callable_level
+1 failed, 17 warnings in 26.22s
