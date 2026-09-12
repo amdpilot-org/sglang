@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/18891",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3207",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3203",
+  "candidate_commit": "5f2c2ea26a4a83bc9c13ed58a784124a881fcfe3",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate implements the requested comparison and fixes the reviewed BasevLLMParameter scratch-subclass failure, but it reports a whole module as matching when a checkpoint omits arbitrary live parameters. This leaves a reproducible false-positive counterexample for incomplete checkpoints.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-323ff292a276/venv/bin/python /job/review-evidence-j-323ff292a276/reproduce_base.py",
+      "exit_code": 1,
+      "what_was_measured": "At recorded base, the original comparison feature is absent and importing compare_module_weights_with_disk raises ImportError."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-323ff292a276/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_disk_server_checksum.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, all six candidate regression tests passed against checkout source."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-323ff292a276/venv/bin/python /job/review-evidence-j-323ff292a276/adversarial_candidate.py",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X, a concrete ModelWeightParameter production-style column loader matched an independent CPU reference and detected mutation; independently, a checkpoint omitting one of two live parameters incorrectly returned match=true."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X executed the concrete ModelWeightParameter load, CPU-reference equality check, checksum match, mutation, and mismatch in raw/adversarial_candidate.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A checkpoint containing only one matching parameter for a module with two live parameters returns match=true while the omitted live parameter can hold an arbitrary stale value; the worker/API consequently claims all requested modules match."
+  ],
+  "remaining_limitations": [
+    "FLUX.2-klein and Qwen-Image model weights were unavailable, so model-specific VAE/text-encoder end-to-end serving behavior remains unverified.",
+    "Only one GPU was assigned; multi-rank TP/SP/DTensor behavior was not exercised.",
+    "The single-rank production-style parallel loader used TP rank zero without a distributed process group.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
