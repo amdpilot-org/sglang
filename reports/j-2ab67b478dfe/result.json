@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31765",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate 08a1faa06f054b939b1a672f3158b90632c713a2's valid explicit queued-abort and timeout cleanup, reproduced both remaining queue-limit counterexamples, and consolidated pre-execution streaming-session cleanup across all three paths. Incoming queue-full rejection now clears Session._inflight. Priority eviction also marks FINISH_ABORT before releasing Mamba cache state, preventing a never-executed turn from being committed.",
+  "parent_prs": [
+    "https://github.com/amdpilot-org/sglang/pull/2283",
+    "https://github.com/amdpilot-org/sglang/pull/2377"
+  ],
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-2ab67b478dfe/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_streaming_session_queue_abort.py (exact candidate source 08a1faa06f054b939b1a672f3158b90632c713a2 plus only the two new regression tests)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: 2 failed and 3 passed. Incoming queue-limit rejection made zero Session.abort_req calls; priority eviction left the streaming Mamba request finished_reason unset. Raw output: evidence/queue-limit-before.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-2ab67b478dfe/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_streaming_session_queue_abort.py test/registered/unit/managers/test_scheduler_timeouts.py test/registered/unit/mem_cache/test_streaming_session_unit.py test/registered/unit/mem_cache/test_session_token_share_unit.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after validation: 26 passed. Covers both queue-limit outcomes, candidate explicit abort and timeout behavior, FINISH_ABORT ordering at the Mamba cache boundary, non-streaming isolation, committed-session preservation, and token-sharing rollback. Raw output: evidence/focused-after.txt."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch contains no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The corrected behavior is entirely before the first model step and was reproduced deterministically at the scheduler/session/cache boundary. No new GPU claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Qwen/Qwen2.5-1.5B-Instruct weights were available, so the reporter's exact HTTP/model reproduction was not repeated.",
+    "No hybrid-Mamba weights were available. Mamba behavior was verified at the scheduler/cache boundary with release_kv_cache mocked to assert ordering and invocation, not end to end on a Mamba model.",
+    "The assigned environment is AMD ROCm rather than the reporter's NVIDIA/CUDA environment; no architecture-specific, semantic model-quality, multi-GPU, or distributed claim is made.",
+    "The change is Python-only; no native rebuild was applicable.",
+    "The prepared environment did not include ruff, so lint invocation was unavailable; focused tests and git diff --check passed."
+  ]
+}
