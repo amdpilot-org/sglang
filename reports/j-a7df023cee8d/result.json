@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33186",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced both MiMo streaming parser defects on the recorded base: normal text after a completed tool call remained in the detector buffer, and every split inside <tool_call> caused raw markup to be emitted as content. Updated the no-marker path to emit confirmed normal text while retaining only a suffix that can still become the opening marker. Added regression coverage for trailing and inter-call text plus all ten non-empty internal marker splits and partial-suffix buffering.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a7df023cee8d/venv/bin/python -m pytest -q test/registered/unit/function_call/test_mimo_detector.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression on the recorded base: 3 failed test methods, all 10 marker-split subtests failed, and 1 unrelated boundary test passed. Raw output: reports/j-a7df023cee8d/raw/regression-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a7df023cee8d/venv/bin/python -m pytest -q test/registered/unit/function_call/test_mimo_detector.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after focused regression: 4 test methods and all 10 marker-split subtests passed. Raw output: reports/j-a7df023cee8d/raw/regression-after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a7df023cee8d/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py test/registered/unit/function_call/test_unknown_tool_name.py",
+      "exit_code": 0,
+      "what_was_measured": "Related function-call parser and unknown-tool behavior: 245 tests and 4 subtests passed. Raw output: reports/j-a7df023cee8d/raw/related-tests.txt"
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files python/sglang/srt/function_call/mimo_detector.py test/registered/unit/function_call/test_mimo_detector.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, secret, and CI registry checks passed for both changed Python files. Raw output: reports/j-a7df023cee8d/raw/pre-commit.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a7df023cee8d/venv/bin/python -m py_compile python/sglang/srt/function_call/mimo_detector.py test/registered/unit/function_call/test_mimo_detector.py",
+      "exit_code": 0,
+      "what_was_measured": "Both changed Python files compiled successfully. Raw output: reports/j-a7df023cee8d/raw/py-compile.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors. Raw output: reports/j-a7df023cee8d/raw/diff-check.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reported reproduction directly calls MiMoDetector and is deterministic CPU-only string parsing. No GPU execution was relevant or performed, and no model-serving inference is claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No MiMo model weights or HTTP serving run was used; validation covers the actual detector implementation and neighboring parser tests, not model semantics or end-to-end generation.",
+    "The one-shot detect_and_parse implementation also omits normal text after a valid tool-call block on this base. That separate pre-existing behavior was observed in reports/j-a7df023cee8d/raw/reproduction-before.txt but was not expanded into this narrowly scoped streaming fix."
+  ]
+}
