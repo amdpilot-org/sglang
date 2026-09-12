@@ -188,7 +188,6 @@ class DFlashVerifyInput(SpecInput):
                 + (self.draft_token_num**2) * bs
             )
             if mask.numel() < mask_numel:
-                # FIXME(attn): temporary fix for custom mask padding with cuda graph
                 mask = torch.cat(
                     [
                         mask,
@@ -201,5 +200,5 @@ class DFlashVerifyInput(SpecInput):
                     ],
                     dim=0,
                 )
-                self.custom_mask = mask
+            mask = mask[:mask_numel]
         return kv_indices, cum_kv_seq_len, qo_indptr, mask
