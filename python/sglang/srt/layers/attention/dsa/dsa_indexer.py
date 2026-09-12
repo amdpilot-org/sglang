@@ -1491,11 +1491,14 @@ class Indexer(DSANPUIndexerMixin, BaseFusedOp):
             _is_in_piecewise_or_breakable_cuda_graph()
         )
 
-        # In piecewise/breakable CUDA graph mode, metadata is fetched inside
-        # custom ops via get_tc_piecewise_forward_context() to prevent Dynamo
-        # from guarding on forward_metadata identity, which changes each replay
-        # when init_forward_metadata creates a new ForwardMetadata object.
-        if not in_piecewise_or_breakable_cuda_graph:
+        # TC piecewise fetches metadata inside its custom ops via
+        # get_tc_piecewise_forward_context() to prevent Dynamo from guarding on
+        # forward_metadata identity. Breakable decode has no such custom-op
+        # handoff: its runner initializes capture-stable metadata before capture
+        # and refreshes that object before replay, so resolve it here just like
+        # the eager path. This also preserves alternate attention backends that
+        # intentionally return no indexer metadata.
+        if not is_in_tc_piecewise_cuda_graph():
             metadata = get_attn_backend().get_indexer_metadata(layer_id, forward_batch)
             if metadata is None:
                 return None
