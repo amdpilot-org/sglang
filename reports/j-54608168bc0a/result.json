@@ -1,0 +1,64 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32084",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2202",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2158",
+  "candidate_commit": "e3d9b98c105efbf452559ebc69efae53b771f16b",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is a verified narrow mitigation: it changes the actual BaseGrammarBackend executor from the stdlib default of 32 workers to an automatic cap of 8 and adds a working positive environment override. Candidate tests and independent boundary cases pass. It does not make automatic sizing cgroup- or affinity-aware, cap xgrammar's internal default of 8 threads, deduplicate in-flight identical compilations, or establish the reported CFS/decode-latency outcome. Accept the scoped mitigation without treating it as a full original-issue fix.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-54608168bc0a/venv/bin/python /job/review-evidence/meta/probe_executor.py (base)",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed SGLang and BaseGrammarBackend imported from /job/repo, xgrammar imported from /opt/venv, os.cpu_count()=256, and the real base executor had 32 workers."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-54608168bc0a/venv/bin/python -c '<construct BaseGrammarBackend and assert executor workers <= 8>' (base)",
+      "exit_code": 1,
+      "what_was_measured": "Issue-specific failing-before regression: the actual base executor had 32 workers and violated the requested cap."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-54608168bc0a/venv/bin/python -m pytest test/registered/unit/constrained/test_base_grammar_backend.py -q (base)",
+      "exit_code": 0,
+      "what_was_measured": "Existing base tests passed: 33 tests and 17 subtests."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-54608168bc0a/venv/bin/python -m pytest test/registered/unit/constrained/test_base_grammar_backend.py -q (candidate e3d9b98c105efbf452559ebc69efae53b771f16b)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression passed: 39 tests and 22 subtests, including helper boundaries, override behavior, and actual executor construction."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-54608168bc0a/venv/bin/python /job/review-evidence/meta/adversarial_candidate.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent checks covered cpu counts 0, 1, 2, 3, 16, and 384; unavailable os.cpu_count(); positive and zero overrides; negative input; and actual executor construction with override=3."
+    },
+    {
+      "command": "taskset -c 0-1 /tmp/amdpilot-repo-j-54608168bc0a/venv/bin/python /job/review-evidence/meta/probe_executor.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Adversarial resource boundary: affinity was 2 CPUs, os.cpu_count() remained 256, and automatic sizing remained 8, proving the implementation is not affinity-aware and illustrating the remaining container-awareness gap."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-54608168bc0a/venv/bin/python -m compileall -q python/sglang/srt/constrained/base_grammar_backend.py python/sglang/srt/environ.py; git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 e3d9b98c105efbf452559ebc69efae53b771f16b",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources compiled and the candidate diff had no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI355X with gfx950 was inventoried. Executor sizing and these regressions are CPU-only; no model weights or GPU numerical claim were needed or used."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With process affinity restricted to 2 CPUs, automatic sizing still chooses 8 outer workers because os.cpu_count() reports the 256-CPU host view.",
+    "With a low CFS quota and no explicit override, the automatic cap can still allow 8 outer compilations times xgrammar's default 8 internal threads, or up to 64 compiler threads.",
+    "Concurrent identical uncached schemas can still submit duplicate outer tasks because completed values, not in-flight futures, are cached."
+  ],
+  "remaining_limitations": [
+    "The environment had no CPU quota (cgroup v2 cpu.max was 'max 100000'), so CFS throttling and decode TPOT degradation were not reproduced.",
+    "No full model-serving workload, production schema burst, or multi-node workload was run; no such claim is made.",
+    "xgrammar was loaded from the prepared /opt/venv installation and exposed the expected max_threads=8 signature, but its native implementation was not rebuilt because the candidate changes no native source.",
+    "The candidate mitigates outer concurrency and supplies an operator override, but automatic sizing remains cgroup-unaware and xgrammar's internal thread count remains unchanged."
+  ]
+}
