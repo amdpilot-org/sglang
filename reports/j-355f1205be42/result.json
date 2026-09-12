@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34857",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "PR 1527 enforces an fp32 returned tensor and its regression passes, while the prepared base already contains the GLM-5.2 correction-bias fix. However, the actual untuned aiter fallback computes a bf16 F.linear result and only then casts it to fp32, leaving the reported precision problem intact and undetected by the dtype-only regression.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-355f1205be42/venv/bin/python <base GPU reproduction script>",
+      "exit_code": 0,
+      "what_was_measured": "At the recorded base, the real imported aiter router helper returned torch.bfloat16 for (8,7168,256), (65,512,64), and (1,7168,256), with finite outputs and nonzero error versus independent fp32 torch linear references."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-355f1205be42/venv/bin/python -m pytest -q test/registered/unit/layers/test_aiter_router_gemm_dtype.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 034ffd7a3995b4cd941f38ee5398250be938b599, the candidate dtype/shape/finiteness regression passed for its production and fallback shapes (1 test, 2 subtests)."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-355f1205be42/venv/bin/python -m pytest -q test/registered/unit/models/test_glmmoedsa_correction_bias_fp32.py",
+      "exit_code": 0,
+      "what_was_measured": "Nine pre-existing tests passed for GLM-5.2 fp32 correction-bias allocation, collapse behavior, and architecture boundaries."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-355f1205be42/venv/bin/python <candidate adversarial GEMM script>",
+      "exit_code": 1,
+      "what_was_measured": "Before a later unrelated stale-argument error, four real candidate GEMMs returned fp32 values that were all exactly bf16-representable. The production and three other shapes matched or nearly matched an fp32 reference rounded through bf16, demonstrating cast-after-rounding behavior."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-355f1205be42/venv/bin/python <corrected bias-sensitive routing script>",
+      "exit_code": 0,
+      "what_was_measured": "A close-score case collapsed all eight fp32 biases to 34.0 in bf16 and changed selected experts from [7,6] to [0,1]; the actual aiter route selected [7,6], confirming the base's pre-existing correction-bias fix."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2, HIP 7.2.26015. Raw logs are retained under reports/j-355f1205be42/raw/."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "For the untuned production shape (8,7168,256), candidate output is fp32 by dtype but exactly equals fp32-reference.to(bfloat16).float(), so no extra logit precision is retained.",
+    "For all four independently tested shapes, every candidate output value is exactly representable in bf16 because aiter torch_gemm ignores otype and tgemm.mm casts only after F.linear returns.",
+    "The candidate regression asserts dtype, shape, and finiteness only and therefore passes when bf16 results are merely widened to fp32."
+  ],
+  "remaining_limitations": [
+    "No GLM-5.2 weights were available, so full-model semantic and accuracy behavior was not tested.",
+    "Only one assigned gfx950 GPU was used; multi-GPU and multi-node behavior was not tested.",
+    "The installed aiter dispatcher had no tuned entry for the tested shapes; tuned kernels remain unverified.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
