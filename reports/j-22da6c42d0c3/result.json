@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34974",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the reported layer_idx=None scatter_add_ dimension mismatch through the checked-out DSparkV4Stage._run_ffn and real EPLB stat gatherer. Isolated only the DSpark draft MoE call from the target model's expert distribution recorder, preserving target statistics and recorder state.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-22da6c42d0c3/venv/bin/python test/registered/unit/spec/test_dspark_expert_distribution.py TestDSparkExpertDistribution.test_draft_preserves_target_counts_and_output -v (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "The actual DSpark _run_ffn and stat gatherer raised RuntimeError: Index tensor must have the same number of dimensions as self tensor for both recording-active and capture-active hook modes."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-22da6c42d0c3/venv/bin/python test/registered/unit/spec/test_dspark_expert_distribution.py -v",
+      "exit_code": 0,
+      "what_was_measured": "Three CPU regressions passed: target counts and draft output preservation in recording/capture-active modes, restoration after an MoE exception, and preservation of an enclosing disabled region."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-22da6c42d0c3/venv/bin/python test/registered/unit/spec/test_dspark_target_hidden_projection.py -v",
+      "exit_code": 0,
+      "what_was_measured": "Two neighboring DSpark target-hidden projection tests passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-22da6c42d0c3/venv/bin/python reports/j-22da6c42d0c3/gfx950_capture_check.py",
+      "exit_code": 0,
+      "what_was_measured": "A real HIP graph captured and replayed the fixed DSpark recorder seam on AMD Instinct MI350X/gfx950; output exactly equaled input+1, target counts remained [[0,0,0,0],[2,0,4,0]], and recorder state was restored."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-22da6c42d0c3/venv/bin/python -m pre_commit run --files python/sglang/srt/models/deepseek_v4_dspark.py test/registered/unit/spec/test_dspark_expert_distribution.py reports/j-22da6c42d0c3/gfx950_capture_check.py reports/j-22da6c42d0c3/result.json reports/j-22da6c42d0c3/README.md",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository hooks passed, including AST checks, isort, ruff, ruff-format, codespell, and registered-test validation."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash model weights were unavailable, so no full model server startup, semantic accuracy, speculative acceptance, or live EPLB migration was tested.",
+    "Only one gfx950 GPU was assigned; the reported 8xH20 TP=8/EP=8 deployment was not reproduced.",
+    "The GPU check substitutes inexpensive MoE arithmetic while exercising the actual DSpark _run_ffn, recorder hook, stat gatherer, and HIP graph capture/replay seam.",
+    "The separate DSpark draft expert-location dispatch correctness concern described in issue #34846 is outside this fix."
+  ]
+}
