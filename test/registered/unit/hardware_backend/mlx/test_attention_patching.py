@@ -96,6 +96,94 @@ def _set_dummy_server_args_for_auxiliary_state_tests() -> None:
 
 @unittest.skipUnless(_HAS_MLX, _SKIP_REASON)
 class TestMlxAttentionPatching(unittest.TestCase):
+    def test_gemma4_public_and_text_wrappers_use_native_cache(self):
+        public = SimpleNamespace(
+            model_type="gemma4", args=SimpleNamespace(model_type="gemma4")
+        )
+        text = SimpleNamespace(
+            model_type="gemma4_text",
+            args=SimpleNamespace(model_type="gemma4_text"),
+        )
+
+        from sglang.srt.hardware_backend.mlx.native_cache import uses_model_native_cache
+
+        self.assertTrue(uses_model_native_cache(public))
+        self.assertTrue(uses_model_native_cache(text))
+        self.assertFalse(uses_model_native_cache(SimpleNamespace(model_type="gemma3")))
+
+    def test_gemma4_native_cache_accepts_yoco_short_cache_list(self):
+        runner = object.__new__(MlxModelRunner)
+        runner._uses_model_native_cache = True
+        runner.model = SimpleNamespace(make_cache=lambda: [object()] * 15)
+        runner._cache_layout = MlxModelCacheLayout.from_attention_discovery(
+            [object()] * 35, [None] * 35
+        )
+
+        self.assertEqual(len(runner._new_cache_skeleton()), 15)
+
+    def test_gemma4_native_cache_rejects_unsafe_scheduler_features(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"--disable-radix-cache.*--disable-overlap-schedule.*"
+            r"--chunked-prefill-size=-1",
+        ):
+            from sglang.srt.hardware_backend.mlx.native_cache import (
+                validate_model_native_cache_config,
+            )
+
+            validate_model_native_cache_config(
+                disable_radix_cache=False,
+                disable_overlap_schedule=False,
+                chunked_prefill_size=1024,
+            )
+
+        validate_model_native_cache_config(
+            disable_radix_cache=True,
+            disable_overlap_schedule=True,
+            chunked_prefill_size=-1,
+        )
+
+    def test_gemma4_native_cache_decode_keeps_requests_independent(self):
+        runner = object.__new__(MlxModelRunner)
+        seen = []
+
+        class Model:
+            def __call__(self, input_ids, cache):
+                seen.append(cache)
+                cache[0].offset += 1
+                return mx.zeros((1, 1, 8), dtype=mx.float32)
+
+        runner.model = Model()
+        cache_a = [SimpleNamespace(offset=3)]
+        cache_b = [SimpleNamespace(offset=7)]
+        logits = runner._decode_with_native_cache(
+            [cache_a, cache_b], [mx.array([[1]]), mx.array([[2]])]
+        )
+        mx.eval(logits)
+
+        self.assertEqual(seen, [cache_a, cache_b])
+        self.assertEqual(cache_a[0].offset, 4)
+        self.assertEqual(cache_b[0].offset, 8)
+        self.assertEqual(logits.shape, (2, 8))
+
+    def test_gemma4_native_cache_is_released_when_request_finishes(self):
+        runner = object.__new__(MlxModelRunner)
+        runner.disable_radix_cache = True
+        runner._uses_model_native_cache = True
+        runner._req_token_ids = {"done": [1, 2]}
+        runner._req_sampling = {"done": object()}
+        runner._req_caches = {"done": [SimpleNamespace(offset=2)]}
+        runner._req_pool_idx = {"done": 3}
+        runner._req_synced_offset = {"done": 2}
+
+        runner.remove_request("done")
+
+        self.assertNotIn("done", runner._req_token_ids)
+        self.assertNotIn("done", runner._req_sampling)
+        self.assertNotIn("done", runner._req_caches)
+        self.assertNotIn("done", runner._req_pool_idx)
+        self.assertNotIn("done", runner._req_synced_offset)
+
     def test_standard_attention_is_patched_once(self):
         model = FakeModel(
             [
