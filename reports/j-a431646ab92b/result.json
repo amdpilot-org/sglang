@@ -1,0 +1,58 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33695",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the seeded min-p assertion on the prepared base and assigned gfx950 GPU, removed the unsupported assertion, and verified deterministic filtered sampling, original-token remapping, normalization invariance, and threshold/top-k boundaries. A matching open upstream candidate exists at https://github.com/sgl-project/sglang/pull/33699 but is not in the prepared base.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-a431646ab92b/venv/bin/python <original issue reproduction>",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction of the exact reported AssertionError in the checked-out implementation on gfx950."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-a431646ab92b/venv/bin/python -m pytest -q test/registered/sampling/test_seeded_min_p_sampling.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: all three seeded min-p tests reached the reported assertion before the source correction; the test was later moved to unit/layers."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-a431646ab92b/venv/bin/python -m pytest -q test/registered/unit/layers/test_seeded_min_p_sampling.py",
+      "exit_code": 0,
+      "what_was_measured": "Three passing-after GPU cases covering deterministic replay and vocabulary-ID mapping, equality with independently normalized filtered weights, and inclusive min-p threshold combined with top-k."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-a431646ab92b/venv/bin/python <seeded min-p numerical check>",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X/gfx950, two identical calls matched; 128 samples selected only retained original token IDs (76 ID 1, 52 ID 3), with filtered IDs absent."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-a431646ab92b/pre-commit /opt/venv/bin/pre-commit run --files python/sglang/srt/layers/sampler.py test/registered/unit/layers/test_seeded_min_p_sampling.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository formatting, lint, syntax, spelling, and CI-registration checks passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-a431646ab92b/venv/bin/python -m pytest -q test/registered/unit/layers/test_seeded_min_p_sampling.py test/registered/sampling/test_sampling_mask.py",
+      "exit_code": 1,
+      "what_was_measured": "Focused tests passed, but server-backed neighboring tests were blocked by HTTP 401 for gated meta-llama/Llama-3.2-1B-Instruct weights; 11 passed, 4 skipped, 17 setup errors."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X, gfx950/capability (9, 5), ROCm 7.2, torch 2.11.0+rocm7.2; deterministic=True and only retained original vocabulary IDs were sampled.",
+  "native_rebuilt": false,
+  "source_paths": [
+    "/job/repo/python/sglang/srt/layers/sampler.py",
+    "/job/repo/test/registered/unit/layers/test_seeded_min_p_sampling.py"
+  ],
+  "evidence_paths": [
+    "/job/repo/reports/j-a431646ab92b/raw/base_reproduction.txt",
+    "/job/repo/reports/j-a431646ab92b/raw/regression_before.txt",
+    "/job/repo/reports/j-a431646ab92b/raw/regression_after.txt",
+    "/job/repo/reports/j-a431646ab92b/raw/gpu_numerical_check.txt",
+    "/job/repo/reports/j-a431646ab92b/raw/pre_commit.txt",
+    "/job/repo/reports/j-a431646ab92b/raw/serving_check_blocked.txt"
+  ],
+  "remaining_limitations": [
+    "No full-model or HTTP serving-path validation is claimed; the available neighboring server test required gated Llama weights and failed with HTTP 401 before startup.",
+    "Validation used one assigned gfx950 GPU only; no multi-GPU or multi-node workload was exercised.",
+    "No native code changed, so native rebuild validation was not applicable."
+  ]
+}
