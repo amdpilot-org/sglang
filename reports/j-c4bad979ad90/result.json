@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37936",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared base already excluded width-dependent EAGLE draft-extend select_index buffers from the process-wide pool, directly preventing cross-width aliasing that can turn a valid wide index into a narrow-graph gather OOB. The change makes that invariant intrinsic to EagleDraftExtendInputBuffers and adds a failing-before/passing-after narrow-versus-wide regression.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-c4bad979ad90/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_cuda_graph_buffer_registry.py -k eagle_width_specific_select_index (with the specialized exclusion temporarily disabled)",
+      "exit_code": 1,
+      "what_was_measured": "The regression observed identical select_index data pointers for narrow and wide EAGLE capture widths, proving the pre-fix aliasing mechanism."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c4bad979ad90/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_cuda_graph_buffer_registry.py test/registered/unit/spec/test_eagle_draft_extend_logits.py",
+      "exit_code": 0,
+      "what_was_measured": "46 unit tests passed, including independent narrow [1,3] over four rows and wide [3,7] over eight rows, plus draft-extend selected-row logits behavior."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-c4bad979ad90/venv/bin/python < deterministic gather boundary script",
+      "exit_code": 1,
+      "what_was_measured": "On the assigned gfx950, the valid gather exactly matched [11,13]. The intentionally invalid [3,7] gather against four rows dispatched asynchronously and ROCm reported HSA_STATUS_ERROR_EXCEPTION; this destructive boundary was not repeated."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-c4bad979ad90/venv/bin/python < post-boundary GPU health script",
+      "exit_code": 0,
+      "what_was_measured": "A fresh process synchronized a deterministic gfx950 tensor calculation with checksum 376.0 after the boundary probe."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-c4bad979ad90/raw/gpu-gather-check.log and gpu-health-after-boundary.log identify AMD Instinct MI355X gfx950 and record exact numerical output. This was a kernel-level fixture, not the reported serving workload.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Tesla V100 or CUDA environment was assigned; the CUDA device-assert, NCCL abort, and Xid 43 signatures were not reproduced.",
+    "Only one gfx950 GPU was assigned, so the reported TP=4 PCIe-only distributed workload was not run.",
+    "RadixArk/Qwen3.8-Flash-Next-NVFP4 weights and the V100-specific image/backends were unavailable.",
+    "The deterministic evidence verifies the candidate cross-width gather-index mechanism and its regression, but does not establish that it is the sole root cause of the original concurrent constrained-tool serving crash."
+  ]
+}

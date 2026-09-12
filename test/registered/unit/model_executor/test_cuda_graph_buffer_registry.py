@@ -26,7 +26,9 @@ from sglang.srt.model_executor.cuda_graph_buffer_registry import (
     GraphSlot,
     PaddingPolicy,
 )
-from sglang.srt.model_executor.input_buffers import ForwardInputBuffers
+from sglang.srt.speculative.eagle_draft_extend_cuda_graph_runner import (
+    EagleDraftExtendInputBuffers,
+)
 from sglang.test.ci.ci_register import register_cpu_ci
 
 register_cpu_ci(est_time=11, suite="base-a-test-cpu")
@@ -59,12 +61,6 @@ class _MiniForwardBatch:
     mamba_track_seqlens: Optional[torch.Tensor] = None
     forward_mode: Optional[str] = None
     spec_info: Optional[object] = None
-
-
-@dataclasses.dataclass
-class _PoolInputBuffers(ForwardInputBuffers):
-    input_ids: torch.Tensor
-    select_index: torch.Tensor
 
 
 def _make_registry(max_bs: int = 8, max_num_tokens: int = 16):
@@ -650,25 +646,59 @@ class TestPoolBackedAlloc(unittest.TestCase):
         small_first, big_after = _ptrs(16, 32)
         self.assertNotEqual(small_first.data_ptr(), big_after.data_ptr())
 
-    def test_forward_input_buffers_can_exclude_width_specific_fields(self):
-        first = _PoolInputBuffers(
+    def test_eagle_width_specific_select_index_does_not_alias(self):
+        def eagle_buffers(input_ids, select_index):
+            max_bs = select_index.numel()
+            num_tokens = input_ids.numel()
+            return EagleDraftExtendInputBuffers(
+                input_ids=input_ids,
+                req_pool_indices=torch.zeros(max_bs, dtype=torch.int64),
+                out_cache_loc=torch.zeros(num_tokens, dtype=torch.int64),
+                positions=torch.zeros(num_tokens, dtype=torch.int64),
+                mrope_positions=torch.zeros(3, num_tokens, dtype=torch.int64),
+                hidden_states=None,
+                seq_lens=torch.zeros(max_bs, dtype=torch.int32),
+                seq_lens_cpu=torch.zeros(max_bs, dtype=torch.int64),
+                extend_seq_lens=torch.zeros(max_bs, dtype=torch.int32),
+                num_correct_drafts=torch.zeros(max_bs, dtype=torch.int32),
+                num_accept_tokens=torch.zeros(max_bs, dtype=torch.int32),
+                select_index=select_index,
+                next_token_logits_buffer=torch.zeros(max_bs, 2),
+                global_num_tokens_gpu=None,
+                global_num_tokens_for_logprob_gpu=None,
+            )
+
+        narrow = eagle_buffers(
             input_ids=torch.zeros(4, dtype=torch.int64),
             select_index=torch.tensor([1, 3], dtype=torch.int64),
         )
-        second = _PoolInputBuffers(
-            input_ids=torch.ones(4, dtype=torch.int64),
+        wide = eagle_buffers(
+            input_ids=torch.ones(8, dtype=torch.int64),
             select_index=torch.tensor([3, 7], dtype=torch.int64),
         )
 
-        first.share_buffers()
-        second.share_buffers(exclude={"select_index"})
+        narrow.share_buffers()
+        wide.share_buffers()
 
-        self.assertEqual(first.input_ids.data_ptr(), second.input_ids.data_ptr())
+        # The equally-shaped indices derived from different EAGLE capture
+        # widths must not share storage. If the wide runner overwrote the
+        # narrow runner's indices with [3, 7], the second index would be outside
+        # this four-row narrow graph output.
+        self.assertNotEqual(narrow.input_ids.data_ptr(), wide.input_ids.data_ptr())
         self.assertNotEqual(
-            first.select_index.data_ptr(), second.select_index.data_ptr()
+            narrow.select_index.data_ptr(), wide.select_index.data_ptr()
         )
         torch.testing.assert_close(
-            second.select_index, torch.tensor([3, 7], dtype=torch.int64)
+            torch.gather(
+                torch.tensor([10, 11, 12, 13]), 0, narrow.select_index
+            ),
+            torch.tensor([11, 13]),
+        )
+        torch.testing.assert_close(
+            torch.gather(
+                torch.arange(8), 0, wide.select_index
+            ),
+            torch.tensor([3, 7]),
         )
 
 
