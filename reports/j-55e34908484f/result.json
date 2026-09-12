@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33867",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1806",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1762",
+  "candidate_commit": "abf75d1860543491105348b87de9615268245e20",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact two-input_text array already succeeds on the recorded base and the candidate adds regression tests only. OpenAI's declared output-list contract also permits image and file parts; independent schema-valid cases show those parts are silently discarded, and the candidate explicitly locks image loss in as expected behavior.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-55e34908484f/venv/bin/python -c '<validate exact issue payload and normalize each input item>'",
+      "exit_code": 0,
+      "what_was_measured": "On the recorded base, ResponsesRequest accepted the exact issue payload and the checked-out serving source normalized the two text parts to content 'First resultSecond result'."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-55e34908484f/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_responses.py::InputItemNormalizationTestCase",
+      "exit_code": 0,
+      "what_was_measured": "The recorded base's existing normalization suite passed 4 tests."
+    },
+    {
+      "command": "git switch --detach abf75d1860543491105348b87de9615268245e20 && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-55e34908484f/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_responses.py::InputItemNormalizationTestCase",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate commit, all 7 focused tests passed, including its exact text-array, empty-array, and mixed-array expectations."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-55e34908484f/venv/bin/python -c '<validate and normalize image-only, file-only, and mixed function output lists>'",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate commit, schema-valid image-only and file-only outputs normalized to an empty string; a text-image-text list normalized to 'beforeafter', discarding the image."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-55e34908484f/venv/bin/python -c '<report torch/ROCm and assigned device>'",
+      "exit_code": 0,
+      "what_was_measured": "The environment exposes exactly one AMD Instinct MI350X device with capability 9.5 under PyTorch 2.11.0+rocm7.2 and HIP 7.2.26015."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned single gfx950 GPU was detected, but model/GPU execution was not needed for the deterministic normalization counterexample and was not run independently in this review."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A schema-valid function_call_output containing only an input_image part is converted to an empty tool-message string.",
+    "A schema-valid function_call_output containing only an input_file part is converted to an empty tool-message string.",
+    "A schema-valid mixed text/image/text output silently removes the image and concatenates the surrounding text without a separator."
+  ],
+  "remaining_limitations": [
+    "The exact issue payload could not be reproduced as failing on the required recorded base because that base already contains text-array flattening.",
+    "DeepSeek-V4-Flash-0731 weights and its deepseekv4/reasoning parser, DSPARK, and production launch configuration were unavailable.",
+    "No HTTP model server was launched; the independent counterexamples exercise request schema validation and the actual checked-out normalization implementation directly.",
+    "The environment is ROCm gfx950, not the issue's CUDA environment, and no multi-node or distributed behavior was tested.",
+    "No native code changed, so no native rebuild was applicable."
+  ]
+}
