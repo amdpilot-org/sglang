@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/3050",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the apparent throughput mismatch and established that request-level whole-lifetime TPOT and the engine's recent-window aggregate token rate have different scopes. Added a benchmark output note that identifies those scopes and points aggregate comparisons to whole-run output throughput; metric formulas and the stable engine log field are unchanged.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-270f613ff5eb/venv/bin/python reports/j-270f613ff5eb/run_issue_repro.py --fixture /tmp/j-270f613ff5eb-runtime/tiny-random-llama --output /tmp/j-270f613ff5eb-evidence/before2 (base source before correction)",
+      "exit_code": 0,
+      "what_was_measured": "Real gfx950 serving path: bench output throughput 1499.91 tok/s, mean/median TPOT 2.16/2.14 ms, measured concurrency 3.72, and steady engine reporting windows 1918.36-1934.43 tok/s."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-270f613ff5eb/venv/bin/python -m pytest -q test/registered/unit/benchmark/test_serving_metric_scope.py (before correction)",
+      "exit_code": 2,
+      "what_was_measured": "Regression failed during collection because format_metric_scope_note did not exist."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-270f613ff5eb/venv/bin/python -m pytest -q test/registered/unit/benchmark/test_serving_metric_scope.py (after correction)",
+      "exit_code": 0,
+      "what_was_measured": "Two independent wording boundary checks passed: client/request lifetime versus engine/recent window, and no invalid TPOT-times-concurrency equivalence."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-270f613ff5eb/venv/bin/python reports/j-270f613ff5eb/run_issue_repro.py --fixture /tmp/j-270f613ff5eb-runtime/tiny-random-llama --output /tmp/j-270f613ff5eb-evidence/after",
+      "exit_code": 0,
+      "what_was_measured": "Real gfx950 post-change serving output contained the scope note; bench output throughput was 1480.49 tok/s and steady engine windows were 1821.60-1848.46 tok/s."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": {
+    "device": "AMD Instinct MI350X",
+    "architecture": "gfx950:sramecc+:xnack-",
+    "torch": "2.11.0+rocm7.2",
+    "hip": "7.2.26015",
+    "paths": [
+      "reports/j-270f613ff5eb/evidence/before/server.log",
+      "reports/j-270f613ff5eb/evidence/before/summary.json",
+      "reports/j-270f613ff5eb/evidence/after/server.log",
+      "reports/j-270f613ff5eb/evidence/after/summary.json"
+    ]
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported Qwen2.5-0.5B weights were unavailable, so no model-architecture or semantic claim is made.",
+    "The assigned GPU is AMD gfx950, not the report's NVIDIA H800/CUDA system.",
+    "The qualified fixture's 128-token context and four-request capacity cannot reproduce the original 2048-input/256-output, concurrency-16 workload.",
+    "The evidence establishes metric scope and serving behavior, not performance equivalence across GPU vendors or model sizes."
+  ]
+}
