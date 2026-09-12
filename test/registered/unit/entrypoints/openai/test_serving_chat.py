@@ -2433,6 +2433,38 @@ class ServingChatTestCase(unittest.TestCase):
                 context=[{"role": "user", "content": "Earlier turn"}],
             )
 
+        for system_messages in (
+            [{"role": "system", "content": "Be concise."}],
+            [
+                {"role": "system", "content": "Be concise."},
+                {"role": "system", "content": "Use plain language."},
+            ],
+        ):
+            with self.subTest(system_messages=system_messages):
+                with self.assertRaisesRegex(
+                    ValueError, "requires at least one non-system message"
+                ):
+                    encoding_dsv4.encode_messages(
+                        system_messages, thinking_mode="thinking"
+                    )
+
+    def test_dsv4_serving_rejects_system_only_request_before_tokenization(self):
+        self.template_manager.chat_template_name = None
+        self.template_manager.jinja_template_content_format = "string"
+        self.chat.chat_encoding_spec = "dsv4"
+        self.chat._dsv4_reasoning_effort_profile = "preview"
+        request = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "system", "content": "Be concise."}],
+        )
+        self.tm.tokenizer.encode.reset_mock()
+
+        with self.assertRaisesRegex(
+            ValueError, "requires at least one non-system message"
+        ):
+            self.chat._process_messages(request, is_multimodal=False)
+        self.tm.tokenizer.encode.assert_not_called()
+
     def test_dsv4_task_and_reminder_encode_end_to_end(self):
         """Task + latest_reminder plumb through to the dsv4 encoder correctly."""
         from sglang.srt.entrypoints.openai import encoding_dsv4

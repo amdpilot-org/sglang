@@ -482,7 +482,7 @@ def render_message(
 
 
 def validate_system_message_order(messages: List[Dict[str, Any]]) -> None:
-    """Reject system messages after the conversation has started."""
+    """Require leading system messages to be followed by a conversation turn."""
     seen_non_system = False
     for index, message in enumerate(messages):
         if message.get("role") == "system":
@@ -493,6 +493,11 @@ def validate_system_message_order(messages: List[Dict[str, Any]]) -> None:
                 )
         else:
             seen_non_system = True
+
+    if not seen_non_system:
+        raise ValueError(
+            "DeepSeek-V4 requires at least one non-system message before generation."
+        )
 
 
 def merge_tool_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

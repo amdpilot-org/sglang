@@ -1,0 +1,41 @@
+Candidate under review: https://github.com/amdpilot-org/sglang/pull/1451
+Exact candidate commit: 7a71a1546b5b27eb420f37fe167ecbe2d76919d4
+Independent review: https://github.com/amdpilot-org/sglang/pull/1534
+Prepared base: 358c163250ad3b1f62939b01ce1314a0a31a0365
+
+FAILING BEFORE (exact candidate)
+Command:
+  PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1e4235f42fcb/venv/bin/python <inline reproduction>
+Observed:
+  system_only ACCEPTED '<｜begin▁of▁sentence｜>a' boundary= False
+  leading_system_user ACCEPTED '<｜begin▁of▁sentence｜>a<｜User｜>b<｜Assistant｜><think>' boundary= True
+  user_only ACCEPTED '<｜begin▁of▁sentence｜><｜User｜>b<｜Assistant｜><think>' boundary= True
+  two_system ACCEPTED '<｜begin▁of▁sentence｜>ab' boundary= False
+
+The actual OpenAI serving preparation in serving_chat.py retained a leading
+system message, called encoding_dsv4.encode_messages, and then tokenized the
+returned string. OpenAIServingBase.handle_request maps ValueError to HTTP 400.
+
+PASSING AFTER
+Command:
+  PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1e4235f42fcb/venv/bin/python <inline reproduction>
+Observed:
+  system_only REJECTED DeepSeek-V4 requires at least one non-system message before generation.
+  two_systems_only REJECTED DeepSeek-V4 requires at least one non-system message before generation.
+  leading_system_user ACCEPTED '<｜begin▁of▁sentence｜>a<｜User｜>b<｜Assistant｜><think>' boundary= True
+
+Focused tests:
+  Ran 11 tests in 0.061s
+  OK
+
+Complete serving-chat unit file:
+  Ran 138 tests in 0.308s
+  OK
+
+Static checks:
+  git diff --check: exit 0
+  py_compile changed Python files: exit 0
+
+Hardware visibility only (not execution evidence):
+  Name: gfx950
+  Marketing Name: AMD Instinct MI355X

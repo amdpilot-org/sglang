@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35433",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 1451's rejection of inline/trailing DeepSeek-V4 system messages and added rejection of the independently reproduced system-only request, which otherwise reached tokenization without an assistant generation boundary.",
+  "tests": [
+    {
+      "command": "exact candidate 7a71a1546b5b27eb420f37fe167ecbe2d76919d4: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1e4235f42fcb/venv/bin/python <inline encoder reproduction>",
+      "exit_code": 0,
+      "what_was_measured": "Before correction, one and two leading-only system messages were accepted and rendered without <｜Assistant｜><think>; leading-system plus user rendered the boundary."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1e4235f42fcb/venv/bin/python test/registered/unit/entrypoints/openai/test_serving_chat.py -k dsv4 -v",
+      "exit_code": 0,
+      "what_was_measured": "11 focused DSV4 tests passed, including trailing-system rejection, system-only rejection, multi-system-only rejection, valid leading-system plus user behavior, and serving-path rejection before tokenizer.encode."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1e4235f42fcb/venv/bin/python test/registered/unit/entrypoints/openai/test_serving_chat.py -v",
+      "exit_code": 0,
+      "what_was_measured": "All 138 serving-chat unit tests passed."
+    },
+    {
+      "command": "git diff --check && /tmp/amdpilot-repo-j-1e4235f42fcb/venv/bin/python -m py_compile python/sglang/srt/entrypoints/openai/encoding_dsv4.py test/registered/unit/entrypoints/openai/test_serving_chat.py",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace and changed Python syntax were valid."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "rocminfo showed one AMD Instinct MI355X/gfx950, but this deterministic request-validation and pre-tokenization correction did not execute GPU kernels."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 model weights were unavailable, so the reported long-context first-token EOS and semantic model response were not replayed.",
+    "No full HTTP server was launched; the serving conversion was executed with the repository unit fixture and the common ValueError-to-HTTP-400 mapping was verified in source.",
+    "The tiny Llama transport fixture was not substituted because it cannot qualify DeepSeek-V4 prompt semantics."
+  ]
+}
