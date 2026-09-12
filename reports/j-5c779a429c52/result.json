@@ -1,0 +1,30 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32156",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared main checkout already includes upstream PR #32736, which fixes mixed-precision compressed-tensors parsing. The real Qwen3.6 NVFP4 config now retains expert activation metadata and selects the NVFP4 MoE scheme; the historical parser state reproduces the reported NoneType.num_bits exception.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-5c779a429c52/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_mixed_precision.py",
+      "exit_code": 0,
+      "what_was_measured": "Five existing CPU regressions covering mixed-precision per-group formats, activation retention, ignore-list boundaries, exact/regex/suffix matching, and weight-only scheme selection; 5 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5c779a429c52/venv/bin/python reports/j-5c779a429c52/reproduce_config_selection.py /tmp/amdpilot-repo-j-5c779a429c52/qwen-config.json",
+      "exit_code": 0,
+      "what_was_measured": "Against the checkpoint's published config, all three expert projections retain nvfp4-pack-quantized 4-bit tensor_group activations and get_moe_scheme selects CompressedTensorsW4A4Nvfp4MoE; replaying the historical missing-activation input reproduces AttributeError on NoneType.num_bits."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5c779a429c52/venv/bin/python <gpu numerical check>",
+      "exit_code": 0,
+      "what_was_measured": "A tensor elementwise calculation ran on the assigned AMD Instinct MI350X gfx950 and matched an independent CPU reference with maximum absolute error 0.0; this is GPU availability evidence, not NVFP4 validation."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The 35B checkpoint weights were not downloaded and a full serving-path reproduction was not performed.",
+    "The assigned gfx950 AMD GPU cannot validate the NVIDIA Blackwell-only NVFP4 MoE implementation.",
+    "NEXTN speculative decoding, CUDA kernel execution, model semantic accuracy, and the issue's full launch command remain unverified."
+  ]
+}
