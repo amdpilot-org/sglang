@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19090",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2940",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2906",
+  "candidate_commit": "7f6725c124ac107fbc06daa0810757488cb6ea28",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a useful partial API addition on top of sleep/wake machinery already present in the recorded base, but it does not fully resolve the original feature request. Its focused tests pass and an independent GPU controller round trip succeeds. However, the requested diffusion-model end-to-end validation and sleep+wake+refit versus kill/relaunch timing are absent, FSDP remains unsupported, and an adversarial scheduler transport failure disproves the PR's claim that transport failures are normalized by the new helper.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-1538d367c584/venv/bin/python -c 'from sglang.multimodal_gen.runtime.entrypoints.diffusion_generator import DiffGenerator; assert all(hasattr(DiffGenerator, n) for n in (\"release_memory_occupation\", \"resume_memory_occupation\", \"update_weights_from_disk\"))'",
+      "revision": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction of the candidate's local DiffGenerator API gap; the recorded base lacks all three methods. This is narrower than the original issue because the base already has server-side controller and HTTP lifecycle support."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1538d367c584/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_diffusion_generator_lifecycle.py python/sglang/multimodal_gen/test/unit/test_diffusion_generator_shutdown.py python/sglang/multimodal_gen/test/unit/test_component_residency.py::test_snapshot_offload_sleep_uses_existing_host_storage python/sglang/multimodal_gen/test/unit/test_weight_snapshot.py::test_sleep_keeps_the_pin_lease_and_existing_pins_are_reused",
+      "revision": "7f6725c124ac107fbc06daa0810757488cb6ea28",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 11 tests passed. The lifecycle client tests mock scheduler forwarding; the compatibility tests exercise existing controller behavior."
+    },
+    {
+      "command": "patched sync_scheduler_client.forward to raise ConnectionError('scheduler transport down'), then called DiffGenerator.release_memory_occupation()",
+      "revision": "7f6725c124ac107fbc06daa0810757488cb6ea28",
+      "exit_code": 1,
+      "what_was_measured": "Independent adversarial transport case. ConnectionError escaped unchanged rather than being normalized to the lifecycle RuntimeError promised in the PR description."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1538d367c584/venv/bin/python <independent controller round-trip script>",
+      "revision": "7f6725c124ac107fbc06daa0810757488cb6ea28",
+      "exit_code": 0,
+      "what_was_measured": "Real AMD Instinct MI355X (gfx950) GPU round trip of a 1024x1024 Linear module through MemoryOccupationController. Sleep moved weights to CPU and reduced allocated GPU memory by 4,198,400 bytes; wake restored cuda:0; output matched an independently computed CPU float64 reference with max absolute error 8.344650268554688e-07."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI355X, gfx950; torch 2.11.0+rocm7.2; HIP 7.2.26015. Independent controller round trip passed. No diffusion checkpoint was available, so this does not establish diffusion-model semantic or serving-path correctness."
+  },
+  "native_rebuilt": false,
+  "native_rebuilt_reason": "The candidate diff changes Python, documentation, tests, and reports only; it changes no native C/C++/CUDA/HIP/FlyDSL source. Imports resolved to /job/repo/python/sglang/multimodal_gen/runtime/entrypoints/diffusion_generator.py, so no native rebuild was applicable.",
+  "remaining_counterexamples": [
+    "sync_scheduler_client.forward raising ConnectionError is not normalized by _send_lifecycle_request, contrary to the candidate PR's stated transport-failure behavior.",
+    "No real diffusion checkpoint was run through sleep, wake, generation, and refit, so model-specific correctness and memory behavior remain unverified.",
+    "No end-to-end sleep+wake+refit versus kill-and-relaunch timing comparison was supplied, although it is an explicit part of the original issue contract.",
+    "FSDP inference sleep/wake remains explicitly unsupported.",
+    "The passing GPU round trip exercises controller code already present in the base, not the candidate's new DiffGenerator transport surface end to end."
+  ],
+  "remaining_limitations": [
+    "No diffusion model weights were available in the prepared environment.",
+    "HTTP and local scheduler execution with a real diffusion architecture were not qualified.",
+    "Distributed/FSDP behavior was not testable and is unsupported by the implementation.",
+    "The available GPU was AMD Instinct MI355X (gfx950), not NVIDIA CUDA hardware; CUDA-specific behavior is unverified.",
+    "The tiny Llama fixture was not used because it cannot qualify diffusion architecture semantics or the requested benchmark."
+  ]
+}
