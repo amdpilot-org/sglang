@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/7892",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Implemented draft-model two-batch overlap for fixed-width EAGLE/NextN draft-extend forwards. The draft worker now installs a TBO attention wrapper only for supported eager DeepSeek NextN + segmented-A2A configurations; draft-extend metadata and EagleDraftExtendInput are split losslessly; the NextN MoE layer executes the two children through the TBO operation pipeline; DSA seed-topk capture is preserved; idle-rank collective symmetry and prefill/decode phase separation are guarded. Also fixed the upstream WIP's known startup assertion by passing the runner-owned attention backend into batch preparation instead of resolving a forward-context backend during ForwardBatch initialization.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-e5851e1fea51/venv/bin/python -m pytest -q test/registered/unit/batch_overlap/test_tbo_draft_extend_split.py",
+      "exit_code": 0,
+      "what_was_measured": "24 deterministic split-math, metadata round-trip, adversarial field-classification, gate, out-of-forward-context regression, operation-order, and DSA seed capture tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e5851e1fea51/venv/bin/python -m pytest -q test/registered/unit/batch_overlap test/registered/unit/spec/test_eagle_draft_extend_logits.py test/registered/unit/spec/test_eagle_worker_v2_topk1_fastpath.py",
+      "exit_code": 0,
+      "what_was_measured": "51 related TBO/speculative tests plus 7 subtests passed, covering compatibility with existing batch-overlap paths and Eagle backend setup. Raw output: /tmp/amdpilot-repo-j-e5851e1fea51/evidence/unit-related-fixed.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-e5851e1fea51/venv/bin/python < independent draft-extend split/reference script",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X, 21 GPU rows at width 3 were split and recombined exactly against independent torch slicing; child-B flat pointers matched independently constructed references; child capture-buffer view writes exactly reconstructed the parent buffer (max_abs_error=0). Raw output: /tmp/amdpilot-repo-j-e5851e1fea51/evidence/gpu-numerical-reference.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e5851e1fea51/venv/bin/python -m pytest --collect-only -q test/registered/e2e/spec/test_deepep_mtp_draft_extend_tbo.py",
+      "exit_code": 0,
+      "what_was_measured": "Collected the three new 4-GPU DeepEP/MTP end-to-end checks: gate banner, forward-mode split census, and GSM8K accuracy/accept-length regression. The tests were not executed because only one GPU was assigned."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-e5851e1fea51/pre-commit /opt/venv/bin/pre-commit run --files <changed files>",
+      "exit_code": 0,
+      "what_was_measured": "All repository formatting, lint, conflict, secret, test-taxonomy, and registered-test checks passed."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "One assigned AMD Instinct MI355X (gfx950, unique ID 0x89e8c5cd3767811a) executed the independent GPU numerical reference successfully; raw output is retained at /tmp/amdpilot-repo-j-e5851e1fea51/evidence/gpu-numerical-reference.log.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The feature is intentionally limited to DeepseekV3ForCausalLMNextN draft workers using a non-none speculative MoE A2A backend, eager draft-extend execution (SGLANG_DISABLE_DRAFT_EXTEND_CUDA_GRAPH=1), no prefill context parallelism, and fixed-width non-widened EagleDraftExtendInput.",
+    "Draft-extend CUDA graph replay with TBO children is not implemented.",
+    "Multi-layer/widened draft inputs (num_front_tokens > 0) are rejected because their row width differs from num_tokens_per_req.",
+    "The required DeepEP integration test needs four GPUs and the DeepSeek-V3 target/NextN draft model weights. This job was assigned one GPU and no qualifying model weights, so the transport-level split census, GSM8K semantic accuracy, accept length, idle-rank distributed collective behavior, and throughput improvement were not executed here. The deterministic tiny Llama fixture cannot qualify DeepSeek NextN architecture, segmented A2A, or a distributed workload, so it was not substituted.",
+    "No native C++/FlyDSL sources changed, repository-environment.json declares native=null, and therefore no native rebuild was applicable."
+  ]
+}
