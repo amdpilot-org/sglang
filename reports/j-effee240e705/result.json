@@ -1,0 +1,60 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36127",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "9a7fdb8c7f520ec561be7c7f45a4a5352cc7a7a3",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2743",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate implements and tests a substantial partial DFlash2 dynamic-verification path: selector-lattice selected-path confidence, cross-request top-k prefix allocation, SPS cost-table budget selection, compact ragged target verification, graph token buckets, and cutoff-aware acceptance. Candidate regression/compatibility tests and independent ROCm GPU adversarial checks passed. It does not implement the original proposal's DFlash2 trained confidence head or optional sequential temperature scaling calibration; its only confidence source is uncalibrated selector-lattice probability (the source calls it suitable for later STS). End-to-end DFlash2 serving, real checkpoint loading, live graph replay, lossless semantic equivalence, and throughput were not verifiable without compatible target/draft checkpoints. Therefore this is a partial implementation and cannot be accepted as a full resolution of the open original feature request.",
+  "tests": [
+    {
+      "command": "On base 358c163: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-effee240e705/venv/bin/python lightweight source/import/GPU probe plus rg for DFLASH_CONFIDENCE",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed imports resolve to /job/repo/python, Torch 2.11.0+rocm7.2 sees one AMD Instinct MI350X, and the recorded base has neither the confidence module nor a registered DFLASH_CONFIDENCE implementation. Full worker import initialized AITer and did not complete cleanly, so it was not treated as reproduction evidence."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-effee240e705/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_confidence.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit: 24 candidate regression tests passed, covering configuration gates, selected-path confidence, graph tiers, budgeting, cutoff/commit helpers, and compatibility behavior."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-effee240e705/venv/bin/python -m pytest -q test/registered/spec/dspark/test_ragged_verify.py test/registered/spec/dspark/test_ragged_verify_backend_capability.py test/registered/unit/spec/test_dflash_overlap_hostsync.py test/registered/unit/spec/test_dflash_extra_buffer_lazy.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit: 26 tests and 3 subtests passed for ragged geometry/backend capability and existing DFlash overlap/buffer compatibility."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-effee240e705/venv/bin/python -m pytest -q test/registered/spec/dspark/test_dspark_kernel_parity.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit: one GPU test with 22 subtests passed against independent PyTorch numerical references for the modified shared DSpark verify-window/cutoff kernels."
+    },
+    {
+      "command": "Independent inline ROCm adversarial test of ScheduleVerifyLensTopk and selector_selected_path_confidence",
+      "exit_code": 0,
+      "what_was_measured": "On the MI350X, a mixed-quality two-request batch with three optional verify rows allocated lengths [4, 1], zero optional budget preserved the [1, 1] anchor progress floor, and selected-path probabilities matched an independently calculated predecessor-chain softmax reference."
+    },
+    {
+      "command": "rg source contract audit; python -m compileall -q modified core modules; git diff --check 358c163..9a7fdb8",
+      "exit_code": 0,
+      "what_was_measured": "Core modules compile and the patch is whitespace-clean. The audit found no native source changes, trained confidence-head implementation, or DFlash2 STS/calibration path; only a comment that selector likelihood is suitable for later STS."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "HIP_VISIBLE_DEVICES=0 exposed exactly one AMD Instinct MI350X under Torch 2.11.0+rocm7.2 / HIP 7.2.26015. Candidate kernel parity (22 subtests) and the independent mixed-quality scheduler/reference test ran on that GPU and passed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A compatible DFlash2 checkpoint containing a trained survival/confidence head cannot exercise such a head because candidate commit 9a7fdb8 contains no confidence-head module, checkpoint loading, or inference path; it always derives confidence from selector-lattice probabilities.",
+    "A deployment requiring the proposal's optional sequential temperature scaling cannot configure or execute it because candidate commit 9a7fdb8 has no DFlash2 STS parameters, calibration loader, or application path; the only STS mention says the raw signal is suitable for later STS.",
+    "The claim of lossless end-to-end speculative semantics remains unverified for a real DFlash2 target/draft pair, including sampling, grammar, continuous batching, overlap relay, and live compact graph replay, because no compatible model weights were supplied or cached.",
+    "The claimed mixed-workload throughput benefit remains unmeasured in a live DFlash2 serving workload."
+  ],
+  "remaining_limitations": [
+    "No compatible DFlash2 target/draft checkpoint was supplied or locally cached. End-to-end HTTP serving, trained-head checkpoint loading, live-engine CUDA/HIP graph replay, semantic quality equivalence, and throughput were not run.",
+    "The qualified tiny Llama fixture was not used because it validates transport/engine execution only and cannot qualify the DFlash2 model architecture or speculative semantics.",
+    "The available accelerator is reported by Torch as AMD Instinct MI350X, not the candidate report's MI355X. This review validates ROCm execution only and does not validate NVIDIA CUDA architecture behavior.",
+    "No C/C++/CUDA/HIP/FlyDSL native source changed in the candidate diff, so no native rebuild was applicable. Python kernels/JIT paths resolved from the exact candidate checkout and the private prepared cache.",
+    "The base full-worker import entered AITer initialization and did not complete cleanly; base failure evidence therefore relies on the absent feature source/registration rather than a model-serving reproduction."
+  ]
+}
