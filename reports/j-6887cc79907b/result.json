@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36858",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2761",
+  "candidate_commit": "da7442bdcecb38e4fa3310e1834cb800b0d0ddab",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate implements the requested unified GatewayConfig and startup-lifecycle refactor and preserved the independently checked CLI/default/routing contract. A fresh pinned-toolchain build and all 344 candidate library tests passed. The candidate's shutdown fix is valid in its final code, although its reported failing-before state came from an intermediate imported proposal rather than the recorded campaign base, which also shut down promptly in the minimal independent check.",
+  "tests": [
+    {
+      "command": "CARGO_HOME=/job/.cargo CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-6887cc79907b/base-target /job/.cargo/bin/cargo test --lib (at 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Recorded-base regression baseline: 392 library tests passed and the checkout exactly matched the required base. The source still contains split RouterConfig/ServerConfig and distributed startup wiring."
+    },
+    {
+      "command": "CARGO_HOME=/job/.cargo CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-6887cc79907b/base-target /job/.cargo/bin/cargo test --lib (at da7442bdcecb38e4fa3310e1834cb800b0d0ddab)",
+      "exit_code": 0,
+      "what_was_measured": "Exact-candidate regression suite: 344 passed, including direct/launch CLI equivalence, defaults, PD bootstrap validation, transport compatibility, and shutdown notification tests."
+    },
+    {
+      "command": "CARGO_HOME=/job/.cargo CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-6887cc79907b/base-target /job/.cargo/bin/cargo build --bin sgl-model-gateway (at da7442bdcecb38e4fa3310e1834cb800b0d0ddab)",
+      "exit_code": 0,
+      "what_was_measured": "Fresh native Rust gateway binary built from the exact candidate with repository-pinned rustc 1.90.0; binary copied to the private runtime before switching revisions."
+    },
+    {
+      "command": "extract and compare sorted long options from rebuilt base/candidate binaries for --help and launch --help",
+      "exit_code": 0,
+      "what_was_measured": "No existing direct or launch long option was removed. The candidate added version flags and made --prefill visible in launch help. Full textual help differs due to grouping and formatting."
+    },
+    {
+      "command": "timeout --signal=INT --kill-after=8s 3s /tmp/amdpilot-repo-j-6887cc79907b/candidate-gateway --host 127.0.0.1 --port 32993 --prometheus-host 127.0.0.1 --prometheus-port 32994 --log-level info",
+      "exit_code": 124,
+      "what_was_measured": "The rebuilt candidate received SIGINT and stopped promptly at 3063 ms with no health-checker timeout warning; timeout returns 124 because it initiated the signal."
+    },
+    {
+      "command": "timeout --signal=INT --kill-after=15s 3s /tmp/amdpilot-repo-j-6887cc79907b/base-gateway --host 127.0.0.1 --port 32995 --prometheus-host 127.0.0.1 --prometheus-port 32996 --log-level info",
+      "exit_code": 124,
+      "what_was_measured": "The recorded base also stopped promptly at 3055 ms in this minimal no-worker case, so the candidate report's 10-second failing-before shutdown was not reproduced against the required recorded base."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU code changed. This is a Rust gateway configuration/control-plane refactor; GPU numerical validation is not applicable. Prepared Torch/ROCm remained untouched."
+  },
+  "native_rebuilt": true,
+  "native_rebuild_evidence": "Built /tmp/amdpilot-repo-j-6887cc79907b/candidate-gateway from exact commit da7442bd with pinned rustc 1.90.0. No FlyDSL/C++ sources or Python native extension sources changed.",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No Kubernetes cluster, live multi-node mesh, production WASM component, TLS deployment, Redis executable fixture, or real model worker was available for end-to-end validation.",
+    "The candidate library suite has 48 fewer tests than the base because in-tree mesh/WASM implementations and associated unit tests were removed/delegated; package integration compiled, but those externalized paths were not independently qualified end to end.",
+    "The prepared image initially lacked the cargo path cited in the candidate report. A private rustup installation of the repository-pinned 1.90.0 toolchain was required.",
+    "The host is x86_64 with ROCm 7.2 available, but no GPU was used because the candidate changes no GPU/native-kernel path."
+  ]
+}
