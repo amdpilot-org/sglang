@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36853",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source already contains the issue-relevant ordinary CPU weight-loading correction from upstream PR 34064: compatible unquantized TP=1 checkpoint tensors are adopted as parameter storage, avoiding a second full tensor allocation/copy per pure-SP rank. Current regressions and independent CPU/GPU storage boundaries pass; the exact four-GPU Qwen-Image OOM was not reproducible with the available hardware and weights.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-0f63259f7d3d/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_fsdp_load.py",
+      "exit_code": 0,
+      "what_was_measured": "18 loader tests passed, including CPU checkpoint-storage pointer adoption, numerical equality, unsupported-layout rejection, rank-local loading boundaries, and real GPU copy/adoption behavior."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0f63259f7d3d/venv/bin/python -m pytest -vv python/sglang/multimodal_gen/test/unit/test_fsdp_load.py::TestOrdinaryWeightLoading::test_tp1_unquantized_linear_adopts_cpu_checkpoint_storage python/sglang/multimodal_gen/test/unit/test_fsdp_load.py::TestOrdinaryWeightLoading::test_ordinary_cuda_loading_preserves_materialization_path python/sglang/multimodal_gen/test/unit/test_fsdp_load.py::TestOrdinaryWeightLoading::test_direct_cuda_loading_adopts_checkpoint_storage",
+      "exit_code": 0,
+      "what_was_measured": "Three independent storage boundaries passed: CPU TP=1 zero-copy adoption, ordinary GPU copy semantics, and direct GPU zero-copy adoption; all validate tensor numerics."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0f63259f7d3d/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_host_spill.py",
+      "exit_code": 0,
+      "what_was_measured": "5 host-spill tests passed for file-backed fused tensors, sealed reuse, disk-space fallback, and checkpoint identity. This is supporting loader coverage, not evidence for discrete-GPU applicability."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The assigned AMD Instinct MI355X gfx950 executed the two CUDA-API GPU storage-boundary tests under PyTorch 2.11.0+rocm7.2; both passed and were not skipped."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one gfx950 GPU was assigned; the reported four-rank SP=4 topology was unavailable.",
+    "Qwen/Qwen-Image weights were unavailable, so the actual 38 GiB DiT and HTTP serving path were not run.",
+    "The source report used four NVIDIA RTX 6000 Ada GPUs and CUDA; NVIDIA-specific behavior was not validated on the AMD GPU.",
+    "No end-to-end image semantic or distributed correctness claim is made.",
+    "Upstream PR 34064 provides a Qwen-Image startup benchmark for the relevant corrected path, but this investigation did not independently repeat that full-model benchmark."
+  ]
+}
