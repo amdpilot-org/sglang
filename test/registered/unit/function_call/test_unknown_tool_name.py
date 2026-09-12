@@ -218,9 +218,10 @@ def test_finish_drains_valid_call_after_unknown_final_chunk(detector, first, fin
     }
 
 
-def test_mistral_character_stream_preserves_calls_after_unknown():
+@pytest.mark.parametrize("separator", [", ", ",", ",\n", ",\t"])
+def test_mistral_character_stream_preserves_calls_after_unknown(separator):
     detector = MistralDetector()
-    wire = f"[TOOL_CALLS] [{WEATHER_CALL}, {UNKNOWN_CALL}, {TIME_CALL}]"
+    wire = f"[TOOL_CALLS] [{separator.join((WEATHER_CALL, UNKNOWN_CALL, TIME_CALL))}]"
 
     calls = _collect_streamed_calls(detector, wire)
 
@@ -228,6 +229,47 @@ def test_mistral_character_stream_preserves_calls_after_unknown():
         0: {"name": "get_weather", "arguments": '{"city": "Tokyo"}'},
         1: {"name": "get_time", "arguments": '{"tz": "JST"}'},
     }
+
+
+@pytest.mark.parametrize("chunk_size", [None, 47])
+def test_hermes_unknown_tool_does_not_leak_closing_tags(chunk_size):
+    detector = HermesDetector()
+    wire = "".join(
+        f"<tool_call>{call}</tool_call>"
+        for call in (WEATHER_CALL, UNKNOWN_CALL, TIME_CALL)
+    )
+    chunks = [wire] if chunk_size is None else [
+        wire[index : index + chunk_size]
+        for index in range(0, len(wire), chunk_size)
+    ]
+
+    calls = {}
+    normal_text = ""
+    for chunk in chunks:
+        result = detector.parse_streaming_increment(chunk, STREAMING_TOOLS)
+        normal_text += result.normal_text or ""
+        for call in result.calls or []:
+            slot = calls.setdefault(
+                call.tool_index, {"name": None, "arguments": ""}
+            )
+            if call.name:
+                slot["name"] = call.name
+            if call.parameters:
+                slot["arguments"] += call.parameters
+    result = detector.finish(STREAMING_TOOLS)
+    normal_text += result.normal_text or ""
+    for call in result.calls or []:
+        slot = calls.setdefault(call.tool_index, {"name": None, "arguments": ""})
+        if call.name:
+            slot["name"] = call.name
+        if call.parameters:
+            slot["arguments"] += call.parameters
+
+    assert calls == {
+        0: {"name": "get_weather", "arguments": '{"city": "Tokyo"}'},
+        1: {"name": "get_time", "arguments": '{"tz": "JST"}'},
+    }
+    assert normal_text == ""
 
 
 def test_finish_drains_coarse_chunked_arguments():

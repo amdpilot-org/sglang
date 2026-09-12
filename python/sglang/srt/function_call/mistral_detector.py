@@ -40,7 +40,9 @@ class MistralDetector(BaseFormatDetector):
         self._tool_calls_marker = "[TOOL_CALLS"
         self._streaming_canonical_array = False
         self.eot_token = "]"
-        self.tool_call_separator = ", "
+        # JSON permits any amount of whitespace after a comma. Consume only the
+        # comma here and let the JSON decoder handle an optional space/newline/tab.
+        self.tool_call_separator = ","
 
     def has_tool_call(self, text: str) -> bool:
         """Return True if the text contains either supported tool-call marker."""
