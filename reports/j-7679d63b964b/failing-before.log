@@ -1,0 +1,54 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+______________ test_report_only_stale_driver_version_fails_closed ______________
+
+signature = DiffusionWorkloadSignature(model_revision='model@abc', task_type='t2v', latent_tokens=128, num_inference_steps=20, log...didate_count=1, cfg_branches=2, dtype='bf16', cache_mode='none', compile_mode='eager', device_topology='2xMI300X/xGMI')
+
+    def test_report_only_stale_driver_version_fails_closed(signature):
+        report = CalibrationReport(
+            "code1",
+            {"device": "MI350X", "driver_version": "stale"},
+            (result(signature, ParallelExecutionPlan(1)),),
+        )
+        resolution = resolve_calibrated_plan(
+            report,
+            signature,
+            code_revision="code1",
+            environment={"device": "MI350X"},
+        )
+>       assert resolution.plan is None
+E       AssertionError: assert ParallelExecutionPlan(num_gpus=1, cfg_parallel_size=1, tensor_parallel_size=1, sequence_parallel_size=1, fsdp=False, data_parallel_replicas=1) is None
+E        +  where ParallelExecutionPlan(num_gpus=1, cfg_parallel_size=1, tensor_parallel_size=1, sequence_parallel_size=1, fsdp=False, data_parallel_replicas=1) = Resolution(plan=ParallelExecutionPlan(num_gpus=1, cfg_parallel_size=1, tensor_parallel_size=1, sequence_parallel_size=1, fsdp=False, data_parallel_replicas=1), source='exact_calibration', reasons=(), signature_hash=None).plan
+
+python/sglang/multimodal_gen/test/unit/test_parallel_advisor.py:151: AssertionError
+__________ test_feasible_report_cannot_select_cfg_plan_for_one_branch __________
+
+signature = DiffusionWorkloadSignature(model_revision='model@abc', task_type='t2v', latent_tokens=128, num_inference_steps=20, log...didate_count=1, cfg_branches=2, dtype='bf16', cache_mode='none', compile_mode='eager', device_topology='2xMI300X/xGMI')
+
+    def test_feasible_report_cannot_select_cfg_plan_for_one_branch(signature):
+        one_branch = DiffusionWorkloadSignature(
+            **{**asdict(signature), "cfg_branches": 1}
+        )
+        plan = ParallelExecutionPlan(num_gpus=2, cfg_parallel_size=2)
+        report = CalibrationReport("code1", {}, (result(one_branch, plan),))
+        resolution = resolve_calibrated_plan(report, one_branch)
+>       assert resolution.plan is None
+E       AssertionError: assert ParallelExecutionPlan(num_gpus=2, cfg_parallel_size=2, tensor_parallel_size=1, sequence_parallel_size=1, fsdp=False, data_parallel_replicas=1) is None
+E        +  where ParallelExecutionPlan(num_gpus=2, cfg_parallel_size=2, tensor_parallel_size=1, sequence_parallel_size=1, fsdp=False, data_parallel_replicas=1) = Resolution(plan=ParallelExecutionPlan(num_gpus=2, cfg_parallel_size=2, tensor_parallel_size=1, sequence_parallel_size=1, fsdp=False, data_parallel_replicas=1), source='exact_calibration', reasons=(), signature_hash=None).plan
+
+python/sglang/multimodal_gen/test/unit/test_parallel_advisor.py:177: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED python/sglang/multimodal_gen/test/unit/test_parallel_advisor.py::test_report_only_stale_driver_version_fails_closed
+FAILED python/sglang/multimodal_gen/test/unit/test_parallel_advisor.py::test_feasible_report_cannot_select_cfg_plan_for_one_branch
+2 failed, 15 deselected, 16 warnings in 0.71s

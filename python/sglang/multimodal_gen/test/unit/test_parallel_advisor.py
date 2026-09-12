@@ -136,6 +136,22 @@ def test_stale_environment_fails_closed(signature):
     assert resolution.reasons == ("calibration environment mismatch",)
 
 
+def test_report_only_stale_driver_version_fails_closed(signature):
+    report = CalibrationReport(
+        "code1",
+        {"device": "MI350X", "driver_version": "stale"},
+        (result(signature, ParallelExecutionPlan(1)),),
+    )
+    resolution = resolve_calibrated_plan(
+        report,
+        signature,
+        code_revision="code1",
+        environment={"device": "MI350X"},
+    )
+    assert resolution.plan is None
+    assert resolution.reasons == ("calibration environment mismatch",)
+
+
 def test_feasible_report_cannot_select_internally_illegal_plan(signature):
     illegal = ParallelExecutionPlan(
         num_gpus=1,
@@ -149,6 +165,15 @@ def test_feasible_report_cannot_select_internally_illegal_plan(signature):
     resolution = resolve_calibrated_plan(report, signature)
     assert resolution.plan is None
     assert resolution.reasons == ("parallel degree product does not equal num_gpus",)
+
+
+def test_feasible_report_cannot_select_cfg_plan_for_one_branch(signature):
+    one_branch = DiffusionWorkloadSignature(**{**asdict(signature), "cfg_branches": 1})
+    plan = ParallelExecutionPlan(num_gpus=2, cfg_parallel_size=2)
+    report = CalibrationReport("code1", {}, (result(one_branch, plan),))
+    resolution = resolve_calibrated_plan(report, one_branch)
+    assert resolution.plan is None
+    assert resolution.reasons == ("CFG degree exceeds workload branches",)
 
 
 def test_report_round_trip_and_stable_hash(tmp_path, signature):

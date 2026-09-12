@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
@@ -235,18 +236,58 @@ def get_runtime_environment() -> dict[str, str]:
         distributed_backend = current_platform.get_torch_distributed_backend_str()
     except Exception:
         distributed_backend = "unknown"
+    driver_version = "unknown"
+    try:
+        if torch.version.hip:
+            output = subprocess.run(
+                ["rocm-smi", "--showdriverversion", "--csv"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+            values = {
+                line.replace('"Driver version", ', "").replace('"', "").strip()
+                for line in output.splitlines()
+                if line.strip() and line.strip() != "name, value"
+            }
+            if len(values) == 1:
+                driver_version = values.pop()
+        elif torch.version.cuda:
+            driver_version = (
+                subprocess.run(
+                    [
+                        "nvidia-smi",
+                        "--query-gpu=driver_version",
+                        "--format=csv,noheader",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                .stdout.splitlines()[0]
+                .strip()
+            )
+    except (FileNotFoundError, IndexError, subprocess.SubprocessError):
+        pass
     return {
         "device_type": str(current_platform.device_type),
         "device_name": device_name,
         "distributed_backend": str(distributed_backend),
         "torch_version": str(torch.__version__),
         "accelerator_runtime_version": str(runtime_version),
+        "driver_version": driver_version,
     }
 
 
-def _intrinsic_plan_rejection(plan: ParallelExecutionPlan) -> str | None:
+def _intrinsic_plan_rejection(
+    plan: ParallelExecutionPlan, signature: DiffusionWorkloadSignature
+) -> str | None:
     if plan.required_devices != plan.num_gpus:
         return "parallel degree product does not equal num_gpus"
+    if plan.cfg_parallel_size > signature.cfg_branches:
+        return "CFG degree exceeds workload branches"
+    if signature.latent_tokens % plan.sequence_parallel_size:
+        return "latent tokens are not divisible by SP degree"
     return None
 
 
@@ -260,9 +301,7 @@ def resolve_calibrated_plan(
 ) -> Resolution:
     if code_revision is not None and report.code_revision != code_revision:
         return Resolution(None, "conservative_fallback", ("code revision mismatch",))
-    if environment is not None and any(
-        report.environment.get(key) != value for key, value in environment.items()
-    ):
+    if environment is not None and report.environment != environment:
         return Resolution(
             None,
             "conservative_fallback",
@@ -282,7 +321,7 @@ def resolve_calibrated_plan(
             rejected.append(f"quality gate={result.quality_gate}")
         elif objective not in result.latency_ms:
             rejected.append(f"missing latency objective {objective}")
-        elif reason := _intrinsic_plan_rejection(result.plan):
+        elif reason := _intrinsic_plan_rejection(result.plan, signature):
             rejected.append(reason)
         else:
             passing.append(result)
