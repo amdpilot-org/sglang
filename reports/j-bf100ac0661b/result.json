@@ -1,0 +1,56 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/7893",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3222",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3027",
+  "candidate_commit": "3559565b2ea09da7c55cad83ee909bf763d8f0d9",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "The recorded base reproduces the reported implementation gate: draft runners return before EPLB metadata initialization and are excluded from EPLBManager construction. The exact candidate removes those gates, introduces draft-local EPLB resources and redundant-expert state, and passes its focused regression plus independent unit and one-GPU mapping checks. However, the original contract is a distributed DeepSeek target plus 256-expert MTP draft at EP size 72 or 144. Only one GPU is available and the prepared environment lacks the required model weights; the existing serving fixture also failed to download with HTTP 401. The candidate is therefore plausible and substantially unit-validated, but its central distributed serving claim remains unverified rather than fully resolved.",
+  "tests": [
+    {
+      "command": "git show 358c163250ad3b1f62939b01ce1314a0a31a0365:python/sglang/srt/model_executor/model_runner.py",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before source contract: maybe_init_expert_location_metadata returns immediately for draft workers, and maybe_init_eplb_manager requires not self.is_draft_worker."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bf100ac0661b/venv/bin/python -m pytest test/registered/unit/test_runtime_context.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate: 97 tests and 140 subtests passed, including draft/target EPLB resource isolation, exception restoration, and EP 72/144 redundancy arithmetic."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bf100ac0661b/venv/bin/python -m pytest test/registered/unit/eplb -q",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate: all 35 existing EPLB unit tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bf100ac0661b/venv/bin/python -m pytest test/registered/unit/eplb test/registered/ep/test_eplb_no_a2a.py -q",
+      "exit_code": 1,
+      "what_was_measured": "35 unit tests passed; two serving tests were blocked before engine execution because lmsys/sglang-ci-dsv3-test config download returned HTTP 401."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bf100ac0661b/venv/bin/python reports/j-1dc6202a21d1/gpu_eplb_mapping_check.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate on one AMD Instinct MI355X: 4096 synthetic routes through a 256-logical/288-physical mapping matched an independent NumPy reference exactly. This checks mapping arithmetic only, not SGLang distributed EPLB execution."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X ran the candidate's synthetic mapping check. No multi-rank server, DeepSeek model, MTP draft, live EPLB rebalance, or cross-rank expert migration ran."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A real 72-rank DeepSeek target with its 256-expert MTP draft and EPLB enabled was not executed.",
+    "A real 144-rank DeepSeek target with its 256-expert MTP draft and EPLB enabled was not executed.",
+    "Cross-rank draft expert migration/rebalancing and end-to-end output correctness were not measured.",
+    "The candidate's GPU script uses a synthetic tensor gather and does not call the SGLang EPLB manager, model loader, communication backend, or speculative serving path.",
+    "The available EPLB serving regression could not access its private model and failed with HTTP 401 before server startup."
+  ],
+  "remaining_limitations": [
+    "Architecture: one AMD Instinct MI355X is visible, insufficient for EP size 72 or 144.",
+    "Models: DeepSeek target/MTP weights and the private lmsys/sglang-ci-dsv3-test fixture are unavailable.",
+    "Native code: the candidate changes Python only; no C++, HIP, CUDA, or FlyDSL source changed, so no native rebuild was applicable. The imported prepared AITER module was /tmp/amdpilot-repo-j-bf100ac0661b/cache/aiter/module_aiter_core.so.",
+    "Imports: sglang and model_runner resolved to /job/repo/python, confirming tests used the checked-out candidate source; Torch resolved to the pinned /opt/venv installation (2.11.0+rocm7.2, HIP 7.2)."
+  ]
+}
