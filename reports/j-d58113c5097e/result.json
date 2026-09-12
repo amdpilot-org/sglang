@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34112",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the current-main form of the final chunked-prefill cancellation race at both scheduler admission and delayed-result commit boundaries. Pending-abort prefill requests could enter optimistic decode and commit one sampled token plus derived metadata. The fix excludes only pending-finish prefill requests while a delayed result exists and consumes the pending finish without committing that result, while preserving mixed decode requests and packed metadata cursor alignment.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-d58113c5097e/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunked_req_gate.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before scheduler boundary: the pending-abort final-prefill request was unexpectedly admitted to optimistic decode; 1 failed, 4 passed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-d58113c5097e/venv/bin/python -m pytest -q test/registered/unit/managers/test_batch_result_processor_hidden_states.py::TestPrefillHiddenStateOffsets::test_aborted_final_prefill_drops_metadata_but_advances_logprob_offset test/registered/unit/managers/test_batch_result_processor_hidden_states.py::TestPrefillHiddenStateOffsets::test_pending_abort_wins_over_sampling_mask_overflow",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before result boundary: the aborted request contained sampled output_ids [101], and sampling-mask overflow could replace the earlier abort reason; 2 failed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-d58113c5097e/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunked_req_gate.py test/registered/unit/managers/test_batch_result_processor_hidden_states.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression and boundary cases: delayed-result admission, already-processed-result control, mixed decode preservation, zero token/metadata commit after abort, live packed-logprob alignment, and sampling-mask precedence; 14 passed, 2 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-d58113c5097e/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunked_req_gate.py test/registered/unit/managers/test_scheduler_chunked_abort_race.py test/registered/unit/managers/test_batch_result_processor_hidden_states.py test/registered/unit/managers/test_batch_result_processor_spec_grammar.py",
+      "exit_code": 0,
+      "what_was_measured": "Extended scheduler/result compatibility coverage, including existing deferred chunk abort and speculative grammar behavior; 22 passed, 2 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d58113c5097e/venv/bin/python -m py_compile python/sglang/srt/managers/scheduler.py python/sglang/srt/managers/scheduler_components/batch_result_processor.py test/registered/unit/managers/test_scheduler_chunked_req_gate.py test/registered/unit/managers/test_batch_result_processor_hidden_states.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Touched Python files compile and the patch has no whitespace errors."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-d58113c5097e/venv/bin/python -c 'import torch; x=torch.tensor([1.,2.,3.], device=\"cuda\"); print((x*x).cpu().tolist())'",
+      "exit_code": 0,
+      "what_was_measured": "The assigned single AMD Instinct MI355X/gfx950 executed a Torch ROCm tensor operation and returned [1.0, 4.0, 9.0]. This is an environment check, not issue reproduction."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI355X (gfx950) was visible through Torch 2.11.0+rocm7.2/HIP 7.2.26015 and executed a deterministic tensor operation. The issue-specific regressions are scheduler/result control-flow tests and did not execute a model on GPU."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported meta-llama/Llama-3.2-1B-Instruct weights were unavailable, so the original HTTP workload was not rerun.",
+    "The available GPU is gfx950 rather than the report's RTX 4090; no NVIDIA/CUDA runtime claim is made.",
+    "The old v0.5.9 negative ScheduleBatch.output_ids values were FutureMap relay handles and that batch representation no longer exists on current main; the verified current defect is the delayed final-prefill token/optimistic-decode race.",
+    "No multi-rank, pipeline-parallel, or disaggregated runtime validation was performed.",
+    "No native code was changed or rebuilt."
+  ]
+}
