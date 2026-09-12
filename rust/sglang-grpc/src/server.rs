@@ -5,11 +5,15 @@ use std::sync::Arc;
 use pyo3::PyErr;
 use pyo3::Python;
 use pyo3::exceptions::{PyTypeError, PyValueError};
-use tokio::sync::{Notify, mpsc::Receiver};
+use tokio::sync::{Notify, RwLock, mpsc::Receiver, watch};
 use tokio::time::{Duration, timeout};
 use tokio_stream::Stream;
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
+use tonic_health::ServingStatus;
+use tonic_health::pb::health_check_response::ServingStatus as WireServingStatus;
+use tonic_health::pb::health_server::{Health, HealthServer};
+use tonic_health::pb::{HealthCheckRequest, HealthCheckResponse};
 
 use crate::bridge::{PyBridge, ResponseChunk, TerminalError};
 use crate::proto;
@@ -29,6 +33,128 @@ pub const DEFAULT_RESPONSE_TIMEOUT_SECS: u64 = 300;
 /// 64 MiB — leaves headroom for multimodal inputs and OpenAI JSON pass-through bodies,
 /// well above tonic's 4 MiB decode default.
 pub const DEFAULT_GRPC_MAX_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
+const SGLANG_SERVICE_NAME: &str = "sglang.runtime.v1.SglangService";
+const HEALTH_POLL_INTERVAL: Duration = Duration::from_secs(1);
+
+fn serving_status(healthy: bool) -> ServingStatus {
+    if healthy {
+        ServingStatus::Serving
+    } else {
+        ServingStatus::NotServing
+    }
+}
+
+#[derive(Clone, Debug)]
+struct HealthReporter {
+    statuses: Arc<RwLock<HashMap<String, ServingStatus>>>,
+    revision: watch::Sender<u64>,
+}
+
+#[derive(Clone, Debug)]
+struct HealthService {
+    statuses: Arc<RwLock<HashMap<String, ServingStatus>>>,
+    revision: watch::Receiver<u64>,
+}
+
+fn health_pair() -> (HealthReporter, HealthService) {
+    let statuses = Arc::new(RwLock::new(HashMap::new()));
+    let (revision, revision_rx) = watch::channel(0);
+    let reporter = HealthReporter {
+        statuses: statuses.clone(),
+        revision,
+    };
+    let service = HealthService {
+        statuses,
+        revision: revision_rx,
+    };
+    (reporter, service)
+}
+
+fn health_reporter() -> (HealthReporter, HealthServer<HealthService>) {
+    let (reporter, service) = health_pair();
+    (reporter, HealthServer::new(service))
+}
+
+impl HealthReporter {
+    async fn set_service_status(&mut self, service_name: &str, status: ServingStatus) {
+        let changed = self
+            .statuses
+            .write()
+            .await
+            .insert(service_name.to_string(), status)
+            != Some(status);
+        if changed {
+            self.revision.send_modify(|revision| *revision += 1);
+        }
+    }
+}
+
+fn wire_health_status(status: Option<ServingStatus>) -> i32 {
+    match status {
+        Some(status) => WireServingStatus::from(status) as i32,
+        None => WireServingStatus::ServiceUnknown as i32,
+    }
+}
+
+#[tonic::async_trait]
+impl Health for HealthService {
+    async fn check(
+        &self,
+        request: Request<HealthCheckRequest>,
+    ) -> Result<Response<HealthCheckResponse>, Status> {
+        let service_name = &request.get_ref().service;
+        let status = self.statuses.read().await.get(service_name).copied();
+        status
+            .map(|status| {
+                Response::new(HealthCheckResponse {
+                    status: wire_health_status(Some(status)),
+                })
+            })
+            .ok_or_else(|| Status::not_found("service not registered"))
+    }
+
+    type WatchStream = StreamResult<HealthCheckResponse>;
+
+    async fn watch(
+        &self,
+        request: Request<HealthCheckRequest>,
+    ) -> Result<Response<Self::WatchStream>, Status> {
+        let service_name = request.into_inner().service;
+        let statuses = self.statuses.clone();
+        let mut revision = self.revision.clone();
+        let stream = async_stream::stream! {
+            let mut last_status = statuses.read().await.get(&service_name).copied();
+            yield Ok(HealthCheckResponse { status: wire_health_status(last_status) });
+            loop {
+                if revision.changed().await.is_err() {
+                    break;
+                }
+                let status = statuses.read().await.get(&service_name).copied();
+                if status != last_status {
+                    last_status = status;
+                    yield Ok(HealthCheckResponse { status: wire_health_status(status) });
+                }
+            }
+        };
+        Ok(Response::new(Box::pin(stream)))
+    }
+}
+
+async fn publish_health_status(bridge: Arc<PyBridge>, reporter: &mut HealthReporter) {
+    let healthy = tokio::task::spawn_blocking(move || bridge.health_check())
+        .await
+        .map_err(|err| format!("health task failed: {err}"))
+        .and_then(|result| result.map_err(|err| err.to_string()))
+        .unwrap_or_else(|err| {
+            tracing::warn!("Standard gRPC health probe failed: {}", err);
+            false
+        });
+    let status = serving_status(healthy);
+    reporter.set_service_status("", status).await;
+    reporter
+        .set_service_status(SGLANG_SERVICE_NAME, status)
+        .await;
+}
 
 /// Resolve the per-message size cap (bytes) applied to the Tonic encoder/decoder.
 //
@@ -985,7 +1111,7 @@ pub async fn run_grpc_server(
     let addr = listener.local_addr()?;
     let listener = tokio::net::TcpListener::from_std(listener)?;
     let service = SglangServiceImpl {
-        bridge,
+        bridge: bridge.clone(),
         response_timeout,
     };
 
@@ -994,9 +1120,28 @@ pub async fn run_grpc_server(
         .max_decoding_message_size(max_message_size)
         .max_encoding_message_size(max_message_size);
 
+    // The standard health service coexists with SglangService.HealthCheck. Both
+    // the aggregate (empty) service name and the fully-qualified native service
+    // are SERVING exactly when RuntimeHandle.health_check() is true: the engine
+    // has left Starting, is not UnHealthy, and is not gracefully exiting. A
+    // false result or probe error is NOT_SERVING. Watch observes changes with a
+    // maximum polling delay of HEALTH_POLL_INTERVAL.
+    let (mut health_reporter, health_service) = health_reporter();
+    publish_health_status(bridge.clone(), &mut health_reporter).await;
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(HEALTH_POLL_INTERVAL);
+        // The initial state was published synchronously above.
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            publish_health_status(bridge.clone(), &mut health_reporter).await;
+        }
+    });
+
     tracing::info!("gRPC server listening on {}", addr);
 
     tonic::transport::Server::builder()
+        .add_service(health_service)
         .add_service(svc)
         .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async move {
             shutdown.notified().await;
