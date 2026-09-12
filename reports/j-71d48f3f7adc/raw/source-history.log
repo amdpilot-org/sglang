@@ -1,0 +1,72 @@
+Prepared base:
+358c163250ad3b1f62939b01ce1314a0a31a0365
+Pinned source sites:
+682:                BasicWorkerBuilder::new(format!("http://w{}:8000", j))
+741:                BasicWorkerBuilder::new(format!("http://w{}:8000", j))
+Historical fixing commit:
+413df1f8 config: ServerArgs holds the raw input (#36255)
+ .claude/skills/sglang-runtime-context/SKILL.md     |  79 ++-
+ examples/runtime/engine/save_remote_state.py       |   3 +-
+ examples/runtime/engine/save_sharded_state.py      |   3 +-
+ .../token_in_token_out_vlm_engine.py               |   8 +-
+ python/sglang/benchmark/one_batch.py               |   2 +-
+ python/sglang/srt/arg_groups/arg_utils.py          |   8 +-
+ python/sglang/srt/arg_groups/overrides.py          | 105 ++--
+ python/sglang/srt/entrypoints/engine.py            |   4 +-
+ python/sglang/srt/entrypoints/http_server.py       |   4 +-
+ .../srt/layers/attention/minimax_sparse_backend.py |   9 +-
+ python/sglang/srt/layers/moe/utils.py              |   4 +-
+ python/sglang/srt/managers/scheduler.py            |   3 +-
+ .../sglang/srt/mem_cache/kv_cache_configurator.py  |   4 +-
+ python/sglang/srt/parser/template_detection.py     |  11 +-
+ python/sglang/srt/ray/engine.py                    |   8 +-
+ python/sglang/srt/runtime_context.py               |  35 +-
+ python/sglang/srt/server_args.py                   |  89 +--
+ scripts/playground/bench_speculative.py            |   4 +
+ .../python/src/sglang_router/launch_server.py      |  29 +-
+ .../bindings/python/tests/test_startup_sequence.py |  56 ++
+ sgl-model-gateway/src/policies/cache_aware.rs      |   4 +-
+ test/registered/cpu/test_server_args_backend.py    |  13 +-
+ .../test_scheduler_internal_state_env_vars.py      |   5 +-
+ .../test_scheduler_internal_state_world_size.py    |  42 +-
+ .../unit/parser/test_template_manager.py           |  64 ++-
+ .../test_model_config_reads_resolved_input.py      |   4 +-
+ .../server_args/test_resolution_declarations.py    | 130 +++--
+ .../server_args/test_resolution_is_reproducible.py |  38 +-
+ .../test_resolution_reads_the_declarations.py      | 612 +++++++++++++++++++++
+ test/registered/unit/test_model_overrides.py       | 155 ++++--
+ .../unit/test_runtime_context_config_bags.py       |  39 +-
+ .../unit/test_runtime_context_override.py          |   2 +-
+ .../test_server_args_no_instance_mutation_entry.py |   6 +-
+ .../test_supplied_instance_exposure_ratchet.py     |   6 +-
+ 34 files changed, 1203 insertions(+), 385 deletions(-)
+commit 413df1f8db4fd159c5d07e960f9ec5547edeb5c1
+Author:     Cheng Wan <54331508+ch-wan@users.noreply.github.com>
+AuthorDate: Wed Aug 26 05:14:05 2026 -0700
+Commit:     GitHub <noreply@github.com>
+CommitDate: Wed Aug 26 05:14:05 2026 -0700
+
+    config: ServerArgs holds the raw input (#36255)
+
+diff --git a/sgl-model-gateway/src/policies/cache_aware.rs b/sgl-model-gateway/src/policies/cache_aware.rs
+index c1d7ee3d..d0f5daa6 100644
+--- a/sgl-model-gateway/src/policies/cache_aware.rs
++++ b/sgl-model-gateway/src/policies/cache_aware.rs
+@@ -679,7 +679,7 @@ mod tests {
+         let mut workers: Vec<Arc<dyn Worker>> = Vec::new();
+         for j in 0..num_workers {
+             workers.push(Arc::new(
+-                BasicWorkerBuilder::new(&format!("http://w{}:8000", j))
++                BasicWorkerBuilder::new(format!("http://w{}:8000", j))
+                     .worker_type(WorkerType::Regular)
+                     .build(),
+             ));
+@@ -738,7 +738,7 @@ mod tests {
+         let mut workers: Vec<Arc<dyn Worker>> = Vec::new();
+         for j in 0..num_workers {
+             workers.push(Arc::new(
+-                BasicWorkerBuilder::new(&format!("http://w{}:8000", j))
++                BasicWorkerBuilder::new(format!("http://w{}:8000", j))
+                     .worker_type(WorkerType::Regular)
+                     .build(),
+             ));
