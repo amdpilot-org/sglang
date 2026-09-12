@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34000",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1800",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1758",
+  "candidate_commit": "7a3c6941121615ac6333ccafa9d3873ee4e61a92",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes the reproduced rollout_log_probs/DiT trajectory collapse and caller-provided raw-latent preparation; the grouped residency-manager defect was already fixed on the recorded base. It does not merge or select RolloutDenoisingEnv per output, so output-specific guidance and nested conditioning from outputs 1..K-1 are silently replaced with output 0's values. This is a partial original-issue fix and requires changes before acceptance.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5fef458e8ae5/venv/bin/python -m pytest -vv /job/review-evidence-j-5fef458e8ae5/test_multi_output_rollout_trajectory.py /job/review-evidence-j-5fef458e8ae5/test_pipeline_residency_manager_install.py /job/review-evidence-j-5fef458e8ae5/test_provided_latents_preparation.py (base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: 4 failed and 3 passed. Base returned rollout shape (1,4) instead of (3,4), retained output 0 for an incomplete group, and left provided raw latents unpacked with latent_ids=None. Grouped residency installation and already-packed/single-output boundaries passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5fef458e8ae5/venv/bin/python -m pytest -vv python/sglang/multimodal_gen/test/unit/test_multi_output_rollout_trajectory.py python/sglang/multimodal_gen/test/unit/test_pipeline_residency_manager_install.py python/sglang/multimodal_gen/test/unit/test_provided_latents_preparation.py /job/review-evidence-j-5fef458e8ae5/test_adversarial_rollout_env.py (candidate checkout)",
+      "exit_code": 1,
+      "what_was_measured": "All 7 candidate regressions passed, but the independent adversarial case failed: three per-output denoising environments produced guidance [1.0,1.0,1.0], not [1.0,2.0,3.0]."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5fef458e8ae5/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_rollout_api.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "34 adjacent rollout API tests passed; they do not cover merging distinct singleton denoising environments."
+    },
+    {
+      "command": "candidate GPU numerical script recorded in evidence/candidate-gpu-numerical.txt",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, merged log-probabilities had shape (3,4) and DiT latents (3,5,2), both exactly equal to independently constructed CPU references."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI355X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2, HIP 7.2.26015. Candidate tensor merge matched CPU references exactly."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_reason": "The candidate changes only Python source, Python tests, and reports; no native code or native import path changed.",
+  "remaining_counterexamples": [
+    "With K=3 singleton rollout trajectories whose RolloutDenoisingEnv.guidance values are 1, 2, and 3, the merged candidate results expose 1, 1, and 1. The same output-0 collapse applies to batch-indexed tensors nested in image_kwargs, pos_cond_kwargs, and neg_cond_kwargs because _concat_rollout_trajectory_data retains first.denoising_env and _select_output_rollout_trajectory returns it unsliced."
+  ],
+  "remaining_limitations": [
+    "No SD3 or FLUX.2 weights were available, so no full diffusion server, image-semantic, GRPO convergence, or model-specific end-to-end run was performed.",
+    "Validation used one assigned AMD gfx950 GPU; it does not qualify NVIDIA H20, distributed, multi-GPU, or multi-node behavior.",
+    "The deterministic tiny Llama fixture is unrelated to diffusion model semantics and was not used as proof.",
+    "The provided-latent behavior was validated through the actual stage implementation with a packed-model config stub, not a loaded FLUX.2 model."
+  ],
+  "source_import_paths": {
+    "sglang": "/job/repo/python/sglang/__init__.py",
+    "gpu_worker": "/job/repo/python/sglang/multimodal_gen/runtime/managers/gpu_worker.py"
+  }
+}
