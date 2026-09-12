@@ -1065,6 +1065,29 @@ class TestBenchmarkDatasetsAPI(CustomTestCase):
         with self.assertRaisesRegex(ValueError, "fewer than --num-prompts=2"):
             sample_embedding_requests(str(path), 2, self.tokenizer)
 
+    def test_embedding_dataset_supports_token_id_inputs(self):
+        path = self.tmpdir_path / "embedding-token-ids.jsonl"
+        records = [
+            {"input": [101, 102, 103]},
+            {"input": [[101, 102], [103]]},
+        ]
+        path.write_text("".join(json.dumps(row) + "\n" for row in records))
+
+        rows = sample_embedding_requests(str(path), 2, self.tokenizer)
+
+        self.assertEqual(rows[0].prompt, [101, 102, 103])
+        self.assertEqual(rows[0].prompt_len, 3)
+        self.assertEqual(rows[1].prompt, [[101, 102], [103]])
+        self.assertEqual(rows[1].prompt_len, 3)
+
+    def test_embedding_dataset_rejects_whitespace_only_inputs(self):
+        path = self.tmpdir_path / "embedding-whitespace.jsonl"
+        for input_value in ["   ", ["valid", "\t"]]:
+            path.write_text(json.dumps({"input": input_value}) + "\n")
+            with self.subTest(input_value=input_value):
+                with self.assertRaisesRegex(ValueError, "line 1"):
+                    sample_embedding_requests(str(path), 1, self.tokenizer)
+
     def test_offline_embedding_benchmark_calls_encode_not_generate(self):
         backend = MagicMock()
         backend.encode.return_value = [{"embedding": [1.0, 0.0]}]
