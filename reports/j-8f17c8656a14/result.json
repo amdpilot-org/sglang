@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31327",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Added a separate Token-weighted Prefix Cache Hit Rate Grafana panel based on prefill cache and compute token counter rates, while preserving the existing Cache Hit Rate gauge panel unchanged. Added regression, compatibility, and mixed-traffic adversarial tests. Inspected open upstream candidate PR https://github.com/sgl-project/sglang/pull/31412 before implementation; it is not present in the prepared base.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-8f17c8656a14/venv/bin/python -c \"import json,sys; panels={p['title']:p for p in json.load(open(sys.argv[1]))['panels']}; assert 'Token-weighted Prefix Cache Hit Rate' in panels, 'missing requested token-weighted panel'\" /tmp/amdpilot-repo-j-8f17c8656a14/sglang-dashboard.base.json",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression against the recorded base: the requested Token-weighted Prefix Cache Hit Rate panel was absent. Raw output: /tmp/amdpilot-repo-j-8f17c8656a14/failing_before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8f17c8656a14/venv/bin/python -m pytest -q test/registered/unit/observability/test_grafana_dashboard.py",
+      "exit_code": 0,
+      "what_was_measured": "Three CPU tests validated the exact counter-based PromQL, preservation of the existing gauge panel, exclusion of decode and batch averaging, a mixed short-cold/long-warm numerical adversarial case, percentage bounds, and unique panel IDs/layout. Raw output: /tmp/amdpilot-repo-j-8f17c8656a14/test_grafana_dashboard.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8f17c8656a14/venv/bin/python -m json.tool examples/monitoring/grafana/dashboards/json/sglang-dashboard.json",
+      "exit_code": 0,
+      "what_was_measured": "The modified Grafana dashboard is valid JSON."
+    },
+    {
+      "command": "jq -e '.panels[] | select(.title == \"Token-weighted Prefix Cache Hit Rate\") | .targets[0].expr == \"sum(rate(sglang_realtime_tokens_total{mode=\\\"prefill_cache\\\"}[$__rate_interval])) / sum(rate(sglang_realtime_tokens_total{mode=~\\\"prefill_cache|prefill_compute\\\"}[$__rate_interval]))\"' examples/monitoring/grafana/dashboards/json/sglang-dashboard.json",
+      "exit_code": 0,
+      "what_was_measured": "An independent JSON query confirmed that the delivered panel contains the requested token-weighted PromQL using the dashboard's established underscore-form Prometheus metric name."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors were introduced."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "This change only modifies a Grafana dashboard JSON file and CPU-side contract tests; it does not execute or alter model, kernel, serving, or numerical GPU paths. GPU execution would not validate Grafana PromQL semantics.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No live Grafana/Prometheus stack was provisioned, so visual rendering and evaluation against a live time series were not exercised; JSON structure and query semantics were validated by focused automated tests and jq.",
+    "The panel reports no value when the selected interval contains no prefill tokens because the PromQL denominator is zero; this preserves Prometheus's honest no-data behavior instead of fabricating a hit rate.",
+    "No GPU, model architecture, distributed workload, HTTP serving path, or native library was exercised because the requested feature is dashboard-only and changes none of those paths."
+  ]
+}
