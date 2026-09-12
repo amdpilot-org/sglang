@@ -1,10 +1,15 @@
+import os
+import subprocess
+import sys
 import threading
 import unittest
 from collections import OrderedDict
+from unittest.mock import patch
 
 import zmq
 
 from sglang.srt.disaggregation.common.conn import CommonKVManager
+from sglang.srt.environ import _default_disaggregation_zmq_socket_cache_size
 from sglang.test.ci.ci_register import register_cpu_ci
 
 register_cpu_ci(est_time=12, suite="base-a-test-cpu")
@@ -127,6 +132,73 @@ class TestCommonKVManagerSocketCache(unittest.TestCase):
         self.assertTrue(failing_socket.closed)
         self.assertEqual(self.manager._socket_cache, {})
         self.assertEqual(self.manager._monitor_cache, {})
+
+    def test_default_cache_size_respects_low_process_fd_limit(self):
+        script = """
+import os
+import resource
+import threading
+from collections import OrderedDict
+
+import zmq
+
+from sglang.srt.disaggregation.common.conn import CommonKVManager
+from sglang.srt.environ import envs
+
+soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+resource.setrlimit(resource.RLIMIT_NOFILE, (min(128, hard), hard))
+
+manager = CommonKVManager.__new__(CommonKVManager)
+manager._zmq_ctx = zmq.Context()
+manager._socket_cache = OrderedDict()
+manager._monitor_cache = {}
+manager._socket_send_locks = {}
+manager._socket_lock = threading.Lock()
+manager._socket_cache_size = max(
+    1, envs.SGLANG_DISAGGREGATION_ZMQ_SOCKET_CACHE_SIZE.get()
+)
+
+try:
+    for port in range(1000):
+        manager._connect(f\"tcp://127.0.0.1:{30000 + port}\")
+    print(f\"cache_size={manager._socket_cache_size}\")
+    print(f\"cached={len(manager._socket_cache)}\")
+    print(f\"open_fds={len(os.listdir('/proc/self/fd'))}\")
+finally:
+    for endpoint in list(manager._socket_cache):
+        manager._close_cached_socket(endpoint)
+    manager._zmq_ctx.term()
+"""
+        env = os.environ.copy()
+        env.pop("SGLANG_DISAGGREGATION_ZMQ_SOCKET_CACHE_SIZE", None)
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            env=env,
+            text=True,
+            timeout=30,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        measurements = dict(
+            line.split("=", maxsplit=1)
+            for line in result.stdout.splitlines()
+            if "=" in line
+        )
+        cache_size = int(measurements["cache_size"])
+        self.assertLess(cache_size, 32)
+        self.assertEqual(int(measurements["cached"]), cache_size)
+        self.assertLess(int(measurements["open_fds"]), 128)
+
+    @patch("sglang.srt.environ.os.listdir", return_value=[str(i) for i in range(8)])
+    @patch("sglang.srt.environ.resource.getrlimit", return_value=(128, 128))
+    def test_default_cache_size_uses_fd_headroom(self, _getrlimit, _listdir):
+        self.assertEqual(_default_disaggregation_zmq_socket_cache_size(), 22)
+
+    @patch("sglang.srt.environ.os.listdir", return_value=[])
+    @patch("sglang.srt.environ.resource.getrlimit", return_value=(1_048_576, 1_048_576))
+    def test_default_cache_size_keeps_normal_cap(self, _getrlimit, _listdir):
+        self.assertEqual(_default_disaggregation_zmq_socket_cache_size(), 1024)
 
 
 if __name__ == "__main__":
