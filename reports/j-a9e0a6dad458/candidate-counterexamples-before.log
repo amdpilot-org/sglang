@@ -1,0 +1,288 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_________ test_grouped_chunking_preserves_global_mapping_and_budget[2] _________
+
+method = <TopkTransformMethod.RAGGED: 2>
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires one GPU")
+    @pytest.mark.parametrize(
+        "method", [TopkTransformMethod.RAGGED, TopkTransformMethod.PAGED]
+    )
+    def test_grouped_chunking_preserves_global_mapping_and_budget(method):
+        device = torch.device("cuda")
+        n_real, total_q, total_k, dim = 5, 7, 12, 8
+        starts = torch.tensor([0, 0, 6, 6, 6], dtype=torch.int32, device=device)
+        ends = torch.tensor([5, 6, 9, 11, 12], dtype=torch.int32, device=device)
+        pool_lens = ends - starts
+        offsets = torch.tensor([101, 102, 201, 202, 203], dtype=torch.int32, device=device)
+        row_index = torch.tensor([3, 3, 9, 9, 9], dtype=torch.int32, device=device)
+        page_table = torch.arange(80, dtype=torch.int32, device=device).reshape(10, 8)
+        plan = SimpleNamespace(
+            seq_lens_expanded=pool_lens * 4,
+            pooled_seq_lens_expanded=pool_lens,
+            ragged_q_ks=starts,
+            ragged_q_ke=ends,
+            ragged_total_k_rows=total_k,
+            ragged_k_u8=torch.zeros((total_k, dim), dtype=torch.uint8, device=device),
+            ragged_k_scale=torch.ones(total_k, dtype=torch.float32, device=device),
+            ragged_concat_page_table=torch.zeros(1, dtype=torch.int32, device=device),
+            ragged_paged_page_table=page_table,
+            ragged_paged_page_table_row_index=row_index,
+            ragged_groups=(
+                SimpleNamespace(q_start=0, q_len=2, k_start=0, k_rows=6),
+                SimpleNamespace(q_start=2, q_len=3, k_start=6, k_rows=6),
+            ),
+        )
+        metadata = SimpleNamespace(
+            attn_metadata=SimpleNamespace(
+                kpool_extend_plan=plan, topk_indices_offset=offsets
+            ),
+            topk_transform_method=method,
+        )
+        q = torch.zeros((total_q, 1, dim), dtype=torch.float8_e4m3fn, device=device)
+        weights = torch.ones((total_q, 1, 1), dtype=torch.float32, device=device)
+        # RAGGED exercises a budget smaller than one concatenated-K row. PAGED uses
+        # one concatenated row so it reaches the later chunk's global table mapping.
+        budget = (6 if method == TopkTransformMethod.RAGGED else total_k) * 4
+        calls = []
+    
+        def fake_logits(q_chunk, kv, weights_chunk, ks, ke, clean_logits):
+            calls.append((q_chunk.shape[0], kv[0].shape[0]))
+            return torch.zeros(
+                (q_chunk.shape[0], kv[0].shape[0]), dtype=torch.float32, device=device
+            )
+    
+        def fake_topk(logits, lens, **kw):
+            cols = [lens, kw["seq_lens"], kw["row_starts"]]
+            if method == TopkTransformMethod.RAGGED:
+                cols.append(kw["topk_offsets"])
+                assert kw["page_table"] is None
+                assert kw["page_table_row_index"] is None
+            else:
+                cols.append(kw["page_table_row_index"])
+                assert kw["page_table"].data_ptr() == page_table.data_ptr()
+                assert kw["topk_offsets"] is None
+            assert logits.numel() * logits.element_size() <= budget
+            result = torch.full(
+                (logits.shape[0], 11), -1, dtype=torch.int32, device=device
+            )
+            result[:, :4] = torch.stack(cols, dim=1).to(torch.int32)
+            return result
+    
+        with (
+            mock.patch.object(
+                IndexerKPool, "_should_chunk_mqa_logits", return_value=(True, budget)
+            ),
+            mock.patch.object(IndexerKPool, "_get_index_k_read_buffer"),
+            mock.patch.object(
+                IndexerKPool, "_topk_from_kpool_logits", side_effect=fake_topk
+            ),
+            mock.patch(
+                "sglang.srt.layers.attention.dsa.dsa_indexer_kpool.get_token_to_kv_pool"
+            ),
+            mock.patch(
+                "sglang.srt.layers.attention.dsa.kpool_fp8_index."
+                "gather_index_k_scale_prefix_into"
+            ),
+            mock.patch(
+                "sglang.srt.layers.attention.dsa.dsa_indexer_kpool.deep_gemm",
+                SimpleNamespace(fp8_mqa_logits=mock.Mock(side_effect=fake_logits)),
+                create=True,
+            ),
+            envs.SGLANG_DSA_FUSE_TOPK.override(True),
+        ):
+>           result = _indexer()._get_topk_ragged_kpool_plan(
+                mock.Mock(), 0, q, weights, metadata
+            )
+
+/tmp/j-a9e0a6dad458-counterexamples.py:117: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/srt/layers/attention/dsa/dsa_indexer_kpool.py:958: in _get_topk_ragged_kpool_plan
+    self._topk_from_kpool_logits(
+/usr/lib/python3.12/unittest/mock.py:1134: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1138: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1199: in _execute_mock_call
+    result = effect(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+logits = tensor([[0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]], device='cuda:0')
+lens = tensor([5], device='cuda:0', dtype=torch.int32)
+kw = {'page_table': None, 'page_table_row_index': None, 'row_starts': tensor([0], device='cuda:0', dtype=torch.int32), 'seq_lens': tensor([20], device='cuda:0', dtype=torch.int32), ...}
+cols = [tensor([5], device='cuda:0', dtype=torch.int32), tensor([20], device='cuda:0', dtype=torch.int32), tensor([0], device='cuda:0', dtype=torch.int32), tensor([101], device='cuda:0', dtype=torch.int32)]
+@py_assert0 = None, @py_assert3 = 12, @py_assert2 = None
+
+    def fake_topk(logits, lens, **kw):
+        cols = [lens, kw["seq_lens"], kw["row_starts"]]
+        if method == TopkTransformMethod.RAGGED:
+            cols.append(kw["topk_offsets"])
+            assert kw["page_table"] is None
+            assert kw["page_table_row_index"] is None
+        else:
+            cols.append(kw["page_table_row_index"])
+            assert kw["page_table"].data_ptr() == page_table.data_ptr()
+            assert kw["topk_offsets"] is None
+>       assert logits.numel() * logits.element_size() <= budget
+E       AssertionError: assert (12 * 4) <= 24
+E        +  where 12 = <built-in method numel of Tensor object at 0x7f41c0336f30>()
+E        +    where <built-in method numel of Tensor object at 0x7f41c0336f30> = tensor([[0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]], device='cuda:0').numel
+E        +  and   4 = <built-in method element_size of Tensor object at 0x7f41c0336f30>()
+E        +    where <built-in method element_size of Tensor object at 0x7f41c0336f30> = tensor([[0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]], device='cuda:0').element_size
+
+/tmp/j-a9e0a6dad458-counterexamples.py:88: AssertionError
+_________ test_grouped_chunking_preserves_global_mapping_and_budget[1] _________
+
+method = <TopkTransformMethod.PAGED: 1>
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires one GPU")
+    @pytest.mark.parametrize(
+        "method", [TopkTransformMethod.RAGGED, TopkTransformMethod.PAGED]
+    )
+    def test_grouped_chunking_preserves_global_mapping_and_budget(method):
+        device = torch.device("cuda")
+        n_real, total_q, total_k, dim = 5, 7, 12, 8
+        starts = torch.tensor([0, 0, 6, 6, 6], dtype=torch.int32, device=device)
+        ends = torch.tensor([5, 6, 9, 11, 12], dtype=torch.int32, device=device)
+        pool_lens = ends - starts
+        offsets = torch.tensor([101, 102, 201, 202, 203], dtype=torch.int32, device=device)
+        row_index = torch.tensor([3, 3, 9, 9, 9], dtype=torch.int32, device=device)
+        page_table = torch.arange(80, dtype=torch.int32, device=device).reshape(10, 8)
+        plan = SimpleNamespace(
+            seq_lens_expanded=pool_lens * 4,
+            pooled_seq_lens_expanded=pool_lens,
+            ragged_q_ks=starts,
+            ragged_q_ke=ends,
+            ragged_total_k_rows=total_k,
+            ragged_k_u8=torch.zeros((total_k, dim), dtype=torch.uint8, device=device),
+            ragged_k_scale=torch.ones(total_k, dtype=torch.float32, device=device),
+            ragged_concat_page_table=torch.zeros(1, dtype=torch.int32, device=device),
+            ragged_paged_page_table=page_table,
+            ragged_paged_page_table_row_index=row_index,
+            ragged_groups=(
+                SimpleNamespace(q_start=0, q_len=2, k_start=0, k_rows=6),
+                SimpleNamespace(q_start=2, q_len=3, k_start=6, k_rows=6),
+            ),
+        )
+        metadata = SimpleNamespace(
+            attn_metadata=SimpleNamespace(
+                kpool_extend_plan=plan, topk_indices_offset=offsets
+            ),
+            topk_transform_method=method,
+        )
+        q = torch.zeros((total_q, 1, dim), dtype=torch.float8_e4m3fn, device=device)
+        weights = torch.ones((total_q, 1, 1), dtype=torch.float32, device=device)
+        # RAGGED exercises a budget smaller than one concatenated-K row. PAGED uses
+        # one concatenated row so it reaches the later chunk's global table mapping.
+        budget = (6 if method == TopkTransformMethod.RAGGED else total_k) * 4
+        calls = []
+    
+        def fake_logits(q_chunk, kv, weights_chunk, ks, ke, clean_logits):
+            calls.append((q_chunk.shape[0], kv[0].shape[0]))
+            return torch.zeros(
+                (q_chunk.shape[0], kv[0].shape[0]), dtype=torch.float32, device=device
+            )
+    
+        def fake_topk(logits, lens, **kw):
+            cols = [lens, kw["seq_lens"], kw["row_starts"]]
+            if method == TopkTransformMethod.RAGGED:
+                cols.append(kw["topk_offsets"])
+                assert kw["page_table"] is None
+                assert kw["page_table_row_index"] is None
+            else:
+                cols.append(kw["page_table_row_index"])
+                assert kw["page_table"].data_ptr() == page_table.data_ptr()
+                assert kw["topk_offsets"] is None
+            assert logits.numel() * logits.element_size() <= budget
+            result = torch.full(
+                (logits.shape[0], 11), -1, dtype=torch.int32, device=device
+            )
+            result[:, :4] = torch.stack(cols, dim=1).to(torch.int32)
+            return result
+    
+        with (
+            mock.patch.object(
+                IndexerKPool, "_should_chunk_mqa_logits", return_value=(True, budget)
+            ),
+            mock.patch.object(IndexerKPool, "_get_index_k_read_buffer"),
+            mock.patch.object(
+                IndexerKPool, "_topk_from_kpool_logits", side_effect=fake_topk
+            ),
+            mock.patch(
+                "sglang.srt.layers.attention.dsa.dsa_indexer_kpool.get_token_to_kv_pool"
+            ),
+            mock.patch(
+                "sglang.srt.layers.attention.dsa.kpool_fp8_index."
+                "gather_index_k_scale_prefix_into"
+            ),
+            mock.patch(
+                "sglang.srt.layers.attention.dsa.dsa_indexer_kpool.deep_gemm",
+                SimpleNamespace(fp8_mqa_logits=mock.Mock(side_effect=fake_logits)),
+                create=True,
+            ),
+            envs.SGLANG_DSA_FUSE_TOPK.override(True),
+        ):
+>           result = _indexer()._get_topk_ragged_kpool_plan(
+                mock.Mock(), 0, q, weights, metadata
+            )
+
+/tmp/j-a9e0a6dad458-counterexamples.py:117: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/srt/layers/attention/dsa/dsa_indexer_kpool.py:958: in _get_topk_ragged_kpool_plan
+    self._topk_from_kpool_logits(
+/usr/lib/python3.12/unittest/mock.py:1134: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1138: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1199: in _execute_mock_call
+    result = effect(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+logits = tensor([[0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]], device='cuda:0')
+lens = tensor([6], device='cuda:0', dtype=torch.int32)
+kw = {'page_table': tensor([[ 8,  9, 10, 11, 12, 13, 14, 15]], device='cuda:0', dtype=torch.int32), 'page_table_row_index':...s': tensor([0], device='cuda:0', dtype=torch.int32), 'seq_lens': tensor([24], device='cuda:0', dtype=torch.int32), ...}
+cols = [tensor([6], device='cuda:0', dtype=torch.int32), tensor([24], device='cuda:0', dtype=torch.int32), tensor([0], device='cuda:0', dtype=torch.int32), tensor([3], device='cuda:0', dtype=torch.int32)]
+@py_assert0 = tensor([[ 8,  9, 10, 11, 12, 13, 14, 15]], device='cuda:0', dtype=torch.int32)
+@py_assert2 = <built-in method data_ptr of Tensor object at 0x7f41c006f520>
+@py_assert4 = 139920377127968
+
+    def fake_topk(logits, lens, **kw):
+        cols = [lens, kw["seq_lens"], kw["row_starts"]]
+        if method == TopkTransformMethod.RAGGED:
+            cols.append(kw["topk_offsets"])
+            assert kw["page_table"] is None
+            assert kw["page_table_row_index"] is None
+        else:
+            cols.append(kw["page_table_row_index"])
+>           assert kw["page_table"].data_ptr() == page_table.data_ptr()
+E           AssertionError: assert 139920377127968 == 139920377127936
+E            +  where 139920377127968 = <built-in method data_ptr of Tensor object at 0x7f41c006f520>()
+E            +    where <built-in method data_ptr of Tensor object at 0x7f41c006f520> = tensor([[ 8,  9, 10, 11, 12, 13, 14, 15]], device='cuda:0', dtype=torch.int32).data_ptr
+E            +  and   139920377127936 = <built-in method data_ptr of Tensor object at 0x7f41c03cfc00>()
+E            +    where <built-in method data_ptr of Tensor object at 0x7f41c03cfc00> = tensor([[ 0,  1,  2,  3,  4,  5,  6,  7],\n        [ 8,  9, 10, 11, 12, 13, 14, 15],\n        [16, 17, 18, 19, 20, 21, 2...       [64, 65, 66, 67, 68, 69, 70, 71],\n        [72, 73, 74, 75, 76, 77, 78, 79]], device='cuda:0', dtype=torch.int32).data_ptr
+
+/tmp/j-a9e0a6dad458-counterexamples.py:86: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+<frozen abc>:106
+  <frozen abc>:106: DeprecationWarning: MultiPlatformOp is deprecated; subclass sglang.kernels.fused_op.BaseFusedOp instead (RFC #29630).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../../tmp/j-a9e0a6dad458-counterexamples.py::test_grouped_chunking_preserves_global_mapping_and_budget[2]
+FAILED ../../tmp/j-a9e0a6dad458-counterexamples.py::test_grouped_chunking_preserves_global_mapping_and_budget[1]
+2 failed, 17 warnings in 12.32s
