@@ -1,0 +1,433 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0 -- /tmp/amdpilot-repo-j-2708bd88fe6e/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /job/repo/test
+configfile: pytest.ini
+plugins: hypothesis-6.155.0, anyio-4.15.1
+collecting ... collected 1 item
+
+test/registered/unit/layers/quantization/test_modelopt_nvfp4_moe_padding.py::TestNvfp4MoeIntermediatePadding::test_process_weights_after_loading_pads_gemma4_tp2_before_swizzle FAILED [100%]
+
+=================================== FAILURES ===================================
+_ TestNvfp4MoeIntermediatePadding.test_process_weights_after_loading_pads_gemma4_tp2_before_swizzle _
+
+self = <test_modelopt_nvfp4_moe_padding.TestNvfp4MoeIntermediatePadding testMethod=test_process_weights_after_loading_pads_gemma4_tp2_before_swizzle>
+
+    def test_process_weights_after_loading_pads_gemma4_tp2_before_swizzle(self):
+        """Exercise the exact flashinfer_cutlass post-load regression path."""
+        layer, original_params = _make_gemma4_tp2_layer()
+        method = modelopt_quant.ModelOptNvFp4FusedMoEMethod.__new__(
+            modelopt_quant.ModelOptNvFp4FusedMoEMethod
+        )
+        method.quant_config = SimpleNamespace(
+            group_size=GROUP_SIZE,
+            use_per_token_activation=False,
+        )
+        method.enable_flashinfer_trtllm_moe = False
+        backend = modelopt_quant.MoeRunnerBackend.FLASHINFER_CUTLASS
+        swizzle_inputs = []
+    
+        def record_swizzle_input(scale):
+            swizzle_inputs.append(scale.detach().clone())
+            padded_rows = (scale.shape[1] + 127) // 128 * 128
+            padded_columns = (scale.shape[2] + 3) // 4 * 4
+            return torch.zeros(
+                scale.shape[0],
+                padded_rows,
+                padded_columns,
+                dtype=scale.dtype,
+                device=scale.device,
+            )
+    
+        with (
+            patch.object(
+                modelopt_quant, "get_moe_runner_backend", return_value=backend
+            ),
+            patch(
+                "sglang.srt.layers.moe.get_moe_runner_backend",
+                return_value=backend,
+            ),
+            patch.object(modelopt_quant, "MOE_NVFP4_DISPATCH", False),
+            patch.object(
+                modelopt_quant,
+                "should_use_flashinfer_cutlass_moe_fp4_allgather",
+                return_value=False,
+            ),
+            patch.object(
+                modelopt_quant,
+                "swizzle_blockscale",
+                side_effect=record_swizzle_input,
+            ),
+        ):
+>           method.process_weights_after_loading(layer)
+
+test/registered/unit/layers/quantization/test_modelopt_nvfp4_moe_padding.py:161: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.layers.quantization.modelopt_quant.ModelOptNvFp4FusedMoEMethod object at 0x7fa6c8615fa0>
+layer = Module()
+
+    def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+        """Transform packed FP4 MoE weights and scales for the selected backend."""
+        if getattr(layer, "inference_moe_w13_interleaved", False) and not getattr(
+            layer, "_w13_deinterleaved", False
+        ):
+            up_first = self.enable_flashinfer_trtllm_moe
+            layer.w13_weight.data = deinterleave_w13(
+                layer.w13_weight.data, up_first=up_first
+            )
+            layer.w13_weight_scale.data = deinterleave_w13(
+                layer.w13_weight_scale.data, up_first=up_first
+            )
+            layer._w13_deinterleaved = True
+    
+        # GEMM1 scale processing is deferred until the input scale is known;
+        # see _compute_gemm1_alphas, which splits w13's gate/up weight scales.
+        moe_runner_backend = getattr(
+            self, "_moe_runner_backend", get_moe_runner_backend()
+        )
+        use_nvfp4_dispatch = _use_nvfp4_dispatch()
+        if moe_runner_backend.is_marlin():
+            # Marlin supports only a single shared w1/w3 weight scale, so collapse
+            # the gate/up columns to the gate scale here. Other backends keep the
+            # raw scale and split the halves later (see _compute_gemm1_alphas).
+            if layer.moe_runner_config.is_gated:
+                if layer.w13_weight_scale_2.dim() == 1:
+                    # Some checkpoints store a shared scale for w1/w3.
+                    w13_weight_scale_2 = layer.w13_weight_scale_2
+                else:
+                    if layer.w13_weight_scale_2.shape[1] >= 2 and not torch.allclose(
+                        layer.w13_weight_scale_2[:, 0],
+                        layer.w13_weight_scale_2[:, 1],
+                    ):
+                        logger.warning_once(
+                            "w1_weight_scale_2 must match w3_weight_scale_2. "
+                            "Accuracy may be affected."
+                        )
+    
+                    w13_weight_scale_2 = layer.w13_weight_scale_2[:, 0]
+            else:
+                w13_weight_scale_2 = layer.w13_weight_scale_2[:]
+            copy_or_rebind_param(
+                layer,
+                "w13_weight_scale_2",
+                w13_weight_scale_2.contiguous(),
+            )
+            prepare_moe_nvfp4_layer_for_marlin(layer)
+            return
+    
+        # Calculate input scales based on strategy
+        if self.enable_flashinfer_cutlass_moe or self.enable_flashinfer_trtllm_moe:
+            w13_input_scale = layer.w13_input_scale.max().to(torch.float32)
+            w2_input_scale = layer.w2_input_scale.max().to(torch.float32)
+        elif moe_runner_backend.is_flashinfer_megamoe():
+            # MegaMOE folds a scalar w13 input scale into input_norm_const but keeps
+            # per-expert w2 scales, so g2_alphas / w2_input_scale_quant stay
+            # per-expert to feed the mega kernel's fc2_alpha / fc1_norm_const (keeps
+            # FC1-output renorm and FC2 dequant on the same per-expert scale).
+            w13_input_scale = layer.w13_input_scale.max().to(torch.float32)
+            w2_input_scale = _input_scale_to_local_experts(
+                layer.w2_input_scale,
+                layer.num_local_experts,
+                layer.num_experts,
+                layer.moe_ep_rank,
+            )
+        elif self.enable_flashinfer_cutedsl_moe:
+            # CuteDSL standard path uses a single scalar input scale (all experts).
+            w13_input_scale = (
+                layer.w13_input_scale.max()
+                .to(torch.float32)
+                .repeat(layer.w13_input_scale.shape[0])
+            )
+            w2_input_scale = layer.w2_input_scale
+    
+            def _slice_scale(w):
+                assert w.shape == (layer.num_experts,)
+                assert layer.moe_ep_size * layer.num_local_experts == layer.num_experts
+                return w[
+                    layer.moe_ep_rank * layer.num_local_experts : (
+                        layer.moe_ep_rank + 1
+                    )
+                    * layer.num_local_experts
+                ]
+    
+            w13_input_scale = _slice_scale(w13_input_scale)
+            w2_input_scale = _slice_scale(w2_input_scale)
+    
+            if use_nvfp4_dispatch:
+                assert torch.all(w13_input_scale == w13_input_scale[0])
+                w13_input_scale = w13_input_scale[0]
+        else:
+            w13_input_scale = layer.w13_input_scale.max(dim=-1).values.to(torch.float32)
+            w2_input_scale = layer.w2_input_scale
+    
+        use_cutedsl_w4a16 = (
+            self._is_cutedsl_v2_standard
+            and envs.SGLANG_FLASHINFER_CUTEDSL_NVFP4_W4A16.get()
+        )
+        if self.quant_config.use_per_token_activation or use_cutedsl_w4a16:
+            # FlashInfer computes activation scales dynamically per token, so
+            # the static checkpoint activation scale is intentionally neutral.
+            # CuTe DSL W4A16 keeps activations in BF16, so its GEMM alphas must
+            # likewise contain only the NVFP4 weight decode scales.
+            w13_input_scale = torch.ones_like(w13_input_scale, dtype=torch.float32)
+            w2_input_scale = torch.ones_like(w2_input_scale, dtype=torch.float32)
+    
+        # Create shared parameters. g1_alphas / g1_alphas_up are the gate (w1)
+        # and up (w3) GEMM1 scales (equal for shared-scale checkpoints).
+        g1_alphas, g1_alphas_up = _compute_gemm1_alphas(
+            layer.w13_weight_scale_2,
+            w13_input_scale,
+            layer.moe_runner_config.is_gated,
+        )
+        copy_or_rebind_param(layer, "g1_alphas", g1_alphas)
+        copy_or_rebind_param(layer, "g1_alphas_up", g1_alphas_up)
+        copy_or_rebind_param(
+            layer,
+            "g2_alphas",
+            (w2_input_scale * layer.w2_weight_scale_2).to(torch.float32),
+        )
+        copy_or_rebind_param(
+            layer,
+            "w13_input_scale_quant",
+            (1 / w13_input_scale).to(torch.float32),
+        )
+        copy_or_rebind_param(
+            layer,
+            "w2_input_scale_quant",
+            (1 / w2_input_scale).to(torch.float32),
+        )
+    
+        if layer.moe_runner_config.is_gated and self.enable_flashinfer_trtllm_moe:
+            runner_config = layer.moe_runner_config
+            is_situ = runner_config.activation == "situ"
+            gemm1_clamp_limit = (
+                None
+                if is_situ
+                else (runner_config.gemm1_clamp_limit or runner_config.swiglu_limit)
+            )
+            if gemm1_clamp_limit is not None:
+                copy_or_rebind_param(
+                    layer,
+                    "gemm1_clamp_limit",
+                    (gemm1_clamp_limit / layer.g1_alphas).to(torch.float32),
+                )
+    
+            if runner_config.gemm1_alpha is not None:
+                copy_or_rebind_param(
+                    layer,
+                    "gemm1_alpha",
+                    torch.full_like(
+                        layer.g1_alphas,
+                        runner_config.gemm1_alpha,
+                        dtype=torch.float32,
+                    ),
+                )
+                gemm1_beta = (
+                    torch.full_like(
+                        layer.g1_alphas,
+                        runner_config.gemm1_clamp_limit,
+                        dtype=torch.float32,
+                    )
+                    if is_situ
+                    else (1.0 / layer.g1_alphas).to(torch.float32)
+                )
+                copy_or_rebind_param(layer, "gemm1_beta", gemm1_beta)
+    
+        # TODO: for flashinfer always do MOE_NVFP4_DISPATCH
+        use_dispatch_fp4 = (
+            not self.quant_config.use_per_token_activation
+            and not use_cutedsl_w4a16
+            and (
+                use_nvfp4_dispatch or should_use_flashinfer_cutlass_moe_fp4_allgather()
+            )
+        )
+    
+        layer.dispatcher.set_quant_config(
+            {
+                "input_global_scale": (
+                    layer.w13_input_scale_quant if use_dispatch_fp4 else None
+                )
+            }
+        )
+    
+        block_size = 16
+        # Validate weight scales
+        assert_dim = 2 if layer.moe_runner_config.is_gated else 1
+        for name, weight_scale in [
+            ("w13", layer.w13_weight_scale),
+            ("w2", layer.w2_weight_scale),
+        ]:
+            # For NVFP4 TRTLLM we require one scale per 16 inputs (last dim == expected_blocks[name]).
+            if get_moe_runner_backend().is_flashinfer_trtllm():
+                expected_blocks = {
+                    "w13": layer.w13_weight.shape[2] * 2 // block_size,
+                    "w2": layer.w2_weight.shape[2] * 2 // block_size,
+                }
+                assert weight_scale.shape[-1] == expected_blocks[name], (
+                    f"Expected {name}_weight_scale.dim(2) == {expected_blocks[name]}, got {weight_scale.shape[-1]}"
+                )
+            else:
+                if weight_scale.shape[assert_dim] % 4 != 0:
+                    logger.warning(
+                        "NVFP4 %s_weight_scale K' not multiple of 4: shape=%s, group_size=%s",
+                        name,
+                        tuple(weight_scale.shape),
+                        getattr(self.quant_config, "group_size", None),
+                    )
+            assert weight_scale.dtype == torch.float8_e4m3fn, (
+                f"{name} Weight Blockscale must be represented as FP8-E4M3"
+            )
+    
+        if moe_runner_backend.is_flashinfer_megamoe():
+            from sglang.srt.layers.moe.flashinfer_megamoe import (
+                prepare_nvfp4_moe_weights_for_flashinfer_megamoe,
+            )
+    
+            prepare_nvfp4_moe_weights_for_flashinfer_megamoe(layer)
+            return
+    
+        # Weight processing based on strategy
+        if (
+            self.enable_flashinfer_trtllm_moe
+            and reorder_rows_for_gated_act_gemm is not None
+            and shuffle_matrix_sf_a is not None
+        ):
+            from sglang.srt.layers.moe.moe_runner.flashinfer_trtllm import (
+                align_fp4_moe_weights_for_flashinfer_trtllm,
+            )
+    
+            # FlashInfer TRTLLM processing - handles both w13 and w2
+            align_fp4_moe_weights_for_flashinfer_trtllm(layer)
+            # TRTLLM doesn't read *_blockscale_swizzled; alias to free the
+            # placeholders from create_weights.
+            layer.w13_blockscale_swizzled = layer.w13_weight_scale
+            layer.w2_blockscale_swizzled = layer.w2_weight_scale
+    
+        else:
+            # CUTLASS processing - handle w13 and w2 separately
+    
+            if self._is_cutedsl_v2_standard and layer.moe_runner_config.is_gated:
+                # CuteDSL v2 only: interleave the two logical W13 halves in
+                # 64-row chunks for the fused SwiGLU GEMM1 layout expected by
+                # CuteDslMoEWrapper.  The v1 (deepep) path uses
+                # grouped_gemm_nt_masked which expects plain contiguous halves.
+                from sglang.srt.layers.moe.moe_runner.flashinfer_cutedsl import (
+                    interleave_w13_halves,
+                )
+    
+                copy_or_rebind_param(
+                    layer,
+                    "w13_weight",
+                    interleave_w13_halves(
+                        layer.w13_weight.view(torch.uint8), group_size=64, dim=1
+                    ).contiguous(),
+                )
+                copy_or_rebind_param(
+                    layer,
+                    "w13_weight_scale",
+                    interleave_w13_halves(
+                        layer.w13_weight_scale, group_size=64, dim=1
+                    ).contiguous(),
+                )
+    
+            # Process w13 weights
+            w13_blockscale_swizzled = swizzle_blockscale(layer.w13_weight_scale)
+            alias_or_bind_derived_param(
+                layer,
+                "w13_weight_scale",
+                "w13_blockscale_swizzled",
+                w13_blockscale_swizzled,
+            )
+    
+            w13_weight = layer.w13_weight
+            intermediate_size_pad = w13_blockscale_swizzled.size(1) - w13_weight.size(1)
+            if intermediate_size_pad:
+>               assert not layer.moe_runner_config.is_gated, (
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                    "The intermediate size required padding, "
+                    "but padding is also implemented for gated activations"
+                )
+E               AssertionError: The intermediate size required padding, but padding is also implemented for gated activations
+
+python/sglang/srt/layers/quantization/modelopt_quant.py:2843: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7fa6c7d24720>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7fafa9672980>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestNvfp4MoeIntermediatePadding.test_process_weights_after_loading_pads_gemma4_tp2_before_swizzle
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/layers/quantization/test_modelopt_nvfp4_moe_padding.py", line 161, in test_process_weights_after_loading_pads_gemma4_tp2_before_swizzle
+    method.process_weights_after_loading(layer)
+  File "/job/repo/python/sglang/srt/layers/quantization/modelopt_quant.py", line 2843, in process_weights_after_loading
+    assert not layer.moe_runner_config.is_gated, (
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: The intermediate size required padding, but padding is also implemented for gated activations
+------------------------------ Captured log call -------------------------------
+WARNING  sglang.srt.layers.quantization.modelopt_quant:modelopt_quant.py:2769 NVFP4 w2_weight_scale K' not multiple of 4: shape=(1, 2816, 22), group_size=16
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/layers/quantization/test_modelopt_nvfp4_moe_padding.py::TestNvfp4MoeIntermediatePadding::test_process_weights_after_loading_pads_gemma4_tp2_before_swizzle - Exception: retry() exceed maximum number of retries.
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+======================= 1 failed, 17 warnings in 11.97s ========================
