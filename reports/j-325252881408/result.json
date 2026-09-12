@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31598",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3460",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3457",
+  "candidate_commit": "44845eb704d9f9eb67a1d81672c51955ae46d344",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "The recorded base reproduced the reported sent_offset retreat through the actual manager, emitting chunks ['A 世', '', '世ab']. Exact candidate 44845eb preserves sent_offset only during incomplete-text recovery and passed both its regression and independent adversarial manager-level cases without duplication or omission.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-325252881408/venv/bin/python /job/review-evidence-j-325252881408/independent_manager_contract.py (recorded base before candidate)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction through the real manager. The reported sequence emitted ['A 世', '', '世ab'] instead of ['A 世', '', 'ab'], independently demonstrating client output A 世世ab. Evidence: raw/base-independent.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-325252881408/venv/bin/python -m pytest -q test/registered/unit/managers/test_detokenizer_stream_offset.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 4 passed, covering repeated recovery, batch isolation, completion, and non-streaming materialization. Evidence: raw/candidate-regression.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-325252881408/venv/bin/python /job/review-evidence-j-325252881408/independent_manager_contract.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent real-manager checks passed the original sequence, repeated retreat after a committed prefix, per-item and grouped batch decode, clean peers, newline recovery, finish, and non-streaming paths with independent chunk-concatenation expectations. Evidence: raw/candidate-independent.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-325252881408/venv/bin/python -m pytest -q test/registered/unit/managers/test_trim_matched_stop.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Eight adjacent completion stop-trimming tests passed. Evidence: raw/candidate-adjacent-trim.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-325252881408/venv/bin/python -c 'inspect source import paths' (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "sglang, detokenizer_manager, and find_printable_text resolved under /job/repo/python/sglang, proving the candidate checkout source was exercised. Evidence: raw/candidate-import-paths.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "Prepared environment reports torch 2.11.0+rocm7.2 and HIP 7.2. No GPU computation was run because the candidate and defect are entirely Python-side tokenizer offset bookkeeping; an unrelated GPU or server smoke would not strengthen this contract proof.",
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "Diff from the recorded base contains one Python source change plus tests/reports and no native source path, so there was no changed native component to rebuild.",
+  "remaining_limitations": "Deterministic tokenizer fixtures force the exact decoded prefix transitions while exercising the actual manager. No model-weight HTTP serving, distributed workload, semantic generation, or alternate hardware architecture was exercised. These are environment/architecture coverage limits, not known counterexamples to the original deterministic offset contract. The prepared checkout initially matched the recorded base exactly; it was later fast-forwarded to mirror main only after candidate testing to create the review-only deliverable.",
+  "source_paths": [
+    "python/sglang/srt/managers/detokenizer_manager.py",
+    "python/sglang/utils.py",
+    "test/registered/unit/managers/test_detokenizer_stream_offset.py"
+  ],
+  "native_paths": []
+}
