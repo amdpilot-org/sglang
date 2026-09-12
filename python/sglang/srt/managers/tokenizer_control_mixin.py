@@ -887,13 +887,17 @@ class TokenizerControlMixin:
             return []
 
         reader = self.load_snapshot_reader
-        if dp_rank is not None:
-            load = reader.read(dp_rank)
-            results = [load] if load is not None else []
-        else:
-            results = reader.read_all()
+        watched = reader.read_all()
+        latest = {load.dp_rank: load for load in watched}
+        for rank, load in getattr(self, "piggyback_load_snapshots", {}).items():
+            previous = latest.get(rank)
+            if previous is None or load.timestamp >= previous.timestamp:
+                latest[rank] = load
 
-        return results
+        if dp_rank is not None:
+            load = latest.get(dp_rank)
+            return [load] if load is not None else []
+        return [latest[rank] for rank in sorted(latest)]
 
     async def open_session(
         self: TokenizerManager,
