@@ -1,0 +1,60 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38710",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independently verified candidate commit 3372815f64ea6dd9f3de99742ac3101fc72dbb0c. The prepared base reproduced the reported mismatch for DeepseekV3ForCausalLM, GlmMoeDsaForCausalLM, and GptOssForCausalLM: the resolved enable_aiter_allreduce_fusion flag remained false while an enablement log was emitted. The candidate gates both affected log sites on the resolved flag without changing the intentionally disabled auto-enable policy. Its regression fails against the base implementation and passes against the exact candidate, and an independent 48-case decision matrix found no counterexamples. This fully resolves the original issue's stated contract because that issue explicitly permits gating the misleading log instead of restoring automatic enablement.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-47709c2d3c66/venv/bin/python <independent real-construction reproduction on prepared base>",
+      "exit_code": 1,
+      "what_was_measured": "Using TestGoldenModelOverrides._construct and the actual model hook, all three checked architectures resolved enable_aiter_allreduce_fusion to false but emitted an enablement log in the eligible single-node non-DP HIP case. Raw output: /job/review-evidence-j-47709c2d3c66/base-reproduction.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-47709c2d3c66/venv/bin/python -m pytest -q test/registered/unit/test_model_overrides.py::TestGoldenModelOverrides::test_aiter_allreduce_fusion_log_matches_resolved_flag (candidate test with base model_hook.py temporarily restored)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before half of the candidate regression: three disabled-flag subtests failed because DeepSeek V3, GLM MoE DSA, and GPT-OSS logged enablement while the resolved flag was false; 9 other subtests passed. Raw output: /job/review-evidence-j-47709c2d3c66/candidate-regression-on-base-source.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-47709c2d3c66/venv/bin/python -m pytest -q test/registered/unit/test_model_overrides.py::TestGoldenModelOverrides::test_aiter_allreduce_fusion_log_matches_resolved_flag",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit 3372815f64ea6dd9f3de99742ac3101fc72dbb0c, 12 subtests passed across DeepSeek V3, GLM MoE DSA, and GPT-OSS for disabled/enabled, DP-attention, and node-count cases. Raw output: /job/review-evidence-j-47709c2d3c66/candidate-regression.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-47709c2d3c66/venv/bin/python <independent 48-case hook decision matrix>",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate, independently checked three architectures across HIP/non-HIP, fusion enabled/disabled, DP attention on/off, and one/two nodes. Resolved state was preserved and the enablement log appeared exactly when HIP, enabled, non-DP, and single-node were all true; no counterexamples were found. Raw output: /job/review-evidence-j-47709c2d3c66/candidate-independent-matrix.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-47709c2d3c66/venv/bin/python -m py_compile python/sglang/srt/arg_groups/model_hook.py test/registered/unit/test_model_overrides.py && git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 3372815f64ea6dd9f3de99742ac3101fc72dbb0c",
+      "exit_code": 0,
+      "what_was_measured": "Python syntax of both candidate source/test files and whitespace validity of the complete candidate diff. Raw output: /job/review-evidence-j-47709c2d3c66/py-compile.txt and /job/review-evidence-j-47709c2d3c66/diff-check.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-47709c2d3c66/venv/bin/python <environment and import-path probe>",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed candidate imports came from /job/repo/python/sglang and /job/repo/python/sglang/srt/arg_groups/model_hook.py. The assigned host exposed one AMD Instinct MI350X (gfx950), Torch 2.11.0+rocm7.2, HIP 7.2.26015. Raw output: /job/review-evidence-j-47709c2d3c66/environment-and-git.txt and candidate-source-imports.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The review exercised the real ROCm-aware Python resolution and hook paths, but did not launch a GPU kernel. Device discovery showed one MI350X gfx950, whereas the report environment was eight MI300X gfx942 GPUs. Distributed AITER all-reduce execution was outside the diagnostic contract and could not be reproduced on the assigned single GPU."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The assigned architecture was one MI350X (gfx950), not the reported eight MI300X (gfx942) system, so multi-rank AITER all-reduce correctness and performance remain unverified.",
+    "The candidate fixes misleading diagnostics and does not restore automatic fusion enablement. That is a complete resolution under the original issue's explicit either/or request, but it is not evidence that broad auto-enable is safe.",
+    "No native code changed, repository-environment.json lists native as null, and all changed runtime code is Python; therefore no native rebuild was applicable.",
+    "The 753B GLM-5.3 checkpoint was not available or launched. The reported model's current SGLang hook architecture, GlmMoeDsaForCausalLM (a DeepseekV2ForCausalLM subclass), was exercised through the actual argument-resolution path."
+  ],
+  "reviewed_candidate": {
+    "pull_request_url": "https://github.com/amdpilot-org/sglang/pull/578",
+    "commit": "3372815f64ea6dd9f3de99742ac3101fc72dbb0c",
+    "changed_runtime_source": "/job/repo/python/sglang/srt/arg_groups/model_hook.py",
+    "changed_test_source": "/job/repo/test/registered/unit/test_model_overrides.py",
+    "native_paths": []
+  },
+  "evidence_directory": "/job/review-evidence-j-47709c2d3c66"
+}
