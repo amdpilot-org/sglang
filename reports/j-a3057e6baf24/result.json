@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/11762",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "b6b86516be14b5c95237cf20e517bef9d4566e63",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate adds four focused CPU tests and reports prior work, but changes no implementation or native source. The same NGRAM overlap relay behavior already passes on the recorded base, so this is test-only hardening rather than a fix for the original multi-part overlap-spec roadmap. End-to-end NGRAM remains blocked by missing operators in the pinned sglang-kernel egg, and the remaining roadmap areas are unimplemented or unverified by this candidate.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a3057e6baf24/venv/bin/python -m pytest -q test/registered/cpu/test_ngram_overlap_relay.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, all four added mocked-unit cases passed: overlap accepted-tail relay, synchronous and grammar no-duplication, and malformed corpus-width rejection."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a3057e6baf24/venv/bin/python -m pytest -q test/registered/kernel/speculative/test_spec_kv_indices_grid.py",
+      "exit_code": 0,
+      "what_was_measured": "Three real-GPU speculative KV-index grid cases passed on an AMD Instinct MI350X (gfx950), including the test's Python reference and sentinel checks; this path is not an end-to-end NGRAM overlap test."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a3057e6baf24/venv/bin/python -m pytest -q test/registered/cpu/test_spec_kernels.py::TestReconstructIndicesFromTreeMask::test_tree_and_chain",
+      "exit_code": 1,
+      "what_was_measured": "Direct native import/execution probe failed because pinned sglang-kernel 0.4.6.post1 lacks torch.ops.sgl_kernel.reconstruct_indices_from_tree_mask_cpu."
+    },
+    {
+      "command": "independent inline relay oracle at candidate commit (CPU zero/full rows and CUDA accept tensors)",
+      "exit_code": 0,
+      "what_was_measured": "Request-row isolation, zero accepted lengths, maximum accepted lengths, max-trie-depth truncation, total lengths, and the GPU-to-host staging path all matched an independently specified oracle."
+    },
+    {
+      "command": "independent inline CUDA-staged relay oracle at recorded base commit 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "The candidate-tested relay behavior already passed before the candidate; git diff also confirmed no implementation or native changes between base and candidate."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X (gfx950) ran the KV-index grid and the independent CUDA accept-token staging case under Torch 2.11.0+rocm7.2 / HIP 7.2."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "There is no candidate implementation change and no base failure for the added relay regression, so the candidate cannot demonstrate a fix for the original issue.",
+    "End-to-end overlap NGRAM execution remains blocked because the pinned sglang-kernel 0.4.6.post1 egg lacks reconstruct_indices_from_tree_mask and reconstruct_indices_from_tree_mask_cpu.",
+    "The candidate does not implement or qualify the unchecked top-k plus page-size combinations, memory over-allocation work, optional verify synchronization, penalty support, universal SpecTpWorker/TpModelWorker parity, high-throughput specialization, EP/DeepEP, PD disaggregation, or separate plan stream.",
+    "No independent EAGLE model-accuracy, attention-backend matrix, distributed DP/EP, PD-disaggregation, or LoRA serving result is provided.",
+    "The passing speculative KV-index grid is adjacent kernel coverage and does not prove the NGRAM serving contract or the complete roadmap."
+  ],
+  "remaining_limitations": [
+    "Prepared source import: /job/repo/python/sglang; native import: /opt/venv/lib/python3.12/site-packages/sglang_kernel-0.4.6.post1-py3.12-linux-x86_64.egg/sgl_kernel.",
+    "The candidate touches no C++/CUDA/HIP/FlyDSL/native files, so no candidate native rebuild was required or possible to validate as a changed artifact.",
+    "Available hardware was one AMD Instinct MI350X gfx950, not a multi-GPU or distributed topology.",
+    "No qualifying EAGLE draft model or other architecture-specific weights were available; tiny fixtures cannot establish those semantics.",
+    "The candidate's prior-job raw serving logs referenced in its prose were outside this checkout; its native blocker was independently reproduced in the current prepared environment."
+  ]
+}
