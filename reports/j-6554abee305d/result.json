@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31248",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "not_reproduced",
+  "summary": "The reported exception remains present as a misleading generic error branch, but the current unsloth/gemma-4-26B-A4B-it-NVFP4 config does not request 2:4 sparsity and does not reach it. The current checkpoint has an empty sparsity_config, explicitly ignores its vision projections, and selects W8A8 FP8 attention plus W4A4 NVFP4 MLP schemes. This change makes unsupported W4A16 and actual 2:4-sparse failures distinct and adds regressions for the reported checkpoint's scheme selection. It does not implement CompressedTensorsW4A16Sparse24.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-6554abee305d/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_mixed_precision.py",
+      "exit_code": 0,
+      "what_was_measured": "Seven CPU unit tests covering mixed-format parsing, exact ignore behavior, current Gemma 4 FP8/NVFP4 scheme selection, and adversarial non-sparse W4A16 error classification."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6554abee305d/venv/bin/python < current-model-config selection script",
+      "exit_code": 0,
+      "what_was_measured": "Parsed the config downloaded from the reported Hugging Face model and selected Unquantized for the ignored vision q_proj, CompressedTensorsW8A8Fp8 for language attention q_proj, and CompressedTensorsW4A4Fp4 for language MLP gate_proj; sparsity_config was empty."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6554abee305d/venv/bin/python -m ruff check ...",
+      "exit_code": 1,
+      "what_was_measured": "Unavailable validation: the pinned interpreter does not contain the ruff module; no package installation was performed."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The assigned device is an AMD Instinct MI350X (gfx950, ROCm 7.2). The requested NVFP4/Sparse-Marlin execution path is NVIDIA-specific and no maintained sparse linear kernel exists in this checkout, so no feature GPU execution or numerical claim was made. rocm-smi inspection used no GPU workload.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "CompressedTensorsW4A16Sparse24 remains unimplemented.",
+    "No NVIDIA Ampere/Blackwell GPU was available to compile or numerically validate the historical Sparse-Marlin kernel path.",
+    "The historical vLLM implementation depended on roughly 3,000 lines of Sparse-Marlin native code and was removed by vLLM commit af9b69f977bd1166ed63c46f9ccbd3a02344ae4f in January 2026; SGLang has no equivalent maintained native dependency in this checkout.",
+    "The 26B reported model weights were not downloaded or served. The current public config was inspected directly, so model semantic accuracy, NEXTN behavior, full weight loading, and HTTP serving remain unverified.",
+    "The deterministic tiny Llama fixture is not architecturally relevant to Gemma 4, NVFP4, or 2:4 sparsity and was therefore not used as substitute evidence.",
+    "Ruff was unavailable in the pinned interpreter."
+  ]
+}

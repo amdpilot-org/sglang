@@ -20,6 +20,8 @@ from sglang.srt.layers.quantization.compressed_tensors.compressed_tensors import
     CompressedTensorsConfig,
 )
 from sglang.srt.layers.quantization.compressed_tensors.schemes import (
+    CompressedTensorsW4A4Fp4,
+    CompressedTensorsW8A8Fp8,
     CompressedTensorsWNA16,
 )
 from sglang.srt.layers.quantization.compressed_tensors.utils import (
@@ -186,6 +188,58 @@ class TestMixedPrecisionFormat(CustomTestCase):
         self.assertEqual(scheme.pack_factor, 32 // 4)
         self.assertEqual(scheme.strategy, "group")
         self.assertEqual(scheme.group_size, 128)
+
+    def test_reported_gemma4_nvfp4_config_selects_expected_schemes(self):
+        """Regression for sgl-project/sglang#31248's current checkpoint.
+
+        The published checkpoint is mixed FP8/NVFP4, not sparse W4A16.  Its
+        vision projections are explicitly ignored, attention is W8A8 FP8, and
+        dense language-model MLPs are W4A4 NVFP4.
+        """
+        dense_nvfp4_group = {
+            **NVFP4_GROUP,
+            "targets": ["re:.*language_model.*\\.mlp\\.(gate|up|down)_proj$"],
+        }
+        vision_q = "model.vision_tower.encoder.layers.0.self_attn.q_proj.linear"
+        config = _mixed_precision_config(
+            FP8_GROUP,
+            dense_nvfp4_group,
+            ignore=[vision_q],
+        )
+        quant_config = CompressedTensorsConfig.from_config(config)
+
+        with mock.patch.object(
+            CompressedTensorsConfig, "_check_scheme_supported", return_value=True
+        ):
+            self.assertIsNone(
+                quant_config.get_linear_scheme(torch.nn.Module(), layer_name=vision_q)
+            )
+            self.assertIsInstance(
+                quant_config.get_linear_scheme(
+                    torch.nn.Module(),
+                    layer_name="model.language_model.layers.0.self_attn.q_proj",
+                ),
+                CompressedTensorsW8A8Fp8,
+            )
+            self.assertIsInstance(
+                quant_config.get_linear_scheme(
+                    torch.nn.Module(),
+                    layer_name="model.language_model.layers.0.mlp.gate_proj",
+                ),
+                CompressedTensorsW4A4Fp4,
+            )
+
+    def test_unsupported_w4a16_format_is_not_mislabeled_sparse24(self):
+        invalid_group = {**WNA16_GROUP, "format": "dense"}
+        quant_config = CompressedTensorsConfig.from_config(
+            _mixed_precision_config(invalid_group)
+        )
+
+        with self.assertRaisesRegex(
+            ImportError,
+            "Unsupported compressed-tensors W4A16 format.*2:4 sparsity is detected",
+        ):
+            quant_config.get_linear_scheme(torch.nn.Module(), layer_name=MLP_LAYER)
 
 
 if __name__ == "__main__":
