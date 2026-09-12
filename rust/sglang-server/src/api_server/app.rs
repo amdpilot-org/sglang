@@ -18,6 +18,7 @@ use super::disaggregation::bootstrap as pd_bootstrap;
 use super::{common, log, native_api, openai};
 use crate::message::config::ServerArgs;
 use crate::tokenizer_manager::from_scheduler::ActivityCounter;
+use crate::tokenizer_manager::from_scheduler::LoadSnapshots;
 use crate::tokenizer_manager::wiring::Senders;
 
 /// Shared handler state: submission handles, immutable server configuration,
@@ -34,6 +35,7 @@ pub(super) struct AppState {
     pub(super) chat_formatter: Option<openai::ChatFormatter>,
     /// Response heartbeat (bumped per drained ring frame).
     pub(super) response_activity: ActivityCounter,
+    pub(super) load_snapshots: LoadSnapshots,
     /// Whether the main process's startup warmup has completed. The listener
     /// binds before warmup so `/model_info` is available to construct that
     /// request, but health endpoints must not advertise readiness yet.
@@ -93,6 +95,7 @@ pub async fn serve(
     response_buf: usize,
     server_args: Arc<ServerArgs>,
     response_activity: ActivityCounter,
+    load_snapshots: LoadSnapshots,
     // The runtime's shutdown signal, shared with every worker stage: it fires
     // (disconnects) when `Runtime::request_shutdown` drops the sender, at
     // which point `serve` stops accepting and its in-flight handlers are
@@ -106,6 +109,7 @@ pub async fn serve(
         server_args: server_args.clone(),
         chat_formatter,
         response_activity,
+        load_snapshots,
         startup_readiness: StartupReadiness::new(server_args.skip_server_warmup),
     });
     // Each endpoint module registers its own routes and merges here.

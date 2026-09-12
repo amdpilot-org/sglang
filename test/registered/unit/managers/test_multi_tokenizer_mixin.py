@@ -6,7 +6,8 @@ from sglang.test.test_utils import maybe_stub_sgl_kernel
 
 maybe_stub_sgl_kernel()
 
-from sglang.srt.managers.io_struct import BatchStrOutput
+from sglang.srt.managers.io_struct import BatchStrOutput, msgpack_decode, msgpack_encode
+from sglang.srt.managers.load_snapshot import LoadSnapshot
 from sglang.srt.managers.multi_tokenizer_mixin import (
     TokenizerWorker,
     _handle_output_by_index,
@@ -84,6 +85,7 @@ def _make_batch_str_output() -> BatchStrOutput:
             ],
             [WeightVersionSpan(version="v2", start=0, end=2)],
         ],
+        load_snapshot=LoadSnapshot(timestamp=12.5, dp_rank=3, num_running_reqs=7),
     )
 
 
@@ -99,6 +101,27 @@ class TestMultiTokenizerMixin(unittest.TestCase):
             single_output.cached_tokens_details,
             [{"device": 1, "host": 3}],
         )
+
+    def test_batch_output_fanout_preserves_batch_level_load_snapshot(self):
+        output = _make_batch_str_output()
+
+        first = _handle_output_by_index(output, 0)
+        second = _handle_output_by_index(output, 1)
+
+        self.assertIs(first.load_snapshot, output.load_snapshot)
+        self.assertIs(second.load_snapshot, output.load_snapshot)
+
+    def test_batch_output_msgpack_roundtrip_preserves_load_snapshot(self):
+        output = _make_batch_str_output()
+        # The helper uses plain lists for readability, while the production
+        # field is array.array.  It is unrelated to this wire assertion.
+        output.output_ids = None
+
+        decoded = msgpack_decode(msgpack_encode(output))
+
+        self.assertIsInstance(decoded, BatchStrOutput)
+        self.assertEqual(decoded.load_snapshot.dp_rank, 3)
+        self.assertEqual(decoded.load_snapshot.num_running_reqs, 7)
 
     def test_batch_str_output_keeps_weight_versions_nested_per_request(self):
         """Per-request segment lists stay one level nested after the split."""

@@ -1,8 +1,9 @@
 //! TokenizerManager dispatcher thread — drains the from_scheduler channel and
 //! routes each message to the detok shard that owns its `Rid::shard`.
 
-use std::sync::Arc;
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
 
 use bytes::Bytes;
 
@@ -20,6 +21,7 @@ use crate::tokenizer_manager::wiring::{Senders, recv};
 /// `last_receive_tstamp`: `/health_generate` watches it advance to confirm the
 /// scheduler → detok path is alive (the value itself is meaningless).
 pub type ActivityCounter = Arc<AtomicU64>;
+pub type LoadSnapshots = Arc<RwLock<BTreeMap<u64, serde_json::Value>>>;
 
 /// Dispatcher dispatcher stage. Owns the from_scheduler consumer + the detok-shard
 /// senders, so the runtime spawns it as a [`Runnable`].
@@ -27,6 +29,7 @@ pub struct Dispatcher {
     from_scheduler_rx: FromSchedulerRx,
     senders: Senders,
     activity: ActivityCounter,
+    load_snapshots: LoadSnapshots,
     shutdown: flume::Receiver<()>,
 }
 
@@ -35,12 +38,14 @@ impl Dispatcher {
         from_scheduler_rx: FromSchedulerRx,
         senders: Senders,
         activity: ActivityCounter,
+        load_snapshots: LoadSnapshots,
         shutdown: flume::Receiver<()>,
     ) -> Self {
         Self {
             from_scheduler_rx,
             senders,
             activity,
+            load_snapshots,
             shutdown,
         }
     }
@@ -113,6 +118,9 @@ impl Runnable for Dispatcher {
                         }
                         continue;
                     }
+                    if let Some(snapshot) = decoded.load_snapshot {
+                        record_load_snapshot(&self.load_snapshots, snapshot);
+                    }
                     for (i, b) in buckets.iter_mut().enumerate() {
                         if b.is_empty() {
                             continue;
@@ -138,6 +146,26 @@ impl Runnable for Dispatcher {
                 other => tracing::warn!(tag = other, "from_scheduler: unknown frame tag"),
             }
         }
+    }
+}
+
+fn record_load_snapshot(loads: &LoadSnapshots, snapshot: serde_json::Value) {
+    let Some(rank) = snapshot.get("dp_rank").and_then(serde_json::Value::as_u64) else {
+        tracing::warn!("from_scheduler: load snapshot missing dp_rank");
+        return;
+    };
+    let timestamp = snapshot
+        .get("timestamp")
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or_default();
+    let mut loads = loads.write().expect("load snapshot lock poisoned");
+    let previous_timestamp = loads
+        .get(&rank)
+        .and_then(|v| v.get("timestamp"))
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(f64::NEG_INFINITY);
+    if timestamp >= previous_timestamp {
+        loads.insert(rank, snapshot);
     }
 }
 
@@ -206,5 +234,21 @@ mod tests {
             }
             _ => panic!("expected Fail"),
         }
+    }
+
+    #[test]
+    fn piggyback_cache_keeps_newest_snapshot_per_rank() {
+        let loads = LoadSnapshots::default();
+        record_load_snapshot(
+            &loads,
+            serde_json::json!({"timestamp": 20.0, "dp_rank": 1, "num_running_reqs": 2}),
+        );
+        record_load_snapshot(
+            &loads,
+            serde_json::json!({"timestamp": 10.0, "dp_rank": 1, "num_running_reqs": 99}),
+        );
+
+        let loads = loads.read().unwrap();
+        assert_eq!(loads[&1]["num_running_reqs"], 2);
     }
 }

@@ -164,6 +164,11 @@ pub struct BatchHeader {
     pub hidden_reqlens: Vec<u32>,
     #[serde(default)]
     pub hidden_poslens: Vec<u32>,
+    /// Batch-level scheduler load report. It is consumed by the frontend
+    /// dispatcher, not copied into every per-request ChunkEvent. Kept last to
+    /// preserve every pre-existing positional column.
+    #[serde(default)]
+    pub load_snapshot: Option<serde_json::Value>,
 }
 
 /// Read a request's flat logprob column (`l` val/idx pairs) from `data` at cursors
@@ -462,6 +467,7 @@ pub fn for_each_chunk(body: &[u8], mut route: impl FnMut(ChunkEvent)) -> Decoded
         let Some(ev) = decode_one(i) else { reject!() };
         route(ev);
     }
+    decoded.load_snapshot = h.load_snapshot.take();
     decoded.ok = true;
     decoded
 }
@@ -506,6 +512,7 @@ fn recover_rids(header: &[u8]) -> Vec<Rid> {
 pub struct Decoded {
     pub ok: bool,
     pub rids: Vec<Rid>,
+    pub load_snapshot: Option<serde_json::Value>,
 }
 
 /// Frame a control result `[rid, payload]` for the response ring (tag prepended).
