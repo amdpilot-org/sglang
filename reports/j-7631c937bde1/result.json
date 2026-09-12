@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/1715",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Implemented automatic shared-prefix cascade decode for the eager FlashInfer attention path. Eligible batches are split into one shared-prefix page table and per-request suffix page tables, evaluated with paged prefill kernels, and combined with FlashInfer's numerically stable merge_state operation. The implementation preserves per-layer sm_scale, logits_soft_cap, k_scale, and v_scale. Unsupported configurations fall back to the existing decode path.",
+  "tests": [
+    {
+      "command": "Run test/registered/unit/test_flashinfer_cascade_attention.py against an archive of base commit 358c163250ad3b1f62939b01ce1314a0a31a0365 with the prepared interpreter",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: 11 failures because the base has no cascade selection helpers, metadata, page-table updater, or cascade forward path. Raw output: reports/j-7631c937bde1/raw/cascade-regression-before.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-7631c937bde1/venv/bin/python -m pytest -q test/registered/unit/test_flashinfer_cascade_attention.py",
+      "exit_code": 0,
+      "what_was_measured": "Six tests passed: threshold boundary/adversarial cases, first-mismatch prefix detection, shared/suffix page-table construction, propagation of all layer scaling arguments, merge dispatch, and an independent float64 GPU comparison of split cascade attention with monolithic full attention. Raw output: reports/j-7631c937bde1/raw/cascade-unit-gpu-final2.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7631c937bde1/venv/bin/python -m py_compile python/sglang/srt/layers/attention/flashinfer_backend.py test/registered/unit/test_flashinfer_cascade_attention.py",
+      "exit_code": 0,
+      "what_was_measured": "Python syntax/import compilation for the changed backend and regression tests."
+    },
+    {
+      "command": "AST signature check against FlashInfer v0.6.18 flashinfer/prefill.py fetched from the tagged upstream source",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed BatchPrefillWithPagedKVCacheWrapper.forward_return_lse accepts q, paged_kv_cache, causal, k_scale, v_scale, logits_soft_cap, and sm_scale. Source retained at /tmp/amdpilot-repo-j-7631c937bde1/flashinfer-prefill-0.6.18.py; raw output: reports/j-7631c937bde1/raw/flashinfer-api-source-check.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the contribution."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "The independent float64 numerical reference ran on one AMD Instinct MI350X under Torch 2.11.0+rocm7.2 and matched monolithic attention at rtol=1e-12, atol=1e-12. See reports/j-7631c937bde1/raw/cascade-unit-gpu-final2.log and reports/j-7631c937bde1/raw/environment-gpu.log. FlashInfer itself was not executed because the pinned ROCm environment has no flashinfer module.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The assigned node is AMD MI350X/ROCm 7.2 and the pinned environment has no flashinfer package, so the actual NVIDIA FlashInfer kernels, JIT/native artifacts, and end-to-end FlashInfer serving path could not be executed.",
+    "Cascade decode is currently eager-only. CUDA-graph replay continues to use the existing decode wrapper because graph selection is keyed only by batch size while common-prefix eligibility and length vary per replay; a correct graph implementation needs a cascade-aware graph variant/key and capture-stable buffers.",
+    "Sliding-window attention, encoder-decoder cross attention, speculative decode, and dequant-workspace KV cache configurations deliberately retain the existing non-cascade path.",
+    "No model-weight serving benchmark was run. The qualified tiny Llama fixture validates transport/engine execution but cannot exercise FlashInfer on this ROCm-only node, so using it would not strengthen the kernel claim.",
+    "No native library was changed or rebuilt."
+  ]
+}
