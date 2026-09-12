@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/23363",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Current main already contains fixes for most originally reported Kimi-K2 parser failures, but still emitted a fragmented <|tool_call_end|> prefix as tool arguments. Hold back only a trailing prefix of that marker until the next increment resolves it. Regression coverage verifies failing-before/passing-after behavior, preservation of a diverging marker-like literal, and two long nested calls with emoji and tiny argument chunks.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-fc25395b71cf/venv/bin/python -m pytest -q test/registered/function_call/test_kimik2_detector.py::TestKimiK2DetectorStreaming::test_streaming_split_end_marker_does_not_leak_into_arguments test/registered/function_call/test_kimik2_detector.py::TestKimiK2DetectorStreaming::test_streaming_end_marker_prefix_divergence_is_preserved test/registered/function_call/test_kimik2_detector.py::TestKimiK2DetectorStreaming::test_streaming_long_nested_multiple_calls_one_character_at_a_time",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before run on the recorded base behavior with tests added but source unmodified: split end-marker text leaked into JSON; the initial one-character-whole-stream stress layout also exposed the existing ambiguity between a literal '<' and a one-character marker prefix. Raw log: reports/j-fc25395b71cf/failing-before.txt. The stress test was then narrowed to tiny argument chunks and explicit multi-character marker splits so it independently tests the evidenced defect without changing the detector's documented literal-'<' behavior."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fc25395b71cf/venv/bin/python -m pytest -q test/registered/function_call/test_kimik2_detector.py::TestKimiK2DetectorStreaming::test_streaming_split_end_marker_does_not_leak_into_arguments test/registered/function_call/test_kimik2_detector.py::TestKimiK2DetectorStreaming::test_streaming_end_marker_prefix_divergence_is_preserved test/registered/function_call/test_kimik2_detector.py::TestKimiK2DetectorStreaming::test_streaming_long_nested_multiple_calls_with_tiny_argument_chunks",
+      "exit_code": 0,
+      "what_was_measured": "Focused passing-after regression and two independent boundaries: divergent marker-like payload preservation and >5 KB nested/emoji arguments across two calls. 3 passed. Raw log: reports/j-fc25395b71cf/passing-after-focused.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fc25395b71cf/venv/bin/python -m pytest -q test/registered/function_call/test_kimik2_detector.py",
+      "exit_code": 0,
+      "what_was_measured": "Complete dedicated Kimi-K2 function/reasoning detector suite: 63 passed and 7 subtests passed. Raw log: reports/j-fc25395b71cf/passing-after-full.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fc25395b71cf/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py -k KimiK2Detector",
+      "exit_code": 0,
+      "what_was_measured": "Legacy Kimi-K2 parser compatibility tests: 6 passed. Raw log: reports/j-fc25395b71cf/passing-after-legacy-kimik2.txt."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and correction are deterministic CPU string-stream parsing only; no model forward pass or GPU kernel is involved. No unrelated GPU smoke was used as evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Kimi-K2/K2.5 model weights and the reported 8-GPU deployments were unavailable, so full serving/UI behavior, model output quality, and distributed execution were not reproduced.",
+    "The regression directly validates parser increments and does not claim a full HTTP serving-path reproduction.",
+    "A stream that splits every special marker after a single literal '<' remains indistinguishable from normal text under the detector's existing documented behavior that emits a trailing literal '<'; the added long test uses one-character argument chunks and realistic multi-character marker fragments."
+  ],
+  "source_paths": [
+    "python/sglang/srt/function_call/kimik2_detector.py",
+    "test/registered/function_call/test_kimik2_detector.py"
+  ],
+  "native_paths": []
+}

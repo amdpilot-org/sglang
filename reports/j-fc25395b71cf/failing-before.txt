@@ -1,0 +1,65 @@
+F.F                                                                      [100%]
+=================================== FAILURES ===================================
+_ TestKimiK2DetectorStreaming.test_streaming_split_end_marker_does_not_leak_into_arguments _
+
+self = <test_kimik2_detector.TestKimiK2DetectorStreaming testMethod=test_streaming_split_end_marker_does_not_leak_into_arguments>
+
+    def test_streaming_split_end_marker_does_not_leak_into_arguments(self):
+        detector = KimiK2FuncDetector()
+        chunks = [
+            "<|tool_calls_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:0"
+            '<|tool_call_argument_begin|>{"path": "/tmp/a"}',
+            "<|tool_call_",
+            "end|><|tool_calls_section_end|>",
+        ]
+    
+        tool_calls, _ = _collect_streaming_tool_calls(detector, chunks, self.tools)
+    
+>       self.assertEqual(tool_calls[0]["parameters"], '{"path": "/tmp/a"}')
+E       AssertionError: '{"path": "/tmp/a"}<|tool_call_' != '{"path": "/tmp/a"}'
+E       - {"path": "/tmp/a"}<|tool_call_
+E       ?                   ------------
+E       + {"path": "/tmp/a"}
+
+test/registered/function_call/test_kimik2_detector.py:281: AssertionError
+_ TestKimiK2DetectorStreaming.test_streaming_long_nested_multiple_calls_one_character_at_a_time _
+
+self = <test_kimik2_detector.TestKimiK2DetectorStreaming testMethod=test_streaming_long_nested_multiple_calls_one_character_at_a_time>
+
+    def test_streaming_long_nested_multiple_calls_one_character_at_a_time(self):
+        detector = KimiK2FuncDetector()
+        long_path = "notes/```json\\n" + ("emoji-🚀-{{nested}}-" * 400) + "\\n```"
+        first_args = json.dumps(
+            {"path": long_path, "metadata": {"nested": {"enabled": True}}},
+            ensure_ascii=False,
+        )
+        second_args = json.dumps({"city": "Paris"})
+        text = (
+            "<|tool_calls_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:7"
+            f"<|tool_call_argument_begin|>{first_args}"
+            "<|tool_call_end|>"
+            "<|tool_call_begin|>functions.get_weather:8"
+            f"<|tool_call_argument_begin|>{second_args}"
+            "<|tool_call_end|>"
+            "<|tool_calls_section_end|>"
+        )
+    
+        tool_calls, _ = _collect_streaming_tool_calls(detector, list(text), self.tools)
+    
+>       self.assertEqual(len(tool_calls), 2)
+E       AssertionError: 0 != 2
+
+test/registered/function_call/test_kimik2_detector.py:321: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/function_call/test_kimik2_detector.py::TestKimiK2DetectorStreaming::test_streaming_split_end_marker_does_not_leak_into_arguments
+FAILED test/registered/function_call/test_kimik2_detector.py::TestKimiK2DetectorStreaming::test_streaming_long_nested_multiple_calls_one_character_at_a_time
+2 failed, 1 passed, 1 warning in 14.25s
