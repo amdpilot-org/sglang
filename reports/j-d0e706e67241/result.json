@@ -1,0 +1,63 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38788",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/574",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/572",
+  "candidate_commit": "96bb88ea23782a2883c3acb4799b20e4e39aec9d",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "Independent review found that the candidate addresses the original scripted-runtime harness contract: request-ID reuse is retried while advancing the scheduler, asynchronous HTTP failures are surfaced, request observations are scoped to distinct RID epochs, repeated aborts no longer require a scheduler message that may legitimately be absent, and old-handle aborts do not disturb a later request with the same RID. All three original manual cases and three stronger registered GPU lifecycle cases passed at the exact candidate commit. The original failure was not reproduced on this prepared ROCm host in two base runs; both base runs passed, with the first materially timing-perturbed by first-use AITer compilation. Accordingly, there is no local failing-before claim, but the candidate behavior was verified directly rather than inferred from its prose.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-d0e706e67241/venv/bin/python -m pytest -sv test/manual/chunked_prefill/test_scripted_multi_req.py::TestMultiReqBasic::test_rid_reuse_after_finish",
+      "revision": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "Original finish-then-immediate-RID-reuse reproduction. It passed twice rather than reproducing the reported timeout. The first run included about 27 seconds of first-use AITer compilation between request operations and is timing-confounded; the warmed second run also passed. Raw logs: /job/review-evidence-j-d0e706e67241/base-rid-reuse.log and /job/review-evidence-j-d0e706e67241/base-rid-reuse-warm.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d0e706e67241/venv/bin/python -m pytest -q test/registered/unit/scripted_runtime/test_background_http_poster.py test/registered/unit/scripted_runtime/test_tokenizer_recv_proxy.py test/registered/unit/scripted_runtime/test_request_epochs.py test/registered/unit/scripted_runtime/test_request_lifecycle.py",
+      "revision": "96bb88ea23782a2883c3acb4799b20e4e39aec9d",
+      "exit_code": 0,
+      "what_was_measured": "Candidate unit regressions for HTTP/SSE error propagation, receive-proxy failure surfacing, epoch isolation, retry exhaustion, abort handling, and resource-drain behavior: 67 passed and 57 subtests passed. Raw log: /job/review-evidence-j-d0e706e67241/candidate-unit.log."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-d0e706e67241/venv/bin/python -m pytest -sv test/manual/chunked_prefill/test_scripted_multi_req.py::TestMultiReqBasic::test_rid_reuse_after_finish test/manual/chunked_prefill/test_scripted_abort.py::TestAbortBasic::test_abort_then_resubmit_same_rid_same_step test/manual/chunked_prefill/test_scripted_abort.py::TestAbortBasic::test_double_abort_idempotent",
+      "revision": "96bb88ea23782a2883c3acb4799b20e4e39aec9d",
+      "exit_code": 0,
+      "what_was_measured": "All three original issue cases against the actual GPU-backed scripted runtime: 3 passed. Raw log: /job/review-evidence-j-d0e706e67241/candidate-original-three.log."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-d0e706e67241/venv/bin/python -m pytest -sv test/registered/scripted_runtime/test_scripted_runtime_core.py -k 'rid_reuse_after_finish_preserves_each_request or double_abort_then_reuse_rid or rid_retry_budget_preserves_original_request'",
+      "revision": "96bb88ea23782a2883c3acb4799b20e4e39aec9d",
+      "exit_code": 0,
+      "what_was_measured": "Adversarial GPU cases verified distinct Req identity across a reused RID, independent finish reasons and output lengths, epoch-scoped chunk history, repeated and stale-handle abort safety, bounded retry progress, preservation of the rejected-retry original, and resource restoration: 3 passed. Raw log: /job/review-evidence-j-d0e706e67241/candidate-registered-adversarial.log."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-d0e706e67241/venv/bin/python - <<'PY' # seeded CPU-vs-GPU float32 matrix multiplication reference",
+      "revision": "96bb88ea23782a2883c3acb4799b20e4e39aec9d",
+      "exit_code": 0,
+      "what_was_measured": "Independent numerical GPU execution check on AMD Instinct MI355X: max_abs_error=9.5367431640625e-06, mean_abs_error=1.067223934114736e-06, torch.allclose(rtol=1e-4, atol=1e-4)=true. Raw log: /job/review-evidence-j-d0e706e67241/gpu-numerical.log."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..96bb88ea23782a2883c3acb4799b20e4e39aec9d",
+      "revision": "96bb88ea23782a2883c3acb4799b20e4e39aec9d",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI355X executed the three original manual cases, the three stronger registered lifecycle cases, and an independent CPU-vs-GPU numerical reference. Torch was 2.11.0+rocm7.2 with HIP 7.2.26015."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported base timeout was not reproduced in two attempts on this host, so a local failing-before/passing-after pair is unavailable. The race is timing-sensitive and the first run was strongly perturbed by first-use AITer compilation; the warmed run also passed.",
+    "Validation architecture was AMD Instinct MI355X (gfx950) with ROCm/HIP 7.2.26015. CUDA A100 and Intel XPU environments from the report were not available.",
+    "No native rebuild was performed because the candidate changes only Python scripted-runtime harness and test files; the editable sglang import resolved to /job/repo/python/sglang/__init__.py. Torch remained the prepared 2.11.0+rocm7.2 installation.",
+    "The full repository test suite was not run. Focused coverage included all original cases, all candidate unit regressions, and independent adversarial GPU lifecycle cases.",
+    "The host reports NUMA balancing enabled. Node-wide configuration was not changed."
+  ],
+  "evidence_directory": "/job/review-evidence-j-d0e706e67241"
+}
