@@ -1,0 +1,63 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35808",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/2942",
+  "candidate_commit": "a6ff9d544d5e1cc56bac200b18cbe425dbed89ad",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a meaningful partial fix: its L3 classifications, legacy HiRadixCache snapshot, ordinary write/load acknowledgement metrics, and focused regressions pass. It does not provide full-lifecycle observability because UnifiedRadixCache decode-retraction performs real L1-to-L2 and L2-to-L1 transfers without the new metric or rid events, and ordinary L1/L2 logs do not provide truthful request-correlated terminal outcomes.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ac42bbbc76bb/venv/bin/python base contract probe at 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: RadixCacheMetricsCollector lacked the transfer-result API; StorageMetrics lacked prefetch_stats; neither cache had structured HICACHE rid events. Evidence: reports/j-ac42bbbc76bb/evidence/base-contract-probe.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ac42bbbc76bb/venv/bin/python -m pytest -q test/registered/unit/observability/test_stat_loggers_di.py",
+      "exit_code": 0,
+      "what_was_measured": "17 candidate collector tests passed, including L3 delta/reset behavior and the newly exposed ordinary transfer counter API. Evidence: reports/j-ac42bbbc76bb/evidence/candidate-observability.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ac42bbbc76bb/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py -k buffer_only_read_path_roundtrip -x",
+      "exit_code": 0,
+      "what_was_measured": "13 passed and 6 repository-gated skips on one AMD GPU; exercised file-backed L3 query, host staging, GPU load-back, exact K/V comparison, and candidate hit-stat export. Evidence: reports/j-ac42bbbc76bb/evidence/candidate-unified-gpu.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ac42bbbc76bb/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hiradix_cache_unit.py test/registered/unit/mem_cache/test_hiradix_pp_sync_drain.py",
+      "exit_code": 0,
+      "what_was_measured": "4 legacy HiRadixCache tests passed on the assigned AMD GPU. Evidence: reports/j-ac42bbbc76bb/evidence/candidate-hiradix.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ac42bbbc76bb/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_decode_retraction_backup.py",
+      "exit_code": 0,
+      "what_was_measured": "2 tests passed on the assigned AMD GPU, confirming the supported UnifiedRadixCache retraction path performs capacity handling and exact target+draft L1/L2 round trips. Evidence: reports/j-ac42bbbc76bb/evidence/candidate-retraction-gpu.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ac42bbbc76bb/venv/bin/python independent recorder probe wrapping test_decode_retraction_backup operations",
+      "exit_code": 1,
+      "what_was_measured": "Candidate counterexample: a real host-capacity-declined retraction backup and a successful target+draft backup/restore both emitted zero transfer-result metric calls. Evidence: reports/j-ac42bbbc76bb/evidence/candidate-adversarial-retraction.log"
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 a6ff9d544d5e1cc56bac200b18cbe425dbed89ad",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff has no whitespace errors. Evidence: reports/j-ac42bbbc76bb/evidence/diff-check.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI355X; Torch 2.11.0+rocm7.2; HIP 7.2.26015. Direct file-storage, legacy cache, and decode-retraction tests ran on this device.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "UnifiedRadixCache.retraction_backup returns None on real host-capacity exhaustion without incrementing hicache_transfer_requests_total for L1-to-L2 failure.",
+    "A successful UnifiedRadixCache retraction_backup plus retraction_restore target+draft GPU round trip emits no L1-to-L2 or L2-to-L1 transfer-result metric.",
+    "The retraction path has req.rid but emits no unified [HICACHE] rid lifecycle records.",
+    "Ordinary init_load_back logs tier=l1 result=complete unconditionally rather than classifying L1 hit/miss and hit tokens, and its L2-to-L1 record is scheduled rather than a request-correlated terminal result.",
+    "Unexpected asynchronous transfer exceptions are still process errors without failure counter events."
+  ],
+  "remaining_limitations": [
+    "No native source changed, so a native rebuild was not applicable.",
+    "Mooncake, HF3FS, NIXL, UMBP, multi-node, TP/PP distributed, model-specific storage paths, and NVIDIA/CUDA were unavailable and remain unverified.",
+    "The one-GPU tests validate cache transport and exact fixture K/V restoration, not HTTP serving or model semantic accuracy.",
+    "NUMA balancing was enabled on the node; the prepared runtime emitted the standard ROCm performance warning, but all selected GPU compatibility tests completed."
+  ]
+}
