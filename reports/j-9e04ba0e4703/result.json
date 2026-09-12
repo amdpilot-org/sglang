@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34384",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source already pads a live compact-ragged layout to the token tier's captured request-slot geometry and stages the padded verify_lens/qo_indptr before replay. Added exact 32x6-to-192-slot regression coverage plus the native 192-request boundary; no runtime correction was needed.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-9e04ba0e4703/venv/bin/python -m pytest -q test/registered/spec/dspark/test_ragged_verify.py (before test-only change)",
+      "exit_code": 0,
+      "what_was_measured": "Existing generic compact-ragged layout and zero-length padding coverage; 10 tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9e04ba0e4703/venv/bin/python -m pytest -q test/registered/spec/dspark/test_ragged_verify.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact issue geometry (32 requests x 6 tokens replayed in the captured 192-slot tier), native 192-request boundary, and existing layout cases; 12 tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9e04ba0e4703/venv/bin/python -m pytest -q test/registered/spec/dspark/test_dspark_scheduler.py::TestBudgetTierSelection",
+      "exit_code": 0,
+      "what_was_measured": "Independent graph-tier and slot-capacity admission boundaries, including max slots accepted and max+1 rejected; 2 tests passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-9e04ba0e4703/venv/bin/python reports/j-9e04ba0e4703/raw/gpu_issue_geometry invocation (inline script retained as output evidence)",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, actual device tensors matched the independent expected [6]*32+[0]*160 layout and query indptr, ending at token 192."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-9e04ba0e4703/raw/gpu_issue_geometry.log and gpu_inventory.log show execution on one AMD Instinct MI350X gfx950; 192 slots, 32 live slots, verify_lens_match=True, qo_indptr_match=True.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The DeepSeek-V4-Flash DSpark model weights were unavailable.",
+    "The assigned hardware was one AMD gfx950 GPU rather than four NVIDIA H20 GPUs, so TP4 and the original CUDA/Hopper illegal-memory-access reproduction remain unverified.",
+    "The GPU fixture validates replay geometry tensors only; it does not qualify model semantic accuracy, the full DSV4 attention graph, or distributed execution.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
