@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35987",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2935",
+  "candidate_commit": "a74bf498ee66251ac0ba18a9ae2e200c657ae557",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes both previously reported phase-scoring and D_FF=3 cardinality regressions, but remains a partial implementation of the original issue. Valid decimal sparsities can underflow the floor calculation to a zero-width mask, and prompt rows are pooled across requests instead of applying Equation 2 per request followed by Equation 3.",
+  "tests": [
+    {
+      "command": "At base 358c163: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e8c06aafb784/venv/bin/python -c 'import sglang.srt.bwap.bwap_manager'",
+      "exit_code": 1,
+      "what_was_measured": "Original feature absence on the recorded base; import failed with ModuleNotFoundError because BWAP was not present."
+    },
+    {
+      "command": "At ee5f9f9: pinned Python independent Equation 2 and D_FF=3 scripts",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced both supplied review counterexamples: old scoring selected neuron 1 instead of 0 and old top-k retained 2 instead of 1."
+    },
+    {
+      "command": "At a74bf498: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e8c06aafb784/venv/bin/python -m pytest test/registered/unit/bwap/test_bwap_manager.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Candidate focused regression suite: 21 tests and 3 subtests passed."
+    },
+    {
+      "command": "At a74bf498: pinned Python independent scoring/cardinality adversarial script",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the two supplied cases pass; found D_FF=5, sparsity=0.8 retains zero rather than one and multi-request prompt pooling changes the top neuron from 1 to 0."
+    },
+    {
+      "command": "At a74bf498 on the assigned GPU: pinned Python independent dense-masked versus gathered reduced-width FFN",
+      "exit_code": 0,
+      "what_was_measured": "On MI350X gfx950 with D_FF=255, k=127, maximum absolute error was 4.76837158203125e-07."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Independent PyTorch execution on AMD Instinct MI350X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2, HIP 7.2.26015; fused gathered FFN matched dense masked reference.",
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "Not applicable: the base-to-candidate diff contains no C/C++/CUDA/HIP/Cython/header/FlyDSL-native source. Candidate BWAP imports resolved to checkout Python sources.",
+  "remaining_counterexamples": [
+    "D_FF=5 and sparsity=0.8: binary floating-point makes (1-sparsity)*D_FF equal 0.9999999999999998, so direct math.floor retains k=0 rather than the mathematical k=1.",
+    "A prompt batch with request 1 rows [[0.8,0,0.6]] repeated four times and request 2 row [[0,1,0]] should select neuron 1 after per-request Equation 2 plus Equation 3, but pooled compute_prompt_scores selects neuron 0."
+  ],
+  "remaining_limitations": [
+    "No production model weights were available, so semantic accuracy and end-to-end throughput were not independently measured.",
+    "The qualified tiny-Llama fixture can only validate transport and engine execution; archived candidate smoke output was not treated as proof of the original feature contract.",
+    "NVIDIA, quantized, biased, TP>1, speculative-decode, and unsupported model-architecture paths remain unverified or explicitly unsupported."
+  ]
+}
