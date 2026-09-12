@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33698",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the paused concurrent disk-weight-update race in the prepared TokenizerManager: the first scheduler response completed the second caller's replacement future and left the first caller pending. Added a dedicated operation lock because scheduler responses have no operation identifier, retained writer-lock ordering for unpaused updates, kept pause state stable during paused updates, and drained an in-flight response before propagating caller cancellation.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-132bdab73f8f/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_weight_updates.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before scheduler-boundary reproduction on the unmodified implementation: concurrent paused updates lost the first completion, and cancellation allowed a second update to dispatch before the first response was drained. Sequential and two-worker boundary cases passed. Raw output: reports/j-132bdab73f8f/raw/failing-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-132bdab73f8f/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_weight_updates.py test/registered/unit/managers/test_tokenizer_config_updates.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression and adjacent coverage: 20 tests passed, including concurrent paused ownership, cancellation and repeated cancellation draining, pause/resume ordering, unpaused RWLock writer preference, cancelled completion metadata publication, sequential updates, multi-worker aggregation, and existing runtime config behavior. Raw output: reports/j-132bdab73f8f/raw/passing-after-final.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-132bdab73f8f/venv/bin/python -m compileall -q python/sglang/srt/managers/tokenizer_manager.py test/registered/unit/managers/test_tokenizer_manager_weight_updates.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources compile and the patch has no whitespace errors. Raw output: reports/j-132bdab73f8f/raw/static-checks.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-132bdab73f8f/venv/bin/python -c '<query torch ROCm device metadata>'",
+      "exit_code": 0,
+      "what_was_measured": "The assigned environment exposes exactly one AMD Instinct MI355X with gfx950 capability through Torch 2.11.0+rocm7.2. This was environment evidence only, not GPU execution. Raw output: reports/j-132bdab73f8f/raw/gpu-environment.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reproduced defect and regression operate at the TokenizerManager/scheduler-message boundary and perform no tensor or model computation. One assigned MI355X/gfx950 was visible, but running an unrelated GPU smoke would not validate this async ownership bug."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No model weights were available or needed, so no full HTTP server or model weight reload was run; the deterministic regression validates the exact untagged scheduler-response boundary described by the issue, not model semantic accuracy.",
+    "No multi-node or distributed serving workload was run. The independent two-worker test validates response aggregation in the manager fixture only.",
+    "The prepared interpreter did not contain black or ruff modules; compileall, git diff --check, focused tests, and adjacent tests were run locally instead."
+  ]
+}
