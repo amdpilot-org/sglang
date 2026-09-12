@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35332",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "The exact candidate adds a useful opt-in Python controller skeleton and passes its focused tests, but an independent CPU and GPU adversarial case shows that reused_prediction() exposes the cached last-real tensor directly. An in-place scheduler/consumer mutation corrupts subsequent reuse, violating the core last-real-prediction contract. The work is also framework-only and has no qualified model adapter or end-to-end stateful diffusion validation.",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "remaining_counterexamples": [
+    "A scheduler or other consumer mutating a reused model_output in place changes StepReuseState.last_real_prediction; the next skipped step returns the mutated tensor rather than the last real prediction. Reproduced on CPU and AMD Instinct MI355X.",
+    "No concrete model adapter is enabled, so request/modality/CFG scope switching, observation semantics, thresholds, forced persistent writes, and quality gates are not validated on a real stateful diffusion architecture.",
+    "Real multi-rank decision agreement and collective-control-flow safety remain unverified with only one assigned GPU.",
+    "Model-specific _run_denoising_step overrides that bypass the shared implementation do not receive reuse behavior without further integration."
+  ],
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-de5283b60938/venv/bin/python -c 'from sglang.multimodal_gen.runtime.pipelines_core.step_reuse import StepReuseController' (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: the recorded base lacks the requested framework module and contract."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-de5283b60938/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_step_reuse.py python/sglang/multimodal_gen/test/unit/test_cfg_gating.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite and nearby CFG lifecycle tests; 16 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-de5283b60938/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_sampling_params.py python/sglang/multimodal_gen/test/unit/test_diffusion_bcg_padding.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Compatibility coverage; 68 passed plus 30 subtests."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-de5283b60938/venv/bin/python < independent cached-tensor mutation probe (CPU, exact candidate)",
+      "exit_code": 1,
+      "what_was_measured": "A consumer mutated the first reused tensor in place; the subsequent reuse shared storage and returned 107.0 instead of the last real prediction 7.0."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-de5283b60938/venv/bin/python < independent cached-tensor mutation probe (GPU, exact candidate)",
+      "exit_code": 1,
+      "what_was_measured": "On AMD Instinct MI355X, the subsequent reuse shared storage and returned 6.5 instead of the last real prediction 3.25."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Independent adversarial execution used one AMD Instinct MI355X with Torch 2.11.0+rocm7.2 and HIP 7.2.26015; reports/j-de5283b60938/adversarial.log records the failing values."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No native rebuild was applicable: the candidate changes only Python and tests, and the prepared environment records native=null.",
+    "No qualified diffusion model weights or architecture adapter were available; the deterministic tiny Llama fixture is not applicable to diffusion quality or stateful world-model semantics.",
+    "Only one GPU was assigned, so real TP/SP/CFG-parallel broadcast behavior was not executed.",
+    "The candidate's previously recorded MI350X claim was not treated as independent proof; this review's visible assigned device identified as AMD Instinct MI355X."
+  ]
+}
