@@ -113,6 +113,7 @@ impl ResponseProcessor {
                     tokenizer.thinking_key_name(),
                 ),
                 tokenizer.thinking_toggle(),
+                tokenizer.think_in_prefill(),
             ) {
                 parser.mark_reasoning_started();
             }

@@ -716,7 +716,11 @@ pub(crate) fn get_history_tool_calls_count(request: &ChatCompletionRequest) -> u
 pub(crate) fn should_mark_reasoning_started(
     user_thinking: Option<bool>,
     thinking_toggle: ThinkingToggle,
+    think_in_prefill: bool,
 ) -> bool {
+    if !think_in_prefill {
+        return false;
+    }
     match thinking_toggle {
         ThinkingToggle::None => false,
         ThinkingToggle::DefaultOn => user_thinking != Some(false),
@@ -1093,21 +1097,34 @@ mod tests {
     fn test_reasoning_parser_start_follows_thinking_toggle() {
         assert!(should_mark_reasoning_started(
             None,
-            ThinkingToggle::DefaultOn
+            ThinkingToggle::DefaultOn,
+            true
         ));
         assert!(!should_mark_reasoning_started(
             Some(false),
-            ThinkingToggle::DefaultOn
+            ThinkingToggle::DefaultOn,
+            true
         ));
         assert!(!should_mark_reasoning_started(
             None,
-            ThinkingToggle::DefaultOff
+            ThinkingToggle::DefaultOff,
+            true
         ));
         assert!(should_mark_reasoning_started(
             Some(true),
-            ThinkingToggle::DefaultOff
+            ThinkingToggle::DefaultOff,
+            true
         ));
-        assert!(!should_mark_reasoning_started(None, ThinkingToggle::None));
+        assert!(!should_mark_reasoning_started(
+            None,
+            ThinkingToggle::None,
+            true
+        ));
+        assert!(!should_mark_reasoning_started(
+            None,
+            ThinkingToggle::DefaultOn,
+            false
+        ));
     }
 
     #[test]
