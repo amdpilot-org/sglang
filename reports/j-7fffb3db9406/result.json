@@ -1,0 +1,29 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36876",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source already contains upstream PR #35255's merged fix for the reachable disconnect race: dispatched tokenizer states are aborted and retained for scheduler cleanup, and chunked-prefill aborts retry after queue transitions. A real streaming disconnect on the source checkout drained from one running request to zero in 0.251 seconds with no deleted-state errors. No additional scheduler change was justified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-7fffb3db9406/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py test/registered/unit/managers/test_scheduler_chunked_abort_race.py",
+      "exit_code": 0,
+      "what_was_measured": "28 lifecycle and deferred chunked-abort tests plus 3 subtests passed, including dispatched/undispatched, single/batch, dispatch-failure, and queue-transition boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7fffb3db9406/venv/bin/python reports/j-7fffb3db9406/run_disconnect_probe.py --fixture /tmp/amdpilot-repo-j-7fffb3db9406/tiny-random-llama --output reports/j-7fffb3db9406/evidence/gpu-disconnect",
+      "exit_code": 0,
+      "what_was_measured": "A real SSE response was started and its TCP client disconnected; scheduler load changed from num_reqs=1 to num_reqs=0 in 0.251 seconds, with zero occurrences of the reported deleted-state error."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Single assigned ROCm device reported by Torch as AMD Instinct MI350X, capability 9.5 (gfx950), Torch 2.11.0+rocm7.2/HIP 7.2.26015. evidence/gpu-disconnect/server.log records actual Triton-backed prefill batches for the disconnected request."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash weights and the DSPARK speculative path were unavailable; the tiny random Llama fixture validates transport and engine lifecycle only.",
+    "Hierarchical cache, production concurrency, CUDA, and multi-node execution were not reproduced.",
+    "The prepared checkout postdates the merged fix, so historical failing-before execution was not run; the registered regression and upstream issue evidence preserve that boundary.",
+    "The owned test server required SIGKILL after its graceful shutdown timeout, after the disconnect assertion and evidence capture had completed."
+  ]
+}
