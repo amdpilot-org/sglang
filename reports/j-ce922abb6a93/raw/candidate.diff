@@ -1,0 +1,202 @@
+diff --git a/python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py b/python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py
+index 1c4ad44..6e7c6d4 100644
+--- a/python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py
++++ b/python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py
+@@ -359,6 +359,23 @@ def _fused_experts_flashinfer_mxfp4_cutlass(
+     topk_ids = topk_output.topk_ids
+     topk_weights = topk_output.topk_weights
+
++    if x.ndim != 2:
++        raise ValueError(
++            "FlashInfer MXFP4 MoE expects 2D hidden states, "
++            f"got shape {tuple(x.shape)}."
++        )
++    if topk_ids.ndim != 2 or topk_weights.ndim != 2:
++        raise ValueError(
++            "FlashInfer MXFP4 MoE expects 2D top-k ids and weights, got "
++            f"{tuple(topk_ids.shape)} and {tuple(topk_weights.shape)}."
++        )
++    if topk_ids.shape != topk_weights.shape or topk_ids.shape[0] != x.shape[0]:
++        raise ValueError(
++            "FlashInfer MXFP4 MoE requires matching top-k shapes and token "
++            f"dimension; hidden states {tuple(x.shape)}, ids "
++            f"{tuple(topk_ids.shape)}, weights {tuple(topk_weights.shape)}."
++        )
++
+     # GPT-OSS: pad input hidden dim up to the loaded weight width. DSv4
+     # leaves padded_hidden as None (or equal to origin_hidden), no pad.
+     origin_hidden = x.shape[-1]
+@@ -390,6 +407,21 @@ def _fused_experts_flashinfer_mxfp4_cutlass(
+         )
+     if use_wfp4afp8_humming and use_mxfp8_act_scaling:
+         raise ValueError("SM90 Humming and SM120 MXFP8 scaling are mutually exclusive.")
++
++    out_hidden = padded_hidden if do_pad else origin_hidden
++    output_dtype = torch.bfloat16
++    with use_symmetric_memory(get_tp_group(), disabled=not is_allocation_symmetric()):
++        out = torch.empty(x.shape[0], out_hidden, dtype=output_dtype, device=x.device)
++
++    # CUTLASS rejects null input pointers, which are valid for zero-sized torch
++    # tensors. Dispatch and routing have already run (including their required
++    # collectives), so only skip the external kernel boundary for a valid empty
++    # activation while preserving the normal output contract.
++    if x.shape[0] == 0:
++        if do_pad:
++            out = out[:, :origin_hidden].contiguous()
++        return StandardCombineInput(hidden_states=out)
++
+     input_sf = None
+     fc1_expert_weights = quant_info.w13_weight
+     fc2_expert_weights = quant_info.w2_weight
+@@ -426,15 +458,10 @@ def _fused_experts_flashinfer_mxfp4_cutlass(
+             quant_info.w2_weight_scale.view(torch.int32),
+         ]
+
+-    out_hidden = padded_hidden if do_pad else origin_hidden
+-    output_dtype = torch.bfloat16
+     # FlashInfer 0.6.17 intentionally reverted the Humming API. Do not pass the
+     # new keyword at all on the existing W4A16/MXFP8 paths, so those paths keep
+     # working with SGLang's currently pinned release.
+     humming_kwargs = {"use_wfp4afp8_humming": True} if use_wfp4afp8_humming else {}
+-    with use_symmetric_memory(get_tp_group(), disabled=not is_allocation_symmetric()):
+-        out = torch.empty(x.shape[0], out_hidden, dtype=output_dtype, device=x.device)
+-
+     flashinfer_cutlass_fused_moe(
+         input=x,
+         token_selected_experts=topk_ids.to(torch.int32),
+diff --git a/test/registered/unit/layers/quantization/test_mxfp4_empty_input.py b/test/registered/unit/layers/quantization/test_mxfp4_empty_input.py
+new file mode 100644
+index 0000000..06a4016
+--- /dev/null
++++ b/test/registered/unit/layers/quantization/test_mxfp4_empty_input.py
+@@ -0,0 +1,130 @@
++from contextlib import contextmanager
++from enum import IntEnum
++
++import pytest
++import torch
++
++from sglang.srt.layers.moe.moe_runner.base import MoeRunnerConfig
++from sglang.srt.layers.moe.moe_runner.flashinfer_cutlass import (
++    FlashInferCutlassMxfp4MoeQuantInfo,
++)
++from sglang.srt.layers.moe.moe_runner.runner import MoeRunner
++from sglang.srt.layers.moe.token_dispatcher.standard import StandardDispatchOutput
++from sglang.srt.layers.moe.topk import StandardTopKOutput
++from sglang.srt.layers.moe.utils import MoeRunnerBackend
++
++
++class _ActivationType(IntEnum):
++    Swiglu = 0
++    SwigluStep = 1
++
++
++def _runner_and_quant_info(device):
++    runner = MoeRunner(
++        MoeRunnerBackend.FLASHINFER_MXFP4,
++        MoeRunnerConfig(
++            num_experts=2,
++            num_local_experts=2,
++            hidden_size=16,
++            intermediate_size_per_partition=32,
++            top_k=2,
++            activation="silu",
++            is_gated=True,
++        ),
++    )
++    quant_info = FlashInferCutlassMxfp4MoeQuantInfo(
++        w13_weight=torch.empty((2, 64, 8), dtype=torch.uint8, device=device),
++        w2_weight=torch.empty((2, 16, 16), dtype=torch.uint8, device=device),
++        w13_weight_scale=torch.empty((2, 64, 4), dtype=torch.uint8, device=device),
++        w2_weight_scale=torch.empty((2, 16, 4), dtype=torch.uint8, device=device),
++    )
++    return runner, quant_info
++
++
++def _dispatch(tokens, device, *, topk_tokens=None):
++    if topk_tokens is None:
++        topk_tokens = tokens
++    return StandardDispatchOutput(
++        hidden_states=torch.randn(
++            (tokens, 16), dtype=torch.bfloat16, device=device
++        ),
++        hidden_states_scale=None,
++        topk_output=StandardTopKOutput(
++            topk_weights=torch.ones((topk_tokens, 2), device=device),
++            topk_ids=torch.zeros((topk_tokens, 2), dtype=torch.int32, device=device),
++            router_logits=torch.empty((topk_tokens, 2), device=device),
++        ),
++    )
++
++
++@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires one GPU")
++def test_flashinfer_mxfp4_empty_input_stops_at_external_kernel_boundary(monkeypatch):
++    import sglang.srt.layers.moe.moe_runner.flashinfer_cutlass as module
++
++    calls = []
++    symmetric_allocations = []
++
++    def instrumented_kernel(**kwargs):
++        calls.append(kwargs)
++        if kwargs["input"].shape[0] == 0:
++            raise RuntimeError("external kernel requires nonempty input")
++        kwargs["output"].fill_(3)
++        return (kwargs["output"],)
++
++    @contextmanager
++    def instrumented_symmetric_memory(*args, **kwargs):
++        symmetric_allocations.append((args, kwargs))
++        yield
++
++    monkeypatch.setattr(
++        module,
++        "_flashinfer_cutlass_fused_moe",
++        lambda: (instrumented_kernel, _ActivationType),
++    )
++    monkeypatch.setattr(module, "use_symmetric_memory", instrumented_symmetric_memory)
++    monkeypatch.setattr(module, "get_tp_group", lambda: object())
++    monkeypatch.setattr(module, "is_allocation_symmetric", lambda: False)
++    monkeypatch.setattr(
++        module.envs.SGLANG_FLASHINFER_MOE_FUSED_FINALIZE, "get", lambda: False
++    )
++
++    device = torch.device("cuda")
++    runner, quant_info = _runner_and_quant_info(device)
++
++    dispatch = _dispatch(0, device)
++    empty = runner.run(dispatch, quant_info).hidden_states
++    assert empty.shape == (0, 16)
++    assert empty.dtype == torch.bfloat16
++    assert empty.device == dispatch.hidden_states.device
++    assert calls == []
++    assert len(symmetric_allocations) == 1
++
++    nonempty = runner.run(_dispatch(1, device), quant_info).hidden_states
++    assert len(calls) == 1
++    assert torch.equal(nonempty, torch.full_like(nonempty, 3))
++
++
++@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires one GPU")
++def test_flashinfer_mxfp4_does_not_accept_malformed_empty_routing(monkeypatch):
++    import sglang.srt.layers.moe.moe_runner.flashinfer_cutlass as module
++
++    monkeypatch.setattr(
++        module,
++        "_flashinfer_cutlass_fused_moe",
++        lambda: (
++            lambda **kwargs: (_ for _ in ()).throw(AssertionError()),
++            _ActivationType,
++        ),
++    )
++    monkeypatch.setattr(
++        module,
++        "use_symmetric_memory",
++        lambda *a, **kw: __import__("contextlib").nullcontext(),
++    )
++    monkeypatch.setattr(module, "get_tp_group", lambda: object())
++    monkeypatch.setattr(module, "is_allocation_symmetric", lambda: False)
++
++    device = torch.device("cuda")
++    runner, quant_info = _runner_and_quant_info(device)
++    with pytest.raises(ValueError, match="token dimension"):
++        runner.run(_dispatch(0, device, topk_tokens=1), quant_info)
