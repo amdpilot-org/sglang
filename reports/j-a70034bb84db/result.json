@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38980",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the candidate's current-device validation bug, preserved numeric CUDA/version rejection hardening, validated against each input tensor's device, and pinned the independently validated native SM8x shared-memory/local-KV correction. The candidate's exact-target rejection of SM89 was removed because later native evidence demonstrated SM86 cubins executing on SM89 and identified a shape-specific kernel defect instead.",
+  "tests": [
+    {
+      "command": "TEST_FLASH_ATTN_SOURCE=/tmp/amdpilot-repo-j-a70034bb84db/candidate-d1f6440/python/sglang/kernels/aot/python/sgl_kernel/flash_attn.py /tmp/amdpilot-repo-j-a70034bb84db/venv/bin/python -m pytest -q python/sglang/kernels/aot/tests/test_flash_attn_public_contract.py",
+      "exit_code": 1,
+      "what_was_measured": "Exact candidate d1f6440 failed 6 cases: both wrappers used is_fa3_supported(None) instead of the cuda:1 tensor device, and the exact-target predicate rejected SM87/SM89 despite same-major SM8x cubin compatibility evidence. Twenty other contract cases passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a70034bb84db/venv/bin/python -m pytest -q python/sglang/kernels/aot/tests/test_flash_attn_public_contract.py",
+      "exit_code": 0,
+      "what_was_measured": "26 source-wrapper/CMake tests passed, covering input-device forwarding, rejection before native dispatch, numeric CUDA versions, the documented FA3-only selector, SM8x compatibility, and the corrected dependency pin/hash."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a70034bb84db/venv/bin/python -m py_compile python/sglang/kernels/aot/python/sgl_kernel/flash_attn.py python/sglang/kernels/aot/tests/test_flash_attn_public_contract.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source and regression tests compile."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors."
+    },
+    {
+      "command": "sha256sum /tmp/amdpilot-repo-j-a70034bb84db/sgl-attn-149a549.tar.gz",
+      "exit_code": 0,
+      "what_was_measured": "Downloaded dependency commit archive matches the new CMake SHA256 98cbb200b5057db2b4a40fdd80fb6eae65e784c751ce6d05a9b220f70b797879."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "Prepared torch is 2.11.0+rocm7.2 with torch.version.cuda=null. No NVIDIA GPU, nvcc, cuobjdump, or CUDA flash_ops build is available; mocked device objects were used only to test wrapper routing.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "This job did not execute CUDA kernels or independently reproduce SM89 numerical results; the pinned dependency's PR reports 22/22 direct native CUDA cases on RTX 4090D SM89.",
+    "A complete sgl-kernel wheel containing dependency commit 149a54916c6a1b940f7ff1afd95f078349a9c471 was not rebuilt in the ROCm-only prepared environment.",
+    "The native dependency correction and upstream version-contract PR are still open at delivery time; this mirror PR pins the reviewed dependency commit directly.",
+    "No claim is made for Hopper performance or for future architectures beyond capability 9.0."
+  ]
+}

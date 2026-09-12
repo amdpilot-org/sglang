@@ -14,18 +14,27 @@ except:
 
 @lru_cache(maxsize=1)
 def is_fa3_supported(device=None) -> bool:
-    #  There some fa3 FYI
-    #  FA3 can fail without a enough shared memory for a some shapes, such as higher
-    #  hidden_dim or some special cases.
-    #  Right now, fa3 is supported for sm80/sm87 and sm86/sm89. The main different
-    #  Between sm80/sm87 and sm86/sm89 is the shared memory size. you can follow the link below for more information
-    #  https://docs.nvidia.com/cuda/cuda-c-programming-guide/#shared-memory-8-x
-    #  And for sgl-kernel right now, we can build fa3 on sm80/sm86/sm89/sm90a.
-    #  That means if you use A100/A*0/L20/L40/L40s/4090 you can use fa3.
-    return (torch.version.cuda >= "12.3") and (
-        torch.cuda.get_device_capability(device)[0] == 9
-        or torch.cuda.get_device_capability(device)[0] == 8
-    )
+    cuda_version = torch.version.cuda
+    if cuda_version is None:
+        return False
+
+    version_parts = tuple(int(part) for part in cuda_version.split(".")[:2])
+    if version_parts < (12, 3):
+        return False
+
+    capability = torch.cuda.get_device_capability(device)
+    # The SM80/SM86 kernels use CUDA's same-major cubin compatibility on newer
+    # SM8x devices (including SM89). Hopper uses architecture-specific SM90a.
+    return capability[0] == 8 or capability == (9, 0)
+
+
+def _validate_fa3_contract(ver, device) -> None:
+    if ver != 3:
+        raise ValueError(f"sgl_kernel.flash_attn only supports ver=3, got {ver!r}")
+    if not is_fa3_supported(device):
+        raise NotImplementedError(
+            "sgl_kernel FA3 is not supported on this CUDA version or GPU architecture"
+        )
 
 
 def maybe_contiguous(x):
@@ -152,6 +161,7 @@ def flash_attn_with_kvcache(
         return_softmax_lse: bool. Whether to return the logsumexp of the attention scores.
         score_mod [optional]: A callable that takes the attention scores and applies a modification.
         aux_tensors [optional]: Some score_mods will want to read from global aux_tensors. This is how we thread them through to the inner kernel.
+        ver: FlashAttention implementation version. Only 3 is supported by this module.
 
     Return:
         out: (batch_size, seqlen, nheads, headdim).
@@ -159,6 +169,9 @@ def flash_attn_with_kvcache(
             logsumexp of each row of the matrix QK^T * scaling (e.g., log of the softmax
             normalization factor).
     """
+
+    if ver != 3:
+        _validate_fa3_contract(ver, None)
 
     if v_cache is None:
         raise ValueError("v_cache must be provided")
@@ -195,6 +208,8 @@ def flash_attn_with_kvcache(
         q_shape = (*qv.shape[:-1], k_cache.shape[-1])
         # The kernel path for only_qv ignores q values, but backend API still requires q tensor.
         q = torch.empty(q_shape, dtype=qv.dtype, device=qv.device)
+
+    _validate_fa3_contract(ver, q.device)
 
     if softmax_scale is None:
         if only_qv:
@@ -302,11 +317,9 @@ def flash_attn_varlen_func(
     ver=3,
     out=None,
 ):
+    """Variable-length FlashAttention-3; other ``ver`` values are unsupported."""
 
-    if not is_fa3_supported():
-        raise NotImplementedError(
-            "flash_attn at sgl-kernel is only supported on sm90 and above"
-        )
+    _validate_fa3_contract(ver, q.device if q is not None else None)
 
     # FA3 requires max_seqlen_q and max_seqlen_k
     if max_seqlen_q is None or max_seqlen_k is None:

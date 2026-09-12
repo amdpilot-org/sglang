@@ -1,0 +1,64 @@
+Prepared base: 358c163250ad3b1f62939b01ce1314a0a31a0365
+Candidate: d1f6440c5ef02abc13ec640a2b860e1e85a7d750
+Candidate PR: https://github.com/amdpilot-org/sglang/pull/637
+Independent review PR: https://github.com/amdpilot-org/sglang/pull/699
+
+The exact candidate source was extracted without modifying the checkout:
+
+  test_dir=/tmp/amdpilot-repo-j-a70034bb84db/candidate-d1f6440
+  git archive d1f6440c5ef02abc13ec640a2b860e1e85a7d750 python/sglang/kernels/aot/python/sgl_kernel/flash_attn.py | tar -x -C "$test_dir"
+
+Failing-before command:
+
+  TEST_FLASH_ATTN_SOURCE=/tmp/amdpilot-repo-j-a70034bb84db/candidate-d1f6440/python/sglang/kernels/aot/python/sgl_kernel/flash_attn.py /tmp/amdpilot-repo-j-a70034bb84db/venv/bin/python -m pytest -q python/sglang/kernels/aot/tests/test_flash_attn_public_contract.py
+
+Failing-before result:
+
+  6 failed, 20 passed in 0.67s
+
+The failures independently reproduced both wrong-current-device cases for both
+public wrappers: the candidate called is_fa3_supported(None), rather than using
+the cuda:1 input tensor device. They also showed that the candidate rejected
+SM87 and SM89 solely because no exact cubin target was listed.
+
+The upstream issue's later native evidence changes the architecture diagnosis:
+sgl-project/sgl-flash-attn#50 ran SM86 cubins on SM89 and isolated the reported
+launch failure to excessive shared-memory padding for head-dimension 256 split
+attention. Its final native matrix passed 22/22 cases after correcting shared
+memory reuse and local KV coordinates. This correction pins that dependency
+commit rather than treating absent exact sm89 code as proof of incompatibility.
+
+Passing-after command:
+
+  /tmp/amdpilot-repo-j-a70034bb84db/venv/bin/python -m pytest -q python/sglang/kernels/aot/tests/test_flash_attn_public_contract.py
+
+Passing-after result:
+
+  26 passed in 0.59s
+
+Additional validation:
+
+  /tmp/amdpilot-repo-j-a70034bb84db/venv/bin/python -m py_compile python/sglang/kernels/aot/python/sgl_kernel/flash_attn.py python/sglang/kernels/aot/tests/test_flash_attn_public_contract.py
+  git diff --check
+
+Both exited 0.
+
+Dependency archive verification:
+
+  sha256sum /tmp/amdpilot-repo-j-a70034bb84db/sgl-attn-149a549.tar.gz
+  98cbb200b5057db2b4a40fdd80fb6eae65e784c751ce6d05a9b220f70b797879
+
+Version-selection conclusion:
+
+The review accurately noted that ver=2 is not dispatched, but rejection is the
+deliberate public contract in upstream sglang#39203: this module is FA3-only and
+rejects unsupported selectors before tensor/device access. There is no shipped
+FA2 implementation registered by this module's flash_ops extension to dispatch
+to. The correction preserves that valid candidate behavior and documents it.
+
+Environment limitation:
+
+The prepared interpreter has torch 2.11.0+rocm7.2 and no NVIDIA GPU, nvcc,
+cuobjdump, or locally built CUDA flash_ops. No CUDA execution or native rebuild
+was performed. Actual SM89 execution is supported here only by the linked native
+producer's evidence and remains unverified in this job environment.
