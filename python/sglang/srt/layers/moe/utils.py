@@ -19,6 +19,7 @@ from sglang.srt.runtime_context import (
     get_forward,
     get_model,
     get_parallel,
+    get_resources,
     get_server_args,
     get_spec,
 )
@@ -785,13 +786,42 @@ def speculative_moe_a2a_backend_context():
     original_backend = moe.a2a_backend
     original_disable_fp4_allgather = moe.disable_fp4_allgather
     original_speculative_context = moe.speculative_context
+    original_ep_num_redundant_experts = get_exec().moe.ep_num_redundant_experts
+    resources = get_resources()
+    original_expert_distribution_recorder = resources.expert_distribution_recorder
+    original_expert_location_metadata = resources.expert_location_metadata
     try:
         moe.a2a_backend = get_speculative_moe_a2a_backend()
         # Disable FP4 allgather for spec decode since MTP layers are unquantized
         moe.disable_fp4_allgather = True
         moe.speculative_context = True
+        if moe.speculative_ep_num_redundant_experts is not None:
+            get_exec().moe._set(
+                "ep_num_redundant_experts",
+                moe.speculative_ep_num_redundant_experts,
+            )
+        resources.expert_distribution_recorder = (
+            resources.speculative_expert_distribution_recorder
+        )
+        resources.expert_location_metadata = (
+            resources.speculative_expert_location_metadata
+        )
         yield
     finally:
+        moe.speculative_ep_num_redundant_experts = (
+            get_exec().moe.ep_num_redundant_experts
+        )
+        get_exec().moe._set(
+            "ep_num_redundant_experts", original_ep_num_redundant_experts
+        )
+        resources.speculative_expert_distribution_recorder = (
+            resources.expert_distribution_recorder
+        )
+        resources.speculative_expert_location_metadata = (
+            resources.expert_location_metadata
+        )
+        resources.expert_distribution_recorder = original_expert_distribution_recorder
+        resources.expert_location_metadata = original_expert_location_metadata
         moe.a2a_backend = original_backend
         moe.disable_fp4_allgather = original_disable_fp4_allgather
         moe.speculative_context = original_speculative_context
