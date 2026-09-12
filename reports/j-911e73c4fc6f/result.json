@@ -1,0 +1,61 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/18072",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2971",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2933",
+  "candidate_commit": "f8c062cb9b3b8012add6a672dd86102fa5ef0ee2",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "unsupported_architecture",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is a substantive source implementation of the proposed RVV kernels, dispatch integration, tests, packaging, Dockerfile, and documentation. The recorded base concretely lacks the rvv CLI choice and RVV Python modules; the candidate makes those portable paths available and its non-native tests pass. However, the review host is x86_64, the imported native sgl_kernel remains the pre-existing x86_64 wheel, and no usable RISC-V sysroot/toolchain or RVV device is present. All 49 native numerical tests skip, a native rebuild cannot be completed, and the required Qwen2.5 GSM8K and RVV performance deliverables cannot run. Therefore the original target-hardware contract is not independently verified and cannot be marked fully resolved.",
+  "tests": [
+    {
+      "command": "base: python -m sglang.launch_server --help; import sglang.srt.layers.attention.rvv_backend and sglang.srt.layers.rvv_utils",
+      "exit_code": 0,
+      "what_was_measured": "On exact base 358c1632, the attention-backend choices do not contain rvv and both RVV module imports fail with ModuleNotFoundError, reproducing the feature absence. See base-feature-absence.log and base-import.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-911e73c4fc6f/venv/bin/python -m pytest -q test/srt/cpu/rvv test/registered/cpu/test_server_args_backend.py --disable-warnings -rs",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate f8c062cb, 21 portable registration, dispatch, fallback, metadata, packing-cache, and server-argument tests passed; all 49 tests that require candidate native RVV operators skipped. See candidate-regression.log."
+    },
+    {
+      "command": "candidate import-path probe",
+      "exit_code": 0,
+      "what_was_measured": "sglang and both new RVV Python modules imported from /job/repo, while sgl_kernel imported from /opt/venv/lib/python3.12/site-packages/sglang_kernel-0.4.6.post1-py3.12-linux-x86_64.egg. Thus Python tests used candidate source but no candidate native library. See candidate-import-paths.log."
+    },
+    {
+      "command": "python -m compileall -q <new RVV Python modules>; independently parse --device cpu --attention-backend rvv; configure RVV CMake project",
+      "exit_code": 0,
+      "what_was_measured": "New Python modules compile, the CLI accepts the explicit rvv backend, and CMake configuration reaches generation. This is portable integration evidence only. See independent-adversarial.log."
+    },
+    {
+      "command": "/opt/rocm-7.2.4/lib/llvm/bin/clang-22 --target=riscv64-unknown-linux-gnu -march=rv64gcv -mabi=lp64d -mrvv-vector-bits=256 -DCPU_CAPABILITY_RVV -std=c++17 -fsyntax-only -x c++ -include python/sglang/kernels/aot/csrc/cpu/riscv64/vector_math.h /dev/null",
+      "exit_code": 1,
+      "what_was_measured": "The only pinned compiler accepts the RISC-V target flags but has no riscv_vector.h, so even header-level intrinsic validation is blocked. See native-compile-attempt.log."
+    },
+    {
+      "command": "cmake --build /tmp/amdpilot-repo-j-911e73c4fc6f/rvv-cmake-probe -j2",
+      "exit_code": 2,
+      "what_was_measured": "A native build on x86_64 fails immediately because the RVV -mabi and -mrvv-vector-bits flags are unsupported for the host target. No candidate shared library was produced. See native-build-attempt.log."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The feature targets RISC-V CPUs. GPU execution would not validate RVV, and no unrelated GPU smoke was substituted."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No candidate native operator executed: every activation, decode, extend, GEMM, INT8 GEMM, norm, and RoPE numerical case skipped on x86_64.",
+    "No RVV 1.0 instruction emission or disassembly was obtained from a rebuilt candidate library.",
+    "No end-to-end Qwen2.5-1.5B-Instruct GSM8K run was performed on a supported RISC-V/RVV system.",
+    "No RVV-versus-Torch-native performance comparison was performed on Banana Pi BPI-F3 or similar target hardware.",
+    "The linux/riscv64 Docker image and its vendor wheel availability were not independently built or validated."
+  ],
+  "remaining_limitations": [
+    "Review machine: x86_64 AMD host, Linux 4.18; no RISC-V or RVV execution capability.",
+    "Pinned Torch is 2.11.0+rocm7.2 and its installed sgl_kernel is an x86_64 egg, not a candidate rebuild.",
+    "Pinned ROCm Clang 22 lacks riscv_vector.h; the environment has no RISC-V sysroot or target-native PyTorch libraries.",
+    "The tiny Llama serving fixture was not used because it cannot qualify RVV native correctness, Qwen architecture accuracy, or target-board performance."
+  ]
+}
