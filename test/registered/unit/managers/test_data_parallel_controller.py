@@ -49,14 +49,26 @@ def _make_controller(dp_size: int) -> DataParallelController:
     ctl.workers = [MagicMock(name=f"worker_{i}") for i in range(dp_size)]
     ctl.status = [True] * dp_size
     ctl._active_workers = list(range(dp_size))
+    ctl.load_balance_method = LoadBalanceMethod.ROUND_ROBIN
     ctl.round_robin_counter = 0
+    ctl.health_round_robin_counter = 0
     ctl.dp_budget = DPBudget(dp_size=dp_size)
+    ctl.dispatching = ctl.round_robin_scheduler
+    ctl.refresh_load_budget_on_dispatch = False
     return ctl
 
 
-def _req(routed_dp_rank=None, bootstrap_room=None, input_ids=None):
+def _req(
+    routed_dp_rank=None,
+    bootstrap_room=None,
+    input_ids=None,
+    rid="USER",
+    time_stats=None,
+):
     """Req stand-in; SimpleNamespace avoids pinning to the Req dataclass schema."""
     return SimpleNamespace(
+        time_stats=time_stats,
+        rid=rid,
         routed_dp_rank=routed_dp_rank,
         bootstrap_room=bootstrap_room,
         input_ids=input_ids or [],
@@ -182,6 +194,109 @@ class TestRoundRobinScheduler(CustomTestCase):
         for i in (1, 2, 3):
             ctl.workers[i].send_pyobj.assert_not_called()
 
+
+class TestHealthCheckScheduler(CustomTestCase):
+    def test_health_and_user_round_robin_state_are_independent(self):
+        ctl = _make_controller(dp_size=4)
+
+        for rid in ("user_0", "user_1"):
+            ctl.dispatching_with_trace(_req(rid=rid))
+        ctl.dispatching_with_trace(_req(rid="HEALTH_CHECK_0"))
+        ctl.dispatching_with_trace(_req(rid="user_2"))
+        ctl.dispatching_with_trace(_req(rid="HEALTH_CHECK_1"))
+        for rid in ("user_3", "user_4"):
+            ctl.dispatching_with_trace(_req(rid=rid))
+
+        self.assertEqual(ctl.round_robin_counter, 1)
+        self.assertEqual(ctl.health_round_robin_counter, 2)
+        self.assertEqual(ctl.workers[0].send_pyobj.call_count, 3)
+        self.assertEqual(ctl.workers[1].send_pyobj.call_count, 2)
+        ctl.workers[2].send_pyobj.assert_called_once()
+        ctl.workers[3].send_pyobj.assert_called_once()
+
+    def test_health_does_not_change_total_requests_budget(self):
+        ctl = _make_controller(dp_size=3)
+        ctl.load_balance_method = LoadBalanceMethod.TOTAL_REQUESTS
+        ctl.dispatching = ctl.total_requests_scheduler
+        ctl.refresh_load_budget_on_dispatch = False
+
+        ctl.dispatching_with_trace(_req(rid="user_0"))
+        budget_after_user = ctl.dp_budget.total_requests.copy()
+        ctl.dispatching_with_trace(_req(rid="HEALTH_CHECK_0"))
+        self.assertEqual(ctl.dp_budget.total_requests, budget_after_user)
+        ctl.dispatching_with_trace(_req(rid="user_1"))
+
+        self.assertEqual(ctl.dp_budget.total_requests, [1, 1, 0])
+        self.assertEqual(ctl.workers[0].send_pyobj.call_count, 2)
+        ctl.workers[1].send_pyobj.assert_called_once()
+
+    def test_health_does_not_change_total_tokens_budget(self):
+        ctl = _make_controller(dp_size=3)
+        ctl.load_balance_method = LoadBalanceMethod.TOTAL_TOKENS
+        ctl.dispatching = ctl.total_tokens_scheduler
+        ctl.refresh_load_budget_on_dispatch = False
+
+        ctl.dispatching_with_trace(_req(rid="user_0", input_ids=[1, 2, 3]))
+        requests_after_user = ctl.dp_budget.total_requests.copy()
+        tokens_after_user = ctl.dp_budget.total_tokens.copy()
+        ctl.dispatching_with_trace(_req(rid="HEALTH_CHECK_0", input_ids=[0]))
+
+        self.assertEqual(ctl.dp_budget.total_requests, requests_after_user)
+        self.assertEqual(ctl.dp_budget.total_tokens, tokens_after_user)
+
+    def test_health_is_still_dispatched_to_a_real_worker(self):
+        ctl = _make_controller(dp_size=2)
+        req = _req(rid="HEALTH_CHECK_admission")
+
+        ctl.dispatching_with_trace(req)
+
+        ctl.workers[0].send_pyobj.assert_called_once()
+        ctl.workers[1].send_pyobj.assert_not_called()
+
+    def test_health_only_batch_does_not_refresh_user_budget(self):
+        ctl = _make_controller(dp_size=2)
+        ctl.refresh_load_budget_on_dispatch = True
+        ctl.refresh_load_budget = MagicMock()
+
+        health_req = _req(rid="HEALTH_CHECK_batch")
+        ctl.dispatch_batch_generate([health_req])
+        ctl.refresh_load_budget.assert_not_called()
+        ctl.workers[0].send_pyobj.assert_called_once()
+
+        ctl.dispatch_batch_generate([health_req, _req(rid="user_batch")])
+        ctl.refresh_load_budget.assert_called_once()
+
+    def test_health_round_robin_uses_only_active_workers(self):
+        ctl = _make_controller(dp_size=4)
+        ctl._active_workers = [1, 3]
+
+        for i in range(4):
+            ctl.dispatching_with_trace(_req(rid=f"HEALTH_CHECK_{i}"))
+
+        ctl.workers[0].send_pyobj.assert_not_called()
+        self.assertEqual(ctl.workers[1].send_pyobj.call_count, 2)
+        ctl.workers[2].send_pyobj.assert_not_called()
+        self.assertEqual(ctl.workers[3].send_pyobj.call_count, 2)
+
+    def test_explicit_health_route_does_not_advance_probe_counter(self):
+        ctl = _make_controller(dp_size=4)
+
+        ctl.dispatching_with_trace(_req(rid="HEALTH_CHECK_routed", routed_dp_rank=2))
+
+        ctl.workers[2].send_pyobj.assert_called_once()
+        self.assertEqual(ctl.health_round_robin_counter, 0)
+
+    def test_health_preserves_follow_bootstrap_room_routing(self):
+        ctl = _make_controller(dp_size=4)
+        ctl.load_balance_method = LoadBalanceMethod.FOLLOW_BOOTSTRAP_ROOM
+
+        ctl.dispatching_with_trace(_req(rid="HEALTH_CHECK_pd", bootstrap_room=3))
+
+        ctl.workers[3].send_pyobj.assert_called_once()
+        self.assertEqual(ctl.health_round_robin_counter, 0)
+
+
+class TestRoundRobinSchedulerState(CustomTestCase):
     def test_skips_inactive_workers(self):
         ctl = _make_controller(dp_size=4)
         ctl.status[1] = False
