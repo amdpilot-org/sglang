@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38745",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/573",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/569",
+  "candidate_commit": "e64beeb06331c7f098184412db14eeb07850a9c4",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduced the original ROCm contradiction from the actual imported DSA modules: is_hip=True, is_cuda=False, DUAL_STREAM_TOKEN_THRESHOLD=0, and every tested token count made 0 < num_tokens <= threshold false in both the standard and k-pool gates. At exact candidate commit e64beeb06331c7f098184412db14eeb07850a9c4, the imported threshold is 1024 on HIP and both production indexers use the same helper, making the gate true for positive token counts through 1024 when an alternate stream exists and capture mode is active. The candidate regression passed, and an independent adversarial boundary test plus real cross-stream GPU computation passed on gfx950. This fully resolves the original issue's stated unsatisfiable-predicate defect; it intentionally retains the pre-existing 1024 upper bound rather than following the separate historical direction of deleting token thresholds.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3d0dcc77f802/venv/bin/python -u - <<'PY' # import both DSA modules and evaluate the base predicate over negative, zero, boundary, and very large token counts",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before reproduction at base commit 358c163250ad3b1f62939b01ce1314a0a31a0365. The actual source imports reported ROCm/HIP true, CUDA false, threshold 0, the same constant in both indexers, and false for -1, 0, 1, 2, 1023, 1024, 1025, and 1,000,000,000 tokens. Raw output: /job/review-evidence-j-3d0dcc77f802/base-reproduction.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3d0dcc77f802/venv/bin/python -u test/registered/attention/unittests/dsa/test_dual_stream_gate.py -v",
+      "exit_code": 0,
+      "what_was_measured": "Candidate-provided regression at exact commit e64beeb06331c7f098184412db14eeb07850a9c4. All three tests passed, covering token boundaries, capture/stream prerequisites, and a simple alternate-stream GPU calculation. Raw output: /job/review-evidence-j-3d0dcc77f802/candidate-regression.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_ROCM_USE_MULTI_STREAM=1 /tmp/amdpilot-repo-j-3d0dcc77f802/venv/bin/python -u - <<'PY' # independent imported-module boundary checks and gfx950 cross-stream calculation",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial validation (executed with the prepared interpreter; the path shown in this command is corrected in remaining_limitations): imported both candidate production modules, confirmed HIP threshold 1024 and the k-pool's shared-helper call, checked -7/0/1/1023/1024/1025/10,000,000 plus missing-stream and missing-capture cases, and ran a 1024x257 float32 computation across the alternate HIP stream. Against an independent NumPy float64 reference, max absolute error was 3.849048692927681e-05 and max relative error was 1.467098522544203e-07. Raw output: /job/review-evidence-j-3d0dcc77f802/candidate-independent.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python:/job/repo/test /tmp/amdpilot-repo-j-3d0dcc77f802/venv/bin/python -u test/registered/attention/unittests/dsa/test_dsa.py TestDSAAttentionBackendCorrectness.test_sparse_decode_impl_variants -v",
+      "exit_code": 1,
+      "what_was_measured": "Attempted broader DSA execution. Four variants failed during fixture construction because the shared fixture uses page_size=64 while the production HIP legacy pool requires page_size=1; tilelang and TRT-LLM variants skipped for explicit top-k and architecture constraints. No DSA kernel output was produced, so this is a fixture blocker, not a candidate regression. Raw output: /job/review-evidence-j-3d0dcc77f802/candidate-dsa-focused.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3d0dcc77f802/venv/bin/python -m py_compile python/sglang/srt/layers/attention/dsa/dsa_indexer.py python/sglang/srt/layers/attention/dsa/dsa_indexer_kpool.py test/registered/attention/unittests/dsa/test_dual_stream_gate.py && git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 e64beeb06331c7f098184412db14eeb07850a9c4",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python files compiled and the candidate diff passed whitespace validation."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One assigned AMD Instinct MI355X, gfx950:sramecc+:xnack-, torch 2.11.0+rocm7.2, HIP 7.2.26015. The independent numerical test executed producer work on torch.cuda.Stream and synchronized it into the current stream before comparison with NumPy.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": "The full production DSA indexer/model path was not executed because the available broader DSA test fixture is incompatible with the HIP legacy page_size=1 requirement, and no model checkpoint was loaded. The candidate's own GPU test exercises the extracted decision helper and generic stream behavior, not DSA kernels; acceptance is based on independently reproducing and correcting the original source-level predicate contradiction in the actual imported modules. Token counts above 1024 remain deliberately single-stream, matching the pre-existing CUDA policy but not the threshold-removal direction of historical PRs #9405 and #14337. No C++/FlyDSL/native/compiler files changed, so no native rebuild or compiler/ISA claim applies. Architecture-specific validation is limited to AMD Instinct MI355X gfx950."
+}
