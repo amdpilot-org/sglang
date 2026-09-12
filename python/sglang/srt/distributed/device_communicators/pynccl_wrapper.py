@@ -147,6 +147,53 @@ class ncclUniqueId(ctypes.Structure):
     _fields_ = [("internal", ctypes.c_byte * 128)]
 
 
+# NCCL symmetric-memory window registration flags (from nccl.h.in).
+NCCL_WIN_COLL_SYMMETRIC = 0x01
+
+# ncclConfig_t mirrors NCCL_CONFIG_INITIALIZER at v2.30.7-1: 21 fields
+# including the trailing graphStreamOrdering (nccl4py's config_dtype omits
+# the last field; a 20-field binding makes ncclCommInitRankConfig reject the
+# config). magic/version must be set by the caller, tunables left UNDEF.
+NCCL_CONFIG_UNDEF_INT = -2147483648  # INT_MIN
+NCCL_API_MAGIC = 0xCAFEBEEF
+
+
+class ncclConfig_t(ctypes.Structure):
+    _fields_ = [
+        ("size", ctypes.c_size_t),
+        ("magic", ctypes.c_uint),
+        ("version", ctypes.c_uint),
+        ("blocking", ctypes.c_int),
+        ("cgaClusterSize", ctypes.c_int),
+        ("minCTAs", ctypes.c_int),
+        ("maxCTAs", ctypes.c_int),
+        ("netName", ctypes.c_void_p),
+        ("splitShare", ctypes.c_int),
+        ("trafficClass", ctypes.c_int),
+        ("commName", ctypes.c_void_p),
+        ("collnetEnable", ctypes.c_int),
+        ("CTAPolicy", ctypes.c_int),
+        ("shrinkShare", ctypes.c_int),
+        ("nvlsCTAs", ctypes.c_int),
+        ("nChannelsPerNetPeer", ctypes.c_int),
+        ("nvlinkCentricSched", ctypes.c_int),
+        ("graphUsageMode", ctypes.c_int),
+        ("numRmaCtx", ctypes.c_int),
+        ("maxP2pPeers", ctypes.c_int),
+        ("graphStreamOrdering", ctypes.c_int),
+    ]
+
+
+# ncclWaitSignalDesc_t: one descriptor per peer (nccl4py nccl.pyx:781-799).
+class ncclWaitSignalDesc_t(ctypes.Structure):
+    _fields_ = [
+        ("op_cnt", ctypes.c_int32),
+        ("peer", ctypes.c_int32),
+        ("sig_idx", ctypes.c_int32),
+        ("ctx", ctypes.c_int32),
+    ]
+
+
 cudaStream_t = ctypes.c_void_p
 buffer_type = ctypes.c_void_p
 
@@ -408,6 +455,92 @@ class NCCLLibrary:
         Function("ncclCommWindowDeregister", ncclResult_t, [ncclComm_t, ncclWindow_t]),
     ]
 
+    # One-sided RMA primitives (NCCL 2.30+) plus ncclMemAlloc/Free.
+    exported_functions_rma = [
+        # ncclResult_t ncclMemAlloc(void** ptr, size_t size);
+        Function(
+            "ncclMemAlloc",
+            ncclResult_t,
+            [ctypes.POINTER(buffer_type), ctypes.c_size_t],
+        ),
+        # ncclResult_t ncclMemFree(void* ptr);
+        Function("ncclMemFree", ncclResult_t, [buffer_type]),
+        # ncclResult_t ncclPutSignal(const void* localbuff, size_t count,
+        #   ncclDataType_t datatype, int peer, ncclWindow_t peerWin,
+        #   size_t peerWinOffset, int sigIdx, int ctx, unsigned int flags,
+        #   ncclComm_t comm, cudaStream_t stream);
+        Function(
+            "ncclPutSignal",
+            ncclResult_t,
+            [
+                buffer_type,
+                ctypes.c_size_t,
+                ncclDataType_t,
+                ctypes.c_int,
+                ncclWindow_t,
+                ctypes.c_size_t,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_uint,
+                ncclComm_t,
+                cudaStream_t,
+            ],
+        ),
+        # ncclResult_t ncclSignal(int peer, int sigIdx, int ctx, unsigned int flags,
+        #   ncclComm_t comm, cudaStream_t stream);
+        Function(
+            "ncclSignal",
+            ncclResult_t,
+            [
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_uint,
+                ncclComm_t,
+                cudaStream_t,
+            ],
+        ),
+        # ncclResult_t ncclWaitSignal(int nDesc, ncclWaitSignalDesc_t* descs,
+        #   ncclComm_t comm, cudaStream_t stream);
+        Function(
+            "ncclWaitSignal",
+            ncclResult_t,
+            [ctypes.c_int, ctypes.c_void_p, ncclComm_t, cudaStream_t],
+        ),
+        # ncclResult_t ncclWinGetUserPtr(ncclComm_t comm, ncclWindow_t win,
+        #   void** outPtr);
+        Function(
+            "ncclWinGetUserPtr",
+            ncclResult_t,
+            [ncclComm_t, ncclWindow_t, ctypes.POINTER(buffer_type)],
+        ),
+        # ncclResult_t ncclGetPeerDevicePointer(ncclWindow_t win, size_t offset,
+        #   int peer, void** outPtr);
+        Function(
+            "ncclGetPeerDevicePointer",
+            ncclResult_t,
+            [
+                ncclWindow_t,
+                ctypes.c_size_t,
+                ctypes.c_int,
+                ctypes.POINTER(buffer_type),
+            ],
+        ),
+        # ncclResult_t ncclCommInitRankConfig(ncclComm_t* comm, int nranks,
+        #   ncclUniqueId commId, int rank, ncclConfig_t* config);
+        Function(
+            "ncclCommInitRankConfig",
+            ncclResult_t,
+            [
+                ctypes.POINTER(ncclComm_t),
+                ctypes.c_int,
+                ncclUniqueId,
+                ctypes.c_int,
+                ctypes.POINTER(ncclConfig_t),
+            ],
+        ),
+    ]
+
     # class attribute to store the mapping from the path to the library
     # to avoid loading the same library multiple times
     path_to_library_cache: Dict[str, Any] = {}
@@ -441,16 +574,38 @@ class NCCLLibrary:
 
         if so_file not in NCCLLibrary.path_to_dict_mapping:
             _funcs: Dict[str, Any] = {}
-            exported_functions = NCCLLibrary.exported_functions
+            # Copy these lists: extending the class-owned list makes a later
+            # load of an older/different NCCL try to resolve optional symbols.
+            exported_functions = list(NCCLLibrary.exported_functions)
             if hasattr(self.lib, "ncclCommWindowRegister"):
                 exported_functions.extend(NCCLLibrary.exported_functions_symm_mem)
+            rma_names = {func.name for func in NCCLLibrary.exported_functions_rma}
+            # A partially backported/vendor library is not a usable RMA ABI.
+            # Require the complete contract so capability checks cannot pass
+            # and then fail with a late AttributeError.
+            self.has_rma = all(hasattr(self.lib, name) for name in rma_names)
+            if self.has_rma:
+                exported_functions.extend(NCCLLibrary.exported_functions_rma)
             for func in exported_functions:
                 f = getattr(self.lib, func.name)
                 f.restype = func.restype
                 f.argtypes = func.argtypes
                 _funcs[func.name] = f
             NCCLLibrary.path_to_dict_mapping[so_file] = _funcs
+        else:
+            rma_names = {func.name for func in NCCLLibrary.exported_functions_rma}
+            self.has_rma = all(hasattr(self.lib, name) for name in rma_names)
         self._funcs = NCCLLibrary.path_to_dict_mapping[so_file]
+
+    def __getattr__(self, name: str):
+        # Resolve RMA primitives (ncclPutSignal/ncclMemAlloc/...) that are bound
+        # in _funcs but not defined as explicit methods.
+        funcs = self.__dict__.get("_funcs")
+        if funcs is not None and name in funcs:
+            return funcs[name]
+        raise AttributeError(
+            f"'{type(self).__name__}' object has no attribute '{name}'"
+        )
 
     def ncclGetErrorString(self, result: ncclResult_t) -> str:
         return self._funcs["ncclGetErrorString"](result).decode("utf-8")
@@ -649,6 +804,39 @@ class NCCLLibrary:
 
     def ncclCommWindowDeregister(self, comm: ncclComm_t, window: ncclWindow_t) -> None:
         self.NCCL_CHECK(self._funcs["ncclCommWindowDeregister"](comm, window))
+
+    def ncclMemAlloc(self, size: int) -> buffer_type:
+        ptr = buffer_type()
+        self.NCCL_CHECK(self._funcs["ncclMemAlloc"](ctypes.byref(ptr), size))
+        return ptr
+
+    def ncclMemFree(self, ptr: buffer_type) -> None:
+        self.NCCL_CHECK(self._funcs["ncclMemFree"](ptr))
+
+    def ncclPutSignal(self, *args) -> None:
+        self.NCCL_CHECK(self._funcs["ncclPutSignal"](*args))
+
+    def ncclSignal(self, *args) -> None:
+        self.NCCL_CHECK(self._funcs["ncclSignal"](*args))
+
+    def ncclWaitSignal(self, *args) -> None:
+        self.NCCL_CHECK(self._funcs["ncclWaitSignal"](*args))
+
+    def ncclWinGetUserPtr(self, comm, window) -> buffer_type:
+        ptr = buffer_type()
+        self.NCCL_CHECK(
+            self._funcs["ncclWinGetUserPtr"](comm, window, ctypes.byref(ptr))
+        )
+        return ptr
+
+    def ncclGetPeerDevicePointer(self, window, offset: int, peer: int) -> buffer_type:
+        ptr = buffer_type()
+        self.NCCL_CHECK(
+            self._funcs["ncclGetPeerDevicePointer"](
+                window, offset, peer, ctypes.byref(ptr)
+            )
+        )
+        return ptr
 
     def ncclGroupStart(self) -> None:
         self.NCCL_CHECK(self._funcs["ncclGroupStart"]())
