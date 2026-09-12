@@ -1,0 +1,212 @@
+author:	zhaochenyang20
+association:	collaborator
+edited:	false
+status:	none
+--
+cc @zhyncs Who is probably on this part 🤔
+--
+author:	hewr2010
+association:	none
+edited:	false
+status:	none
+--
+I encountered the same problem. Any update?
+--
+author:	zhaochenyang20
+association:	collaborator
+edited:	false
+status:	none
+--
+> Hi, I encountered an inconsistency in decode throughput reporting. When benchmarking with the bench_serving script, the reported TPOT is much lower than the decode throughput logged by the engine. This gap is significant for small models or high concurrency settings.
+
+
+I personally think this is due to inter-process overhead. It's actually acceptable.
+--
+author:	leepoly
+association:	none
+edited:	false
+status:	none
+--
+Hi @zhaochenyang20 
+
+Thanks for the input. However, I believe this gap is significant and deserves more attention.
+
+- The discrepancy is quite large—3584 in the benchmarking script versus 7026 in the engine log. This gap seems substantial enough to be worth investigating further. and I’ve noticed that this issue is not isolated to just my setup. Others have observed this behavior across all models, suggesting a systemic issue.
+- I’ve checked the Nsight system profile, and the engine log is consistent with the real GPU execution time. So **the engine’s reported throughput appears accurate in terms of actual GPU utilization**.
+- Are you suggesting that this gap is caused by CPU-related overhead, e.g., inter-process communication? If so, this CPU overhead seems non-trivial as it matches the GPU execution time?
+
+Looking forward to your thoughts on this!
+--
+author:	zhaochenyang20
+association:	collaborator
+edited:	false
+status:	none
+--
+Sure. I see your point. We will check for this.
+--
+author:	zhaochenyang20
+association:	collaborator
+edited:	false
+status:	none
+--
+@leepoly Sorry I missed your point before. I was saying for the difference between engine and server. I will check it.
+--
+author:	V-yw
+association:	none
+edited:	false
+status:	none
+--
+Has the issue been fixed?
+--
+author:	zhaochenyang20
+association:	collaborator
+edited:	false
+status:	none
+--
+I don't have a clear answer to this. Need someone to profile and check it.
+--
+author:	zhaochenyang20
+association:	collaborator
+edited:	false
+status:	none
+--
+I've asked the community for help.
+--
+author:	YEXINGZHE54
+association:	none
+edited:	false
+status:	none
+--
+I think it's just a difference between  long-time metric and short-time peak metric. From the perspective of bench_serving, estimating token throughput using TPOT (Time Per Output Token) provides a comprehensive evaluation over the entire testing period. On the other hand, the throughput printed in the engine log refers to the number of tokens generated within a single logging interval (which can be understood as the time for 40 consecutive decodes) divided by the time taken. Clearly, the data in the engine log is influenced by various factors, including: the potential interleaving of the prefill phase between decodes, which extends the total time; additionally, the amount of remaining memory also affects the number of tokens output per decode. Of course, the core issue here is that the engine log records short-term peak throughput, and similar results might be obtained if using the P25 (25th percentile) of TPOT for estimation.
+--
+author:	Tshiyao
+association:	none
+edited:	false
+status:	none
+--
+I'm currently learning sglang, I would like to take on this task. By the way, I think it should be the difference between the instantaneous and the average. However, I will go and check it. 
+--
+author:	zhaochenyang20
+association:	collaborator
+edited:	false
+status:	none
+--
+@YEXINGZHE54 @Tshiyao Great!
+--
+author:	Tshiyao
+association:	none
+edited:	true
+status:	none
+--
+I think I've found the cause. In multiple tests, when the backend is specified as "sglang," the `flush_cache` function is called to clear the cache.
+
+ If `flush_cache` is executed successfully, there will be an inconsistency in the Decode Throughput between `bench_serving` and `engine logs`, specifically, `bench_serving` will be lower than `engine logs`. 
+
+If `flush_cache` fails, the difference in Throughput between the two is within an acceptable range.
+
+I speculate that the time loss caused by the successful execution of `flush_cache` might be the reason. The Decode Throughput in `engine logs` is not affected by this, but `bench_serving` is. I'm still not sure how to fix it. Does anyone have any suggestions?
+
+When the backend is specified as "sglang," the following code is called to flush the cache，code in [here](https://github.com/sgl-project/sglang/blob/9cf407729441a18561ee5a8b2c1e3e535ba817f9/python/sglang/bench_serving.py#L961):
+```python
+# Flush cache
+if "sglang" in backend:
+    requests.post(base_url + "/flush_cache")
+```
+
+The specific implementation of `flush_cache` can be found [here](https://github.com/sgl-project/sglang/blob/9cf407729441a18561ee5a8b2c1e3e535ba817f9/python/sglang/srt/managers/scheduler.py#L1677):
+```python
+def flush_cache(self):
+    """Flush the memory pool and cache."""
+    if len(self.waiting_queue) == 0 and (
+        self.running_batch is None or len(self.running_batch.reqs) == 0
+    ):
+        self.tree_cache.reset()
+        self.tree_cache_metrics = {"total": 0, "hit": 0}
+        if self.grammar_backend:
+            self.grammar_backend.reset()
+        self.req_to_token_pool.clear()
+        self.token_to_kv_pool.clear()
+
+        if not self.spec_algorithm.is_none():
+            self.draft_worker.model_runner.req_to_token_pool.clear()
+            self.draft_worker.model_runner.token_to_kv_pool.clear()
+
+        self.num_generated_tokens = 0
+        self.forward_ct_decode = 0
+        self.spec_num_total_accepted_tokens = 0
+        self.spec_num_total_forward_ct = 0
+        torch.cuda.empty_cache()
+        logger.info("Cache flushed successfully!")
+        if_success = True
+    else:
+        logging.warning(
+            f"Cache not flushed because there are pending requests. "
+            f"#queue-req: {len(self.waiting_queue)}, "
+            f"#running-req: {0 if self.running_batch is None else len(self.running_batch.reqs)}"
+        )
+        if_success = False
+    return if_success
+```
+--
+author:	Tshiyao
+association:	none
+edited:	false
+status:	none
+--
+@zhaochenyang20 Excuse me, I have three more questions, and I'm wondering if there are any relevant materials or suggestions:
+
+1. Why does `flush_cache` lead to a decrease in the throughput of `bench_serving`, rather than an increase? When testing with random data, there should be no input cache in the GPU. How should I analyze this situation?
+
+2. If the throughput measured with a failed `flush_cache` is different from that measured with a successful `flush_cache`, which one should be considered accurate? Should it force `flush_cache` to succeed?
+
+3. Should I modify the `bench_serving` code to ensure `flush_cache` succeeds before proceeding with the test? Should I submit a pull request for this?
+
+Thank you!
+--
+author:	zhaochenyang20
+association:	collaborator
+edited:	false
+status:	none
+--
+> [@zhaochenyang20](https://github.com/zhaochenyang20) Excuse me, I have three more questions, and I'm wondering if there are any relevant materials or suggestions:
+> 
+> 1. Why does `flush_cache` lead to a decrease in the throughput of `bench_serving`, rather than an increase? When testing with random data, there should be no input cache in the GPU. How should I analyze this situation?
+> 2. If the throughput measured with a failed `flush_cache` is different from that measured with a successful `flush_cache`, which one should be considered accurate? Should it force `flush_cache` to succeed?
+> 3. Should I modify the `bench_serving` code to ensure `flush_cache` succeeds before proceeding with the test? Should I submit a pull request for this?
+> 
+> Thank you!
+
+cc @FrankLeeeee 
+--
+author:	ch-wan
+association:	collaborator
+edited:	false
+status:	none
+--
+@Tshiyao One potential cause is that `fluse_cache` releases pre-allocated memory in CUDA. https://github.com/sgl-project/sglang/blob/73bc1d00fcc548979141db84e06aa1ae8ed8a13a/python/sglang/srt/managers/scheduler.py#L1819 Therefore, the first requests after flushing may experience "cold start" latency.
+--
+author:	ptimizeroracle
+association:	none
+edited:	true
+status:	none
+--
+I went through both sides of this with the current code (main @ 99b9109). Happy to turn any of it into a fix if wanted, but evidence first.
+
+**The two numbers are different estimators, not two measurements of the same thing:**
+
+| | bench_serving | engine log |
+|---|---|---|
+| definition | TPOT-derived, per request: `(latency − ttft)` over `output_len − 1`, averaged across the whole run, client-side | `num_generated_tokens / gap_latency` where `gap_latency` is the time since the previous log line (`scheduler_components/metrics_reporter.py:799,894`) |
+| window | entire run: queueing, any cold start, `[DONE]` tail included | one reporting interval, near-instantaneous |
+
+So bench < engine is expected whenever the run has any ramp-up: the engine line reads close to a short-window peak, the bench number is a whole-run average.
+
+Three smaller things verified along the way (all `python/sglang/benchmark/serving.py` unless noted):
+
+1. TPOT arithmetic is the standard upstream vLLM formula (`(latency − ttft)/(output_len − 1)`, `:1136`): sound.
+2. `itl` is recorded per stream **event**, not per token (`:334-337`, `:466+`). Events carrying several tokens (stream-interval batching, speculative decoding) contribute one itl sample, so `len(itl) < output_len − 1` and ITL percentiles conflate event latency with token latency. A retokenized correction already exists, but only for the `sglang-oai` backends (`:1131-1135`, `:1145-1155`); the completions/chat paths don't get it. I wrote CPU unit tests pinning this behavior (sum(itl) + [DONE]-tail == latency − ttft exactly; mean(ITL) > TPOT for the same request from denominators alone). Happy to PR them.
+3. `should_flush_cache` is `("sglang" in backend AND SGLANG_IS_IN_CI) or --flush-cache` (`:1467-1471`), not default-on, so the cold-start mechanism discussed earlier in this thread needs CI or the explicit flag to apply to a default run.
+
+If it's useful, the options I see: (a) a note in the bench output clarifying the window difference vs engine logs, (b) an engine-side long-window average for apples-to-apples runs, (c) extending the retokenized ITL path to the other backends. Which, if any, would you want?
+
+--
