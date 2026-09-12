@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38815",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Prevented SWA branching from truncating a hybrid Full/SWA/Mamba insertion key independently of its unsliceable Mamba checkpoint. The regression uses the real unified cache and verifies node depths and Mamba slot ownership at checkpoints 64 and 128, an SWA-created split at 96, a sibling checkpoint at 192, and fallback to checkpoint 64 after targeted Mamba eviction.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python:/job/repo/test/registered/unit/mem_cache /tmp/amdpilot-repo-j-597c6457584a/venv/bin/python -m unittest test_unified_radix_cache_unittest.Test_FULL_SWA_MAMBA_ps1_sw128_h8l32.test_swa_branch_does_not_rekey_later_mamba_checkpoint (guard temporarily disabled)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: SWA reduced the effective insertion length from the Mamba checkpoint depth 192 to split depth 96 (AssertionError: 96 != 192). Raw output: reports/j-597c6457584a/raw/failing_before.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python:/job/repo/test/registered/unit/mem_cache /tmp/amdpilot-repo-j-597c6457584a/venv/bin/python -m unittest test_unified_radix_cache_unittest.Test_FULL_SWA_MAMBA_ps1_sw128_h8l32.test_swa_branch_does_not_rekey_later_mamba_checkpoint",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after actual cache state: split node 96 owns no Mamba slot, fork leaf 192 owns its generated checkpoint slot, main-path nodes 64/128 retain their original slots, and evicting state192 makes the fork rematch resolve exactly to state64. Raw output: reports/j-597c6457584a/raw/passing_python_after_format.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python:/job/repo/test/registered/unit/mem_cache /tmp/amdpilot-repo-j-597c6457584a/venv/bin/python -m unittest test_unified_radix_cache_unittest.Test_FULL_SWA_ps1_sw4.test_swa_branching_seqlen_caps_insert_after_forward",
+      "exit_code": 0,
+      "what_was_measured": "Neighboring Full+SWA behavior still caps insertion at the SWA branch when no Mamba component exists. Raw output: reports/j-597c6457584a/raw/swa_neighbor.log"
+    },
+    {
+      "command": "SGLANG_UNIFIED_RADIX_TREE_CORE_BACKEND=rust HIP_VISIBLE_DEVICES=0 ... test_swa_branch_does_not_rekey_later_mamba_checkpoint",
+      "exit_code": 1,
+      "what_was_measured": "Rust backend did not reach the test: the prepared extension loader failed while querying cargo because the cargo executable is not runnable (PermissionError: [Errno 13]). Raw output: reports/j-597c6457584a/raw/passing_rust.log"
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-597c6457584a/pre-commit-cache /opt/venv/bin/pre-commit run --files python/sglang/srt/mem_cache/unified_cache/components/swa_component.py test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, syntax, registry, and repository policy hooks passed. Raw output: reports/j-597c6457584a/raw/precommit_after_format.log"
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "GPU evidence: the cache-state regression ran with HIP_VISIBLE_DEVICES=0 on one AMD Instinct MI350X using torch 2.11.0+rocm7.2 and HIP 7.2.26015; reports/j-597c6457584a/raw/gpu_evidence.log records the separate device probe.",
+    "The real thinkingmachines/Inkling checkpoint was not available locally, so end-to-end model token/logprob parity was not rerun; correctness was verified against actual unified-cache node and Mamba-slot ownership rather than a hit counter.",
+    "The Rust TreeCore-backed copy of the shared regression could not execute because the prepared cargo executable returned PermissionError before extension loading. No Rust or FlyDSL native source changed, and no native library was rebuilt.",
+    "The fix matches the independently inspected candidate in unmerged upstream PR https://github.com/sgl-project/sglang/pull/37584, but this change was reproduced and validated against the recorded mirror base rather than copied without verification."
+  ]
+}

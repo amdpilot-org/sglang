@@ -916,6 +916,13 @@ class SWAComponent(TreeComponent):
         # that boundary so insertion creates a tombstone instead of live SWA KV.
         insert_params.swa_evicted_seqlen = req.kv.swa_evicted_seqlen
 
+        # Recurrent state cannot be sliced like KV.  On hybrid caches, Mamba's
+        # checkpoint depth must therefore own the insertion length; otherwise
+        # an SWA branch can truncate the key while leaving a later checkpoint
+        # attached to that earlier prefix.
+        if self.cache.is_mamba_enabled:
+            return None
+
         branching_seqlen = req.swa_branching_seqlen
         if branching_seqlen is None or branching_seqlen <= req.kv.cache_protected_len:
             return None
