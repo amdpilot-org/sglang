@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36071",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared main checkout still directly registered graph-owned custom-all-reduce inputs during ROCm DSA decode with DP attention. Added a narrow policy that selects the stable pre-registered copy-in path only for DSA decode plus DP attention (and preserves the existing memory-saver behavior), forwarding it to both AITER and SGLang custom-all-reduce implementations. This matches open upstream PR #36088; linked PR #36079 instead disables only DSA dense dual graphs and does not address general DP-lane graph skew.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-bbbcc73e6807/venv/bin/python -m pytest -q test/registered/unit/distributed/test_custom_all_reduce_graph_capture_policy.py (before source change)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: all 7 initial policy/dispatch cases failed because the checkout had no DSA+DP capture policy. Raw output: reports/j-bbbcc73e6807/failing-before-policy.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bbbcc73e6807/venv/bin/python -m pytest -q test/registered/unit/distributed/test_custom_all_reduce_graph_capture_policy.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression and independent boundaries: 9 cases cover DSA with and without DP attention, non-DSA DP attention, memory saver, registered/copy-in capture selection, deterministic SGLang dispatch, normal SGLang dispatch, and AITER dispatch. Raw output: reports/j-bbbcc73e6807/passing-after-policy.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bbbcc73e6807/venv/bin/python reports/j-bbbcc73e6807/gpu_stable_copy_graph.py",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned MI355X gfx950, four separately captured graphs replayed in reverse order through one stable BF16 staging address; observed FP32 sums [8192, 4096, 2048, 1024] exactly matched the independent expected values. Raw output: reports/j-bbbcc73e6807/gpu-stable-copy-graph.txt"
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files python/sglang/srt/distributed/device_communicators/custom_all_reduce.py test/registered/unit/distributed/test_custom_all_reduce_graph_capture_policy.py reports/j-bbbcc73e6807/gpu_stable_copy_graph.py reports/j-bbbcc73e6807/result.json",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, Ruff lint/format, AST, codespell, test registry, and other configured checks passed. Raw output: reports/j-bbbcc73e6807/pre-commit.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Single assigned AMD Instinct MI355X, gfx950:sramecc+:xnack-, executed the stable copy-in CUDA-graph numerical check. This is not a multi-rank custom-all-reduce reproduction."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one gfx950 GPU was assigned, so the reported eight-GPU TP8/DP4 skewed collective could not be reproduced or validated end to end.",
+    "The amd/GLM-5.2-MXFP4 weights were not available, so model logits, token generation, semantic accuracy, and throughput were not tested.",
+    "The GPU fixture validates stable-address copy-in across separately captured graphs on one device; it does not validate peer IPC registration, AITER/SGLang multi-rank custom-all-reduce kernels, or distributed replay skew.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
