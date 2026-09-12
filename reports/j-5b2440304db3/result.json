@@ -1,0 +1,32 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31271",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the GPT-OSS TokenizersBackend warning with the public openai/gpt-oss-20b tokenizer under Transformers 5.12.1. The declared PreTrainedTokenizerFast name is an alias of the runtime TokenizersBackend class, and no required tokenizer behavior was missing. Existing upstream PR 34451 removes the false-positive warning and unnecessary retry; its source change was verified locally rather than duplicated.",
+  "tests": [
+    {
+      "command": "HF_HOME=/tmp/amdpilot-repo-j-5b2440304db3/hf-cache /tmp/amdpilot-repo-j-5b2440304db3/venv/bin/python < current GPT-OSS retry/attribute probe",
+      "exit_code": 0,
+      "what_was_measured": "On current main, public GPT-OSS loaded as TokenizersBackend for both trust settings, invoked resolution once each, emitted the reported warning with trust enabled, and retained get_vocab and backend_tokenizer."
+    },
+    {
+      "command": "git apply --include=python/sglang/srt/utils/hf_transformers/tokenizer.py reports/j-5b2440304db3/raw/upstream_pr_34451.diff && HF_HOME=/tmp/amdpilot-repo-j-5b2440304db3/hf-cache /tmp/amdpilot-repo-j-5b2440304db3/venv/bin/python < candidate GPT-OSS functional probe",
+      "exit_code": 0,
+      "what_was_measured": "With upstream PR 34451's source change, both trust settings skipped the unnecessary retry and warning while preserving get_vocab, encode, decode, apply_chat_template, chat_template, backend_tokenizer, exact token IDs, round-trip text, and 200019-entry vocabulary."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5b2440304db3/venv/bin/python -m pytest -q test/registered/unit/tokenizer/test_tokenizers_backend_resolution.py",
+      "exit_code": 0,
+      "what_was_measured": "Locally developed regression tests demonstrated that a declared PreTrainedTokenizerFast alias skips resolution and preserves trust_remote_code, while an undeclared backend still retries with the trust setting. These exploratory tests were not retained because upstream PR 34451 already contains the corresponding regression coverage."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "Tokenizer loading and functional probes ran on CPU; no model weights or GPU kernels were used.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The exact private merged-LoRA checkpoint was unavailable and was not accessed or reconstructed.",
+    "The exact NVIDIA B200/CUDA 13 serving path was unavailable in the prepared ROCm environment.",
+    "No full GPT-OSS model weights were downloaded, so server startup, architecture execution, semantic output, distributed execution, and merged-LoRA behavior remain unverified.",
+    "The conclusion applies to the public openai/gpt-oss-20b tokenizer revision 6cee5e81ee83917806bbde320786a8fb61efebee and its declared PreTrainedTokenizerFast class."
+  ]
+}

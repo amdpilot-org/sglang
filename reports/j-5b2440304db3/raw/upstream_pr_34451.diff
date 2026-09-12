@@ -1,0 +1,241 @@
+diff --git a/python/sglang/srt/utils/hf_transformers/tokenizer.py b/python/sglang/srt/utils/hf_transformers/tokenizer.py
+index def8d25814e2..e63fd21a44f9 100644
+--- a/python/sglang/srt/utils/hf_transformers/tokenizer.py
++++ b/python/sglang/srt/utils/hf_transformers/tokenizer.py
+@@ -49,38 +49,71 @@
+ # Class name used by transformers v5 when no tokenizer mapping exists for a model_type.
+ _TOKENIZERS_BACKEND = "TokenizersBackend"
+ 
++# Declared tokenizer_class values that are generic bases/aliases, not model-specific
++# classes. In transformers v5, PreTrainedTokenizerFast is an alias of TokenizersBackend
++# and PreTrainedTokenizer is an alias of PythonBackend, so a model declaring one of
++# these (e.g. gpt-oss) has no model-specific tokenizer class to recover.
++_GENERIC_TOKENIZER_CLASS_NAMES = frozenset(
++    {
++        "TokenizersBackend",
++        "PreTrainedTokenizerFast",
++        "PreTrainedTokenizer",
++        "PreTrainedTokenizerBase",
++        "PythonBackend",
++    }
++)
+ 
+-def _load_tokenizer_by_declared_class(tokenizer_name, *args, **kwargs):
+-    """Load tokenizer by the class declared in tokenizer_config.json.
+-
+-    AutoTokenizer resolves to TokenizersBackend when the model's config
+-    model_type has no tokenizer class mapping (e.g. deepseek_vl_v2), even
+-    though tokenizer_config.json declares a standard class like
+-    LlamaTokenizerFast.  Returns None if it cannot improve on AutoTokenizer.
+-    """
+-    import transformers
+ 
++def _read_tokenizer_config(tokenizer_name, revision=None):
++    """Return the parsed tokenizer_config.json, or None if unavailable."""
+     try:
+-        revision = kwargs.get("revision") or kwargs.get("tokenizer_revision")
+         config_file = _resolve_local_or_cached_file(
+             tokenizer_name, "tokenizer_config.json", revision
+         )
+         with open(config_file) as f:
+-            tok_config = json.load(f)
+-        tok_class_name = tok_config.get("tokenizer_class")
++            return json.load(f)
+     except FileNotFoundError:
+         return None
+-    except (OSError, json.JSONDecodeError) as e:
++    except (OSError, ValueError) as e:
++        # ValueError also covers json.JSONDecodeError and huggingface_hub's
++        # HFValidationError (raised for local paths with no such file).
+         logger.debug(
+             "Failed to read tokenizer_config.json for %s: %s", tokenizer_name, e
+         )
+         return None
+ 
++
++def _has_generic_declared_tokenizer_class(tokenizer_name, revision=None):
++    """Whether tokenizer_config.json declares a generic base/alias class.
++
++    Those models have no model-specific class to recover, so re-resolving a
++    ``TokenizersBackend`` instance for them is pointless (#31271).
++    """
++    tok_config = _read_tokenizer_config(tokenizer_name, revision) or {}
++    return tok_config.get("tokenizer_class") in _GENERIC_TOKENIZER_CLASS_NAMES
++
++
++def _load_tokenizer_by_declared_class(tokenizer_name, *args, **kwargs):
++    """Load tokenizer by the class declared in tokenizer_config.json.
++
++    AutoTokenizer resolves to TokenizersBackend when the model's config
++    model_type has no tokenizer class mapping (e.g. deepseek_vl_v2), even
++    though tokenizer_config.json declares a standard class like
++    LlamaTokenizerFast.  Returns None if it cannot improve on AutoTokenizer.
++    """
++    import transformers
++
++    revision = kwargs.get("revision") or kwargs.get("tokenizer_revision")
++    tok_config = _read_tokenizer_config(tokenizer_name, revision)
++    if tok_config is None:
++        return None
++
++    tok_class_name = tok_config.get("tokenizer_class")
+     if not tok_class_name:
+         return None
+ 
+-    # Skip base classes that don't implement required methods (e.g. get_vocab)
+-    if tok_class_name in ("PreTrainedTokenizer", "PreTrainedTokenizerBase"):
++    # Skip generic bases/aliases (no model-specific class to recover).
++    if tok_class_name in _GENERIC_TOKENIZER_CLASS_NAMES:
+         return None
+ 
+     tok_cls = getattr(transformers, tok_class_name, None)
+@@ -521,9 +554,15 @@ def get_tokenizer(
+             # With fastokens, the patched TokenizersBackend.from_pretrained already
+             # returned a tokenizer whose backend is a fastokens shim. Re-resolving via
+             # the declared class (e.g. Qwen2Tokenizer) would discard that work.
++            # Models that declare a generic class (gpt-oss declares
++            # PreTrainedTokenizerFast, which *is* TokenizersBackend in transformers v5)
++            # have nothing to re-resolve to, so skip the retry for them (#31271).
+             if (
+                 type(tokenizer).__name__ == _TOKENIZERS_BACKEND
+                 and tokenizer_backend != "fastokens"
++                and not _has_generic_declared_tokenizer_class(
++                    tokenizer_name, kwargs.get("revision") or tokenizer_revision
++                )
+             ):
+                 tokenizer = _resolve_tokenizers_backend(
+                     tokenizer_name, *args, **common_kwargs
+diff --git a/test/registered/unit/utils/test_hf_transformers.py b/test/registered/unit/utils/test_hf_transformers.py
+index 27c0494183b6..8517a06f5f64 100644
+--- a/test/registered/unit/utils/test_hf_transformers.py
++++ b/test/registered/unit/utils/test_hf_transformers.py
+@@ -5,16 +5,21 @@
+ """
+ 
+ import inspect
++import json
++import logging
+ import tempfile
+ import unittest
++from pathlib import Path
+ from types import SimpleNamespace
+ from unittest.mock import MagicMock, patch
+ 
++import transformers
+ from transformers import PretrainedConfig
+ from transformers.image_processing_utils import BaseImageProcessor
+ 
+ import sglang.srt.utils.hf_transformers.processor as processor_utils
+ from sglang.srt.utils import hf_transformers_patches
++from sglang.srt.utils.hf_transformers import tokenizer as tokenizer_mod
+ from sglang.srt.utils.hf_transformers.common import (
+     _is_deepseek_ocr2_model,
+     _is_deepseek_ocr_model,
+@@ -26,7 +31,11 @@
+     get_hf_text_config,
+     get_rope_config,
+ )
+-from sglang.srt.utils.hf_transformers.tokenizer import _fix_special_tokens_pattern
++from sglang.srt.utils.hf_transformers.tokenizer import (
++    _fix_special_tokens_pattern,
++    _load_tokenizer_by_declared_class,
++    get_tokenizer,
++)
+ from sglang.srt.utils.hf_transformers_patches import normalize_rope_scaling_compat
+ from sglang.test.ci.ci_register import register_cpu_ci
+ 
+@@ -588,6 +597,94 @@ def test_no_change_when_no_pattern(self):
+         self.assertFalse(hasattr(tok, "special_tokens_pattern"))
+ 
+ 
++# ---------------------------------------------------------------------------
++# get_tokenizer — generic declared tokenizer classes (gpt-oss / #31271)
++# ---------------------------------------------------------------------------
++
++
++class TestGenericDeclaredTokenizerClass(unittest.TestCase):
++    """gpt-oss and similar models declare PreTrainedTokenizerFast, which *is*
++    TokenizersBackend in transformers v5. There is no model-specific class to
++    recover, so get_tokenizer must skip the re-resolve retry (and its
++    false-positive warning) for them.
++    """
++
++    _WARN_SNIPPET = "still TokenizersBackend after retries"
++
++    def _tmp_dir(self):
++        tmp = tempfile.TemporaryDirectory()
++        self.addCleanup(tmp.cleanup)
++        return tmp.name
++
++    def _model_dir(self, tok_class_name):
++        model_dir = self._tmp_dir()
++        (Path(model_dir) / "tokenizer_config.json").write_text(
++            json.dumps({"tokenizer_class": tok_class_name})
++        )
++        return model_dir
++
++    def _get_tokenizer(self, model_dir):
++        """Run get_tokenizer with the initial load stubbed to a TokenizersBackend.
++
++        Returns the tokenizer and the patched module-level ``AutoTokenizer``,
++        which is only touched by the ``use_fast=False`` retry.
++        """
++        backend = type("TokenizersBackend", (), {})()
++        with patch.object(
++            tokenizer_mod, "_auto_tokenizer_from_pretrained", return_value=backend
++        ), patch.object(tokenizer_mod, "AutoTokenizer") as auto_tokenizer, patch.object(
++            tokenizer_mod, "_apply_post_load_fixes", side_effect=lambda tok, *a: tok
++        ):
++            auto_tokenizer.from_pretrained.return_value = backend
++            tokenizer = get_tokenizer(model_dir, trust_remote_code=True)
++        return tokenizer, auto_tokenizer
++
++    def test_generic_declared_class_skips_retry_and_warning(self):
++        # Repro for #31271: openai/gpt-oss-20b declares PreTrainedTokenizerFast.
++        for declared in (
++            "PreTrainedTokenizerFast",
++            "TokenizersBackend",
++            "PreTrainedTokenizer",
++            "PythonBackend",
++        ):
++            with self.subTest(declared=declared):
++                with self.assertNoLogs(tokenizer_mod.logger, logging.WARNING):
++                    tokenizer, auto_tokenizer = self._get_tokenizer(
++                        self._model_dir(declared)
++                    )
++                self.assertEqual(type(tokenizer).__name__, "TokenizersBackend")
++                auto_tokenizer.from_pretrained.assert_not_called()
++
++    def test_specific_declared_class_still_retries_and_warns(self):
++        with patch.object(
++            tokenizer_mod, "_load_tokenizer_by_declared_class", return_value=None
++        ):
++            with self.assertLogs(tokenizer_mod.logger, logging.WARNING) as logs:
++                tokenizer, auto_tokenizer = self._get_tokenizer(
++                    self._model_dir("LlamaTokenizerFast")
++                )
++
++        self.assertEqual(type(tokenizer).__name__, "TokenizersBackend")
++        auto_tokenizer.from_pretrained.assert_called_once()
++        self.assertTrue(
++            any(self._WARN_SNIPPET in line for line in logs.output), logs.output
++        )
++
++    def test_missing_tokenizer_config_still_retries(self):
++        model_dir = self._tmp_dir()
++        with patch.object(
++            tokenizer_mod, "_load_tokenizer_by_declared_class", return_value=None
++        ):
++            _, auto_tokenizer = self._get_tokenizer(model_dir)
++        auto_tokenizer.from_pretrained.assert_called_once()
++
++    def test_load_by_declared_class_skips_generic_without_loading(self):
++        model_dir = self._model_dir("PreTrainedTokenizerFast")
++        with patch.object(transformers, "PreTrainedTokenizerFast") as tok_cls:
++            self.assertIsNone(_load_tokenizer_by_declared_class(model_dir))
++        tok_cls.from_pretrained.assert_not_called()
++
++
+ # ---------------------------------------------------------------------------
+ # __init__.py re-exports
+ # ---------------------------------------------------------------------------

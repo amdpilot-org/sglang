@@ -1,0 +1,71 @@
+.F                                                                       [100%]
+=================================== FAILURES ===================================
+_ TestTokenizersBackendResolution.test_undeclared_backend_retries_with_trust_setting _
+
+self = <test_tokenizers_backend_resolution.TestTokenizersBackendResolution testMethod=test_undeclared_backend_retries_with_trust_setting>
+
+    def test_undeclared_backend_retries_with_trust_setting(self):
+        tokenizer = object.__new__(PreTrainedTokenizerFast)
+        resolved = object()
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "tokenizer_config.json").write_text("{}")
+            with (
+                patch(
+                    "sglang.srt.utils.hf_transformers.tokenizer._auto_tokenizer_from_pretrained",
+                    return_value=tokenizer,
+                ),
+                patch(
+                    "sglang.srt.utils.hf_transformers.tokenizer._resolve_tokenizers_backend",
+                    return_value=resolved,
+                ) as retry,
+                patch(
+                    "sglang.srt.utils.hf_transformers.tokenizer._apply_post_load_fixes",
+                    side_effect=lambda value, *_: value,
+                ),
+            ):
+>               result = get_tokenizer(directory, trust_remote_code=True)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/registered/unit/tokenizer/test_tokenizers_backend_resolution.py:59: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/srt/utils/hf_transformers/tokenizer.py:571: in get_tokenizer
+    and not _matches_declared_tokenizer_class(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+tokenizer = <[AttributeError("'property' object has no attribute 'items'") raised in repr()] TokenizersBackend object at 0x772c8a7a1400>
+tokenizer_name = '/tmp/tmpl4sczvzj', revision = None
+
+    def _matches_declared_tokenizer_class(tokenizer, tokenizer_name, revision=None):
+        """Return whether a v5 backend is the class requested by the checkpoint.
+    
+        Transformers v5 renamed ``PreTrainedTokenizerFast`` to
+        ``TokenizersBackend`` while retaining the old name as an alias.  Therefore
+        the runtime class name alone does not mean that AutoTokenizer fell back to
+        a generic, incompatible tokenizer.
+        """
+        import transformers
+    
+        try:
+            config_file = _resolve_local_or_cached_file(
+                tokenizer_name, "tokenizer_config.json", revision
+            )
+            with open(config_file) as f:
+                tok_class_name = json.load(f).get("tokenizer_class")
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            return False
+    
+>       declared_class = getattr(transformers, tok_class_name, None)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: attribute name must be string, not 'NoneType'
+
+python/sglang/srt/utils/hf_transformers/tokenizer.py:74: TypeError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/tokenizer/test_tokenizers_backend_resolution.py::TestTokenizersBackendResolution::test_undeclared_backend_retries_with_trust_setting
+1 failed, 1 passed, 1 warning in 3.44s
