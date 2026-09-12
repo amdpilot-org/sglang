@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34092",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2985",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2950",
+  "candidate_commit": "8ae54e54289174deeb7f13f3f306126f430ca108",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the default Transformers 5.12.1 generated-config crash and its regression suite passes, but it remains a partial fix: SGLang still forces deepseek_v4 through a V3-derived alias despite claiming native V4 parsing, and incomplete modern compression/RoPE mappings are silently converted to different runtime behavior rather than rejected.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python AITER_JIT_DIR=/tmp/amdpilot-repo-j-cfe8cad72c79/cache/aiter /tmp/amdpilot-repo-j-cfe8cad72c79/venv/bin/python /job/review-evidence/j-cfe8cad72c79/repro_contract.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction using a serialized Transformers DeepseekV4Config: indexer count was 0 and ModelConfig raised AttributeError for missing compress_ratios. Raw log: /job/review-evidence/j-cfe8cad72c79/base-repro.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python AITER_JIT_DIR=/tmp/amdpilot-repo-j-cfe8cad72c79/cache/aiter /tmp/amdpilot-repo-j-cfe8cad72c79/venv/bin/python /job/review-evidence/j-cfe8cad72c79/repro_contract.py (candidate 8ae54e54289174deeb7f13f3f306126f430ca108)",
+      "exit_code": 0,
+      "what_was_measured": "Passing candidate default generated-config path: one C4 indexer layer and per-layer ratios [128, 128, 128, 4]. The loaded class was still the SGLang V3-derived alias. Raw log: /job/review-evidence/j-cfe8cad72c79/candidate-repro.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python AITER_JIT_DIR=/tmp/amdpilot-repo-j-cfe8cad72c79/cache/aiter /tmp/amdpilot-repo-j-cfe8cad72c79/venv/bin/python -m pytest -q test/registered/unit/configs/test_model_config.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 11 tests and 4 subtests passed. Raw log: /job/review-evidence/j-cfe8cad72c79/candidate-pytest.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python AITER_JIT_DIR=/tmp/amdpilot-repo-j-cfe8cad72c79/cache/aiter /tmp/amdpilot-repo-j-cfe8cad72c79/venv/bin/python /job/review-evidence/j-cfe8cad72c79/adversarial_candidate.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial inspection: partial modern rates silently normalized to [0, 4], a missing compress RoPE subsection silently normalized to {}, and get_config returned _DeepseekV4ConfigAlias instead of Transformers DeepseekV4Config. Raw log: /job/review-evidence/j-cfe8cad72c79/candidate-adversarial.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One ROCm GPU was visible, but no DeepSeek V4 weights were available; only deterministic CPU-side configuration and import-path behavior were tested."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "deepseek_v4 remains registered to the V3-derived _DeepseekV4ConfigAlias, so the claimed native Transformers V4 parser path is not implemented.",
+    "A Transformers-created config with a partial compress_rates mapping silently maps an unmapped layer type to compression ratio 0 instead of rejecting the incomplete mapping.",
+    "Nested rope_parameters missing the active compress subsection silently becomes an empty/default scaling configuration instead of failing validation."
+  ],
+  "remaining_limitations": [
+    "Transformers 5.12.1 was available rather than exactly 4.57.x; it emits the modern schema described by the issue.",
+    "No DeepSeek V4 weights were available, so weight loading, serving startup, GPU numerical parity, model accuracy, and distributed execution were not verified.",
+    "No native files changed in the candidate, so native rebuild was not applicable.",
+    "The tiny Llama serving fixture cannot validate DeepSeek V4 architecture or RoPE semantics and was not used as proof."
+  ]
+}
