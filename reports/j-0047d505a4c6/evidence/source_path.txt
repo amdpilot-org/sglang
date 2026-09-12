@@ -1,0 +1,91 @@
+Candidate: bab33e2e1c26450edc7661eb4de484af3d331740
+Candidate production diff versus prepared base:
+Ordinary generation gate and token commit:
+   310	                    and req.inflight_middle_chunks <= 0
+   311	                )
+   312	                sampling_mask_finish_reason = None
+   313	                if should_commit_output and req.return_sampling_mask:
+   314	                    assert logits_output is not None
+   315	                    statuses = logits_output.next_token_sampling_mask_status
+   316	                    status = None if statuses is None else statuses[i]
+   317	                    sampling_mask_finish_reason = self.get_sampling_mask_finish_reason(
+   318	                        status=status
+   319	                    )
+   320	                if (
+   321	                    batch.return_hidden_states
+   322	                    and logits_output.hidden_states is not None
+   323	                ):
+   324	                    assert extend_input_len_per_req is not None
+   325	                    hidden_state_offset = self._append_prefill_hidden_states(
+   326	                        req=req,
+   327	                        logits_output=logits_output,
+   328	                        hidden_state_offset=hidden_state_offset,
+   329	                        capture_hidden_mode=prefill_hidden_capture_mode,
+   330	                        extend_input_len=extend_input_len_per_req[i],
+   331	                        store=(
+   332	                            should_commit_output and sampling_mask_finish_reason is None
+   333	                        ),
+   334	                    )
+   335
+   336	                if (
+   337	                    req.finished() and req.inflight_middle_chunks <= 0
+   338	                ) or req.is_retracted:
+   339	                    # Decode req in a mixed batch, or a retracted req. Keep an
+   340	                    # aborted middle chunk in the chunked branch long enough to
+   341	                    # drain its accounting without streaming it.
+   342	                    continue
+   343
+   344	                if req.inflight_middle_chunks <= 0:
+   345	                    req.time_stats.set_prefill_finished_time()
+   346
+   347	                    if sampling_mask_finish_reason is not None:
+   348	                        req.to_finish = sampling_mask_finish_reason
+   349	                        req.update_finish_state(0)
+   350	                    elif req.beam_group is not None:
+   351	                        # The relay point already replaced the sampled-token
+   352	                        # append; the group owns all finish semantics.
+   353	                        self.beam_coordinator.commit_prefill(
+   354	                            req, up_to_tick=batch.forward_iter
+   355	                        )
+v0.5.17 hidden-state offset implementation:
+   605	            num_input_logprobs = (
+   606	                self.logprob_result_processor.calculate_num_input_logprobs(
+   607	                    req,
+   608	                    extend_input_len,
+   609	                    extend_logprob_start_len,
+   610	                )
+   611	            )
+   612	            if req.return_logprob:
+   613	                self.logprob_result_processor.add_input_logprob_return_values(
+   614	                    i,
+   615	                    req,
+   616	                    logits_output,
+   617	                    logprob_pt,
+   618	                    num_input_logprobs,
+   619	                    last_prefill_chunk=False,
+   620	                )
+   621	            logprob_pt += num_input_logprobs
+   622	        return logprob_pt
+   623
+   624	    def _resolve_spec_v2_tokens(
+   625	        self,
+   626	        result: GenerationBatchResult,
+   627	        batch: ScheduleBatch,
+   628	    ) -> List[List[int]]:
+   629	        """Resolve the padded next token ids for spec-v2 (overlap and non-overlap)."""
+   630	        assert result.next_token_ids.is_cpu
+   631	        assert result.accept_lens.is_cpu
+   632
+   633	        next_token_ids = result.next_token_ids.tolist()
+   634	        accept_lens = result.accept_lens.tolist()
+   635	        result.num_correct_drafts = sum(accept_lens) - len(batch.reqs)
+   636	        result.num_correct_drafts_per_req_cpu = [x - 1 for x in accept_lens]
+   637
+   638	        block_accept_lens = (
+   639	            result.block_accept_lens.tolist()
+   640	            if result.block_accept_lens is not None
+   641	            else None
+   642	        )
+   643	        result.num_block_accept_tokens = (
+   644	            sum(block_accept_lens) if block_accept_lens else 0
+   645	        )
