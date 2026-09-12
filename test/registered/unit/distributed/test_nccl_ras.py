@@ -13,6 +13,7 @@ import copy
 import json
 import os
 import socket
+import threading
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -164,6 +165,41 @@ class TestParseStatus(CustomTestCase):
             st = client.poll_status()
         self.assertIsNotNone(st)
         self.assertEqual(st.communicators_count, 1)
+
+    def test_socket_client_allows_delayed_job_wide_status(self):
+        """The default timeout must allow NCCL to collect a job-wide reply."""
+        ready = threading.Event()
+        port = []
+        server_errors = []
+
+        def serve_status():
+            try:
+                with socket.socket() as listener:
+                    listener.bind(("127.0.0.1", 0))
+                    listener.listen(1)
+                    port.append(listener.getsockname()[1])
+                    ready.set()
+                    conn, _ = listener.accept()
+                    with conn:
+                        request = b""
+                        while request.count(b"\n") < 2:
+                            request += conn.recv(4096)
+                        self.assertEqual(request, b"SET FORMAT json\nSTATUS\n")
+                        _time.sleep(1.2)
+                        conn.sendall(b"OK\n" + json.dumps(_healthy()).encode())
+            except BaseException as exc:
+                server_errors.append(exc)
+
+        server = threading.Thread(target=serve_status)
+        server.start()
+        self.assertTrue(ready.wait(timeout=1.0))
+        status = RasSocketClient(addr="127.0.0.1", port=port[0]).poll_status()
+        server.join(timeout=3.0)
+
+        self.assertFalse(server.is_alive())
+        self.assertEqual(server_errors, [])
+        self.assertIsNotNone(status)
+        self.assertEqual(status.communicators_count, 1)
 
     def test_from_endpoint_parsing(self):
         c = RasSocketClient.from_endpoint("10.0.0.1:28029")

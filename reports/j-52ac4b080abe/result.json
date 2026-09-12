@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32928",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR https://github.com/amdpilot-org/sglang/pull/2789 at 93773a6d3a67ed79e50d198c20f9964be234832e and corrected the concrete timeout defect identified by review PR https://github.com/amdpilot-org/sglang/pull/2874. RasSocketClient now uses the NCCL reference client's five-second default read timeout, and a protocol-correct loopback regression verifies that a valid STATUS response delayed by 1.2 seconds is accepted instead of becoming poll_success=0.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-52ac4b080abe/venv/bin/python -m pytest -q test/registered/unit/distributed/test_nccl_ras.py::TestParseStatus::test_socket_client_allows_delayed_job_wide_status (with candidate read_timeout default restored to 1.0)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction against the candidate behavior: a loopback server read both protocol commands, delayed 1.2 seconds, and returned valid STATUS JSON; poll_status returned None. Raw output: reports/j-52ac4b080abe/raw/failing-before-regression.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-52ac4b080abe/venv/bin/python -m pytest -q test/registered/unit/distributed/test_nccl_ras.py::TestParseStatus::test_socket_client_allows_delayed_job_wide_status",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression with the five-second default; the same valid 1.2-second delayed STATUS response parsed successfully. Raw output: reports/j-52ac4b080abe/raw/passing-after-regression.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-52ac4b080abe/venv/bin/python -m pytest -q test/registered/unit/distributed/test_nccl_ras.py",
+      "exit_code": 0,
+      "what_was_measured": "Full NCCL RAS parser, socket, detector, metrics, monitor, and election regression suite: 35 passed and 2 subtests passed. Raw output: reports/j-52ac4b080abe/raw/unit-tests-after.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-52ac4b080abe/venv/bin/python -m compileall -q python/sglang/srt/distributed/nccl_ras.py python/sglang/srt/environ.py python/sglang/srt/managers/scheduler.py python/sglang/srt/observability/metrics_collector.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python integration modules compile successfully. Raw output: reports/j-52ac4b080abe/raw/environment-and-static.log"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "No GPU execution was needed to reproduce or correct the socket timeout. Environment inspection found one AMD Instinct MI355X, Torch 2.11.0+rocm7.2, and RCCL API compatibility 2.27.7; this cannot qualify NVIDIA NCCL RAS 2.28.7+ behavior.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Live NVIDIA NCCL 2.28.7+ STATUS polling remains unverified because the assigned environment is AMD/RCCL 2.27.7.",
+    "Two-node unresponsive (~5 second) and considered_dead (~60 second) transitions remain unverified because only one assigned GPU/node is available.",
+    "TP=2 serving metrics remain unverified because only one assigned GPU is available.",
+    "Listeners were observed on localhost:28028, but they were not probed because they may belong to other workloads and do not establish a qualified NVIDIA NCCL RAS environment.",
+    "The deterministic tiny Llama fixture was not used because it cannot supply NVIDIA NCCL RAS, a second node, or TP=2 on a single assigned GPU."
+  ]
+}
