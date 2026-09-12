@@ -1,0 +1,29 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36820",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "reproduced",
+  "summary": "Reproduced that Qwen3 a2a=none enters the full EP post-expert all-reduce even when the local expert contribution is identically zero. The sparse destination-aware transport was not implemented because the prepared node has one AMD GPU and cannot validate the required multi-rank protocol; this contribution is evidence and an explicit limitation report, not a feature-complete fix.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python XDG_CACHE_HOME=/tmp/amdpilot-repo-j-25beb90fd317/test-cache TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-25beb90fd317/triton-cache /tmp/amdpilot-repo-j-25beb90fd317/venv/bin/python -m pytest -q reports/j-25beb90fd317/test_qwen3_none_path_contract.py",
+      "exit_code": 0,
+      "what_was_measured": "Actual Qwen3 forward_normal control flow: zero and nonzero local expert outputs both invoke the EP reduction; EP=1 does not; an existing fused-reduction skip is distinguished from sparse dispatch. Four tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python XDG_CACHE_HOME=/tmp/amdpilot-repo-j-25beb90fd317/test-cache /tmp/amdpilot-repo-j-25beb90fd317/venv/bin/python reports/j-25beb90fd317/gpu_sparse_combine_reference.py",
+      "exit_code": 0,
+      "what_was_measured": "On one MI350X, active-only summation exactly matched full summation with inactive partials set to zero; CPU float64 reference max difference was 1.1920928955078125e-07. This was local algebra, not distributed transport."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-25beb90fd317/gpu-reference.log records execution on AMD Instinct MI350X with torch 2.11.0+rocm7.2; reports/j-25beb90fd317/environment.log records exactly one visible GPU.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No sparse dispatch/combine runtime path was implemented.",
+    "Only one AMD MI350X was available; no multi-rank or cross-node payload transfer was executed.",
+    "No NVIDIA L4, NCCL, no-RDMA, Qwen3-30B-A3B weights, or four-node qualification was available.",
+    "Deadlock freedom across routing divergence, layers, microbatches, concurrent requests, and CUDA graph replay remains unverified.",
+    "Dense fallback, metrics, network-byte reduction, critical-path removal, token/logprob equivalence, and latency remain unimplemented or unverified.",
+    "The GPU numerical check establishes only the selected-contribution sum identity and must not be read as transport evidence."
+  ]
+}
