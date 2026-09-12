@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33088",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that unresolved decode-side DP-rank lookups can be issued once per scheduler cycle even though current main already batches rooms and pools HTTP sessions. Added a per-bootstrap-address 10 ms rate limit shared by asynchronous prefetch and synchronous fallback, with cleanup when an address becomes inactive.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-ef41d35bf892/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_decode_queue_cleanup.py -k 'prefill_dp_rank_queries_are_rate_limited or dp_rank_query_throttle_is_independent'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: the real unresolved queue path queried on all 3 scheduler cycles instead of 2 interval-permitted attempts, and the independent-address throttle helper did not exist. Raw output: reports/j-ef41d35bf892/raw/failing-before.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-ef41d35bf892/venv/bin/python -m pytest -q test/registered/unit/disaggregation",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after registered disaggregation suite: 360 passed and 45 subtests passed, including scheduler prefetch throttling, immediate first lookup, retry after the interval, and independent bootstrap-address behavior. Raw output: reports/j-ef41d35bf892/raw/disaggregation-unit-suite-passing.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "Inventory only: prepared Torch 2.11.0+rocm7.2 saw one AMD Instinct MI350X with gcn_arch_name gfx950:sramecc+:xnack-. No GPU kernel or model serving execution was used for this CPU-side HTTP scheduling fix. Raw output: reports/j-ef41d35bf892/raw/gpu-inventory.txt",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The Qwen3.5-397B-A17B-FP8 weights were unavailable.",
+    "Only one gfx950 GPU and one node were assigned; the reported two-node TP8/EP8/DP8 MoRI topology could not be run.",
+    "The exact [Errno 99] ephemeral-port exhaustion was not reproduced; the deterministic regression proves the scheduler-cycle query flood that can drive it.",
+    "An independently unreachable bootstrap remains unreachable; this correction bounds query frequency but does not repair network reachability.",
+    "The prepared interpreter does not include the ruff module; git diff --check and the complete registered disaggregation unit suite were used instead."
+  ]
+}
