@@ -72,6 +72,22 @@ logger = init_logger(__name__)
 _MAX_RECV_REQS_PER_POLL = 1024
 _BATCH_METRICS_LOG_INTERVAL = 5
 
+_UNRECOVERABLE_ACCELERATOR_ERROR_MARKERS = (
+    "cuda driver error: device not ready",
+    "cudacachingallocator.cpp",
+)
+
+
+def _is_unrecoverable_accelerator_error(error: Any) -> bool:
+    """Return whether continuing could execute work on a poisoned device.
+
+    These errors are distinct from an ordinary allocation failure: CUDA has
+    already reported an unavailable device or an allocator invariant failure.
+    The process cannot safely repair either condition with ``empty_cache``.
+    """
+    text = str(error).lower()
+    return any(marker in text for marker in _UNRECOVERABLE_ACCELERATOR_ERROR_MARKERS)
+
 
 @dataclasses.dataclass(frozen=True)
 class _SequentiallyReturnedOutputs:
@@ -84,6 +100,19 @@ class Scheduler(SchedulerWarmupMixin, SchedulerPostTrainingMixin, SchedulerDisag
     It listens for external requests via ZMQ and coordinates with other workers.
     This class does NOT manage worker processes.
     """
+
+    def _handle_execution_error(self, error: Exception) -> OutputBatch:
+        message = str(error)
+        if _is_unrecoverable_accelerator_error(error):
+            message = (
+                f"{message}. The accelerator entered an unrecoverable state; "
+                "restart the server before submitting more requests."
+            )
+            # The caller still returns this request's reply before the event
+            # loop observes the flag and shuts down.
+            self._running = False
+            logger.critical(message)
+        return OutputBatch(error=message)
 
     def __init__(
         self,
@@ -1254,7 +1283,7 @@ class Scheduler(SchedulerWarmupMixin, SchedulerPostTrainingMixin, SchedulerDisag
                     f"Error executing request in scheduler event loop: {e}",
                     exc_info=True,
                 )
-                handler_result = OutputBatch(error=str(e))
+                handler_result = self._handle_execution_error(e)
 
             if isinstance(handler_result, _SequentiallyReturnedOutputs):
                 try:
