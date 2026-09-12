@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/10492",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "reproduced",
+  "summary": "Scheduler import remains expensive on the prepared ROCm stack: the first completed empty-private-cache subprocess took 28.612 s and compiled AIter core, while five warm-cache clean subprocesses averaged 13.086 s (12.868-13.217 s). Import profiling found an unnecessary eager quantization-to-MXFP4-to-AIter chain, plus OpenAI/FastAPI/torchvision imports. No source change was made because the measured fixes are already implemented in open upstream PRs #37602/#38005 and #38177; this PR avoids duplicating them.",
+  "tests": [
+    {
+      "command": "env XDG_CACHE_HOME=/tmp/amdpilot-repo-j-a97c2728157d/cache SGLANG_CACHE_DIR=/tmp/amdpilot-repo-j-a97c2728157d/cache /tmp/amdpilot-repo-j-a97c2728157d/venv/bin/python -c 'from sglang.srt.managers.scheduler import Scheduler'",
+      "exit_code": 0,
+      "what_was_measured": "First completed import against the initially empty private cache: 28.612 s wall; AIter module_aiter_core was compiled and loaded. Five later clean subprocesses with compiler/filesystem caches warm: mean 13.086 s, min 12.868 s, max 13.217 s."
+    },
+    {
+      "command": "env XDG_CACHE_HOME=/tmp/amdpilot-repo-j-a97c2728157d/cache SGLANG_CACHE_DIR=/tmp/amdpilot-repo-j-a97c2728157d/cache /tmp/amdpilot-repo-j-a97c2728157d/venv/bin/python -X importtime -c 'from sglang.srt.managers.scheduler import Scheduler'",
+      "exit_code": 0,
+      "what_was_measured": "Raw import profile retained at raw/importtime-before.log: Scheduler 11.059 s cumulative, quantization 5.287 s, AIter 4.773 s, and aiter.ops.flydsl.gemm_kernels 2.433 s self time."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a97c2728157d/venv/bin/python -c 'from sglang.srt.managers.scheduler import Scheduler; import sys; ...'",
+      "exit_code": 0,
+      "what_was_measured": "Scheduler remained importable and resolved from the expected module; aiter, openai, fastapi, and torchvision were all present in sys.modules after import."
+    },
+    {
+      "command": "rocm-smi --showproductname --showuniqueid",
+      "exit_code": 0,
+      "what_was_measured": "Recorded the single visible AMD Instinct MI350X and gfx950 environment for provenance only; this did not execute a GPU workload."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "No numerical GPU operation, model server, or kernel validation was required or run. ROCm SMI and torch device discovery were used only to identify the prepared host.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No source candidate was applied because matching lazy-import changes are already open upstream; therefore there is no before/after measurement for a new patch in this PR.",
+    "The host is shared and filesystem page cache, CPU scheduling, and concurrent workload state were not controlled. Warm samples are clean Python processes but use populated compiler/filesystem caches.",
+    "A sampling subprocess begun after the first completed run compiled module_rmsnorm_quant but was interrupted by the command runner; it is excluded from timing statistics, while its Ninja log is retained only as evidence of import-triggered compilation.",
+    "No serving behavior, model architecture, semantic accuracy, distributed workload, or numerical GPU path was tested because no runtime source behavior changed."
+  ]
+}
