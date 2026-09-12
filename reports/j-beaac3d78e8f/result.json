@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38561",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/586",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/581",
+  "candidate_commit": "a029c210fb032ae8127b6113496753b7b057bd1a",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The prepared base reproduced the original mixed-stream decoder defect exactly. At the exact candidate commit, the exported BlockStoredView and KVEventBatchView decoded legacy unsalted and salted producer payloads in one stream while preserving cache_salt, leaving producer bytes unchanged. Focused regression, independent adversarial wire cases, imports, and pre-commit checks passed.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-beaac3d78e8f/venv/bin/python /job/review-evidence-j-beaac3d78e8f/repro_contract.py",
+      "exit_code": 0,
+      "what_was_measured": "On base commit 358c1632, reproduced the exact 7/8-element mixed wire shapes, silent cache_salt loss through KVEventBatch, rejection of the unsalted event by BlockStoredWithMetadata, and duplicate-tag union construction failure."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-beaac3d78e8f/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_kv_events.py",
+      "exit_code": 0,
+      "what_was_measured": "At candidate a029c210, 16 tests and 22 subtests passed, including the candidate mixed producer-payload regression and existing KV-event behavior."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-beaac3d78e8f/venv/bin/python /job/review-evidence-j-beaac3d78e8f/adversarial_candidate.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent msgpack tests covered mixed salted/unsalted stores, BlockRemoved and AllBlocksCleared in the same batch, attn_dp_rank retention, exact legacy bytes, explicit null metadata, unknown future metadata keys, malformed metadata rejection, boundary-like integer values, Unicode/NUL salt content, unchanged producer bytes, and the documented decode-only encoding caveat."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-beaac3d78e8f/venv/bin/python - <<'PY' # import and inspect sglang, msgspec, BlockStoredView, KVEventBatchView",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed sglang and both candidate exports loaded from /job/repo/python, with kv_events.py at /job/repo/python/sglang/srt/disaggregation/kv_events.py; msgspec loaded from /opt/venv/lib/python3.12/site-packages/msgspec/__init__.py."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/disaggregation/kv_events.py test/registered/unit/disaggregation/test_kv_events.py docs/docs/advanced_features/kv_events.mdx docs/docs.json",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python, test, and documentation files passed configured formatting, lint, spelling, structural, and repository checks."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The original issue and candidate are limited to CPU msgspec serialization and exported Python types; no model, kernel, numerical GPU output, or accelerator execution is part of the reported contract."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No live server or ZeroMQ transport was launched; validation exercised the exact msgpack bytes emitted by the checked-in producer structs, which is the original issue's serialization boundary.",
+    "No GPU numerical test was run because the defect is architecture-independent Python/msgspec schema behavior.",
+    "No native rebuild was performed because candidate a029c210 changes only Python, tests, documentation, and prior report artifacts; repository-environment.json records native as null."
+  ]
+}
