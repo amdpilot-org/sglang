@@ -39,6 +39,7 @@ class TeaCacheContext:
         current_timestep: Current denoising timestep index (0-indexed).
         num_inference_steps: Total number of inference steps.
         do_cfg: Whether classifier-free guidance is enabled.
+        cfg_parallel: Whether each CFG rank executes only one local branch.
         is_cfg_negative: True if currently processing negative CFG branch.
         teacache_thresh: Threshold for accumulated L1 distance.
         coefficients: Polynomial coefficients for L1 rescaling.
@@ -48,6 +49,7 @@ class TeaCacheContext:
     current_timestep: int
     num_inference_steps: int
     do_cfg: bool
+    cfg_parallel: bool
     is_cfg_negative: bool  # For CFG branch selection
     teacache_thresh: float
     coefficients: list[float]
@@ -283,14 +285,20 @@ class TeaCacheMixin:
         do_cfg = forward_batch.do_classifier_free_guidance
         is_cfg_negative = forward_batch.is_cfg_negative
 
-        # Reset at first timestep
-        if current_timestep == 0 and not self.is_cfg_negative:
+        from sglang.multimodal_gen.runtime.server_args import get_global_server_args
+
+        cfg_parallel = bool(get_global_server_args().enable_cfg_parallel and do_cfg)
+
+        # Serial CFG resets once on the positive branch. Under CFG parallel each
+        # rank owns a single branch, so its local state must reset independently.
+        if current_timestep == 0 and (not is_cfg_negative or cfg_parallel):
             self.reset_teacache_state()
 
         return TeaCacheContext(
             current_timestep=current_timestep,
             num_inference_steps=num_inference_steps,
             do_cfg=do_cfg,
+            cfg_parallel=cfg_parallel,
             is_cfg_negative=is_cfg_negative,
             teacache_thresh=teacache_params.teacache_thresh,
             coefficients=teacache_params.get_coefficients(),
