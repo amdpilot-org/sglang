@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33268",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "c8135ea13ade6c245ab99fef8be25e19f54998ca",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the core/file and several backend key paths, including the reviewed Aibrix logical-FP8 collision, but remains a partial fix: exact-candidate probes reproduce dtype collisions in NPU MemCache and SiMM, while FlexKV and LMCache remain unverified.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-21bd699facb6/venv/bin/python /job/review-evidence/base_contract_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "On the recorded base, HiCacheStorageConfig lacks kv_cache_dtype and two otherwise identical bf16/fp8 file-backend runs derive the same page_model_0_1 key."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-21bd699facb6/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_aibrix_kv_cache_dtype_key.py test/registered/unit/mem_cache/test_hicache_kv_cache_dtype_key.py test/registered/unit/mem_cache/test_mem_pool_host.py test/registered/unit/mem_cache/test_mooncake_tenant_config.py test/registered/unit/mem_cache/test_umbp_store.py",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate's regression suite passed 62 tests, covering its Aibrix fix and modified in-tree paths."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-21bd699facb6/venv/bin/python /job/review-evidence/candidate_adversarial.py",
+      "exit_code": 0,
+      "what_was_measured": "On the exact candidate, production NPU MemCache and SiMM key transformations still produce identical component keys for fp8_e4m3 and fp8_e5m2."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI355X gfx950 was visible, but the defect and counterexamples are deterministic string/key derivation and did not require GPU kernels."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "NPU MemCache accepts a dtype-bearing HiCacheStorageConfig but _tag_keys and component-key derivation omit it; fp8_e4m3 and fp8_e5m2 collide.",
+    "SiMM accepts a dtype-bearing HiCacheStorageConfig but batch_exists/key preprocessing omit it; fp8_e4m3 and fp8_e5m2 collide.",
+    "FlexKV external client key derivation was unchanged and could not be verified because its package/service is absent.",
+    "LMCache external client key derivation was unchanged and could not be verified because its package/service is absent."
+  ],
+  "remaining_limitations": [
+    "Aibrix, FlexKV, LMCache, memcache_hybrid, and SiMM packages/services were unavailable.",
+    "No Ascend NPU, model weights, serving workload, or multi-node setup was available.",
+    "Aibrix, NPU MemCache, and SiMM validation used their in-tree client boundaries with stubs, not end-to-end services.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
