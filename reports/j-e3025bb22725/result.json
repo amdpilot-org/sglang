@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34972",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "54cdc6836ad6387df1b01d140353f15a4f73a94f",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base deterministically reproduced the false host-memory rejection, while the exact candidate passed the same contract and independent allocator, page-size, parsing, non-additivity, and multi-rank boundary cases. No source-level counterexample remains for the original preflight-accounting bug.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-e3025bb22725/venv/bin/python /job/review_contract_test.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Actual imported base host_memory_budget_bytes returned 2 GiB and rejected a 7 GiB request despite a simulated matching 12 GiB free hugetlb pool; see base-contract.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e3025bb22725/venv/bin/python /job/review_contract_test.py (candidate 54cdc6836ad6387df1b01d140353f15a4f73a94f)",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate's imported source returned the matching 12 GiB hugetlb budget and admitted the original 7 GiB request; see candidate-contract.txt."
+    },
+    {
+      "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /tmp/amdpilot-repo-j-e3025bb22725/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mem_pool_host.py -k 'TestHostMemoryBudget'",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 8 passed, covering the reported case and its committed boundaries; see candidate-focused-retry.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e3025bb22725/venv/bin/python /job/review_adversarial_test.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent cases verified alternative pools are not added, the larger pool wins, hugetlb capacity is rank-split, mismatched/malformed meminfo is rejected, and only the eligible default allocator uses recognized hugepage settings; see candidate-adversarial.txt."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "One AMD Instinct MI350X gfx950 device was detected with Torch 2.11.0+rocm7.2, but the reviewed change is CPU host-memory accounting and no GPU numerical claim was made.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The review host has HugePages_Total=0, so a physical hugetlb-backed mmap and the reporter's full server/model startup were not reproduced; changing node-wide hugepage reservations was outside scope.",
+    "No model weights were needed or used. This review does not qualify model semantics, HTTP serving, or multi-node behavior."
+  ]
+}
