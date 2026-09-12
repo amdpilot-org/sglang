@@ -112,6 +112,23 @@ class TestKimiK2DetectorBasic(unittest.TestCase):
         self.assertEqual(result.calls[1].name, "get_weather")
         self.assertEqual(result.calls[1].parameters, '{"city": "Tokyo"}')
 
+    def test_non_streaming_singular_thinking_section_markers(self):
+        text = (
+            "prefix<|tool_call_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:0"
+            '<|tool_call_argument_begin|>{"path": "/test.py"}'
+            "<|tool_call_end|>"
+            "<|tool_call_section_end|>"
+        )
+
+        self.assertTrue(self.detector.has_tool_call(text))
+        result = self.detector.detect_and_parse(text, self.tools)
+
+        self.assertEqual(result.normal_text, "prefix")
+        self.assertEqual(len(result.calls), 1)
+        self.assertEqual(result.calls[0].name, "ReadFile")
+        self.assertEqual(result.calls[0].parameters, '{"path": "/test.py"}')
+
     def test_non_streaming_tool_index_is_local(self):
         """tool_index is the per-response 0-based position, not the model's :N suffix.
 
@@ -379,6 +396,44 @@ class TestKimiK2DetectorStreaming(unittest.TestCase):
         self.assertEqual(detector._buffer, "")
         self.assertEqual(result.normal_text, "functions.ReadFile:0" + "x" * 256)
         self.assertEqual(result.calls, [])
+
+    def test_streaming_completed_call_does_not_mask_later_overflow(self):
+        with patch.dict("os.environ", {"SGLANG_KIMI_PARSER_SECTION_MAX": "128"}):
+            detector = KimiK2FuncDetector()
+        wire = (
+            "<|tool_calls_section_begin|>"
+            "<|tool_call_begin|>functions.ReadFile:0"
+            '<|tool_call_argument_begin|>{"path": "/tmp/a"}'
+            "<|tool_call_end|>"
+            "<|tool_call_begin|>functions.ReadFile:1"
+            "<|tool_call_argument_begin|>"
+            + "x" * 200
+        )
+
+        result = detector.parse_streaming_increment(wire, self.tools)
+
+        self.assertEqual(detector._buffer, "")
+        self.assertEqual(len(result.calls), 1)
+        self.assertEqual(result.calls[0].tool_index, 0)
+        self.assertEqual(
+            result.normal_text, "functions.ReadFile:1" + "x" * 200
+        )
+        finished = detector.finish(self.tools)
+        self.assertEqual(finished.normal_text, "")
+        self.assertEqual(detector._buffer, "")
+
+    def test_finish_releases_pending_text_and_resets(self):
+        detector = KimiK2FuncDetector()
+        first = detector.parse_streaming_increment("ordinary text <", self.tools)
+
+        self.assertEqual(first.normal_text, "ordinary text ")
+        self.assertEqual(detector._buffer, "<")
+
+        finished = detector.finish(self.tools)
+
+        self.assertEqual(finished.normal_text, "<")
+        self.assertEqual(detector._buffer, "")
+        self.assertEqual(detector.current_tool_id, -1)
 
     def test_explicit_reset_isolates_reused_detector(self):
         detector = KimiK2FuncDetector()

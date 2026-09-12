@@ -176,7 +176,13 @@ class KimiK2Detector(BaseFormatDetector):
 
     def has_tool_call(self, text: str) -> bool:
         """Check if the text contains a KimiK2 format tool call."""
-        return self.bot_token in text
+        return any(
+            token in text
+            for token in (
+                self.bot_token,
+                "<|tool_call_section_begin|>",
+            )
+        )
 
     def detect_and_parse(self, text: str, tools: List[Tool]) -> StreamingParseResult:
         """
@@ -186,7 +192,14 @@ class KimiK2Detector(BaseFormatDetector):
         :param tools: List of available tools.
         :return: StreamingParseResult with normal_text (content before tool calls) and calls (parsed items).
         """
-        if self.bot_token not in text:
+        section_starts = (
+            self.bot_token,
+            "<|tool_call_section_begin|>",
+        )
+        section_start_indices = [
+            index for token in section_starts if (index := text.find(token)) != -1
+        ]
+        if not section_start_indices:
             return StreamingParseResult(normal_text=text, calls=[])
         try:
             function_call_tuples = self.tool_call_regex.findall(text)
@@ -219,7 +232,7 @@ class KimiK2Detector(BaseFormatDetector):
                 )
                 local_tool_index += 1
 
-            content = text[: text.find(self.bot_token)]
+            content = text[: min(section_start_indices)]
             return StreamingParseResult(normal_text=content, calls=tool_calls)
 
         except Exception as e:
@@ -231,18 +244,6 @@ class KimiK2Detector(BaseFormatDetector):
     ) -> StreamingParseResult:
         """Streaming incremental parsing tool calls for KimiK2 format."""
         self._buffer += new_text
-
-        # A truncated generation must not retain an arbitrarily large section.
-        # Once the configured bound is crossed, release it as content and reset
-        # the detector so a later request cannot inherit poisoned state.
-        if (
-            self.tool_call_start_token in self._buffer
-            and self.tool_call_end_token not in self._buffer
-            and len(self._buffer) > self.section_max
-        ):
-            normal_text = _strip_special_tokens(self._buffer)
-            self.reset()
-            return StreamingParseResult(normal_text=normal_text)
 
         # Fast path: no tool call in flight and no markers yet -- emit as
         # normal text, holding back any trailing partial start token.
@@ -297,6 +298,14 @@ class KimiK2Detector(BaseFormatDetector):
                 function_id = buffer[id_start:arg_begin_idx].strip()
                 args_start = arg_begin_idx + len(self.tool_call_argument_begin_token)
                 end_idx = buffer.find(self.tool_call_end_token)
+
+                # Check the active call after earlier complete calls have been
+                # consumed. An end marker from a previous call must not mask an
+                # oversized, unclosed call later in the same increment.
+                if end_idx == -1 and len(buffer) > self.section_max:
+                    normal_text_parts.append(_strip_special_tokens(buffer))
+                    self.reset()
+                    break
 
                 # Resolve function name (cached across chunks within a section).
                 name_just_resolved = False
@@ -387,6 +396,12 @@ class KimiK2Detector(BaseFormatDetector):
             return StreamingParseResult(
                 normal_text="".join(normal_text_parts), calls=calls
             )
+
+    def finish(self, tools: List[Tool]) -> StreamingParseResult:
+        """Release text held for a marker that cannot arrive after end-of-stream."""
+        normal_text = _strip_special_tokens(self._buffer)
+        self.reset()
+        return StreamingParseResult(normal_text=normal_text)
 
     def _reset_inflight_call_state(self) -> None:
         """Reset per-section streaming state after finalize/discard."""
