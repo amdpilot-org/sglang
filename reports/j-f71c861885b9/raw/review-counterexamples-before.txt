@@ -1,0 +1,63 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_ TestHiCacheDtypeKeyCollision.test_production_config_preserves_logical_fp8_format _
+
+self = <test_hicache_kv_cache_dtype_key.TestHiCacheDtypeKeyCollision object at 0x733b627ae000>
+
+    def test_production_config_preserves_logical_fp8_format(self):
+        e4m3 = _production_storage_config(torch.float8_e4m3fn)
+        e5m2 = _production_storage_config(torch.float8_e5m2)
+    
+>       assert e4m3.kv_cache_dtype == "torch.float8_e4m3fn"
+E       AssertionError: assert 'torch.uint8' == 'torch.float8_e4m3fn'
+E         
+E         - torch.float8_e4m3fn
+E         + torch.uint8
+
+test/registered/unit/mem_cache/test_hicache_kv_cache_dtype_key.py:95: AssertionError
+----------------------------- Captured stderr call -----------------------------
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-f71c861885b9/cache/aiter/module_aiter_core.so
+___________ TestUMBPStore.test_config_prefix_isolates_kv_cache_dtype ___________
+
+self = <test_umbp_store.TestUMBPStore testMethod=test_config_prefix_isolates_kv_cache_dtype>
+
+    def test_config_prefix_isolates_kv_cache_dtype(self):
+        from sglang.srt.mem_cache.storage.umbp import umbp_store
+    
+        imported = list(umbp_store._import_umbp_client())
+        imported[0] = lambda config: MagicMock()
+        with patch.object(
+            umbp_store, "_import_umbp_client", return_value=tuple(imported)
+        ):
+            e4m3 = umbp_store.UMBPStore(
+                MockStorageConfig(kv_cache_dtype="torch.float8_e4m3fn")
+            )
+            e5m2 = umbp_store.UMBPStore(
+                MockStorageConfig(kv_cache_dtype="torch.float8_e5m2")
+            )
+    
+>       self.assertNotEqual(e4m3.config_prefix, e5m2.config_prefix)
+E       AssertionError: 'test-model' == 'test-model'
+
+test/registered/unit/mem_cache/test_umbp_store.py:140: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+registered/unit/mem_cache/test_hicache_kv_cache_dtype_key.py: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+registered/unit/mem_cache/test_hicache_kv_cache_dtype_key.py::TestHiCacheDtypeKeyCollision::test_production_config_preserves_logical_fp8_format
+registered/unit/mem_cache/test_hicache_kv_cache_dtype_key.py::TestHiCacheDtypeKeyCollision::test_production_config_preserves_logical_fp8_format
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/mem_cache/test_hicache_kv_cache_dtype_key.py::TestHiCacheDtypeKeyCollision::test_production_config_preserves_logical_fp8_format
+FAILED test/registered/unit/mem_cache/test_umbp_store.py::TestUMBPStore::test_config_prefix_isolates_kv_cache_dtype
+2 failed, 17 warnings in 8.47s

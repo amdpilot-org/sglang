@@ -42,7 +42,7 @@ from sglang.srt.layers.dp_attention import (
 )
 from sglang.srt.mem_cache.l2_transfer import L2Transfer, L2TransferEngine
 from sglang.srt.mem_cache.memory_pool import MLATokenToKVPool
-from sglang.srt.runtime_context import get_parallel
+from sglang.srt.runtime_context import get_model, get_parallel
 from sglang.srt.utils import get_device_module
 
 logger = logging.getLogger(__name__)
@@ -745,7 +745,15 @@ class HiCacheController:
             tp_lcm_size=tp_lcm_size,
             should_split_heads=should_split_heads,
             extra_config=storage_backend_extra_config,
-            kv_cache_dtype=str(self.mem_pool_host.dtype),
+            # Host pools expose uint8 for FP8 storage, and on ROCm the device
+            # dtype can also be shared by explicitly requested E4M3 and E5M2.
+            # Preserve the configured format; only "auto" needs the resolved
+            # device dtype as its namespace.
+            kv_cache_dtype=(
+                str(self.mem_pool_device.dtype)
+                if get_model().kv_cache_dtype == "auto"
+                else get_model().kv_cache_dtype
+            ),
         )
 
     def reset(self):
