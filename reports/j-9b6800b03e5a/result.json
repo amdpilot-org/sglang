@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36352",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1282",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1244",
+  "candidate_commit": "a98f1aec8abd104076f7d995fbf6d3f576414a20",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The base accepts the reported NGRAM plus effective torch_native configuration. The exact candidate rejects it with an actionable pre-model-load ValueError and preserves supported controls. The change is Python-only and fully satisfies the original issue's requested validation contract.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9b6800b03e5a/venv/bin/python /job/review-evidence-j-9b6800b03e5a/independent_attention_validation.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "The real base attention compatibility hook accepted NGRAM plus combined torch_native, EAGLE plus torch_native, and NGRAM with either split backend set to torch_native. Supported controls passed. Imports resolved to /job/repo/python."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9b6800b03e5a/venv/bin/python /job/review-evidence-j-9b6800b03e5a/independent_attention_validation.py (candidate a98f1aec8abd104076f7d995fbf6d3f576414a20)",
+      "exit_code": 0,
+      "what_was_measured": "All four unsupported configurations rejected with the intended ValueError; plain torch_native, NGRAM plus Triton, and a generic torch_native value fully overridden by supported split backends remained valid. Plain torch_native still disabled both CUDA-graph phases."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9b6800b03e5a/venv/bin/python -m pytest test/registered/unit/server_args/test_server_args.py::TestTorchNativeSpeculativeCompatibility -q",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 4 tests passed with 2 split-backend subtests."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9b6800b03e5a/venv/bin/python -m pytest test/registered/unit/server_args/test_server_args.py -q",
+      "exit_code": 1,
+      "what_was_measured": "228 tests and 46 subtests passed. Two unrelated HIP context-parallel tests failed because the prepared ROCm platform rejects deprecated prefill CP before their expected conditions."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No model inference or GPU kernel was needed for the pre-model-load validation check. The assigned host is AMD Instinct MI355X gfx950, not the issue's NVIDIA CUDA architecture."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No Qwen model weights or NVIDIA GPU were available, so the later full-server warmup crash was not reproduced on the report's architecture.",
+    "The validation-path reproduction establishes the original missing rejection but does not claim model semantic accuracy, distributed execution, or multi-node behavior.",
+    "The full server-argument test file has two unrelated ROCm context-parallel expectation failures.",
+    "No native rebuild was applicable because the candidate changes no native or FlyDSL source."
+  ]
+}
