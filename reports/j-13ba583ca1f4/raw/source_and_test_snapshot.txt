@@ -1,0 +1,458 @@
+## amdpilot/j-13ba583ca1f4
+?? reports/
+358c163250ad3b1f62939b01ce1314a0a31a0365
+   742
+   743	def handle_multimodal_feature_transport(server_args: Any):
+   744	    """Resolve multimodal feature transport before tokenizer workers start.
+   745
+   746	    CUDA IPC is opt-in because its fixed pool on ``base_gpu_id`` reduces the
+   747	    memory left for model/KV-cache allocations. Multi-node MNNVL deployments
+   748	    may still auto-select CUDA VMM. The legacy CUDA IPC flag and environment
+   749	    variable remain supported so existing deployments map to this policy.
+   750	    """
+   751
+   752	    cfg = resolving_view(server_args)
+   753	    requested_transport = cfg.mm_feature_transport
+   754	    legacy_ipc_is_set = envs.SGLANG_USE_CUDA_IPC_TRANSPORT.is_set()
+   755	    legacy_ipc_enabled = envs.SGLANG_USE_CUDA_IPC_TRANSPORT.get()
+   756
+   757	    if cfg.keep_mm_feature_on_device:
+   758	        if requested_transport not in (None, "cuda_ipc"):
+   759	            raise ValueError(
+   760	                "--keep-mm-feature-on-device conflicts with "
+   761	                f"--mm-feature-transport={requested_transport}. Use only "
+   762	                "--mm-feature-transport=cuda_ipc."
+   763	            )
+   764	        requested_transport = "cuda_ipc"
+   765	        logger.warning(
+   766	            "--keep-mm-feature-on-device is deprecated; using "
+   767	            "--mm-feature-transport=cuda_ipc instead."
+   768	        )
+   769
+   770	    if requested_transport is None:
+   771	        if legacy_ipc_is_set:
+   772	            requested_transport = "cuda_ipc" if legacy_ipc_enabled else "cpu"
+   773	            logger.warning(
+   774	                "SGLANG_USE_CUDA_IPC_TRANSPORT is deprecated; use "
+   775	                "--mm-feature-transport=%s instead.",
+   776	                requested_transport,
+   777	            )
+   778	        elif cfg.encoder_only:
+   779	            requested_transport = "cpu"
+   780	            logger.info(
+   781	                "Multimodal feature transport auto-resolved to cpu for "
+   782	                "encoder-only serving; encoder outputs use "
+   783	                "--encoder-transfer-backend instead."
+   784	            )
+   785	        elif (
+   786	            model_config_of(server_args).is_multimodal
+   787	            and get_platform().is_cuda
+   788	            and cfg.disaggregation_mode == "null"
+   789	        ):
+   790	            # A full GPU pool always degrades to CPU transport per tensor.
+   791	            # Keep CUDA IPC opt-in because even an idle pool consumes HBM
+   792	            # that would otherwise back the KV cache. Multi-node
+   793	            # auto-selection is limited to GB200/GB300 systems where the
+   794	            # runtime already enables the MNNVL/IMEX communication stack.
+   795	            if cfg.nnodes == 1:
+   796	                requested_transport = "cpu"
+   797	            elif is_mnnvl_fabric_device() and os.path.exists(
+   798	                "/dev/nvidia-caps-imex-channels/channel0"
+   799	            ):
+   800	                from sglang.srt.model_loader.utils import (
+   801	                    supports_cuda_vmm_feature_transport,
+   802	                )
+   803
+   804	                if supports_cuda_vmm_feature_transport(model_config_of(server_args)):
+   805	                    requested_transport = "cuda_vmm"
+   806	                    logger.info(
+   807	                        "Multimodal feature transport auto-resolved to "
+   808	                        "cuda_vmm (multi-node GB200/GB300 MNNVL). Pass "
+   809	                        "--mm-feature-transport=cpu to opt out."
+   810	                    )
+   811	                else:
+   812	                    requested_transport = "cpu"
+   813	                    logger.info(
+   814	                        "Multimodal feature transport auto-resolved to cpu: "
+   815	                        "the model has not opted into CUDA VMM transport."
+   816	                    )
+   817	            else:
+   818	                requested_transport = "cpu"
+   819	                if is_mnnvl_fabric_device():
+   820	                    logger.info(
+   821	                        "Multimodal feature transport auto-resolved to cpu: "
+   822	                        "GB200/GB300 was detected but no IMEX channel is "
+   823	                        "mounted. Configure the MNNVL compute domain or pass "
+   824	                        "--mm-feature-transport=cuda_vmm after doing so."
+   825	                    )
+   826	        else:
+   827	            requested_transport = "cpu"
+   828	    elif legacy_ipc_is_set and legacy_ipc_enabled != (
+   829	        requested_transport == "cuda_ipc"
+   830	    ):
+   831	        logger.warning(
+   832	            "--mm-feature-transport=%s overrides the conflicting legacy "
+   833	            "SGLANG_USE_CUDA_IPC_TRANSPORT=%s setting.",
+   834	            requested_transport,
+   835	            int(legacy_ipc_enabled),
+   836	        )
+   837
+   838	    if cfg.encoder_only and requested_transport in ("cuda_ipc", "cuda_vmm"):
+   839	        logger.warning(
+   840	            "--mm-feature-transport=%s does not control encoder-only "
+   841	            "output transfer; using cpu for this inactive transport. Select "
+   842	            "--encoder-transfer-backend for encoder outputs.",
+   843	            requested_transport,
+   844	        )
+   845	        requested_transport = "cpu"
+   846
+   847	    if requested_transport == "cuda_vmm":
+   848	        if not get_platform().is_cuda:
+   849	            raise ValueError("--mm-feature-transport=cuda_vmm requires NVIDIA CUDA.")
+   850	        if cfg.pp_size != 1:
+   851	            raise ValueError(
+   852	                "--mm-feature-transport=cuda_vmm does not support pipeline parallelism."
+   853	            )
+   854	        if envs.SGLANG_RUST_SERVER.get():
+   855	            raise ValueError(
+   856	                "--mm-feature-transport=cuda_vmm is not supported with "
+   857	                "SGLANG_RUST_SERVER."
+   858	            )
+   859	        pool_budget_mb = envs.SGLANG_MM_FEATURE_CACHE_MB.get()
+   860	        handle_kind = "CUDA FABRIC" if cfg.nnodes > 1 else "POSIX FD"
+   861	        logger.info(
+   862	            "Using CUDA VMM for multimodal features with %s sharing: "
+   863	            "reserving up to %d MiB on base GPU %d across %d tokenizer "
+   864	            "worker(s). This reduces KV cache headroom; a full pool falls "
+   865	            "back to inline CPU transport.",
+   866	            handle_kind,
+   867	            pool_budget_mb,
+   868	            cfg.base_gpu_id,
+   869	            cfg.tokenizer_worker_num,
+   870	        )
+   871
+   872	    if requested_transport == "cuda_ipc":
+   873	        if not get_platform().is_cuda:
+   874	            raise ValueError("--mm-feature-transport=cuda_ipc requires NVIDIA CUDA.")
+   875	        if cfg.nnodes != 1:
+   876	            raise ValueError(
+   877	                "--mm-feature-transport=cuda_ipc only supports a single node."
+   878	            )
+   879
+   880	        pool_budget_mb = envs.SGLANG_MM_FEATURE_CACHE_MB.get()
+   881	        logger.info(
+   882	            "Using CUDA IPC for multimodal features: reserving up to %d MiB "
+   883	            "on base GPU %d across %d tokenizer worker(s). This reduces KV "
+   884	            "cache headroom; a full pool falls back to CPU transport.",
+   885	            pool_budget_mb,
+   886	            cfg.base_gpu_id,
+   887	            cfg.tokenizer_worker_num,
+   888	        )
+   889	        logger.info(
+   890	            "CUDA IPC pool-handle caching is %s. It reuses mappings to the "
+   891	            "existing bounded pool without reserving another pool; set "
+   892	            "SGLANG_USE_IPC_POOL_HANDLE_CACHE=0 to disable it.",
+   893	            ("enabled" if envs.SGLANG_USE_IPC_POOL_HANDLE_CACHE.get() else "disabled"),
+   894	        )
+   895
+   896	    declare_resolution(
+   897	        server_args,
+   898	        "_handle_multimodal_feature_transport",
+   899	        mm_feature_transport=requested_transport,
+   900	    )
+   901	    # The bounded IPC pool owns device residency. Do not retain unpooled
+   902	    # tensors after a pool miss, which would make HBM use request-dependent.
+   903	    declare_resolution(
+   904	        server_args,
+   905	        "_handle_multimodal_feature_transport",
+   906	        keep_mm_feature_on_device=False,
+   907	    )
+   908	    envs.SGLANG_USE_CUDA_IPC_TRANSPORT.set(
+   909	        "1" if requested_transport == "cuda_ipc" else "0"
+   910	    )
+   405	class TestMultimodalFeatureTransport(CustomTestCase):
+   406	    @staticmethod
+   407	    def _set_model_type(server_args, *, is_multimodal):
+   408	        server_args._model_config = SimpleNamespace(is_multimodal=is_multimodal)
+   409
+   410	    @override_platform(is_cuda=True)
+   411	    def test_cuda_ipc_is_explicit_and_bounded(self):
+   412	        server_args = ServerArgs(
+   413	            model_path="dummy",
+   414	            mm_feature_transport="cuda_ipc",
+   415	            tokenizer_worker_num=4,
+   416	            base_gpu_id=2,
+   417	        )
+   418
+   419	        with patch.dict(os.environ, {"SGLANG_USE_CUDA_IPC_TRANSPORT": "0"}):
+   420	            with self.assertLogs(serving_hook.logger, level="INFO") as logs:
+   421	                handle_multimodal_feature_transport(server_args)
+   422
+   423	            self.assertEqual(
+   424	                resolution_result(server_args, "mm_feature_transport"), "cuda_ipc"
+   425	            )
+   426	            self.assertTrue(envs.SGLANG_USE_CUDA_IPC_TRANSPORT.get())
+   427
+   428	        output = "\n".join(logs.output)
+   429	        self.assertIn("base GPU 2", output)
+   430	        self.assertIn("4 tokenizer worker", output)
+   431
+   432	    @override_platform(is_cuda=True)
+   433	    def test_legacy_keep_flag_maps_to_cuda_ipc(self):
+   434	        server_args = ServerArgs(model_path="dummy", keep_mm_feature_on_device=True)
+   435
+   436	        with patch.dict(os.environ, {"SGLANG_USE_CUDA_IPC_TRANSPORT": "0"}):
+   437	            with self.assertLogs(serving_hook.logger, level="WARNING") as logs:
+   438	                handle_multimodal_feature_transport(server_args)
+   439
+   440	            self.assertEqual(
+   441	                resolution_result(server_args, "mm_feature_transport"), "cuda_ipc"
+   442	            )
+   443	            self.assertFalse(
+   444	                resolution_result(server_args, "keep_mm_feature_on_device")
+   445	            )
+   446	            self.assertTrue(envs.SGLANG_USE_CUDA_IPC_TRANSPORT.get())
+   447
+   448	        self.assertIn("deprecated", logs.output[0])
+   449
+   450	    def test_legacy_keep_flag_rejects_explicit_cuda_vmm(self):
+   451	        server_args = ServerArgs(
+   452	            model_path="dummy",
+   453	            keep_mm_feature_on_device=True,
+   454	            mm_feature_transport="cuda_vmm",
+   455	        )
+   456
+   457	        with self.assertRaisesRegex(ValueError, "conflicts.*cuda_vmm"):
+   458	            handle_multimodal_feature_transport(server_args)
+   459
+   460	    @override_platform(is_cuda=True)
+   461	    def test_explicit_cpu_overrides_legacy_environment(self):
+   462	        server_args = ServerArgs(model_path="dummy", mm_feature_transport="cpu")
+   463
+   464	        with patch.dict(os.environ, {"SGLANG_USE_CUDA_IPC_TRANSPORT": "1"}):
+   465	            with self.assertLogs(serving_hook.logger, level="WARNING") as logs:
+   466	                handle_multimodal_feature_transport(server_args)
+   467
+   468	            self.assertEqual(
+   469	                resolution_result(server_args, "mm_feature_transport"), "cpu"
+   470	            )
+   471	            self.assertFalse(envs.SGLANG_USE_CUDA_IPC_TRANSPORT.get())
+   472
+   473	        self.assertIn("overrides", logs.output[0])
+   474
+   475	    def test_default_transport_is_cpu(self):
+   476	        server_args = ServerArgs(model_path="dummy")
+   477
+   478	        with patch.dict(os.environ, {"SGLANG_USE_CUDA_IPC_TRANSPORT": "0"}):
+   479	            handle_multimodal_feature_transport(server_args)
+   480
+   481	            self.assertEqual(
+   482	                resolution_result(server_args, "mm_feature_transport"), "cpu"
+   483	            )
+   484	            self.assertFalse(envs.SGLANG_USE_CUDA_IPC_TRANSPORT.get())
+   485
+   486	    @override_platform(is_cuda=True)
+   487	    def test_default_transport_is_cpu_for_text_only_model(self):
+   488	        server_args = ServerArgs(model_path="dummy")
+   489	        self._set_model_type(server_args, is_multimodal=False)
+   490
+   491	        with patch.dict(os.environ, {}, clear=False):
+   492	            envs.SGLANG_USE_CUDA_IPC_TRANSPORT.clear()
+   493	            with self.assertNoLogs(server_args_module.logger, level="INFO"):
+   494	                handle_multimodal_feature_transport(server_args)
+   495
+   496	            self.assertEqual(
+   497	                resolution_result(server_args, "mm_feature_transport"), "cpu"
+   498	            )
+   499	            self.assertFalse(envs.SGLANG_USE_CUDA_IPC_TRANSPORT.get())
+   500
+   501	    @override_platform(is_cuda=True)
+   502	    def test_default_transport_is_cpu_for_multimodal_model(self):
+   503	        server_args = ServerArgs(model_path="dummy")
+   504	        self._set_model_type(server_args, is_multimodal=True)
+   505
+   506	        with patch.dict(os.environ, {}, clear=False):
+   507	            envs.SGLANG_USE_CUDA_IPC_TRANSPORT.clear()
+   508	            with self.assertNoLogs(server_args_module.logger, level="INFO"):
+   509	                handle_multimodal_feature_transport(server_args)
+   510
+   511	            self.assertEqual(
+   512	                resolution_result(server_args, "mm_feature_transport"), "cpu"
+   513	            )
+   514	            self.assertFalse(envs.SGLANG_USE_CUDA_IPC_TRANSPORT.get())
+   515
+   516	    @patch("sglang.srt.arg_groups.serving_hook.os.path.exists", return_value=True)
+   517	    @patch(
+   518	        "sglang.srt.arg_groups.serving_hook.is_mnnvl_fabric_device", return_value=True
+   519	    )
+   520	    @override_platform(is_cuda=True)
+   521	    @patch(
+   522	        "sglang.srt.model_loader.utils.supports_cuda_vmm_feature_transport",
+   523	        return_value=True,
+   524	    )
+   525	    def test_default_transport_is_cuda_vmm_for_supported_multinode_mnnvl(
+   526	        self, _mock_supports_cuda_vmm, _mock_is_cuda, _mock_is_mnnvl
+   527	    ):
+   528	        server_args = ServerArgs(model_path="dummy", nnodes=2)
+   529	        self._set_model_type(server_args, is_multimodal=True)
+   530
+   531	        with patch.dict(os.environ, {}, clear=False):
+   532	            envs.SGLANG_USE_CUDA_IPC_TRANSPORT.clear()
+   533	            with self.assertLogs(serving_hook.logger, level="INFO") as logs:
+   534	                handle_multimodal_feature_transport(server_args)
+   535
+   536	            self.assertEqual(
+   537	                resolution_result(server_args, "mm_feature_transport"), "cuda_vmm"
+   538	            )
+   539	            self.assertFalse(envs.SGLANG_USE_CUDA_IPC_TRANSPORT.get())
+   540
+   541	        output = "\n".join(logs.output)
+   542	        self.assertIn("auto-resolved to cuda_vmm", output)
+   543	        self.assertIn("CUDA FABRIC", output)
+   544
+   545	    @patch("sglang.srt.arg_groups.serving_hook.os.path.exists", return_value=True)
+   546	    @patch(
+   547	        "sglang.srt.arg_groups.serving_hook.is_mnnvl_fabric_device", return_value=True
+   548	    )
+   549	    @override_platform(is_cuda=True)
+   550	    @patch(
+   551	        "sglang.srt.model_loader.utils.supports_cuda_vmm_feature_transport",
+   552	        return_value=False,
+   553	    )
+   554	    def test_default_transport_is_cpu_for_unsupported_multinode_model(
+   555	        self, _mock_supports_cuda_vmm, _mock_is_cuda, _mock_is_mnnvl
+   556	    ):
+   557	        server_args = ServerArgs(model_path="dummy", nnodes=2)
+   558	        self._set_model_type(server_args, is_multimodal=True)
+   559
+   560	        with self.assertLogs(serving_hook.logger, level="INFO") as logs:
+   561	            handle_multimodal_feature_transport(server_args)
+   562
+   563	        self.assertEqual(resolution_result(server_args, "mm_feature_transport"), "cpu")
+   564	        self.assertIn("has not opted into CUDA VMM", "\n".join(logs.output))
+   565
+   566	    @patch("sglang.srt.arg_groups.serving_hook.os.path.exists", return_value=False)
+   567	    @patch(
+   568	        "sglang.srt.arg_groups.serving_hook.is_mnnvl_fabric_device", return_value=True
+   569	    )
+   570	    @override_platform(is_cuda=True)
+   571	    def test_default_transport_is_cpu_without_imex_channel(
+   572	        self, _mock_is_cuda, _mock_is_mnnvl
+   573	    ):
+   574	        server_args = ServerArgs(model_path="dummy", nnodes=2)
+   575	        self._set_model_type(server_args, is_multimodal=True)
+   576
+   577	        with patch.dict(os.environ, {}, clear=False):
+   578	            envs.SGLANG_USE_CUDA_IPC_TRANSPORT.clear()
+   579	            with self.assertLogs(serving_hook.logger, level="INFO") as logs:
+   580	                handle_multimodal_feature_transport(server_args)
+   581
+   582	            self.assertEqual(
+   583	                resolution_result(server_args, "mm_feature_transport"), "cpu"
+   584	            )
+   585
+   586	        self.assertIn("no IMEX channel", "\n".join(logs.output))
+   587
+   588	    @patch(
+   589	        "sglang.srt.arg_groups.serving_hook.is_mnnvl_fabric_device", return_value=False
+   590	    )
+   591	    @override_platform(is_cuda=True)
+   592	    def test_default_transport_is_cpu_for_multinode_non_mnnvl(self, _mock_is_cuda):
+   593	        server_args = ServerArgs(model_path="dummy", nnodes=2)
+   594	        self._set_model_type(server_args, is_multimodal=True)
+   595
+   596	        with patch.dict(os.environ, {}, clear=False):
+   597	            envs.SGLANG_USE_CUDA_IPC_TRANSPORT.clear()
+   598	            handle_multimodal_feature_transport(server_args)
+   599
+   600	            self.assertEqual(
+   601	                resolution_result(server_args, "mm_feature_transport"), "cpu"
+   602	            )
+   603	            self.assertFalse(envs.SGLANG_USE_CUDA_IPC_TRANSPORT.get())
+   604
+   605	    @override_platform(is_cuda=True)
+   606	    def test_default_transport_is_cpu_for_language_only_model(self):
+   607	        server_args = ServerArgs(model_path="dummy", language_only=True)
+   608	        self._set_model_type(server_args, is_multimodal=True)
+   609
+   610	        with patch.dict(os.environ, {}, clear=False):
+   611	            envs.SGLANG_USE_CUDA_IPC_TRANSPORT.clear()
+   612	            handle_multimodal_feature_transport(server_args)
+   613
+   614	            self.assertEqual(
+   615	                resolution_result(server_args, "mm_feature_transport"), "cpu"
+   616	            )
+   617	            self.assertFalse(envs.SGLANG_USE_CUDA_IPC_TRANSPORT.get())
+   618
+   619	    @override_platform(is_cuda=False)
+   620	    def test_cuda_ipc_rejects_non_nvidia_platforms(self):
+   621	        server_args = ServerArgs(model_path="dummy", mm_feature_transport="cuda_ipc")
+   622
+   623	        with self.assertRaisesRegex(ValueError, "requires NVIDIA CUDA"):
+   624	            handle_multimodal_feature_transport(server_args)
+   625
+   626	    @override_platform(is_cuda=True)
+   627	    def test_cuda_ipc_rejects_multi_node(self):
+   628	        server_args = ServerArgs(
+   629	            model_path="dummy", mm_feature_transport="cuda_ipc", nnodes=2
+   630	        )
+   631
+   632	        with self.assertRaisesRegex(ValueError, "single node"):
+   633	            handle_multimodal_feature_transport(server_args)
+   634
+   635	    @override_platform(is_cuda=True)
+   636	    def test_cuda_vmm_is_explicit_and_uses_shared_budget(self):
+   637	        server_args = ServerArgs(
+   638	            model_path="dummy",
+   639	            mm_feature_transport="cuda_vmm",
+   640	            nnodes=2,
+   641	            tokenizer_worker_num=2,
+   642	        )
+   643
+   644	        with (
+   645	            patch.dict(os.environ, {"SGLANG_USE_CUDA_IPC_TRANSPORT": "1"}),
+   646	            envs.SGLANG_MM_FEATURE_CACHE_MB.override(256),
+   647	        ):
+   648	            with self.assertLogs(serving_hook.logger, level="INFO") as logs:
+   649	                handle_multimodal_feature_transport(server_args)
+   650
+   651	            self.assertEqual(
+   652	                resolution_result(server_args, "mm_feature_transport"), "cuda_vmm"
+   653	            )
+   654	            self.assertFalse(envs.SGLANG_USE_CUDA_IPC_TRANSPORT.get())
+   655
+   656	        output = "\n".join(logs.output)
+   657	        self.assertIn("CUDA FABRIC", output)
+   658	        self.assertIn("256 MiB", output)
+   659	        self.assertIn("2 tokenizer worker", output)
+   660	        self.assertIn("falls back to inline CPU", output)
+   661
+   662	    @override_platform(is_cuda=False)
+   663	    def test_cuda_vmm_rejects_non_nvidia_platforms(self):
+   664	        server_args = ServerArgs(model_path="dummy", mm_feature_transport="cuda_vmm")
+   665
+   666	        with self.assertRaisesRegex(ValueError, "requires NVIDIA CUDA"):
+   667	            handle_multimodal_feature_transport(server_args)
+   668
+   669	    @override_platform(is_cuda=True)
+   670	    def test_cuda_vmm_rejects_rust_server(self):
+   671	        server_args = ServerArgs(model_path="dummy", mm_feature_transport="cuda_vmm")
+   672
+   673	        with (
+   674	            envs.SGLANG_RUST_SERVER.override(True),
+   675	            self.assertRaisesRegex(ValueError, "SGLANG_RUST_SERVER"),
+   676	        ):
+   677	            handle_multimodal_feature_transport(server_args)
+   678
+   679	    @override_platform(is_cuda=True)
+   680	    def test_cuda_vmm_rejects_pipeline_parallelism(self):
+   681	        server_args = ServerArgs(
+   682	            model_path="dummy", mm_feature_transport="cuda_vmm", pp_size=2
+   683	        )
+   684
+   685	        with self.assertRaisesRegex(ValueError, "pipeline parallelism"):
+   686	            handle_multimodal_feature_transport(server_args)
+   687
+   688
+   689	class TestMambaCacheStochasticRounding(unittest.TestCase):
+   690	    def test_rejects_fp32_ssm_cache(self):
