@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31719",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2521",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2401",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/2487",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced both candidate counterexamples, preserved its valid mixed-dtype fixes, routed MIS through the dtype-safe convolution boundary, and prevented PAD_SLOT_ID=-1 from gathering or updating conv_states[-1].",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python <prepared-python> /tmp/reproduce_review_counterexamples.py (exact candidate 8926f3e)",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, confirmed the MIS production method directly used causal_conv1d_fn; BF16 activation with FP32 and FP16 caches each produced Triton new_conv_state branch-type CompilationError, and the candidate helper changed the PAD_SLOT_ID=-1 cache row while the direct same-dtype kernel preserved it."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python <prepared-python> reports/j-90144626db2a/reproduce_corrected_boundaries.py",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, BF16 activation with FP32 and FP16 cache storage compiled and matched independent grouped-conv output and active final-state references; PAD_SLOT_ID=-1 cache storage remained exactly unchanged; source inspection confirmed MIS uses the corrected helper."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python <prepared-python> reports/j-badb4e8b86a3/reproduce_mixed_conv_dtype.py",
+      "exit_code": 0,
+      "what_was_measured": "The preserved candidate GPU regression passed all four activation/cache dtype combinations against its independent grouped-convolution reference."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python <prepared-python> -m pytest -q test/registered/unit/layers/attention/test_gdn_prefill_backend_policy.py",
+      "exit_code": 0,
+      "what_was_measured": "19 focused tests and 27 subtests passed, including the new padded-slot boundary test."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python <prepared-python> -m pytest -q test/registered/layers/mamba/test_causal_conv1d.py -k branches_from_cloned_query_state",
+      "exit_code": 0,
+      "what_was_measured": "Existing GPU causal-convolution regression passed (1 passed, 245 deselected)."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X gfx950 ran the failing-before compiler/skip-contract reproduction and passing-after numerical checks with Torch 2.11.0+rocm7.2 and HIP 7.2.26015."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "QuantTrio/Qwen3.6-27B-AWQ weights were unavailable, so full-model serving and semantic accuracy were not tested.",
+    "The available GPU was AMD Instinct MI350X gfx950 with ROCm 7.2, not the reported RTX 5090/SM120 with CUDA 13.3.",
+    "No multi-node behavior was tested.",
+    "No native source changed, so native rebuild was not applicable."
+  ]
+}

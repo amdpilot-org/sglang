@@ -1,0 +1,81 @@
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-90144626db2a/cache/aiter/module_aiter_core.so
+Traceback (most recent call last):
+  File "/tmp/reproduce_review_counterexamples.py", line 46, in <module>
+    gdn_backend.causal_conv1d_fn(x, weight, bias, **kwargs)
+  File "/job/repo/python/sglang/kernels/ops/mamba/causal_conv1d_triton.py", line 525, in causal_conv1d_fn
+    _causal_conv1d_fwd_kernel[grid](
+  File "/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py", line 370, in <lambda>
+    return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py", line 751, in run
+    kernel = self._do_compile(key, signature, device, constexprs, options, attrs, warmup)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py", line 896, in _do_compile
+    kernel = self.compile(src, target=target, options=options.__dict__)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/triton/compiler/compiler.py", line 307, in compile
+    module = src.make_ir(target, options, codegen_fns, module_map, context)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/triton/compiler/compiler.py", line 80, in make_ir
+    return ast_to_ttir(self.fn, self, context=context, options=options, codegen_fns=codegen_fns,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+triton.compiler.errors.CompilationError: at 190:12:
+            idx_tokens_conv = tl.arange(0, NP2_STATELEN)  # [BLOCK_M]
+            conv_states_ptrs_target = (
+                conv_states_base[None, :]
+                + (idx_tokens_conv * stride_conv_state_tok)[:, None]
+            )
+
+            mask = (idx_tokens_conv < state_len)[:, None] & (idx_feats < dim)[None, :]
+            tl.debug_barrier()  #  NOTE: use this due to bug in Triton compiler
+            tl.store(conv_states_ptrs_target, new_conv_state, mask)
+
+        else:
+            if load_init_state:
+            ^
+AssertionError("Mismatched type for new_conv_state between then block (<['4', '256'], fp32>) and else block (<['4', '256'], bf16>)")
+Traceback (most recent call last):
+  File "/tmp/reproduce_review_counterexamples.py", line 46, in <module>
+    gdn_backend.causal_conv1d_fn(x, weight, bias, **kwargs)
+  File "/job/repo/python/sglang/kernels/ops/mamba/causal_conv1d_triton.py", line 525, in causal_conv1d_fn
+    _causal_conv1d_fwd_kernel[grid](
+  File "/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py", line 370, in <lambda>
+    return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py", line 751, in run
+    kernel = self._do_compile(key, signature, device, constexprs, options, attrs, warmup)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/triton/runtime/jit.py", line 896, in _do_compile
+    kernel = self.compile(src, target=target, options=options.__dict__)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/triton/compiler/compiler.py", line 307, in compile
+    module = src.make_ir(target, options, codegen_fns, module_map, context)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/triton/compiler/compiler.py", line 80, in make_ir
+    return ast_to_ttir(self.fn, self, context=context, options=options, codegen_fns=codegen_fns,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+triton.compiler.errors.CompilationError: at 190:12:
+            idx_tokens_conv = tl.arange(0, NP2_STATELEN)  # [BLOCK_M]
+            conv_states_ptrs_target = (
+                conv_states_base[None, :]
+                + (idx_tokens_conv * stride_conv_state_tok)[:, None]
+            )
+
+            mask = (idx_tokens_conv < state_len)[:, None] & (idx_feats < dim)[None, :]
+            tl.debug_barrier()  #  NOTE: use this due to bug in Triton compiler
+            tl.store(conv_states_ptrs_target, new_conv_state, mask)
+
+        else:
+            if load_init_state:
+            ^
+AssertionError("Mismatched type for new_conv_state between then block (<['4', '256'], fp16>) and else block (<['4', '256'], bf16>)")
+module /job/repo/python/sglang/srt/layers/attention/linear/gdn_backend.py
+commit candidate exact; device AMD Instinct MI350X hip 7.2.26015
+mis_direct_call_confirmed True
+EXPECTED_MIS_FAILURE torch.float32 CompilationError
+EXPECTED_MIS_FAILURE torch.float16 CompilationError
+direct_pad_row_unchanged True
+mixed_pad_row_unchanged False
+mixed_pad_max_delta 0.007626771926879883
+REPRODUCED_BOTH_REVIEW_COUNTEREXAMPLES
