@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39216",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The checked-out implementation allowed asyncio.CancelledError raised inside Request.is_disconnected() to escape from both request-state polling branches. A narrow wrapper now treats receive-only cancellation as a client disconnect, while propagating cancellation when the surrounding handler task is itself being cancelled. Both branches abort the affected scheduler request through their existing paths.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-2c0ee86b22cc/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py -k DisconnectPollingCancellation (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Exact request.is_disconnected() CancelledError injection: waiting and running request branches failed by propagating CancelledError; genuine handler-task cancellation boundary passed. Raw output: evidence/unit-before.log."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-2c0ee86b22cc/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py -k DisconnectPollingCancellation",
+      "exit_code": 0,
+      "what_was_measured": "Four focused cases passed: waiting-request abort, running-request abort, ordinary connected result preservation, and propagation of genuine task cancellation. Raw output: evidence/unit-after.log."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-2c0ee86b22cc/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py",
+      "exit_code": 0,
+      "what_was_measured": "The complete tokenizer-manager request-state cleanup module passed: 30 tests and 3 subtests. Raw output: evidence/unit-full-after.log."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-2c0ee86b22cc/venv/bin/python reports/j-2c0ee86b22cc/run_disconnect_probe.py --fixture /tmp/amdpilot-repo-j-2c0ee86b22cc/tiny-random-llama --output reports/j-2c0ee86b22cc/evidence/gpu-disconnect",
+      "exit_code": 0,
+      "what_was_measured": "A real single-gfx950 SGLang server survived an abrupt TCP close, returned HTTP 200 from /health, and served a subsequent four-token GPU generation. Raw server log and probe.json are retained."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Single AMD gfx950 GPU; the tiny deterministic Llama server loaded with the Triton attention backend and produced follow-up output_ids [104, 40, 16, 93] after the disconnect. See evidence/gpu-disconnect/probe.json and server.log."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported 4x NVIDIA RTX 6000D (SM120), DeepSeek-V4.1-Flash weights, ~200,000-token prompt, TP=4 topology, and original container image were unavailable, so that full deployment was not reproduced.",
+    "The qualified tiny random Llama fixture validates HTTP transport and real engine execution only; it does not validate DeepSeek architecture behavior, semantic accuracy, long-context behavior, or distributed execution.",
+    "The real HTTP probe exercised an abrupt TCP disconnect and engine survival, while the deterministic unit regression supplied the issue-specific CancelledError at the exact tokenizer-manager polling call sites.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable.",
+    "The prepared interpreter does not contain the ruff module; pytest and git diff --check were used for validation."
+  ]
+}
