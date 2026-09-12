@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import (
     Annotated,
     Any,
+    ClassVar,
     Dict,
     List,
     Literal,
@@ -977,6 +978,63 @@ class ChatCompletionRequest(BaseModel):
         "min_p": 0.0,
         "repetition_penalty": 1.0,
     }
+
+    _FIELD_TO_SAMPLING_KEY: ClassVar[Dict[str, str]] = {
+        "max_completion_tokens": "max_new_tokens",
+        "max_tokens": "max_new_tokens",
+        "min_tokens": "min_new_tokens",
+        "stop": "stop",
+        "stop_token_ids": "stop_token_ids",
+        "stop_regex": "stop_regex",
+        "temperature": "temperature",
+        "top_p": "top_p",
+        "top_k": "top_k",
+        "min_p": "min_p",
+        "presence_penalty": "presence_penalty",
+        "frequency_penalty": "frequency_penalty",
+        "repetition_penalty": "repetition_penalty",
+        "regex": "regex",
+        "ebnf": "ebnf",
+        "n": "n",
+        "no_stop_trim": "no_stop_trim",
+        "ignore_eos": "ignore_eos",
+        "skip_special_tokens": "skip_special_tokens",
+        "logit_bias": "logit_bias",
+        "custom_params": "custom_params",
+        "seed": "sampling_seed",
+        "response_format": "json_schema",
+    }
+
+    _NULL_MEANS_UNSET_SAMPLING_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "temperature",
+            "top_p",
+            "top_k",
+            "min_p",
+            "repetition_penalty",
+        }
+    )
+
+    def get_explicit_sampling_keys(self) -> List[str]:
+        """Return sampling keys whose values were explicitly supplied by the client."""
+        keys = {
+            sampling_key
+            for field, sampling_key in self._FIELD_TO_SAMPLING_KEY.items()
+            if field in self.model_fields_set
+            and not (
+                field in self._NULL_MEANS_UNSET_SAMPLING_FIELDS
+                and getattr(self, field) is None
+            )
+        }
+        if "response_format" in self.model_fields_set:
+            keys.add("structural_tag")
+        if (
+            "chat_template_kwargs" in self.model_fields_set
+            and self.chat_template_kwargs is not None
+            and "spaces_between_special_tokens" in self.chat_template_kwargs
+        ):
+            keys.add("spaces_between_special_tokens")
+        return sorted(keys)
 
     @model_validator(mode="before")
     @classmethod
