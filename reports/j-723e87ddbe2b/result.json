@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19087",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 3079's valid hierarchical diffusion startup instrumentation and corrected all four concrete counterexamples from independent review PR 3157: the worker NameError, late CLI clock, incomplete process-preparation breakdown, and separate process-local summaries.",
+  "tests": [
+    {
+      "command": "At candidate 8c5412d, execute the real run_scheduler_process target with platform/scheduler/logging operations isolated and profiling disabled",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before real worker entry; raised NameError at the unconditional get_startup_profiler call before scheduler construction."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-723e87ddbe2b/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_startup_profiler.py python/sglang/multimodal_gen/test/unit/test_launch_server_shutdown.py",
+      "exit_code": 0,
+      "what_was_measured": "14 tests passed, covering disabled and enabled profiling, real worker entry, CLI clock placement, full parent process preparation, parent/worker aggregation, idempotent logging, fork reset, and shutdown behavior."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-723e87ddbe2b/venv/bin/python -m py_compile python/sglang/cli/main.py python/sglang/cli/generate.py python/sglang/multimodal_gen/runtime/launch_server.py python/sglang/multimodal_gen/runtime/managers/gpu_worker.py python/sglang/multimodal_gen/runtime/utils/startup_profiler.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed CLI and runtime Python modules compile successfully."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..HEAD",
+      "exit_code": 0,
+      "what_was_measured": "Patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The deterministic failure and corrections are in Python startup control flow and occur before model construction; Qwen-Image weights were unavailable, so no GPU/model run is claimed.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Qwen-Image model launch was performed because its weights were unavailable in the prepared private runtime.",
+    "Multi-node, multi-GPU, non-ROCm, and disaggregated launch paths remain unverified.",
+    "Direct Python callers start timing at the beginning of sglang.cli.generate import; the console entry point starts earlier at sglang.cli.main import.",
+    "Ruff was unavailable in the required prepared interpreter."
+  ]
+}
