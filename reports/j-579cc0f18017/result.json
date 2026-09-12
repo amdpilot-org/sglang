@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37944",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2706",
+  "candidate_commit": "0e4ffed88e34a6c710e94cfb49253c5fbcaa1283",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The threshold works in the submitted focused zigzag unit cases, but DSA interleave metadata preparation still uses an unthresholded static predicate. A below-threshold batch can be treated as non-CP by execution while DSA metadata is CP-sharded. The original CUDA GLM-5.2-FP8 zigzag workload is additionally unverified on this HIP-only CP-unsupported host.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-579cc0f18017/venv/bin/python -c 'init_cp_strategy(..., min_tokens=16)' on recorded base",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before feature absence: the captured call raised TypeError because the base has no min_tokens parameter."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-579cc0f18017/venv/bin/python -m pytest -q test/registered/unit/server_args/test_server_args.py::TestContextParallelServerArgs::test_prefill_cp_min_tokens_cli test/registered/unit/server_args/test_server_args.py::TestContextParallelServerArgs::test_prefill_cp_min_tokens_must_be_non_negative test/registered/unit/server_args/test_server_args.py::TestContextParallelServerArgs::test_context_parallel_handler_initializes_cp_strategy test/registered/cp/test_cp_strategy_unit.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 30 tests and 18 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-579cc0f18017/venv/bin/python /job/review-evidence/j-579cc0f18017/candidate/adversarial_dynamic_cp.py",
+      "exit_code": 1,
+      "what_was_measured": "Independent below-threshold DSA interleave consistency: generic and DSA execution predicates were false, but the DSA interleave metadata/padding predicate was true."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Torch detected one AMD Instinct MI355X under ROCm/HIP 7.2, but SGLang explicitly disables DSA prefill CP on HIP; no qualifying CUDA multi-rank CP forward or numerical comparison ran."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "DSA interleave, cp_size=4, threshold=16, 8 processed tokens: is_cp_active=False and dsa_use_prefill_cp=False, but can_dsa_prefill_cp_interleave=True; dsa_backend.py consequently selects CP-specific metadata sharding for a non-CP forward."
+  ],
+  "remaining_limitations": [
+    "The reported GLM-5.2-FP8 model and weights were unavailable.",
+    "The assigned AMD ROCm architecture is explicitly unsupported for DSA prefill CP, so the original NVIDIA CUDA zigzag path, independent GPU numerics, multi-rank behavior, and TTFT improvement remain unverified.",
+    "No native source changed; native rebuild was not applicable.",
+    "The candidate's zigzag threshold behavior passed unit simulation, but could not be qualified in the original serving architecture."
+  ]
+}
