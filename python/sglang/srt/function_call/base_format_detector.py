@@ -46,6 +46,14 @@ class BaseFormatDetector(ABC):
         # Flag for whether current tool's name has been sent to client.
         # Tool names sent first with empty parameters, then arguments stream incrementally.
         self.current_tool_name_sent: bool = False
+        # True while consuming a call whose name is not present in the request.
+        # The call must remain buffered until its JSON object is complete so only
+        # that object, rather than the rest of a parallel batch, is discarded.
+        self._skipping_unknown_tool: bool = False
+        # An unknown first entry still establishes a parallel-call sequence. This
+        # lets separator-prefixed valid calls be parsed without assigning an output
+        # index to the discarded entry.
+        self._skipped_tool_in_sequence: bool = False
         # Tracks raw JSON string content streamed to client for each tool's arguments.
         # Critical for serving layer to calculate remaining content when streaming ends.
         # Each index corresponds to a tool_id. Example: ['{"location": "San Francisco"', '{"temp": 72']
@@ -149,8 +157,11 @@ class BaseFormatDetector(ABC):
         if not (
             self.has_tool_call(current_text)
             or (
-                self.current_tool_id > 0
-                and current_text.startswith(self.tool_call_separator)
+                (self.current_tool_id > 0 or self._skipped_tool_in_sequence)
+                and (
+                    current_text.startswith(self.tool_call_separator)
+                    or self.tool_call_separator.startswith(current_text)
+                )
             )
         ):
             # Only clear buffer if we're sure no tool call is starting
@@ -178,9 +189,9 @@ class BaseFormatDetector(ABC):
                 # appear inside array parameters of the current tool, and we must not
                 # mistakenly identify that as the start of a new tool.
                 used_separator_branch = False
-                if self.current_tool_id > 0 and current_text.startswith(
-                    self.tool_call_separator
-                ):
+                if (
+                    self.current_tool_id > 0 or self._skipped_tool_in_sequence
+                ) and current_text.startswith(self.tool_call_separator):
                     start_idx = len(self.tool_call_separator)
                     used_separator_branch = True
                 else:
@@ -215,14 +226,24 @@ class BaseFormatDetector(ABC):
                     current_text[start_idx : start_idx + end_idx]
                 )
 
-                # Validate tool name if present
+                # Consume an unknown call without disturbing completed calls or
+                # buffered calls that follow it in the same parallel batch.
+                if self._skipping_unknown_tool:
+                    if is_current_complete:
+                        self._buffer = current_text[start_idx + end_idx :]
+                        self._skipping_unknown_tool = False
+                        self._skipped_tool_in_sequence = True
+                    return StreamingParseResult()
+
                 if "name" in obj and obj["name"] not in self._tool_indices:
-                    # Invalid tool name - reset state
-                    self._buffer = ""
-                    self.current_tool_id = -1
-                    self.current_tool_name_sent = False
-                    if self.streamed_args_for_tool:
-                        self.streamed_args_for_tool.pop()
+                    logger.warning(
+                        "Model attempted to call undefined function: %s", obj["name"]
+                    )
+                    if is_current_complete:
+                        self._buffer = current_text[start_idx + end_idx :]
+                        self._skipped_tool_in_sequence = True
+                    else:
+                        self._skipping_unknown_tool = True
                     return StreamingParseResult()
 
                 # Handle parameters/arguments consistency
@@ -356,7 +377,45 @@ class BaseFormatDetector(ABC):
         Detectors that hold text back while waiting for a marker that can no
         longer arrive (the stream is over) override this to release it.
         """
-        return StreamingParseResult()
+        normal_text = ""
+        calls = []
+
+        # One increment can intentionally emit only one state transition (for
+        # example, a tool name before its arguments). Drain every transition
+        # that can be made from bytes already received before declaring EOF.
+        while self._buffer:
+            state_before = (
+                self._buffer,
+                self.current_tool_id,
+                self.current_tool_name_sent,
+                self._skipping_unknown_tool,
+                self._skipped_tool_in_sequence,
+                tuple(self.streamed_args_for_tool),
+            )
+            result = self.parse_streaming_increment("", tools)
+            normal_text += result.normal_text or ""
+            calls.extend(result.calls or [])
+            state_after = (
+                self._buffer,
+                self.current_tool_id,
+                self.current_tool_name_sent,
+                self._skipping_unknown_tool,
+                self._skipped_tool_in_sequence,
+                tuple(self.streamed_args_for_tool),
+            )
+            if state_after == state_before:
+                wrapper = self._buffer
+                if self.tool_call_separator and wrapper.startswith(
+                    self.tool_call_separator
+                ):
+                    wrapper = wrapper[len(self.tool_call_separator) :]
+                if self.eot_token:
+                    wrapper = wrapper.replace(self.eot_token, "")
+                if not wrapper.strip():
+                    self._buffer = ""
+                break
+
+        return StreamingParseResult(normal_text=normal_text, calls=calls)
 
     def supports_structural_tag(self) -> bool:
         """Return True if this detector supports structural tag format."""
