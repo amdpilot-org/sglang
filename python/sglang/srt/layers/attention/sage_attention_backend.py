@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Optional
 import torch
 
 from sglang.srt.layers.attention.torch_native_backend import TorchNativeAttnBackend
+from sglang.srt.runtime_context import get_platform
 from sglang.srt.utils import is_hip
 
 if TYPE_CHECKING:
@@ -25,6 +26,12 @@ class SageAttentionBackend(TorchNativeAttnBackend):
             raise RuntimeError(
                 "The sage attention backend requires NVIDIA CUDA; "
                 "the upstream SageAttention extension does not support ROCm."
+            )
+        if get_platform().is_sm100:
+            raise RuntimeError(
+                "The sage attention backend is not supported on SM100 by the "
+                "pinned SageAttention revision: its public sageattn dispatcher "
+                "raises 'Unsupported CUDA architecture: sm100'."
             )
         try:
             from sageattention import sageattn

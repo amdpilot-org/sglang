@@ -1078,6 +1078,29 @@ class TestFa4PageSizeAutoForce(CustomTestCase):
         self.assertEqual(resolved_view(args).page_size, 128)
 
 
+class TestSageAttentionAdmission(CustomTestCase):
+    def _make_args(self, *, attention_backend=None, prefill=None, decode=None):
+        args = ServerArgs(model_path="dummy")
+        args.attention_backend = attention_backend
+        args.prefill_attention_backend = prefill
+        args.decode_attention_backend = decode
+        args._model_config = MagicMock()
+        args._model_config.hf_config.dual_chunk_attention_config = None
+        return args
+
+    @override_platform(is_sm100=True)
+    def test_rejects_combined_sage_backend_on_sm100(self):
+        args = self._make_args(attention_backend="sage")
+        with self.assertRaisesRegex(ValueError, "not supported on SM100"):
+            handle_attention_backend_compatibility(args)
+
+    @override_platform(is_sm100=True)
+    def test_rejects_split_sage_prefill_on_sm100(self):
+        args = self._make_args(prefill="sage", decode="fa3")
+        with self.assertRaisesRegex(ValueError, "not supported on SM100"):
+            handle_attention_backend_compatibility(args)
+
+
 class TestContextParallelServerArgs(CustomTestCase):
     def setUp(self):
         self.parser = server_args_module.argparse.ArgumentParser()
