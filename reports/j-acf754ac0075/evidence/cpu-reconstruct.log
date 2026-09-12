@@ -1,0 +1,181 @@
+Script started on 2026-09-12 20:30:31+00:00 [COMMAND="PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-acf754ac0075/venv/bin/python -m pytest -q test/registered/cpu/test_spec_kernels.py::TestReconstructIndicesFromTreeMask::test_tree_and_chain" <not executed on terminal>]
+F                                                                        [100%]
+=================================== FAILURES ===================================
+____________ TestReconstructIndicesFromTreeMask.test_tree_and_chain ____________
+
+self = <test_spec_kernels.TestReconstructIndicesFromTreeMask testMethod=test_tree_and_chain>
+
+    def test_tree_and_chain(self):
+        from sgl_kernel.speculative import reconstruct_indices_from_tree_mask
+
+        bs, draft_token_num = 2, 4
+        seq_lens = torch.tensor([12, 5], dtype=torch.int64)
+        # Request 0: root(0) -> {1, 2}, 2 -> 3 (golden case from
+        # python/sglang/kernels/aot/tests/speculative/test_ngram_utils.py).
+        # Request 1: plain chain 0 -> 1 -> 2 -> 3.
+        tree_mask = torch.tensor(
+            # fmt: off
+            [
+                1,
+                0,
+                0,
+                0,
+                1,
+                1,
+                0,
+                0,
+                1,
+                0,
+                1,
+                0,
+                1,
+                0,
+                1,
+                1,
+                1,
+                0,
+                0,
+                0,
+                1,
+                1,
+                0,
+                0,
+                1,
+                1,
+                1,
+                0,
+                1,
+                1,
+                1,
+                1,
+            ],
+            # fmt: on
+            dtype=torch.bool,
+        )
+        retrieve_index = torch.full((bs, draft_token_num), -1, dtype=torch.int64)
+        retrieve_next_token = torch.full((bs, draft_token_num), -1, dtype=torch.int64)
+        retrieve_next_sibling = torch.full((bs, draft_token_num), -1, dtype=torch.int64)
+        positions = torch.empty((bs * draft_token_num,), dtype=torch.int64)
+
+>       reconstruct_indices_from_tree_mask(
+            tree_mask,
+            seq_lens,
+            positions,  # mutable
+            retrieve_index,  # mutable
+            retrieve_next_token,  # mutable
+            retrieve_next_sibling,  # mutable
+            bs,
+            draft_token_num,
+        )
+
+test/registered/cpu/test_spec_kernels.py:912:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/opt/venv/lib/python3.12/site-packages/sglang_kernel-0.4.6.post1-py3.12-linux-x86_64.egg/sgl_kernel/speculative.py:103: in reconstruct_indices_from_tree_mask
+    torch.ops.sgl_kernel.reconstruct_indices_from_tree_mask_cpu(
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <module 'torch.ops.sgl_kernel' from 'torch.ops'>
+op_name = 'reconstruct_indices_from_tree_mask_cpu'
+
+    def __getattr__(self, op_name: str) -> OpOverloadPacket:
+        if op_name in ("__origin__", "__self__"):
+            raise AttributeError(
+                f"Invalid attribute '{op_name}' for '_OpNamespace' '{self.name}'"
+            )
+
+        # Get the op `my_namespace::my_op` if available. This will also check
+        # for overloads and raise an exception if there are more than one.
+        namespace_name = self.name
+        qualified_op_name = f"{namespace_name}::{op_name}"
+        module_name = self.__module__ + "." + namespace_name
+
+        try:
+            op, overload_names = _get_packet(qualified_op_name, module_name)
+            if op is None:
+>               raise AttributeError(
+                    f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
+                )
+E               AttributeError: '_OpNamespace' 'sgl_kernel' object has no attribute 'reconstruct_indices_from_tree_mask_cpu'
+
+/opt/venv/lib/python3.12/site-packages/torch/_ops.py:1379: AttributeError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7fb6b12714e0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7fb788b22e80>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestReconstructIndicesFromTreeMask.test_tree_and_chain
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/cpu/test_spec_kernels.py", line 912, in test_tree_and_chain
+    reconstruct_indices_from_tree_mask(
+  File "/opt/venv/lib/python3.12/site-packages/sglang_kernel-0.4.6.post1-py3.12-linux-x86_64.egg/sgl_kernel/speculative.py", line 103, in reconstruct_indices_from_tree_mask
+    torch.ops.sgl_kernel.reconstruct_indices_from_tree_mask_cpu(
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/torch/_ops.py", line 1379, in __getattr__
+    raise AttributeError(
+AttributeError: '_OpNamespace' 'sgl_kernel' object has no attribute 'reconstruct_indices_from_tree_mask_cpu'
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/cpu/test_spec_kernels.py::TestReconstructIndicesFromTreeMask::test_tree_and_chain
+1 failed, 17 warnings in 11.88s
+
+Script done on 2026-09-12 20:30:47+00:00 [COMMAND_EXIT_CODE="1"]
