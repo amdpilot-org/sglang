@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32158",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the pipeline-parallel load undercount in the checked-out implementation: SchedulerLoadInquirer counted only the currently selected running_batch although the PP loop retains active requests across running_mbs. The fix supplies all PP running slots and counts unique request IDs, while preserving the singleton non-PP path.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-0b3781ed1483/venv/bin/python -m pytest -q test/registered/unit/managers/scheduler_components/test_load_inquirer.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression on the recorded base: all three PP-slot, deduplication, and singleton/empty cases failed because the load inquirer exposed only get_running_batch. Raw output: reports/j-0b3781ed1483/evidence/pytest-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0b3781ed1483/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_v1_loads_aggregate.py test/registered/unit/managers/scheduler_components/test_load_inquirer.py",
+      "exit_code": 0,
+      "what_was_measured": "Eight tests passed, covering the existing HTTP aggregation behavior plus all PP slots, request-ID deduplication across slots, the non-PP singleton case, and no running batches. Raw output: reports/j-0b3781ed1483/evidence/pytest-focused-final.log"
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-0b3781ed1483/pre-commit /opt/venv/bin/pre-commit run --files python/sglang/srt/managers/scheduler.py python/sglang/srt/managers/scheduler_components/load_inquirer.py test/registered/unit/managers/scheduler_components/test_load_inquirer.py",
+      "exit_code": 0,
+      "what_was_measured": "All repository formatting, lint, source-safety, and registered-test metadata hooks passed. Raw output: reports/j-0b3781ed1483/evidence/pre-commit-final.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0b3781ed1483/venv/bin/python -c 'import torch; ...'",
+      "exit_code": 0,
+      "what_was_measured": "Environment inventory found exactly one AMD Instinct MI350X gfx950 GPU. No GPU kernel was executed because the defect and correction are CPU scheduler bookkeeping, and one GPU cannot reproduce the reported TP=2, PP=4 deployment. Raw output: reports/j-0b3781ed1483/evidence/gpu-environment.log"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The assigned environment exposes one gfx950 GPU, but the reported configuration requires eight GPUs (TP=2 x PP=4). The deterministic regression exercises the actual SchedulerLoadInquirer accounting logic without claiming a distributed serving reproduction. See reports/j-0b3781ed1483/evidence/gpu-environment.log.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original 16-request TP=2, PP=4 HTTP serving workload was not run because only one GPU was assigned; no full-model weights were supplied.",
+    "The regression verifies the scheduler accounting defect and fix with representative running_mbs batches, not pipeline communication or multi-GPU execution.",
+    "No native code changed, so a native rebuild was neither required nor performed."
+  ]
+}

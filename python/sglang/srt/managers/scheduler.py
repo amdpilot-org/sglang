@@ -2415,7 +2415,11 @@ class Scheduler(
             tp_worker=self.tp_worker,
             token_to_kv_pool_allocator=self.token_to_kv_pool_allocator,
             spec_algorithm=self.spec_algorithm,
-            get_running_batch=lambda: self.running_batch,
+            get_running_batches=lambda: (
+                self.running_mbs
+                if self.ps.pp_size > 1 and hasattr(self, "running_mbs")
+                else (self.running_batch,)
+            ),
             get_waiting_queue=lambda: self.waiting_queue,
             waiting_queue_prefix_matched=lambda: (
                 self.policy.waiting_queue_prefix_matched(self.waiting_queue)

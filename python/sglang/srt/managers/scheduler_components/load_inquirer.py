@@ -41,7 +41,7 @@ class SchedulerLoadInquirer:
     tp_worker: BaseTpWorker
     token_to_kv_pool_allocator: BaseTokenToKVPoolAllocator
     spec_algorithm: SpeculativeAlgorithm
-    get_running_batch: Callable
+    get_running_batches: Callable
     get_waiting_queue: Callable
     waiting_queue_prefix_matched: Callable
     get_recent_cache_hit_rate: Callable
@@ -97,7 +97,7 @@ class SchedulerLoadInquirer:
     def get_loads(self) -> LoadSnapshot:
         """Build the per-DP-rank load snapshot for DP balancing and /v1/loads."""
         stats = self.get_stats()
-        num_running_reqs = len(self.get_running_batch().reqs)
+        num_running_reqs = self._get_num_running_reqs()
 
         waiting_queues = [self.get_waiting_queue()]
         pending_token_queues = [self.get_waiting_queue()]
@@ -238,4 +238,10 @@ class SchedulerLoadInquirer:
             total_prefill_uncached_tokens=self.get_total_prefill_uncached_tokens(),
             total_prefill_busy_us=self.get_total_prefill_busy_us(),
             decode_moments=decode_moments,
+        )
+
+    def _get_num_running_reqs(self) -> int:
+        """Count unique requests retained in the scheduler's running batches."""
+        return len(
+            {req.rid for batch in self.get_running_batches() for req in batch.reqs}
         )
