@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35333",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2866",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2748",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/2831",
+  "candidate_commit": "b9fdebd698e93283f02acc4095f1fcda71233f4e",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Preserved the candidate's valid trajectory-gate and regional-compile framework, independently reproduced and fixed its NaN fail-open behavior and tensor-valued terminal-state exception, and added adversarial regressions. The candidate still does not wire manifest resolution into a production server/request path and has no real diffusion or stateful world-model qualification, so this is a bounded correction rather than a complete implementation of the original feature.",
+  "tests": [
+    {
+      "command": "Exact-candidate adversarial invocation at b9fdebd698e93283f02acc4095f1fcda71233f4e (retained in raw/candidate_counterexamples.log)",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before: a NaN checkpoint and NaN output metric produced passed=True with no failures; equal tensor-valued terminal states raised RuntimeError because tensor truth value was ambiguous."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-020ffe8828e4/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_compile_trajectory_gate.py python/sglang/multimodal_gen/test/unit/test_regional_torch_compile.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after focused compatibility and adversarial suite: 20 passed, including non-finite tensor/output rejection and nested tensor terminal-state structural comparison."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TORCHINDUCTOR_CACHE_DIR=/tmp/amdpilot-repo-j-020ffe8828e4/inductor-correction-cache /tmp/amdpilot-repo-j-020ffe8828e4/venv/bin/python reports/j-ca997a4b410d/gpu_trajectory_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "Real Inductor execution on one AMD Instinct MI350X: eager versus compiled four-step toy rollout passed with maximum absolute error 1.1920928955078125e-07; reset/short-history passed; deliberate step-1 perturbation was rejected."
+    },
+    {
+      "command": "rg -n 'CompilePlanResolver|CompilePlanResolution|CompiledPlanManifest|TrajectoryCapture|evaluate_trajectory_gate' python/sglang --glob '!**/test/**'",
+      "exit_code": 0,
+      "what_was_measured": "Production wiring audit: the resolver and manifest APIs have no server/configuration/request consumer; DenoisingStage accepts an optional resolution but production callers omit it."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI350X with Torch 2.11.0+rocm7.2 ran the candidate's deterministic Linear/tanh Inductor trajectory. This does not qualify a diffusion or world-model architecture.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No production path loads a manifest, derives a current workload signature, resolves it, or passes resolved_plan to DenoisingStage; uncovered production requests are therefore not made eager by this feature.",
+    "No production model weights were available, so no real diffusion or stateful world-model trajectory was run and no architecture-specific source change is justified.",
+    "History regimes, cache on/off, CFG serial/parallel, reset isolation, mutation/alias metadata, distributed topology, and semantic output metrics remain unqualified.",
+    "The GPU test is a small Linear/tanh toy and does not exercise production DenoisingStage manifest enforcement or serving transport.",
+    "No native source changed and repository-environment.json declares no native build target, so native rebuilding was not applicable.",
+    "Torch emitted non-fatal Dynamo metrics JSON-serialization errors during the successful GPU execution."
+  ]
+}
