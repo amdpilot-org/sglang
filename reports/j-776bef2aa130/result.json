@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38574",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Reproduced the independent review against candidate 8a5abc997a9d05264d4349a9d62fd0fc7d4ee630. Dense BF16 MTP construction with a broad Linear W4A8 target and no ignore still raises before checkpoint tensors are visible. Preserved the candidate's actionable diagnostic and packed-layer safety boundary, corrected its invalid plain-glob documentation, and added regression coverage for both MTP prefix forms. No automatic fallback was added because construction cannot distinguish dense .weight storage from genuinely quantized weight_packed/weight_scale storage.",
+  "tests": [
+    {
+      "command": "At exact candidate 8a5abc997a9d05264d4349a9d62fd0fc7d4ee630: PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-776bef2aa130/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_nextn.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's three tests passed, including its explicit assertion that dense no-ignore construction still raises. Raw output: /job/raw/j-776bef2aa130/candidate-regression.txt"
+    },
+    {
+      "command": "Pinned-source inline CompressedTensorsConfig + ReplicatedLinear construction for no ignore, plain mtp.* / model.mtp.*, and re:(model\\.)?mtp\\..*",
+      "exit_code": 0,
+      "what_was_measured": "No ignore and both plain glob-looking entries raised the candidate's actionable NotImplementedError; the corrected regex selected UnquantizedLinearMethod. Raw output: /job/raw/j-776bef2aa130/candidate-counterexamples-pinned.txt"
+    },
+    {
+      "command": "PYTHONPYCACHEPREFIX=/tmp/amdpilot-repo-j-776bef2aa130/pycache-final-2 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-776bef2aa130/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_nextn.py test/registered/unit/layers/quantization/test_compressed_tensors_mixed_precision.py test/registered/unit/layers/quantization/test_compressed_tensors_lm_head.py test/registered/unit/layers/quantization/test_compressed_tensors_kv_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "23 focused compressed-tensors tests and 4 subtests passed after correction. Raw output: /job/raw/j-776bef2aa130/passing-after.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-776bef2aa130/venv/bin/python inline explicit-ignore BF16 GPU comparison",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X, the corrected regex selected UnquantizedLinearMethod and GPU BF16 output had maximum absolute difference 0.015968799591064453 from an independent CPU FP32 matmul over the BF16-rounded weights. Raw output: /job/raw/j-776bef2aa130/gpu-explicit-ignore.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI350X (gfx950), Torch 2.11.0+rocm7.2, HIP 7.2.26015; source /job/repo/python/sglang/srt/layers/quantization/compressed_tensors/compressed_tensors.py. See /job/raw/j-776bef2aa130/gpu-explicit-ignore.txt.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Dense MTP weights without an explicit valid ignore entry still fail construction; this correction makes the failure actionable and documents the valid regex but does not claim to resolve no-ignore startup.",
+    "Actual packed MTP checkpoint loading was not exercised. Dense and packed tensor inventories cannot affect the common pre-load construction point, and no model weights were available to verify the later load path.",
+    "No full Qwen3-Next checkpoint or original 2x H100 NVL TP2/EP2 environment was available, so end-to-end NEXTN server startup remains unverified.",
+    "No native source changed, so no native rebuild was applicable."
+  ],
+  "source_paths": [
+    "/job/repo/python/sglang/srt/layers/quantization/compressed_tensors/compressed_tensors.py",
+    "/job/repo/test/registered/unit/layers/quantization/test_compressed_tensors_nextn.py",
+    "/job/repo/docs/docs/advanced_features/quantization.mdx"
+  ],
+  "native_paths": []
+}

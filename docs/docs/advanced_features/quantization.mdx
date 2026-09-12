@@ -197,6 +197,33 @@ On AMD, several of these methods use [Aiter](https://github.com/ROCm/aiter) for 
 
 On Ascend, various layers quantization configurations are supported, see [Ascend NPU quantization](../hardware-platforms/ascend-npus/optimization/quantization) for details.
 
+### Compressed-tensors checkpoints with NEXTN/MTP
+
+Some compressed-tensors checkpoints contain an unquantized MTP draft module
+even though their quantization configuration broadly targets every `Linear`
+module. SGLang builds the draft module before reading checkpoint tensors, so
+the checkpoint metadata must explicitly exclude dense MTP weights from
+quantization. Add an MTP pattern to `quantization_config.ignore` in the model's
+`config.json`, for example:
+
+```json
+{
+  "quantization_config": {
+    "ignore": ["re:(model\\.)?mtp\\..*"]
+  }
+}
+```
+
+The `re:` prefix is required for wildcard matching. Plain entries such as
+`"mtp.*"` and `"model.mtp.*"` are not globs: they match only an exact name or
+a dotted suffix, so they do not ignore MTP children such as
+`mtp.layers.0.self_attn.qkv_proj`. Inspect the module prefixes and use a regular
+expression that covers only the checkpoint's dense MTP layers. For a checkpoint
+that uses only the top-level `mtp...` form, `"re:mtp\\..*"` is sufficient.
+Do not add this exclusion when the MTP module is genuinely quantized and the
+checkpoint contains packed tensors such as `weight_packed` or `weight_scale`;
+doing so would allocate incompatible dense parameters.
+
 ## GEMM Backends for FP4/FP8 Quantization
 
 <Note>
