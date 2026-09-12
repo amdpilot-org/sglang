@@ -991,6 +991,18 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
         return forward_batch, attn_backend, pp_proxy_tensors
 
     def capture(self) -> None:
+        if (
+            self.ragged_verify_mode
+            and not self.attn_backend.supports_ragged_verify_graph
+        ):
+            logger.warning(
+                "Skipping compact target-verify CUDA graph capture because "
+                "attention backend %s does not support ragged verify graphs; "
+                "target verification will use the eager path.",
+                type(self.attn_backend).__name__,
+            )
+            return
+
         # Warm up + autotune kernels once before capture (run-once across the
         # decode + prefill runners; see BaseRunner.warmup).
         self.warmup()
