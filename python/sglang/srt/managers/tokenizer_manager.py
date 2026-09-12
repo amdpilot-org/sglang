@@ -1275,10 +1275,8 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
     def _validate_mm_limits(
         self, obj: Union[GenerateReqInput, EmbeddingReqInput]
     ) -> None:
-        if not get_mm().limit_mm_data_per_request:
-            return
-
-        for modality, limit in get_mm().limit_mm_data_per_request.items():
+        configured_limits = get_mm().limit_mm_data_per_request or {}
+        for modality, limit in configured_limits.items():
             data = getattr(obj, f"{modality}_data", None)
             if data:
                 count = len(data) if isinstance(data, list) else 1
@@ -1286,6 +1284,13 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                     raise ValueError(
                         f"{modality.capitalize()} count {count} exceeds limit {limit} per request."
                     )
+
+        # Every serving request passes this point before processor dispatch.
+        # This also covers processors that intentionally bypass load_mm_data().
+        if "image" not in configured_limits and self.mm_processor is not None:
+            self.mm_processor.validate_image_num_limitation(
+                getattr(obj, "image_data", None)
+            )
 
     def _validate_for_matryoshka_dim(self, obj: EmbeddingReqInput) -> None:
         """Validate the request for Matryoshka dim if it has the field set."""
