@@ -1,0 +1,182 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ TestRunaiModelStreamerLoader.test_incomplete_index_keeps_auto_added_mtp_safetensors _
+
+self = <test_candidate_runai_loader.TestRunaiModelStreamerLoader testMethod=test_incomplete_index_keeps_auto_added_mtp_safetensors>
+
+    def test_incomplete_index_keeps_auto_added_mtp_safetensors(self):
+        with tempfile.TemporaryDirectory() as model_dir:
+            target_file = os.path.join(model_dir, "target.safetensors")
+            draft_file = os.path.join(model_dir, "draft-1.safetensors")
+            supplemental_file = os.path.join(model_dir, "mtp.safetensors")
+            files = [target_file, draft_file]
+            for path in (*files, supplemental_file):
+                Path(path).touch()
+
+            with open(
+                os.path.join(model_dir, "model.safetensors.index.json"), "w"
+            ) as index_file:
+                json.dump(
+                    {
+                        "weight_map": {
+                            "model.layers.0.weight": "target.safetensors",
+                            "mtp.1.decoder.weight": "draft-1.safetensors",
+                        }
+                    },
+                    index_file,
+                )
+
+            load_config = LoadConfig(
+                load_format=LoadFormat.RUNAI_STREAMER,
+                model_loader_extra_config={},
+                draft_model_idx=1,
+            )
+            runai_loader = loader_mod.RunaiModelStreamerLoader(load_config)
+            runai_loader.target_device_str = "cpu"
+            source = runai_loader.Source(
+                model_dir,
+                revision=None,
+                model_config=SimpleNamespace(
+                    hf_config=SimpleNamespace(
+                        architectures=["Glm4MoeForCausalLM"],
+                        num_nextn_predict_layers=1,
+                    )
+                ),
+            )
+
+            with (
+                patch.object(
+                    runai_loader,
+                    "_prepare_weights",
+                    return_value=(model_dir, files),
+                ),
+                patch.object(
+                    weight_utils,
+                    "runai_safetensors_weights_iterator",
+                    return_value=iter(()),
+                ) as mock_iterator,
+            ):
+                list(runai_loader._get_weights_iterator(source))
+
+>           self.assertEqual(
+                mock_iterator.call_args.args[0],
+                [target_file, draft_file, supplemental_file],
+            )
+E           AssertionError: Lists differ: ['/tmp/tmphcy46bql/draft-1.safetensors'] != ['/tmp/tmphcy46bql/target.safetensors', '/tmp/tmphcy46bql/dr[50 chars]ors']
+E
+E           First differing element 0:
+E           '/tmp/tmphcy46bql/draft-1.safetensors'
+E           '/tmp/tmphcy46bql/target.safetensors'
+E
+E           Second list contains 2 additional elements.
+E           First extra element 1:
+E           '/tmp/tmphcy46bql/draft-1.safetensors'
+E
+E           + ['/tmp/tmphcy46bql/target.safetensors',
+E           - ['/tmp/tmphcy46bql/draft-1.safetensors']
+E           ? ^                                      ^
+E
+E           +  '/tmp/tmphcy46bql/draft-1.safetensors',
+E           ? ^                                      ^
+E
+E           +  '/tmp/tmphcy46bql/mtp.safetensors']
+
+../review-evidence-j-a7d274d5a66e/test_candidate_runai_loader.py:199: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7f49192376a0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7f51fdfd20c0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestRunaiModelStreamerLoader.test_incomplete_index_keeps_auto_added_mtp_safetensors
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/review-evidence-j-a7d274d5a66e/test_candidate_runai_loader.py", line 199, in test_incomplete_index_keeps_auto_added_mtp_safetensors
+    self.assertEqual(
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1091, in assertListEqual
+    self.assertSequenceEqual(list1, list2, msg, seq_type=list)
+  File "/usr/lib/python3.12/unittest/case.py", line 1073, in assertSequenceEqual
+    self.fail(msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: Lists differ: ['/tmp/tmphcy46bql/draft-1.safetensors'] != ['/tmp/tmphcy46bql/target.safetensors', '/tmp/tmphcy46bql/dr[50 chars]ors']
+
+First differing element 0:
+'/tmp/tmphcy46bql/draft-1.safetensors'
+'/tmp/tmphcy46bql/target.safetensors'
+
+Second list contains 2 additional elements.
+First extra element 1:
+'/tmp/tmphcy46bql/draft-1.safetensors'
+
++ ['/tmp/tmphcy46bql/target.safetensors',
+- ['/tmp/tmphcy46bql/draft-1.safetensors']
+? ^                                      ^
+
++  '/tmp/tmphcy46bql/draft-1.safetensors',
+? ^                                      ^
+
++  '/tmp/tmphcy46bql/mtp.safetensors']
+------------------------------ Captured log call -------------------------------
+WARNING  sglang.srt.model_loader.weight_utils:weight_utils.py:883 Found mtp.safetensors but it's not referenced in model.safetensors.index.json. This is a checkpoint packaging bug. Auto-adding it for loading. Please report this to the checkpoint provider.
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+<frozen abc>:106
+  <frozen abc>:106: DeprecationWarning: MultiPlatformOp is deprecated; subclass sglang.kernels.fused_op.BaseFusedOp instead (RFC #29630).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../review-evidence-j-a7d274d5a66e/test_candidate_runai_loader.py::TestRunaiModelStreamerLoader::test_incomplete_index_keeps_auto_added_mtp_safetensors
+1 failed, 17 warnings in 12.05s
