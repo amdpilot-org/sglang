@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38980",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "d1f6440c5ef02abc13ec640a2b860e1e85a7d750",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a partial fix: it rejects sm89 in the source-level support predicate, adds a KV-cache guard, compares CUDA versions numerically, and rejects non-3 versions before FA3 dispatch. However, both wrappers validate the current CUDA device rather than the input tensor device, so an sm89 tensor can still reach the native FA3 launch when another supported GPU is current. CUDA/sm89 execution could not be performed in the ROCm-only environment.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-faace530f82a/venv/bin/python /job/review-evidence-j-faace530f82a/independent_contract_probe.py /job/repo/python/sglang/kernels/aot/python/sgl_kernel/flash_attn.py (base)",
+      "exit_code": 0,
+      "what_was_measured": "The checked-out base public wrapper reported sm89 supported and sent ver=2, ver=3, ver=4, None, and string '3' through the same instrumented torch.ops.sgl_kernel.fwd.default boundary."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-faace530f82a/venv/bin/python -m pytest -q python/sglang/kernels/aot/tests/test_flash_attn_public_contract.py (candidate d1f6440c5ef02abc13ec640a2b860e1e85a7d750)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's 22 source-wrapper and CMake-inspection regression cases passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-faace530f82a/venv/bin/python /job/review-evidence-j-faace530f82a/independent_contract_probe.py /job/repo/python/sglang/kernels/aot/python/sgl_kernel/flash_attn.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Verified supported/unsupported capability decisions and version rejection at the real source wrapper boundary. Also demonstrated that validation calls is_fa3_supported with None rather than the tensor device, allowing the backend call when current-device support is true for tensors modeled on another device."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-faace530f82a/venv/bin/python -m py_compile python/sglang/kernels/aot/python/sgl_kernel/flash_attn.py python/sglang/kernels/aot/tests/test_flash_attn_public_contract.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python source and regression test compiled."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 d1f6440c5ef02abc13ec640a2b860e1e85a7d750",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the candidate diff."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "Torch is 2.11.0+rocm7.2 with torch.version.cuda=None and one AMD Instinct MI350X. No NVIDIA GPU, nvcc, cuobjdump, or nvidia-smi is available; AMD execution was not used as evidence for CUDA FA3 behavior.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "If the process current CUDA device is supported (for example sm90) but q/k/v are on sm89, _validate_fa3_contract() calls is_fa3_supported(None), passes, and still reaches the unsupported native FA3 launch.",
+    "If the process current CUDA device is unsupported but input tensors are on a supported GPU, the wrapper rejects a valid call based on the wrong device.",
+    "ver=2 remains present as a public selector but is rejected rather than dispatching the shipped FA2 path or being removed, so the issue's stated version-selection alternatives are only partially met."
+  ],
+  "remaining_limitations": [
+    "CUDA binary contents and actual wheel cubins were not inspected because the prepared environment has no CUDA toolkit or CUDA flash_ops library.",
+    "Actual sm89 launch behavior and NVIDIA numerical output remain unverified because no NVIDIA GPU is assigned.",
+    "CMake source shows FA3 sm90a and conditional sm80/sm86 targets; binary forward compatibility was not assumed.",
+    "No native source changed in the candidate, so no native rebuild was applicable.",
+    "The installed sgl_kernel is a ROCm egg; source-level tests explicitly loaded the candidate checkout's flash_attn.py rather than treating the installed package as the candidate."
+  ]
+}
