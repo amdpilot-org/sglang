@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35987",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Ported the complete opt-in BWAP proposal onto the prepared main checkout, including per-request adaptive scheduling, masked fallback, TP=1 unquantized fused gathered GEMMs, adaptive decode CUDA-graph buffer refresh, CLI/config integration, documentation, and regression tests. Verified native ROCm arithmetic and real eager/graph serving with the qualified deterministic tiny Llama fixture. This is a verified implementation candidate, not a semantic-accuracy or production-throughput qualification.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-da4cd9bbb840/venv/bin/python -m pytest -q test/registered/unit/bwap/test_bwap_manager.py",
+      "exit_code": 0,
+      "what_was_measured": "20 unit tests plus 3 adversarial subtests covering score equations, exact top-k cardinality, per-request and mixed-batch scheduling, activation-hook behavior, fused/masked equivalence, fixed-address buffers, graph gating, defaults, and invalid option combinations."
+    },
+    {
+      "command": "pinned Python GPU numerical script recorded in evidence/gpu/numerical.txt",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X, compared the native SGLang SiluAndMul ROCm kernel and every BWAP gathered-GEMM variant against an independent pure-PyTorch dense masked formula. Maximum absolute error was 0 for native/fused/into and 0.0009765625 for the fully pool-free path."
+    },
+    {
+      "command": "qualified run_server_probe.py with --enable-bwap --bwap-fused --bwap-sparsity 0.5 --bwap-t-init 1 --bwap-t-explore 1 --bwap-t-prune 2 --disable-cuda-graph",
+      "exit_code": 0,
+      "what_was_measured": "Real source-checkout eager serving on the assigned GPU: /generate, OpenAI completion, two-request batch, and streaming all returned HTTP 200; both Llama MLP layers selected the fused path."
+    },
+    {
+      "command": "qualified run_server_probe.py with decode graph batch sizes 1,2 and --enable-bwap --bwap-fused --bwap-sparsity 0.5 --bwap-t-init 1 --bwap-t-explore 1 --bwap-t-prune 2",
+      "exit_code": 0,
+      "what_was_measured": "Real adaptive CUDA-graph serving on the assigned GPU: batch sizes 1 and 2 captured, four graph-resident buffers registered, repeated 64-of-128 mask refreshes observed, and all four HTTP probes returned 200."
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files <changed files>",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, secret, merge-conflict, and registered-test checks for all changed source/test/report files."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI355X (gfx950), Torch 2.11.0+rocm7.2 / HIP 7.2.26015. See evidence/gpu/numerical.txt and evidence/serving/{eager,graph}/server.log."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The qualified tiny Llama has deterministic random weights. It validates transport, engine execution, fused FFN selection, and adaptive graph refresh only; it cannot establish semantic accuracy.",
+    "No suitable 1.5B/7B model weights or GSM8K corpus were available, so the proposal's accuracy claims and accuracy-versus-sparsity tradeoff were not independently reproduced.",
+    "No production-sized model throughput benchmark was run. Tiny-model request latency is dominated by overhead and is not evidence of a BWAP speedup.",
+    "The fused fast path remains intentionally limited to unquantized floating-point, bias-free gated MLPs at TP=1. Quantized layers, bias-bearing layers, and TP>1 use the correct masking fallback without compute savings; global cross-TP top-k is unimplemented.",
+    "The gathered weights and capture scratch buffers retain the proposal's substantial extra memory overhead.",
+    "Eager and graph output IDs matched for the isolated single-request probes. In the later two-request probe they differed in a few tail tokens after prior requests had adapted the shared masks; the random fixture cannot distinguish benign low-precision sensitivity from model-quality impact.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable. The installed ROCm SGLang kernel was exercised directly on GPU."
+  ]
+}
