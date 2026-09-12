@@ -427,7 +427,9 @@ class TestLongAudioChunkedNonStreaming(CustomTestCase):
             result = self._create_transcription(tm, _long_wav_bytes(65.0))
 
         self.assertEqual(result.status_code, 400)
-        self.assertIn("Failed to split audio", json.loads(result.body)["message"])
+        self.assertIn(
+            "Failed to split audio", json.loads(result.body)["error"]["message"]
+        )
         self.assertEqual(tm.requests, [])
 
     def test_short_audio_stays_unchunked(self):

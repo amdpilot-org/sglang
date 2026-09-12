@@ -528,7 +528,7 @@ class ServingChatTestCase(unittest.TestCase):
                 response = get_or_create_event_loop().run_until_complete(
                     self.chat.handle_request(request, self.fastapi_request)
                 )
-                error = json.loads(response.body)
+                error = json.loads(response.body)["error"]
                 self.assertEqual(response.status_code, HTTPStatus.BAD_REQUEST)
                 self.assertEqual(error["type"], "BadRequestError")
                 self.assertIn(media_type, error["message"])
