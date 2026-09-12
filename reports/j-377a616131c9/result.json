@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38253",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/862",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/824",
+  "candidate_commit": "fce408041e990861151b72d113404cbe194b3333",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate fixes the original GLM-5.3-Flash FP8 false-negative fusion gate by resolving the six source projection prefixes through the quantization configuration, while preserving TP-layout and partially-quantized rejection guards.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-377a616131c9/venv/bin/python /job/review-evidence/reproduce_before.py (base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "Original failure: all six source prefixes resolved to UnquantizedLinearMethod, but the recorded base's global quant_config gate disabled fusion."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-377a616131c9/venv/bin/python -m pytest -q test/registered/unit/models/test_glm5_next_qkvbfg_fusion.py test/registered/quant/test_is_layer_skipped.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression, partial-quantization rejection, attention-TP mismatch rejection, and existing prefix boundaries; 7 tests passed."
+    },
+    {
+      "command": "Independent Fp8Config prefix matrix using can_fuse_glm5_next_qkvbfg (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Official parent-prefix and checkpoint-leaf exclusions enable fusion; missing/unrelated exclusions, TP mismatch, and unquantized-model behavior take the expected paths. The original first matrix intentionally exited 1 after finding the internal-qkv_proj conservative false negative; detailed follow-up resolved the naming distinction."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 independent BF16 fused primitive and real weight-loader comparisons (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, both fused stages and all eight loader-populated matrix results matched independent torch linear/bmm references exactly (max_abs 0.0)."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-377a616131c9/raw/gpu-inventory.txt identifies one AMD Instinct MI350X gfx950; gpu-fused-primitives.txt and gpu-loader-and-math.txt record exact BF16 agreement with independent PyTorch references."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "An ignored_layers list using the internal fused name model.layers.0.linear_attn.qkv_proj (rather than checkpoint leaves q_proj/k_proj/v_proj or the parent linear_attn prefix) remains conservatively unfused. This does not match the original official-checkpoint configuration and cannot cause unsafe fusion."
+  ],
+  "remaining_limitations": [
+    "Official GLM-5.3-Flash weights were unavailable, so full-model serving and semantic accuracy were not tested.",
+    "Only one gfx950 GPU was assigned, so the reported TP8 deployment and multi-node behavior were not reproduced.",
+    "GPU checks validate the changed fused primitives and their weight loaders, not complete GLM-5.3-Flash execution or performance.",
+    "No native source changed and the prepared environment specified no separate native artifact, so no native rebuild was applicable."
+  ]
+}

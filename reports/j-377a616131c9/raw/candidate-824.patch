@@ -1,0 +1,596 @@
+diff --git a/python/sglang/srt/layers/quantization/utils.py b/python/sglang/srt/layers/quantization/utils.py
+index 70c6d05..d1824e2 100644
+--- a/python/sglang/srt/layers/quantization/utils.py
++++ b/python/sglang/srt/layers/quantization/utils.py
+@@ -7,7 +7,7 @@ from __future__ import annotations
+ import re
+ from copy import deepcopy
+ from types import MappingProxyType
+-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, Union
++from typing import TYPE_CHECKING, Dict, Iterable, List, Mapping, Optional, Tuple, Union
+ 
+ import numpy
+ import torch
+@@ -125,6 +125,27 @@ def is_layer_skipped(
+     return is_skipped
+ 
+ 
++def are_linear_prefixes_unquantized(
++    quant_config: Optional[QuantizationConfig], prefixes: Iterable[str]
++) -> bool:
++    """Return whether every linear prefix resolves to an unquantized method."""
++    if quant_config is None:
++        return True
++
++    from sglang.srt.layers.linear import LinearBase
++    from sglang.srt.layers.quantization.unquant import UnquantizedLinearMethod
++
++    # LinearBase allocates no weights itself. Using an unquantized probe lets
++    # each config apply its own per-prefix exclusion rules through the same
++    # get_quant_method entry point used by real linear layers.
++    probe = LinearBase(input_size=1, output_size=1, quant_config=None)
++    for prefix in prefixes:
++        method = quant_config.get_quant_method(probe, prefix=prefix)
++        if method is not None and not isinstance(method, UnquantizedLinearMethod):
++            return False
++    return True
++
++
+ def per_tensor_dequantize(
+     tensor: torch.Tensor, inv_scale: Union[float, torch.Tensor]
+ ) -> torch.Tensor:
+diff --git a/python/sglang/srt/models/glm5_next.py b/python/sglang/srt/models/glm5_next.py
+index c6ec665..575ab88 100644
+--- a/python/sglang/srt/models/glm5_next.py
++++ b/python/sglang/srt/models/glm5_next.py
+@@ -49,6 +49,7 @@ from sglang.srt.layers.moe.utils import (
+     is_shared_experts_fusion_disabled,
+ )
+ from sglang.srt.layers.quantization.base_config import QuantizationConfig
++from sglang.srt.layers.quantization.utils import are_linear_prefixes_unquantized
+ from sglang.srt.layers.radix_linear_attention import RadixLinearAttention
+ from sglang.srt.layers.rotary_embedding import get_rope
+ from sglang.srt.layers.utils.common import PPMissingLayer
+@@ -303,6 +304,28 @@ class Glm5NextVisionModel(GlmOcrVisionModel):
+         )
+ 
+ 
++def can_fuse_glm5_next_qkvbfg(
++    quant_config: Optional[QuantizationConfig],
++    prefix: str,
++    head_shard_size: int,
++    tp_size: int,
++) -> bool:
++    if head_shard_size != tp_size:
++        return False
++
++    projection_names = (
++        "qkv_proj",
++        "f_a_proj",
++        "f_b_proj",
++        "b_proj",
++        "g_a_proj",
++        "g_b_proj",
++    )
++    return are_linear_prefixes_unquantized(
++        quant_config, (f"{prefix}.{name}" for name in projection_names)
++    )
++
++
+ class Glm5NextLinearAttention(nn.Module):
+     def __init__(
+         self,
+@@ -337,7 +360,9 @@ class Glm5NextLinearAttention(nn.Module):
+         projection_size = self.head_dim * self.num_heads
+         self.conv_size = config.linear_attn_config["short_conv_kernel_size"]
+ 
+-        self.do_fuse_qkvbfg = quant_config is None and head_shard_size == self.tp_size
++        self.do_fuse_qkvbfg = can_fuse_glm5_next_qkvbfg(
++            quant_config, prefix, head_shard_size, self.tp_size
++        )
+         if self.do_fuse_qkvbfg:
+             self.qkvb_sizes = [
+                 projection_size,
+@@ -351,7 +376,10 @@ class Glm5NextLinearAttention(nn.Module):
+                 self.hidden_size,
+                 self.qkvb_sizes,
+                 self.fg_sizes,
+-                quant_config=quant_config,
++                # The source projections were resolved as unquantized above.
++                # The synthetic fused prefix is absent from the checkpoint's
++                # exclusion list and must not inherit the global FP8 method.
++                quant_config=None,
+                 prefix=f"{prefix}.fused_qkvbfg_a_proj",
+             )
+             self.split_sizes = [
+diff --git a/reports/j-645d11addaa7/investigation.md b/reports/j-645d11addaa7/investigation.md
+new file mode 100644
+index 0000000..ab1c6c0
+--- /dev/null
++++ b/reports/j-645d11addaa7/investigation.md
+@@ -0,0 +1,57 @@
++# GLM-5.3 qkvbfg fusion investigation
++
++Upstream issue: https://github.com/sgl-project/sglang/issues/38253
++
++Mirror issue: https://github.com/amdpilot-org/sglang/issues/764
++
++Base commit: `358c163250ad3b1f62939b01ce1314a0a31a0365`
++
++## Finding
++
++The bug is present at the recorded base. `Glm5NextLinearAttention` used
++`quant_config is None` to decide whether to construct the qkvbfg fusion. That
++tests whether any part of the model is quantized, rather than whether the six
++source projections are quantized. Consequently an FP8 checkpoint whose
++attention projections are excluded from quantization still selected the
++unfused path.
++
++The closed, unmerged upstream PR https://github.com/sgl-project/sglang/pull/37744
++described the same cause and supplied checkpoint observations from the official
++GLM-5.3-Flash weights. Its change was not present in this checkout.
++
++## Correction
++
++The fusion decision now resolves the six real projection prefixes through the
++active quantization configuration. Fusion is allowed only if every prefix maps
++to `None` or `UnquantizedLinearMethod`, and the existing attention-TP condition
++still holds. The synthetic fused projection is constructed without the global
++quantization configuration because its synthetic prefix is not checkpoint
++metadata and the gate has already established that all source weights are
++unquantized.
++
++## Evidence
++
++- `raw/reproduce-before.txt`: the actual base gate evaluates false even though
++  all six prefixes resolve to `UnquantizedLinearMethod` (expected assertion
++  failure, exit 1).
++- `raw/failing-before.txt`: the regression added before implementation also
++  failed collection because the issue-specific decision function did not exist
++  yet (pytest exit 2).
++- `raw/focused-tests-after.txt`: the issue configuration and two independent
++  boundaries pass (partially quantized attention remains unfused; attention TP
++  mismatch remains unfused), along with the existing skip-prefix tests (7
++  passed).
++- `raw/gfx950-fused-linear-numerical.txt`: on the assigned AMD Instinct MI350X
++  (`gfx950`), the actual BF16 `MergedColumnParallelRepeatedLinear` and
++  `ColumnParallelBatchedLinear` outputs exactly matched independent PyTorch
++  `linear`/`bmm` references (both maximum absolute errors were 0.0).
++- `raw/pre-commit.txt`: repository pre-commit checks passed for all changed
++  Python files.
++
++## Limitations
++
++The official GLM-5.3-Flash weights were not available and the assignment had a
++single GPU, so the original full-model TP8 serving, semantic accuracy, and
++performance claims were not reproduced. The GPU check validates only the fused
++linear primitives used by the corrected path. No native C++ source changed and
++no native rebuild was required.
+diff --git a/reports/j-645d11addaa7/raw/failing-before.exit-code b/reports/j-645d11addaa7/raw/failing-before.exit-code
+new file mode 100644
+index 0000000..0cfbf08
+--- /dev/null
++++ b/reports/j-645d11addaa7/raw/failing-before.exit-code
+@@ -0,0 +1 @@
++2
+diff --git a/reports/j-645d11addaa7/raw/failing-before.txt b/reports/j-645d11addaa7/raw/failing-before.txt
+new file mode 100644
+index 0000000..bef55cc
+--- /dev/null
++++ b/reports/j-645d11addaa7/raw/failing-before.txt
+@@ -0,0 +1,38 @@
++
++==================================== ERRORS ====================================
++___ ERROR collecting registered/unit/models/test_glm5_next_qkvbfg_fusion.py ____
++ImportError while importing test module '/job/repo/test/registered/unit/models/test_glm5_next_qkvbfg_fusion.py'.
++Hint: make sure your test modules/packages have valid Python names.
++Traceback:
++/usr/lib/python3.12/importlib/__init__.py:90: in import_module
++    return _bootstrap._gcd_import(name[level:], package, level)
++           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++test/registered/unit/models/test_glm5_next_qkvbfg_fusion.py:4: in <module>
++    from sglang.srt.models.glm5_next import can_fuse_glm5_next_qkvbfg
++E   ImportError: cannot import name 'can_fuse_glm5_next_qkvbfg' from 'sglang.srt.models.glm5_next' (/job/repo/python/sglang/srt/models/glm5_next.py)
++------------------------------- Captured stderr --------------------------------
++[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
++[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-645d11addaa7/cache/aiter/module_aiter_core.so
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++<frozen abc>:106
++  <frozen abc>:106: DeprecationWarning: MultiPlatformOp is deprecated; subclass sglang.kernels.fused_op.BaseFusedOp instead (RFC #29630).
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++=========================== short test summary info ============================
++ERROR test/registered/unit/models/test_glm5_next_qkvbfg_fusion.py
++!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
++18 warnings, 1 error in 28.37s
+diff --git a/reports/j-645d11addaa7/raw/focused-tests-after.exit-code b/reports/j-645d11addaa7/raw/focused-tests-after.exit-code
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/reports/j-645d11addaa7/raw/focused-tests-after.exit-code
+@@ -0,0 +1 @@
++0
+diff --git a/reports/j-645d11addaa7/raw/focused-tests-after.txt b/reports/j-645d11addaa7/raw/focused-tests-after.txt
+new file mode 100644
+index 0000000..93ed5fa
+--- /dev/null
++++ b/reports/j-645d11addaa7/raw/focused-tests-after.txt
+@@ -0,0 +1,21 @@
++.......                                                                  [100%]
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++<frozen abc>:106
++  <frozen abc>:106: DeprecationWarning: MultiPlatformOp is deprecated; subclass sglang.kernels.fused_op.BaseFusedOp instead (RFC #29630).
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++7 passed, 18 warnings in 13.37s
+diff --git a/reports/j-645d11addaa7/raw/focused-tests-final.exit-code b/reports/j-645d11addaa7/raw/focused-tests-final.exit-code
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/reports/j-645d11addaa7/raw/focused-tests-final.exit-code
+@@ -0,0 +1 @@
++0
+diff --git a/reports/j-645d11addaa7/raw/focused-tests-final.txt b/reports/j-645d11addaa7/raw/focused-tests-final.txt
+new file mode 100644
+index 0000000..3bffc23
+--- /dev/null
++++ b/reports/j-645d11addaa7/raw/focused-tests-final.txt
+@@ -0,0 +1,21 @@
++.......                                                                  [100%]
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++<frozen abc>:106
++  <frozen abc>:106: DeprecationWarning: MultiPlatformOp is deprecated; subclass sglang.kernels.fused_op.BaseFusedOp instead (RFC #29630).
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++7 passed, 18 warnings in 13.41s
+diff --git a/reports/j-645d11addaa7/raw/gfx950-fused-linear-numerical.exit-code b/reports/j-645d11addaa7/raw/gfx950-fused-linear-numerical.exit-code
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/reports/j-645d11addaa7/raw/gfx950-fused-linear-numerical.exit-code
+@@ -0,0 +1 @@
++0
+diff --git a/reports/j-645d11addaa7/raw/gfx950-fused-linear-numerical.txt b/reports/j-645d11addaa7/raw/gfx950-fused-linear-numerical.txt
+new file mode 100644
+index 0000000..2ebedd0
+--- /dev/null
++++ b/reports/j-645d11addaa7/raw/gfx950-fused-linear-numerical.txt
+@@ -0,0 +1,7 @@
++[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
++[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-645d11addaa7/cache/aiter/module_aiter_core.so
++device= AMD Instinct MI350X
++gfx_arch= gfx950:sramecc+:xnack-
++qkv_shape= (5, 18) beta_shape= (5, 2) fg_shape= (2, 5, 6)
++first_max_abs= 0.0
++second_max_abs= 0.0
+diff --git a/reports/j-645d11addaa7/raw/gpu-inventory.txt b/reports/j-645d11addaa7/raw/gpu-inventory.txt
+new file mode 100644
+index 0000000..8aacfd3
+--- /dev/null
++++ b/reports/j-645d11addaa7/raw/gpu-inventory.txt
+@@ -0,0 +1,2 @@
++device,Unique ID,VRAM Total Memory (B),VRAM Total Used Memory (B),Card Series,Card Model,Card Vendor,Card SKU,Subsystem ID,Device Rev,Node ID,GUID,GFX Version
++card0,0xcb3b7f83d3aa787d,270566162432,298110976,AMD Instinct MI350X,0x75a0,Advanced Micro Devices Inc. [AMD/ATI],N/A,0x75a0,0x00,9,1779,gfx950
+diff --git a/reports/j-645d11addaa7/raw/pre-commit.exit-code b/reports/j-645d11addaa7/raw/pre-commit.exit-code
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/reports/j-645d11addaa7/raw/pre-commit.exit-code
+@@ -0,0 +1 @@
++0
+diff --git a/reports/j-645d11addaa7/raw/pre-commit.txt b/reports/j-645d11addaa7/raw/pre-commit.txt
+new file mode 100644
+index 0000000..80de995
+--- /dev/null
++++ b/reports/j-645d11addaa7/raw/pre-commit.txt
+@@ -0,0 +1,57 @@
++[INFO] Initializing environment for https://github.com/pre-commit/pre-commit-hooks.
++[INFO] Initializing environment for https://github.com/PyCQA/isort.
++[INFO] Initializing environment for https://github.com/astral-sh/ruff-pre-commit.
++[INFO] Initializing environment for https://github.com/codespell-project/codespell.
++[INFO] Initializing environment for https://github.com/pre-commit/mirrors-clang-format.
++[INFO] Initializing environment for https://github.com/kynan/nbstripout.
++[INFO] Initializing environment for https://github.com/lycheeverse/lychee.git.
++[INFO] Installing environment for https://github.com/pre-commit/pre-commit-hooks.
++[INFO] Once installed this environment will be reused.
++[INFO] This may take a few minutes...
++[INFO] Installing environment for https://github.com/PyCQA/isort.
++[INFO] Once installed this environment will be reused.
++[INFO] This may take a few minutes...
++[INFO] Installing environment for https://github.com/astral-sh/ruff-pre-commit.
++[INFO] Once installed this environment will be reused.
++[INFO] This may take a few minutes...
++[INFO] Installing environment for https://github.com/codespell-project/codespell.
++[INFO] Once installed this environment will be reused.
++[INFO] This may take a few minutes...
++[INFO] Installing environment for https://github.com/pre-commit/mirrors-clang-format.
++[INFO] Once installed this environment will be reused.
++[INFO] This may take a few minutes...
++[INFO] Installing environment for https://github.com/kynan/nbstripout.
++[INFO] Once installed this environment will be reused.
++[INFO] This may take a few minutes...
++check for broken symlinks..............................(no files to check)Skipped
++detect destroyed symlinks..................................................Passed
++trim trailing whitespace...................................................Passed
++fix end of files...........................................................Passed
++check yaml.............................................(no files to check)Skipped
++check toml.............................................(no files to check)Skipped
++check python ast...........................................................Passed
++check for added large files................................................Passed
++check for merge conflicts..................................................Passed
++check that scripts with shebangs are executable............................Passed
++detect private key.........................................................Passed
++debug statements (python)..................................................Passed
++don't commit to branch.....................................................Passed
++isort......................................................................Passed
++ruff (legacy alias)........................................................Passed
++ruff format................................................................Passed
++codespell..................................................................Passed
++clang-format...........................................(no files to check)Skipped
++nbstripout.............................................(no files to check)Skipped
++forbid docs_new/ (renamed to docs/)....................(no files to check)Skipped
++check chinese characters in multimodal_gen.............(no files to check)Skipped
++sort CI_PERMISSIONS.json...............................(no files to check)Skipped
++check for duplicate workflow job names.................(no files to check)Skipped
++check rust-ext cache key prefix defaults match.........(no files to check)Skipped
++reject bare pytest.main calls in __main__ blocks...........................Passed
++unit tests for lint checkers...........................(no files to check)Skipped
++validate registered test CI registries.....................................Passed
++reject CI-registered tests inside the sglang package.......................Passed
++rustfmt sgl-model-gateway (nightly)....................(no files to check)Skipped
++rustfmt experimental/sgl-router........................(no files to check)Skipped
++clippy rust/ workspace (auto-fix)......................(no files to check)Skipped
++rustfmt rust/ workspace................................(no files to check)Skipped
+diff --git a/reports/j-645d11addaa7/raw/reproduce-before.exit-code b/reports/j-645d11addaa7/raw/reproduce-before.exit-code
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/reports/j-645d11addaa7/raw/reproduce-before.exit-code
+@@ -0,0 +1 @@
++1
+diff --git a/reports/j-645d11addaa7/raw/reproduce-before.txt b/reports/j-645d11addaa7/raw/reproduce-before.txt
+new file mode 100644
+index 0000000..40482e5
+--- /dev/null
++++ b/reports/j-645d11addaa7/raw/reproduce-before.txt
+@@ -0,0 +1,10 @@
++[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
++[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-645d11addaa7/cache/aiter/module_aiter_core.so
++resolved_methods= {'qkv_proj': 'UnquantizedLinearMethod', 'f_a_proj': 'UnquantizedLinearMethod', 'f_b_proj': 'UnquantizedLinearMethod', 'b_proj': 'UnquantizedLinearMethod', 'g_a_proj': 'UnquantizedLinearMethod', 'g_b_proj': 'UnquantizedLinearMethod'}
++all_source_projections_unquantized= True
++base_gate_result= False
++Traceback (most recent call last):
++  File "/job/repo/reports/j-645d11addaa7/reproduce_before.py", line 42, in <module>
++    assert base_gate_result, "base gate disables fusion solely because quant_config exists"
++           ^^^^^^^^^^^^^^^^
++AssertionError: base gate disables fusion solely because quant_config exists
+diff --git a/reports/j-645d11addaa7/raw/upstream-issue-38253.json b/reports/j-645d11addaa7/raw/upstream-issue-38253.json
+new file mode 100644
+index 0000000..6a65c0e
+--- /dev/null
++++ b/reports/j-645d11addaa7/raw/upstream-issue-38253.json
+@@ -0,0 +1 @@
++{"url":"https://api.github.com/repos/sgl-project/sglang/issues/38253","repository_url":"https://api.github.com/repos/sgl-project/sglang","labels_url":"https://api.github.com/repos/sgl-project/sglang/issues/38253/labels{/name}","comments_url":"https://api.github.com/repos/sgl-project/sglang/issues/38253/comments","events_url":"https://api.github.com/repos/sgl-project/sglang/issues/38253/events","html_url":"https://github.com/sgl-project/sglang/issues/38253","id":5369418874,"node_id":"I_kwDOLCAjRs8AAAABQArUeg","number":38253,"title":"[Bug] glm5_next qkvbfg fusion disabled on FP8 GLM-5.3-Flash: gate checks global quant_config, not per-layer","user":{"login":"linkedlist771","id":72634327,"node_id":"MDQ6VXNlcjcyNjM0MzI3","avatar_url":"https://avatars.githubusercontent.com/u/72634327?v=4","gravatar_id":"","url":"https://api.github.com/users/linkedlist771","html_url":"https://github.com/linkedlist771","followers_url":"https://api.github.com/users/linkedlist771/followers","following_url":"https://api.github.com/users/linkedlist771/following{/other_user}","gists_url":"https://api.github.com/users/linkedlist771/gists{/gist_id}","starred_url":"https://api.github.com/users/linkedlist771/starred{/owner}{/repo}","subscriptions_url":"https://api.github.com/users/linkedlist771/subscriptions","organizations_url":"https://api.github.com/users/linkedlist771/orgs","repos_url":"https://api.github.com/users/linkedlist771/repos","events_url":"https://api.github.com/users/linkedlist771/events{/privacy}","received_events_url":"https://api.github.com/users/linkedlist771/received_events","type":"User","user_view_type":"public","site_admin":false},"labels":[],"state":"open","locked":false,"assignees":[],"milestone":null,"comments":0,"created_at":"2026-09-07T02:46:26Z","updated_at":"2026-09-07T02:46:26Z","closed_at":null,"assignee":null,"author_association":"NONE","issue_field_values":[],"type":null,"active_lock_reason":null,"sub_issues_summary":{"total":0,"completed":0,"percent_completed":0},"issue_dependencies_summary":{"blocked_by":0,"total_blocked_by":0,"blocking":0,"total_blocking":0},"body":"### Checklist\n\n- [x] I searched related issues but found no solution.\n- [x] The bug persists in the latest version.\n- [x] Issues without environment info and a minimal reproducible demo are hard to resolve and may receive no feedback.\n- [x] If this is not a bug report but a general question, please start a discussion at https://github.com/sgl-project/sglang/discussions. Otherwise, it will be closed.\n- [x] Please use English. Otherwise, it will be closed.\n\n### Describe the bug\n\noriginates from https://github.com/sgl-project/sglang/pull/37744, reopen it based on the main.\n\n### Reproduction\n\nsee in https://github.com/sgl-project/sglang/pull/37744\n\n### Environment\n\nsee in https://github.com/sgl-project/sglang/pull/37744","closed_by":null,"reactions":{"url":"https://api.github.com/repos/sgl-project/sglang/issues/38253/reactions","total_count":0,"+1":0,"-1":0,"laugh":0,"hooray":0,"confused":0,"heart":0,"rocket":0,"eyes":0},"timeline_url":"https://api.github.com/repos/sgl-project/sglang/issues/38253/timeline","performed_via_github_app":null,"state_reason":null,"pinned_comment":null}
+diff --git a/reports/j-645d11addaa7/raw/upstream-pr-37744-comments.json b/reports/j-645d11addaa7/raw/upstream-pr-37744-comments.json
+new file mode 100644
+index 0000000..debab91
+--- /dev/null
++++ b/reports/j-645d11addaa7/raw/upstream-pr-37744-comments.json
+@@ -0,0 +1 @@
++[{"url":"https://api.github.com/repos/sgl-project/sglang/issues/comments/5522282755","html_url":"https://github.com/sgl-project/sglang/pull/37744#issuecomment-5522282755","issue_url":"https://api.github.com/repos/sgl-project/sglang/issues/37744","id":5522282755,"node_id":"IC_kwDOLCAjRs8AAAABSSdZAw","user":{"login":"linkedlist771","id":72634327,"node_id":"MDQ6VXNlcjcyNjM0MzI3","avatar_url":"https://avatars.githubusercontent.com/u/72634327?v=4","gravatar_id":"","url":"https://api.github.com/users/linkedlist771","html_url":"https://github.com/linkedlist771","followers_url":"https://api.github.com/users/linkedlist771/followers","following_url":"https://api.github.com/users/linkedlist771/following{/other_user}","gists_url":"https://api.github.com/users/linkedlist771/gists{/gist_id}","starred_url":"https://api.github.com/users/linkedlist771/starred{/owner}{/repo}","subscriptions_url":"https://api.github.com/users/linkedlist771/subscriptions","organizations_url":"https://api.github.com/users/linkedlist771/orgs","repos_url":"https://api.github.com/users/linkedlist771/repos","events_url":"https://api.github.com/users/linkedlist771/events{/privacy}","received_events_url":"https://api.github.com/users/linkedlist771/received_events","type":"User","user_view_type":"public","site_admin":false},"created_at":"2026-09-03T07:38:13Z","updated_at":"2026-09-03T07:38:13Z","body":"/tag-and-rerun-ci\r\n\r\n","author_association":"NONE","reactions":{"url":"https://api.github.com/repos/sgl-project/sglang/issues/comments/5522282755/reactions","total_count":1,"+1":1,"-1":0,"laugh":0,"hooray":0,"confused":0,"heart":0,"rocket":0,"eyes":0},"performed_via_github_app":null,"minimized":null}]
+diff --git a/reports/j-645d11addaa7/raw/upstream-pr-37744-files.json b/reports/j-645d11addaa7/raw/upstream-pr-37744-files.json
+new file mode 100644
+index 0000000..122d607
+--- /dev/null
++++ b/reports/j-645d11addaa7/raw/upstream-pr-37744-files.json
+@@ -0,0 +1 @@
++[{"sha":"c454a77661efd9778b1d781705d389d794b45850","filename":"python/sglang/srt/layers/quantization/utils.py","status":"modified","additions":34,"deletions":1,"changes":35,"blob_url":"https://github.com/sgl-project/sglang/blob/ebe935c116f35d29b67041c55ddc1e15e6ef1a1c/python%2Fsglang%2Fsrt%2Flayers%2Fquantization%2Futils.py","raw_url":"https://github.com/sgl-project/sglang/raw/ebe935c116f35d29b67041c55ddc1e15e6ef1a1c/python%2Fsglang%2Fsrt%2Flayers%2Fquantization%2Futils.py","contents_url":"https://api.github.com/repos/sgl-project/sglang/contents/python%2Fsglang%2Fsrt%2Flayers%2Fquantization%2Futils.py?ref=ebe935c116f35d29b67041c55ddc1e15e6ef1a1c","patch":"@@ -7,7 +7,7 @@\n import re\n from copy import deepcopy\n from types import MappingProxyType\n-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, Union\n+from typing import TYPE_CHECKING, Dict, Iterable, List, Mapping, Optional, Tuple, Union\n \n import numpy\n import torch\n@@ -125,6 +125,39 @@ def is_layer_skipped(\n     return is_skipped\n \n \n+def are_linear_prefixes_unquantized(\n+    quant_config: Optional[QuantizationConfig],\n+    prefixes: Iterable[str],\n+) -> bool:\n+    \"\"\"Whether every linear layer in ``prefixes`` would be built unquantized.\n+\n+    A model-level ``quant_config`` only says the checkpoint carries *some*\n+    quantized weights, not that any given layer is one of them -- FP8\n+    checkpoints routinely quantize the experts and leave attention in BF16.\n+    Callers that swap in a hand-fused module the quant methods cannot feed must\n+    therefore ask per layer instead of testing ``quant_config is None``, so\n+    resolve each prefix the way the real layer would and accept only\n+    ``None`` / ``UnquantizedLinearMethod``.\n+    \"\"\"\n+    if quant_config is None:\n+        return True\n+\n+    from sglang.srt.layers.linear import LinearBase\n+    from sglang.srt.layers.quantization.unquant import UnquantizedLinearMethod\n+\n+    # Weightless stand-in: LinearBase.__init__ allocates nothing (create_weights\n+    # lives in the subclasses), and quant_config=None keeps constructing the\n+    # probe from recursing back into get_quant_method.\n+    probe = LinearBase(input_size=1, output_size=1, quant_config=None)\n+    for prefix in prefixes:\n+        quant_method = quant_config.get_quant_method(probe, prefix=prefix)\n+        if quant_method is not None and not isinstance(\n+            quant_method, UnquantizedLinearMethod\n+        ):\n+            return False\n+    return True\n+\n+\n def per_tensor_dequantize(\n     tensor: torch.Tensor, inv_scale: Union[float, torch.Tensor]\n ) -> torch.Tensor:"},{"sha":"f27e0be7c814ecb0df0b5462adfff06d7438a86a","filename":"python/sglang/srt/models/glm5_next.py","status":"modified","additions":27,"deletions":2,"changes":29,"blob_url":"https://github.com/sgl-project/sglang/blob/ebe935c116f35d29b67041c55ddc1e15e6ef1a1c/python%2Fsglang%2Fsrt%2Fmodels%2Fglm5_next.py","raw_url":"https://github.com/sgl-project/sglang/raw/ebe935c116f35d29b67041c55ddc1e15e6ef1a1c/python%2Fsglang%2Fsrt%2Fmodels%2Fglm5_next.py","contents_url":"https://api.github.com/repos/sgl-project/sglang/contents/python%2Fsglang%2Fsrt%2Fmodels%2Fglm5_next.py?ref=ebe935c116f35d29b67041c55ddc1e15e6ef1a1c","patch":"@@ -49,6 +49,7 @@\n     is_shared_experts_fusion_disabled,\n )\n from sglang.srt.layers.quantization.base_config import QuantizationConfig\n+from sglang.srt.layers.quantization.utils import are_linear_prefixes_unquantized\n from sglang.srt.layers.radix_linear_attention import RadixLinearAttention\n from sglang.srt.layers.rotary_embedding import get_rope\n from sglang.srt.layers.utils.common import PPMissingLayer\n@@ -336,7 +337,26 @@ def __init__(\n         projection_size = self.head_dim * self.num_heads\n         self.conv_size = config.linear_attn_config[\"short_conv_kernel_size\"]\n \n-        self.do_fuse_qkvbfg = quant_config is None and head_shard_size == self.tp_size\n+        # A global quant_config does not mean these six projections are\n+        # quantized: GLM-5.3-Flash ships FP8 experts with BF16 attention. Ask\n+        # per prefix, since the fused modules can only eat unquantized weights.\n+        self.do_fuse_qkvbfg = (\n+            head_shard_size == self.tp_size\n+            and are_linear_prefixes_unquantized(\n+                quant_config,\n+                [\n+                    f\"{prefix}.{name}\"\n+                    for name in (\n+                        \"qkv_proj\",\n+                        \"f_a_proj\",\n+                        \"f_b_proj\",\n+                        \"b_proj\",\n+                        \"g_a_proj\",\n+                        \"g_b_proj\",\n+                    )\n+                ],\n+            )\n+        )\n         if self.do_fuse_qkvbfg:\n             self.qkvb_sizes = [\n                 projection_size,\n@@ -350,7 +370,12 @@ def __init__(\n                 self.hidden_size,\n                 self.qkvb_sizes,\n                 self.fg_sizes,\n-                quant_config=quant_config,\n+                # The gate above already proved the source weights are\n+                # unquantized. This name exists in no checkpoint, so an ignore\n+                # list written in terms of the real ones is not guaranteed to\n+                # cover it -- handing it the global config risks quantizing a\n+                # layer whose source weights are BF16.\n+                quant_config=None,\n                 prefix=f\"{prefix}.fused_qkvbfg_a_proj\",\n             )\n             self.split_sizes = ["}]
+diff --git a/reports/j-645d11addaa7/raw/upstream-pr-37744.json b/reports/j-645d11addaa7/raw/upstream-pr-37744.json
+new file mode 100644
+index 0000000..9a5ba08
+--- /dev/null
++++ b/reports/j-645d11addaa7/raw/upstream-pr-37744.json
+@@ -0,0 +1 @@
++{"url":"https://api.github.com/repos/sgl-project/sglang/pulls/37744","id":4430380622,"node_id":"PR_kwDOLCAjRs8AAAABCBI-Tg","html_url":"https://github.com/sgl-project/sglang/pull/37744","diff_url":"https://github.com/sgl-project/sglang/pull/37744.diff","patch_url":"https://github.com/sgl-project/sglang/pull/37744.patch","issue_url":"https://api.github.com/repos/sgl-project/sglang/issues/37744","number":37744,"state":"closed","locked":false,"title":"[GLM-5.3] Fix qkvbfg fusion being disabled by the global quant config","user":{"login":"linkedlist771","id":72634327,"node_id":"MDQ6VXNlcjcyNjM0MzI3","avatar_url":"https://avatars.githubusercontent.com/u/72634327?v=4","gravatar_id":"","url":"https://api.github.com/users/linkedlist771","html_url":"https://github.com/linkedlist771","followers_url":"https://api.github.com/users/linkedlist771/followers","following_url":"https://api.github.com/users/linkedlist771/following{/other_user}","gists_url":"https://api.github.com/users/linkedlist771/gists{/gist_id}","starred_url":"https://api.github.com/users/linkedlist771/starred{/owner}{/repo}","subscriptions_url":"https://api.github.com/users/linkedlist771/subscriptions","organizations_url":"https://api.github.com/users/linkedlist771/orgs","repos_url":"https://api.github.com/users/linkedlist771/repos","events_url":"https://api.github.com/users/linkedlist771/events{/privacy}","received_events_url":"https://api.github.com/users/linkedlist771/received_events","type":"User","user_view_type":"public","site_admin":false},"body":"## Motivation\r\n\r\nStacked on #36507 — this targets that PR's branch (`xinyuan/glm-5.3-flash-support`), not `main`.\r\n\r\n`Glm5NextLinearAttention` gates its qkvbfg fusion on:\r\n\r\n```python\r\nself.do_fuse_qkvbfg = quant_config is None and head_shard_size == self.tp_size\r\n```\r\n\r\n`quant_config is None` asks whether the *model* carries any quantized weights. The question that actually matters here is whether *these six projections* are quantized.\r\n\r\nThe official GLM-5.3-Flash checkpoint is FP8, but only the routed experts are quantized — attention stays BF16. Dumping the modules the non-fused branch builds, in `forward`, at TP8 on the official FP8 weights:\r\n\r\n```\r\nqkv_proj  (3072, 4096) torch.bfloat16\r\nf_a_proj  (128,  4096) torch.bfloat16\r\nf_b_proj  (1024, 128)  torch.bfloat16\r\nb_proj    (8,    4096) torch.bfloat16\r\ng_a_proj  (128,  4096) torch.bfloat16\r\ng_b_proj  (1024, 128)  torch.bfloat16\r\n```\r\n\r\nAll six resolve to `UnquantizedLinearMethod` with plain BF16 weights. The fusion path can consume them exactly as-is — it is turned off purely because a global FP8 config object exists.\r\n\r\nThe gate arrived with #17801, which added this fusion for Kimi Linear. That model is pure BF16, so `quant_config` was always `None` there and the check never had to be right. `glm5_next` is the first model to reuse the fusion with a quantization config present.\r\n\r\nCost of the wrong answer: 6 GEMM launches per linear-attention layer per step instead of 2, one of them with `N=8`. #17801 reported 38.8us -> 11.7us on the decode kernel and 5–10% TPOT for the same fusion on Kimi Linear; I have not re-measured those numbers on GLM-5.3-Flash.\r\n\r\n## Modifications\r\n\r\n**`python/sglang/srt/layers/quantization/utils.py`** — new `are_linear_prefixes_unquantized(quant_config, prefixes)` alongside `is_layer_skipped`:\r\n\r\n- `quant_config is None` returns `True` immediately, so unquantized models behave exactly as they do today.\r\n- Otherwise it builds one `LinearBase(1, 1, quant_config=None)` probe and resolves each prefix through `quant_config.get_quant_method(probe, prefix=...)`, accepting only `None` / `UnquantizedLinearMethod`.\r\n\r\nGoing through `get_quant_method` rather than calling `is_layer_skipped` directly is deliberate: each config wraps the skip check differently (`ignored_layers` in `Fp8Config`, `exclude_modules` + `is_layer_excluded` in ModelOpt, `get_dynamic_override` regexes in GPTQ), and only `get_quant_method` covers them all uniformly.\r\n\r\nThe probe is safe on the two counts that matter: `LinearBase.__init__` allocates no weights (`create_weights` lives in the subclasses), and passing `quant_config=None` stops it from recursing back into `get_quant_method`. Every `get_quant_method` in `layers/quantization/` `isinstance`-checks the layer in its `LinearBase` branch and reads no attributes off it, so an attribute-less probe is sufficient.\r\n\r\n**`python/sglang/srt/models/glm5_next.py`** — the gate becomes per-prefix:\r\n\r\n```python\r\nself.do_fuse_qkvbfg = (\r\n    head_shard_size == self.tp_size\r\n    and are_linear_prefixes_unquantized(quant_config, [...six prefixes...])\r\n)\r\n```\r\n\r\nThe cheap TP condition stays first, so unquantized models never build a probe.\r\n\r\n`fused_qkvbfg_a_proj` is now constructed with `quant_config=None`. That name exists in no checkpoint, so an ignore list written in terms of the real projection names is not guaranteed to cover it, and handing it the global config would risk quantizing a layer whose source weights are BF16. Under the old gate `quant_config` was provably `None` at this call site, so this is a no-op for existing behavior. `fused_fg_b_proj` takes no `quant_config` at all.\r\n\r\n`load_weights` needs no matching change: it decides per stacked-mapping entry via `candidate not in params_dict`, so it already consumes the module tree `__init__` actually built and cannot disagree with the gate.\r\n\r\nNo change to `MergedColumnParallelRepeatedLinear` / `ColumnParallelBatchedLinear`, and no other model is touched — Kimi Linear keeps today's behavior, since `quant_config is None` short-circuits to `True`.\r\n\r\n## Accuracy Tests\r\n\r\nNot yet run — will post GSM8K on GLM-5.3-Flash FP8 at TP8, fused vs. unfused, before this is merged.\r\n\r\nLogic verified so far by resolving the six prefixes through `is_layer_skipped` for several ignore-list shapes:\r\n\r\n| `ignored_layers` shape                      | fuses?         |\r\n| ------------------------------------------- | -------------- |\r\n| parent path (`linear_attn`) — GLM-5.3-Flash | yes            |\r\n| leaf names (`q_proj`, `k_proj`, …)          | yes            |\r\n| attention fully quantized                   | no, falls back |\r\n| partial (only `b_proj` left in BF16)        | no, falls back |\r\n\r\n`qkv_proj` expands through the packed-shard mapping in every case.\r\n\r\nCheck the two paths' accuracy with a simple POST request.\r\n\r\n## Speed Tests and Profiling\r\n\r\nNot yet run — will post decode kernel time and TPOT on GLM-5.3-Flash FP8 at TP8, to confirm the #17801 gains carry over.\r\n\r\n## Checklist\r\n\r\n- [x] Format your code according to the [[Format code with pre-commit](https://docs.sglang.io/developer_guide/contribution_guide.html#format-code-with-pre-commit)](https://docs.sglang.io/developer_guide/contribution_guide.html#format-code-with-pre-commit).\r\n- [ ] Add unit tests according to the [[Run and add unit tests](https://docs.sglang.io/developer_guide/contribution_guide.html#run-and-add-unit-tests)](https://docs.sglang.io/developer_guide/contribution_guide.html#run-and-add-unit-tests).\r\n- [ ] Update documentation according to [[Write documentations](https://docs.sglang.io/developer_guide/contribution_guide.html#write-documentations)](https://docs.sglang.io/developer_guide/contribution_guide.html#write-documentations).\r\n- [ ] Provide accuracy and speed benchmark results according to [[Test the accuracy](https://docs.sglang.io/developer_guide/contribution_guide.html#test-the-accuracy)](https://docs.sglang.io/developer_guide/contribution_guide.html#test-the-accuracy) and [[Benchmark the speed](https://docs.sglang.io/developer_guide/contribution_guide.html#benchmark-the-speed)](https://docs.sglang.io/developer_guide/contribution_guide.html#benchmark-the-speed).\r\n- [x] Follow the SGLang code style [[guidance](https://docs.sglang.io/developer_guide/contribution_guide.html#code-style-guidance)](https://docs.sglang.io/developer_guide/contribution_guide.html#code-style-guidance).\r\n\r\ncc @JustinTong0323\r\n\r\n🤖 Generated with [[Claude Code](https://claude.com/claude-code)](https://claude.com/claude-code)\r\n\r\nhttps://claude.ai/code/session_011bZceDMfnfmqUyDGMw7nHP\n\n<!-- pr-states:start -->\n---\n### CI States\n\nLatest PR Test (Base): <!-- slot:pr-test:start -->:x: [Run #33728768058](https://github.com/sgl-project/sglang/actions/runs/33728768058)<!-- slot:pr-test:end -->\nLatest PR Test (Extra): <!-- slot:pr-test-extra:start -->:x: [Run #33728767847](https://github.com/sgl-project/sglang/actions/runs/33728767847)<!-- slot:pr-test-extra:end -->\nLatest PR Test (AMD ROCm 7.2): <!-- slot:pr-test-amd-rocm720:start -->:x: [Run #33728768018](https://github.com/sgl-project/sglang/actions/runs/33728768018)<!-- slot:pr-test-amd-rocm720:end -->\n<!-- pr-states:end -->","created_at":"2026-09-03T07:34:04Z","updated_at":"2026-09-06T09:28:46Z","closed_at":"2026-09-06T09:28:46Z","merged_at":null,"merge_commit_sha":"4b97e99364c04933b503779c056b67cc741bebc0","assignees":[],"requested_reviewers":[{"login":"HaiShaw","id":3349073,"node_id":"MDQ6VXNlcjMzNDkwNzM=","avatar_url":"https://avatars.githubusercontent.com/u/3349073?v=4","gravatar_id":"","url":"https://api.github.com/users/HaiShaw","html_url":"https://github.com/HaiShaw","followers_url":"https://api.github.com/users/HaiShaw/followers","following_url":"https://api.github.com/users/HaiShaw/following{/other_user}","gists_url":"https://api.github.com/users/HaiShaw/gists{/gist_id}","starred_url":"https://api.github.com/users/HaiShaw/starred{/owner}{/repo}","subscriptions_url":"https://api.github.com/users/HaiShaw/subscriptions","organizations_url":"https://api.github.com/users/HaiShaw/orgs","repos_url":"https://api.github.com/users/HaiShaw/repos","events_url":"https://api.github.com/users/HaiShaw/events{/privacy}","received_events_url":"https://api.github.com/users/HaiShaw/received_events","type":"User","user_view_type":"public","site_admin":false},{"login":"AniZpZ","id":9033639,"node_id":"MDQ6VXNlcjkwMzM2Mzk=","avatar_url":"https://avatars.githubusercontent.com/u/9033639?v=4","gravatar_id":"","url":"https://api.github.com/users/AniZpZ","html_url":"https://github.com/AniZpZ","followers_url":"https://api.github.com/users/AniZpZ/followers","following_url":"https://api.github.com/users/AniZpZ/following{/other_user}","gists_url":"https://api.github.com/users/AniZpZ/gists{/gist_id}","starred_url":"https://api.github.com/users/AniZpZ/starred{/owner}{/repo}","subscriptions_url":"https://api.github.com/users/AniZpZ/subscriptions","organizations_url":"https://api.github.com/users/AniZpZ/orgs","repos_url":"https://api.github.com/users/AniZpZ/repos","events_url":"https://api.github.com/users/AniZpZ/events{/privacy}","received_events_url":"https://api.github.com/users/AniZpZ/received_events","type":"User","user_view_type":"public","site_admin":false},{"login":"Edwardf0t1","id":24870971,"node_id":"MDQ6VXNlcjI0ODcwOTcx","avatar_url":"https://avatars.githubusercontent.com/u/24870971?v=4","gravatar_id":"","url":"https://api.github.com/users/Edwardf0t1","html_url":"https://github.com/Edwardf0t1","followers_url":"https://api.github.com/users/Edwardf0t1/followers","following_url":"https://api.github.com/users/Edwardf0t1/following{/other_user}","gists_url":"https://api.github.com/users/Edwardf0t1/gists{/gist_id}","starred_url":"https://api.github.com/users/Edwardf0t1/starred{/owner}{/repo}","subscriptions_url":"https://api.github.com/users/Edwardf0t1/subscriptions","organizations_url":"https://api.github.com/users/Edwardf0t1/orgs","repos_url":"https://api.github.com/users/Edwardf0t1/repos","events_url":"https://api.github.com/users/Edwardf0t1/events{/privacy}","received_events_url":"https://api.github.com/users/Edwardf0t1/received_events","type":"User","user_view_type":"public","site_admin":false},{"login":"FlamingoPg","id":32722923,"node_id":"MDQ6VXNlcjMyNzIyOTIz","avatar_url":"https://avatars.githubusercontent.com/u/32722923?v=4","gravatar_id":"","url":"https://api.github.com/users/FlamingoPg","html_url":"https://github.com/FlamingoPg","followers_url":"https://api.github.com/users/FlamingoPg/followers","following_url":"https://api.github.com/users/FlamingoPg/following{/other_user}","gists_url":"https://api.github.com/users/FlamingoPg/gists{/gist_id}","starred_url":"https://api.github.com/users/FlamingoPg/starred{/owner}{/repo}","subscriptions_url":"https://api.github.com/users/FlamingoPg/subscriptions","organizations_url":"https://api.github.com/users/FlamingoPg/orgs","repos_url":"https://api.github.com/users/FlamingoPg/repos","events_url":"https://api.github.com/users/FlamingoPg/events{/privacy}","received_events_url":"https://api.github.com/users/FlamingoPg/received_events","type":"User","user_view_type":"public","site_admin":false},{"login":"BBuf","id":35585791,"node_id":"MDQ6VXNlcjM1NTg1Nzkx","avatar_url":"https://avatars.githubusercontent.com/u/35585791?v=4","gravatar_id":"","url":"https://api.github.com/users/BBuf","html_url":"https://github.com/BBuf","followers_url":"https://api.github.com/users/BBuf/followers","following_url":"https://api.github.com/users/BBuf/following{/other_user}","gists_url":"https://api.github.com/users/BBuf/gists{/gist_id}","starred_url":"https://api.github.com/users/BBuf/starred{/owner}{/repo}","subscriptions_url":"https://api.github.com/users/BBuf/subscriptions","organizations_url":"https://api.github.com/users/BBuf/orgs","repos_url":"https://api.github.com/users/BBuf/repos","events_url":"https://api.github.com/users/BBuf/events{/privacy}","received_events_url":"https://api.github.com/users/BBuf/received_events","type":"User","user_view_type":"public","site_admin":false},{"login":"Alisehen","id":48639761,"node_id":"MDQ6VXNlcjQ4NjM5NzYx","avatar_url":"https://avatars.githubusercontent.com/u/48639761?v=4","gravatar_id":"","url":"https://api.github.com/users/Alisehen","html_url":"https://github.com/Alisehen","followers_url":"https://api.github.com/users/Alisehen/followers","following_url":"https://api.github.com/users/Alisehen/following{/other_user}","gists_url":"https://api.github.com/users/Alisehen/gists{/gist_id}","starred_url":"https://api.github.com/users/Alisehen/starred{/owner}{/repo}","subscriptions_url":"https://api.github.com/users/Alisehen/subscriptions","organizations_url":"https://api.github.com/users/Alisehen/orgs","repos_url":"https://api.github.com/users/Alisehen/repos","events_url":"https://api.github.com/users/Alisehen/events{/privacy}","received_events_url":"https://api.github.com/users/Alisehen/received_events","type":"User","user_view_type":"public","site_admin":false},{"login":"ch-wan","id":54331508,"node_id":"MDQ6VXNlcjU0MzMxNTA4","avatar_url":"https://avatars.githubusercontent.com/u/54331508?v=4","gravatar_id":"","url":"https://api.github.com/users/ch-wan","html_url":"https://github.com/ch-wan","followers_url":"https://api.github.com/users/ch-wan/followers","following_url":"https://api.github.com/users/ch-wan/following{/other_user}","gists_url":"https://api.github.com/users/ch-wan/gists{/gist_id}","starred_url":"https://api.github.com/users/ch-wan/starred{/owner}{/repo}","subscriptions_url":"https://api.github.com/users/ch-wan/subscriptions","organizations_url":"https://api.github.com/users/ch-wan/orgs","repos_url":"https://api.github.com/users/ch-wan/repos","events_url":"https://api.github.com/users/ch-wan/events{/privacy}","received_events_url":"https://api.github.com/users/ch-wan/received_events","type":"User","user_view_type":"public","site_admin":false},{"login":"OrangeRedeng","id":58187114,"node_id":"MDQ6VXNlcjU4MTg3MTE0","avatar_url":"https://avatars.githubusercontent.com/u/58187114?v=4","gravatar_id":"","url":"https://api.github.com/users/OrangeRedeng","html_url":"https://github.com/OrangeRedeng","followers_url":"https://api.github.com/users/OrangeRedeng/followers","following_url":"https://api.github.com/users/OrangeRedeng/following{/other_user}","gists_url":"https://api.github.com/users/OrangeRedeng/gists{/gist_id}","starred_url":"https://api.github.com/users/OrangeRedeng/starred{/owner}{/repo}","subscriptions_url":"https://api.github.com/users/OrangeRedeng/subscriptions","organizations_url":"https://api.github.com/users/OrangeRedeng/orgs","repos_url":"https://api.github.com/users/OrangeRedeng/repos","events_url":"https://api.github.com/users/OrangeRedeng/events{/privacy}","received_events_url":"https://api.github.com/users/OrangeRedeng/received_events","type":"User","user_view_type":"public","site_admin":false},{"login":"mmangkad","id":176301910,"node_id":"U_kgDOCoInVg","avatar_url":"https://avatars.githubusercontent.com/u/176301910?v=4","gravatar_id":"","url":"https://api.github.com/users/mmangkad","html_url":"https://github.com/mmangkad","followers_url":"https://api.github.com/users/mmangkad/followers","following_url":"https://api.github.com/users/mmangkad/following{/other_user}","gists_url":"https://api.github.com/users/mmangkad/gists{/gist_id}","starred_url":"https://api.github.com/users/mmangkad/starred{/owner}{/repo}","subscriptions_url":"https://api.github.com/users/mmangkad/subscriptions","organizations_url":"https://api.github.com/users/mmangkad/orgs","repos_url":"https://api.github.com/users/mmangkad/repos","events_url":"https://api.github.com/users/mmangkad/events{/privacy}","received_events_url":"https://api.github.com/users/mmangkad/received_events","type":"User","user_view_type":"public","site_admin":false},{"login":"b8zhong","id":184021590,"node_id":"U_kgDOCvfyVg","avatar_url":"https://avatars.githubusercontent.com/u/184021590?v=4","gravatar_id":"","url":"https://api.github.com/users/b8zhong","html_url":"https://github.com/b8zhong","followers_url":"https://api.github.com/users/b8zhong/followers","following_url":"https://api.github.com/users/b8zhong/following{/other_user}","gists_url":"https://api.github.com/users/b8zhong/gists{/gist_id}","starred_url":"https://api.github.com/users/b8zhong/starred{/owner}{/repo}","subscriptions_url":"https://api.github.com/users/b8zhong/subscriptions","organizations_url":"https://api.github.com/users/b8zhong/orgs","repos_url":"https://api.github.com/users/b8zhong/repos","events_url":"https://api.github.com/users/b8zhong/events{/privacy}","received_events_url":"https://api.github.com/users/b8zhong/received_events","type":"User","user_view_type":"public","site_admin":false}],"requested_teams":[],"labels":[],"milestone":null,"draft":false,"commits_url":"https://api.github.com/repos/sgl-project/sglang/pulls/37744/commits","review_comments_url":"https://api.github.com/repos/sgl-project/sglang/pulls/37744/comments","review_comment_url":"https://api.github.com/repos/sgl-project/sglang/pulls/comments{/number}","comments_url":"https://api.github.com/repos/sgl-project/sglang/issues/37744/comments","statuses_url":"https://api.github.com/repos/sgl-project/sglang/statuses/ebe935c116f35d29b67041c55ddc1e15e6ef1a1c","head":{"label":"linkedlist771:xinyuan/glm5-next-qkvbfg-fusion-per-layer-quant-gate","ref":"xinyuan/glm5-next-qkvbfg-fusion-per-layer-quant-gate","sha":"ebe935c116f35d29b67041c55ddc1e15e6ef1a1c","user":{"login":"linkedlist771","id":72634327,"node_id":"MDQ6VXNlcjcyNjM0MzI3","avatar_url":"https://avatars.githubusercontent.com/u/72634327?v=4","gravatar_id":"","url":"https://api.github.com/users/linkedlist771","html_url":"https://github.com/linkedlist771","followers_url":"https://api.github.com/users/linkedlist771/followers","following_url":"https://api.github.com/users/linkedlist771/following{/other_user}","gists_url":"https://api.github.com/users/linkedlist771/gists{/gist_id}","starred_url":"https://api.github.com/users/linkedlist771/starred{/owner}{/repo}","subscriptions_url":"https://api.github.com/users/linkedlist771/subscriptions","organizations_url":"https://api.github.com/users/linkedlist771/orgs","repos_url":"https://api.github.com/users/linkedlist771/repos","events_url":"https://api.github.com/users/linkedlist771/events{/privacy}","received_events_url":"https://api.github.com/users/linkedlist771/received_events","type":"User","user_view_type":"public","site_admin":false},"repo":{"id":1277600936,"node_id":"R_kgDOTCakqA","name":"sglang","full_name":"linkedlist771/sglang","private":false,"owner":{"login":"linkedlist771","id":72634327,"node_id":"MDQ6VXNlcjcyNjM0MzI3","avatar_url":"https://avatars.githubusercontent.com/u/72634327?v=4","gravatar_id":"","url":"https://api.github.com/users/linkedlist771","html_url":"https://github.com/linkedlist771","followers_url":"https://api.github.com/users/linkedlist771/followers","following_url":"https://api.github.com/users/linkedlist771/following{/other_user}","gists_url":"https://api.github.com/users/linkedlist771/gists{/gist_id}","starred_url":"https://api.github.com/users/linkedlist771/starred{/owner}{/repo}","subscriptions_url":"https://api.github.com/users/linkedlist771/subscriptions","organizations_url":"https://api.github.com/users/linkedlist771/orgs","repos_url":"https://api.github.com/users/linkedlist771/repos","events_url":"https://api.github.com/users/linkedlist771/events{/privacy}","received_events_url":"https://api.github.com/users/linkedlist771/received_events","type":"User","user_view_type":"public","site_admin":false},"html_url":"https://github.com/linkedlist771/sglang","description":"SGLang is a high-performance serving framework for large language models and multimodal models.","fork":true,"url":"https://api.github.com/repos/linkedlist771/sglang","forks_url":"https://api.github.com/repos/linkedlist771/sglang/forks","keys_url":"https://api.github.com/repos/linkedlist771/sglang/keys{/key_id}","collaborators_url":"https://api.github.com/repos/linkedlist771/sglang/collaborators{/collaborator}","teams_url":"https://api.github.com/repos/linkedlist771/sglang/teams","hooks_url":"https://api.github.com/repos/linkedlist771/sglang/hooks","issue_events_url":"https://api.github.com/repos/linkedlist771/sglang/issues/events{/number}","events_url":"https://api.github.com/repos/linkedlist771/sglang/events","assignees_url":"https://api.github.com/repos/linkedlist771/sglang/assignees{/user}","branches_url":"https://api.github.com/repos/linkedlist771/sglang/branches{/branch}","tags_url":"https://api.github.com/repos/linkedlist771/sglang/tags","blobs_url":"https://api.github.com/repos/linkedlist771/sglang/git/blobs{/sha}","git_tags_url":"https://api.github.com/repos/linkedlist771/sglang/git/tags{/sha}","git_refs_url":"https://api.github.com/repos/linkedlist771/sglang/git/refs{/sha}","trees_url":"https://api.github.com/repos/linkedlist771/sglang/git/trees{/sha}","statuses_url":"https://api.github.com/repos/linkedlist771/sglang/statuses/{sha}","languages_url":"https://api.github.com/repos/linkedlist771/sglang/languages","stargazers_url":"https://api.github.com/repos/linkedlist771/sglang/stargazers","contributors_url":"https://api.github.com/repos/linkedlist771/sglang/contributors","subscribers_url":"https://api.github.com/repos/linkedlist771/sglang/subscribers","subscription_url":"https://api.github.com/repos/linkedlist771/sglang/subscription","commits_url":"https://api.github.com/repos/linkedlist771/sglang/commits{/sha}","git_commits_url":"https://api.github.com/repos/linkedlist771/sglang/git/commits{/sha}","comments_url":"https://api.github.com/repos/linkedlist771/sglang/comments{/number}","issue_comment_url":"https://api.github.com/repos/linkedlist771/sglang/issues/comments{/number}","contents_url":"https://api.github.com/repos/linkedlist771/sglang/contents/{+path}","compare_url":"https://api.github.com/repos/linkedlist771/sglang/compare/{base}...{head}","merges_url":"https://api.github.com/repos/linkedlist771/sglang/merges","archive_url":"https://api.github.com/repos/linkedlist771/sglang/{archive_format}{/ref}","downloads_url":"https://api.github.com/repos/linkedlist771/sglang/downloads","issues_url":"https://api.github.com/repos/linkedlist771/sglang/issues{/number}","pulls_url":"https://api.github.com/repos/linkedlist771/sglang/pulls{/number}","milestones_url":"https://api.github.com/repos/linkedlist771/sglang/milestones{/number}","notifications_url":"https://api.github.com/repos/linkedlist771/sglang/notifications{?since,all,participating}","labels_url":"https://api.github.com/repos/linkedlist771/sglang/labels{/name}","releases_url":"https://api.github.com/repos/linkedlist771/sglang/releases{/id}","deployments_url":"https://api.github.com/repos/linkedlist771/sglang/deployments","created_at":"2026-06-23T03:13:48Z","updated_at":"2026-09-07T02:49:43Z","pushed_at":"2026-09-07T02:53:42Z","git_url":"git://github.com/linkedlist771/sglang.git","ssh_url":"git@github.com:linkedlist771/sglang.git","clone_url":"https://github.com/linkedlist771/sglang.git","svn_url":"https://github.com/linkedlist771/sglang","homepage":"https://sglang.io","size":277160,"stargazers_count":0,"watchers_count":0,"language":"Python","has_issues":false,"has_projects":true,"has_downloads":false,"has_wiki":false,"has_pages":false,"has_discussions":false,"forks_count":0,"mirror_url":null,"archived":false,"disabled":false,"open_issues_count":0,"license":{"key":"apache-2.0","name":"Apache License 2.0","spdx_id":"Apache-2.0","url":"https://api.github.com/licenses/apache-2.0","node_id":"MDc6TGljZW5zZTI="},"allow_forking":true,"is_template":false,"web_commit_signoff_required":false,"has_pull_requests":true,"pull_request_creation_policy":"all","topics":[],"visibility":"public","forks":0,"open_issues":0,"watchers":0,"default_branch":"main"}},"base":{"label":"sgl-project:xinyuan/glm-5.3-flash-support","ref":"xinyuan/glm-5.3-flash-support","sha":"d06f3bec866c472f47bf6212d63cac366a4f9c73","user":{"login":"sgl-project","id":147780389,"node_id":"O_kgDOCM7zJQ","avatar_url":"https://avatars.githubusercontent.com/u/147780389?v=4","gravatar_id":"","url":"https://api.github.com/users/sgl-project","html_url":"https://github.com/sgl-project","followers_url":"https://api.github.com/users/sgl-project/followers","following_url":"https://api.github.com/users/sgl-project/following{/other_user}","gists_url":"https://api.github.com/users/sgl-project/gists{/gist_id}","starred_url":"https://api.github.com/users/sgl-project/starred{/owner}{/repo}","subscriptions_url":"https://api.github.com/users/sgl-project/subscriptions","organizations_url":"https://api.github.com/users/sgl-project/orgs","repos_url":"https://api.github.com/users/sgl-project/repos","events_url":"https://api.github.com/users/sgl-project/events{/privacy}","received_events_url":"https://api.github.com/users/sgl-project/received_events","type":"Organization","user_view_type":"public","site_admin":false},"repo":{"id":740303686,"node_id":"R_kgDOLCAjRg","name":"sglang","full_name":"sgl-project/sglang","private":false,"owner":{"login":"sgl-project","id":147780389,"node_id":"O_kgDOCM7zJQ","avatar_url":"https://avatars.githubusercontent.com/u/147780389?v=4","gravatar_id":"","url":"https://api.github.com/users/sgl-project","html_url":"https://github.com/sgl-project","followers_url":"https://api.github.com/users/sgl-project/followers","following_url":"https://api.github.com/users/sgl-project/following{/other_user}","gists_url":"https://api.github.com/users/sgl-project/gists{/gist_id}","starred_url":"https://api.github.com/users/sgl-project/starred{/owner}{/repo}","subscriptions_url":"https://api.github.com/users/sgl-project/subscriptions","organizations_url":"https://api.github.com/users/sgl-project/orgs","repos_url":"https://api.github.com/users/sgl-project/repos","events_url":"https://api.github.com/users/sgl-project/events{/privacy}","received_events_url":"https://api.github.com/users/sgl-project/received_events","type":"Organization","user_view_type":"public","site_admin":false},"html_url":"https://github.com/sgl-project/sglang","description":"SGLang is a high-performance serving framework for large language models and multimodal models.","fork":false,"url":"https://api.github.com/repos/sgl-project/sglang","forks_url":"https://api.github.com/repos/sgl-project/sglang/forks","keys_url":"https://api.github.com/repos/sgl-project/sglang/keys{/key_id}","collaborators_url":"https://api.github.com/repos/sgl-project/sglang/collaborators{/collaborator}","teams_url":"https://api.github.com/repos/sgl-project/sglang/teams","hooks_url":"https://api.github.com/repos/sgl-project/sglang/hooks","issue_events_url":"https://api.github.com/repos/sgl-project/sglang/issues/events{/number}","events_url":"https://api.github.com/repos/sgl-project/sglang/events","assignees_url":"https://api.github.com/repos/sgl-project/sglang/assignees{/user}","branches_url":"https://api.github.com/repos/sgl-project/sglang/branches{/branch}","tags_url":"https://api.github.com/repos/sgl-project/sglang/tags","blobs_url":"https://api.github.com/repos/sgl-project/sglang/git/blobs{/sha}","git_tags_url":"https://api.github.com/repos/sgl-project/sglang/git/tags{/sha}","git_refs_url":"https://api.github.com/repos/sgl-project/sglang/git/refs{/sha}","trees_url":"https://api.github.com/repos/sgl-project/sglang/git/trees{/sha}","statuses_url":"https://api.github.com/repos/sgl-project/sglang/statuses/{sha}","languages_url":"https://api.github.com/repos/sgl-project/sglang/languages","stargazers_url":"https://api.github.com/repos/sgl-project/sglang/stargazers","contributors_url":"https://api.github.com/repos/sgl-project/sglang/contributors","subscribers_url":"https://api.github.com/repos/sgl-project/sglang/subscribers","subscription_url":"https://api.github.com/repos/sgl-project/sglang/subscription","commits_url":"https://api.github.com/repos/sgl-project/sglang/commits{/sha}","git_commits_url":"https://api.github.com/repos/sgl-project/sglang/git/commits{/sha}","comments_url":"https://api.github.com/repos/sgl-project/sglang/comments{/number}","issue_comment_url":"https://api.github.com/repos/sgl-project/sglang/issues/comments{/number}","contents_url":"https://api.github.com/repos/sgl-project/sglang/contents/{+path}","compare_url":"https://api.github.com/repos/sgl-project/sglang/compare/{base}...{head}","merges_url":"https://api.github.com/repos/sgl-project/sglang/merges","archive_url":"https://api.github.com/repos/sgl-project/sglang/{archive_format}{/ref}","downloads_url":"https://api.github.com/repos/sgl-project/sglang/downloads","issues_url":"https://api.github.com/repos/sgl-project/sglang/issues{/number}","pulls_url":"https://api.github.com/repos/sgl-project/sglang/pulls{/number}","milestones_url":"https://api.github.com/repos/sgl-project/sglang/milestones{/number}","notifications_url":"https://api.github.com/repos/sgl-project/sglang/notifications{?since,all,participating}","labels_url":"https://api.github.com/repos/sgl-project/sglang/labels{/name}","releases_url":"https://api.github.com/repos/sgl-project/sglang/releases{/id}","deployments_url":"https://api.github.com/repos/sgl-project/sglang/deployments","created_at":"2024-01-08T04:15:52Z","updated_at":"2026-09-12T05:36:06Z","pushed_at":"2026-09-12T05:49:13Z","git_url":"git://github.com/sgl-project/sglang.git","ssh_url":"git@github.com:sgl-project/sglang.git","clone_url":"https://github.com/sgl-project/sglang.git","svn_url":"https://github.com/sgl-project/sglang","homepage":"https://sglang.io","size":354985,"stargazers_count":35835,"watchers_count":35835,"language":"Python","has_issues":true,"has_projects":false,"has_downloads":false,"has_wiki":false,"has_pages":false,"has_discussions":true,"forks_count":8790,"mirror_url":null,"archived":false,"disabled":false,"open_issues_count":5300,"license":{"key":"apache-2.0","name":"Apache License 2.0","spdx_id":"Apache-2.0","url":"https://api.github.com/licenses/apache-2.0","node_id":"MDc6TGljZW5zZTI="},"allow_forking":true,"is_template":false,"web_commit_signoff_required":false,"has_pull_requests":true,"pull_request_creation_policy":"all","topics":["attention","blackwell","cuda","deepseek","diffusion","glm","gpt-oss","inference","llama","llm","minimax","moe","qwen","qwen-image","reinforcement-learning","transformer","vlm","wan"],"visibility":"public","forks":8790,"open_issues":5300,"watchers":35835,"default_branch":"main"}},"_links":{"self":{"href":"https://api.github.com/repos/sgl-project/sglang/pulls/37744"},"html":{"href":"https://github.com/sgl-project/sglang/pull/37744"},"issue":{"href":"https://api.github.com/repos/sgl-project/sglang/issues/37744"},"comments":{"href":"https://api.github.com/repos/sgl-project/sglang/issues/37744/comments"},"review_comments":{"href":"https://api.github.com/repos/sgl-project/sglang/pulls/37744/comments"},"review_comment":{"href":"https://api.github.com/repos/sgl-project/sglang/pulls/comments{/number}"},"commits":{"href":"https://api.github.com/repos/sgl-project/sglang/pulls/37744/commits"},"statuses":{"href":"https://api.github.com/repos/sgl-project/sglang/statuses/ebe935c116f35d29b67041c55ddc1e15e6ef1a1c"}},"author_association":"NONE","auto_merge":null,"assignee":null,"active_lock_reason":null,"merged":false,"mergeable":false,"rebaseable":false,"mergeable_state":"dirty","merged_by":null,"comments":1,"review_comments":0,"maintainer_can_modify":false,"commits":1,"additions":61,"deletions":3,"changed_files":2}
+diff --git a/reports/j-645d11addaa7/reproduce_before.py b/reports/j-645d11addaa7/reproduce_before.py
+new file mode 100644
+index 0000000..e8f0125
+--- /dev/null
++++ b/reports/j-645d11addaa7/reproduce_before.py
+@@ -0,0 +1,40 @@
++"""Minimal reproduction of the fusion gate at the recorded base commit."""
++
++from sglang.srt.layers.linear import LinearBase
++from sglang.srt.layers.quantization.fp8 import Fp8Config
++from sglang.srt.layers.quantization.unquant import UnquantizedLinearMethod
++
++prefix = "model.layers.0.linear_attn"
++projection_names = (
++    "qkv_proj",
++    "f_a_proj",
++    "f_b_proj",
++    "b_proj",
++    "g_a_proj",
++    "g_b_proj",
++)
++quant_config = Fp8Config(
++    is_checkpoint_fp8_serialized=True,
++    ignored_layers=[prefix],
++)
++probe = LinearBase(input_size=1, output_size=1, quant_config=None)
++methods = {
++    name: type(quant_config.get_quant_method(probe, prefix=f"{prefix}.{name}")).__name__
++    for name in projection_names
++}
++all_source_projections_unquantized = all(
++    isinstance(
++        quant_config.get_quant_method(probe, prefix=f"{prefix}.{name}"),
++        UnquantizedLinearMethod,
++    )
++    for name in projection_names
++)
++
++# Exact decision used by Glm5NextLinearAttention at the base commit.
++base_gate_result = quant_config is None and 8 == 8
++
++print("resolved_methods=", methods)
++print("all_source_projections_unquantized=", all_source_projections_unquantized)
++print("base_gate_result=", base_gate_result)
++assert all_source_projections_unquantized
++assert base_gate_result, "base gate disables fusion solely because quant_config exists"
+diff --git a/reports/j-645d11addaa7/result.json b/reports/j-645d11addaa7/result.json
+new file mode 100644
+index 0000000..aee190d
+--- /dev/null
++++ b/reports/j-645d11addaa7/result.json
+@@ -0,0 +1,38 @@
++{
++  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38253",
++  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
++  "outcome": "fixed",
++  "summary": "Changed GLM-5.3 qkvbfg fusion eligibility from a global quant_config check to per-projection quant-method resolution, while preserving the attention-TP constraint and keeping the synthetic fused projection unquantized.",
++  "tests": [
++    {
++      "command": "/tmp/amdpilot-repo-j-645d11addaa7/venv/bin/python reports/j-645d11addaa7/reproduce_before.py",
++      "exit_code": 1,
++      "what_was_measured": "Failing-before reproduction of the exact base gate: all six GLM-5.3 attention prefixes resolved to UnquantizedLinearMethod, but the global quant_config check still returned false and disabled fusion."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-645d11addaa7/venv/bin/python -m pytest -q test/registered/unit/models/test_glm5_next_qkvbfg_fusion.py test/registered/quant/test_is_layer_skipped.py",
++      "exit_code": 0,
++      "what_was_measured": "Passing-after fusion decision for FP8 experts with unquantized attention, rejection of partially quantized projections, preservation of the TP-layout guard, and existing prefix-matching boundaries; 7 tests passed."
++    },
++    {
++      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-645d11addaa7/venv/bin/python < gfx950 fused-linear numerical fixture",
++      "exit_code": 0,
++      "what_was_measured": "Actual BF16 fused linear primitives on AMD Instinct MI350X gfx950 versus independent torch.nn.functional.linear and torch.bmm references; maximum absolute error 0.0 for both stages."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-645d11addaa7/venv/bin/python -m pre_commit run --files python/sglang/srt/layers/quantization/utils.py python/sglang/srt/models/glm5_next.py test/registered/unit/models/test_glm5_next_qkvbfg_fusion.py",
++      "exit_code": 0,
++      "what_was_measured": "Repository formatting, lint, static file checks, and registered-test metadata checks for changed files."
++    }
++  ],
++  "gpu_execution": {
++    "value": true,
++    "evidence": "reports/j-645d11addaa7/raw/gfx950-fused-linear-numerical.txt records execution on AMD Instinct MI350X gfx950 with exact agreement to PyTorch references."
++  },
++  "native_rebuilt": false,
++  "remaining_limitations": [
++    "The official GLM-5.3-Flash weights were unavailable, so full-model serving and semantic accuracy were not tested.",
++    "Only one gfx950 GPU was assigned, so the reported TP8 deployment and multi-GPU performance were not reproduced.",
++    "The GPU fixture validates the fused linear primitives and shapes, not the complete model architecture or end-to-end generation."
++  ]
++}
+diff --git a/test/registered/unit/models/test_glm5_next_qkvbfg_fusion.py b/test/registered/unit/models/test_glm5_next_qkvbfg_fusion.py
+new file mode 100644
+index 0000000..13cc001
+--- /dev/null
++++ b/test/registered/unit/models/test_glm5_next_qkvbfg_fusion.py
+@@ -0,0 +1,64 @@
++import unittest
++
++from sglang.srt.layers.quantization.fp8 import Fp8Config
++from sglang.srt.models.glm5_next import can_fuse_glm5_next_qkvbfg
++from sglang.test.ci.ci_register import register_cpu_ci
++from sglang.test.test_utils import CustomTestCase
++
++register_cpu_ci(est_time=10, suite="base-a-test-cpu")
++
++
++PREFIX = "model.layers.0.linear_attn"
++PROJECTION_NAMES = (
++    "qkv_proj",
++    "f_a_proj",
++    "f_b_proj",
++    "b_proj",
++    "g_a_proj",
++    "g_b_proj",
++)
++
++
++class TestGlm5NextQkvbfgFusion(CustomTestCase):
++    def test_fp8_experts_with_unquantized_attention_can_fuse(self):
++        quant_config = Fp8Config(
++            is_checkpoint_fp8_serialized=True,
++            ignored_layers=[PREFIX],
++        )
++
++        self.assertTrue(
++            can_fuse_glm5_next_qkvbfg(
++                quant_config, PREFIX, head_shard_size=8, tp_size=8
++            )
++        )
++
++    def test_partially_quantized_attention_cannot_fuse(self):
++        ignored_layers = [
++            f"{PREFIX}.{name}" for name in PROJECTION_NAMES if name != "g_b_proj"
++        ]
++        quant_config = Fp8Config(
++            is_checkpoint_fp8_serialized=True,
++            ignored_layers=ignored_layers,
++        )
++
++        self.assertFalse(
++            can_fuse_glm5_next_qkvbfg(
++                quant_config, PREFIX, head_shard_size=8, tp_size=8
++            )
++        )
++
++    def test_attention_tp_mismatch_cannot_fuse(self):
++        quant_config = Fp8Config(
++            is_checkpoint_fp8_serialized=True,
++            ignored_layers=[PREFIX],
++        )
++
++        self.assertFalse(
++            can_fuse_glm5_next_qkvbfg(
++                quant_config, PREFIX, head_shard_size=4, tp_size=8
++            )
++        )
++
++
++if __name__ == "__main__":
++    unittest.main()
