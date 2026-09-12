@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/11762",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "The candidate's relay test passes unchanged on the prepared base and its diff has no implementation/native change. The pinned kernel lacks the CPU and GPU reconstruction operators required for end-to-end overlap NGRAM, so no evidence-based source correction is justified. The valid relay regression is preserved as test hardening without claiming feature completion.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-60e55b1e6fb4/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-60e55b1e6fb4/candidate-test/test_ngram_overlap_relay.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate relay regression executed against prepared-base source: 4 passed, proving no base failure."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-60e55b1e6fb4/venv/bin/python -m pytest -q test/registered/cpu/test_spec_kernels.py::TestReconstructIndicesFromTreeMask::test_tree_and_chain",
+      "exit_code": 1,
+      "what_was_measured": "Direct CPU wrapper invocation fails because torch.ops.sgl_kernel.reconstruct_indices_from_tree_mask_cpu is absent."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-60e55b1e6fb4/venv/bin/python python/sglang/kernels/aot/tests/speculative/test_ngram_utils.py",
+      "exit_code": 1,
+      "what_was_measured": "Direct GPU wrapper invocation on MI355X fails because torch.ops.sgl_kernel.reconstruct_indices_from_tree_mask is absent."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-60e55b1e6fb4/venv/bin/python -m pytest -q test/registered/kernel/speculative/test_spec_kv_indices_grid.py",
+      "exit_code": 0,
+      "what_was_measured": "Three real-GPU adjacent KV-index tests passed, including top-k 4/page-size 16 against an independent Python reference; this does not exercise NGRAM serving."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI355X (gfx950); direct reconstruction invocation failed on the missing registered GPU op, while the adjacent speculative KV-index grid passed 3 tests. Raw logs: /tmp/amdpilot-repo-j-60e55b1e6fb4/evidence/.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "End-to-end overlap NGRAM is environment-blocked by missing reconstruct_indices_from_tree_mask CPU/GPU operators in pinned sglang-kernel 0.4.6.post1; no native rebuild command or replacement wheel was supplied.",
+    "There is no failing-before/passing-after implementation correction: the candidate regression passes on the recorded base and the candidate changes only tests/reports.",
+    "No EAGLE accuracy, attention-backend matrix, distributed DP/EP, EP/DeepEP, PD-disaggregation, or LoRA serving result is qualified.",
+    "Unchecked roadmap work remains unimplemented or unqualified: combined top-k/page-size serving, memory over-allocation, optional verify synchronization, penalties, universal SpecTpWorker/TpModelWorker parity, high-throughput specialization, EP/DeepEP, PD disaggregation, and separate plan stream.",
+    "The passing speculative KV-index grid is adjacent kernel coverage, not proof of the NGRAM serving contract or complete overlap-spec roadmap."
+  ]
+}
