@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38167",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/997",
+  "candidate_commit": "7035931a1eee025b1847b58c531c583f983ea8a6",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate provides verified partial hardening for the monolithic scheduler by latching two fatal accelerator error strings and rejecting later monolithic requests without worker dispatch. It does not fully resolve the original issue: RPC waits remain unbounded by default, disaggregated event loops do not use the fatal latch, and the initial 1344x768 failure is neither prevented nor converted to a justified insufficient-memory/admission error.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-51701e782aff/venv/bin/python - (direct Scheduler dispatch probe at base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before behavior: the base has no fatal-state latch and a later request dispatches to its worker handler. Raw output: reports/j-51701e782aff/raw/base_behavior.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-51701e782aff/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_scheduler_device_failure.py python/sglang/multimodal_gen/test/unit/test_warmup_probe_degradation.py python/sglang/multimodal_gen/test/unit/test_scheduler_client.py python/sglang/multimodal_gen/test/unit/test_launch_server_shutdown.py (at 7035931a1eee025b1847b58c531c583f983ea8a6)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate focused regression suite: 34 tests passed. Raw output: reports/j-51701e782aff/raw/candidate_focused_tests.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-51701e782aff/venv/bin/python reports/j-e9765cab3f56/probe_fatal_scheduler_state.py (at 7035931a1eee025b1847b58c531c583f983ea8a6)",
+      "exit_code": 0,
+      "what_was_measured": "The fatal triggering request receives a restart-required response and a later monolithic request is rejected without worker dispatch. Raw output: reports/j-51701e782aff/raw/candidate_regression_probe.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-51701e782aff/venv/bin/python - (independent grouped-request, ZMQ timeout, and disaggregated-loop adversarial probe at 7035931a1eee025b1847b58c531c583f983ea8a6)",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the monolithic grouped-request boundary, then reproduced two remaining counterexamples: default ZMQ RCVTIMEO is -1 and a disaggregated encoder loop dispatches again after the fatal signature. Raw output: reports/j-51701e782aff/raw/candidate_adversarial.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-51701e782aff/venv/bin/python - (float64 GPU sum-of-squares against integer closed form)",
+      "exit_code": 0,
+      "what_was_measured": "One AMD Instinct MI350X executed the numerical check and returned 22914881536, exactly matching the independent reference. This is device execution evidence, not a MiniMax-H3 reproduction."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Torch 2.11.0+rocm7.2 executed a numerical reference on one AMD Instinct MI350X; see reports/j-51701e782aff/raw/gpu_check.txt. The original CUDA workload was not executable in this environment."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With scheduler_rpc_timeout at its default None, _resolve_timeout_ms returns None and _configure_recv_timeout leaves the ZMQ receive timeout at -1, so an HTTP-side caller can still wait indefinitely if a scheduler path disappears or fails to reply.",
+    "Disaggregated scheduler event loops do not call _handle_execution_error or consult _fatal_error_message; an independent encoder-loop probe dispatched a second work item after CUDA driver error: device not ready.",
+    "The 1344x768 request is not rejected at admission and ordinary OOM is explicitly excluded from fatal classification; the candidate does not provide a clean insufficient-memory error for the original resource ceiling.",
+    "The exact RTX 5070 12 GB / WSL2 / CUDA 13.0 MiniMax-H3 failure and subsequent 480p request remain unverified because that architecture, software stack, weights, and LoRA were unavailable."
+  ],
+  "remaining_limitations": [
+    "The prepared host provides one AMD Instinct MI350X with ROCm 7.2 rather than the reported RTX 5070 with CUDA 13.0 under WSL2.",
+    "MiniMax-H3 weights and the reporter's turbo LoRA were unavailable.",
+    "The qualified tiny Llama fixture validates a different model architecture and serving path and cannot reproduce or resolve this diffusion/CUDA-specific issue.",
+    "No native source changed in the candidate, so no native rebuild was applicable."
+  ]
+}
