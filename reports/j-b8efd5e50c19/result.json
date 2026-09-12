@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31720",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2273",
+  "candidate_commit": "f6f603a21a6cd96b3b4713162564516bb56b2638",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes the reproduced AWQ GDN split-loader defect: AWQ qweight/qzeros/scales are bound to the tuple-aware loader, and output-packed tensors are split in packed checkpoint units. Candidate tests and independent exact target-dimension checks pass on gfx950. Full 27B generation and the reporter's CUDA sm_120 path remain unverified.",
+  "tests": [
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-b8efd5e50c19/venv/bin/python - <<'PY' (independent base PackedvLLMParameter binding and split probe)",
+      "exit_code": 0,
+      "what_was_measured": "On the recorded base, qweight received tuple shard id (0,1,2) unsplit; forcing the wrapper failed because logical split sizes [16,8,24] did not match six packed columns."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b8efd5e50c19/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen3_5_awq_weight_loading.py test/registered/unit/models/test_qwen3_5_packed_weight_loader.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit: 10 loader regression and compatibility tests passed."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-b8efd5e50c19/venv/bin/python - <<'PY' (independent exact target-dimension AWQ tensor split checks)",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, exact reconstruction for qweight and qzeros packed widths [256,256,768], scale widths [2048,2048,6144], plus noncontiguous shard selection."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b8efd5e50c19/venv/bin/python -m py_compile python/sglang/srt/models/qwen3_5.py test/registered/unit/models/test_qwen3_5_awq_weight_loading.py && git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 f6f603a21a6cd96b3b4713162564516bb56b2638 -- python/sglang/srt/models/qwen3_5.py test/registered/unit/models/test_qwen3_5_awq_weight_loading.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python syntax and patch whitespace."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b8efd5e50c19/venv/bin/python -m ruff check python/sglang/srt/models/qwen3_5.py test/registered/unit/models/test_qwen3_5_awq_weight_loading.py",
+      "exit_code": 1,
+      "what_was_measured": "Tool availability only; ruff is absent from the prepared interpreter."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X gfx950:sramecc+:xnack- executed exact target-dimension packed tensor construction, splitting, and equality checks for qweight, qzeros, and scales."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No end-to-end QuantTrio/Qwen3.6-27B-AWQ generation run was possible because the weights were not present; the original few-shot and system-prompt degeneration remains unverified.",
+    "The reporter's NVIDIA RTX 5090 sm_120 CUDA 13.3 AWQ-Marlin execution path was not exercised on the assigned AMD gfx950 ROCm host."
+  ],
+  "remaining_limitations": [
+    "The public checkpoint config and weight index were inspected, but the approximately 27B checkpoint was not downloaded or served.",
+    "gfx950 validates loader tensor behavior and GPU operations, not NVIDIA sm_120 compiler/kernel behavior or semantic generation quality.",
+    "No native source changed, so there was no native rebuild to perform.",
+    "Ruff was unavailable in the prepared Python environment."
+  ]
+}
