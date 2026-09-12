@@ -167,6 +167,23 @@ class SchedulerInitResult:
     engine_info_bootstrap_server: Optional[Any] = None
 
 
+def _add_effective_max_running_requests(
+    server_info: Dict[str, Any], internal_states: List[Dict[Any, Any]]
+) -> None:
+    """Add the scheduler's effective request limit without replacing the flag.
+
+    Each scheduler reports its post-cache-sizing per-DP limit.  Use the most
+    restrictive rank so the advertised value is safe for every DP worker.
+    """
+    effective_values = [
+        state["effective_max_running_requests_per_dp"]
+        for state in internal_states
+        if state.get("effective_max_running_requests_per_dp") is not None
+    ]
+    if effective_values:
+        server_info["effective_max_running_requests"] = min(effective_values)
+
+
 def init_tokenizer_manager(
     server_args: ServerArgs,
     port_args: PortArgs,
@@ -1377,16 +1394,16 @@ class Engine(EngineScoreMixin, EngineBase):
         internal_states = self.loop.run_until_complete(
             self.tokenizer_manager.get_internal_state()
         )
-        return msgspec_to_builtins(
-            {
-                **self.tokenizer_manager.server_args.resolved_dict(),
-                "launch_command": self.tokenizer_manager.server_args.launch_command,
-                **self._scheduler_init_result.scheduler_infos[0],
-                "startup_time": self.tokenizer_manager.startup_time,
-                "internal_states": internal_states,
-                "version": __version__,
-            }
-        )
+        result = {
+            **self.tokenizer_manager.server_args.resolved_dict(),
+            "launch_command": self.tokenizer_manager.server_args.launch_command,
+            **self._scheduler_init_result.scheduler_infos[0],
+            "startup_time": self.tokenizer_manager.startup_time,
+            "internal_states": internal_states,
+            "version": __version__,
+        }
+        _add_effective_max_running_requests(result, internal_states)
+        return msgspec_to_builtins(result)
 
     def get_model_info(self):
         """What this engine is serving right now.

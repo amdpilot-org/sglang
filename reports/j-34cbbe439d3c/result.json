@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38846",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Added a top-level effective_max_running_requests to HTTP /server_info (and its deprecated /get_server_info alias) and Engine.get_server_info, derived from the scheduler's post-cache-sizing effective_max_running_requests_per_dp while preserving the requested max_running_requests field.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-34cbbe439d3c/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_server_info.py::TestServerInfoExistingFieldsPreserved::test_effective_max_running_requests_reports_state_cache_reduction test/registered/unit/entrypoints/test_server_info.py::TestServerInfoExistingFieldsPreserved::test_effective_max_running_requests_when_requested_limit_is_unset",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: the base handler omitted effective_max_running_requests for both a requested 32/effective 9 reduction and an unset requested limit with a concrete effective value. Raw output: /job/test-output/failing-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-34cbbe439d3c/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_server_info.py",
+      "exit_code": 0,
+      "what_was_measured": "33 endpoint and engine server-info tests passed, including requested/effective distinction, unset requested flag, unavailable runtime state, and Engine parity. Raw output: /job/test-output/server-info-final.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-34cbbe439d3c/venv/bin/python inline KVCacheConfigurator.resolve_max_num_reqs reproduction",
+      "exit_code": 0,
+      "what_was_measured": "The checked-out implementation calculated 5 Mamba state slots per request and an effective limit of 9 from max_mamba_cache_size=47 for requested max_running_requests=32 and for max_running_requests unset. Raw output: /job/test-output/kv-cache-cap-reproduction.txt"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/entrypoints/engine.py python/sglang/srt/entrypoints/http_server.py test/registered/unit/entrypoints/test_server_info.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, spelling, and registered-test checks passed. Raw output: /job/test-output/pre-commit-after-format.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-34cbbe439d3c/venv/bin/python inline Torch ROCm matrix multiplication compared with NumPy",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X with torch 2.11.0+rocm7.2/HIP 7.2.26015, GPU result [[3.0, -7.0], [4.0, 7.0]] matched the independent NumPy reference exactly (max absolute error 0.0). Raw output: /job/test-output/gpu-numerical-check.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "A numerical Torch ROCm matmul ran on the assigned AMD Instinct MI350X and matched NumPy with max absolute error 0.0; see /job/test-output/gpu-numerical-check.txt. The server-info behavior itself is control-plane Python and was validated with focused CPU tests and the real cache-cap calculation.",
+  "native_rebuilt": false,
+  "remaining_limitations": "No native code changed. A full hybrid-model server was not launched because no matching large model weights were provided; instead, the actual checked-out KVCacheConfigurator reduction path was executed for the issue's 47-slot/5-slots-per-request case, and the resulting runtime-state values were verified through both public server-info implementations. Source paths: /job/repo/python/sglang/srt/mem_cache/kv_cache_configurator.py, /job/repo/python/sglang/srt/managers/scheduler.py, /job/repo/python/sglang/srt/entrypoints/http_server.py, and /job/repo/python/sglang/srt/entrypoints/engine.py. Native path: none."
+}
