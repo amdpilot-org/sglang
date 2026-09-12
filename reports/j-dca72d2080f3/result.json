@@ -1,0 +1,31 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32781",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The recorded base already contains the issue-specific source-offset correction in FusedMoE._load_w13 and _load_w2. Added direct TP16 padded-shard regression coverage and verified that restoring the old destination-derived offset reproduces the reported failure.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-dca72d2080f3/venv/bin/python -m pytest -q test/registered/unit/layers/moe/test_padded_tp_weight_loading.py (with the reported old shard_size * tp_rank calculation temporarily substituted)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: 7 failed and 1 passed; _load_w13 rank 15 reproduced an out-of-range start of 3840. Raw output: /tmp/amdpilot-repo-j-dca72d2080f3/evidence/padded_tp_weight_loading_old_logic.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-dca72d2080f3/venv/bin/python -m pytest -q test/registered/unit/layers/moe/test_padded_tp_weight_loading.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after behavior of the actual recorded-base implementation for reported w13 and w2 scale shapes plus unpadded and split-w3 boundaries: 8 passed. Raw output: /tmp/amdpilot-repo-j-dca72d2080f3/evidence/padded_tp_weight_loading_cpu.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-dca72d2080f3/venv/bin/python < inline gfx950 numerical reference script",
+      "exit_code": 0,
+      "what_was_measured": "Actual _load_w13 and _load_w2 methods on AMD Instinct MI355X: w13 rank 15 selected 2880..3071 with zero padding; w2 scale rank 14 produced [84, 85, 86, 87, 88, 89, 0, 0]. Raw output: /tmp/amdpilot-repo-j-dca72d2080f3/evidence/padded_tp_weight_loading_gfx950.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The assigned gfx950 GPU cannot validate the CUDA/H100 Marlin execution path.",
+    "DeepSeek-V4-Pro weights were unavailable, so model architecture loading and semantic accuracy were not tested.",
+    "Only one GPU was assigned; the reported TP16, two-node distributed deployment was not reproduced.",
+    "The recorded base is a shallow prepared snapshot, so the exact earlier commit or PR that introduced the already-present correction could not be established from local history."
+  ]
+}
