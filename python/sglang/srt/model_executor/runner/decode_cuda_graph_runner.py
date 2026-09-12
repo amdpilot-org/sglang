@@ -584,7 +584,19 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
     def _ragged_capture_slots(self, num_tokens: int) -> int:
         if envs.SGLANG_TEST_RAGGED_VERIFY_FORCE_UNIFORM_CAPTURE.get():
             return num_tokens // self.captured_req_width
-        return min(num_tokens, self.max_bs)
+        # A token tier represents the smallest number of request-width rows
+        # that can contain it.  Using max_bs here invents extra request rows
+        # for every tier below the maximum (for example 42 tokens became
+        # eight rows at width six instead of seven rows).  Besides changing
+        # per-request semantics, that makes nominally uniform tiers ragged at
+        # capture time and breaks consumers which hash one block per request.
+        from sglang.srt.speculative.ragged_verify import capture_num_slots
+
+        return capture_num_slots(
+            num_tokens=num_tokens,
+            request_width=self.captured_req_width,
+            max_bs=self.max_bs,
+        )
 
     def _capture_ragged_verify_layout(self, num_tokens: int):
         if not self.ragged_verify_mode:
