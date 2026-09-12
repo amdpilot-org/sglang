@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33642",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1882",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1838",
+  "candidate_commit": "074a97cefd38979cd1d35f5cb424c201914512bc",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate removes the first-build early return, and focused plus independent tests show that initial target-verify graph setup now launches the fused DSA metadata kernel instead of deferring it to first replay. GPU numerical tests pass on gfx950. The exact eight-rank B300/CUDA driver hang could not be reproduced or disproved, so this is a verified source-level warmup fix but not a fully verified end-to-end resolution.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ac0fb33eeed9/venv/bin/python -m pytest -q /job/review-evidence-j-ac0fb33eeed9/test_dsa_graph_metadata_warmup.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: initial target-verify setup called fused_dsa_target_verify_metadata zero times; second cached-metadata test passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ac0fb33eeed9/venv/bin/python -m pytest -q test/registered/attention/test_dsa_graph_metadata_warmup.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: initial target-verify setup warms the fused kernel and cached metadata is not rebuilt; 2 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ac0fb33eeed9/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_dsa_metadata.py (base and candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Real gfx950 execution of DSA decode, target-verify, and draft-extend Triton metadata kernels against independent PyTorch references; 8 tests and 4 subtests passed on each revision."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ac0fb33eeed9/venv/bin/python -m pytest -q /job/review-evidence-j-ac0fb33eeed9/test_adversarial_graph_warmup.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent candidate cases for first-build and cached reuse at batch sizes 1, 2, and 7 plus initial decode setup; 4 passed on candidate and the same 4 failed on base."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X gfx950 was used. The repository DSA metadata suite executed real Triton kernels and passed 8 tests plus 4 subtests against PyTorch references."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Eight NVIDIA B300 sm_103 scheduler contexts could still contend or deadlock if they load the module concurrently during startup rather than first request; this environment cannot test that driver behavior.",
+    "The complete GLM-5.2 EAGLE Spec V2 Mooncake PD-disaggregated request path was not run because the required weights, topology, and eight GPUs were unavailable.",
+    "The report originates from an internal fork, so fork-only behavior may remain outside the prepared base."
+  ],
+  "remaining_limitations": [
+    "Hardware was one AMD Instinct MI350X gfx950 with ROCm 7.2, not eight NVIDIA B300 sm_103 GPUs with CUDA driver 590.48.01.",
+    "No GLM-5.2 weights, Mooncake two-instance PD setup, or TP8/DP8/EP8 topology were available.",
+    "No native rebuild was performed because the candidate contains no native C++ or FlyDSL changes.",
+    "The source-level lazy-load prerequisite is fixed, but the original CUDA driver deadlock itself remains unverified."
+  ]
+}
