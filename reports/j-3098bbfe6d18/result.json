@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32290",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2163",
+  "candidate_commit": "4faa68870a503cd20c7b5473f0133fe6c63fc0a2",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate reproducibly fixes duplicate decoded-text loss in the list-shaped Chat Completions and Responses serving outputs and fixes the wrong surviving value in the legacy dictionary. It is a narrow partial fix: the direct/legacy dictionary still collapses duplicate text and original token bytes remain unavailable.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3098bbfe6d18/venv/bin/python <original issue reproducer at base>",
+      "exit_code": 1,
+      "what_was_measured": "At the recorded base, actual checkout import returned 2 rather than 3 entries and retained -2.5 rather than -0.5."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3098bbfe6d18/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_duplicate_top_logprobs.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression tests exercised Chat, Responses, missing positions, unique candidates, and legacy fallback; 4 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3098bbfe6d18/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_responses.py test/registered/unit/entrypoints/openai/test_serving_chat.py test/registered/unit/entrypoints/openai/test_serving_completions.py",
+      "exit_code": 0,
+      "what_was_measured": "Adjacent serving behavior; 189 tests and 72 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3098bbfe6d18/venv/bin/python <independent adversarial script>",
+      "exit_code": 0,
+      "what_was_measured": "Serialized Chat and Responses retained all ordered duplicate candidates; mixed prompt/output alignment passed; legacy collapse, reconstructed bytes, and unsorted first-entry behavior were confirmed."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 4faa68870a503cd20c7b5473f0133fe6c63fc0a2",
+      "exit_code": 2,
+      "what_was_measured": "Candidate archive log contains trailing whitespace at reports/j-7c3ec2d6e068/pytest.log:7; no product-source functional failure."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU was used. The reviewed change is CPU response shaping. The original four-H200 TP4 model workload and weights are unavailable, and the assigned AMD gfx950-class GPU cannot qualify it."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The direct and legacy LogProbs.top_logprobs dictionary still has two keys for three candidates with duplicate decoded text.",
+    "Legacy Completions cannot serialize two candidates sharing the same decoded-string dictionary key.",
+    "Byte-fallback token identity is not carried; U+FFFD is still emitted with reconstructed UTF-8 bytes [239, 191, 189].",
+    "For deliberately unsorted duplicate candidates, the legacy projection retains the first encounter rather than selecting the maximum logprob."
+  ],
+  "remaining_limitations": [
+    "No DeepSeek-V4-Flash-FP8 weights or four NVIDIA H200 GPUs were available; the original TP4 serving workload was not reproduced.",
+    "The prepared environment exposes one AMD gfx950-class ROCm GPU, which is not architecture-equivalent to the reported system.",
+    "No native files changed and repository-environment.json reports no native build target, so native rebuilding was not applicable.",
+    "Raw review evidence is retained at /job/review-evidence-j-3098bbfe6d18 outside the checkout."
+  ]
+}
