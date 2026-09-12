@@ -3658,20 +3658,40 @@ class Scheduler(
         running_bs: int,
         beam_width: Optional[int] = None,
         running_batch: Optional[ScheduleBatch] = None,
+        chunked_req_in_batch: bool = False,
     ) -> int:
         pp_budget = get_parallel().pp_max_micro_batch_size - running_bs
-        available = self.req_to_token_pool.available_size()
+        available = self._get_available_req_pool_rows(
+            running_batch=running_batch,
+            chunked_req_in_batch=chunked_req_in_batch,
+        )
+
+        res = min(pp_budget, available)
+        if beam_width is not None:
+            # This scalar form is used when every prospective request has the
+            # same width. The prefill loop accounts for heterogeneous widths
+            # directly instead of treating an already-scheduled width-1 chunk
+            # as if it had the next candidate's beam width.
+            res = min(res, available // beam_width)
+
+        return res
+
+    def _get_available_req_pool_rows(
+        self,
+        running_batch: Optional[ScheduleBatch] = None,
+        chunked_req_in_batch: bool = False,
+    ) -> int:
+        # An in-flight chunked prefill already holds a req_to_token_pool slot
+        # (deducted from available_size()) and is re-counted in the adder's
+        # can_run_list by add_chunked_req. Credit that held slot only when the
+        # request was actually appended to this prefill batch.
+        available = self.req_to_token_pool.available_size() + int(chunked_req_in_batch)
 
         active_batch = running_batch or self.running_batch
         available = max(
             available - self.beam_coordinator.pending_member_rows(active_batch), 0
         )
-        res = min(pp_budget, available)
-        if beam_width is not None:
-            # A beam candidate owns beam_width rows once decoding.
-            res = min(res, available // beam_width)
-
-        return res
+        return available
 
     def get_new_batch_prefill(self, running_batch: ScheduleBatch) -> NextBatchPlan:
         prefill_delayer_single_pass = None
@@ -3804,9 +3824,16 @@ class Scheduler(
             prefill_tile_block_m=prefill_tile_block_m,
         )
 
-        if self.chunked_req is not None:
-            self.chunked_req.init_next_round_input()
-            self.chunked_req = adder.add_chunked_req(self.chunked_req)
+        chunked_req = self.chunked_req
+        if chunked_req is not None:
+            chunked_req.init_next_round_input()
+            self.chunked_req = adder.add_chunked_req(chunked_req)
+
+        # Hybrid-SWA can park a chunk instead of scheduling it, while a final
+        # chunk is scheduled even though add_chunked_req returns None.
+        chunked_req_in_batch = chunked_req is not None and any(
+            req is chunked_req for req in adder.can_run_list
+        )
 
         if self.enable_lora:
             running_loras = {
@@ -3833,16 +3860,29 @@ class Scheduler(
             candidate_beam_width = (
                 req.beam_group.beam_width if req.beam_group is not None else None
             )
-            if len(adder.can_run_list) >= self.get_num_allocatable_reqs(
-                running_bs,
-                candidate_beam_width,
+            candidate_pool_rows = candidate_beam_width or 1
+            scheduled_pool_rows = sum(
+                scheduled_req.beam_group.beam_width
+                if scheduled_req.beam_group is not None
+                else 1
+                for scheduled_req in adder.can_run_list
+            )
+            pp_budget = get_parallel().pp_max_micro_batch_size - running_bs
+            available_pool_rows = self._get_available_req_pool_rows(
                 running_batch=running_batch,
+                chunked_req_in_batch=chunked_req_in_batch,
+            )
+            if (
+                len(adder.can_run_list) >= pp_budget
+                or scheduled_pool_rows + candidate_pool_rows > available_pool_rows
             ):
                 running_batch.batch_is_full = True
             if self.disaggregation_mode == DisaggregationMode.PREFILL:
                 # In prefill mode, prealloc queue and transfer queue can also take memory,
                 # so we need to check if the available size for the actual available size.
-                if len(adder.can_run_list) >= self.req_to_token_pool.available_size():
+                if len(adder.can_run_list) >= (
+                    self.req_to_token_pool.available_size() + int(chunked_req_in_batch)
+                ):
                     running_batch.batch_is_full = True
 
             if running_batch.batch_is_full:

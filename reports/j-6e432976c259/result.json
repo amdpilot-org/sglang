@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38118",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1813",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/869",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/962",
+  "candidate_commit": "e1bce2f4784b8af0cd8565f2cde9dfcae44a198e",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved PR 869's held chunk-row credit and corrected its remaining heterogeneous Beam accounting. The candidate divided all available rows by the queued request's beam width and compared that request count with a list already containing a width-1 chunk. Admission now compares the actual row cost of scheduled requests plus the candidate against available pool rows, while retaining the independent PP request-count ceiling and pending Beam-row reservation.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6e432976c259/venv/bin/python -m pytest -q test/registered/unit/managers/test_get_new_batch_prefill_chunked_slot.py (candidate e1bce2f logic plus exact review regression, before correction)",
+      "exit_code": 1,
+      "what_was_measured": "8 candidate tests passed and the independent exact-capacity regression failed: with running_bs=12, ceiling=16, one scheduled width-1 held chunk, available_size=2, and one queued width-2 request, the queued request remained absent from can_run_list. Raw output: /tmp/amdpilot-repo-j-6e432976c259/evidence/candidate-before.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6e432976c259/venv/bin/python -m pytest -q test/registered/unit/managers/test_get_new_batch_prefill_chunked_slot.py test/registered/unit/managers/test_scheduler_chunked_req_gate.py test/registered/unit/managers/test_scheduler_chunked_abort_race.py",
+      "exit_code": 0,
+      "what_was_measured": "15 tests passed after correction: the original non-Beam underfill, exact-capacity width-2 case, insufficient-capacity width-2 boundary, PP ceiling, PD-prefill, final and parked chunks, pending Beam reservations, and nearby chunk lifecycle/abort behavior. Raw output: /tmp/amdpilot-repo-j-6e432976c259/evidence/focused-after.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6e432976c259/venv/bin/python -m pre_commit run --files python/sglang/srt/managers/scheduler.py test/registered/unit/managers/test_get_new_batch_prefill_chunked_slot.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, source-safety, and registered-test validation hooks passed. Raw output: /tmp/amdpilot-repo-j-6e432976c259/evidence/precommit.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6e432976c259/venv/bin/python GPU identity and 4096-element arithmetic check",
+      "exit_code": 0,
+      "what_was_measured": "Torch 2.11.0+rocm7.2 executed on AMD Instinct MI350X gfx950 and matched the CPU reference with max_abs_diff=0.0. This documents assigned-device access only; scheduler admission is host-side. Raw output: /tmp/amdpilot-repo-j-6e432976c259/evidence/gpu-smoke.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A deterministic arithmetic smoke executed on the assigned AMD Instinct MI350X (gfx950) with max_abs_diff=0.0. It is not evidence for the scheduler correction or the unavailable GLM-5/B200 workload."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported GLM-5-FP8 weights were unavailable.",
+    "The source workload requires eight NVIDIA B200 GPUs, CUDA/TRT-LLM NSA backends, and DP=8; this host exposes one AMD Instinct MI350X gfx950 with ROCm 7.2, so the original full-model distributed serving benchmark was not rerun.",
+    "The deterministic scheduler regression validates request admission accounting, not GLM-5 semantics, NVIDIA backend behavior, throughput, or distributed synchronization.",
+    "No native source changed, so a native rebuild was not applicable."
+  ],
+  "evidence_directory": "/tmp/amdpilot-repo-j-6e432976c259/evidence"
+}
