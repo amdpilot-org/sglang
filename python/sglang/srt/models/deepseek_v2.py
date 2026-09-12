@@ -150,16 +150,14 @@ from sglang.srt.models.deepseek_common.attention_backend_handler import (
 from sglang.srt.models.deepseek_common.attention_forward_methods import (
     AttnForwardMethod,
     DeepseekMHAForwardMixin,
-    DeepseekMHARocmForwardMixin,
-    DeepseekMLACpuForwardMixin,
     DeepseekMLAForwardMixin,
-    DeepseekMLAFusedRopeRocmForwardMixin,
-    DeepseekMLARocmForwardMixin,
 )
 from sglang.srt.models.deepseek_common.deepseek_weight_loader import (
     DeepseekV2WeightLoaderMixin,
 )
-from sglang.srt.models.deepseek_common.hardware_backend.deepseek_v2_npu_mixin import (
+from sglang.srt.models.deepseek_common.hardware_backend import (
+    DeepseekV2AMDAttentionMixin,
+    DeepseekV2CPUAttentionMixin,
     DeepseekV2NPUAttentionMixin,
 )
 from sglang.srt.models.deepseek_common.utils import (
@@ -1699,13 +1697,11 @@ class DeepseekV2MoE(nn.Module):
 class DeepseekV2AttentionMLA(
     nn.Module,
     DeepseekV32AttentionMixin,
+    DeepseekV2AMDAttentionMixin,
+    DeepseekV2CPUAttentionMixin,
     DeepseekV2NPUAttentionMixin,
     DeepseekMHAForwardMixin,
-    DeepseekMHARocmForwardMixin,
     DeepseekMLAForwardMixin,
-    DeepseekMLARocmForwardMixin,
-    DeepseekMLAFusedRopeRocmForwardMixin,
-    DeepseekMLACpuForwardMixin,
 ):
     def __init__(
         self,
@@ -2076,20 +2072,9 @@ class DeepseekV2AttentionMLA(
                 llama_4_scaling,
                 prev_topk_indices,
             )
-        elif attn_forward_method == AttnForwardMethod.MHA_ROCM:
-            inner_state = self.forward_normal_rocm_prepare(
-                positions, hidden_states, forward_batch, zero_allocator
-            )
-        elif attn_forward_method == AttnForwardMethod.MHA_ONE_SHOT_ROCM:
-            inner_state = self.forward_normal_one_shot_rocm_prepare(
-                positions, hidden_states, forward_batch, zero_allocator
-            )
-        elif attn_forward_method == AttnForwardMethod.MHA_CHUNKED_KV_ROCM:
-            inner_state = self.forward_normal_chunked_kv_rocm_prepare(
-                positions, hidden_states, forward_batch, zero_allocator
-            )
-        elif attn_forward_method == AttnForwardMethod.MLA_ROCM:
-            inner_state = self.forward_absorb_rocm_prepare(
+        elif attn_forward_method in self._AMD_FORWARD_METHODS:
+            inner_state = self.forward_amd_prepare(
+                attn_forward_method,
                 positions,
                 hidden_states,
                 forward_batch,
@@ -2097,13 +2082,13 @@ class DeepseekV2AttentionMLA(
                 llama_4_scaling,
                 prev_topk_indices,
             )
-        elif attn_forward_method == AttnForwardMethod.MLA_FUSED_ROPE_ROCM:
-            inner_state = self.forward_absorb_fused_mla_rope_prepare(
-                positions, hidden_states, forward_batch, zero_allocator
-            )
-        elif attn_forward_method == AttnForwardMethod.MLA_FUSED_ROPE_CPU:
-            inner_state = self.forward_absorb_fused_mla_rope_cpu_prepare(
-                positions, hidden_states, forward_batch, zero_allocator
+        elif attn_forward_method in self._CPU_FORWARD_METHODS:
+            inner_state = self.forward_cpu_prepare(
+                attn_forward_method,
+                positions,
+                hidden_states,
+                forward_batch,
+                zero_allocator,
             )
         elif attn_forward_method in (
             AttnForwardMethod.MHA_NPU,
@@ -2138,18 +2123,10 @@ class DeepseekV2AttentionMLA(
             return self.forward_normal_one_shot_core(*inner_state)
         elif attn_forward_method == AttnForwardMethod.MLA:
             return self.forward_absorb_core(*inner_state)
-        elif attn_forward_method == AttnForwardMethod.MHA_ROCM:
-            return self.forward_normal_core(*inner_state)
-        elif attn_forward_method == AttnForwardMethod.MHA_ONE_SHOT_ROCM:
-            return self.forward_normal_one_shot_core(*inner_state)
-        elif attn_forward_method == AttnForwardMethod.MHA_CHUNKED_KV_ROCM:
-            return self.forward_normal_chunked_kv_core(*inner_state)
-        elif attn_forward_method == AttnForwardMethod.MLA_ROCM:
-            return self.forward_absorb_rocm_core(*inner_state)
-        elif attn_forward_method == AttnForwardMethod.MLA_FUSED_ROPE_ROCM:
-            return self.forward_absorb_fused_mla_rope_core(*inner_state)
-        elif attn_forward_method == AttnForwardMethod.MLA_FUSED_ROPE_CPU:
-            return self.forward_absorb_fused_mla_rope_cpu_core(*inner_state)
+        elif attn_forward_method in self._AMD_FORWARD_METHODS:
+            return self.forward_amd_core(attn_forward_method, inner_state)
+        elif attn_forward_method in self._CPU_FORWARD_METHODS:
+            return self.forward_cpu_core(attn_forward_method, inner_state)
         elif attn_forward_method in (
             AttnForwardMethod.MHA_NPU,
             AttnForwardMethod.MLA_NPU,
