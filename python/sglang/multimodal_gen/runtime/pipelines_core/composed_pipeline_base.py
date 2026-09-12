@@ -59,6 +59,7 @@ from sglang.multimodal_gen.runtime.utils.hf_diffusers_utils import (
     verify_model_config_and_directory,
 )
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
+from sglang.multimodal_gen.runtime.utils.startup_profiler import startup_phase
 
 logger = init_logger(__name__)
 
@@ -151,7 +152,8 @@ class ComposedPipelineBase(ABC):
         self.memory_usages: dict[str, float] = {}
         # Load modules directly in initialization
         logger.info("Loading pipeline modules...")
-        self.modules = self.load_modules(server_args, loaded_modules)
+        with startup_phase("load_modules"):
+            self.modules = self.load_modules(server_args, loaded_modules)
 
         self.__post_init__()
 
@@ -166,10 +168,12 @@ class ComposedPipelineBase(ABC):
 
     def __post_init__(self) -> None:
         assert self.server_args is not None, "server_args must be set"
-        self.initialize_pipeline(self.server_args)
+        with startup_phase("initialize_pipeline"):
+            self.initialize_pipeline(self.server_args)
 
         logger.info("Creating pipeline stages...")
-        self.create_pipeline_stages(self.server_args)
+        with startup_phase("create_pipeline_stages"):
+            self.create_pipeline_stages(self.server_args)
 
     def get_module(self, module_name: str, default_value: Any = None) -> Any:
         return self.modules.get(module_name, default_value)
@@ -425,7 +429,8 @@ class ComposedPipelineBase(ABC):
         If provided, loaded_modules will be used instead of loading from config/pretrained weights.
         """
 
-        model_index = self._load_config()
+        with startup_phase("load_config"):
+            model_index = self._load_config()
         logger.info("Loading pipeline modules from config: %s", model_index)
 
         # remove keys that are not pipeline modules
@@ -616,17 +621,18 @@ class ComposedPipelineBase(ABC):
                     attn_backend.name.lower(),
                     matched_backend_key,
                 )
-            module, memory_usage = PipelineComponentLoader.load_component(
-                component_name=module_name,
-                component_type=load_module_name,
-                loader_cls=self.component_loaders.get(module_name),
-                component_model_path=component_model_path,
-                transformers_or_diffusers=transformers_or_diffusers,
-                server_args=server_args,
-                component_architecture=architecture,
-                component_attn_backend=attn_backend,
-                component_attn_name=matched_backend_key or module_name,
-            )
+            with startup_phase(f"load_component.{module_name}"):
+                module, memory_usage = PipelineComponentLoader.load_component(
+                    component_name=module_name,
+                    component_type=load_module_name,
+                    loader_cls=self.component_loaders.get(module_name),
+                    component_model_path=component_model_path,
+                    transformers_or_diffusers=transformers_or_diffusers,
+                    server_args=server_args,
+                    component_architecture=architecture,
+                    component_attn_backend=attn_backend,
+                    component_attn_name=matched_backend_key or module_name,
+                )
 
             self.memory_usages[module_name] = memory_usage
 
