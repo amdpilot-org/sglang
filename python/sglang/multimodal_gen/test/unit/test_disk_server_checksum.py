@@ -6,6 +6,9 @@ from pathlib import Path
 import torch
 from safetensors.torch import save_file
 
+from sglang.multimodal_gen.runtime.post_training.gpu_worker_post_training_mixin import (
+    GPUWorkerPostTrainingMixin,
+)
 from sglang.multimodal_gen.runtime.post_training.weights_updater import (
     _get_weights_iter,
     _load_weights_into_module,
@@ -83,6 +86,46 @@ def test_comparison_rejects_checkpoint_with_no_loadable_parameters(tmp_path):
     try:
         compare_module_weights_with_disk(module, str(checkpoint))
     except ValueError as exc:
-        assert "No checkpoint parameters matched" in str(exc)
+        assert "No checkpoint state matched" in str(exc)
     else:
         raise AssertionError("empty comparisons must not be reported as matching")
+
+
+class _VaeWithRunningState(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.tensor([1.0]))
+        self.register_buffer("running_mean", torch.tensor([9.0]))
+
+
+def test_comparison_detects_checkpoint_buffer_corruption(tmp_path):
+    checkpoint = tmp_path / "vae"
+    checkpoint.mkdir()
+    save_file(
+        {"weight": torch.tensor([1.0]), "running_mean": torch.tensor([2.0])},
+        checkpoint / "model.safetensors",
+    )
+
+    result = compare_module_weights_with_disk(_VaeWithRunningState(), str(checkpoint))
+
+    assert result["match"] is False
+    assert result["server_checksum"] != result["disk_checksum"]
+    assert result["parameter_count"] == 1
+    assert result["buffer_count"] == 1
+    assert result["tensor_count"] == 2
+
+
+def test_explicit_empty_module_selection_is_rejected(tmp_path):
+    class _Pipeline:
+        modules = {"vae": _VaeWithRunningState()}
+
+    class _Worker(GPUWorkerPostTrainingMixin):
+        pipeline = _Pipeline()
+
+    result = _Worker().compare_weights_with_disk(str(tmp_path), module_names=[])
+
+    assert result == {
+        "success": False,
+        "message": "At least one module must be selected",
+        "modules": {},
+    }

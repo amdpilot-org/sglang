@@ -179,6 +179,12 @@ class GPUWorkerPostTrainingMixin:
 
         modules = get_updatable_modules(self.pipeline)
         names = module_names if module_names is not None else list(modules)
+        if not names:
+            return {
+                "success": False,
+                "message": "At least one module must be selected",
+                "modules": {},
+            }
         unknown = [name for name in names if name not in modules]
         if unknown:
             return {

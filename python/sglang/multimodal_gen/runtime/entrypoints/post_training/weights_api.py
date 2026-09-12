@@ -170,10 +170,14 @@ async def compare_weights_with_disk(request: Request):
     module_names = body.get("module_names")
     if module_names is not None and (
         not isinstance(module_names, list)
+        or not module_names
         or not all(isinstance(name, str) and name for name in module_names)
     ):
         return orjson_response(
-            {"success": False, "message": "module_names must be a list of names"},
+            {
+                "success": False,
+                "message": "module_names must be a non-empty list of names",
+            },
             status_code=400,
         )
 
