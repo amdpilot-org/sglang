@@ -15,7 +15,7 @@ The candidate also does not identify the cause of recurring transfers failing in
 - `raw/candidate_adversarial.log`: one independent case fails and the reviewed equal-count ABA case passes.
 - `raw/base_imports.log` and `raw/candidate_imports.log`: measured Python, Torch/ROCm, repository import paths, and visible GPU.
 - `raw/candidate_source_lines.log`: exact candidate source ordering relevant to the remaining race.
-- `raw/compileall.log` and `raw/diff-check.log`: both commands exited zero.
+- `raw/compileall.log`: compilation exited zero. `raw/diff-check.log`: diff-check exited 2 because the candidate commits trailing whitespace in six lines of its raw evidence logs; no product-source whitespace error was reported.
 
 ## Environment limits
 
