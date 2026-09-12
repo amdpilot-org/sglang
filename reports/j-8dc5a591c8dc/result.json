@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34539",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1661",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1627",
+  "candidate_commit": "93464111cb0ea89bd5166c17b25adcdd7c717fc1",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The base reproducibly lets LMCache and FlexKV exceed kv_len_to_handle. The exact candidate caps both normal and speculative backend-derived lengths before token and KV-index slicing, and passed its regression plus independent boundary cases.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8dc5a591c8dc/venv/bin/python -m pytest -q /job/review-evidence-j-8dc5a591c8dc/candidate_test.py (base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: both backends stored 9 rather than 4 entries normally and 8 rather than 4 speculatively; 4 failed and 2 passed backend subtests."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8dc5a591c8dc/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_external_cache_effective_kv_len.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 3 tests passed and 6 backend subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8dc5a591c8dc/venv/bin/python /job/review-evidence-j-8dc5a591c8dc/adversarial.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Sixteen independent LMCache/FlexKV cases across topk None/1/2/8 and smaller/equal/larger caller bounds; all token and KV-index lengths matched min(backend-derived length, caller limit)."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "ROCm and torch identify the assigned device as AMD Instinct MI350X, gfx950/capability (9,5), but tests exercised CPU-side metadata slicing only."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "LMCache and FlexKV packages/services were unavailable; optional dependencies were stubbed while actual SGLang backend methods were executed.",
+    "No live asynchronous external-store integration was run.",
+    "The prepared ROCm gfx950 environment differs from the issue's NVIDIA CUDA environment.",
+    "No model, semantic-accuracy, distributed, or multi-node claim is made.",
+    "No native code changed, so a native rebuild was not applicable."
+  ]
+}
