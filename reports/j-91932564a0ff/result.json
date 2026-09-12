@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37160",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate correctly implements the SGLang side of a capability-gated LMCache MP cache_salt handoff and safely disables external caching for salted requests on legacy connectors. It is an acceptable partial fix and fail-closed mitigation, not a complete original-issue resolution: current/released LMCache lacks the required capability and token-plus-salt wire-key API.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-91932564a0ff/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_lmcache_cache_salt.py (candidate test copied onto recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before evidence on base 358c163: all five committed candidate tests failed, exposing absent lookup/store salt handling, fail-closed gating, cleanup hardening, and documentation change."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-91932564a0ff/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_lmcache_cache_salt.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate fd2b399, the candidate's five focused regression tests passed."
+    },
+    {
+      "command": "Independent Python boundary harness against candidate LMCRadixCache methods with controlled legacy and salt-aware LMCache API stubs",
+      "exit_code": 0,
+      "what_was_measured": "Distinct lookup salts, fail-closed legacy/invalid capability behavior, unsalted compatibility, executable store metadata salt forwarding, and exception-safe lock/session/marker cleanup."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-91932564a0ff/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_radix_cache_unit.py test/registered/unit/mem_cache/test_lmcache_cache_salt.py",
+      "exit_code": 0,
+      "what_was_measured": "44 tests and 61 subtests passed at the exact candidate, covering existing radix-cache behavior and the focused regression."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-91932564a0ff/venv/bin/python -m compileall -q python/sglang/srt/mem_cache/radix_cache.py python/sglang/srt/mem_cache/storage/lmcache/lmc_radix_cache.py test/registered/unit/mem_cache/test_lmcache_cache_salt.py && git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 fd2b3990a384d1f86bb49d4ec0a7f69cf07d0837",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python files compiled and the exact candidate diff had no whitespace errors."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "One AMD Instinct MI350X was visible with ROCm 7.2 and Torch 2.11.0+rocm7.2, but LMCache was absent. An unrelated GPU smoke would not validate external cache-key tenant isolation.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With current LMCache dev or an existing released connector, supports_cache_salt is absent, so every salted request bypasses LMCache rather than producing token-plus-salt external keys.",
+    "No live LMCache daemon/object-key trace confirms that two identical prompts with different salts create distinct external keys; the prepared environment lacks LMCache.",
+    "The original end-to-end cross-tenant latency/compute scenario remains unverified here because the required LMCache package, daemon, and deployment setup are unavailable.",
+    "The coordinated LMCache PR 4842 is still open with mergeStateStatus DIRTY, so the required external API is not yet an available dependency."
+  ],
+  "remaining_limitations": [
+    "This validates MP-mode SGLang handoff and fail-closed behavior only; it is not a full model-serving or live external-storage reproduction.",
+    "LMCache IP/XPU mode and extra_key/LoRA external namespacing are outside the candidate and original cache_salt MP scope.",
+    "No native code changed; native rebuild and ISA validation were not applicable.",
+    "The candidate PR prose reports four failing-before tests, while the exact committed five-test file produced five failures on the recorded base."
+  ]
+}
