@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19612",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "0d598f3188d250d251ffde2782d53e247c493aa9",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a verified partial fix. The requested root and Triton/Inductor/torch_compile layout work, including real ROCm compilation, but DeepGEMM can still be imported by configurer.py before compile_utils.py assigns DG_JIT_CACHE_DIR. Therefore the original all-controlled-JIT-caches contract is not fully resolved.",
+  "tests": [
+    {
+      "command": "base contract check with SGLANG_JIT_CACHE_ROOT and InductorAdaptor.initialize_cache",
+      "exit_code": 1,
+      "what_was_measured": "At the recorded base the requested variable is absent/ignored and the adapter relocates Triton/Inductor to graph-local directories; see evidence/base_contract.txt."
+    },
+    {
+      "command": "candidate contract check at exact commit 0d598f3188d250d251ffde2782d53e247c493aa9",
+      "exit_code": 0,
+      "what_was_measured": "Repository source imports, requested triton/inductor paths, and resistance to later InductorAdaptor relocation; see evidence/candidate_contract.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9f1fdc289b80/venv/bin/python -m pytest -q test/registered/unit/test_jit_cache_root.py test/registered/unit/test_environ.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 22 passed plus 2 subtests; see evidence/candidate_unit_tests.txt."
+    },
+    {
+      "command": "real ROCm torch.compile check with SGLANG_JIT_CACHE_ROOT in the private runtime directory",
+      "exit_code": 0,
+      "what_was_measured": "One MI350X generated 22 Inductor/Triton artifacts under the configured root and matched an independent CPU float64 reference with max absolute error 3.5180391902561725e-06; see evidence/gpu_compile.txt."
+    },
+    {
+      "command": "independent DeepGEMM import-order audit of compile_utils.py and configurer.py",
+      "exit_code": 1,
+      "what_was_measured": "On supported CUDA/MUSA, configurer imports deep_gemm before compile_utils assigns DG_JIT_CACHE_DIR; see evidence/deep_gemm_import_order.txt."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 0d598f3188d250d251ffde2782d53e247c493aa9",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff contains no whitespace errors."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One visible AMD Instinct MI350X, Torch 2.11.0+rocm7.2, HIP 7.2.26015. Generated .amdgcn and .hsaco artifacts under the requested root and checked output against CPU float64.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "On a supported CUDA or MUSA platform, importing compile_utils first imports configurer; configurer executes _compute_enable_deep_gemm and imports deep_gemm before compile_utils assigns DG_JIT_CACHE_DIR. The first import can therefore bind DeepGEMM to a cache outside SGLANG_JIT_CACHE_ROOT.",
+    "The candidate regression test for DeepGEMM import ordering only compares the assignment with the later import in compile_utils.py and misses configurer.py's earlier imports."
+  ],
+  "remaining_limitations": [
+    "No native source changed, so no native rebuild was applicable.",
+    "DeepGEMM, CUDA driver-cache writes, FlashInfer CUDA cache writes, and MUSA behavior could not be executed on the assigned AMD GPU.",
+    "ROCm validation qualifies Triton/Inductor cache placement and numerical execution, not NVIDIA/MUSA-specific DeepGEMM behavior.",
+    "No model-serving fixture was run because the changed behavior is process-level compiler cache configuration and the affected ROCm compiler path was exercised directly."
+  ]
+}
