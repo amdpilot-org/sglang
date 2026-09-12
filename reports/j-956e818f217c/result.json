@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37983",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that VisionTritonAttention silently computed full attention without sinks when given MiMo-style window_size and s_aux, then added sliding-window masking and per-query-head sink logits to the Triton varlen prefill kernel and forwarded both backend arguments. The regression now agrees with an independent PyTorch softmax reference on gfx950.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-956e818f217c/venv/bin/python /tmp/test_triton_attention_window_sink.py TestTritonAttentionWindowSink.test_reference_matches_hand_computed_example TestTritonAttentionWindowSink.test_kernel_matches_reference_full_attention TestTritonAttentionWindowSink.test_backend_window_and_sinks_acceptance",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: the hand-computed oracle and legacy full-attention kernel calibration passed, while VisionTritonAttention disagreed with the window-and-sink reference because it dropped both kwargs. Raw output: reports/j-956e818f217c/raw/baseline_reproduction.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-956e818f217c/venv/bin/python test/registered/kernel/attention/test_triton_attention_window_sink.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after numerical regression on MI350X/gfx950: 13 tests passed and the NVIDIA Hopper-only FA3 cross-check skipped. Tests compare BF16 Triton output with an independent FP32 PyTorch reference and cover window-only, sink-only, combined semantics, ragged varlen, GQA, causal composition, one-sided and small multi-block windows, NaN resistance, backend forwarding, and invalid sink shape. Raw output: reports/j-956e818f217c/raw/fixed_full_regression_final.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-956e818f217c/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_vision_max_seqlen.py",
+      "exit_code": 0,
+      "what_was_measured": "Seven existing VisionTritonAttention max-sequence-length and metadata tests passed. Raw output: reports/j-956e818f217c/raw/vision_max_seqlen.log"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/kernels/ops/attention/prefill_attention.py python/sglang/srt/layers/attention/vision.py test/registered/kernel/attention/test_triton_attention_window_sink.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, secrets, and registered-test taxonomy checks passed. Raw output: reports/j-956e818f217c/raw/precommit_second.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Executed the Triton kernel and backend numerical regressions on the single assigned AMD Instinct MI350X, gfx950, ROCm 7.2 GPU. Hardware record: reports/j-956e818f217c/raw/gpu_info.log",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No MiMo-V2.5 weights were available, so no full-model serving or semantic-quality reproduction was claimed; validation is at the actual VisionTritonAttention and Triton kernel layers.",
+    "The assigned GPU is AMD gfx950, not the NVIDIA B40/H20 hardware from the report.",
+    "The FlashAttention3 comparison requires NVIDIA Hopper and was skipped; the independent FP32 PyTorch reference supplies the numerical oracle on this host.",
+    "No native C++ or FlyDSL component was changed, so no native rebuild was applicable."
+  ]
+}
