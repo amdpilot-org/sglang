@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32750",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "Exact candidate 2b9bcb31501441d2cc36f3a1a3faac04084d3689 implements the requested stage-local partial projection, fixed-width PP context accumulation, one final RMSNorm, final-stage draft-KV injection, and target-plus-draft KV PD mapping. Its focused regression suite and an independent single-GPU numerical reference pass. Full original-issue resolution remains unverified because real multi-rank PP + PD serving and real Kimi-K3/DeepSeek-V4 DSpark checkpoints could not be exercised on the one-GPU prepared node.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-241a4a55ffd8/venv/bin/python -m pytest -q /job/review-evidence-j-241a4a55ffd8/test_dspark_pp_context.py (at recorded base)",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before reproduction: collection failed because the base lacks _BlockFp8LinearSlice and the PP-aware partial-projection implementation. Raw output retained at /job/review-evidence-j-241a4a55ffd8/base-dspark-pp-context.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-241a4a55ffd8/venv/bin/python -m pytest -q test/registered/unit/spec/test_dspark_pp_context.py test/registered/unit/spec/test_dspark_target_hidden_projection.py test/registered/spec/dspark/test_dspark_stacked_ctx_kv_parity.py test/registered/unit/disaggregation/test_pp_pd_consensus.py test/registered/unit/disaggregation/test_disaggregation_wire.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact-candidate regressions: 69 passed and 12 subtests passed, covering partial/full projection equivalence, FP8 slicing structure, PP context ownership, draft KV ownership, PP consensus, and PD wire mappings. Raw output retained at /job/review-evidence-j-241a4a55ffd8/candidate-focused.log."
+    },
+    {
+      "command": "independent torch GPU script using DFlashDraftModel.project_target_hidden_partial with five features split noncontiguously and out of order across three simulated owners",
+      "exit_code": 0,
+      "what_was_measured": "Compared accumulated partial linear projections followed by one RMSNorm against independent torch.nn.functional.linear plus explicit RMSNorm on AMD Instinct MI350X; max_abs=0.0. Also verified rejection of wrong width, empty indices, and out-of-range indices. Raw output retained at /job/review-evidence-j-241a4a55ffd8/independent-gpu-parity.log."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X executed the independent numerical projection/RMSNorm reference with torch 2.11.0+rocm7.2 and HIP 7.2.26015. This was single-process protocol math, not multi-rank serving."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A real two-or-more-rank pipeline-parallel prefill connected to a disaggregated decode instance was not executable with the single assigned GPU.",
+    "Real Kimi-K3 and DeepSeek-V4/DSpark weights were unavailable, including execution of the quantized DeepSeek-V4 projection slice against checkpoint tensors.",
+    "Actual Mooncake and NIXL transfers carrying target KV plus final-stage-owned draft KV were not executed; only repository protocol/wire tests were available."
+  ],
+  "remaining_limitations": [
+    "The node exposed one AMD Instinct MI350X, so real multi-rank PP + PD serving could not be run.",
+    "No qualifying architecture weights were available. The tiny Llama fixture cannot validate Kimi-K3 or DeepSeek-V4 DSpark semantics and was not used as proof.",
+    "No C++, HIP, or FlyDSL sources changed; repository-environment.json reports native and wheel paths as null, so no native rebuild was applicable.",
+    "The source import was confirmed as /job/repo/python/sglang/__init__.py using the prepared interpreter."
+  ]
+}
