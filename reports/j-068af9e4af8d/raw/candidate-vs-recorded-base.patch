@@ -1,0 +1,468 @@
+diff --git a/python/sglang/srt/managers/cache_controller.py b/python/sglang/srt/managers/cache_controller.py
+index f530e46..1995dee 100644
+--- a/python/sglang/srt/managers/cache_controller.py
++++ b/python/sglang/srt/managers/cache_controller.py
+@@ -744,6 +744,7 @@ class HiCacheController:
+             model_name=model_name,
+             tp_lcm_size=tp_lcm_size,
+             should_split_heads=should_split_heads,
++            dp_rank=self.dp_rank,
+             extra_config=storage_backend_extra_config,
+         )
+ 
+diff --git a/python/sglang/srt/mem_cache/hicache_storage.py b/python/sglang/srt/mem_cache/hicache_storage.py
+index b573e69..0b53e57 100644
+--- a/python/sglang/srt/mem_cache/hicache_storage.py
++++ b/python/sglang/srt/mem_cache/hicache_storage.py
+@@ -37,6 +37,9 @@ class HiCacheStorageConfig:
+     model_name: Optional[str]
+     tp_lcm_size: Optional[int] = None
+     should_split_heads: bool = False
++    # With DP attention, tp_rank is attention-group-local and does not identify
++    # the embedded storage client by itself.
++    dp_rank: int = 0
+     extra_config: Optional[dict] = None
+ 
+ 
+diff --git a/python/sglang/srt/mem_cache/storage/mooncake_store/mooncake_store.py b/python/sglang/srt/mem_cache/storage/mooncake_store/mooncake_store.py
+index ec6c606..92cf490 100644
+--- a/python/sglang/srt/mem_cache/storage/mooncake_store/mooncake_store.py
++++ b/python/sglang/srt/mem_cache/storage/mooncake_store/mooncake_store.py
+@@ -504,7 +504,15 @@ class MooncakeStore(HiCacheStorage, MooncakeBaseStore):
+                 if self.config.enable_ssd_offload:
+                     setup_kwargs["enable_ssd_offload"] = True
+                 if self.config.ssd_offload_path is not None:
+-                    setup_kwargs["ssd_offload_path"] = self.config.ssd_offload_path
++                    ssd_offload_path = self.config.ssd_offload_path
++                    if storage_config is not None:
++                        ssd_offload_path = os.path.join(
++                            ssd_offload_path,
++                            f"rank_{storage_config.dp_rank}"
++                            f"_{storage_config.tp_rank}_{storage_config.pp_rank}",
++                        )
++                    os.makedirs(ssd_offload_path, exist_ok=True)
++                    setup_kwargs["ssd_offload_path"] = ssd_offload_path
+                 if self.config.tenant_id != DEFAULT_TENANT_ID:
+                     setup_kwargs["tenant_id"] = self.config.tenant_id
+ 
+diff --git a/reports/j-d39e095a1905/raw/mooncake-unit-suite.txt b/reports/j-d39e095a1905/raw/mooncake-unit-suite.txt
+new file mode 100644
+index 0000000..610c003
+--- /dev/null
++++ b/reports/j-d39e095a1905/raw/mooncake-unit-suite.txt
+@@ -0,0 +1,18 @@
++..............                                                           [100%]
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++14 passed, 17 warnings in 12.27s
+diff --git a/reports/j-d39e095a1905/raw/pre-commit.txt b/reports/j-d39e095a1905/raw/pre-commit.txt
+new file mode 100644
+index 0000000..4a675e3
+--- /dev/null
++++ b/reports/j-d39e095a1905/raw/pre-commit.txt
+@@ -0,0 +1,32 @@
++check for broken symlinks..............................(no files to check)Skipped
++detect destroyed symlinks..................................................Passed
++trim trailing whitespace...................................................Passed
++fix end of files...........................................................Passed
++check yaml.............................................(no files to check)Skipped
++check toml.............................................(no files to check)Skipped
++check python ast...........................................................Passed
++check for added large files................................................Passed
++check for merge conflicts..................................................Passed
++check that scripts with shebangs are executable............................Passed
++detect private key.........................................................Passed
++debug statements (python)..................................................Passed
++don't commit to branch.....................................................Passed
++isort......................................................................Passed
++ruff (legacy alias)........................................................Passed
++ruff format................................................................Passed
++codespell..................................................................Passed
++clang-format...........................................(no files to check)Skipped
++nbstripout.............................................(no files to check)Skipped
++forbid docs_new/ (renamed to docs/)....................(no files to check)Skipped
++check chinese characters in multimodal_gen.............(no files to check)Skipped
++sort CI_PERMISSIONS.json...............................(no files to check)Skipped
++check for duplicate workflow job names.................(no files to check)Skipped
++check rust-ext cache key prefix defaults match.........(no files to check)Skipped
++reject bare pytest.main calls in __main__ blocks...........................Passed
++unit tests for lint checkers...........................(no files to check)Skipped
++validate registered test CI registries.....................................Passed
++reject CI-registered tests inside the sglang package.......................Passed
++rustfmt sgl-model-gateway (nightly)....................(no files to check)Skipped
++rustfmt experimental/sgl-router........................(no files to check)Skipped
++clippy rust/ workspace (auto-fix)......................(no files to check)Skipped
++rustfmt rust/ workspace................................(no files to check)Skipped
+diff --git a/reports/j-d39e095a1905/raw/regression-after.txt b/reports/j-d39e095a1905/raw/regression-after.txt
+new file mode 100644
+index 0000000..0d48148
+--- /dev/null
++++ b/reports/j-d39e095a1905/raw/regression-after.txt
+@@ -0,0 +1,9 @@
++...                                                                      [100%]
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++3 passed, 1 warning in 4.95s
+diff --git a/reports/j-d39e095a1905/raw/regression-before.txt b/reports/j-d39e095a1905/raw/regression-before.txt
+new file mode 100644
+index 0000000..b06f96c
+--- /dev/null
++++ b/reports/j-d39e095a1905/raw/regression-before.txt
+@@ -0,0 +1,140 @@
++FFF                                                                      [100%]
++=================================== FAILURES ===================================
++_ TestMooncakeSsdOffloadPath.test_dp_attention_clients_get_distinct_directories _
++
++self = <test_mooncake_ssd_offload_path.TestMooncakeSsdOffloadPath testMethod=test_dp_attention_clients_get_distinct_directories>
++
++    def test_dp_attention_clients_get_distinct_directories(self):
++        with tempfile.TemporaryDirectory() as base:
++            paths = {
++                _make_store(
++>                   _make_storage_config(
++                        dp_rank=dp_rank,
++                        tp_rank=0,
++                        pp_rank=0,
++                        ssd_offload_path=base,
++                    )
++                ).setup_kwargs["ssd_offload_path"]
++                for dp_rank in range(4)
++            }
++
++test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py:105:
++_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
++
++    def _make_storage_config(*, dp_rank, tp_rank, pp_rank, ssd_offload_path):
++>       return HiCacheStorageConfig(
++            dp_rank=dp_rank,
++            tp_rank=tp_rank,
++            tp_size=8,
++            pp_rank=pp_rank,
++            pp_size=2,
++            attn_cp_rank=0,
++            attn_cp_size=1,
++            is_mla_model=False,
++            enable_storage_metrics=False,
++            is_page_first_layout=True,
++            model_name="test",
++            extra_config={
++                "master_server_address": "127.0.0.1:50051",
++                "check_server": False,
++                "global_segment_size": 1024 * 1024,
++                "enable_ssd_offload": True,
++                "ssd_offload_path": ssd_offload_path,
++            },
++        )
++E       TypeError: HiCacheStorageConfig.__init__() got an unexpected keyword argument 'dp_rank'
++
++test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py:67: TypeError
++__ TestMooncakeSsdOffloadPath.test_tp_and_pp_ranks_are_both_part_of_directory __
++
++self = <test_mooncake_ssd_offload_path.TestMooncakeSsdOffloadPath testMethod=test_tp_and_pp_ranks_are_both_part_of_directory>
++
++    def test_tp_and_pp_ranks_are_both_part_of_directory(self):
++        with tempfile.TemporaryDirectory() as base:
++            paths = {
++                _make_store(
++>                   _make_storage_config(
++                        dp_rank=1,
++                        tp_rank=tp_rank,
++                        pp_rank=pp_rank,
++                        ssd_offload_path=base,
++                    )
++                ).setup_kwargs["ssd_offload_path"]
++                for tp_rank, pp_rank in ((0, 0), (1, 0), (0, 1))
++            }
++
++test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py:125:
++_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
++
++    def _make_storage_config(*, dp_rank, tp_rank, pp_rank, ssd_offload_path):
++>       return HiCacheStorageConfig(
++            dp_rank=dp_rank,
++            tp_rank=tp_rank,
++            tp_size=8,
++            pp_rank=pp_rank,
++            pp_size=2,
++            attn_cp_rank=0,
++            attn_cp_size=1,
++            is_mla_model=False,
++            enable_storage_metrics=False,
++            is_page_first_layout=True,
++            model_name="test",
++            extra_config={
++                "master_server_address": "127.0.0.1:50051",
++                "check_server": False,
++                "global_segment_size": 1024 * 1024,
++                "enable_ssd_offload": True,
++                "ssd_offload_path": ssd_offload_path,
++            },
++        )
++E       TypeError: HiCacheStorageConfig.__init__() got an unexpected keyword argument 'dp_rank'
++
++test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py:67: TypeError
++______ TestMooncakeSsdOffloadPath.test_unconfigured_ssd_path_is_not_added ______
++
++self = <test_mooncake_ssd_offload_path.TestMooncakeSsdOffloadPath testMethod=test_unconfigured_ssd_path_is_not_added>
++
++    def test_unconfigured_ssd_path_is_not_added(self):
++>       config = _make_storage_config(
++            dp_rank=0, tp_rank=0, pp_rank=0, ssd_offload_path=None
++        )
++
++test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py:139:
++_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
++
++    def _make_storage_config(*, dp_rank, tp_rank, pp_rank, ssd_offload_path):
++>       return HiCacheStorageConfig(
++            dp_rank=dp_rank,
++            tp_rank=tp_rank,
++            tp_size=8,
++            pp_rank=pp_rank,
++            pp_size=2,
++            attn_cp_rank=0,
++            attn_cp_size=1,
++            is_mla_model=False,
++            enable_storage_metrics=False,
++            is_page_first_layout=True,
++            model_name="test",
++            extra_config={
++                "master_server_address": "127.0.0.1:50051",
++                "check_server": False,
++                "global_segment_size": 1024 * 1024,
++                "enable_ssd_offload": True,
++                "ssd_offload_path": ssd_offload_path,
++            },
++        )
++E       TypeError: HiCacheStorageConfig.__init__() got an unexpected keyword argument 'dp_rank'
++
++test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py:67: TypeError
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++=========================== short test summary info ============================
++FAILED test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py::TestMooncakeSsdOffloadPath::test_dp_attention_clients_get_distinct_directories
++FAILED test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py::TestMooncakeSsdOffloadPath::test_tp_and_pp_ranks_are_both_part_of_directory
++FAILED test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py::TestMooncakeSsdOffloadPath::test_unconfigured_ssd_path_is_not_added
++3 failed, 1 warning in 5.54s
+diff --git a/reports/j-d39e095a1905/result.json b/reports/j-d39e095a1905/result.json
+new file mode 100644
+index 0000000..c13ad0c
+--- /dev/null
++++ b/reports/j-d39e095a1905/result.json
+@@ -0,0 +1,38 @@
++{
++  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35484",
++  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
++  "outcome": "candidate_verified",
++  "summary": "Reproduced the SGLang-side collision precondition: MooncakeStore forwarded the same configured ssd_offload_path to every embedded client, while HiCacheController computed but did not retain the DP rank. The correction carries dp_rank in HiCacheStorageConfig and passes each configured client a created rank_<dp>_<tp>_<pp> subdirectory. A regression verifies DP-attention clients with identical local TP rank are isolated, with independent TP/PP and unset-path boundary cases.",
++  "tests": [
++    {
++      "command": "/tmp/amdpilot-repo-j-d39e095a1905/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py (before production change)",
++      "exit_code": 1,
++      "what_was_measured": "Failing-before regression showed HiCacheStorageConfig did not accept dp_rank, preventing distinct DP-attention client identities; raw output is reports/j-d39e095a1905/raw/regression-before.txt."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-d39e095a1905/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py",
++      "exit_code": 0,
++      "what_was_measured": "Three focused cases passed: DP ranks with tp_rank=0 received distinct rank_<dp>_0_0 directories, TP/PP ranks were independently distinct, and an unset SSD path was not forwarded; raw output is reports/j-d39e095a1905/raw/regression-after.txt."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-d39e095a1905/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mooncake_group_semantics.py test/registered/unit/mem_cache/test_mooncake_standalone_dummy_mamba.py test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py",
++      "exit_code": 0,
++      "what_was_measured": "Fourteen adjacent Mooncake and new path-isolation unit tests passed; raw output is reports/j-d39e095a1905/raw/mooncake-unit-suite.txt."
++    },
++    {
++      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-d39e095a1905/pre-commit /opt/venv/bin/pre-commit run --files python/sglang/srt/managers/cache_controller.py python/sglang/srt/mem_cache/hicache_storage.py python/sglang/srt/mem_cache/storage/mooncake_store/mooncake_store.py test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py",
++      "exit_code": 0,
++      "what_was_measured": "Repository formatting, lint, spelling, AST, test-registration, and other applicable pre-commit checks passed; raw output is reports/j-d39e095a1905/raw/pre-commit.txt."
++    }
++  ],
++  "gpu_execution": {
++    "value": false,
++    "evidence": "The corrected behavior is CPU-side rank configuration, directory creation, and keyword forwarding; no GPU kernel or model execution is involved in the regression."
++  },
++  "native_rebuilt": false,
++  "remaining_limitations": [
++    "The DeepSeek-V4-Flash weights and reported TP8 multi-rank Mooncake bucket deployment were not available, so silent KV byte corruption under the full production workload was not reproduced.",
++    "Tests use the actual SGLang MooncakeStore implementation with a deterministic fake Mooncake client; they validate client path isolation, not Mooncake bucket I/O or restart re-adoption semantics.",
++    "No GPU claim is made, and this result does not qualify model architecture behavior, semantic accuracy, or distributed recovery."
++  ]
++}
+diff --git a/test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py b/test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py
+new file mode 100644
+index 0000000..289a4c9
+--- /dev/null
++++ b/test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py
+@@ -0,0 +1,148 @@
++import os
++import tempfile
++import types
++import unittest
++from unittest.mock import patch
++
++from sglang.srt.mem_cache.hicache_storage import HiCacheStorageConfig
++from sglang.test.ci.ci_register import register_cpu_ci
++
++register_cpu_ci(est_time=1, suite="base-a-test-cpu")
++
++
++def _fake_store_class():
++    class FakeMooncakeDistributedStore:
++        instances = []
++
++        def __init__(self):
++            self.setup_kwargs = None
++            self.objects = {}
++            type(self).instances.append(self)
++
++        def setup(self, *args, **kwargs):
++            self.setup_kwargs = kwargs
++            return 0
++
++        def put(self, key, value, *args, **kwargs):
++            self.objects[key] = value
++            return 0
++
++        def get(self, key, *args, **kwargs):
++            return self.objects.get(key)
++
++        def is_exist(self, key):
++            return int(key in self.objects)
++
++        def remove(self, key, *args, **kwargs):
++            self.objects.pop(key, None)
++            return 0
++
++    return FakeMooncakeDistributedStore
++
++
++def _fake_modules(fake_store_cls):
++    mooncake = types.ModuleType("mooncake")
++    mooncake_store = types.ModuleType("mooncake.store")
++    mooncake_store.MooncakeDistributedStore = fake_store_cls
++
++    pool_host = types.ModuleType("sglang.srt.mem_cache.pool_host")
++    pool_host.HostKVCache = type("HostKVCache", (), {})
++    pool_host.HostTensorAllocator = type("HostTensorAllocator", (), {})
++
++    pool_host_mla = types.ModuleType("sglang.srt.mem_cache.pool_host.mla")
++    pool_host_mla.MLATokenToKVPoolHost = type("MLATokenToKVPoolHost", (), {})
++
++    metrics = types.ModuleType("sglang.srt.observability.metrics_collector")
++    metrics.StorageMetrics = type("StorageMetrics", (), {})
++    return {
++        "mooncake": mooncake,
++        "mooncake.store": mooncake_store,
++        "sglang.srt.mem_cache.pool_host": pool_host,
++        "sglang.srt.mem_cache.pool_host.mla": pool_host_mla,
++        "sglang.srt.observability.metrics_collector": metrics,
++    }
++
++
++def _make_storage_config(*, dp_rank, tp_rank, pp_rank, ssd_offload_path):
++    return HiCacheStorageConfig(
++        dp_rank=dp_rank,
++        tp_rank=tp_rank,
++        tp_size=8,
++        pp_rank=pp_rank,
++        pp_size=2,
++        attn_cp_rank=0,
++        attn_cp_size=1,
++        is_mla_model=False,
++        enable_storage_metrics=False,
++        is_page_first_layout=True,
++        model_name="test",
++        extra_config={
++            "master_server_address": "127.0.0.1:50051",
++            "check_server": False,
++            "global_segment_size": 1024 * 1024,
++            "enable_ssd_offload": True,
++            "ssd_offload_path": ssd_offload_path,
++        },
++    )
++
++
++def _make_store(storage_config):
++    fake_store_cls = _fake_store_class()
++    with patch.dict("sys.modules", _fake_modules(fake_store_cls)):
++        from sglang.srt.mem_cache.storage.mooncake_store.mooncake_store import (
++            MooncakeStore,
++        )
++
++        MooncakeStore(storage_config)
++    return fake_store_cls.instances[-1]
++
++
++class TestMooncakeSsdOffloadPath(unittest.TestCase):
++    def test_dp_attention_clients_get_distinct_directories(self):
++        with tempfile.TemporaryDirectory() as base:
++            paths = {
++                _make_store(
++                    _make_storage_config(
++                        dp_rank=dp_rank,
++                        tp_rank=0,
++                        pp_rank=0,
++                        ssd_offload_path=base,
++                    )
++                ).setup_kwargs["ssd_offload_path"]
++                for dp_rank in range(4)
++            }
++
++            self.assertEqual(
++                paths,
++                {os.path.join(base, f"rank_{rank}_0_0") for rank in range(4)},
++            )
++            self.assertTrue(all(os.path.isdir(path) for path in paths))
++
++    def test_tp_and_pp_ranks_are_both_part_of_directory(self):
++        with tempfile.TemporaryDirectory() as base:
++            paths = {
++                _make_store(
++                    _make_storage_config(
++                        dp_rank=1,
++                        tp_rank=tp_rank,
++                        pp_rank=pp_rank,
++                        ssd_offload_path=base,
++                    )
++                ).setup_kwargs["ssd_offload_path"]
++                for tp_rank, pp_rank in ((0, 0), (1, 0), (0, 1))
++            }
++
++            self.assertEqual(len(paths), 3)
++            self.assertIn(os.path.join(base, "rank_1_0_1"), paths)
++
++    def test_unconfigured_ssd_path_is_not_added(self):
++        config = _make_storage_config(
++            dp_rank=0, tp_rank=0, pp_rank=0, ssd_offload_path=None
++        )
++        client = _make_store(config)
++
++        self.assertNotIn("ssd_offload_path", client.setup_kwargs)
++
++
++if __name__ == "__main__":
++    unittest.main()
