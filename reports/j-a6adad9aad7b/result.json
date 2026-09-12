@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34716",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the OpenAI SDK coercion that serialized Responses streaming snapshot created_at values as floats, then normalized response-bearing events at the shared final SSE serialization seam used by both Harmony and non-Harmony streams. Added regression coverage for created, in-progress, completed, and failed snapshots plus an independent non-response delta passthrough boundary.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a6adad9aad7b/venv/bin/python reports/j-a6adad9aad7b/reproduce_created_at.py --raw-sdk",
+      "exit_code": 0,
+      "what_was_measured": "Before the patch, OpenAI SDK 2.6.1 serialized created_at as JSON float 1786588600.0 for response.created, response.in_progress, and response.completed. Raw output is retained in reports/j-a6adad9aad7b/raw/reproduction-before.txt."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-a6adad9aad7b/venv/bin/python reports/j-a6adad9aad7b/reproduce_created_at.py",
+      "exit_code": 0,
+      "what_was_measured": "After the patch, the production serializer emitted JSON integer 1786588600 for response.created, response.in_progress, and response.completed. Raw output is retained in reports/j-a6adad9aad7b/raw/reproduction-after.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a6adad9aad7b/venv/bin/python test/registered/unit/entrypoints/openai/test_serving_responses_stream.py",
+      "exit_code": 0,
+      "what_was_measured": "All 10 focused streaming tests passed. The generator fixture asserted integer created_at values on created, in-progress, and completed SSE snapshots; the independent serializer boundary asserted failed snapshots are integers and non-response delta serialization is unchanged."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a6adad9aad7b/venv/bin/python -m py_compile python/sglang/srt/entrypoints/openai/serving_responses.py test/registered/unit/entrypoints/openai/test_serving_responses_stream.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python files compile and the patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect was reproduced and validated entirely at the OpenAI SDK/Pydantic final JSON serialization boundary; no model execution or GPU behavior participates in this wire-type coercion."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No live HTTP model-server run was performed because model weights were not needed for this deterministic serialization defect; transport and model execution were therefore not requalified.",
+    "The actual non-Harmony stream generator fixture was exercised. The Harmony path uses the same new serializer call but was not run through a full Harmony model fixture.",
+    "The prepared environment did not include black or ruff; py_compile, git diff --check, and the focused unit suite passed."
+  ]
+}

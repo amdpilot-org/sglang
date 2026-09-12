@@ -1,0 +1,64 @@
+diff --git a/python/sglang/srt/entrypoints/openai/serving_responses.py b/python/sglang/srt/entrypoints/openai/serving_responses.py
+index 41ae749a3f2a..00a5d7e2f37d 100644
+--- a/python/sglang/srt/entrypoints/openai/serving_responses.py
++++ b/python/sglang/srt/entrypoints/openai/serving_responses.py
+@@ -134,6 +134,16 @@ def _should_emit_normal_text_as_message(
+     return True
+ 
+ 
++def _serialize_responses_event_data(event: Any) -> str:
++    if not hasattr(event, "response"):
++        return event.model_dump_json(indent=None)
++
++    payload = event.model_dump(mode="json")
++    # The SDK types this field as float; match SGLang's non-streaming wire format.
++    payload["response"]["created_at"] = int(payload["response"]["created_at"])
++    return orjson.dumps(payload).decode()
++
++
+ class OpenAIServingResponses(OpenAIServingChat):
+     """Handler for /v1/responses requests"""
+ 
+@@ -1481,7 +1491,7 @@ def _send_event(event):
+             event_type = getattr(event, "type", "unknown")
+             return (
+                 f"event: {event_type}\n"
+-                f"data: {event.model_dump_json(indent=None)}\n\n"
++                f"data: {_serialize_responses_event_data(event)}\n\n"
+             )
+ 
+         current_content_index = 0
+@@ -1911,7 +1921,7 @@ def _send_event(event):
+             event_type = getattr(event, "type", "unknown")
+             return (
+                 f"event: {event_type}\n"
+-                f"data: {event.model_dump_json(indent=None)}\n\n"
++                f"data: {_serialize_responses_event_data(event)}\n\n"
+             )
+ 
+         # The streaming Response* event models echo ``tools`` through a
+diff --git a/test/registered/unit/entrypoints/openai/test_serving_responses_stream.py b/test/registered/unit/entrypoints/openai/test_serving_responses_stream.py
+index c199a7aa6863..e469e6c8a119 100644
+--- a/test/registered/unit/entrypoints/openai/test_serving_responses_stream.py
++++ b/test/registered/unit/entrypoints/openai/test_serving_responses_stream.py
+@@ -61,7 +61,19 @@ def test_emits_typed_sse_events_in_order(self):
+             self.assertIn(ev, types)
+         self.assertEqual(types[-1], "response.completed")
+ 
+-        seqs = [p["sequence_number"] for p in event_payloads(events)]
++        payloads = event_payloads(events)
++        snapshot_types = {
++            "response.created",
++            "response.in_progress",
++            "response.completed",
++        }
++        for payload in payloads:
++            if payload["type"] in snapshot_types:
++                self.assertIs(
++                    type(payload["response"]["created_at"]), int, payload["type"]
++                )
++
++        seqs = [p["sequence_number"] for p in payloads]
+         self.assertEqual(seqs, list(range(len(seqs))))
+ 
+     def test_required_tool_choice_emits_function_call_events(self):

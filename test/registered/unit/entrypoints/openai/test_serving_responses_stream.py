@@ -1,5 +1,8 @@
+import json
 import unittest
 from unittest.mock import patch
+
+import openai.types.responses as openai_responses_types
 
 from utils import (
     StreamFixture,
@@ -11,6 +14,9 @@ from utils import (
 )
 
 from sglang.srt.entrypoints.openai.protocol import ResponsesRequest
+from sglang.srt.entrypoints.openai.serving_responses import (
+    _serialize_responses_event_data,
+)
 from sglang.srt.runtime_context import publish, reset_context
 from sglang.srt.server_args import ServerArgs
 from sglang.test.ci.ci_register import register_cpu_ci
@@ -94,8 +100,58 @@ class NonHarmonyStreamTestCase(CustomTestCase):
             self.assertIn(ev, types)
         self.assertEqual(types[-1], "response.completed")
 
-        seqs = [p["sequence_number"] for p in event_payloads(events)]
+        payloads = event_payloads(events)
+        snapshots = {
+            payload["type"]: payload
+            for payload in payloads
+            if "response" in payload
+        }
+        self.assertEqual(
+            set(snapshots),
+            {"response.created", "response.in_progress", "response.completed"},
+        )
+        for event_type, payload in snapshots.items():
+            self.assertIs(type(payload["response"]["created_at"]), int, event_type)
+
+        seqs = [p["sequence_number"] for p in payloads]
         self.assertEqual(seqs, list(range(len(seqs))))
+
+    def test_snapshot_serializer_covers_failed_and_preserves_delta_events(self):
+        failed_response = {
+            "id": "resp_failed",
+            "created_at": 1786588600,
+            "error": {"code": "server_error", "message": "boom"},
+            "incomplete_details": None,
+            "instructions": None,
+            "metadata": None,
+            "model": "x",
+            "object": "response",
+            "output": [],
+            "parallel_tool_calls": True,
+            "temperature": None,
+            "tool_choice": "auto",
+            "tools": [],
+            "top_p": None,
+            "status": "failed",
+        }
+        failed = openai_responses_types.ResponseFailedEvent(
+            type="response.failed", sequence_number=3, response=failed_response
+        )
+        failed_payload = json.loads(_serialize_responses_event_data(failed))
+        self.assertIs(type(failed_payload["response"]["created_at"]), int)
+
+        delta = openai_responses_types.ResponseTextDeltaEvent(
+            type="response.output_text.delta",
+            sequence_number=4,
+            item_id="msg_1",
+            output_index=0,
+            content_index=0,
+            delta="hello",
+            logprobs=[],
+        )
+        self.assertEqual(
+            _serialize_responses_event_data(delta), delta.model_dump_json(indent=None)
+        )
 
     def test_required_tool_choice_emits_function_call_events(self):
         serving = make_serving()
