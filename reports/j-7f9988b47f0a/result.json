@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33055",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "summary": "Implemented the additive Rust /server_info.kv_events discovery descriptor from typed ServerArgs, including safe JSON/TCP endpoint and port validation, null fallback behavior, and preservation of the existing allowlist/redaction boundary. Python route parity passes, but the prepared environment contains no cargo or rustc executable, so the Rust crate and its serialization tests could not be compiled or executed.",
+  "tests": [
+    {
+      "command": "git show 358c163250ad3b1f62939b01ce1314a0a31a0365:rust/sglang-server/src/api_server/common.rs | sed -n '/let response = serde_json::json!({/,/});/p' | grep -q '\"kv_events\"'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: the checked-out base Rust /server_info serializer did not contain the kv_events field. Raw extracted serializer is retained in reports/j-7f9988b47f0a/rust-server-info-before.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7f9988b47f0a/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_server_info.py",
+      "exit_code": 0,
+      "what_was_measured": "The real Python /server_info handler contract, including enabled, disabled, malformed JSON, non-TCP and malformed TCP endpoints, port bounds, page-size rejection, IPv6, and existing-field preservation: 29 tests and 12 subtests passed."
+    },
+    {
+      "command": "CARGO_HOME=/tmp/amdpilot-repo-j-7f9988b47f0a/cargo-home CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-7f9988b47f0a/cargo-target cargo test -p sglang-server api_server::common::tests --manifest-path rust/Cargo.toml",
+      "exit_code": 127,
+      "what_was_measured": "Attempted the focused Rust serialization/redaction regression suite from the prepared repository with private cache paths; the shell reported cargo: command not found before compilation."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Rust 1.92 is pinned by rust/rust-toolchain.toml, but neither cargo nor rustc is installed or discoverable in the prepared environment; therefore the Rust tests, crate build, and live Rust HTTP route remain unverified.",
+    "No GPU was used because this is an HTTP metadata serialization contract with no model-kernel execution; the frozen Torch/ROCm stack was unchanged.",
+    "KV-event publishing itself is intentionally out of scope and was not implemented or exercised.",
+    "The deterministic tiny-Llama fixture was not used because it cannot validate an uncompiled Rust metadata serializer and no model execution is involved."
+  ]
+}

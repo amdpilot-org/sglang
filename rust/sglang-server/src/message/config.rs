@@ -151,6 +151,11 @@ pub struct ServerArgs {
     /// and the scheduler-derived KV token capacity, reported by `/server_info`.
     pub version: String,
     pub max_total_num_tokens: u64,
+    /// KV-event publisher discovery metadata used only by `/server_info`.
+    /// The raw config is never serialized by the Rust HTTP server.
+    pub kv_events_config: Option<String>,
+    pub page_size: Option<i64>,
+    pub dp_size: usize,
 }
 
 #[pyo3::pymethods]
@@ -185,6 +190,9 @@ impl ServerArgs {
         num_reserved_tokens,
         version,
         max_total_num_tokens,
+        kv_events_config,
+        page_size,
+        dp_size,
     ))]
     // The parameter list IS the schema; one keyword per field, all required.
     #[allow(clippy::too_many_arguments)]
@@ -217,6 +225,9 @@ impl ServerArgs {
         num_reserved_tokens: u64,
         version: String,
         max_total_num_tokens: u64,
+        kv_events_config: Option<String>,
+        page_size: Option<i64>,
+        dp_size: usize,
     ) -> Self {
         Self {
             model_path,
@@ -247,6 +258,9 @@ impl ServerArgs {
             num_reserved_tokens,
             version,
             max_total_num_tokens,
+            kv_events_config,
+            page_size,
+            dp_size,
         }
     }
 }
@@ -285,6 +299,9 @@ impl Default for ServerArgs {
             num_reserved_tokens: 0,
             version: String::new(),
             max_total_num_tokens: 0,
+            kv_events_config: None,
+            page_size: None,
+            dp_size: 1,
         }
     }
 }
