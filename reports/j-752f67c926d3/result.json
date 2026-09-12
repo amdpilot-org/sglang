@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32056",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared base already gates disposal of the standard DeepGEMM pre-permute input on runner_config.inplace in both compact and masked layouts. Added a four-case regression that fails when unconditional disposal is restored and passes against the checked-out implementation.",
+  "tests": [
+    {
+      "command": "rocm-smi --showproductname --showuniqueid --showmeminfo vram; /tmp/amdpilot-repo-j-752f67c926d3/venv/bin/python <GPU probe and DeepGEMM import script>",
+      "exit_code": 0,
+      "what_was_measured": "Detected the single assigned AMD Instinct MI350X gfx950, Torch 2.11.0+rocm7.2, one available GPU, successful GPU arithmetic (sum 66.0), and import of the checked-out deep_gemm.py. Raw output: reports/j-752f67c926d3/raw/gpu_and_import.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-752f67c926d3/venv/bin/python -m pytest -q test/registered/unit/layers/moe/test_deep_gemm_standard_input_ownership.py -vv (with both ownership guards temporarily removed)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: compact and masked inplace=False cases both observed the caller alias collapse from shape [4, 4] to [0]; inplace=True boundary cases passed. Raw output: reports/j-752f67c926d3/raw/regression_before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-752f67c926d3/venv/bin/python -m pytest -q test/registered/unit/layers/moe/test_deep_gemm_standard_input_ownership.py -vv",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression on gfx950: all four compact/masked and borrowed/owned ownership cases passed against the prepared source. Raw output: reports/j-752f67c926d3/raw/regression_final.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Delivered test and report changes contain no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Regression tensors and alias/storage assertions executed on the assigned single AMD Instinct MI350X gfx950 through torch device 'cuda'; hardware and framework details are in reports/j-752f67c926d3/raw/gpu_and_import.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Qwen3.5-397B-A17B-FP8 weights and the reported eight-H800 TP8/EP8 CUDA environment were unavailable, so no full-model or multi-node serving reproduction was performed.",
+    "The regression executes the actual Python pre-permute implementation but mocks token packing kernels to isolate the ownership contract; it is not a DeepGEMM numerical correctness test.",
+    "The prepared source already contained the correction, so the delivered code change is regression coverage and evidence rather than a new production fix."
+  ]
+}
