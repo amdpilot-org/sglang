@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31084",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that all dynamic LoRA handlers permit tokenizer_worker_num > 1 despite per-process registries, then added a deterministic fail-fast guard before backend calls or local mutations. Multi-worker dynamic LoRA synchronization remains unsupported.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-55f7d05688e3/venv/bin/python -m pytest test/registered/unit/managers/test_tokenizer_control_mixin.py -q",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: 4 failures showed both load variants succeeding with two tokenizer workers, and unload consulting only the serving worker's empty registry. Raw output: reports/j-55f7d05688e3/raw/pytest_before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-55f7d05688e3/venv/bin/python -m pytest test/registered/unit/managers/test_tokenizer_control_mixin.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression and boundaries: all three dynamic APIs reject before backend/state mutation; DP attention does not bypass the guard; single-worker dynamic updates and startup-preloaded registries remain functional. 6 passed. Raw output: reports/j-55f7d05688e3/raw/pytest_after.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-55f7d05688e3/venv/bin/python -m pytest test/registered/unit/managers/test_tokenizer_control_mixin.py test/registered/unit/managers/test_lora_update_result_merge.py test/registered/unit/managers/test_multi_tokenizer_mixin.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Focused regression plus neighboring LoRA result-merging and multi-tokenizer routing tests. 16 passed. Raw output: reports/j-55f7d05688e3/raw/pytest_related.log"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/managers/tokenizer_control_mixin.py test/registered/unit/managers/test_tokenizer_control_mixin.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, and CI registry checks for changed source and test files. Raw output: reports/j-55f7d05688e3/raw/precommit.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and correction are tokenizer-process control-plane behavior. The deterministic reproduction used the actual handlers and registry with mocked backend communication; no GPU command was run."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "This correction rejects unsupported multi-tokenizer dynamic updates; it does not synchronize LoRA state across tokenizer workers.",
+    "No model weights or full HTTP serving reproduction were used, so real-model transport, architecture semantics, and distributed execution remain unverified.",
+    "The assigned gfx950 GPU was not used because no numerical kernel or model-execution claim is made."
+  ]
+}

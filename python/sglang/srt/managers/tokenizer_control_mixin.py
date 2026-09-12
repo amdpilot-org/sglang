@@ -598,6 +598,16 @@ class TokenizerControlMixin:
 
         return result
 
+    def _validate_dynamic_lora_supported(self: TokenizerManager) -> None:
+        if get_serving().tokenizer_worker_num > 1:
+            raise ValueError(
+                "Dynamic LoRA loading and unloading are not supported with "
+                "--tokenizer-worker-num > 1 because tokenizer-worker LoRA "
+                "registries are not synchronized. Launch with "
+                "--tokenizer-worker-num 1, or preload adapters stored on disk "
+                "with --lora-paths."
+            )
+
     async def load_lora_adapter(
         self: TokenizerManager,
         obj: LoadLoRAAdapterReqInput,
@@ -610,6 +620,8 @@ class TokenizerControlMixin:
                 raise ValueError(
                     "LoRA is not enabled. Please set `--enable-lora` to enable LoRA."
                 )
+
+            self._validate_dynamic_lora_supported()
 
             assert get_parallel().dp_size == 1 or get_parallel().enable_dp_attention, (
                 "dp_size must be 1 or dp attention must be enabled for dynamic lora loading"
@@ -688,6 +700,8 @@ class TokenizerControlMixin:
                 raise ValueError(
                     "LoRA is not enabled. Please set `--enable-lora` to enable LoRA."
                 )
+
+            self._validate_dynamic_lora_supported()
 
             assert get_parallel().dp_size == 1 or get_parallel().enable_dp_attention, (
                 "dp_size must be 1 or dp attention must be enabled for dynamic lora loading"
@@ -768,6 +782,8 @@ class TokenizerControlMixin:
             assert obj.lora_name is not None, (
                 "lora_name must be provided to unload LoRA adapter"
             )
+
+            self._validate_dynamic_lora_supported()
 
             assert get_parallel().dp_size == 1 or get_parallel().enable_dp_attention, (
                 "dp_size must be 1 or dp attention must be enabled for dynamic lora loading"
