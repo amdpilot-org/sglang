@@ -325,6 +325,12 @@ class DeepseekSparseAttnBackend(
         super().__init__()
         self.forward_metadata: DSAMetadata
         self.device = model_runner.device
+        # EAGLE creates its draft-decode and draft-extend DSA backends after
+        # ModelRunner.init_attention_backends() has performed the generic bind
+        # pass.  Keep the late-created backends on the owning runner's index
+        # namespace too; FP8 MHA prefix reads use this API even when translation
+        # is a passthrough for a static KV pool.
+        self.kv_index_translator = model_runner.kv_index_translator
         assert isinstance(model_runner.page_size, int)
         self.real_page_size = model_runner.page_size
         self.num_splits = (
