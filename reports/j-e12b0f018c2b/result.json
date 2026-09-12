@@ -1,0 +1,26 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31205",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source already contains an issue-specific SWA admission escape hatch. When a request budget cannot fit the total SWA pool, PrefillAdder computes a page-aligned safe chunk and admits it instead of indefinitely deferring the FCFS queue head. A new regression using the reported 20,992-token pool, 32,768-token chunk limit, 512-token page, and 20,742-token prompt demonstrates NO_TOKEN with the old behavior simulated and progress with the current implementation (19,968 tokens admitted). No production source correction was justified.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-e12b0f018c2b/venv/bin/python -m pytest -q test/registered/unit/managers/test_prefill_adder.py -k 'dsv4 or swa_never_fits or add_chunked_req_hybrid_swa'",
+      "exit_code": 0,
+      "what_was_measured": "Seven focused scheduler tests, including failing-before/passing-after issue geometry and independent below-capacity, exact-capacity, and transient-pressure boundaries. Raw output: reports/j-e12b0f018c2b/raw/prefill_adder_focused.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-e12b0f018c2b/venv/bin/python -m pytest -q test/registered/unit/managers/test_prefill_adder.py",
+      "exit_code": 0,
+      "what_was_measured": "Complete PrefillAdder unit module: 30 tests and 12 subtests passed. Raw output: reports/j-e12b0f018c2b/raw/prefill_adder_full.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The verified defect and existing correction are deterministic scheduler admission arithmetic and do not execute GPU kernels. HIP_VISIBLE_DEVICES=0 restricted the test process to the assigned device, but the unit path remained CPU-only.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Pro/DSpark weights and the reported 1P1D TP4+TP4, 8xB300 deployment were unavailable, so no full-model HTTP or distributed reproduction is claimed.",
+    "The regression verifies scheduler admission and FCFS-head progress with the exact reported pool/chunk/page/prompt geometry; it does not validate DeepSeek-V4 semantic output, mooncake transfer, or multi-node behavior.",
+    "The current implementation resolves the hang by safely chunking an intrinsically oversized prefill rather than returning the suggested HTTP 400."
+  ]
+}
