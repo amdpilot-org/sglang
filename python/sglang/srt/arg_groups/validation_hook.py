@@ -36,9 +36,7 @@ def check_bwap_server_args(cfg: Any) -> None:
     assert cfg.bwap_t_init >= 0, "--bwap-t-init must be non-negative."
     assert cfg.bwap_t_explore >= 1, "--bwap-t-explore must be positive."
     assert cfg.bwap_t_prune >= 1, "--bwap-t-prune must be positive."
-    assert not cfg.bwap_probe or cfg.bwap_fused, (
-        "--bwap-probe requires --bwap-fused."
-    )
+    assert not cfg.bwap_probe or cfg.bwap_fused, "--bwap-probe requires --bwap-fused."
     if cfg.bwap_fused and cfg.tp_size > 1:
         logger.warning(
             "--bwap-fused gather-GEMM is TP=1 only; with tp_size>1, "
