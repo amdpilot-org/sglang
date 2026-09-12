@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39072",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/841",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/800",
+  "candidate_commit": "995ac1056eef6bea1c17c728327c334268ef09e1",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes the reproducible source-level DSA metadata/query alignment mismatch: the recorded base leaves 9 metadata rows while prepare_mlp_sync_batch produces 12 query rows, and the candidate aligns both to 12. Candidate regression and 97 independent boundary cases passed, including GPU tensor execution. The full original H20/FlashMLA/disaggregated deployment remains unavailable. Request changes because the committed candidate report claims git diff --check passed although the exact candidate diff fails that check on trailing whitespace in its raw logs.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b200ef167acb/venv/bin/python -m pytest -q /job/review-evidence/meta/test_dsa_dp_spec_padding.py (at base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: 3 failed, 1 passed; issue-class 9-row DSA metadata was not aligned to the eventual 12-row query."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b200ef167acb/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_dsa_dp_spec_padding.py (at candidate 995ac1056eef6bea1c17c728327c334268ef09e1)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 4 passed, covering issue-class SUM_LEN, another DP rank, MAX_LEN, and no-padding identity."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b200ef167acb/venv/bin/python /job/review-evidence/meta/adversarial_padding.py (at candidate)",
+      "exit_code": 0,
+      "what_was_measured": "97 independent cases on GPU tensors across uneven/zero DP counts, SUM_LEN/MAX_LEN, attention TP 1/2/4/8, zero filling, and CP-interleave ordering."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 995ac1056eef6bea1c17c728327c334268ef09e1",
+      "exit_code": 2,
+      "what_was_measured": "Contradicts the candidate report's exit-0 claim: trailing whitespace exists in committed raw regression logs."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The independent matrix used torch device cuda on one AMD Instinct MI350X/gfx950 and passed 97 cases. This validates tensor padding only, not CUDA FlashMLA or the full serving path."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No counterexample was found within the directly exercised cal_padded_tokens/pad_dsa_cache_seqlens shape contract.",
+    "The candidate's committed evidence has a counterexample to its git diff --check claim: the exact diff reports trailing whitespace in raw logs.",
+    "The original eight-H20 GLM-5.3-W4AFP8 disaggregated decode path remains unexecuted, so failures specific to CUDA FlashMLA, Mooncake/InfiniBand, TP=8/DP=2 synchronization, model architecture, or warmup cannot be excluded."
+  ],
+  "remaining_limitations": [
+    "Only one AMD Instinct MI350X/gfx950 with ROCm 7.2 was assigned; the report used eight NVIDIA H20 GPUs and CUDA 12.9.",
+    "GLM-5.3-W4AFP8 weights were unavailable.",
+    "CUDA FlashMLA, Mooncake/InfiniBand, multi-GPU TP=8/DP=2, and disaggregated decode were not available.",
+    "No native source changed, so no native rebuild was required or performed.",
+    "The tiny Llama serving fixture was not used because it cannot exercise DSA/GLM, CUDA FlashMLA, or the reported distributed topology and would be an unrelated smoke."
+  ]
+}
