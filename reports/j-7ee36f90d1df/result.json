@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36548",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "summary": "The reported Qwen3.8-27B NVFP4 DFlash2 corruption was not reproduced because the assigned environment is AMD gfx950 and the required target/draft weights are unavailable. Public issue evidence localizes the underlying divergence to GDN target-verify SSM arithmetic even at batch size one, rather than demonstrating cross-request bookkeeping corruption. Current source passes its bookkeeping ownership guard and its ReplaySSM fold regression on gfx950, but explicitly rejects ReplaySSM for DFLASH/DSPARK on non-KDA GDN models, so that path does not solve or qualify the reported Qwen3.8 configuration. No unverified source fix was made.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-7ee36f90d1df/venv/bin/python -m pytest -q test/registered/attention/unittests/gdn/test_gdn_replayssm_spec_fold.py",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned gfx950, four GDN ReplaySSM fold tests compared ring-write/fold output with an independent per-step snapshot baseline for FP32 and BF16 state, non-contiguous and null slots, varied accept lengths, untouched slots, and 256 chained commits; all passed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-7ee36f90d1df/venv/bin/python -m pytest -q test/registered/unit/spec/test_decode_bookkeeping_ownership.py",
+      "exit_code": 0,
+      "what_was_measured": "Two AST-level ownership tests verified the allowlisted per-request decode/KV bookkeeping sites and that speculative draft workers do not duplicate scheduler bookkeeping."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-7ee36f90d1df/venv/bin/python -m pytest -q test/registered/attention/unittests/gdn/test_gdn_cutedsl_ring_verify.py",
+      "exit_code": 2,
+      "what_was_measured": "The NVIDIA CUDA/CuTeDSL-specific ring-verify regression could not collect in the ROCm environment because cuda.bindings.driver is unavailable."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X (gfx950:sramecc+:xnack-) executed test_gdn_replayssm_spec_fold.py; raw/gdn_replayssm_spec_fold.log records 4 passed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The Qwen3.8-27B NVFP4 target and z-lab Qwen3.8-27B DFlash2 draft weights were unavailable.",
+    "The assigned GPU is AMD gfx950, not the reported NVIDIA RTX Pro 6000/CUDA architecture.",
+    "No full-model serving or concurrent HTTP reproduction was performed; the deterministic tiny Llama fixture cannot qualify hybrid GDN or DFlash2 model behavior.",
+    "Current source rejects --enable-linear-replayssm-spec for DFLASH/DSPARK on non-KDA models, leaving the implicated Qwen3.8 GDN target-verify path unqualified.",
+    "The CUDA/CuTeDSL-specific numerical regression could not run because CUDA Python bindings and NVIDIA hardware are absent."
+  ]
+}
