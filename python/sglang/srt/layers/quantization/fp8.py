@@ -1502,6 +1502,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             self._ensure_cutlass_buffers_initialized(layer)
 
     def process_weights_after_loading_block_quant(self, layer: Module) -> None:
+        if self.is_fp4_expert and self.dequant_fp4_to_fp8:
+            self._dequant_fp4_experts_to_fp8(layer)
+
         # AMD FP4 experts: use aiter's native MXFP4 MoE path
         if _use_aiter and self.is_fp4_expert:
             gu_intv = envs.SGLANG_USE_AITER_MOE_GU_ITLV.get()
@@ -1746,26 +1749,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             # Check if MoE will actually use DeepGEMM runner
             will_use_deepgemm = self.is_deepgemm_moe_runner_backend_enabled()
 
-            if self.is_fp4_expert and self.dequant_fp4_to_fp8:
-                for weight_param, scale_param in [
-                    (layer.w13_weight, layer.w13_weight_scale_inv),
-                    (layer.w2_weight, layer.w2_weight_scale_inv),
-                ]:
-                    num_experts = weight_param.shape[0]
-                    new_weights = []
-                    new_scales = []
-                    for e in range(num_experts):
-                        w, s = cast_e2m1fn_to_e4m3fn(
-                            weight_param.data[e], scale_param.data[e]
-                        )
-                        new_weights.append(w)
-                        new_scales.append(s)
-                    weight_param.data = torch.stack(new_weights)
-                    scale_param.data = torch.stack(new_scales).float()
-                    scale_param.format_ue8m0 = False
-                self.is_fp4_expert = False
-                logger.warning_once("Dequantized FP4 expert weights to FP8.")
-
             if self.is_fp4_expert:
                 if get_moe_runner_backend().is_marlin():
                     layer.w13_weight.data = layer.w13_weight.data.view(torch.int8)
@@ -1835,6 +1818,26 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                         output_dtype=torch.bfloat16,
                         weight_shape=weight.shape[-2:],
                     )
+
+    def _dequant_fp4_experts_to_fp8(self, layer: Module) -> None:
+        for weight_param, scale_param in [
+            (layer.w13_weight, layer.w13_weight_scale_inv),
+            (layer.w2_weight, layer.w2_weight_scale_inv),
+        ]:
+            num_experts = weight_param.shape[0]
+            new_weights = []
+            new_scales = []
+            for expert_id in range(num_experts):
+                weight, scale = cast_e2m1fn_to_e4m3fn(
+                    weight_param.data[expert_id], scale_param.data[expert_id]
+                )
+                new_weights.append(weight)
+                new_scales.append(scale)
+            weight_param.data = torch.stack(new_weights)
+            scale_param.data = torch.stack(new_scales).float()
+            scale_param.format_ue8m0 = False
+        self.is_fp4_expert = False
+        logger.warning_once("Dequantized FP4 expert weights to FP8.")
 
     def _convert_mxfp8_moe_to_block_fp8(self, layer: Module) -> None:
         from sglang.srt.layers.quantization.mxfp8_block_convert import (
