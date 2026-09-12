@@ -55,6 +55,7 @@ def test_selective_dequant_deduplicates_and_remaps_gpu():
         page_table,
         topk,
         max_unique_ratio=1.0,
+        max_topk_ratio=2.0,
         min_tokens_saved=0,
         min_full_tokens=0,
     )
@@ -106,6 +107,29 @@ def test_selective_dequant_falls_back_when_savings_are_small_gpu():
     torch.testing.assert_close(actual_indices, topk, rtol=0, atol=0)
 
 
+def test_selective_dequant_falls_back_before_large_topk_dedup_gpu():
+    torch.manual_seed(13)
+    device = torch.device("cuda")
+    source = torch.randn(16, 576, device=device, dtype=torch.bfloat16)
+    packed = _pack_cache(source)
+    page_table = torch.randperm(16, device=device, dtype=torch.int32)
+    topk = torch.randint(0, 16, (4, 4), device=device, dtype=torch.int32)
+
+    # This input has one top-k entry per full-prefix row, so the default
+    # pre-deduplication gate must choose the full path.
+    actual, actual_indices, used = dequantize_k_cache_paged_selective(
+        packed,
+        page_table,
+        topk,
+        min_full_tokens=0,
+    )
+    expected = dequantize_k_cache_paged(packed, page_table)
+
+    assert not used
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+    torch.testing.assert_close(actual_indices, topk, rtol=0, atol=0)
+
+
 def test_selective_dequant_masks_invalid_indices_and_supplies_empty_sentinel_gpu():
     device = torch.device("cuda")
     source = torch.zeros(2, 576, device=device, dtype=torch.bfloat16)
@@ -118,6 +142,7 @@ def test_selective_dequant_masks_invalid_indices_and_supplies_empty_sentinel_gpu
         page_table,
         topk,
         max_unique_ratio=1.0,
+        max_topk_ratio=2.0,
         min_tokens_saved=0,
         min_full_tokens=0,
     )

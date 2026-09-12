@@ -239,6 +239,7 @@ def dequantize_k_cache_paged_selective(
     topk_indices: torch.Tensor,
     *,
     max_unique_ratio: float = 0.75,
+    max_topk_ratio: float = 0.5,
     min_tokens_saved: int = 256,
     min_full_tokens: int = 131072,
 ) -> tuple[torch.Tensor, torch.Tensor, bool]:
@@ -251,18 +252,25 @@ def dequantize_k_cache_paged_selective(
     indices address that buffer. Invalid and ``-1`` entries remain ``-1``.
 
     Deduplication/remapping has a fixed cost, so the compact result is used only
-    for prefixes with at least ``min_full_tokens`` rows, when it saves both
-    ``min_tokens_saved`` rows and the fraction selected is no greater than
-    ``max_unique_ratio``.  Otherwise this falls back to the full flattened
-    dequantization and returns the original indices.
+    for prefixes with at least ``min_full_tokens`` rows. Before constructing
+    the union, inputs with more than ``max_topk_ratio`` top-k entries per full
+    prefix row fall back directly, avoiding a deduplication pass that can cost
+    more time and memory than full dequantization. After deduplication, the
+    compact path must save ``min_tokens_saved`` rows and select no more than
+    ``max_unique_ratio`` of the full prefix. Otherwise this falls back to the
+    full flattened dequantization and returns the original indices.
     """
     assert 0.0 <= max_unique_ratio <= 1.0
+    assert max_topk_ratio >= 0.0
     assert min_tokens_saved >= 0
     assert min_full_tokens >= 0
     assert page_table_1_flattened.ndim == 1
 
     num_logical = page_table_1_flattened.numel()
-    if num_logical < min_full_tokens:
+    if (
+        num_logical < min_full_tokens
+        or topk_indices.numel() > num_logical * max_topk_ratio
+    ):
         return (
             dequantize_k_cache_paged(quant_k_cache, page_table_1_flattened),
             topk_indices,

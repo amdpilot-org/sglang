@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36338",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced PR 2799's concrete MI350X regressions against PR 2736 at 21e526df7844155adec0c2163992178bf899ba99, then added a pre-deduplication top-k-size gate that preserves the beneficial compact path while avoiding expensive torch.unique work for the reviewed large-query cases.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python .../venv/bin/python reports/j-2eee0f89730e/evidence/adversarial_scaling.py (candidate before correction)",
+      "exit_code": 0,
+      "what_was_measured": "MI355X warmed median latency and peak GPU allocation. Reproduced 64-query selective slowdown at 1.519x and 256/1024-query late-fallback slowdowns at 1.993x/2.291x with 166724096/213910016-byte peaks."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python .../venv/bin/python -m pytest -q test/registered/kernel/ops/attention/test_selective_dsa_kv_dequant.py",
+      "exit_code": 0,
+      "what_was_measured": "Four GPU tests passed: independent FP8 dequant reference, physical alias dedup/remap, small-prefix fallback, new pre-dedup large-top-k fallback, and invalid sentinels."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python .../venv/bin/python reports/j-2eee0f89730e/evidence/adversarial_scaling.py (corrected)",
+      "exit_code": 0,
+      "what_was_measured": "The 64/256/1024-query counterexamples chose early full fallback, used exactly the full path's 150994944-byte peak, and measured 0.795x/0.802x/0.827x of the separately warmed full baseline."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python .../venv/bin/python reports/j-f631daba9e47/benchmark_selective_dequant.py",
+      "exit_code": 0,
+      "what_was_measured": "Preserved beneficial compact behavior: 262144 logical rows reduced to 4029 rows, 301989888 to 4641408 BF16 bytes, and 0.6235 ms to 0.2494 ms (2.500x)."
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files python/sglang/kernels/ops/attention/dsa/dequant_k_cache.py python/sglang/srt/layers/attention/dsa_backend.py test/registered/kernel/ops/attention/test_selective_dsa_kv_dequant.py reports/j-2eee0f89730e/evidence/adversarial_scaling.py reports/j-2eee0f89730e/README.md reports/j-2eee0f89730e/result.json",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, syntax, registered-test taxonomy, and policy hooks all passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python .../venv/bin/python -m pytest -q test/registered/attention/unittests/dsa/test_dsa.py -k sparse_fp8_prefill_cases -s",
+      "exit_code": 1,
+      "what_was_measured": "On ROCm, 1 passed, 4 skipped, and 2 subtests stopped before attention because the fixture page size is 64 while the available legacy HIP DSA path requires page size 1."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "All focused numerical and performance checks executed checked-out source on one AMD Instinct MI355X (gfx950) with Torch 2.11.0+rocm7.2.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "BF16 flashmla_sparse attention output and end-to-end sparse-prefill performance remain unverified because the assigned AMD MI355X is not the required NVIDIA Hopper/Blackwell architecture.",
+    "The ROCm DSA backend fixture cannot reach attention with page size 64 on the available legacy HIP path, which requires page size 1.",
+    "No native C++, CUDA, HIP, or FlyDSL source changed, so a native rebuild was not applicable."
+  ]
+}
