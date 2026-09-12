@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36829",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3418",
+  "candidate_commit": "dde29de4674681f48047b836068c46dd1215048e",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The candidate correctly rejects known equivalent spellings of the same local or Hub checkpoint from using GLM5's bundled NextN head as EAGLE3. This is a valid partial safety fix, not a semantic or performance fix for the original issue.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-b94dcb1c3a49/venv/bin/python -m pytest -q /job/test_glm5_candidate.py",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before collection on recorded base; the new validator was absent."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-b94dcb1c3a49/venv/bin/python -m pytest -q test/registered/unit/spec/test_glm5_next_spec_algorithm.py test/registered/unit/models/test_glm5_next_dflash_capture.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression and existing GLM5 hidden-state capture tests: 9 passed and 3 subtests passed."
+    },
+    {
+      "command": "Direct adversarial calls to _validate_native_mtp_algorithm for local aliases and Hub revisions",
+      "exit_code": 0,
+      "what_was_measured": "Existing path aliases and equivalent Hub revisions were rejected; distinct revisions/repositories were allowed."
+    },
+    {
+      "command": "ROCm tensor shape probe for H=4096, hc_mult=4 on cuda",
+      "exit_code": 0,
+      "what_was_measured": "One mHC capture was width 16384 and three concatenated captures width 49152, both incompatible with an H-wide 4096 input."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A shape-only torch tensor probe ran on one AMD Instinct MI355X gfx950. No GLM5 model or fused kernel executed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Bundled NEXTN/EAGLE acceptance and throughput remain unverified; the reported acceptance near 1.0 is unresolved.",
+    "A distinct EAGLE3 draft remains allowed without evidence of GLM5 architecture compatibility or successful execution.",
+    "The patch blocks the known bundled-head EAGLE3 configuration but does not correct EAGLE3/mHC hidden-state semantics."
+  ],
+  "remaining_limitations": [
+    "No GLM-5.3-Flash weights were available.",
+    "The environment has one AMD MI355X gfx950 with ROCm 7.2, not 4x NVIDIA H20 TP=4.",
+    "No full server, fused CUDA kernel, model acceptance, or throughput run was performed.",
+    "No native files changed, so a native rebuild was not applicable."
+  ]
+}
