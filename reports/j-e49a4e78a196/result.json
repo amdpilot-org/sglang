@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32101",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Implemented the correctness-first Gemma 4 MLX cache bridge: public gemma4 and gemma4_text models retain complete per-request mlx-lm cache lists, including the 35-layer/15-owned-cache YOCO shape; radix caching, overlap scheduling, and chunked prefill fail at startup with actionable flags; the default native-cache scheduler budget is conservatively limited to 2,048 tokens. Portable policy tests pass, but this Linux x86_64/ROCm node cannot execute MLX/Metal or load the Apple Silicon E2B checkpoint, so the candidate is not claimed as fully fixed.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-e49a4e78a196/venv/bin/python -m pytest -q test/registered/unit/hardware_backend/mlx/test_gemma4_native_cache_policy.py --junitxml=reports/j-e49a4e78a196/pytest-policy.xml",
+      "exit_code": 0,
+      "what_was_measured": "Portable recognition and adversarial configuration policy: public wrapper/text backbone detection, complete reporting of all unsafe scheduler flags, and acceptance of the conservative configuration. Result: 3 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e49a4e78a196/venv/bin/python -m pytest -q test/registered/unit/hardware_backend/mlx/test_attention_patching.py --junitxml=reports/j-e49a4e78a196/pytest-mlx-skipped.xml",
+      "exit_code": 0,
+      "what_was_measured": "MLX-gated regression coverage includes the real Gemma 4 35-layer/15-cache ownership shape, independent cache mutation for two requests, and request-finish release. Result: 43 skipped because mlx is unavailable on this non-Apple host; this is retained as blocker evidence, not a functional pass."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e49a4e78a196/venv/bin/python -m compileall -q python/sglang/srt/hardware_backend/mlx test/registered/unit/hardware_backend/mlx/test_gemma4_native_cache_policy.py",
+      "exit_code": 0,
+      "what_was_measured": "Python syntax/import compilation for the changed MLX backend and tests."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "Prepared node is Linux 4.18 x86_64 with Torch 2.11.0+rocm7.2; importlib reports mlx=None and mlx_lm=None. MLX requires Apple Silicon/Metal, so no qualified GPU numerical reference was possible.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Apple Silicon or Metal device was available; the public gemma4.Model wrapper and tiny real architecture could not be instantiated here.",
+    "mlx-community/gemma-4-e2b-it-4bit was not downloaded or launched, and /v1/chat/completions was not exercised.",
+    "Greedy output was not compared token-for-token with unmodified mlx-lm across a prompt longer than the synthetic sliding window.",
+    "The MLX-gated cache isolation and 35-layer/15-cache regression tests are present but skipped on this host.",
+    "Only the E2B text correctness bridge is targeted. Radix/prefix reuse, overlap/chained decode, chunked prefill, fused batched attention, long-context claims, Gemma 4 Unified, E4B/31B/26B, multimodal inputs, MTP, and custom Gemma-specific Metal kernels remain unimplemented or unverified.",
+    "No native C++ or FlyDSL code changed; native rebuild requirements are not applicable to this contribution."
+  ]
+}

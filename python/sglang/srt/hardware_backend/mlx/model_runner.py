@@ -58,6 +58,10 @@ from sglang.srt.hardware_backend.mlx.kv_cache import (
     set_context,
     uses_sliding_window_attention,
 )
+from sglang.srt.hardware_backend.mlx.native_cache import (
+    uses_model_native_cache,
+    validate_model_native_cache_config,
+)
 from sglang.srt.hardware_backend.mlx.remote_code_gate import (
     ensure_remote_code_allowed,
     resolve_model_directory,
@@ -161,6 +165,7 @@ class MlxModelRunner:
     _enable_sampling = False
     _sanitize_nan = False
     _deterministic_seeding = False
+    _uses_model_native_cache = False
 
     def __init__(
         self,
@@ -174,6 +179,8 @@ class MlxModelRunner:
         enable_sampling: bool = False,
         sampling_rng_seed: int = 0,
         deterministic_seeding: bool = False,
+        disable_overlap_schedule: bool = False,
+        chunked_prefill_size: int = -1,
     ):
         self.model_path = model_path
         self.trust_remote_code = trust_remote_code
@@ -217,6 +224,14 @@ class MlxModelRunner:
 
         self._load_model()
 
+        self._uses_model_native_cache = uses_model_native_cache(self.model)
+        if self._uses_model_native_cache:
+            validate_model_native_cache_config(
+                disable_radix_cache=disable_radix_cache,
+                disable_overlap_schedule=disable_overlap_schedule,
+                chunked_prefill_size=chunked_prefill_size,
+            )
+
         # Pin MLX allocations to prevent OS paging
         device_info = mx.device_info()
         max_wired = int(device_info.get("max_recommended_working_set_size", 0))
@@ -224,16 +239,27 @@ class MlxModelRunner:
             mx.set_wired_limit(max_wired)
             logger.info(f"Wired memory limit set to {max_wired / (1024**3):.1f} GB")
 
-        patch_model_attention(self.model)
-
         layer_list, attn_attrs = find_attention_layers(self.model)
+        if self._uses_model_native_cache:
+            # Gemma 4 combines heterogeneous full/SWA KV, K=V attention and
+            # YOCO layers which reuse another layer's KV.  Replacing only the
+            # discoverable attention modules would split one model-owned cache
+            # contract across two implementations.  Keep the complete cache
+            # list native until per-layer KV ownership is representable.
+            attn_attrs = [None] * len(layer_list)
+        else:
+            patch_model_attention(self.model)
+            layer_list, attn_attrs = find_attention_layers(self.model)
         self._cache_layout = MlxModelCacheLayout.from_attention_discovery(
             layer_list,
             attn_attrs,
             # Per-layer sliding windows (container convention, e.g. gpt-oss).
             layer_window_sizes=get_layer_window_sizes(self.model),
         )
-        if self._cache_layout.num_attention_layers == 0:
+        if (
+            self._cache_layout.num_attention_layers == 0
+            and not self._uses_model_native_cache
+        ):
             raise RuntimeError("MLX model has no supported attention layers")
         if self._cache_layout.has_auxiliary_state and not hasattr(
             self.model, "make_cache"
@@ -251,7 +277,7 @@ class MlxModelRunner:
                 "MLX runner does not support models with both auxiliary "
                 "cache state and sliding-window attention layers."
             )
-        if self._cache_layout.has_auxiliary_state:
+        if self._cache_layout.has_auxiliary_state and not self._uses_model_native_cache:
             self._model_embed, self._model_norm, self._model_lm_head = (
                 self._extract_model_components()
             )
@@ -282,7 +308,10 @@ class MlxModelRunner:
         """Create a model-shaped cache list before attention cache wiring."""
         if self._cache_layout.has_auxiliary_state:
             cache = self.model.make_cache()
-            if len(cache) != self._cache_layout.num_layers:
+            if (
+                not self._uses_model_native_cache
+                and len(cache) != self._cache_layout.num_layers
+            ):
                 raise RuntimeError(
                     "model.make_cache() returned "
                     f"{len(cache)} entries for {self._cache_layout.num_layers} layers"
@@ -318,6 +347,10 @@ class MlxModelRunner:
             self._cache_pool.append(cache)
 
     def _first_attention_cache(self, cache: list[Any]) -> Any:
+        if self._uses_model_native_cache:
+            if not cache:
+                raise RuntimeError("Gemma 4 model.make_cache() returned no cache entries")
+            return cache[0]
         return cache[self._cache_layout.first_attention_layer_index]
 
     def _get_auxiliary_state_pool_index(self, req_pool_idx: int) -> Any | None:
@@ -669,6 +702,10 @@ class MlxModelRunner:
         """Determine pool slot count (auto-size from available memory if needed)."""
         if explicit_size is not None:
             return explicit_size
+        if self._uses_model_native_cache:
+            # The initial correctness bridge is validated only to 2K.  This is
+            # scheduler bookkeeping capacity; KV remains in mlx-lm caches.
+            return 2048
         n_kv_heads, head_dim, dtype = self._get_attn_config()
         # Only full-attention layers occupy pool slots. All-SWA models have no
         # pool at all and fall back to the all-layer formula purely to keep the
@@ -1568,7 +1605,12 @@ class MlxModelRunner:
         last_tokens = [self._req_token_ids[rid][-1] for rid in req_ids]
         batched_input = mx.array(last_tokens, dtype=mx.int32)[:, None]
 
-        if self._cache_layout.has_auxiliary_state:
+        if self._uses_model_native_cache:
+            last_logits = self._decode_with_native_cache(
+                caches,
+                [batched_input[i : i + 1] for i in range(len(caches))],
+            )
+        elif self._cache_layout.has_auxiliary_state:
             last_logits = self._decode_with_hybrid_batching(
                 caches, batched_input, list(req_ids)
             )
@@ -1626,7 +1668,12 @@ class MlxModelRunner:
         # So layer-0 offsets reflect the position the NEW token will
         # be written at in step N+1 (and equivalently the RoPE offset).
         batched_input = prev.lazy_tokens[:, None]
-        if self._cache_layout.has_auxiliary_state:
+        if self._uses_model_native_cache:
+            last_logits = self._decode_with_native_cache(
+                caches,
+                [batched_input[i : i + 1] for i in range(len(caches))],
+            )
+        elif self._cache_layout.has_auxiliary_state:
             last_logits = self._decode_with_hybrid_batching(
                 caches, batched_input, prev.req_ids
             )

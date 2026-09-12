@@ -74,6 +74,30 @@ SGLANG_USE_MLX=1 python -m sglang.launch_server \
 5. `SGLANG_MLX_FUSE_SWIGLU=1` - Enables the use of fused Swish-Gated Linear Unit kernel (disabled by default)
 6. `SGLANG_MLX_CLEAR_CACHE_STEPS=256` - Sets the number of decode steps before clearing the MLX cache (256 by default)
 
+## Gemma 4 text MVP
+
+Gemma 4 E2B text generation uses the cache objects created by `mlx-lm` itself.
+This preserves Gemma 4's mixed sliding-window/full attention, heterogeneous
+per-layer KV shapes, K=V attention, `v_norm`, and YOCO cache ownership. Start it
+with the conservative configuration below:
+
+```bash
+SGLANG_USE_MLX=1 python -m sglang.launch_server \
+  --model-path mlx-community/gemma-4-e2b-it-4bit \
+  --device mps \
+  --disable-radix-cache \
+  --disable-overlap-schedule \
+  --chunked-prefill-size -1 \
+  --max-total-tokens 2048
+```
+
+The validated scope is text-only E2B generation up to 2,048 total tokens.
+Radix/prefix reuse, overlap or chained decode, chunked prefill, fused batched
+attention, longer-context claims, Gemma 4 Unified, E4B/31B/26B, multimodal
+inputs, MTP, and custom Gemma-specific Metal kernels are not part of this MVP.
+Unsupported cache/scheduler combinations fail during model startup with the
+required flags in the error message.
+
 ## Quantization
 
 The MLX backend supports two quantization paths on Apple Silicon:

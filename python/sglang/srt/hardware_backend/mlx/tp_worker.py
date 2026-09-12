@@ -99,6 +99,8 @@ class MlxTpModelWorker(TpModelWorker):
             deterministic_seeding=(
                 get_exec().deterministic.enable_deterministic_inference
             ),
+            disable_overlap_schedule=get_schedule().disable_overlap_schedule,
+            chunked_prefill_size=get_schedule().chunked_prefill_size,
         )
         if get_schedule().max_total_tokens is not None:
             init_kwargs["pool_size"] = get_schedule().max_total_tokens
