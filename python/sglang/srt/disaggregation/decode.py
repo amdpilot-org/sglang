@@ -55,6 +55,7 @@ from sglang.srt.disaggregation.utils import (
     build_kv_layer_ids,
     build_staging_slot_metadata,
     get_dsa_tail_state_indices,
+    get_dsv4_c4_state_indices,
     get_dsv4_c128_state_indices,
     get_kv_class,
     is_dsv4_c128_online_enabled,
@@ -1448,6 +1449,13 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
                     ring_size=ring_size,
                 )
 
+            def _c2_state_payload():
+                return get_dsv4_c4_state_indices(
+                    int(decode_req.req.kv.req_pool_idx),
+                    seq_len,
+                    ring_size=self.token_to_kv_pool.get_ring_size(4),
+                )
+
             state_types = self.kv_manager.kv_args.state_types
             if StateType.DSV4_REQUEST_STATE in state_types:
                 clear_c128_state = getattr(
@@ -1462,6 +1470,7 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
                 StateType.DSA_TAIL: _dsa_tail_payload,
                 StateType.MINIMAX_INDEX_K: _full_kv_pages_payload,
                 StateType.SWA_RING: _swa_ring_payload,
+                StateType.DSV4_C2_STATE: _c2_state_payload,
                 StateType.DSV4_REQUEST_STATE: _c128_state_payload,
                 StateType.BLOCK_SCALE: _full_kv_pages_payload,
                 StateType.BLOCK_SCALE_SWA: _swa_payload,

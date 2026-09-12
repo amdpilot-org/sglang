@@ -881,21 +881,25 @@ class DeepSeekV4TokenToKVPool(BaseSWAKVPool):
                 data_lens.append(buf.nbytes)
                 item_lens.append(buf[0].nbytes)
 
-        for pools in [
-            self.compress_state_pools,
-            self.indexer_compress_state_pools,
-        ]:
+        return data_ptrs, data_lens, item_lens
+
+    def get_c2_state_buf_infos(self) -> Tuple[List[int], List[int], List[int]]:
+        """Register C4 compressors' pending C2 state at row granularity."""
+        data_ptrs: List[int] = []
+        data_lens: List[int] = []
+        item_lens: List[int] = []
+        for pools in (
+            getattr(self, "compress_state_pools", ()),
+            getattr(self, "indexer_compress_state_pools", ()),
+        ):
             for pool in pools:
-                if pool is None:
-                    continue
-                if pool.ratio == 128:
+                if pool is None or pool.ratio != 4:
                     continue
                 t = pool.kv_score_buffer.kv_score
                 assert t.ndim == 2, f"expected 2D buffer, got {t.ndim}D"
                 data_ptrs.append(t.data_ptr())
                 data_lens.append(t.nbytes)
-                item_lens.append(t[0].nbytes * pool.ring_size)
-
+                item_lens.append(t[0].nbytes)
         return data_ptrs, data_lens, item_lens
 
     def get_request_state_buf_infos(

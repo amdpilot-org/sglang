@@ -640,35 +640,41 @@ class TestEagleDsaSeedTransfer(CustomTestCase):
 
 class TestDSV4C4StateIndices(unittest.TestCase):
     def test_non_mtp_to_mtp_maps_the_same_logical_positions(self):
-        # seq_len=13 keeps logical positions [8, 13) for the overlap C4 state.
+        # N=13 has pending position 12; each side maps it into its own ring.
         src = get_dsv4_c4_state_indices(2, 13, ring_size=8)
         dst = get_dsv4_c4_state_indices(2, 13, ring_size=16)
 
-        np.testing.assert_array_equal(src, np.array([16, 17, 18, 19, 20]))
-        np.testing.assert_array_equal(dst, np.array([40, 41, 42, 43, 44]))
+        np.testing.assert_array_equal(src, np.array([20]))
+        np.testing.assert_array_equal(dst, np.array([44]))
         self.assertEqual(src.size, dst.size)
 
     def test_ring_wrap_preserves_position_order(self):
         np.testing.assert_array_equal(
-            get_dsv4_c4_state_indices(0, 10, ring_size=8),
-            np.array([4, 5, 6, 7, 0, 1], dtype=np.int32),
+            get_dsv4_c4_state_indices(3, 101, ring_size=8),
+            np.array([28], dtype=np.int32),
         )
 
     def test_short_and_empty_sequences(self):
         np.testing.assert_array_equal(
             get_dsv4_c4_state_indices(3, 3, ring_size=8),
-            np.array([24, 25, 26], dtype=np.int32),
+            np.array([26], dtype=np.int32),
         )
         np.testing.assert_array_equal(
             get_dsv4_c4_state_indices(3, 0, ring_size=8),
             np.empty((0,), dtype=np.int32),
         )
 
+    def test_even_boundary_has_no_payload(self):
+        np.testing.assert_array_equal(
+            get_dsv4_c4_state_indices(3, 102, ring_size=8),
+            np.empty((0,), dtype=np.int32),
+        )
+
     def test_invalid_ring_size_is_rejected(self):
         with self.assertRaises(ValueError):
-            get_dsv4_c4_state_indices(0, 8, ring_size=4)
+            get_dsv4_c4_state_indices(0, 8, ring_size=1)
         with self.assertRaises(ValueError):
-            get_dsv4_c4_state_indices(0, 8, ring_size=10)
+            get_dsv4_c4_state_indices(0, 8, ring_size=6)
 
 
 class TestDSV4C128StateIndices(unittest.TestCase):
@@ -715,6 +721,7 @@ def _make_dsv4_target(*, unified, mapping=None):
         _buf_infos(12) if unified else ([], [], [])
     )
     pool.get_request_state_buf_infos = lambda: ([], [], [])
+    pool.get_c2_state_buf_infos = lambda: ([], [], [])
     return pool
 
 
@@ -743,6 +750,24 @@ def _make_dsv4_draft(*, unified, mapping=None):
 
 
 class TestDSV4DraftStateRegistration(unittest.TestCase):
+    def test_target_c2_state_is_row_granular_component(self):
+        target = _make_dsv4_target(unified=False, mapping=torch.arange(16))
+        target.get_c2_state_buf_infos = lambda: ([21, 22, 23], [8192] * 3, [4096] * 3)
+        draft = _make_dsv4_draft(
+            unified=False, mapping=target.full_to_swa_index_mapping
+        )
+        kv_args = KVArgs()
+
+        setup_state_kv_args(kv_args, target, draft)
+
+        self.assertEqual(
+            kv_args.state_types,
+            [StateType.SWA, StateType.DSV4_C2_STATE, StateType.SWA],
+        )
+        self.assertEqual(kv_args.state_data_ptrs[1], [21, 22, 23])
+        self.assertEqual(kv_args.state_item_lens[1], [4096, 4096, 4096])
+        self.assertEqual(sum(kv_args.state_item_lens[1]), 12 * 1024)
+
     def test_draft_state_is_a_separate_component(self):
         mapping = torch.arange(16)
         cases = [
