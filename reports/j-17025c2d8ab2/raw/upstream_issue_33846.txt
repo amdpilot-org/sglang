@@ -1,0 +1,35 @@
+author:	fallow5
+association:	none
+edited:	false
+status:	none
+--
+## Update: Tried #33810 (GDN -1 sentinel fix) — did not resolve
+
+Applied the #33810 patch (`chunk_delta_h.py`: guard initial state load and in-place update with `valid_state = index >= 0`) on the same 8×MI350X + K3 + DSPARK setup. Ran 5 rounds of c=1 bench (ISL=4096, OSL=1024):
+
+- Round 1: ✅ passed
+- Round 2: ❌ **KDA prefill hang reproduced** — same stack (`chunk_kda_fwd → prepare_chunk_indices → tolist → D2H`), health check failed, GPU 100% spinning
+
+So the GDN sentinel fix is a real bug (buffer-under-read from padding index=-1) but **not the root cause of the D2H stall**. The hang is specifically in `prepare_chunk_indices` (`index.py`), which does its own `tolist()` → `hipMemcpy D2H sync` independently of the GDN kernel.
+
+The fix needs to target `prepare_chunk_indices()` directly — either avoid the blocking `tolist()` or ensure the GPU stream completes before the D2H copy.
+--
+author:	fallow5
+association:	none
+edited:	false
+status:	none
+--
+## ✅ Confirmed: #32219 one-liner fixes the hang
+
+Tested on the same 8×MI350X + K3 MXFP4 + DSPARK setup by cherry-picking only `needs_cpu_seq_lens = False` into `KDAAttnBackend` (the rest of #32219 was skipped to avoid config incompatibility).
+
+**10 rounds c=1 (ISL=4096, OSL=1024) — zero hangs.**
+
+Previously 2-3 rounds would reliably trigger the `chunk_kda_fwd → prepare_chunk_indices → tolist() → hipMemcpy D2H stall`. With `needs_cpu_seq_lens = False` applied, the blocking per-step seq_lens D2H is no longer forced, and the hang is gone.
+
+Performance unchanged — TPOT ~4.4ms, accept len ~7.6.
+
+**Root cause**: `KDAAttnBackend` was missing `needs_cpu_seq_lens: bool = False` (like `GDNAttnBackend` and `Mamba2AttnBackend` already have), so the KDA metadata path was doing a blocking per-step D2H sync that would occasionally stall the GPU stream at batch_size=1. The fix matches exactly what #32219 described for the MTP decode path, but applies the same fix to the KDA backend.
+
+**Recommendation**: This one-line fix should be backported to the next ROCm K3 image regardless of the full #32219 merge status.
+--
