@@ -39,7 +39,32 @@ def _replace_class_contents(old: type, new: type) -> None:
         delattr(old, name)
     for name, value in vars(new).items():
         if name not in protected:
+            _rebind_class_closure(value, new, old)
             setattr(old, name, value)
+
+
+def _rebind_class_closure(value: object, new: type, old: type) -> None:
+    """Point zero-argument ``super()`` at the class identity being preserved."""
+    if inspect.isfunction(value):
+        functions = (value,)
+    elif isinstance(value, (classmethod, staticmethod)):
+        functions = (value.__func__,)
+    elif isinstance(value, property):
+        functions = tuple(
+            function
+            for function in (value.fget, value.fset, value.fdel)
+            if function is not None
+        )
+    else:
+        return
+
+    for function in functions:
+        closure = function.__closure__
+        if closure is None:
+            continue
+        for freevar, cell in zip(function.__code__.co_freevars, closure):
+            if freevar == "__class__" and cell.cell_contents is new:
+                cell.cell_contents = old
 
 
 def reload_modules(module_names: Iterable[str]) -> ReloadResult:

@@ -39,6 +39,36 @@ def test_reload_rebinds_existing_instances_and_imported_functions(
     sys.modules.pop("sglang.reload_fixture", None)
 
 
+def test_reload_rebinds_zero_argument_super_for_existing_instances(
+    tmp_path, monkeypatch
+):
+    module_path = tmp_path / "reload_super_fixture.py"
+    module_path.write_text(
+        "class Base:\n"
+        "    def value(self): return 'base-v1'\n"
+        "class Child(Base):\n"
+        "    def value(self): return super().value() + '-child-v1'\n"
+    )
+    monkeypatch.setattr(sglang, "__path__", [*sglang.__path__, str(tmp_path)])
+    module = importlib.import_module("sglang.reload_super_fixture")
+    child = module.Child()
+    old_child_class = module.Child
+
+    module_path.write_text(
+        "class Base:\n"
+        "    def value(self): return 'base-version-2'\n"
+        "class Child(Base):\n"
+        "    def value(self): return super().value() + '-child-version-2'\n"
+    )
+    importlib.invalidate_caches()
+
+    reload_modules(["sglang.reload_super_fixture"])
+
+    assert module.Child is old_child_class
+    assert child.value() == "base-version-2-child-version-2"
+    sys.modules.pop("sglang.reload_super_fixture", None)
+
+
 @pytest.mark.parametrize(
     "name", ["json", "sglang.not_loaded", "sglang.srt._custom_ops"]
 )
