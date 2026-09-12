@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38236",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the DeepSeek-V4 model hook rejecting the raw NEXTN alias before speculative decoding canonicalizes it to EAGLE. The narrow fix accepts NEXTN wherever the hook accepts EAGLE, including the same top-k=1 constraint. A regression verifies that the reported NEXTN configuration passes the model hook and is subsequently canonicalized to EAGLE; boundary cases retain EAGLE and DSPARK support and reject invalid NEXTN top-k and NGRAM.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c432ba6121ae/venv/bin/python < issue-specific hook reproduction",
+      "exit_code": 0,
+      "what_was_measured": "Before the fix, directly exercised the checked-out DeepSeek-V4 hook: NEXTN/topk=1 raised the reported unsupported-algorithm assertion, EAGLE/topk=1 and DSPARK passed, and EAGLE/topk=2 raised the top-k assertion. The script intentionally caught and printed each outcome; raw output is reports/j-c432ba6121ae/raw/reproduction-before.txt."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c432ba6121ae/venv/bin/python -m pytest -q test/registered/unit/server_args/test_deepseek_v4_hook.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: the unmodified hook rejected NEXTN before alias canonicalization. Raw output is reports/j-c432ba6121ae/raw/regression-before.txt."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c432ba6121ae/venv/bin/python -m pytest -q test/registered/unit/server_args/test_deepseek_v4_hook.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression and independent boundaries: 4 tests passed with 2 subtests, covering NEXTN-to-EAGLE canonicalization, NEXTN top-k rejection, existing EAGLE/DSPARK acceptance, and NGRAM rejection. Raw output is reports/j-c432ba6121ae/raw/regression-final.txt."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c432ba6121ae/venv/bin/python -m pytest -q test/registered/unit/server_args/test_server_args.py",
+      "exit_code": 1,
+      "what_was_measured": "Broader server-argument suite: 224 passed and 2 unrelated context-parallel tests failed because this ROCm environment intentionally rejects prefill CP on HIP before those tests' expected validation. Raw output is reports/j-c432ba6121ae/raw/server-args-suite.txt."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the proposed patch."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "No GPU kernels were executed because the defect occurs in deterministic server-argument hook ordering before model loading. Hardware inventory confirmed one assigned AMD Instinct MI355X gfx950, recorded in reports/j-c432ba6121ae/raw/environment.txt; it cannot reproduce the reported 2x RTX PRO 6000 Blackwell TP=2 deployment.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash weights were not available, so a full server/model load was not run.",
+    "The reported two-GPU sm_120 TP=2 environment was unavailable; only one gfx950 GPU was assigned.",
+    "The tiny Llama serving fixture was not used because it cannot qualify DeepseekV4ForCausalLM model-specific hook behavior.",
+    "The broader server-argument suite has two pre-existing environment-specific failures in context-parallel tests on HIP; all 224 other tests passed.",
+    "No native code changed, so no native rebuild was applicable."
+  ]
+}
