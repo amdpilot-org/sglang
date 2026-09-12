@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30760",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate moves HiCache prefetch-progress checks for the complete waiting queue ahead of rank-local capacity and batch-full exits, eliminating the original issue's scheduler-level collective call-count mismatch. Verification is deterministic and source-level because the reported four-GPU NVIDIA deployment was unavailable.",
+  "tests": [
+    {
+      "command": "candidate test retained; python/sglang/srt/managers/scheduler.py restored from 358c163250ad3b1f62939b01ce1314a0a31a0365; /tmp/amdpilot-repo-j-6d4675c4f136/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_hicache_prefetch_progress.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before comparison: 5 failures. The batch-full integration case proves the base returns before a queue-wide progress check; the other four failures merely show that the candidate helper is absent and were not treated as independent reproduction evidence. Raw output: /job/base-regression-with-candidate-test.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6d4675c4f136/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_hicache_prefetch_progress.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 26709f5a5b8744a56ed9ad7e8972a3271dfd8540, 5 tests passed, covering divergent simulated local limits, an already-full batch, unfinished progress, disabled storage, and an empty queue. Raw output: /job/candidate-regression-full.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6d4675c4f136/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_decision_batch_params.py test/registered/unit/mem_cache/test_hiradix_pp_sync_drain.py test/registered/unit/managers/test_scheduler_hicache_prefetch_progress.py",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate, 10 focused scheduler and HiCache tests passed. Raw output: /job/candidate-focused.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6d4675c4f136/venv/bin/python -c 'import inspect, sglang, torch; from sglang.srt.managers import scheduler; print(inspect.getfile(sglang)); print(inspect.getfile(scheduler)); print(torch.__version__, torch.version.hip, torch.cuda.device_count(), torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0))'",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed source imports came from /job/repo and detected Torch 2.11.0+rocm7.2 with one AMD Instinct MI350X reporting capability (9, 5), i.e. gfx950."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "GPU discovery was performed, but no GPU workload could reproduce the TP=4 NCCL issue: only one AMD gfx950 GPU was assigned, versus the reported four NVIDIA GPUs."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The original TP=4 NVIDIA/NCCL GLM-5.2-FP8 deployment with EAGLE, Mooncake/RDMA, model weights, and production traffic was unavailable.",
+    "The candidate tests do not execute a real multi-process collective; verification of the exact fix is based on the actual scheduler control flow plus deterministic unit coverage.",
+    "The candidate assumes TP ranks retain identical waiting-queue order and corresponding ongoing-prefetch membership. A separate divergence there remains outside the demonstrated original failure and could still mismatch HiRadixCache's conditional internal collective.",
+    "The watchdog blind spot mentioned separately in the issue is unchanged and was not treated as part of the requested prefetch call-count fix."
+  ]
+}
