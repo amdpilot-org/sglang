@@ -1709,6 +1709,7 @@ class Qwen3_5ForCausalLM(nn.Module):
             self.norm = PPMissingLayer()
 
         self.layers_to_capture = []
+        self._capture_after_last_layer = False
 
     def _build_embed_tokens(self, config: Qwen3_5TextConfig) -> nn.Module:
         """Embedding sharding hook for models reusing this backbone."""
@@ -1735,8 +1736,28 @@ class Qwen3_5ForCausalLM(nn.Module):
 
     def set_dflash_layers_to_capture(self, layers_to_capture: list[int]):
         self.layers_to_capture = layers_to_capture
+        self._capture_after_last_layer = False
         for layer_id in self.layers_to_capture:
+            if layer_id == len(self.layers):
+                self._capture_after_last_layer = True
+                continue
+            if not 0 <= layer_id < len(self.layers):
+                raise ValueError(
+                    f"capture layer id must be in [0, {len(self.layers)}], "
+                    f"got {layer_id}"
+                )
             setattr(self.layers[layer_id], "_is_layer_to_capture", True)
+
+    def _capture_final_decoder_output(
+        self,
+        hidden_states: torch.Tensor,
+        residual: Optional[torch.Tensor],
+        aux_hidden_states: list[torch.Tensor],
+    ) -> None:
+        if self._capture_after_last_layer:
+            aux_hidden_states.append(
+                hidden_states + residual if residual is not None else hidden_states
+            )
 
     @property
     def start_layer(self) -> int:
@@ -1816,6 +1837,10 @@ class Qwen3_5ForCausalLM(nn.Module):
                     "residual": residual,
                 }
             )
+
+        self._capture_final_decoder_output(
+            hidden_states, residual, aux_hidden_states
+        )
 
         # The final layer has no successor to consume its deferred MoE tail.
         trace_final_norm = envs.SGLANG_TRACE_QWEN35_FINAL_NORM.get()
