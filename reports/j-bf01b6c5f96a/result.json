@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37111",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Preserved PR 1076's independently reproduced fix for a real QSA/NEXTN draft-extend metadata exception. The candidate does not establish or enforce semantic correctness for the original 1024-token punctuation-loop and approximately 25K-token ordered-marker failures, and the required GB10/SM121 TP2 model environment is unavailable, so no broader speculative correction was made.",
+  "tests": [
+    {
+      "command": "base inline reproduction with EagleDraftExtendInput(num_tokens_per_req=4)",
+      "exit_code": 1,
+      "what_was_measured": "Prepared base raises AttributeError because draft-extend input has no draft_token_num."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bf01b6c5f96a/venv/bin/python -m pytest -q test/registered/kernel/qsa/test_qsa.py -k 'speculative_row_bound or cuda_graph_pads_dynamic_draft_extend_rows or cuda_graph_target_verify_ignores_capture_bucket_requests'",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate fix and focused graph-layout regressions: 5 passed."
+    },
+    {
+      "command": "inline independent canonical-width boundary cases",
+      "exit_code": 0,
+      "what_was_measured": "Draft widths 1 and 4, canonical-over-legacy width, and no-speculation case all matched independent expected bounds."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bf01b6c5f96a/venv/bin/python -m pytest -q test/registered/kernel/qsa/test_qsa.py",
+      "exit_code": 0,
+      "what_was_measured": "Full QSA test file: 41 passed and the NVIDIA SM121-only test skipped."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bf01b6c5f96a/venv/bin/python -m pytest -vv test/registered/kernel/qsa/test_qsa.py::test_qsa_triton_block_expansion_matches_torch_reference test/registered/kernel/qsa/test_qsa.py::test_qsa_graph_metadata_kernels_match_legacy_host_path test/registered/kernel/qsa/test_qsa.py::test_qsa_graph_layout_covers_speculative_rows_and_padded_tail",
+      "exit_code": 0,
+      "what_was_measured": "Three QSA GPU metadata/kernel comparisons passed on AMD Instinct MI350X gfx950."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "Three QSA GPU reference tests passed on the single assigned AMD Instinct MI350X gfx950; torch reports CUDA None and HIP 7.2.26015.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No NVIDIA GB10/SM121 device or CUDA decode-graph execution.",
+    "No second GPU/node, TP2, or RoCEv2 execution.",
+    "No Qwen3.8-Flash-Next-NVFP4 model weights.",
+    "No model-level eager/graph comparison for the 1024-token punctuation-loop gate.",
+    "No model-level eager/graph comparison for the approximately 25K-token ordered-marker gate.",
+    "The candidate contains no fail-closed guard; available evidence is insufficient to define a safe, narrow guard condition.",
+    "No native source changed, so native rebuild was not applicable."
+  ]
+}

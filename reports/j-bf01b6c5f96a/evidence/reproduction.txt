@@ -1,0 +1,55 @@
+Prepared base: 358c163250ad3b1f62939b01ce1314a0a31a0365
+Reviewed candidate: 3b1f061a7a8c650318803e6ee46f6332557f56f7
+
+Failing-before, prepared base, real EagleDraftExtendInput(num_tokens_per_req=4):
+
+Traceback (most recent call last):
+  File "<stdin>", line 6, in <module>
+  File "/job/repo/python/sglang/srt/layers/attention/qwen_sparse_attn_backend.py", line 259, in _speculative_max_row_length
+    draft_window = int(spec_info.draft_token_num) if spec_info is not None else 0
+AttributeError: 'EagleDraftExtendInput' object has no attribute 'draft_token_num'
+EXIT_CODE=1
+
+Candidate focused regression:
+
+/tmp/amdpilot-repo-j-bf01b6c5f96a/venv/bin/python -m pytest -q test/registered/kernel/qsa/test_qsa.py -k 'speculative_row_bound or cuda_graph_pads_dynamic_draft_extend_rows or cuda_graph_target_verify_ignores_capture_bucket_requests'
+..... [100%]
+5 passed, 37 deselected
+EXIT_CODE=0
+
+Independent boundary cases:
+
+draft_extend_width_1 8 8
+draft_extend_width_4 25 25
+verify_canonical_over_legacy 15 15
+none 7 7
+PASS
+EXIT_CODE=0
+
+Full QSA file:
+
+/tmp/amdpilot-repo-j-bf01b6c5f96a/venv/bin/python -m pytest -q test/registered/kernel/qsa/test_qsa.py
+41 passed, 1 skipped in 17.92s
+EXIT_CODE=0
+The skip requires NVIDIA SM121.
+
+GPU reference tests:
+
+/tmp/amdpilot-repo-j-bf01b6c5f96a/venv/bin/python -m pytest -vv test/registered/kernel/qsa/test_qsa.py::test_qsa_triton_block_expansion_matches_torch_reference test/registered/kernel/qsa/test_qsa.py::test_qsa_graph_metadata_kernels_match_legacy_host_path test/registered/kernel/qsa/test_qsa.py::test_qsa_graph_layout_covers_speculative_rows_and_padded_tail
+3 passed in 14.28s
+EXIT_CODE=0
+
+Environment:
+
+torch 2.11.0+rocm7.2
+HIP 7.2.26015
+CUDA None
+gpu_count 1
+gpu 0 AMD Instinct MI350X, capability (9, 5) / gfx950
+
+Candidate-diff inspection:
+
+The only runtime change is `_speculative_max_row_length` reading
+`spec_info.num_tokens_per_req` instead of `spec_info.draft_token_num`.
+The candidate adds unit and gfx950 metadata/kernel evidence, but no model-level
+eager/graph semantic result and no fail-closed guard for the reported profile.

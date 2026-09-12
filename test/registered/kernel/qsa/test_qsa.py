@@ -35,6 +35,7 @@ from sglang.srt.layers.attention.qwen_sparse_attn_backend import (
     QwenSparseMultiStepDraftBackend,
 )
 from sglang.srt.model_executor.forward_batch_info import ForwardMode
+from sglang.srt.speculative.eagle_info import EagleDraftExtendInput
 from sglang.test.ci.ci_register import register_cuda_ci
 
 register_cuda_ci(est_time=60, stage="base-b-kernel-unit", runner_config="4-gpu-b200")
@@ -490,6 +491,47 @@ def test_qsa_cuda_graph_pads_dynamic_draft_extend_rows():
     assert row_lengths.tolist() == [11, 20, 21, 1, 1, 1, 1, 1]
     assert row_req_pool_indices.tolist() == [3, 7, 7, 3, 3, 3, 3, 3]
     assert row_prefix_lengths.tolist() == [10, 19, 19, 0, 0, 0, 0, 0]
+
+
+def test_qsa_speculative_row_bound_accepts_real_draft_extend_input():
+    forward_batch = SimpleNamespace(
+        seq_lens_cpu=torch.tensor([11, 21], dtype=torch.int32),
+        spec_info=EagleDraftExtendInput(num_tokens_per_req=4),
+    )
+
+    assert (
+        QwenSparseAttnBackend._speculative_max_row_length(
+            forward_batch, torch.tensor([11, 21], dtype=torch.int32)
+        )
+        == 25
+    )
+
+
+def test_qsa_speculative_row_bound_uses_canonical_width():
+    forward_batch = SimpleNamespace(
+        seq_lens_cpu=torch.tensor([9], dtype=torch.int32),
+        spec_info=SimpleNamespace(num_tokens_per_req=4, draft_token_num=99),
+    )
+
+    assert (
+        QwenSparseAttnBackend._speculative_max_row_length(
+            forward_batch, torch.tensor([9], dtype=torch.int32)
+        )
+        == 13
+    )
+
+
+def test_qsa_speculative_row_bound_without_speculation():
+    forward_batch = SimpleNamespace(
+        seq_lens_cpu=torch.tensor([0, 7], dtype=torch.int32), spec_info=None
+    )
+
+    assert (
+        QwenSparseAttnBackend._speculative_max_row_length(
+            forward_batch, torch.tensor([0, 7], dtype=torch.int32)
+        )
+        == 7
+    )
 
 
 def test_qsa_cuda_graph_target_verify_ignores_capture_bucket_requests():
