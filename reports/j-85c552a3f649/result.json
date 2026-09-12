@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38708",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/584",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/579",
+  "candidate_commit": "a0f252214e9c8393cdb2c6683ed9289028a3d19c",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review reproduced the original breakable DSA decode failure on the prepared base: the checked-out Indexer.forward_cuda path discarded valid backend metadata and passed None to get_page_table_64. At the exact candidate commit, the regression passes because breakable mode resolves backend metadata while TC-piecewise retains its custom-op handoff. Related DSA page-table tests also pass against independent PyTorch references. The change is Python-only and does not require a native rebuild.",
+  "tests": [
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-85c552a3f649/venv/bin/python <independent Indexer.forward_cuda breakable decode reproducer>",
+      "exit_code": 1,
+      "what_was_measured": "On base 358c163, valid backend metadata was replaced by None and the paged decode path raised AttributeError: 'NoneType' object has no attribute 'get_page_table_64'. Raw output: /job/review-evidence/j-85c552a3f649/logs/base_reproduction.log"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/job/review-evidence/j-85c552a3f649/cache/triton /tmp/amdpilot-repo-j-85c552a3f649/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_dsa_breakable_metadata.py",
+      "exit_code": 0,
+      "what_was_measured": "At candidate a0f2522, both GPU regressions passed: valid DSA metadata reached get_page_table_64, and a backend intentionally returning no DSA metadata remained a clean no-op. Result: 2 passed. Raw output: /job/review-evidence/j-85c552a3f649/logs/candidate_regression.log"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/job/review-evidence/j-85c552a3f649/cache/triton /tmp/amdpilot-repo-j-85c552a3f649/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_dsa_transform_index.py test/registered/kernels/ops/attention/test_dsa_indexer.py::TestDSAIndexer::test_indexer_metadata_interface",
+      "exit_code": 0,
+      "what_was_measured": "10 tests and 4 subtests passed on the assigned gfx950 GPU. The suite checks decode/prefill page-table transformations and metadata interfaces against independent PyTorch references, including mixed lengths, padding, empty batches, large contexts, and nontrivial strides. Raw output: /job/review-evidence/j-85c552a3f649/logs/related_dsa_gpu.log"
+    },
+    {
+      "command": "git merge-base 358c163250ad3b1f62939b01ce1314a0a31a0365 a0f252214e9c8393cdb2c6683ed9289028a3d19c",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the reviewed candidate is directly based on the prepared base commit."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "PyTorch reported AMD Instinct MI350X, gfx950:sramecc+:xnack-, and all focused/related tests executed with real device='cuda' ROCm tensors on the assigned GPU.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The full zai-org/GLM-5.3 launch could not be run: the report requires a 753B FP8 model with TP4/PP2 across eight MI300X GPUs, while this job provides one MI350X and no model weights.",
+    "The source environment used gfx942/MI300X and Torch 2.9.1+ROCm 7.2; this prepared environment uses gfx950/MI350X and Torch 2.11.0+ROCm 7.2.",
+    "The full server startup-to-serving condition therefore remains unverified, although the exact failing implementation path and its page-table contract were exercised before and after on real ROCm tensors.",
+    "No FlyDSL C++ or other native source changed in the candidate, so a native rebuild was not applicable. Source imports resolved from /job/repo/python/sglang, while aiter loaded /tmp/amdpilot-repo-j-85c552a3f649/cache/aiter/module_aiter_core.so."
+  ]
+}
