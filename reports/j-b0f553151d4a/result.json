@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/6357",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "9fcf66b7818e6bed7c2d510fbbb526c1c56a0aed",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "The exact candidate restores sglang:avg_request_queue_latency as a live Prometheus gauge, computes it from initialized monotonic waiting-queue timestamps, and refreshes it from both prefill and decode reporting. A failing-base/passing-candidate registry probe and independent numerical/exposition cases verify the original metric-availability contract.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-b0f553151d4a/venv/bin/python /job/review-evidence-j-b0f553151d4a/base_metric_probe.py at 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 3,
+      "what_was_measured": "The source-checkout SchedulerMetricsCollector did not register or expose sglang:avg_request_queue_latency; output recorded has_metric: False."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b0f553151d4a/venv/bin/python /job/review-evidence-j-b0f553151d4a/base_metric_probe.py at 9fcf66b7818e6bed7c2d510fbbb526c1c56a0aed",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate source registered and exposed sglang:avg_request_queue_latency in an isolated Prometheus registry; output recorded has_metric: True."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b0f553151d4a/venv/bin/python -m pytest -q test/registered/unit/observability/test_queue_latency_metrics.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 4 tests passed for mean live wait, empty queue, uninitialized timestamps, and future timestamps."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b0f553151d4a/venv/bin/python -m pytest -q test/registered/unit/observability/test_ray_wrappers.py",
+      "exit_code": 0,
+      "what_was_measured": "Existing metrics backend compatibility: 33 tests and 4 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b0f553151d4a/venv/bin/python /job/review-evidence-j-b0f553151d4a/candidate_adversarial_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent boundary calculations and exact Prometheus numeric exposition passed; imported source was /job/repo/python/sglang/__init__.py."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b0f553151d4a/venv/bin/python -m compileall -q python/sglang/srt/managers/scheduler_components/metrics_reporter.py python/sglang/srt/observability/metrics_collector.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python modules compiled successfully."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 9fcf66b7818e6bed7c2d510fbbb526c1c56a0aed",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace validity."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "No GPU workload was launched by this independent review. rocm-smi identified the assigned idle device as AMD Instinct MI350X, gfx950. The candidate's committed single-gfx950 tiny-Llama serving evidence was inspected separately and not generalized to the original TP=8 NVIDIA deployment.",
+  "native_rebuilt": false,
+  "remaining_limitations": "No native source changed, so no native rebuild was applicable. The review host has one gfx950 AMD GPU with ROCm 7.2 and no production weights; it cannot reproduce the original eight-GPU NVIDIA TP=8 DP-attention deployment. Full distributed and production-load behavior remains untested, although no architecture-specific code is involved in the corrected metric registration and calculation."
+}
