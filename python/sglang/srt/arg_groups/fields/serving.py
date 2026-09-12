@@ -103,6 +103,10 @@ class Serving(msgspec.Struct):
         ),
     ] = None
     skip_server_warmup: A[bool, "If set, skip warmup."] = False
+    enable_dev_reload: A[
+        bool,
+        "Enable the DEV ONLY /dev/reload endpoint for pure-Python SGLang modules.",
+    ] = False
     warmups: A[
         Optional[str],
         "Specify custom warmup functions (csv) to run before server starts eg. --warmups=warmup_name1,warmup_name2 will run the functions `warmup_name1` and `warmup_name2` specified in warmup.py before the server starts listening for requests",
