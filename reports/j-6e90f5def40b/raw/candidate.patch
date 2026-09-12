@@ -1,0 +1,287 @@
+diff --git a/reports/j-16dd9a9721c4/README.md b/reports/j-16dd9a9721c4/README.md
+new file mode 100644
+index 0000000..0bb79a8
+--- /dev/null
++++ b/reports/j-16dd9a9721c4/README.md
+@@ -0,0 +1,46 @@
++# Investigation report: Mamba state-cache concurrency cap
++
++Upstream issue: https://github.com/sgl-project/sglang/issues/36889
++
++Mirror issue: https://github.com/amdpilot-org/sglang/issues/3330
++
++Recorded base: `358c163250ad3b1f62939b01ce1314a0a31a0365`
++
++## Finding
++
++The capacity mechanism reproduces in the actual implementation: with eight
++requested requests, ten state slots, and a five-slot-per-request ratio,
++`KVCacheConfigurator.resolve_max_num_reqs` returns an effective concurrency of
++two.
++
++The reported diagnostic defect does not reproduce. The recorded base emits an
++actionable `WARNING` containing the effective cap, pool size, slot ratio, and
++configuration suggestions. Direct inspection of the issue reporter's cited
++revision, `aa8c950a3df62b6642c4ea60a93a5e3eb1a1450e`, shows the same
++`logger.warning` call. The scheduler also publishes its resolved value as
++`effective_max_running_requests_per_dp` in each `/server_info` internal-state
++entry.
++
++Because the source already contains one of the issue's requested remedies, no
++production change was justified. This PR adds regression coverage that would
++fail if the diagnostic were reduced to INFO, along with exact-capacity and
++below-one-request boundary cases.
++
++The separate top-level API convenience field is being pursued in upstream PR
++https://github.com/sgl-project/sglang/pull/38931 and is intentionally not
++duplicated here.
++
++## Evidence
++
++- `raw/recorded_base_cap_path.txt`: cap and WARNING path at the recorded base.
++- `raw/reporter_base_cap_path.txt`: the same path at the reporter's cited base.
++- `raw/pytest_mamba.txt`: 12 passing focused and adjacent Mamba tests.
++- `raw/gpu_inventory.txt`: assigned device inventory (MI355X/gfx950); no GPU
++  execution was relevant to the CPU-side resolver regression.
++
++## Limitations
++
++The GLM-5.3-Flash NVFP4 target weights, DFlash2 drafter weights, two DGX Spark
++GB10 nodes, and CUDA 13 topology from the report were unavailable. Therefore
++this investigation does not claim to reproduce the published throughput curve,
++qualify that model architecture, or validate distributed serving semantics.
+diff --git a/reports/j-16dd9a9721c4/raw/gpu_inventory.txt b/reports/j-16dd9a9721c4/raw/gpu_inventory.txt
+new file mode 100644
+index 0000000..9a4db05
+--- /dev/null
++++ b/reports/j-16dd9a9721c4/raw/gpu_inventory.txt
+@@ -0,0 +1,22 @@
++
++
++============================ ROCm System Management Interface ============================
++======================================= Unique ID ========================================
++GPU[0]		: Unique ID: 0xc1a597582efe51ae
++==========================================================================================
++================================== Memory Usage (Bytes) ==================================
++GPU[0]		: VRAM Total Memory (B): 309220868096
++GPU[0]		: VRAM Total Used Memory (B): 308121600
++==========================================================================================
++====================================== Product Info ======================================
++GPU[0]		: Card Series: 		AMD Instinct MI355X
++GPU[0]		: Card Model: 		0x75a3
++GPU[0]		: Card Vendor: 		Advanced Micro Devices, Inc. [AMD/ATI]
++GPU[0]		: Card SKU: 		N/A
++GPU[0]		: Subsystem ID: 	0x75a3
++GPU[0]		: Device Rev: 		0x00
++GPU[0]		: Node ID: 		4
++GPU[0]		: GUID: 		36479
++GPU[0]		: GFX Version: 		gfx950
++==========================================================================================
++================================== End of ROCm SMI Log ===================================
+diff --git a/reports/j-16dd9a9721c4/raw/pytest_mamba.txt b/reports/j-16dd9a9721c4/raw/pytest_mamba.txt
+new file mode 100644
+index 0000000..f70eaef
+--- /dev/null
++++ b/reports/j-16dd9a9721c4/raw/pytest_mamba.txt
+@@ -0,0 +1,18 @@
++............                                                             [100%]
++=============================== warnings summary ===============================
++../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
++  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
++
++    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
++
++../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
++  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
++    warnings.warn(
++
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
++  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
++    from distutils.dep_util import newer, newer_group
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++12 passed, 17 warnings in 8.94s
+diff --git a/reports/j-16dd9a9721c4/raw/recorded_base_cap_path.txt b/reports/j-16dd9a9721c4/raw/recorded_base_cap_path.txt
+new file mode 100644
+index 0000000..319b21a
+--- /dev/null
++++ b/reports/j-16dd9a9721c4/raw/recorded_base_cap_path.txt
+@@ -0,0 +1,28 @@
++        capped_by_mamba = False
++        if self.mambaish_config is not None:
++            ratio = self._calculate_mamba_ratio()
++            mamba_cap = get_schedule().max_mamba_cache_size // ratio
++            if mamba_cap < max_num_reqs:
++                capped_by_mamba = True
++                logger.warning(
++                    "max_running_requests is capped to %d by the mamba state "
++                    "cache (max_mamba_cache_size=%d, %d state slots per "
++                    "request). To raise it: increase --mamba-full-memory-ratio "
++                    "or --max-mamba-cache-size, or halve the state size with "
++                    "--mamba-ssm-dtype bfloat16.",
++                    mamba_cap,
++                    get_schedule().max_mamba_cache_size,
++                    ratio,
++                )
++            max_num_reqs = min(max_num_reqs, mamba_cap)
++
++            if max_num_reqs <= 0:
++                raise RuntimeError(
++                    f"Hybrid (mamba/linear-attention) state cache is too small to serve "
++                    f"any requests. max_mamba_cache_size={get_schedule().max_mamba_cache_size}, "
++                    f"mamba_ratio={ratio}, resulting max_num_reqs={max_num_reqs}. "
++                    f"Try: (1) reduce --max-running-requests, "
++                    f"(2) increase --mem-fraction-static, or "
++                    f"(3) use GPUs with more memory."
++                )
++        if (
+diff --git a/reports/j-16dd9a9721c4/raw/reporter_base_cap_path.txt b/reports/j-16dd9a9721c4/raw/reporter_base_cap_path.txt
+new file mode 100644
+index 0000000..5265a3e
+--- /dev/null
++++ b/reports/j-16dd9a9721c4/raw/reporter_base_cap_path.txt
+@@ -0,0 +1,21 @@
++        capped_by_mamba = False
++        if self.mambaish_config is not None:
++            ratio = self._calculate_mamba_ratio()
++            mamba_cap = get_schedule().max_mamba_cache_size // ratio
++            if mamba_cap < max_num_reqs:
++                capped_by_mamba = True
++                logger.warning(
++                    "max_running_requests is capped to %d by the mamba state "
++                    "cache (max_mamba_cache_size=%d, %d state slots per "
++                    "request). To raise it: increase --mamba-full-memory-ratio "
++                    "or --max-mamba-cache-size, or halve the state size with "
++                    "--mamba-ssm-dtype bfloat16.",
++                    mamba_cap,
++                    get_schedule().max_mamba_cache_size,
++                    ratio,
++                )
++            max_num_reqs = min(max_num_reqs, mamba_cap)
++
++            if max_num_reqs <= 0:
++                raise RuntimeError(
++                    f"Hybrid (mamba/linear-attention) state cache is too small to serve "
+diff --git a/reports/j-16dd9a9721c4/result.json b/reports/j-16dd9a9721c4/result.json
+new file mode 100644
+index 0000000..1864724
+--- /dev/null
++++ b/reports/j-16dd9a9721c4/result.json
+@@ -0,0 +1,39 @@
++{
++  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36889",
++  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
++  "outcome": "candidate_verified",
++  "summary": "The reported 8-request/10-slot/5-slots-per-request shape reproduces the effective concurrency cap of 2 in the actual resolver. However, the claimed info-only diagnostic does not reproduce: both the recorded base and the reporter's cited aa8c950a3 revision emit an actionable WARNING, and the recorded base publishes the resolved per-DP value as effective_max_running_requests_per_dp in server internal state. Added focused regression coverage for the reported shape and independent exact-capacity and zero-capacity boundaries; no production correction was justified.",
++  "tests": [
++    {
++      "command": "/tmp/amdpilot-repo-j-16dd9a9721c4/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_concurrency_cap.py",
++      "exit_code": 0,
++      "what_was_measured": "The issue-shaped 8 requested / 10 state slots / ratio 5 case resolves to 2 and logs the effective cap and sizing inputs at WARNING; an exactly sized 40-slot pool resolves to 8 without a warning; a 4-slot pool fails startup because it cannot back one request. Result: 3 passed."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-16dd9a9721c4/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_concurrency_cap.py test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py",
++      "exit_code": 0,
++      "what_was_measured": "The new concurrency-cap regression plus existing independent Mamba slot-ratio, allocation-pressure, and pipeline-parallel sizing coverage. Result: 12 passed."
++    },
++    {
++      "command": "git show aa8c950a3df62b6642c4ea60a93a5e3eb1a1450e:python/sglang/srt/mem_cache/kv_cache_configurator.py | sed -n '2005,2025p'",
++      "exit_code": 0,
++      "what_was_measured": "Actual source at the revision cited by the reporter already calls logger.warning for the Mamba state-cache concurrency cap."
++    },
++    {
++      "command": "git diff --check",
++      "exit_code": 0,
++      "what_was_measured": "Patch whitespace validation."
++    }
++  ],
++  "gpu_execution": {
++    "value": false,
++    "evidence": "The assigned device was inventoried as one AMD Instinct MI355X (gfx950), but the verified behavior is CPU-side capacity resolution and logging. No GLM-5.3-Flash target weights, DFlash2 drafter weights, 2x DGX Spark GB10 hardware, CUDA 13 environment, or two-node topology were available, so no GPU/model throughput claim was made."
++  },
++  "native_rebuilt": false,
++  "remaining_limitations": [
++    "The reported +75% throughput effect was not reproduced: the cited GLM-5.3-Flash NVFP4 and DFlash2 weights and the 2x DGX Spark GB10 TP=2/nnodes=2 environment were unavailable.",
++    "The exact model's five-slot ratio was represented by the real resolver with an injected ratio; this validates cap arithmetic, warning severity, and boundaries, not GLM-5.3 model execution or semantic accuracy.",
++    "The top-level /server_info max_running_requests remains the configured value. The effective per-DP value is available inside internal_states; a separate open upstream PR, https://github.com/sgl-project/sglang/pull/38931, proposes a top-level effective_max_running_requests convenience field and was not duplicated here.",
++    "No native code changed, so no native rebuild was applicable."
++  ]
++}
+diff --git a/test/registered/unit/mem_cache/test_mamba_concurrency_cap.py b/test/registered/unit/mem_cache/test_mamba_concurrency_cap.py
+new file mode 100644
+index 0000000..26012b0
+--- /dev/null
++++ b/test/registered/unit/mem_cache/test_mamba_concurrency_cap.py
+@@ -0,0 +1,71 @@
++"""Regression coverage for the hybrid-state concurrency ceiling.
++
++The scheduler's requested request limit is not necessarily its effective
++limit: hybrid models need several Mamba state slots for every running request.
++When the state pool is smaller than that requirement, operators must receive a
++warning that includes both the effective limit and the slot ratio.
++"""
++
++import unittest
++from types import SimpleNamespace
++
++from sglang.srt.mem_cache.kv_cache_configurator import KVCacheConfigurator
++from sglang.srt.runtime_context import get_context
++from sglang.test.ci.ci_register import register_cpu_ci
++
++register_cpu_ci(est_time=1, suite="base-a-test-cpu")
++
++
++def _resolve(*, requested: int, slots: int, ratio: int) -> int:
++    configurator = SimpleNamespace(
++        model_config=SimpleNamespace(context_len=4096),
++        ps=SimpleNamespace(attn_dp_size=1),
++        mambaish_config=object(),
++        _calculate_mamba_ratio=lambda: ratio,
++    )
++    with get_context().override_server_args(
++        max_running_requests=requested,
++        max_mamba_cache_size=slots,
++    ):
++        return KVCacheConfigurator.resolve_max_num_reqs(configurator, 100_000)
++
++
++class TestMambaConcurrencyCap(unittest.TestCase):
++    def test_dflash_shaped_shortfall_warns_with_effective_cap(self):
++        # Issue #36889's reported shape: 8 requested streams, 10 state slots,
++        # and 5 slots consumed per request. The effective concurrency is 2 and
++        # the diagnostic must be visible at WARNING, not only at INFO.
++        with self.assertLogs(
++            "sglang.srt.mem_cache.kv_cache_configurator", level="WARNING"
++        ) as logs:
++            effective = _resolve(requested=8, slots=10, ratio=5)
++
++        self.assertEqual(effective, 2)
++        message = "\n".join(logs.output)
++        self.assertIn("max_running_requests is capped to 2", message)
++        self.assertIn("max_mamba_cache_size=10", message)
++        self.assertIn("5 state slots per request", message)
++
++    def test_exactly_sized_pool_preserves_requested_concurrency(self):
++        # Independent boundary: 8 * 5 slots exactly backs all 8 requests, so
++        # the Mamba-specific cap warning must not fire.
++        with self.assertNoLogs(
++            "sglang.srt.mem_cache.kv_cache_configurator", level="WARNING"
++        ):
++            effective = _resolve(requested=8, slots=40, ratio=5)
++        self.assertEqual(effective, 8)
++
++    def test_less_than_one_request_of_state_fails_at_startup(self):
++        # Independent lower boundary: silently resolving to zero request slots
++        # would produce a server that can admit work but can never execute it.
++        with self.assertLogs(
++            "sglang.srt.mem_cache.kv_cache_configurator", level="WARNING"
++        ):
++            with self.assertRaisesRegex(
++                RuntimeError, "state cache is too small to serve any requests"
++            ):
++                _resolve(requested=8, slots=4, ratio=5)
++
++
++if __name__ == "__main__":
++    unittest.main()
