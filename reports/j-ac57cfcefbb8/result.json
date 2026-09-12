@@ -1,0 +1,32 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36460",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "unsupported_architecture",
+  "summary": "The current loader collapses expert-wise FP8/W4A16_AWQ metadata to one fused-MoE algorithm and has no W4A16_AWQ dispatch. The prepared AMD ROCm node cannot execute the NVIDIA-only ModelOpt paths, and no exported target checkpoint was available because the relevant fused-expert AWQ exporter fix remains open. No unsafe partial runtime implementation was made.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ac57cfcefbb8/venv/bin/python < synthetic ModelOptMixedPrecisionConfig reproduction",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed that FP8 and W4A16_AWQ expert entries resolve individually but their fused expert prefix resolves wholesale to the first FP8 descendant; confirmed there is no AWQ sub-configuration."
+    },
+    {
+      "command": "rocm-smi --showproductname --showuniqueid --showmeminfo vram",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the assigned device is one AMD Instinct MI350X (gfx950) under ROCm."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ac57cfcefbb8/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_modelopt_loader.py -x",
+      "exit_code": 1,
+      "what_was_measured": "Existing ModelOpt tests are not runnable on this node: ModelConfig rejects modelopt_fp8 on ROCm before kernel execution."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "ROCm inventory was collected, but SGLang rejects ModelOpt quantization on ROCm; no target kernel executed.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No NVIDIA GPU was available for ModelOpt kernel execution.",
+    "No real fused-expert W4A16_AWQ ModelOpt checkpoint was available for loading or accuracy tests.",
+    "NVIDIA Model Optimizer PR 2017, which unblocks fused-expert AWQ export, is still open.",
+    "Heterogeneous per-expert storage, dispatch, AWQ pre_quant_scale handling, TP/EP behavior, and numerical parity remain unimplemented and unverified."
+  ]
+}
