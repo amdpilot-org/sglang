@@ -1213,6 +1213,13 @@ class RuntimeContext:
         d = self.server_args.resolved_dict() if base is None else dict(base)
         for _source, fields in self._overrides_log:
             d.update(fields)
+        # Overrides carry raw values. Apply the positive allowlist again so a
+        # post-startup update cannot put an unreviewed field back into a
+        # diagnostic response after the base projection redacted it.
+        from sglang.srt.server_args_diagnostics import diagnostic_value
+
+        for name, value in d.items():
+            d[name] = diagnostic_value(name, value)
         return d
 
     def override_server_args(self, **fields) -> _ServerArgsOverride:

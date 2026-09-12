@@ -309,18 +309,24 @@ class ServerArgs:
         return getattr(self, "_launch_command", None)
 
     def resolved_dict(self) -> dict[str, Any]:
-        """This configuration as a plain dict of resolved field values.
+        """This configuration as a safe diagnostic dict of resolved values.
 
         What the whole-object readbacks report (`/server_info` and its gRPC and
         in-process twins). A plain `asdict` reads the fields, which
         carry the raw input; this reads the declarations, so it answers with what
         resolution decided. Nested dataclass fields are expanded
         the way `asdict` expands them; the private resolution bookkeeping and the
-        `model_config` memo are not fields and do not appear.
+        `model_config` memo are not fields and do not appear. Fields outside
+        the reviewed diagnostic allowlist remain present but are redacted, so
+        newly introduced arguments are private by default.
         """
 
+        from sglang.srt.server_args_diagnostics import diagnostic_value
+
         return {
-            field.name: _plain(resolution_result(self, field.name))
+            field.name: diagnostic_value(
+                field.name, _plain(resolution_result(self, field.name))
+            )
             for field in record_fields(type(self))
         }
 
@@ -725,7 +731,11 @@ def prepare_server_args(argv: list[str]) -> ServerArgs:
     # Not a field: the record's fields are the configuration, and this is how
     # the configuration was asked for. It rides along on the record so a
     # subprocess copy can answer the same question the launcher can.
-    server_args._launch_command = " ".join(argv)
+    from sglang.srt.server_args_diagnostics import redact_cli_arguments
+
+    server_args._launch_command = " ".join(
+        redact_cli_arguments(argv, parser._option_string_actions)
+    )
     return server_args
 
 

@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37457",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced cleartext api_key, admin_api_key, and ssl_keyfile_password disclosure through the actual /server_info handler. Added a positive allowlist diagnostic projection that redacts unreviewed present values by default, reapplies redaction after runtime overlays, and prevents the newer launch_command field from echoing unreviewed CLI or Engine argument values. The operational ServerArgs object remains unchanged.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-32261d3de89d/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_server_info.py::TestServerInfoCredentialRedaction",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction through the actual async server_info handler: all three configured credential sentinels appeared in the response. Raw output: reports/j-32261d3de89d/failing-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-32261d3de89d/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_server_info.py::TestServerInfoCredentialRedaction",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after coverage for configured and unset credentials, operational-record preservation, unknown-field default redaction, launch-command redaction, and runtime-overlay redaction. Raw output: reports/j-32261d3de89d/passing-after-focused.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-32261d3de89d/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_server_info.py test/registered/unit/server_args/test_resolution_declarations.py test/registered/unit/server_args/test_server_args.py",
+      "exit_code": 1,
+      "what_was_measured": "Broad regression run: 272 passed and 2 unrelated existing context-parallel tests failed because this prepared interpreter reports HIP, where prefill CP is deliberately rejected. Raw output: reports/j-32261d3de89d/regression-suite.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-32261d3de89d/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_server_info.py test/registered/unit/server_args/test_resolution_declarations.py test/registered/unit/server_args/test_server_args.py -k 'not test_canonical_prefill_cp_requires_strategy and not test_context_parallel_handler_initializes_cp_strategy'",
+      "exit_code": 0,
+      "what_was_measured": "All applicable server-info and ServerArgs regressions: 272 passed, 2 explicitly deselected, 70 subtests passed. Raw output: reports/j-32261d3de89d/regression-suite-applicable.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-32261d3de89d/venv/bin/python -m compileall -q python/sglang/srt/server_args.py python/sglang/srt/server_args_diagnostics.py python/sglang/srt/runtime_context.py python/sglang/srt/entrypoints/engine.py test/registered/unit/entrypoints/test_server_info.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python modules and regression test compile successfully."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/server_args.py python/sglang/srt/server_args_diagnostics.py python/sglang/srt/runtime_context.py python/sglang/srt/entrypoints/engine.py test/registered/unit/entrypoints/test_server_info.py reports/j-32261d3de89d/result.json reports/j-32261d3de89d/investigation.md",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, AST, credential-pattern, CI-registration, and other configured hooks all passed."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "GPU execution was not performed because the disclosure and fix are deterministic Python projection/HTTP-handler behavior before model execution; no GPU kernel, model forward pass, or numerical claim is involved.",
+    "No full model server was launched and no model weights were used; the regression invokes the repository's actual async /server_info handler with the established no-socket TokenizerManager fixture.",
+    "The two excluded broad-suite cases exercise deprecated prefill context parallelism and fail only because the prepared ROCm platform rejects that feature before their asserted non-HIP behavior.",
+    "The open upstream candidate PR 37499 was inspected but deliberately uses a credential-name denylist/classification guard; this implementation instead follows the issue requirement that unknown future top-level ServerArgs fields redact by default."
+  ]
+}

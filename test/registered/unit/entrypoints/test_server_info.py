@@ -33,7 +33,8 @@ from sglang.srt.entrypoints import http_server
 from sglang.srt.lora.lora_registry import LoRARef
 from sglang.srt.managers.tokenizer_manager import TokenizerManager
 from sglang.srt.runtime_context import publish, reset_context
-from sglang.srt.server_args import ServerArgs
+from sglang.srt.server_args import ServerArgs, prepare_server_args
+from sglang.srt.server_args_diagnostics import diagnostic_value
 from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import CustomTestCase
 
@@ -585,6 +586,63 @@ class TestLoadPublishEndpointValidation(CustomTestCase):
                     load_publish_endpoint=endpoint,
                 )
                 check_load_publish_args(args)  # must not raise
+
+
+class TestServerInfoCredentialRedaction(CustomTestCase):
+    def test_credentials_are_redacted_without_mutating_server_args(self):
+        sentinels = {
+            "api_key": "sentinel-api-key-j32261",
+            "admin_api_key": "sentinel-admin-key-j32261",
+            "ssl_keyfile_password": "sentinel-tls-password-j32261",
+        }
+        args = ServerArgs(model_path="dummy", **sentinels)
+
+        info = _call_server_info_with(args)
+
+        for field, sentinel in sentinels.items():
+            with self.subTest(field=field):
+                self.assertEqual(info[field], "<redacted>")
+                self.assertEqual(getattr(args, field), sentinel)
+                self.assertNotIn(sentinel, json.dumps(info, default=str))
+
+    def test_unset_credentials_remain_none(self):
+        info = _call_server_info_with(ServerArgs(model_path="dummy"))
+
+        for field in ("api_key", "admin_api_key", "ssl_keyfile_password"):
+            with self.subTest(field=field):
+                self.assertIsNone(info[field])
+
+    def test_launch_command_does_not_bypass_projection_redaction(self):
+        sentinel = "sentinel-command-key-j32261"
+        args = prepare_server_args(["--model-path", "dummy", "--api-key", sentinel])
+
+        info = _call_server_info_with(args)
+
+        self.assertNotIn(sentinel, info["launch_command"])
+        self.assertIn("<redacted>", info["launch_command"])
+
+    def test_unknown_future_field_is_private_by_default(self):
+        sentinel = "sentinel-future-credential-j32261"
+
+        self.assertEqual(
+            diagnostic_value("future_vendor_credential", sentinel), "<redacted>"
+        )
+        self.assertIsNone(diagnostic_value("future_vendor_credential", None))
+
+    def test_runtime_override_cannot_restore_a_redacted_value(self):
+        sentinel = "sentinel-rotated-admin-key-j32261"
+        args = ServerArgs(model_path="dummy", admin_api_key="initial-secret")
+        publish(args, role="tokenizer")
+        try:
+            from sglang.srt.runtime_context import get_context
+
+            get_context().override("test", admin_api_key=sentinel)
+            projected = get_context().resolved_server_args_dict()
+        finally:
+            reset_context()
+
+        self.assertEqual(projected["admin_api_key"], "<redacted>")
+        self.assertNotIn(sentinel, json.dumps(projected, default=str))
 
 
 if __name__ == "__main__":
