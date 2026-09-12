@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33493",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "remaining_counterexamples": [
+    "The exact DeepSeek-V4-Flash-0731 DSPARK TP4 HTTP min_tokens workload remains unverified on the available single gfx950 GPU without qualified model weights; no source-level failing counterexample was found."
+  ],
+  "summary": "The recorded base independently reproduces the real min_new_tokens lifecycle failure, while exact candidate cb093511f20bcc0a981f3b77ff55bd4d7295fcba passes its lifecycle regression, focused penalty tests, and an independent heterogeneous gfx950 boundary case. The candidate is a justified narrow source-level fix, but full original-workload qualification remains unavailable.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-efe99c3b31c2/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_min_new_tokens.py (runtime source at base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Real BatchedMinNewTokensPenalizer lifecycle on the prepared base; EOS remained -inf after two DFLASH preparations with min_new_tokens=2."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-efe99c3b31c2/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_min_new_tokens.py test/registered/unit/spec/test_dflash_verify_logits_adjustments.py test/registered/unit/sampling/test_penaltylib.py (exact candidate cb093511f20bcc0a981f3b77ff55bd4d7295fcba)",
+      "exit_code": 0,
+      "what_was_measured": "47 focused tests covering real lifecycle advancement/removal, additive penalty broadcast, DSPARK fast-path gating, and penalty library boundaries."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-efe99c3b31c2/venv/bin/python /job/review-evidence-j-efe99c3b31c2/adversarial/real_penalty_lifecycle.py (exact candidate cb093511f20bcc0a981f3b77ff55bd4d7295fcba)",
+      "exit_code": 0,
+      "what_was_measured": "Independent GPU case with heterogeneous min_new_tokens values 0, 1, and 3; exact threshold release and two-position verify-block broadcasting on gfx950."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-efe99c3b31c2/venv/bin/python -m py_compile python/sglang/srt/speculative/dflash_info_v2.py python/sglang/srt/speculative/dflash_utils.py python/sglang/srt/speculative/dspark_components/dspark_verify.py",
+      "exit_code": 0,
+      "what_was_measured": "All changed runtime Python modules compile under the prepared interpreter."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Independent adversarial execution used cuda:0 on one AMD Instinct MI355X (gfx950) with Torch 2.11.0+rocm7.2/HIP 7.2.26015 and passed all heterogeneous lifecycle and verify-broadcast assertions."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The exact DeepSeek-V4-Flash-0731 TP4 HTTP serving reproduction was not run because the environment provides one gfx950 GPU and no qualified model weights.",
+    "The tiny Llama transport fixture cannot qualify DeepSeek-V4 architecture behavior, DSPARK TP4 execution, semantic accuracy, or the reported distributed serving workload.",
+    "The candidate changes no native source, so no native rebuild was applicable."
+  ]
+}
