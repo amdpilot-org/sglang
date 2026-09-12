@@ -1174,6 +1174,8 @@ class SchedulerMetricsCollector(_StatLoggerDIMixin):
         from sglang.srt.distributed.nccl_ras import RasState
 
         self._ras_state_values = [s.name for s in RasState]
+        self._ras_seen_comms: Set[str] = set()
+        self._ras_seen_divergence: Set[tuple[str, str]] = set()
 
     @classmethod
     def init_new(
@@ -1558,6 +1560,56 @@ class SchedulerMetricsCollector(_StatLoggerDIMixin):
             self.nccl_ras_last_collection_age_sec.labels(**base).set(
                 findings.last_collection_age_sec
             )
+
+        # Reconcile labelsets only after a successful snapshot. A poll failure
+        # says nothing about whether the previous communicators still exist.
+        if findings.poll_success:
+            seen_comms = getattr(self, "_ras_seen_comms", set())
+            seen_divergence = getattr(self, "_ras_seen_divergence", set())
+            current_comms = set(findings.per_comm)
+            current_divergence = {
+                (comm_key, collective)
+                for comm_key, comm in findings.per_comm.items()
+                for collective in comm.divergence
+            }
+            base_values = tuple(base.values())
+            multiprocess = bool(
+                os.environ.get("PROMETHEUS_MULTIPROC_DIR")
+                or os.environ.get("prometheus_multiproc_dir")
+            )
+
+            def clear_gauge(gauge, *label_values) -> None:
+                # prometheus_client cannot delete mmap-backed multiprocess
+                # labelsets. Zero them there so stale alerts clear; in the
+                # normal registry also remove them to avoid ghost series.
+                gauge.labels(*label_values).set(0)
+                if not multiprocess:
+                    gauge.remove(*label_values)
+
+            for comm_key, collective in seen_divergence - current_divergence:
+                clear_gauge(
+                    self.nccl_ras_collective_divergence,
+                    *base_values,
+                    comm_key,
+                    collective,
+                )
+            for comm_key in seen_comms - current_comms:
+                comm_values = (*base_values, comm_key)
+                for gauge in (
+                    self.nccl_ras_missing_ranks,
+                    self.nccl_ras_unresponsive_ranks,
+                    self.nccl_ras_dead_ranks,
+                    self.nccl_ras_ranks_in_error,
+                    self.nccl_ras_stuck,
+                ):
+                    clear_gauge(gauge, *comm_values)
+                for state in self._ras_state_values:
+                    clear_gauge(
+                        self.nccl_ras_communicator_state, *comm_values, state
+                    )
+
+            self._ras_seen_comms = current_comms
+            self._ras_seen_divergence = current_divergence
 
         for comm_key, comm in findings.per_comm.items():
             comm_labels = {**base, "comm_hash": comm_key}

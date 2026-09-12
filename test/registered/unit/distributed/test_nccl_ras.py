@@ -411,7 +411,9 @@ class TestRasMetrics(CustomTestCase):
         churn here)."""
         from prometheus_client import Counter, Gauge, generate_latest
 
-        from sglang.srt.observability.metrics_collector import SchedulerMetricsCollector
+        from sglang.srt.observability.metrics_collector import (
+            SchedulerMetricsCollector,
+        )
         from sglang.srt.distributed.nccl_ras import (
             RasCommFinding,
             RasFindings,
@@ -505,6 +507,118 @@ class TestRasMetrics(CustomTestCase):
         out = generate_latest().decode()
         self.assertIn("v_ps", out)
         self.assertIn("v_pe", out)
+
+    def test_recovery_clears_divergence_and_disappeared_communicator_gauges(self):
+        from prometheus_client import CollectorRegistry, Gauge, generate_latest
+
+        from sglang.srt.distributed.nccl_ras import (
+            RasCommFinding,
+            RasFindings,
+            RasState,
+        )
+        from sglang.srt.observability.metrics_collector import SchedulerMetricsCollector
+
+        registry = CollectorRegistry()
+        labels = {"model_name": "recovery", "engine_type": "test"}
+        comm = list(labels) + ["comm_hash"]
+        ctype = comm + ["collective"]
+        cstate = comm + ["state"]
+        c = SchedulerMetricsCollector.__new__(SchedulerMetricsCollector)
+        c.labels = labels
+        c.nccl_ras_missing_ranks = Gauge(
+            "recovery_missing", "", comm, registry=registry
+        )
+        c.nccl_ras_unresponsive_ranks = Gauge(
+            "recovery_unresp", "", comm, registry=registry
+        )
+        c.nccl_ras_dead_ranks = Gauge("recovery_dead", "", comm, registry=registry)
+        c.nccl_ras_ranks_in_error = Gauge("recovery_error", "", comm, registry=registry)
+        c.nccl_ras_collective_divergence = Gauge(
+            "recovery_div", "", ctype, registry=registry
+        )
+        c.nccl_ras_stuck = Gauge("recovery_stuck", "", comm, registry=registry)
+        c.nccl_ras_communicator_state = Gauge(
+            "recovery_state", "", cstate, registry=registry
+        )
+        c.nccl_ras_peer_dead_transitions_total = MagicMock()
+        c.nccl_ras_poll_success = Gauge(
+            "recovery_poll", "", list(labels), registry=registry
+        )
+        c.nccl_ras_poll_errors_total = MagicMock()
+        c.nccl_ras_last_collection_age_sec = Gauge(
+            "recovery_age", "", list(labels), registry=registry
+        )
+        c._ras_state_values = [
+            "HEALTHY",
+            "UNKNOWN",
+            "SUSPECT",
+            "STUCK",
+            "ERROR",
+            "DEAD",
+        ]
+
+        def findings(per_comm):
+            return RasFindings(
+                per_comm=per_comm,
+                worst_state=RasState.HEALTHY,
+                poll_success=True,
+                last_collection_age_sec=0.0,
+            )
+
+        divergent = RasCommFinding(
+            comm_key="comm-a",
+            state=RasState.STUCK,
+            missing=0,
+            unresponsive=0,
+            dead=0,
+            ranks_in_error=0,
+            divergence={"AllReduce": 7},
+            stuck=True,
+            peer_dead_transitions=0,
+        )
+        recovered = RasCommFinding(
+            comm_key="comm-a",
+            state=RasState.HEALTHY,
+            missing=0,
+            unresponsive=0,
+            dead=0,
+            ranks_in_error=0,
+            divergence={},
+            stuck=False,
+            peer_dead_transitions=0,
+        )
+
+        c.log_nccl_ras(findings({"comm-a": divergent}))
+        self.assertIn(
+            'recovery_div{collective="AllReduce",comm_hash="comm-a"',
+            generate_latest(registry).decode(),
+        )
+
+        c.log_nccl_ras(findings({"comm-a": recovered}))
+        after_recovery = generate_latest(registry).decode()
+        self.assertIn(
+            'recovery_div{collective="AllReduce",comm_hash="comm-a",engine_type="test",model_name="recovery"} 0.0',
+            after_recovery,
+        )
+
+        c.log_nccl_ras(findings({}))
+        after_disappearance = generate_latest(registry).decode()
+        for metric in (
+            "recovery_missing",
+            "recovery_unresp",
+            "recovery_dead",
+            "recovery_error",
+            "recovery_stuck",
+        ):
+            self.assertIn(
+                f'{metric}{{comm_hash="comm-a",engine_type="test",model_name="recovery"}} 0.0',
+                after_disappearance,
+            )
+        for state in c._ras_state_values:
+            self.assertIn(
+                f'recovery_state{{comm_hash="comm-a",engine_type="test",model_name="recovery",state="{state}"}} 0.0',
+                after_disappearance,
+            )
 
 
 class TestRasCollectorElection(CustomTestCase):
