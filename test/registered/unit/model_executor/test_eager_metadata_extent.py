@@ -79,6 +79,13 @@ class TestEagerMetadataExtent(CustomTestCase):
             dsa_cache_seqlens_int32=torch.ones(4, dtype=torch.int32),
             dsa_cu_seqlens_k=torch.arange(5, dtype=torch.int32),
             dsa_cu_seqlens_q=torch.arange(5, dtype=torch.int32),
+            dsa_seqlens_expanded=torch.ones(4, dtype=torch.int32),
+            token_to_batch_idx=torch.arange(4, dtype=torch.int32),
+            indexer_k_start_end=(
+                torch.arange(4, dtype=torch.int32),
+                torch.arange(4, dtype=torch.int32),
+            ),
+            topk_indices_offset=None,
         )
         batch = _preplanned_batch(ForwardMode.DRAFT_EXTEND_V2)
         backend.validate_preplanned_metadata_extent(batch)
@@ -88,6 +95,26 @@ class TestEagerMetadataExtent(CustomTestCase):
         )
         with self.assertRaisesRegex(RuntimeError, "dsa_rows=3"):
             backend.validate_preplanned_metadata_extent(batch)
+
+    def test_dsa_rejects_stale_downstream_token_metadata(self):
+        backend = DeepseekSparseAttnBackend.__new__(DeepseekSparseAttnBackend)
+        backend.forward_metadata = SimpleNamespace(
+            dsa_cache_seqlens_int32=torch.ones(4, dtype=torch.int32),
+            dsa_cu_seqlens_k=torch.arange(5, dtype=torch.int32),
+            dsa_cu_seqlens_q=torch.arange(5, dtype=torch.int32),
+            dsa_seqlens_expanded=torch.ones(3, dtype=torch.int32),
+            token_to_batch_idx=torch.arange(3, dtype=torch.int32),
+            indexer_k_start_end=(
+                torch.arange(3, dtype=torch.int32),
+                torch.arange(3, dtype=torch.int32),
+            ),
+            topk_indices_offset=None,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "expanded_rows=3"):
+            backend.validate_preplanned_metadata_extent(
+                _preplanned_batch(ForwardMode.DRAFT_EXTEND_V2)
+            )
 
 
 if __name__ == "__main__":
