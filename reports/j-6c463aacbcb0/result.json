@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35826",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The grammar/forced token synchronization path called torch.distributed.all_reduce with ReduceOp.MIN even when DP attention selected a singleton attention-TP process group. The sampler now checks the selected group's world size and skips the identity collective when it is one, while retaining the existing MIN reduction for multi-rank groups.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-6c463aacbcb0/venv/bin/python -m pytest -q test/registered/unit/test_sampler_token_sync.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Issue-specific regression: both grammar-triggered and environment-forced synchronization incorrectly called all_reduce for a mocked world-size-one group; the multi-rank MIN and no-trigger boundary cases passed. Raw output: reports/j-6c463aacbcb0/raw/regression-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6c463aacbcb0/venv/bin/python -m pytest -q test/registered/unit/test_sampler_token_sync.py (after source fix)",
+      "exit_code": 0,
+      "what_was_measured": "Four cases passed: singleton grammar sync skip, singleton forced sync skip, multi-rank ReduceOp.MIN preservation, and no-trigger avoidance of both size query and collective. Final raw output after formatting: reports/j-6c463aacbcb0/raw/regression-after-final.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-6c463aacbcb0/venv/bin/python - <singleton GPU check>",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI350X gfx950 GPU, a real world-size-one NCCL-backend process group reported size one; the sampler left a GPU int64 token tensor equal to the independent expected tensor [17], and an all_reduce trap was not reached. Raw output: reports/j-6c463aacbcb0/raw/gpu-singleton-check.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6c463aacbcb0/venv/bin/python -m pre_commit run --files python/sglang/srt/layers/sampler.py test/registered/unit/test_sampler_token_sync.py reports/j-6c463aacbcb0/result.json reports/j-6c463aacbcb0/README.md",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository formatting, lint, credential, syntax, and registered-test CI validation hooks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-6c463aacbcb0/raw/gpu-singleton-check.log records AMD Instinct MI350X, architecture (9, 5)/gfx950, backend nccl, world_size=1, token_ids=[17], expected=[17], and singleton_all_reduce=skipped."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one assigned AMD gfx950 GPU was available, so the reported 8x NVIDIA B300 DP-attention serving configuration was not reproduced.",
+    "The CUDA 13.0/NCCL 2.28.9 512 MiB NET shared P2P allocation signature could not be measured in this ROCm environment.",
+    "No model weights were needed for this sampler control-flow defect; consequently no full HTTP server, model-semantic, or multi-rank workload claim is made.",
+    "The multi-rank boundary is unit-verified by asserting the unchanged ReduceOp.MIN call, not executed on multiple physical GPUs."
+  ]
+}
