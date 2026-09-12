@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/16255",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3152",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3145",
+  "candidate_commit": "8f131570f6d56fa3298720cfec2506660bfd4596",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a valid partial refactor: V3.2 policy and NPU attention dispatch are extracted and focused plus independent adversarial tests pass. It does not fully implement the original issue's hardware separation, and real V3.2, NPU, and distributed execution remain unverified.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3c5bf8131f78/venv/bin/python -m pytest -q /tmp/test_deepseek_v32_candidate.py /tmp/test_deepseek_npu_candidate.py",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before on recorded base: candidate regressions fail collection because v32_mixin and hardware_backend are absent."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3c5bf8131f78/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v32_mixin.py test/registered/unit/models/test_deepseek_npu_mixin.py test/registered/unit/models/test_deepseek_mla_dispatch.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: V3.2 construction/pipeline policy, NPU routing, and existing MLA dispatch; 22 tests and 8 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3c5bf8131f78/venv/bin/python /tmp/adversarial_review_j3.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent pipeline handoff truth table, NPU MHA/MLA/DSA call signatures, and real AMD GPU empty-top-k device/dtype/shape."
+    },
+    {
+      "command": "python -m compileall -q python/sglang/srt/models/deepseek_common/v32_mixin.py python/sglang/srt/models/deepseek_common/hardware_backend/deepseek_v2_npu_mixin.py python/sglang/srt/models/deepseek_v2.py",
+      "exit_code": 0,
+      "what_was_measured": "Syntax compilation of every changed source module."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Independent test allocated and validated the empty top-k tensor on one AMD Instinct MI350X, gfx950:sramecc+:xnack-. This is not a DeepSeek checkpoint or kernel execution."
+  },
+  "native_rebuilt": false,
+  "native_rebuilt_reason": "No native source changed and repository-environment.json declares no native build target.",
+  "remaining_counterexamples": [
+    "No dedicated deepseek_v2_amd_mixin.py or deepseek_v2_cpu_mixin.py exists under deepseek_common/hardware_backend; only the NPU mixin was added.",
+    "Numerous CPU, ROCm/AMD, NPU, and MUSA conditionals remain in deepseek_v2.py, so the proposed hardware-platform separation is incomplete.",
+    "No real DeepSeek V3.2 checkpoint exercised Indexer or IndexerKPool loading, logits, serving, or semantic accuracy.",
+    "No multi-GPU or pipeline-parallel execution crossed a real stage boundary with top-k handoff.",
+    "NPU, NVIDIA, CPU-only, MUSA, and other architecture-specific runtime paths were not executed."
+  ],
+  "remaining_limitations": [
+    "One AMD Instinct MI350X was available; no second GPU or alternative architecture was available.",
+    "NPU routing was validated with mocks only because no NPU runtime hardware was available.",
+    "The available tiny Llama fixture cannot validate DeepSeek V3.2 architecture, weights, numerical semantics, or distributed behavior."
+  ]
+}

@@ -1,0 +1,178 @@
+head=8f131570f6d56fa3298720cfec2506660bfd4596
+deepseek_v2_lines=3121
+hardware_backend files:
+python/sglang/srt/models/deepseek_common/hardware_backend/__init__.py
+python/sglang/srt/models/deepseek_common/hardware_backend/__pycache__/__init__.cpython-312.pyc
+python/sglang/srt/models/deepseek_common/hardware_backend/__pycache__/deepseek_v2_npu_mixin.cpython-312.pyc
+python/sglang/srt/models/deepseek_common/hardware_backend/deepseek_v2_npu_mixin.py
+attention forward platform files:
+python/sglang/srt/models/deepseek_common/attention_forward_methods/__init__.py
+python/sglang/srt/models/deepseek_common/attention_forward_methods/forward_methods.py
+python/sglang/srt/models/deepseek_common/attention_forward_methods/forward_mha.py
+python/sglang/srt/models/deepseek_common/attention_forward_methods/forward_mha_rocm.py
+python/sglang/srt/models/deepseek_common/attention_forward_methods/forward_mla.py
+python/sglang/srt/models/deepseek_common/attention_forward_methods/forward_mla_fused_rope_cpu.py
+python/sglang/srt/models/deepseek_common/attention_forward_methods/forward_mla_fused_rope_rocm.py
+python/sglang/srt/models/deepseek_common/attention_forward_methods/forward_mla_rocm.py
+python/sglang/srt/models/deepseek_common/attention_forward_methods/triton_qk_rmsnorm.py
+remaining platform/v32 references in deepseek_v2.py:
+100:    CombineInput,
+148:    resolve_rocm_forward_method,
+162:from sglang.srt.models.deepseek_common.hardware_backend.deepseek_v2_npu_mixin import (
+163:    DeepseekV2NPUAttentionMixin,
+168:    _is_cpu,
+169:    _is_cpu_amx_available,
+173:    _is_musa,
+174:    _is_npu,
+210:    from sglang.srt.layers.rocm_linear_utils import aiter_dsv3_router_gemm
+213:    from sglang.srt.layers.rocm_linear_utils import (
+314:                x, self.gate_up_proj.input_scale_inv, enable_pdl=True
+322:                self.down_proj.input_scale_inv,
+358:            down_input_fp8 = gate_up.new_empty((M, N // 2), dtype=torch.float8_e4m3fn)
+360:            down_input_scale = create_per_token_group_quant_fp8_output_scale(
+369:                input=gate_up,
+370:                output=down_input_fp8,
+371:                output_scale=down_input_scale,
+381:                (down_input_fp8, down_input_scale),
+428:            if _is_npu:
+429:                x = torch.ops.npu.npu_clipped_swiglu(
+486:        if _is_cpu and _is_cpu_amx_available:
+606:        # scaling factor for fused shared experts on AMD-platform.
+780:            if self.shared_experts_is_fp8 and not _is_npu:
+870:        input_ids: Optional[torch.Tensor] = None,
+871:        input_ids_global: Optional[torch.Tensor] = None,
+881:                input_ids_global=input_ids_global,
+902:                    input_ids,
+903:                    input_ids_global=input_ids_global,
+909:                    input_ids,
+910:                    input_ids_global=input_ids_global,
+915:                hidden_states, forward_batch, input_ids_global=input_ids_global
+922:        input_ids: Optional[torch.Tensor] = None,
+923:        input_ids_global: Optional[torch.Tensor] = None,
+934:        pre_quant_input = (
+937:            else self._maybe_quant_moe_input_once(hidden_states)
+958:                {"input_ids": input_ids_global}
+980:        elif pre_quant_input is not None:
+982:                hidden_states, topk_output, pre_quant_input=pre_quant_input
+988:            and not _is_musa
+999:                pre_quant_input=pre_quant_input,
+1035:        input_ids: Optional[torch.Tensor] = None,
+1036:        input_ids_global: Optional[torch.Tensor] = None,
+1042:            return self.forward_cpu(hidden_states)
+1056:            pre_quant_input = (
+1059:                else self._maybe_quant_moe_input_once(hidden_states)
+1069:                    pre_quant_input=pre_quant_input,
+1074:                {"input_ids": input_ids_global}
+1085:            pre_quant_input = None
+1095:                dispatcher: BaseDispatcher, combine_input: CombineInput
+1121:        if pre_quant_input is not None:
+1125:                pre_quant_input=pre_quant_input,
+1134:            and not _is_musa
+1151:                pre_quant_input=pre_quant_input,
+1171:    def forward_cpu(
+1188:        final_hidden_states = torch.ops.sgl_kernel.shared_expert_cpu(
+1232:        input_ids_global: Optional[torch.Tensor] = None,
+1263:                {"input_ids": input_ids_global}
+1352:                dispatcher: BaseDispatcher, combine_input: CombineInput
+1408:                dispatcher: BaseDispatcher, combine_input: CombineInput
+1468:        pre_quant_input: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+1471:            if pre_quant_input is not None:
+1476:                    hidden_states, gateup_pre_quant=pre_quant_input
+1486:        """SGLANG_OPT_MOE_QUANT_ONCE: quantize the (dp-gathered) MoE input to
+1563:        if experts.moe_runner_config.apply_router_weight_on_input:
+1564:            return False, "apply_router_weight_on_input"
+1565:        if experts.w13_input_scale is not None:
+1566:            return False, "static w13 input scale"
+1569:    def _maybe_quant_moe_input_once(
+1591:        if state.hidden_states_mlp_input.shape[0] > 0:
+1593:            state.router_logits = self.gate(state.hidden_states_mlp_input)
+1598:        hidden_states_mlp_input = state.pop("hidden_states_mlp_input")
+1600:            state.forward_batch.forward_mode, hidden_states_mlp_input
+1602:            state.shared_output = self.shared_experts(hidden_states_mlp_input)
+1608:        hidden_states = state.hidden_states_mlp_input
+1610:        # Hash MoE layers (e.g. DeepSeek-V4) route on input_ids; forward_deepep
+1611:        # passes them as a topk kwarg. The per-ubatch forward_batch.input_ids is
+1616:            topk_kwargs["input_ids"] = state.forward_batch.input_ids
+1643:                hidden_states=state.hidden_states_mlp_input,
+1658:        state.combine_input = self.experts.run_moe_core(
+1665:                combine_input=state.pop("combine_input"),
+1702:    DeepseekV2NPUAttentionMixin,
+1752:        # NOTE modification to rope_scaling must be done early enough, b/c e.g. Indexer needs it
+1925:        self.init_mla_fused_rope_rocm_forward()
+1926:        self.init_mla_fused_rope_cpu_forward()
+1983:        return resolve_rocm_forward_method(handler(self, forward_batch))
+1995:        # forward_core may return (hidden_states, topk_indices) for DSA models
+1996:        # with index cache enabled. In the TBO path, topk_indices is not
+2011:        prev_topk_indices: Optional[torch.Tensor] = None,
+2020:            prev_topk_indices=prev_topk_indices,
+2032:        prev_topk_indices: Optional[torch.Tensor] = None,
+2040:                not get_attn_tp_context().input_scattered
+2049:                not get_attn_tp_context().input_scattered
+2077:                prev_topk_indices,
+2080:            inner_state = self.forward_normal_rocm_prepare(
+2084:            inner_state = self.forward_normal_one_shot_rocm_prepare(
+2088:            inner_state = self.forward_normal_chunked_kv_rocm_prepare(
+2092:            inner_state = self.forward_absorb_rocm_prepare(
+2098:                prev_topk_indices,
+2104:        elif attn_forward_method == AttnForwardMethod.MLA_FUSED_ROPE_CPU:
+2105:            inner_state = self.forward_absorb_fused_mla_rope_cpu_prepare(
+2109:            AttnForwardMethod.MHA_NPU,
+2110:            AttnForwardMethod.MLA_NPU,
+2111:            AttnForwardMethod.DSA_NPU,
+2113:            inner_state = self.forward_npu_prepare(
+2120:                prev_topk_indices,
+2148:            return self.forward_absorb_rocm_core(*inner_state)
+2151:        elif attn_forward_method == AttnForwardMethod.MLA_FUSED_ROPE_CPU:
+2152:            return self.forward_absorb_fused_mla_rope_cpu_core(*inner_state)
+2154:            AttnForwardMethod.MHA_NPU,
+2155:            AttnForwardMethod.MLA_NPU,
+2156:            AttnForwardMethod.DSA_NPU,
+2158:            return self.forward_npu_core(attn_forward_method, inner_state)
+2312:        self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+2326:            input_layernorm=self.input_layernorm,
+2383:        prev_topk_indices: Optional[torch.Tensor] = None,
+2406:                prev_topk_indices=prev_topk_indices,
+2409:            hidden_states, topk_indices = hidden_states
+2411:            topk_indices = None
+2412:        get_attn_tp_context().clear_attn_inputs()
+2466:        return hidden_states, residual, topk_indices
+2478:        state.hidden_states_after_comm_pre_attn, state.residual_after_input_ln = (
+2493:        state.hidden_states_mlp_input, state.residual_after_comm_pre_mlp = (
+2496:                state.pop("residual_after_input_ln"),
+2545:        if self.pp_group.is_first_rank or (_is_npu and self.pp_group.is_last_rank):
+2558:                or _is_musa
+2559:                or envs.SGLANG_NPU_USE_MULTI_STREAM.get()
+2665:    def get_input_embeddings(self) -> torch.Tensor:
+2670:        input_ids: torch.Tensor,
+2673:        input_embeds: torch.Tensor = None,
+2679:            if input_embeds is None:
+2680:                hidden_states = self.embed_tokens(input_ids)
+2682:                hidden_states = input_embeds
+2684:            initial_topk_indices = None
+2689:            initial_topk_indices = pp_proxy_tensors.tensors.get("topk_indices")
+2690:        index_topk_share = IndexTopKShareState(forward_batch, initial_topk_indices)
+2695:                and self.dsa_stage_requires_input_topk(dsa_forward_uses_topk)
+2696:                and index_topk_share.topk_indices is None
+2699:                "topk_indices from the previous stage."
+2756:                hidden_states, residual, topk_indices = layer(
+2764:                    prev_topk_indices=index_topk_share.topk_indices,
+2772:                index_topk_share.update(topk_indices)
+2782:                input_data_scatter_mode=self.layers[
+2794:                topk_indices = index_topk_share.topk_indices
+2799:                    assert topk_indices is not None, (
+2801:                        "DSA topk_indices because the next stage starts on a "
+2804:                if topk_indices is None:
+2805:                    topk_indices = self.empty_dsa_topk(hidden_states)
+2806:                proxy_tensors["topk_indices"] = topk_indices
+2854:        self.use_dsa = is_deepseek_dsa(config)
+2950:            and (not _is_musa or torch.musa.get_device_capability("musa") < (3, 1))
+2954:                "or AMD-platform with capability >= gfx942(MI30x) can use shared experts fusion optimization."
+2961:                "Only Deepseek V3/R1 on AMD-platform with capability >= gfx942(MI30x) "
+2974:    def get_input_embeddings(self) -> nn.Embedding:
+2980:        input_ids: torch.Tensor,
+2983:        input_embeds: torch.Tensor = None,
+2986:        with get_attn_tp_context().maybe_input_scattered(forward_batch):
+2988:                input_ids, positions, forward_batch, input_embeds, pp_proxy_tensors
+2996:                input_ids, hidden_states, self.lm_head, forward_batch, aux_hidden_states
+3064:        extend_prefix_lens_cpu: torch.Tensor,
+3077:            extend_prefix_lens_cpu=extend_prefix_lens_cpu,
