@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37852",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "DeepSeek-V4 pools inherited mem_usage=0 and never finalized accounting. The fix records the exact nbytes of owned physical tensors for single-KV and indexer pools, then aggregates SWA or unified KV, C4/C128 KV, indexer, compression-state, backend-specific indexer, and online C128 MTP state storage in the top-level pool.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-63239824c521/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_dsv4_compressed_pools.py -k mem_usage",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: both non-unified and unified fixtures failed because DeepSeekV4TokenToKVPool had no accounting finalizer; raw output: reports/j-63239824c521/evidence/failing_before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-63239824c521/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_dsv4_compressed_pools.py",
+      "exit_code": 0,
+      "what_was_measured": "Five focused unit tests and eight subtests passed, including exact byte accounting for non-unified split indexer/state storage and the unified layout boundary; raw output: reports/j-63239824c521/evidence/unit_after_final.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-63239824c521/venv/bin/python reports/j-63239824c521/verify_gpu_mem_usage.py",
+      "exit_code": 0,
+      "what_was_measured": "A real non-unified DSV4 allocation on gfx950 reported 0.003348052502 GiB, exactly matching an independent sum of 3,594,944 allocated tensor bytes; raw output: reports/j-63239824c521/evidence/gpu_mem_usage_final.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed source, tests, and report artifacts contain no whitespace errors."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "One visible AMD Instinct MI355X (gfx950) executed actual torch GPU allocations for SWA, C4, C128, indexer, and compression-state buffers; reports/j-63239824c521/evidence/gpu_mem_usage_final.txt",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4/DeepSeek-V4-Flash weights were not available, so a full server launch and HTTP metrics scrape were not performed.",
+    "The original eight-rank NVIDIA H100 configuration was not reproduced; validation used the assigned single AMD gfx950 GPU and does not claim multi-GPU or model-semantic coverage.",
+    "Unified-KV and backend-specific extra-buffer boundaries are covered deterministically by unit fixtures, but only the non-unified HIP allocation path was executed on hardware."
+  ]
+}

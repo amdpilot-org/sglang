@@ -8,8 +8,10 @@ import torch
 from sglang.srt.mem_cache.deepseek_v4_memory_pool import (
     DeepSeekV4SingleKVPool,
     DeepSeekV4TokenToKVPool,
+    HiSparseC4DevicePool,
     _CompressedPoolConfig,
 )
+from sglang.srt.mem_cache.memory_pool import GB
 from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import CustomTestCase
 
@@ -17,6 +19,91 @@ register_cpu_ci(est_time=5, suite="base-a-test-cpu")
 
 
 class TestDSV4CompressedPools(CustomTestCase):
+    def test_hisparse_mem_usage_includes_device_pointer_table(self):
+        for layer_num in (1, 3):
+            with self.subTest(layer_num=layer_num):
+                pool = HiSparseC4DevicePool(
+                    size=64,
+                    page_size=64,
+                    dtype=torch.float8_e4m3fn,
+                    qk_nope_head_dim=448,
+                    qk_rope_head_dim=64,
+                    layer_num=layer_num,
+                    device="cpu",
+                    enable_memory_saver=False,
+                )
+
+                allocated = pool.allocated_tensors()
+                self.assertEqual(allocated, [*pool.kv_buffer, pool.data_ptrs])
+                self.assertEqual(pool.data_ptrs.nbytes, layer_num * 8)
+                self.assertEqual(
+                    pool.mem_usage,
+                    sum(tensor.nbytes for tensor in allocated) / GB,
+                )
+
+    def test_mem_usage_sums_non_unified_physical_buffers(self):
+        pool = DeepSeekV4TokenToKVPool.__new__(DeepSeekV4TokenToKVPool)
+        pool._unified_kv = False
+        swa = torch.empty(11, dtype=torch.uint8)
+        pool.swa_kv_pool = SimpleNamespace(allocated_tensors=lambda: [swa])
+        pool.unified_kv_pool = None
+        pool.kv_pools = {
+            4: SimpleNamespace(
+                allocated_tensors=lambda: [torch.empty(13, dtype=torch.uint8)]
+            ),
+            128: SimpleNamespace(
+                allocated_tensors=lambda: [torch.empty(17, dtype=torch.uint8)]
+            ),
+        }
+        pool.index_pools = {
+            4: SimpleNamespace(
+                allocated_tensors=lambda: [
+                    torch.empty(19, dtype=torch.uint8),
+                    torch.empty(23, dtype=torch.uint8),
+                ]
+            )
+        }
+        pool.compress_state_pools = [
+            SimpleNamespace(
+                kv_score_buffer=SimpleNamespace(
+                    kv_score=torch.empty(29, dtype=torch.uint8)
+                )
+            ),
+            None,
+        ]
+        pool.indexer_compress_state_pools = [
+            SimpleNamespace(
+                kv_score_buffer=SimpleNamespace(
+                    kv_score=torch.empty(31, dtype=torch.uint8)
+                )
+            )
+        ]
+        pool.online_c128_mtp_pending_seq_lens = torch.empty(5, dtype=torch.int64)
+
+        pool._finalize_mem_usage()
+
+        self.assertEqual(pool.mem_usage, (11 + 13 + 17 + 19 + 23 + 29 + 31 + 40) / GB)
+
+    def test_mem_usage_sums_unified_layout_without_absent_kv_pools(self):
+        pool = DeepSeekV4TokenToKVPool.__new__(DeepSeekV4TokenToKVPool)
+        pool._unified_kv = True
+        pool.swa_kv_pool = None
+        pool.unified_kv_pool = SimpleNamespace(
+            kv_buffer=[
+                torch.empty(37, dtype=torch.uint8),
+                torch.empty(41, dtype=torch.uint8),
+            ]
+        )
+        pool.kv_pools = {4: None, 128: None}
+        pool.index_pools = {}
+        pool.compress_state_pools = []
+        pool.indexer_compress_state_pools = []
+        pool.online_c128_mtp_pending_seq_lens = None
+
+        pool._finalize_mem_usage()
+
+        self.assertEqual(pool.mem_usage, (37 + 41) / GB)
+
     def test_pp_mapping_and_pd_buffer_order(self):
         for unified, stage_ratios in product(
             (False, True), ([4, 0, 128, 4], [128], [0])
