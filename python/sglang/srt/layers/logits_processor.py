@@ -227,6 +227,9 @@ class LogitsProcessorOutput:
     next_token_sampling_mask_idx: Optional[List[Optional[List[int]]]] = None
     next_token_sampling_logprobs: Optional[List[Optional[float]]] = None
     next_token_sampling_mask_status: Optional[List[Optional[int]]] = None
+    # Per-request mask captured before NaN sanitization. It is populated only
+    # for the opt-in plain sampling abort path.
+    full_nan_rows: Optional[torch.Tensor] = None
 
     ## Part 3: Prefill-only. This part will be assigned in python/sglang/srt/layers/logits_processor.py::LogitsProcessor
     # The logprobs of input tokens.        shape: [#token]
