@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38319",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "The candidate's new paged regression models a direct mutable-view free that neither real paged cache_unfinished_req path performs. Independent CPU and assigned-GPU runs against the exact candidate behavior and prepared base showed correct ownership through both Python and native C++ paths even when _copy_for_free_group was replaced by identity. Existing abort/retract lifecycle tests pass. The reported QSA/SM121 model-serving corruption could not be reproduced in this environment, so no speculative source correction was made.",
+  "tests": [
+    {
+      "command": "apply the test-only diff from 4d68007d1345b03fd894dcc23e56f3f2bc687f8f; temporarily change BaseTokenToKVPoolAllocator._copy_for_free_group to identity; /tmp/amdpilot-repo-j-dca03528cf46/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_radix_cache_unit.py::TestRadixCache::test_cache_unfinished_req_deferred_paged_free_owns_original_indices",
+      "exit_code": 1,
+      "what_was_measured": "Independent failing-before reproduction of the candidate's synthetic sequence: its direct request-table view is overwritten before grouped-free completion. This establishes the helper behavior but not reachability through either real cache_unfinished_req path."
+    },
+    {
+      "command": "apply the test-only diff from 4d68007d1345b03fd894dcc23e56f3f2bc687f8f; /tmp/amdpilot-repo-j-dca03528cf46/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_radix_cache_unit.py::TestRadixCache::test_cache_unfinished_req_deferred_paged_free_owns_original_indices test/registered/unit/mem_cache/test_radix_cache_unit.py::TestRadixCache::test_cache_unfinished_req_deferred_free_owns_original_indices",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's synthetic paged direct-view test and existing token allocator test both pass; the candidate diff was then removed from the delivery branch."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-dca03528cf46/venv/bin/python reports/j-dca03528cf46/raw/repro_actual_radix_paths.py {python,cpp} cpu {clone,no_clone}",
+      "exit_code": 0,
+      "what_was_measured": "Both actual cache_unfinished_req implementations freed the duplicate request page, retained the canonical tree page, rebound the request row, and returned canonical indices on lookup with and without the allocator clone."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-dca03528cf46/venv/bin/python reports/j-dca03528cf46/raw/repro_actual_radix_paths.py {python,cpp} cuda no_clone",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X/gfx950, both real paths retained correct page ownership with the candidate's claimed dependency disabled."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-dca03528cf46/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunked_abort_race.py test/registered/unit/managers/test_scheduler_pause_generation.py",
+      "exit_code": 0,
+      "what_was_measured": "23 tests and 2 subtests passed, covering deferred chunked-abort state handling and pause/retract scheduler transitions; these are lifecycle tests, not QSA payload tests."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-dca03528cf46/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_radix_cache_unit.py::TestRadixCache::test_cache_unfinished_req_deferred_free_owns_original_indices",
+      "exit_code": 0,
+      "what_was_measured": "The prepared base's valid generic grouped-free ownership regression passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Real Python and native C++ radix ownership checks ran on one AMD Instinct MI355X, gfx950:sramecc+:xnack-, under Torch 2.11.0+rocm7.2. Both reported request_page_freed=true, tree_page_freed=false, row_is_tree=true, and match_is_tree=true with the clone disabled."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The available architecture is AMD Instinct MI355X/gfx950 under ROCm 7.2, not the reported DGX Spark GB10/SM121 CUDA architecture.",
+    "RadixArk/Qwen3.8-Flash-Next-NVFP4 weights, NVFP4 KV cache, QSA KDA kernel configuration, EAGLE speculative decoding, 262144-token pressure, and the original stochastic timing were unavailable.",
+    "No available evidence reproduces corrupted payload through QSATokenToKVPool, repeated bad first-token output, token 248319, or cache-flush recovery.",
+    "The scheduler lifecycle tests use controlled requests and verify abort/retract transitions, while the real-cache tests verify ownership. An end-to-end test combining the reported model, QSA pool payload, chunked prefill, and a live abort/retract remains unexecuted.",
+    "No native source changed, so no native rebuild was applicable. The exercised extension was /tmp/amdpilot-repo-j-dca03528cf46/cache/torch_extensions/py312_rocm7226015/radix_tree_cpp/radix_tree_cpp.so built from the checkout-local cpp_radix_tree sources."
+  ]
+}
