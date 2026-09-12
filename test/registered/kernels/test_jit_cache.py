@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import os
 import pathlib
+import subprocess
 import sys
+import time
 
 import msgspec
 import pytest
@@ -394,6 +396,61 @@ def test_build_lock_excludes_a_second_holder(tmp_path):
     first.join(5)
     second.join(5)
     assert contender_entered.is_set(), "never entered after the lock was released"
+
+
+def test_build_lock_ignores_an_orphaned_lock_file(tmp_path):
+    """A marker left on disk is not ownership of an advisory lock.
+
+    The legacy Torch extension loader treated existence of its ``lock`` file as
+    ownership, so a compiler killed before cleanup wedged every later loader.
+    ``load_jit`` deliberately keeps its lock file and derives ownership only
+    from the kernel-managed flock.
+    """
+    from sglang.kernels.jit.utils.compile import loader
+
+    lock_file = tmp_path / loader._LOCK_FILE
+    lock_file.write_text("left by a dead compiler")
+
+    with loader._build_lock(tmp_path):
+        assert lock_file.read_text() == "left by a dead compiler"
+
+
+def test_build_lock_is_released_when_the_holder_process_dies(tmp_path):
+    """Killing a compiler owner cannot leave later JIT loads blocked."""
+    from sglang.kernels.jit.utils.compile import loader
+
+    ready = tmp_path / "holder-ready"
+    script = """
+import pathlib
+import signal
+import sys
+from sglang.kernels.jit.utils.compile import loader
+
+scope, ready = map(pathlib.Path, sys.argv[1:])
+with loader._build_lock(scope):
+    ready.touch()
+    signal.pause()
+"""
+    process = subprocess.Popen(
+        [sys.executable, "-c", script, str(tmp_path), str(ready)]
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.exists() and process.poll() is None:
+            assert time.monotonic() < deadline, "child never acquired the build lock"
+            time.sleep(0.01)
+        assert ready.exists(), (
+            f"child exited before acquiring the lock: {process.returncode}"
+        )
+    finally:
+        process.terminate()
+        process.wait(timeout=5)
+
+    # The lock path remains, matching the interrupted-build case.  Ownership
+    # died with the process, so this acquisition must complete immediately.
+    assert (tmp_path / loader._LOCK_FILE).exists()
+    with loader._build_lock(tmp_path):
+        pass
 
 
 # --------------------------------------------------------------------------
