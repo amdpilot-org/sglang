@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34092",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3126",
+  "candidate_mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3043",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3104",
+  "candidate_commit": "1b37c3e6f5659c7bd291b8cca345933c83a76cdf",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the original valid Transformers-created DeepSeek V4 config failure and two earlier implementation defects, but its missing-compress-RoPE regression bypasses the real serialization/parser path. A config.json missing rope_parameters.compress is still accepted and silently receives Transformers defaults, so the claimed consolidated validation correction is incomplete.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-52d864784ab3/venv/bin/python /job/review-evidence/j-52d864784ab3/probe_deepseek_v4.py (base commit)",
+      "exit_code": 0,
+      "what_was_measured": "The probe itself completed and captured the original engine configuration failure: SGLang loaded _DeepseekV4ConfigAlias and ModelConfig raised AttributeError because compress_ratios was absent. Evidence: /job/review-evidence/j-52d864784ab3/base-probe.json"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-52d864784ab3/venv/bin/python -m pytest -q test/registered/unit/configs/test_model_config.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 12 tests and 4 subtests passed, including native registration and post-construction malformed-object validation. Evidence: /job/review-evidence/j-52d864784ab3/candidate-regression.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-52d864784ab3/venv/bin/python /job/review-evidence/j-52d864784ab3/probe_deepseek_v4.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "The native Transformers DeepseekV4Config loaded exactly, and ModelConfig normalized the generated config to [128, 128, 128, 4]. Evidence: /job/review-evidence/j-52d864784ab3/candidate-probe.json"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-52d864784ab3/venv/bin/python /job/review-evidence/j-52d864784ab3/adversarial_candidate.py (candidate commit)",
+      "exit_code": 1,
+      "what_was_measured": "Five adversarial expectations passed, but a real serialized config missing rope_parameters.compress was accepted and defaulted instead of rejected. Evidence: /job/review-evidence/j-52d864784ab3/candidate-adversarial.json"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X was visible with Torch 2.11.0+rocm7.2, but no DeepSeek V4 weights were available. No GPU numerical or serving claim was made; /job/review-evidence/j-52d864784ab3/gpu-python.log records visibility only."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A serialized native DeepSeek V4 config.json with rope_parameters.main present but rope_parameters.compress absent is accepted. Transformers 5.12.1 inserts its default compress subsection before SGLang validation, so the omission is silently hidden rather than rejected."
+  ],
+  "remaining_limitations": [
+    "No DeepSeek V4 weights were available, so full model loading, engine startup, GPU numerical accuracy, semantic behavior, and distributed serving remain unverified.",
+    "The pinned environment uses Transformers 5.12.1 rather than exactly 4.57.x; it exercises the newer native V4 schema relevant to the issue.",
+    "Fallback behavior on older Transformers versions without native DeepseekV4Config was source-reviewed but could not be executed without altering the pinned environment.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
