@@ -11,58 +11,58 @@ mock_all_gather = <MagicMock name='all_gather_object' id='139905688992320'>
         """With multiple ranks, ready = intersection, failed = union."""
         mgr = self._make_mgr()
         mgr.grammar_sync_size = 2  # Enable multi-rank path
-    
+
         # Two requests: idx 0 ready on both ranks, idx 1 ready only on rank 0
         grammar_obj = MagicMock(spec=BaseGrammarObject)
         grammar_obj.copy.return_value = grammar_obj
         done_future = Future()
         done_future.set_result(grammar_obj)
-    
+
         req0 = _make_req(json_schema="s0", rid="r0")
         req0.grammar = done_future
         req0.grammar_key = ("json", "s0")
-    
+
         pending_future = Future()
         req1 = _make_req(json_schema="s1", rid="r1")
         req1.grammar = pending_future
         req1.grammar_key = ("json", "s1")
         req1.grammar_wait_ct = 0
-    
+
         mgr.grammar_queue = [req0, req1]
         mgr.SGLANG_GRAMMAR_MAX_POLL_ITERATIONS = 100
-    
+
         # Simulate all_gather: rank 0 has {0} ready, rank 1 has {0,1} ready
         def fake_all_gather(output_list, _obj, group=None):  # noqa: ARG001
             output_list[0] = ({0}, set())  # rank 0: only idx 0 ready
             output_list[1] = ({0, 1}, set())  # rank 1: both ready
-    
+
         mock_all_gather.side_effect = fake_all_gather
-    
+
 >       result = mgr.get_ready_grammar_requests()
                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-test/registered/unit/constrained/test_grammar_manager.py:692: 
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/unit/constrained/test_grammar_manager.py:692:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
 self = <sglang.srt.constrained.grammar_manager.GrammarManager object at 0x7f3e54df3a40>
 
     def get_ready_grammar_requests(self) -> List[Req]:
         """
         Move requests whose grammar objects are ready from grammar_queue to waiting_queue.
-    
+
         For PP0, DP/TP group rank i returns two sets ready_reqs_i,
         failed_reqs_i. ready_reqs_all = all_gather(ready_reqs_i) within
         PP0's DP/TP group. failed_reqs_all = all_gather(failed_reqs_i)
         within PP0's DP/TP group.
-    
+
         ready_reqs = intersect(ready_reqs_all)
         failed_reqs = union(failed_reqs_all)
-    
+
         Compile outcomes (invalid grammar, compile exception, timeout) are
         reported per index in failure messages that travel with the same
         sync, so every rank applies an identical abort state even though only
         the entry rank compiles.
-    
+
         PP0 then propagates the synced result to later PP ranks. Later PP
         ranks receive and apply the propagated ready/failed decision.
         """
@@ -70,7 +70,7 @@ self = <sglang.srt.constrained.grammar_manager.GrammarManager object at 0x7f3e54
         ready_req_idxs: set[int] = set()
         failed_req_idxs: set[int] = set()
         failed_reasons: dict[int, str] = {}
-    
+
         if self.pp_rank == 0:
             # Poll for ready requests
             start_time = time.perf_counter()
@@ -78,18 +78,18 @@ self = <sglang.srt.constrained.grammar_manager.GrammarManager object at 0x7f3e54
                 for i, req in enumerate(self.grammar_queue):
                     if i in ready_req_idxs or i in failed_req_idxs:
                         continue
-    
+
                     if req.finished() or req.grammar is None:
                         # It is aborted by AbortReq
                         ready_req_idxs.add(i)
                         continue
-    
+
                     if isinstance(req.grammar, PlaceholderGrammarObject):
                         # Non-entry ranks never compile; they are ready as
                         # soon as the entry rank's decision arrives.
                         ready_req_idxs.add(i)
                         continue
-    
+
                     if isinstance(req.grammar, InvalidGrammarObject):
                         # A cached-invalid grammar on the compiling rank.
                         # Fail through the sync so every rank aborts the
@@ -100,12 +100,12 @@ self = <sglang.srt.constrained.grammar_manager.GrammarManager object at 0x7f3e54
                             f"{req.grammar.error_message}"
                         )
                         continue
-    
+
                     if not isinstance(req.grammar, futures.Future):
                         # A cache hit on the compiling rank: already resolved.
                         ready_req_idxs.add(i)
                         continue
-    
+
                     if req.grammar.done():
                         try:
                             result = req.grammar.result()
@@ -128,15 +128,15 @@ self = <sglang.srt.constrained.grammar_manager.GrammarManager object at 0x7f3e54
                             )
                             continue
                         ready_req_idxs.add(i)
-    
+
                 if len(ready_req_idxs) + len(failed_req_idxs) == len(
                     self.grammar_queue
                 ):
                     break
-    
+
                 # Sleep a bit to avoid busy waiting
                 time.sleep(self.SGLANG_GRAMMAR_POLL_INTERVAL / 10)
-    
+
             # Check failed requests
             for i, req in enumerate(self.grammar_queue):
                 if i not in ready_req_idxs and i not in failed_req_idxs:
@@ -147,7 +147,7 @@ self = <sglang.srt.constrained.grammar_manager.GrammarManager object at 0x7f3e54
                         # Timeout after max poll iterations
                         # The actual waiting time is SGLANG_GRAMMAR_MAX_POLL_ITERATIONS * max(SGLANG_GRAMMAR_POLL_INTERVAL, GPU_forward_batch_latency)
                         failed_req_idxs.add(i)
-    
+
             # Sync ready and failed requests across all TP ranks in PP0.
             if self.grammar_sync_size == 1:
                 synced_ready_req_idxs = ready_req_idxs
@@ -180,47 +180,47 @@ mock_all_gather = <MagicMock name='all_gather_object' id='139905690427728'>
         mgr = self._make_mgr()
         mgr.grammar_sync_size = 2
         mgr.SGLANG_GRAMMAR_MAX_POLL_ITERATIONS = 1
-    
+
         pending_future = Future()  # Never completes
         req = _make_req(json_schema="slow", rid="r0")
         req.grammar = pending_future
         req.grammar_key = ("json", "slow")
         req.grammar_wait_ct = 0
-    
+
         mgr.grammar_queue = [req]
-    
+
         # Simulate: rank 0 has no ready and idx 0 failed, rank 1 has no ready/failed
         def fake_all_gather(output_list, _obj, group=None):  # noqa: ARG001
             output_list[0] = (set(), {0})  # rank 0: idx 0 timed out
             output_list[1] = (set(), set())  # rank 1: nothing
-    
+
         mock_all_gather.side_effect = fake_all_gather
-    
+
 >       result = mgr.get_ready_grammar_requests()
                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-test/registered/unit/constrained/test_grammar_manager.py:722: 
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/unit/constrained/test_grammar_manager.py:722:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
 self = <sglang.srt.constrained.grammar_manager.GrammarManager object at 0x7f3e54e153a0>
 
     def get_ready_grammar_requests(self) -> List[Req]:
         """
         Move requests whose grammar objects are ready from grammar_queue to waiting_queue.
-    
+
         For PP0, DP/TP group rank i returns two sets ready_reqs_i,
         failed_reqs_i. ready_reqs_all = all_gather(ready_reqs_i) within
         PP0's DP/TP group. failed_reqs_all = all_gather(failed_reqs_i)
         within PP0's DP/TP group.
-    
+
         ready_reqs = intersect(ready_reqs_all)
         failed_reqs = union(failed_reqs_all)
-    
+
         Compile outcomes (invalid grammar, compile exception, timeout) are
         reported per index in failure messages that travel with the same
         sync, so every rank applies an identical abort state even though only
         the entry rank compiles.
-    
+
         PP0 then propagates the synced result to later PP ranks. Later PP
         ranks receive and apply the propagated ready/failed decision.
         """
@@ -228,7 +228,7 @@ self = <sglang.srt.constrained.grammar_manager.GrammarManager object at 0x7f3e54
         ready_req_idxs: set[int] = set()
         failed_req_idxs: set[int] = set()
         failed_reasons: dict[int, str] = {}
-    
+
         if self.pp_rank == 0:
             # Poll for ready requests
             start_time = time.perf_counter()
@@ -236,18 +236,18 @@ self = <sglang.srt.constrained.grammar_manager.GrammarManager object at 0x7f3e54
                 for i, req in enumerate(self.grammar_queue):
                     if i in ready_req_idxs or i in failed_req_idxs:
                         continue
-    
+
                     if req.finished() or req.grammar is None:
                         # It is aborted by AbortReq
                         ready_req_idxs.add(i)
                         continue
-    
+
                     if isinstance(req.grammar, PlaceholderGrammarObject):
                         # Non-entry ranks never compile; they are ready as
                         # soon as the entry rank's decision arrives.
                         ready_req_idxs.add(i)
                         continue
-    
+
                     if isinstance(req.grammar, InvalidGrammarObject):
                         # A cached-invalid grammar on the compiling rank.
                         # Fail through the sync so every rank aborts the
@@ -258,12 +258,12 @@ self = <sglang.srt.constrained.grammar_manager.GrammarManager object at 0x7f3e54
                             f"{req.grammar.error_message}"
                         )
                         continue
-    
+
                     if not isinstance(req.grammar, futures.Future):
                         # A cache hit on the compiling rank: already resolved.
                         ready_req_idxs.add(i)
                         continue
-    
+
                     if req.grammar.done():
                         try:
                             result = req.grammar.result()
@@ -286,15 +286,15 @@ self = <sglang.srt.constrained.grammar_manager.GrammarManager object at 0x7f3e54
                             )
                             continue
                         ready_req_idxs.add(i)
-    
+
                 if len(ready_req_idxs) + len(failed_req_idxs) == len(
                     self.grammar_queue
                 ):
                     break
-    
+
                 # Sleep a bit to avoid busy waiting
                 time.sleep(self.SGLANG_GRAMMAR_POLL_INTERVAL / 10)
-    
+
             # Check failed requests
             for i, req in enumerate(self.grammar_queue):
                 if i not in ready_req_idxs and i not in failed_req_idxs:
@@ -305,7 +305,7 @@ self = <sglang.srt.constrained.grammar_manager.GrammarManager object at 0x7f3e54
                         # Timeout after max poll iterations
                         # The actual waiting time is SGLANG_GRAMMAR_MAX_POLL_ITERATIONS * max(SGLANG_GRAMMAR_POLL_INTERVAL, GPU_forward_batch_latency)
                         failed_req_idxs.add(i)
-    
+
             # Sync ready and failed requests across all TP ranks in PP0.
             if self.grammar_sync_size == 1:
                 synced_ready_req_idxs = ready_req_idxs
@@ -335,7 +335,7 @@ self = <test_grammar_manager.TestGrammarManagerPPSync testMethod=test_last_pp_ra
         pp0_data = ({0}, {2})
         pp_group = _FakePPGroup(recv_data=pp0_data)
         mgr = self._make_mgr_for_pp(pp_rank=2, pp_size=3, pp_group=pp_group)
-    
+
 >       data = mgr._pp_sync_ready_failed(set(), set())
                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 E       TypeError: GrammarManager._pp_sync_ready_failed() missing 1 required positional argument: 'failed_reasons'
@@ -349,7 +349,7 @@ self = <test_grammar_manager.TestGrammarManagerPPSync testMethod=test_middle_pp_
         pp0_data = ({1, 2}, {4})
         pp_group = _FakePPGroup(recv_data=pp0_data)
         mgr = self._make_mgr_for_pp(pp_rank=1, pp_size=3, pp_group=pp_group)
-    
+
 >       data = mgr._pp_sync_ready_failed(set(), set())
                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 E       TypeError: GrammarManager._pp_sync_ready_failed() missing 1 required positional argument: 'failed_reasons'
@@ -362,7 +362,7 @@ self = <test_grammar_manager.TestGrammarManagerPPSync testMethod=test_pp0_sends_
     def test_pp0_sends_ready_failed_without_recv(self):
         pp_group = _FakePPGroup()
         mgr = self._make_mgr_for_pp(pp_rank=0, pp_size=3, pp_group=pp_group)
-    
+
 >       data = mgr._pp_sync_ready_failed({1}, {3})
                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 E       TypeError: GrammarManager._pp_sync_ready_failed() missing 1 required positional argument: 'failed_reasons'
@@ -377,7 +377,7 @@ self = <test_grammar_manager.TestGrammarManagerPPSync testMethod=test_pp_sync_dr
         mgr = self._make_mgr_for_pp(pp_rank=0, pp_size=2, pp_group=pp_group)
         work = _FakePPSendWork()
         mgr.grammar_pp_sync_work_list = [work]
-    
+
 >       mgr._pp_sync_ready_failed({1}, set())
 E       TypeError: GrammarManager._pp_sync_ready_failed() missing 1 required positional argument: 'failed_reasons'
 
@@ -389,19 +389,19 @@ self = <test_grammar_manager.TestStrictReasoningPaths testMethod=test_future_exc
     def test_future_exception_creates_invalid_grammar(self):
         """Future.result() raising should create InvalidGrammarObject, not crash."""
         mgr = self._make_mgr()
-    
+
         future = Future()
         future.set_exception(RuntimeError("compilation failed"))
-    
+
         req = _make_req(json_schema='{"type": "object"}')
         req.require_reasoning = True
         req.grammar = future
         req.grammar_key = ("json", '{"type": "object"}')
         mgr.grammar_queue.append(req)
-    
+
         mgr.SGLANG_GRAMMAR_POLL_INTERVAL = 0.001
         result = mgr.get_ready_grammar_requests()
-    
+
         self.assertEqual(len(result), 1)
 >       self.assertIsInstance(result[0].grammar, InvalidGrammarObject)
 E       AssertionError: <Future at 0x7f3e54fbd340 state=finished raised RuntimeError> is not an instance of <class 'sglang.srt.constrained.base_grammar_backend.InvalidGrammarObject'>
@@ -412,7 +412,7 @@ ERROR    sglang.srt.constrained.grammar_manager:grammar_manager.py:298 Grammar c
 =============================== warnings summary ===============================
 ../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
   /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
-  
+
     self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
 
 ../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
