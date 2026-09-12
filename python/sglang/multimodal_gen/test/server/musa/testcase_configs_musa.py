@@ -15,6 +15,17 @@ from sglang.multimodal_gen.test.server.testcase_configs import (
     TI2I_sampling_params,
     TI2V_sampling_params,
 )
+from sglang.multimodal_gen.test.test_utils import (
+    DEFAULT_FAST_HUNYUAN_MODEL_NAME_FOR_TEST,
+    DEFAULT_QWEN_IMAGE_2512_MODEL_NAME_FOR_TEST,
+    DEFAULT_QWEN_IMAGE_EDIT_2509_MODEL_NAME_FOR_TEST,
+    DEFAULT_QWEN_IMAGE_EDIT_MODEL_NAME_FOR_TEST,
+    DEFAULT_QWEN_IMAGE_LAYERED_MODEL_NAME_FOR_TEST,
+    DEFAULT_QWEN_IMAGE_MODEL_NAME_FOR_TEST,
+    DEFAULT_SMALL_MODEL_NAME_FOR_TEST,
+    DEFAULT_WAN_2_1_I2V_14B_480P_MODEL_NAME_FOR_TEST,
+    DEFAULT_WAN_2_1_T2V_1_3B_MODEL_NAME_FOR_TEST,
+)
 
 
 @lru_cache(maxsize=None)
@@ -34,7 +45,7 @@ ONE_GPU_MUSA_CASES: list[DiffusionTestCase] = [
     DiffusionTestCase(
         "qwen_image_t2i_musa",
         DiffusionServerArgs(
-            model_path=hf_cached_model("Qwen/Qwen-Image"),
+            model_path=hf_cached_model(DEFAULT_QWEN_IMAGE_MODEL_NAME_FOR_TEST),
             modality="image",
         ),
         T2I_sampling_params,
@@ -43,7 +54,7 @@ ONE_GPU_MUSA_CASES: list[DiffusionTestCase] = [
     DiffusionTestCase(
         "wan2_1_t2v_1.3b_musa",
         DiffusionServerArgs(
-            model_path=hf_cached_model("Wan-AI/Wan2.1-T2V-1.3B-Diffusers"),
+            model_path=hf_cached_model(DEFAULT_WAN_2_1_T2V_1_3B_MODEL_NAME_FOR_TEST),
             modality="video",
             custom_validator="video",
             # Server warmup caps videos at 17 frames, while this test's
@@ -64,7 +75,7 @@ NIGHTLY_1_GPU_MUSA_CASES: list[DiffusionTestCase] = [
     DiffusionTestCase(
         "zimage_image_t2i_musa",
         DiffusionServerArgs(
-            model_path=hf_cached_model("Tongyi-MAI/Z-Image-Turbo"),
+            model_path=hf_cached_model(DEFAULT_SMALL_MODEL_NAME_FOR_TEST),
             modality="image",
         ),
         T2I_sampling_params,
@@ -73,7 +84,7 @@ NIGHTLY_1_GPU_MUSA_CASES: list[DiffusionTestCase] = [
     DiffusionTestCase(
         "qwen_image_layered_i2i_musa",
         DiffusionServerArgs(
-            model_path=hf_cached_model("Qwen/Qwen-Image-Layered"),
+            model_path=hf_cached_model(DEFAULT_QWEN_IMAGE_LAYERED_MODEL_NAME_FOR_TEST),
             modality="image",
         ),
         MULTI_FRAME_I2I_sampling_params,
@@ -82,7 +93,7 @@ NIGHTLY_1_GPU_MUSA_CASES: list[DiffusionTestCase] = [
     DiffusionTestCase(
         "fast_hunyuan_video_musa",
         DiffusionServerArgs(
-            model_path=hf_cached_model("FastVideo/FastHunyuan-diffusers"),
+            model_path=hf_cached_model(DEFAULT_FAST_HUNYUAN_MODEL_NAME_FOR_TEST),
             modality="video",
             custom_validator="video",
         ),
@@ -92,7 +103,7 @@ NIGHTLY_1_GPU_MUSA_CASES: list[DiffusionTestCase] = [
     DiffusionTestCase(
         "qwen_image_2512_t2i_musa",
         DiffusionServerArgs(
-            model_path=hf_cached_model("Qwen/Qwen-Image-2512"),
+            model_path=hf_cached_model(DEFAULT_QWEN_IMAGE_2512_MODEL_NAME_FOR_TEST),
             modality="image",
         ),
         T2I_sampling_params,
@@ -101,7 +112,7 @@ NIGHTLY_1_GPU_MUSA_CASES: list[DiffusionTestCase] = [
     DiffusionTestCase(
         "qwen_image_edit_t2i_musa",
         DiffusionServerArgs(
-            model_path=hf_cached_model("Qwen/Qwen-Image-Edit"),
+            model_path=hf_cached_model(DEFAULT_QWEN_IMAGE_EDIT_MODEL_NAME_FOR_TEST),
             modality="image",
         ),
         MUSA_TI2I_sampling_params,
@@ -110,7 +121,9 @@ NIGHTLY_1_GPU_MUSA_CASES: list[DiffusionTestCase] = [
     DiffusionTestCase(
         "qwen_image_edit_2509_ti2i_musa",
         DiffusionServerArgs(
-            model_path=hf_cached_model("Qwen/Qwen-Image-Edit-2509"),
+            model_path=hf_cached_model(
+                DEFAULT_QWEN_IMAGE_EDIT_2509_MODEL_NAME_FOR_TEST
+            ),
             modality="image",
         ),
         MULTI_IMAGE_TI2I_sampling_params,
@@ -128,7 +141,9 @@ TWO_GPU_MUSA_CASES: list[DiffusionTestCase] = [
     DiffusionTestCase(
         "wan2_1_i2v_14b_480P_2gpu_musa",
         DiffusionServerArgs(
-            model_path=hf_cached_model("Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"),
+            model_path=hf_cached_model(
+                DEFAULT_WAN_2_1_I2V_14B_480P_MODEL_NAME_FOR_TEST
+            ),
             modality="video",
             custom_validator="video",
             num_gpus=2,

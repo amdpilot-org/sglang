@@ -20,6 +20,7 @@ from sglang.multimodal_gen.runtime.entrypoints.openai.video_api import (
     create_video,
 )
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import Req
+from sglang.multimodal_gen.test.test_utils import DEFAULT_MINIMAX_H3_MODEL_NAME_FOR_TEST
 
 
 def test_multipart_video_declares_perf_dump_path_form_field():
@@ -44,7 +45,7 @@ def test_video_api_forwards_profiling_options():
     server_args = SimpleNamespace(
         backend="auto",
         model_id=None,
-        model_path="MiniMaxAI/MiniMax-H3",
+        model_path=DEFAULT_MINIMAX_H3_MODEL_NAME_FOR_TEST,
         pipeline_class_name="MiniMaxH3Pipeline",
         pipeline_config=object(),
     )

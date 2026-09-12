@@ -76,6 +76,9 @@ from sglang.multimodal_gen.runtime.pipelines_core.stages.model_specific_stages.c
 from sglang.multimodal_gen.runtime.pipelines_core.stages.model_specific_stages.cosmos3_guardrails import (
     is_cosmos_guardrail_available,
 )
+from sglang.multimodal_gen.test.test_utils import (
+    DEFAULT_COSMOS3_NANO_MODEL_NAME_FOR_TEST,
+)
 
 
 def _apply(mapping_fn, key):
@@ -86,7 +89,7 @@ def _apply(mapping_fn, key):
 def _cosmos3_server_args(config=None, batching_max_size=1):
     return types.SimpleNamespace(
         model_id=None,
-        model_path="nvidia/Cosmos3-Nano",
+        model_path=DEFAULT_COSMOS3_NANO_MODEL_NAME_FOR_TEST,
         served_model_name="cosmos3-production",
         backend=None,
         pipeline_class_name=None,
@@ -884,7 +887,7 @@ class TestCosmos3ModelResolution(unittest.TestCase):
 
     def test_hf_checkpoint_uses_registered_native_pipeline_config(self):
         for model_path in (
-            "nvidia/Cosmos3-Nano",
+            DEFAULT_COSMOS3_NANO_MODEL_NAME_FOR_TEST,
             "nvidia/Cosmos3-Nano-Policy-DROID",
             "nvidia/Cosmos3-Super",
             "nvidia/Cosmos3-Super-Text2Image",

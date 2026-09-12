@@ -20,12 +20,13 @@ from sglang.multimodal_gen.runtime.entrypoints.action.protocol import (
     pack_msgpack,
     unpack_msgpack,
 )
+from sglang.multimodal_gen.test.test_utils import DEFAULT_PI05_MODEL_NAME_FOR_TEST
 
 
 def _server_args(config: Pi05PipelineConfig | None = None) -> SimpleNamespace:
     return SimpleNamespace(
         model_id=None,
-        model_path="lerobot/pi05_base",
+        model_path=DEFAULT_PI05_MODEL_NAME_FOR_TEST,
         served_model_name="pi05-production",
         output_path=None,
         comfyui_mode=False,
@@ -73,7 +74,7 @@ def test_action_request_schema_builds_pi05_sampling_params():
     image = np.zeros((8, 8, 3), dtype=np.uint8)
     payload = {
         "request_id": "action-req-1",
-        "model": "lerobot/pi05_base",
+        "model": DEFAULT_PI05_MODEL_NAME_FOR_TEST,
         "input": {
             "task": "pick up the block",
             "observation": {

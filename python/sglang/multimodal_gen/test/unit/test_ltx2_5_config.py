@@ -27,6 +27,11 @@ from sglang.multimodal_gen.configs.pipeline_configs.ltx_2_5 import (
     LTX25_DISTILLED_SIGMA_VALUES,
     LTX25PipelineConfig,
 )
+from sglang.multimodal_gen.test.test_utils import (
+    DEFAULT_LTX_2_3_MODEL_NAME_FOR_TEST,
+    DEFAULT_LTX_2_5_MODEL_NAME_FOR_TEST,
+    DEFAULT_LTX_2_MODEL_NAME_FOR_TEST,
+)
 
 
 class TestLTX25DiTConfig(unittest.TestCase):
@@ -247,15 +252,17 @@ class TestLTX25PipelineConfig(unittest.TestCase):
         from sglang.multimodal_gen.registry import _get_config_info
 
         self.assertIs(
-            _get_config_info("Lightricks/LTX-2.5-Diffusers").pipeline_config_cls,
+            _get_config_info(DEFAULT_LTX_2_5_MODEL_NAME_FOR_TEST).pipeline_config_cls,
             LTX25PipelineConfig,
         )
         self.assertIs(
-            _get_config_info("Lightricks/LTX-2").pipeline_config_cls,
+            _get_config_info(DEFAULT_LTX_2_MODEL_NAME_FOR_TEST).pipeline_config_cls,
             LTX2PipelineConfig,
         )
         self.assertEqual(
-            _get_config_info("Lightricks/LTX-2.3").pipeline_config_cls.__name__,
+            _get_config_info(
+                DEFAULT_LTX_2_3_MODEL_NAME_FOR_TEST
+            ).pipeline_config_cls.__name__,
             "LTX23PipelineConfig",
         )
 
