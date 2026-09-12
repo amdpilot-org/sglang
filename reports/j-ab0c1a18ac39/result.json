@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39092",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the batch-only trace cursor IndexError from the recorded base, then bound every profiler flush to the actual FullCudaGraphBackend ShapeKey. Trace filenames now retain batch size plus any PDMUX stream, LoRA, and attention/DSA variant dimensions without collisions; the legacy filename remains unchanged for a default single-stream graph.",
+  "tests": [
+    {
+      "command": "base checkout callback reproduction recorded in reports/j-ab0c1a18ac39/raw/failing_before_cursor.log",
+      "exit_code": 1,
+      "what_was_measured": "The third flush for two batch buckets (representing bs=11 dense, bs=11 sparse, bs=7 dense) raised IndexError from _profile_bs_list[2] in the actual base implementation."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ab0c1a18ac39/venv/bin/python -m pytest -q test/registered/unit/model_executor/runner/test_decode_cuda_graph_runner.py test/registered/unit/model_executor/runner_backend/test_full_cuda_graph_backend.py",
+      "exit_code": 0,
+      "what_was_measured": "18 tests passed, including propagation of the exact ShapeKey and collision-free naming across batch, stream, LoRA/no-LoRA, and dense/sparse attention variants. Raw output: reports/j-ab0c1a18ac39/raw/focused_pytest.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ab0c1a18ac39/venv/bin/python reports/j-ab0c1a18ac39/gpu_graph_profile_repro.py",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X with torch 2.11.0+rocm7.2, the real torch profiler and FullCudaGraphBackend produced 16 unique Chrome traces for 2 batch sizes x 2 stream groups x 2 LoRA identities x 2 attention identities. Traces contained the expected ProfilerStep sequence 2,5,...,47 and GPU kernel events. All 16 captured graphs replayed with max absolute error 0.0 against independently executed eager PyTorch references. Raw log and .json.gz traces are under reports/j-ab0c1a18ac39/raw/gpu_profile and reports/j-ab0c1a18ac39/raw/gpu_graph_profile_repro.log."
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files <changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, credential, and registered-test metadata checks passed for all changed Python files."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported amd/GLM-5.2-MXFP4 TP=8 server startup was not run: this job had one GPU and used the requested minimal genuine graph/profiler setup instead.",
+    "The harness exercised DSA-style dense/sparse and LoRA/no-LoRA capture identities through the real backend/profiler callback, but did not load a full DSA or LoRA model.",
+    "PDMUX is NVIDIA-only, so its model/runtime path was not executed on this ROCm host. The genuine profiler was entered separately for two stream groups exactly as capture() does, and collision-free stream attribution was validated, but NVIDIA PDMUX behavior remains unverified.",
+    "No FlyDSL C++ or other native source changed, so no native rebuild or compiler/ISA claim applies."
+  ]
+}

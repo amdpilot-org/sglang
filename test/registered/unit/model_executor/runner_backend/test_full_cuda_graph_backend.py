@@ -82,6 +82,7 @@ def _make_runner(*, enable_profile, profiler, num_tokens_per_bs=1, mode_name="DE
         num_tokens_per_bs=num_tokens_per_bs,
         capture_forward_mode=SimpleNamespace(name=mode_name),
         enable_profile_cuda_graph=enable_profile,
+        _enqueue_profile_capture_identity=mock.Mock(),
     )
     if profiler is not _UNSET:
         runner._profiler = profiler
@@ -186,6 +187,22 @@ class TestCaptureOneWithProfiling(CustomTestCase):
         # Schedule wait=2 + active=1 => one step per warmup (x2) + one post-capture.
         self.assertEqual(profiler.step.call_count, 3)
         self.assertEqual(forward_fn.call_count, 3)
+
+    def test_enqueues_the_actual_shape_key_before_profiler_steps(self):
+        profiler = SimpleNamespace(step=mock.Mock(name="step"))
+        runner = _make_runner(enable_profile=True, profiler=profiler)
+        backend = _make_backend(runner)
+        shape_key = ShapeKey(
+            size=11,
+            stream_idx=2,
+            variant_label="nolora",
+            attention_variant="sparse",
+        )
+
+        with mock.patch("torch.cuda.CUDAGraph", return_value="GRAPH"):
+            backend.capture_one(shape_key, mock.Mock(return_value=object()))
+
+        runner._enqueue_profile_capture_identity.assert_called_once_with(shape_key)
 
     def test_capture_not_wrapped_in_record_function(self):
         # The capture forward is no longer wrapped in a record_function; per-bs

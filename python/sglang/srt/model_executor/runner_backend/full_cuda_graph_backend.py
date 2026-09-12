@@ -133,6 +133,8 @@ class FullCudaGraphBackend(BaseCudaGraphBackend):
             if getattr(runner, "enable_profile_cuda_graph", False)
             else None
         )
+        if profiler is not None:
+            runner._enqueue_profile_capture_identity(shape_key)
 
         # Two warmups so kernels are loaded and one-time setup is paid before capture.
         # post_warmup_hook lets the attention backend reset state that warmup mutated.
