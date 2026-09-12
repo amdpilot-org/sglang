@@ -1,0 +1,67 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35562",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1409",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1375",
+  "candidate_commit": "2b195c8caafa620378888215ed62d32d2babbd2a",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the exact deletion examples and dictionary-shaped no-call cases, but the speculative unmarked parser still raises before its preservation fallback when a later semicolon-separated JSON value is a scalar or array. It is a real but partial source fix.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0abccae644bc/venv/bin/python /job/review-evidence-j-0abccae644bc/parser_cases.py",
+      "exit_code": 0,
+      "what_was_measured": "Public llama3 parser registry behavior on the recorded base and exact candidate, including the two reported inputs, valid and unknown calls, multiple non-tool objects, Python-dict fallback, malformed tails, and non-object JSON tails. The harness records per-case exceptions without aborting."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0abccae644bc/venv/bin/python -m pytest -q test/registered/unit/function_call/test_llama32_detector.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate focused regression suite: 18 passed and 4 subtests passed. Base suite: 15 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0abccae644bc/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py -k Llama32Detector",
+      "exit_code": 0,
+      "what_was_measured": "Broader existing Llama32 detector coverage: 7 passed, 236 deselected."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0abccae644bc/venv/bin/python -m compileall -q python/sglang/srt/function_call/llama32_detector.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source compiled successfully from the checkout."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 2b195c8caafa620378888215ed62d32d2babbd2a",
+      "exit_code": 2,
+      "what_was_measured": "Two trailing-whitespace findings in candidate report artifacts; no whitespace finding in changed source or tests."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The issue and adversarial cases execute entirely in the CPU parser. rocminfo identified the assigned gfx950 AMD Instinct MI355X, but GPU execution was neither required nor used."
+  },
+  "native_rebuilt": false,
+  "source_paths": [
+    "/job/repo/python/sglang/srt/function_call/llama32_detector.py",
+    "/job/repo/python/sglang/srt/function_call/function_call_parser.py",
+    "/job/repo/test/registered/unit/function_call/test_llama32_detector.py"
+  ],
+  "native_paths": [],
+  "remaining_counterexamples": [
+    {
+      "input": "{\"a\":1};42",
+      "observed": "AttributeError: 'int' object has no attribute 'get'",
+      "expected_under_original_contract": "No calls and original text preserved unchanged"
+    },
+    {
+      "input": "{\"a\":1};[]",
+      "observed": "AttributeError: 'list' object has no attribute 'get'",
+      "expected_under_original_contract": "No calls and original text preserved unchanged"
+    }
+  ],
+  "remaining_limitations": [
+    "No HTTP server or model-weight run was performed; parser behavior was tested directly through the public registry as permitted by the original reproduction.",
+    "No model semantic accuracy or distributed workload was evaluated.",
+    "No native component changed, so native rebuild validation was not applicable.",
+    "The candidate contains trailing whitespace in two committed historical report artifacts."
+  ]
+}
