@@ -103,7 +103,10 @@ class TestMultimodalPreprocessingAdmission(CustomTestCase):
 
     def test_provisional_lease_resizes_to_parsed_weight(self):
         admission = MultimodalPreprocessingAdmission(max_inflight_items=4)
-        lease = admission.acquire(1)
+        lease = admission.acquire_unparsed_body()
+
+        self.assertEqual(lease.item_count, 4)
+        self.assertEqual(admission.inflight_items, 4)
 
         with lease.activate():
             self.assertIs(get_mm_preprocessing_admission_lease(), lease)

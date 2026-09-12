@@ -504,7 +504,7 @@ class MultimodalBodyAdmissionMiddleware:
             return
 
         try:
-            lease = admission.acquire(1)
+            lease = admission.acquire_unparsed_body()
         except MultimodalPreprocessingBusy:
             response = ORJSONResponse(
                 {

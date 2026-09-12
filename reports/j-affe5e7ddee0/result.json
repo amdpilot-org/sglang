@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33035",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3076",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2938",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/3044",
+  "candidate_commit": "7da983b52f8e95df6c41bebe4a685775e3e65f9f",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved the candidate's weighted pre-scheduler admission and corrected its pre-body under-accounting. An unparsed admitted body now reserves the full configured item budget until parsing reveals its actual media count, preventing N unknown bodies that may each weigh N items from entering ASGI receive concurrently.",
+  "tests": [
+    {
+      "command": "on exact candidate 7da983b52f8e95df6c41bebe4a685775e3e65f9f: independent ASGI adversarial case with budget=4, four concurrent 4 MiB bodies, and eventual weight=4 each",
+      "exit_code": 0,
+      "what_was_measured": "Failing before: all four bodies entered receive, retaining 16777216 bytes while provisional accounting charged four total items. Evidence: reports/j-affe5e7ddee0/evidence/candidate-weighted-adversarial-before.log"
+    },
+    {
+      "command": "PYTHONPATH=python:test/registered/unit/entrypoints/openai /tmp/amdpilot-repo-j-affe5e7ddee0/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_mm_body_admission.py test/registered/unit/managers/test_multimodal_preprocessing_admission.py",
+      "exit_code": 0,
+      "what_was_measured": "12 focused controller and ASGI middleware tests passed, including the budget=4 weighted pre-body regression. Evidence: reports/j-affe5e7ddee0/evidence/focused-after.log"
+    },
+    {
+      "command": "corrected independent ASGI adversarial case with budget=4, four concurrent 4 MiB bodies, and eventual weight=4 each",
+      "exit_code": 0,
+      "what_was_measured": "Passing after: exactly one body entered receive and retained 4194304 bytes; the other three received HTTP 503 before receive; accounting returned to zero. Evidence: reports/j-affe5e7ddee0/evidence/weighted-adversarial-after.log"
+    },
+    {
+      "command": "pytest over every test file changed from base, deselecting the two HIP-inapplicable prefill context-parallel tests",
+      "exit_code": 0,
+      "what_was_measured": "447 passed, 2 deselected, and 58 subtests passed. The two deselected tests exercise prefill context parallelism, which the current source explicitly rejects on HIP before reaching this feature. Evidence: reports/j-affe5e7ddee0/evidence/consolidated-tests-deselected.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "This is CPU-side ASGI and Python admission accounting. Kimi-K2.6 weights and an equivalent 1.5 TiB host were unavailable, and the deterministic tiny Llama fixture cannot validate multimodal Kimi behavior. No GPU numerical claim was made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The exact 200-client, 28-images-per-request Kimi-K2.6 OOM and end-to-end prevention remain unverified because the model weights and equivalent 1.5 TiB host were unavailable.",
+    "SGLANG_RUST_SERVER remains unsupported because it owns a separate frontend and preprocessing pipeline; the option is explicitly rejected there.",
+    "EPD language-only mode remains unsupported because no qualified cross-process admission ownership protocol is available; the option is explicitly rejected there.",
+    "The conservative full-budget pre-parse lease serializes application-level request-body parsing while enabled; parsing must expose the true media count before the lease can be downsized.",
+    "ASGI admission does not quantify or eliminate bounded socket, kernel, or protocol-server buffering before application receive."
+  ]
+}

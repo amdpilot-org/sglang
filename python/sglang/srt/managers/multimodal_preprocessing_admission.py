@@ -1,8 +1,9 @@
 """Admission accounting for multimodal preprocessing.
 
-The HTTP frontend takes a provisional one-item lease before consuming a request
-body. Once parsing identifies the actual media count, tokenizer-side admission
-resizes that same lease and holds it through preprocessing and scheduler handoff.
+The HTTP frontend takes a provisional maximum-weight lease before consuming a
+request body. Once parsing identifies the actual media count, tokenizer-side
+admission resizes that same lease and holds it through preprocessing and
+scheduler handoff.
 """
 
 from __future__ import annotations
@@ -213,6 +214,16 @@ class MultimodalPreprocessingAdmission:
             return self.acquire(item_count)
         except MultimodalPreprocessingBusy:
             return None
+
+    def acquire_unparsed_body(self) -> MultimodalPreprocessingAdmissionLease:
+        """Reserve the largest possible weight until a body can be inspected.
+
+        The media count is inside the JSON body, so charging less than the full
+        budget before ``receive()`` could admit several bodies that later each
+        consume the entire item budget. The tokenizer manager resizes this lease
+        to the parsed weight as soon as request validation exposes that count.
+        """
+        return self.acquire(self.max_inflight_items)
 
     def _release(self, item_count: int) -> None:
         with self._lock:
