@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/2272",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "unsupported_architecture",
+  "summary": "The requested cuDNN attention backend is absent at the recorded base and the requested --attention-backend cudnn command is rejected by argument parsing. The prepared node exposes one AMD Instinct MI355X through ROCm 7.2 and has no NVIDIA CUDA runtime or cudnn Python frontend, so a cuDNN paged-attention implementation cannot be built, executed, numerically compared, or CUDA-graph-qualified here. Two closed upstream candidates (PRs 4650 and 5505) were inspected; the newer candidate is not directly applicable to current main because it implements CUDA-graph metadata hooks that the current AttentionBackend contract explicitly removed, and its reported CUDA-graph work remained incomplete when closed. No unvalidated backend code was presented as a completed feature.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-89d88ff92688/venv/bin/python -m sglang.launch_server --model meta-llama/Llama-3.1-8B-Instruct --attention-backend cudnn",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before reproduction of the requested public CLI. argparse reports cudnn as an invalid attention backend choice before model loading."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-89d88ff92688/venv/bin/python -c <environment probe importing torch and querying cudnn frontend availability>",
+      "exit_code": 0,
+      "what_was_measured": "Pinned runtime identity and prerequisite availability: torch 2.11.0+rocm7.2, torch.version.cuda is null, torch.version.hip is 7.2.26015, one AMD Instinct MI355X is visible, and importlib.util.find_spec('cudnn') is null."
+    },
+    {
+      "command": "gh issue view 2272 --repo sgl-project/sglang --json title,body,state,comments,url; gh pr view 4650 --repo sgl-project/sglang ...; gh pr view 5505 --repo sgl-project/sglang ...",
+      "exit_code": 0,
+      "what_was_measured": "Complete issue contract and existing related work. PR 5505 reported the required int32 sequence-length correction and decode CUDA-graph work, while the issue remained open and the PR was closed."
+    },
+    {
+      "command": "gh api repos/sgl-project/sglang/contents/python/sglang/srt/layers/attention/cudnn_backend.py?ref=407286248663946eea06bcc83ca31897013d4232 --jq .content | base64 -d | rg ...; sed -n '1,240p' python/sglang/srt/layers/attention/base_attn_backend.py",
+      "exit_code": 0,
+      "what_was_measured": "Compatibility review of the latest closed candidate against the current backend contract. The candidate overrides init_forward_metadata_capture_cuda_graph/init_forward_metadata_replay_cuda_graph; current main documents those hooks as removed and requires init_forward_metadata_out_graph/init_forward_metadata_in_graph."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "A GPU was queried but no cuDNN operation was run. The assigned device is AMD Instinct MI355X under ROCm; cuDNN is an NVIDIA CUDA library and the cudnn frontend module is absent.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No NVIDIA GPU or CUDA runtime was available, so cuDNN paged attention, page_size=1 behavior, BF16/FP16 numerical accuracy, graph caching, and CUDA Graph capture/replay could not be exercised.",
+    "The requested Llama-3.1-8B-Instruct serving path was not run because argument parsing fails first and the available deterministic tiny fixture only qualifies transport/engine execution, not cuDNN or the requested model semantics.",
+    "No independent GPU numerical reference was produced because the target kernel cannot execute on the assigned AMD architecture.",
+    "No native rebuild applies: the proposed backend is Python plus NVIDIA cuDNN frontend, and repository-environment.json declares no prepared native component.",
+    "A complete implementation still needs adaptation to the current AttentionBackend metadata lifecycle, current KV-index translation/pool contracts, dependency packaging, explicit NVIDIA platform gating, page-size validation, eager prefill/decode tests, CUDA Graph capture/replay tests, adversarial mixed-prefix tests, and comparison against an independent PyTorch SDPA reference on supported NVIDIA hardware."
+  ]
+}
