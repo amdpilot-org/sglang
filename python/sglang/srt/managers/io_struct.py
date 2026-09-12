@@ -216,6 +216,9 @@ class GenerateReqInput:
     mm_content_hashes: Optional[
         Union[List[Optional[str]], List[List[Optional[str]]]]
     ] = None
+    # Optional opaque, stable caller identities, aligned one-to-one with images.
+    # They are trusted only when --trust-mm-content-hashes is enabled.
+    mm_cache_ids: Optional[Union[List[Optional[str]], List[List[Optional[str]]]]] = None
     # Whether to extract and process audio from video inputs.
     use_audio_in_video: bool = False
     # Optional request-scoped video processor configuration.
@@ -635,7 +638,7 @@ class GenerateReqInput:
 
     def _normalize_mm_hashes(self, num):
         """Align per-media hashes with normalized batched image inputs."""
-        for field_name in ("mm_hashes", "mm_content_hashes"):
+        for field_name in ("mm_hashes", "mm_content_hashes", "mm_cache_ids"):
             hashes = getattr(self, field_name)
             if hashes is None:
                 setattr(self, field_name, [None] * num)
@@ -895,6 +898,9 @@ class GenerateReqInput:
                 self.mm_content_hashes[i]
                 if self.mm_content_hashes is not None
                 else None
+            ),
+            mm_cache_ids=(
+                self.mm_cache_ids[i] if self.mm_cache_ids is not None else None
             ),
             sampling_params=self.sampling_params[i],
             return_logprob=self.return_logprob[i],

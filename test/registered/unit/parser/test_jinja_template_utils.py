@@ -7,7 +7,7 @@ from sglang.srt.parser.jinja_template_utils import (
     jinja_template_may_reorder_tool_results,
     process_content_for_template_format,
 )
-from sglang.srt.utils import VideoData
+from sglang.srt.utils import AudioData, VideoData
 from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import CustomTestCase
 
@@ -16,6 +16,38 @@ register_cpu_ci(est_time=6, suite="stage-b-test-cpu-intel")
 
 
 class TestTemplateContentFormatDetection(CustomTestCase):
+    def test_media_cache_ids_survive_chat_template_extraction(self):
+        image_data, video_data, audio_data, modalities = [], [], [], []
+        process_content_for_template_format(
+            {
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "i", "cache_id": "image-id"},
+                    },
+                    {
+                        "type": "video_url",
+                        "video_url": {"url": "v", "cache_id": "video-id"},
+                    },
+                    {
+                        "type": "audio_url",
+                        "audio_url": {"url": "a", "cache_id": "audio-id"},
+                    },
+                ]
+            },
+            "openai",
+            image_data,
+            video_data,
+            audio_data,
+            modalities,
+        )
+        self.assertEqual(image_data[0].cache_id, "image-id")
+        self.assertIsInstance(video_data[0], VideoData)
+        self.assertEqual(video_data[0].cache_id, "video-id")
+        self.assertIsInstance(audio_data[0], AudioData)
+        self.assertIsInstance(audio_data[0], str)
+        self.assertEqual(audio_data[0].cache_id, "audio-id")
+
     """Test template content format detection functionality."""
 
     def test_detect_tool_result_id_association(self):

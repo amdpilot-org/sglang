@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38651",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Implemented validated caller-provided multimodal cache IDs across native image input, Chat Completions image/video/audio parts, and Responses input-image normalization. Trusted IDs are domain-separated and feed the existing modality/processor/options-aware artifact key, enabling lookup before source I/O; strict content behavior remains the default.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-5cf314909165/venv/bin/python -m compileall -q python/sglang/srt",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python serving, protocol, request, identity, and cache modules compile successfully."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5cf314909165/venv/bin/python -m pytest -q --junitxml=reports/j-5cf314909165/pytest.xml test/registered/unit/entrypoints/openai/test_protocol.py test/registered/unit/parser/test_jinja_template_utils.py test/registered/unit/managers/test_mm_hashes.py test/registered/unit/multimodal/test_media_artifact_processor.py test/registered/unit/models/test_kimi_k25.py test/registered/unit/disaggregation/test_kimi_k3_encoder_mode.py",
+      "exit_code": 0,
+      "what_was_measured": "186 tests plus 27 subtests passed. Coverage includes image/video/audio API retention, Responses retention, native batch alignment, adversarial validation, strict-mode compatibility, trusted hot-hit no-I/O/no-preprocess behavior, and Kimi/disaggregated regression suites."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the candidate patch."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5cf314909165/venv/bin/python -m pytest -q --junitxml=reports/j-5cf314909165/pytest_openai_serving.xml test/registered/unit/entrypoints/openai/test_serving_chat.py test/registered/unit/entrypoints/openai/test_serving_responses.py",
+      "exit_code": 0,
+      "what_was_measured": "170 OpenAI Chat Completions and Responses serving tests plus 70 subtests passed, covering compatibility of request conversion, replay, validation, and serving control flow."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "This change is Python request/identity/cache-control plumbing and does not alter numerical kernels. No compatible multimodal model weights were available; the deterministic tiny Llama fixture cannot qualify multimodal preprocessing or another architecture."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "At this base commit, only the Kimi-K3 image processor consumes the shared preprocessing-artifact cache. The generic cache accepts every modality, but current video and audio model processors are not yet migrated, so their cache IDs are retained by the APIs but do not yet produce no-I/O hot hits.",
+    "No compatible multimodal model weights were available, so HTTP serving with a real image/video/audio model and GPU execution were not run.",
+    "Responses input-image identities are retained in stored/replayed request content, but a full previous_response_id serving test was unavailable without a compatible multimodal model.",
+    "No native code changed, so a native rebuild was not applicable.",
+    "The prepared environment did not include ruff; syntax compilation, focused regression suites, and git diff whitespace validation were run instead."
+  ]
+}
