@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35122",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Moved requested DeepSeek-V4 MXFP4-to-FP8 expert conversion ahead of ROCm FNUZ normalization and the native AITER FP4 early-return path. Added a failing-before/passing-after regression and flag/type boundary cases.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-9ca8c0093679/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_fp8_moe_fp4_dequant.py::test_fp4_dequant_precedes_rocm_weight_processing",
+      "exit_code": 1,
+      "what_was_measured": "Against the base control flow, both ROCm FNUZ parameterizations entered native AITER FP4 processing before the requested conversion; retained in raw/failing_before.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9ca8c0093679/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_fp8_moe_fp4_dequant.py test/registered/unit/layers/quantization/test_deepgemm_ue8m0_requant.py",
+      "exit_code": 0,
+      "what_was_measured": "Eleven focused tests passed, including AITER with FNUZ on/off, dequant flag off, non-FP4 weights, and existing block-FP8/DeepGEMM processing."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9ca8c0093679/venv/bin/python reports/j-9ca8c0093679/raw/gpu_fp4_to_fp8_numerical.py (inline invocation retained as gpu_fp4_to_fp8_numerical.log)",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X gfx950, the actual packed-E2M1-to-E4M3 conversion reconstructed an independently unpacked and scaled 128x128 reference exactly (max absolute error 0.0)."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-9ca8c0093679/raw/gpu_fp4_to_fp8_numerical.log records AMD Instinct MI355X, gfx950:sramecc+:xnack-, ROCm PyTorch 2.11.0, and exact numerical equality."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 weights were unavailable, so no full-model serving, graph-capture, GSM8K, TP8, or multi-node reproduction was performed.",
+    "Available hardware was one gfx950 MI355X rather than the reported eight gfx942 MI308X GPUs.",
+    "The deterministic tiny Llama fixture is not architecture-qualified for DeepSeek-V4 MXFP4 MoE and therefore was not used as substitute evidence.",
+    "No native source changed; a native rebuild was not applicable."
+  ]
+}
