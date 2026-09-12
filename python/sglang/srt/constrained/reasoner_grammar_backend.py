@@ -144,7 +144,7 @@ class ReasonerGrammarObject(BaseGrammarObject):
             self._matched_channel_header_end_tokens,
             self._matched_channel_reasoning_header_tokens,
             self._saw_channel_reasoning_header,
-            list(self._thinking_match_history),
+            len(self._thinking_match_history),
         )
 
     def _restore_state(self, state):
@@ -156,8 +156,9 @@ class ReasonerGrammarObject(BaseGrammarObject):
             self._matched_channel_header_end_tokens,
             self._matched_channel_reasoning_header_tokens,
             self._saw_channel_reasoning_header,
-            self._thinking_match_history,
+            thinking_match_history_length,
         ) = state
+        del self._thinking_match_history[thinking_match_history_length:]
 
     def _start_channel_header(self):
         self._channel_header_tokens = 0
@@ -173,7 +174,6 @@ class ReasonerGrammarObject(BaseGrammarObject):
             self.tokens_in_think = 0
             self.tokens_after_end = -1
             self._matched_think_end_tokens = 0
-            self._thinking_match_history.clear()
         else:
             self.tokens_after_end = 0
         self._saw_channel_reasoning_header = False
@@ -334,9 +334,7 @@ class ReasonerGrammarObject(BaseGrammarObject):
             self._matched_channel_reasoning_header_tokens
         )
         new_obj._saw_channel_reasoning_header = self._saw_channel_reasoning_header
-        new_obj._state_history = [
-            (*state[:-1], list(state[-1])) for state in self._state_history
-        ]
+        new_obj._state_history = list(self._state_history)
         new_obj._finished = self._finished
         new_obj.current_token = self.current_token
         return new_obj

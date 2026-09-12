@@ -270,6 +270,60 @@ class TestReasonerGrammarBackend(unittest.TestCase):
         obj.rollback(1)
         self.assertTrue(obj._is_thinking())
 
+    def test_rollback_snapshots_do_not_copy_reasoning_history(self):
+        obj = ReasonerGrammarObject(
+            grammar=_RecordingGrammar(), think_end_ids=[self.EOM]
+        )
+        obj.maybe_init_reasoning(True)
+        reasoning_tokens = 2_000
+        answer_tokens = 2_000
+
+        for _ in range(reasoning_tokens):
+            obj.accept_token(1001)
+        obj.accept_token(self.EOM)
+        for _ in range(answer_tokens):
+            obj.accept_token(2001)
+
+        self.assertEqual(len(obj._state_history), 4_001)
+        self.assertFalse(
+            any(
+                isinstance(value, list)
+                for state in obj._state_history
+                for value in state
+            )
+        )
+        self.assertEqual(len(obj._thinking_match_history), reasoning_tokens + 1)
+
+        copied = obj.copy()
+        obj.rollback(answer_tokens + 1)
+        self.assertTrue(obj._is_thinking())
+        self.assertEqual(obj.tokens_in_think, reasoning_tokens)
+        self.assertEqual(len(obj._thinking_match_history), reasoning_tokens)
+        self.assertTrue(copied._is_generation())
+        self.assertEqual(len(copied.grammar.accepted), answer_tokens)
+
+    def test_rollback_restores_history_before_second_reasoning_channel(self):
+        obj = self._make_muse_object()
+        first_reasoning = [1001, 1002]
+        second_header = [
+            self.EOM,
+            self.START,
+            self.ASSISTANT,
+            self.TO,
+            self.EQ_SELF,
+            self.MESSAGE,
+        ]
+        for token in first_reasoning + second_header + [1003]:
+            obj.accept_token(token)
+
+        self.assertTrue(obj._is_thinking())
+        self.assertEqual(obj.tokens_in_think, 1)
+        obj.rollback(len(second_header) + 1)
+
+        self.assertTrue(obj._is_thinking())
+        self.assertEqual(obj.tokens_in_think, len(first_reasoning))
+        self.assertEqual(len(obj._thinking_match_history), len(first_reasoning))
+
     def test_non_channel_detector_still_binds_immediately_after_think_end(self):
         grammar = _RecordingGrammar()
         obj = ReasonerGrammarObject(grammar=grammar, think_end_ids=[7])
