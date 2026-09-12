@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32693",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2629",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2624",
+  "candidate_commit": "965b2a92956845e23c25f26da09d52d4e4006bd4",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a substantive partial fix: it scopes clear() to a validated SHA-256-prefixed instance suffix, preserves unrelated files, and fixes the two counterexamples inherited from PR 2598. It does not satisfy the original shared-mount isolation contract for all valid model names. With an MLA clearing suffix of _model, filenames for distinct MLA deployments named model_mamba, model_swa, model_k, or model_indexer are accepted as owned component files and deleted. The flat filename grammar makes these names identical to valid component keys of model, so the candidate's allowlist cannot distinguish ownership.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-75e80d781547/venv/bin/python /job/review-evidence-j-75e80d781547/reproduce_clear.py (base 358c163)",
+      "exit_code": 0,
+      "what_was_measured": "Production NixlFileManager imported from the checkout. Legacy clear removed owned files, foreign model/rank/prefix files, and unrelated.txt, reproducing the original issue."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-75e80d781547/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_nixl_file_manager.py (candidate 965b2a9)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 6 tests and 5 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-75e80d781547/venv/bin/python /job/review-evidence-j-75e80d781547/reproduce_clear.py (candidate 965b2a9)",
+      "exit_code": 0,
+      "what_was_measured": "Independent production-file-manager check confirmed owned base/component removal while preserving model_variant, model_0_1, tenant_model, and unrelated.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-75e80d781547/venv/bin/python /job/review-evidence-j-75e80d781547/adversarial_collision.py (candidate 965b2a9)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial check showed all four foreign MLA deployment files (_model_mamba, _model_swa, _model_k, _model_indexer) were deleted by clear(suffix=_model)."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-75e80d781547/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_nixl_cleaner.py (candidate 965b2a9)",
+      "exit_code": 0,
+      "what_was_measured": "Related cleaner suite: 9 tests and 8 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-75e80d781547/venv/bin/python -m py_compile python/sglang/srt/mem_cache/storage/nixl/nixl_utils.py python/sglang/srt/mem_cache/storage/nixl/hicache_nixl.py (candidate 965b2a9)",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources compile successfully."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The issue and candidate concern CPU filesystem filename matching and unlink behavior; no GPU operation is involved, so using the assigned gfx950 would not strengthen this contract test."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "For MLA suffix _model, a different valid MLA deployment named model_mamba produces the same filename tail as model's mamba component and is deleted.",
+    "For MLA suffix _model, different valid MLA deployments named model_swa, model_k, and model_indexer likewise collide with accepted component suffixes and are deleted."
+  ],
+  "remaining_limitations": [
+    "No real NIXL plugin, HTTP server, shared distributed filesystem, model weights, multi-rank deployment, or GPU transfer was exercised. The production NixlFileManager and its actual bucket routing were exercised directly, which is sufficient to prove the deterministic deletion matcher counterexample.",
+    "The current flat filename layout is inherently ambiguous between a component suffix and another MLA model name. Full isolation requires an unambiguous namespace/layout or equivalent ownership metadata; this review does not implement a replacement patch.",
+    "No native code changed in the candidate, repository-environment.json declares native and wheel as null, and source imports resolved to /job/repo/python; therefore no native rebuild applied."
+  ]
+}

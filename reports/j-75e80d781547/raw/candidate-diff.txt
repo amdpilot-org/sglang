@@ -1,0 +1,235 @@
+commit
+ .../srt/mem_cache/storage/nixl/hicache_nixl.py     |   2 +-
+ .../srt/mem_cache/storage/nixl/nixl_utils.py       |  53 +++++++++-
+ .../mem_cache/test_hicache_nixl_file_manager.py    | 116 +++++++++++++++++++++
+ 3 files changed, 167 insertions(+), 4 deletions(-)
+diff --git a/python/sglang/srt/mem_cache/storage/nixl/hicache_nixl.py b/python/sglang/srt/mem_cache/storage/nixl/hicache_nixl.py
+index 1f32270..985bde8 100644
+--- a/python/sglang/srt/mem_cache/storage/nixl/hicache_nixl.py
++++ b/python/sglang/srt/mem_cache/storage/nixl/hicache_nixl.py
+@@ -609,7 +609,7 @@ class HiCacheNixl(HiCacheStorage):
+     def clear(self) -> None:
+         if self.file_manager is None:
+             return
+-        self.file_manager.clear()
++        self.file_manager.clear(suffix=self.config_suffix)
+
+     def close(self):
+         if self._l3_cleaner is not None:
+diff --git a/python/sglang/srt/mem_cache/storage/nixl/nixl_utils.py b/python/sglang/srt/mem_cache/storage/nixl/nixl_utils.py
+index ed826eb..96e2b1b 100644
+--- a/python/sglang/srt/mem_cache/storage/nixl/nixl_utils.py
++++ b/python/sglang/srt/mem_cache/storage/nixl/nixl_utils.py
+@@ -1,8 +1,10 @@
+ import logging
+ import os
++import re
+ from typing import Optional
+
+ from sglang.srt.environ import envs
++from sglang.srt.mem_cache.hicache_storage import PoolName
+ from sglang.srt.mem_cache.storage.nixl.nixl_routing import (
+     _BUCKET_MASK,
+     BUCKET_HEX_CHARS,
+@@ -11,6 +13,37 @@ from sglang.srt.mem_cache.storage.nixl.nixl_routing import (
+
+ logger = logging.getLogger(__name__)
+
++_CACHE_KEY_HEX_LENGTH = 64
++_POOL_NAME_PATTERN = "|".join(
++    sorted((re.escape(pool.value) for pool in PoolName), key=len, reverse=True)
++)
++_COMPONENT_SUFFIX_RE = re.compile(
++    rf"_(?:(?:{_POOL_NAME_PATTERN})(?:_(?:temporal|conv_\d+|[kv]|\d+))?|[kv])$"
++)
++
++
++def _name_matches_suffix(name: str, suffix: str) -> bool:
++    """Return whether a cache file belongs to an instance suffix.
++
++    NIXL cache file names start with a SHA-256 page key, followed by the
++    instance suffix and, optionally, a component suffix from the key formats
++    produced by ``HiCacheNixl``.
++    Anchoring the suffix after the fixed-width key avoids treating a shorter
++    model name as the underscore-delimited tail of a longer model name.
++    """
++    key = name[:_CACHE_KEY_HEX_LENGTH]
++    if len(key) != _CACHE_KEY_HEX_LENGTH or any(
++        char not in "0123456789abcdef" for char in key
++    ):
++        return False
++
++    scoped_name = name[_CACHE_KEY_HEX_LENGTH:]
++    if not scoped_name.startswith(suffix):
++        return False
++    remainder = scoped_name[len(suffix) :]
++    return not remainder or _COMPONENT_SUFFIX_RE.fullmatch(remainder) is not None
++
++
+ _SGLANG_NIXL_CONFIG_KEYS = {
+     "use_direct_io",
+     "l3_cleaner_enabled",
+@@ -233,16 +266,26 @@ class NixlFileManager:
+                 f"Initialized file manager with base directories: {self.base_dirs}. Direct I/O: {use_direct_io}"
+             )
+
+-    def clear(self) -> None:
+-        """Clear all files below every configured base directory."""
++    def clear(self, suffix: Optional[str] = None) -> None:
++        """Clear only files belonging to the supplied instance suffix."""
+         if not self.base_dirs:
+             logger.warning("Base directories are empty, skipping clear operation")
+             return
+
++        if not suffix or suffix == "_":
++            logger.error(
++                "Refusing to clear NIXL files without a usable instance suffix "
++                "(suffix=%r)",
++                suffix,
++            )
++            return
++
+         for base in self.base_dirs:
+             try:
+                 for root, _dirs, files in os.walk(base):
+                     for file in files:
++                        if not _name_matches_suffix(file, suffix):
++                            continue
+                         file_path = os.path.join(root, file)
+                         try:
+                             os.remove(file_path)
+@@ -250,7 +293,11 @@ class NixlFileManager:
+                             logger.warning(f"Failed to remove file {file_path}: {e}")
+             except Exception as e:
+                 logger.error(f"Failed to clear base directory {base}: {e}")
+-        logger.debug(f"Cleared all files in base directories: {self.base_dirs}")
++        logger.debug(
++            "Cleared files with suffix %r in base directories: %s",
++            suffix,
++            self.base_dirs,
++        )
+
+     def ensure_all_bucket_dirs(self) -> None:
+         """Pre-create every possible bucket directory under each base dir.
+diff --git a/test/registered/unit/mem_cache/test_hicache_nixl_file_manager.py b/test/registered/unit/mem_cache/test_hicache_nixl_file_manager.py
+new file mode 100644
+index 0000000..3cbcead
+--- /dev/null
++++ b/test/registered/unit/mem_cache/test_hicache_nixl_file_manager.py
+@@ -0,0 +1,116 @@
++"""CPU-only regression tests for scoped NIXL file-cache clearing."""
++
++import os
++import shutil
++import tempfile
++import unittest
++
++from sglang.srt.mem_cache.storage.nixl.nixl_utils import NixlFileManager
++from sglang.test.ci.ci_register import register_cpu_ci
++
++register_cpu_ci(est_time=2, suite="base-a-test-cpu")
++
++
++class TestNixlFileManagerClear(unittest.TestCase):
++    KEY = "a" * 64
++
++    def setUp(self):
++        self.temp_dir = tempfile.TemporaryDirectory()
++        self.base_dirs = [
++            os.path.join(self.temp_dir.name, "disk0"),
++            os.path.join(self.temp_dir.name, "disk1"),
++        ]
++        self.manager = NixlFileManager(self.base_dirs, use_direct_io=False)
++
++    def tearDown(self):
++        self.temp_dir.cleanup()
++
++    def _write(self, name: str) -> str:
++        path = self.manager.get_file_path(name)
++        os.makedirs(os.path.dirname(path), exist_ok=True)
++        with open(path, "wb") as output:
++            output.write(b"cache entry")
++        return path
++
++    def test_clear_only_removes_the_calling_instance_files(self):
++        owned = [
++            self._write(f"{self.KEY}_model-a_0_1"),
++            self._write(f"{self.KEY}_model-a_0_1_mamba_temporal"),
++        ]
++        preserved = [
++            self._write(f"{self.KEY}_model-b_0_1"),
++            self._write(f"{self.KEY}_model-a_0_10"),
++            self._write(f"{self.KEY}_model-a-extended_0_1"),
++            self._write("unrelated.txt"),
++        ]
++
++        self.manager.clear(suffix="_model-a_0_1")
++
++        self.assertTrue(all(not os.path.exists(path) for path in owned))
++        self.assertTrue(all(os.path.exists(path) for path in preserved))
++
++    def test_clear_does_not_match_tail_of_longer_model_name(self):
++        cases = [
++            ("_model_0_1", "_tenant_model_0_1"),
++            ("_model", "_tenant_model"),
++        ]
++
++        for suffix, longer_model_suffix in cases:
++            with self.subTest(suffix=suffix):
++                owned = self._write(f"{self.KEY}{suffix}")
++                foreign = self._write(f"{self.KEY}{longer_model_suffix}")
++
++                self.manager.clear(suffix=suffix)
++
++                self.assertFalse(os.path.exists(owned))
++                self.assertTrue(os.path.exists(foreign))
++
++    def test_mla_clear_does_not_match_prefix_overlapping_deployments(self):
++        owned = [
++            self._write(f"{self.KEY}_model"),
++            self._write(f"{self.KEY}_model_mamba_temporal"),
++            self._write(f"{self.KEY}_model_mamba_conv_0"),
++            self._write(f"{self.KEY}_model_swa_k"),
++            self._write(f"{self.KEY}_model_k"),
++        ]
++        preserved = [
++            self._write(f"{self.KEY}_model_variant"),
++            self._write(f"{self.KEY}_model_0_1"),
++        ]
++
++        self.manager.clear(suffix="_model")
++
++        self.assertTrue(all(not os.path.exists(path) for path in owned))
++        self.assertTrue(all(os.path.exists(path) for path in preserved))
++
++    def test_clear_requires_a_sha256_cache_key_prefix(self):
++        cache_file = self._write(f"{self.KEY}_model-a_0_1")
++        non_cache_file = self._write("notes_model-a_0_1")
++
++        self.manager.clear(suffix="_model-a_0_1")
++
++        self.assertFalse(os.path.exists(cache_file))
++        self.assertTrue(os.path.exists(non_cache_file))
++
++    def test_clear_rejects_empty_or_degenerate_scope(self):
++        path = self._write(f"{self.KEY}_model-b_0_1")
++
++        for suffix in (None, "", "_"):
++            with (
++                self.subTest(suffix=suffix),
++                self.assertLogs(
++                    "sglang.srt.mem_cache.storage.nixl.nixl_utils", level="ERROR"
++                ),
++            ):
++                self.manager.clear(suffix=suffix)
++            self.assertTrue(os.path.exists(path))
++
++    def test_clear_handles_missing_base_directory(self):
++        self._write(f"{self.KEY}_model-a_0_1")
++        shutil.rmtree(self.base_dirs[0])
++
++        self.manager.clear(suffix="_model-a_0_1")
++
++
++if __name__ == "__main__":
++    unittest.main()
