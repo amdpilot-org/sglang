@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19612",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "2840b82be46c4e30d138aff60627168e7a4d6987",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate fully implements the requested unified JIT cache root and fixes the independently reported DeepGEMM import-order defect. Its regression suite passed, independent precedence and source-import checks passed, and a real ROCm torch.compile run wrote numerically correct Inductor/Triton artifacts beneath the configured root.",
+  "tests": [
+    {
+      "command": "base 358c163250ad3b1f62939b01ce1314a0a31a0365: clean import plus supported-platform synthetic deep_gemm first-import hook",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced the original incompleteness: SGLANG_JIT_CACHE_ROOT was absent, and the first deep_gemm import observed DG_JIT_CACHE_DIR as unset. See reports/j-652ca01d1698/evidence/base_reproduction.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-652ca01d1698/venv/bin/python -m pytest -q test/registered/unit/compilation/test_jit_cache_root.py",
+      "exit_code": 0,
+      "what_was_measured": "Nine candidate regressions passed at exact commit 2840b82be46c4e30d138aff60627168e7a4d6987, including executable DeepGEMM first-import ordering."
+    },
+    {
+      "command": "clean-process independent cache-root and override-precedence subprocesses at candidate commit",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed repository source imports, root-derived triton/inductor/deep_gemm paths, SGLANG_DG_CACHE_DIR precedence, and native DG_JIT_CACHE_DIR backward compatibility."
+    },
+    {
+      "command": "SGLANG_JIT_CACHE_ROOT=/tmp/amdpilot-repo-j-652ca01d1698/review-gpu-cache /tmp/amdpilot-repo-j-652ca01d1698/venv/bin/python -c '<torch.compile ROCm numerical/cache check>'",
+      "exit_code": 0,
+      "what_was_measured": "On one MI355X, compiled relu(matmul) matched eager output with max absolute error 0.0 and generated Inductor plus Triton AMDGPU/HSACO artifacts solely beneath the configured root."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..2840b82be46c4e30d138aff60627168e7a4d6987",
+      "exit_code": 0,
+      "what_was_measured": "The candidate diff contains no whitespace errors."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI355X with torch 2.11.0+rocm7.2 / HIP 7.2.26015; real Inductor and Triton compilation produced .amdgcn and .hsaco artifacts under the candidate's configured root, with max absolute numerical error 0.0 against eager PyTorch.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No native source changed, so a native rebuild was not applicable.",
+    "The prepared GPU is ROCm. Actual DeepGEMM cache-file creation on its CUDA/MUSA supported paths could not be executed; first-import ordering and precedence were verified behaviorally with a synthetic supported-platform import hook.",
+    "CUDA driver and FlashInfer CUDA cache writes were not executable on ROCm; their source mappings and import-time setup were inspected but not runtime-qualified on CUDA.",
+    "No serving/model fixture was run because the issue concerns process-level compiler-cache configuration; the real GPU compiler exercise directly covered the available affected Inductor/Triton paths."
+  ]
+}
