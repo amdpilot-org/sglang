@@ -177,6 +177,27 @@ class AutoencoderDC(nn.Module, LayerwiseOffloadableModuleMixin):
         sample = gather_and_trim_height(decoded.sample, expected_height)
         return decoded.__class__(sample=sample)
 
+    def enable_tiling(
+        self,
+        tile_sample_min_height: int | None = None,
+        tile_sample_min_width: int | None = None,
+        tile_sample_stride_height: float | None = None,
+        tile_sample_stride_width: float | None = None,
+    ) -> None:
+        """Enable tiled decoding on the wrapped diffusers autoencoder."""
+        self._ensure_inner_model()
+        self._inner_model.enable_tiling(
+            tile_sample_min_height=tile_sample_min_height,
+            tile_sample_min_width=tile_sample_min_width,
+            tile_sample_stride_height=tile_sample_stride_height,
+            tile_sample_stride_width=tile_sample_stride_width,
+        )
+
+    def disable_tiling(self) -> None:
+        """Disable tiled decoding on the wrapped diffusers autoencoder."""
+        self._ensure_inner_model()
+        self._inner_model.disable_tiling()
+
     def forward(self, x: torch.Tensor, **kwargs):
         self._ensure_inner_model()
         return self._inner_model(x, **kwargs)
