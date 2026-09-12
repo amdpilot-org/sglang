@@ -3,6 +3,7 @@ from __future__ import annotations
 import gc
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -80,6 +81,7 @@ class SchedulerProfilerManager:
         self.profile_in_progress: bool = False
         self.merge_profiles = False
         self.detailed_annotations: bool = False
+        self._pending_export_threads: List[threading.Thread] = []
 
         # For ROCM
         self.rpd_profiler = None
@@ -278,8 +280,16 @@ class SchedulerProfilerManager:
         self._apply_detailed_annotations(self.detailed_annotations)
         return ProfileReqOutput(success=True, message="Succeeded")
 
-    def _merge_profile_traces(self) -> str:
-        if not self.merge_profiles:
+    def _merge_profile_traces(
+        self,
+        *,
+        merge_profiles: Optional[bool] = None,
+        output_dir: Optional[Path] = None,
+        profile_id: Optional[str] = None,
+    ) -> str:
+        if merge_profiles is None:
+            merge_profiles = self.merge_profiles
+        if not merge_profiles:
             return ""
 
         if self.ps.tp_rank != 0:
@@ -293,7 +303,10 @@ class SchedulerProfilerManager:
 
         try:
             logger.info("Starting profile merge...")
-            merger = ProfileMerger(self.torch_profiler_output_dir, self.profile_id)
+            merger = ProfileMerger(
+                output_dir or self.torch_profiler_output_dir,
+                profile_id or self.profile_id,
+            )
             merged_path = merger.merge_chrome_traces()
 
             summary = merger.get_merge_summary()
@@ -309,6 +322,40 @@ class SchedulerProfilerManager:
             return f" Merge failed: {e!s}"
         else:
             return merge_message
+
+    def _wait_for_pending_exports(self) -> None:
+        pending = getattr(self, "_pending_export_threads", [])
+        for thread in pending:
+            thread.join()
+        self._pending_export_threads = []
+
+    def _export_torch_trace(
+        self,
+        profiler: Any,
+        trace_path: str,
+        *,
+        merge_profiles: bool,
+        output_dir: Path,
+        profile_id: str,
+    ) -> None:
+        try:
+            profiler.export_chrome_trace(trace_path)
+            torch.distributed.barrier(self.dp_tp_cpu_group)
+            merge_message = self._merge_profile_traces(
+                merge_profiles=merge_profiles,
+                output_dir=output_dir,
+                profile_id=profile_id,
+            )
+            logger.info(
+                "Profiling done. Traces are saved to: %s%s",
+                output_dir,
+                merge_message,
+            )
+        except Exception:
+            logger.exception("Failed to export profiler trace to %s", trace_path)
+        finally:
+            del profiler
+            gc.collect()
 
     def _stop_profile(
         self, stage: Optional[ForwardMode] = None
@@ -332,8 +379,10 @@ class SchedulerProfilerManager:
 
         stage_suffix = f"-{stage.name}" if stage else ""
         logger.info("Stop profiling" + stage_suffix + "...")
-        if self.torch_profiler is not None:
-            self.torch_profiler.stop()
+        torch_profiler = self.torch_profiler
+        export_scheduled = False
+        if torch_profiler is not None:
+            torch_profiler.stop()
             if not _is_npu:
                 # Build filename with only non-zero ranks to maintain backward compatibility
                 filename_parts = [self.profile_id, f"TP-{self.ps.tp_rank}"]
@@ -353,10 +402,31 @@ class SchedulerProfilerManager:
                     + ".trace.json.gz"
                 )
 
-                self.torch_profiler.export_chrome_trace(
-                    os.path.join(self.torch_profiler_output_dir, filename)
+                export_thread = threading.Thread(
+                    target=self._export_torch_trace,
+                    args=(
+                        torch_profiler,
+                        os.path.join(self.torch_profiler_output_dir, filename),
+                    ),
+                    kwargs={
+                        "merge_profiles": self.merge_profiles,
+                        "output_dir": self.torch_profiler_output_dir,
+                        "profile_id": self.profile_id,
+                    },
+                    name=f"sglang-profile-export-{self.profile_id}-{self.ps.tp_rank}",
                 )
-            torch.distributed.barrier(self.dp_tp_cpu_group)
+                if not hasattr(self, "_pending_export_threads"):
+                    self._pending_export_threads = []
+                self._pending_export_threads = [
+                    thread
+                    for thread in self._pending_export_threads
+                    if thread.is_alive()
+                ]
+                self._pending_export_threads.append(export_thread)
+                export_thread.start()
+                export_scheduled = True
+            else:
+                torch.distributed.barrier(self.dp_tp_cpu_group)
 
         if self.rpd_profiler is not None:
             self.rpd_profiler.rangePop()
@@ -387,17 +457,21 @@ class SchedulerProfilerManager:
             if self.ps.gpu_id == get_device().base_gpu_id:
                 torch.cuda.cudart().cudaProfilerStop()
 
-        merge_message = self._merge_profile_traces()
+        merge_message = ""
+        if not export_scheduled:
+            merge_message = self._merge_profile_traces()
+            logger.info(
+                "Profiling done. Traces are saved to: %s%s",
+                self.torch_profiler_output_dir,
+                merge_message,
+            )
+        else:
+            logger.info(
+                "Profiling stopped. Trace export continues in the background: %s",
+                self.torch_profiler_output_dir,
+            )
 
-        logger.info(
-            "Profiling done. Traces are saved to: %s%s",
-            self.torch_profiler_output_dir,
-            merge_message,
-        )
-
-        if self.torch_profiler is not None:
-            self.torch_profiler = None
-            gc.collect()
+        self.torch_profiler = None
 
         self.profile_in_progress = False
         self.profiler_start_forward_ct = None
@@ -411,14 +485,18 @@ class SchedulerProfilerManager:
             return
 
         if self.profile_by_stage:
-            if batch.forward_mode.is_prefill():
+            is_spec_decode = batch.forward_mode in (
+                ForwardMode.TARGET_VERIFY,
+                ForwardMode.DRAFT_EXTEND_V2,
+            )
+            if batch.forward_mode.is_prefill() and not is_spec_decode:
                 if self.profiler_prefill_ct == 0:
                     self._start_profile(batch.forward_mode)
                 self.profiler_prefill_ct += 1
                 if self.profiler_prefill_ct > self.profiler_target_prefill_ct:
                     if self.profile_in_progress:
                         self._stop_profile(stage=ForwardMode.EXTEND)
-            elif batch.forward_mode.is_decode():
+            elif batch.forward_mode.is_decode() or is_spec_decode:
                 if self.profiler_decode_ct == 0:
                     if self.profile_in_progress:
                         # force trace flush (a prefill capture must not absorb decode steps)
