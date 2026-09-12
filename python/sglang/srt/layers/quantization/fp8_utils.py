@@ -271,11 +271,6 @@ if _is_cuda:
 
 use_triton_w8a8_fp8_kernel = get_bool_env_var("USE_TRITON_W8A8_FP8_KERNEL")
 
-# Input scaling factors are no longer optional in _scaled_mm starting
-# from pytorch 2.5. Allocating a dummy tensor to pass as input_scale
-TORCH_DEVICE_IDENTITY = None
-
-
 def use_rowwise_torch_scaled_mm():
     if _is_hip:
         # The condition to determine if it is on a platform that supports
@@ -1838,20 +1833,13 @@ def _apply_fallback_scaled_mm(
     bias,
     input_dtype,
 ):
-    global TORCH_DEVICE_IDENTITY
-    if TORCH_DEVICE_IDENTITY is None:
-        TORCH_DEVICE_IDENTITY = torch.ones(1, dtype=torch.float32, device=weight.device)
-
-    output = torch._scaled_mm(
-        qinput,
-        weight,
-        scale_a=TORCH_DEVICE_IDENTITY,
-        scale_b=TORCH_DEVICE_IDENTITY,
-        out_dtype=torch.float32,
-    )
+    # This path is also used on devices where torch._scaled_mm has no native
+    # FP8 kernel. Dequantize explicitly so it is a real software fallback.
+    output = torch.mm(qinput.to(torch.float32), weight.to(torch.float32))
 
     output = _process_scaled_mm_output(output, input_2d_shape, output_shape)
-    x_scale = torch.narrow(x_scale, 0, 0, input_2d_shape[0])
+    if x_scale.numel() > 1:
+        x_scale = torch.narrow(x_scale, 0, 0, input_2d_shape[0])
 
     output = output * x_scale * weight_scale.t()
     if bias is not None:

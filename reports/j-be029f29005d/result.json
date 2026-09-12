@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38513",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced CudaSRTPlatform.supports_fp8() returning true for controlled CUDA capabilities 7.5, 8.0, 8.9, and 9.0, and reproduced that the channelwise fallback still called torch._scaled_mm. The candidate makes supports_fp8() describe native CUDA FP8 GEMM (SM 8.9+) while explicitly separating that from FP8 storage/conversion, and implements the fallback as FP32 dequantization plus torch.mm. ROCm's conservative platform flag is unchanged; both the software fallback and ROCm torch._scaled_mm were executed on the assigned MI350X.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-be029f29005d/venv/bin/python controlled pre-change reproduction",
+      "exit_code": 0,
+      "what_was_measured": "Actual checked-out CudaSRTPlatform API returned true for mocked capabilities 7.5, 8.0, 8.9, and 9.0; a forced unsupported torch._scaled_mm error escaped _apply_fallback_scaled_mm. Raw output: reports/j-be029f29005d/raw/before_reproduction.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-be029f29005d/venv/bin/python -m pytest -q test/registered/unit/platforms/test_platform_interface.py test/registered/quant/test_fp8_utils.py -k 'cuda_srt_platform_capabilities or channelwise_fallback_does_not_require_scaled_mm or prequant_output_dtype'",
+      "exit_code": 0,
+      "what_was_measured": "Three focused tests passed with six capability/dtype subtests, including the 7.5/8.0 false and 8.9/9.0 true platform decisions, the no-_scaled_mm software fallback, and scalar/prequantized scale behavior. Raw output: reports/j-be029f29005d/raw/focused_tests_final.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-be029f29005d/venv/bin/python -m pytest -q test/registered/unit/platforms/test_platform_interface.py",
+      "exit_code": 0,
+      "what_was_measured": "All 60 platform tests and 25 subtests passed. Raw output: reports/j-be029f29005d/raw/platform_tests.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-be029f29005d/venv/bin/python -m pytest -q test/registered/quant/test_fp8_utils.py",
+      "exit_code": 1,
+      "what_was_measured": "The new fallback test and four other tests passed. Existing environment-dependent tests failed because deep_gemm and CUDA-only fp8_scaled_mm symbols are absent on this ROCm checkout; the run also exposed the scalar-scale fallback edge case, which was fixed and passed in the focused rerun. Raw output: reports/j-be029f29005d/raw/fp8_utils_tests.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-be029f29005d/venv/bin/python physical ROCm FP8 validation",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X with torch 2.11.0+rocm7.2, the software fallback completed without calling torch._scaled_mm and matched an independent NumPy dequantized GEMM reference with max absolute error 0.0. The installed ROCm torch._scaled_mm also produced a finite 16x16 result. Raw output: reports/j-be029f29005d/raw/rocm_gpu_validation.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X was used for FP8 tensor conversion, the new software fallback, NumPy-reference comparison, and a native ROCm torch._scaled_mm call."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No physical NVIDIA GPU was assigned. CUDA SM 7.5, 8.0, 8.9, and 9.0 results are controlled probes through the actual CudaSRTPlatform implementation, not physical NVIDIA qualification.",
+    "The CUDA platform threshold describes native hardware FP8 GEMM capability; CUDA toolkit/library availability remains the responsibility of the selected kernel backend.",
+    "The full quantization test module cannot pass in this prepared ROCm environment because optional deep_gemm and CUDA-only fp8_scaled_mm symbols are unavailable.",
+    "No native code changed, so no native rebuild was applicable."
+  ]
+}
