@@ -324,6 +324,8 @@ class ServerArgs(DisaggServerArgsMixin):
     enable_cfg_parallel: Optional[bool] = None
     # number of GPUs in each CFG parallel group (None = auto, 1 = disabled, N > 1 = enabled)
     cfg_parallel_degree: Optional[int] = None
+    diffusion_parallel_plan: str | None = None
+    diffusion_workload_signature: str | None = None
 
     # encoder layout across a multi-rank replica: auto | fold | dp | replicate
     # (see --encoder-parallel); fold shards the weights at load time, so it is
@@ -611,6 +613,20 @@ class ServerArgs(DisaggServerArgsMixin):
 
     def _adjust_parameters(self):
         """set defaults and normalize values."""
+        from sglang.multimodal_gen.runtime.server_args.parallel_advisor import (
+            apply_advisor_to_server_args,
+        )
+
+        self.parallel_plan_resolution = apply_advisor_to_server_args(self)
+        if self.diffusion_parallel_plan:
+            logger.info(
+                "Diffusion parallel advisor source=%s selected_plan=%s "
+                "signature_hash=%s reasons=%s",
+                self.parallel_plan_resolution.source,
+                self.parallel_plan_resolution.plan,
+                self.parallel_plan_resolution.signature_hash,
+                self.parallel_plan_resolution.reasons,
+            )
         self._normalize_component_residency()
         self._adjust_cpu_offload_components()
         auto_tuner = ServerArgsAutoTuner(self)
@@ -2299,6 +2315,16 @@ class ServerArgs(DisaggServerArgsMixin):
             type=int,
             default=ServerArgs.dp_size,
             help="The data parallelism size.",
+        )
+        parser.add_argument(
+            "--diffusion-parallel-plan",
+            default=None,
+            help="Resolve a calibrated plan from auto:<report.json>.",
+        )
+        parser.add_argument(
+            "--diffusion-workload-signature",
+            default=None,
+            help="Exact workload signature as JSON or a JSON file path.",
         )
 
         parser.add_argument(
