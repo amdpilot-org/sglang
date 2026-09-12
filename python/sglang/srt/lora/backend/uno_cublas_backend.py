@@ -87,7 +87,7 @@ class UnoCublasLoRABackend(TritonLoRABackend):
             RowParallelLinear,
         )
         from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
-        from sglang.srt.layers.utils import get_layer_id
+        from sglang.srt.lora.utils import get_lora_layer_id
         from sglang.srt.models.inkling_common.dense_mlp import InklingBatchDenseMLP
 
         unsupported: list[str] = []
@@ -106,7 +106,7 @@ class UnoCublasLoRABackend(TritonLoRABackend):
             )
             if not (named_target or special_moe_target):
                 continue
-            if get_layer_id(module_name) is None:
+            if get_lora_layer_id(module_name, base_model) is None:
                 continue
             if not isinstance(module, supported):
                 unsupported.append(f"{module_name} ({type(module).__name__})")

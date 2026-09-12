@@ -1,0 +1,32 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32572",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate b53a21a7's valid Qwen3-VL and MOSS-VL dimension fixes, then added model-aware logical-layer resolution so MOSS-VL's unindexed visual.merger.linear_fc1 and linear_fc2 modules are wrapped and their adapter tensors are assigned to logical layer 0.",
+  "tests": [
+    {
+      "command": "git switch --detach b53a21a7e9c3ca61f35a09eef878ee8bb9a194d6 && /tmp/amdpilot-repo-j-5560de7d12f5/venv/bin/python /tmp/reproduce_moss_registration.py",
+      "exit_code": 1,
+      "what_was_measured": "Exact-candidate reproduction: both selected MOSS-VL visual merger targets had layer_id None; zero modules were wrapped and every registration dictionary was empty."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5560de7d12f5/venv/bin/python -m pytest -q test/registered/unit/lora/test_qwen3_vl_lora_targets.py test/registered/unit/lora/test_moss_vl_lora_targets.py test/registered/unit/lora/test_laguna_hidden_dim_unit.py",
+      "exit_code": 0,
+      "what_was_measured": "26 focused tests passed, including MOSS-VL base-module registration, adapter tensor placement, Qwen3-VL deep-stack indexing, dimensions, and namespace boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5560de7d12f5/venv/bin/python reports/j-5560de7d12f5/gpu_linear_fc_reference.py",
+      "exit_code": 0,
+      "what_was_measured": "BF16 rank-32 Qwen3-VL and MOSS-VL merger projections executed on AMD Instinct MI355X gfx950 and matched CPU FP32 references."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/lora/utils.py python/sglang/srt/lora/lora.py python/sglang/srt/lora/lora_manager.py python/sglang/srt/lora/backend/uno_cublas_backend.py python/sglang/srt/models/moss_vl.py test/registered/unit/lora/test_moss_vl_lora_targets.py reports/j-5560de7d12f5/gpu_linear_fc_reference.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, safety, and CI-registration hooks passed."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "reports/j-5560de7d12f5/raw/gpu_linear_fc_reference.log records AMD Instinct MI355X gfx950 execution and CPU-reference error measurements for all four projection shapes.",
+  "native_rebuilt": false,
+  "remaining_limitations": "Qwen3-VL-8B/EditScore and MOSS-VL weights were unavailable, so no full server/model-load or semantic multimodal reproduction was performed. The available GPU was ROCm gfx950, not the report's H100/CUDA platform. The GPU fixture validates projection arithmetic and shapes only. No native source changed."
+}

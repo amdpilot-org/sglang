@@ -5,10 +5,23 @@ from typing import Iterable, List, Optional, Set, Tuple, Union
 
 import torch
 
+from sglang.srt.layers.utils import get_layer_id
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.utils.hf_transformers_utils import AutoConfig
 
 logger = logging.getLogger(__name__)
+
+
+def get_lora_layer_id(module_name: str, base_model: torch.nn.Module) -> Optional[int]:
+    """Resolve the logical LoRA buffer layer for a module or adapter weight."""
+    layer_id = get_layer_id(module_name)
+    if layer_id is not None:
+        return layer_id
+
+    resolver = getattr(base_model, "get_lora_layer_id", None)
+    if resolver is not None:
+        return resolver(module_name)
+    return None
 
 
 def warn_if_adapter_targets_embeddings(
