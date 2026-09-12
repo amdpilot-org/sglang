@@ -1132,6 +1132,7 @@ class Envs:
     SGLANG_OPT_MASK_DP_PAD_MOE = EnvBool(False)
     SGLANG_JIT_DEEPGEMM_PRECOMPILE = EnvBool(True)
     SGLANG_JIT_DEEPGEMM_FAST_WARMUP = EnvBool(False)
+    SGLANG_JIT_DEEPGEMM_WARMUP_MARKER = EnvBool(False)
     SGLANG_JIT_DEEPGEMM_COMPILE_WORKERS = EnvInt(4)
     SGLANG_IN_DEEPGEMM_PRECOMPILE_STAGE = EnvBool(False)
     # Resolved lazily so it tracks SGLANG_CACHE_DIR, which is defined below.

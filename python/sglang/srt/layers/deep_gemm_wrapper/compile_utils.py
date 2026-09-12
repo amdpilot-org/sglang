@@ -1,4 +1,6 @@
 import fcntl
+import hashlib
+import importlib.metadata
 import logging
 import math
 import os
@@ -6,7 +8,7 @@ import time
 from contextlib import contextmanager, nullcontext
 from enum import IntEnum, auto
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 from tqdm import tqdm
@@ -17,6 +19,12 @@ from sglang.srt.distributed.device_communicators.pynccl_allocator import (
 )
 from sglang.srt.environ import envs
 from sglang.srt.layers.deep_gemm_wrapper.configurer import ENABLE_JIT_DEEPGEMM
+from sglang.srt.layers.deep_gemm_wrapper.warmup_marker import (
+    make_marker_payload,
+    marker_matches,
+    marker_path,
+    write_marker_atomic,
+)
 from sglang.srt.model_executor.forward_batch_info import ForwardMode
 from sglang.srt.runtime_context import (
     get_device,
@@ -25,6 +33,7 @@ from sglang.srt.runtime_context import (
     get_schedule,
 )
 from sglang.srt.utils import ceil_align, ceil_div, get_available_gpu_memory, is_musa
+from sglang.version import __version__ as sglang_version
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +49,7 @@ _DO_COMPILE_ALL = True
 _IS_FIRST_RANK_ON_NODE = envs.SGLANG_IS_FIRST_RANK_ON_NODE.get()
 _IN_PRECOMPILE_STAGE = envs.SGLANG_IN_DEEPGEMM_PRECOMPILE_STAGE.get()
 _FAST_WARMUP = envs.SGLANG_JIT_DEEPGEMM_FAST_WARMUP.get()
+_USE_WARMUP_MARKER = envs.SGLANG_JIT_DEEPGEMM_WARMUP_MARKER.get()
 
 # Force redirect deep_gemm cache_dir. Defaults under SGLANG_CACHE_DIR so it
 # sits with the other compiled-kernel caches; SGLANG_DG_CACHE_DIR still wins.
@@ -117,6 +127,171 @@ class DeepGemmKernelType(IntEnum):
 _INITIALIZATION_DICT: Dict[Tuple[DeepGemmKernelType, int, int, int], bool] = dict()
 
 
+def _module_artifacts(module, distribution_names: Tuple[str, ...]):
+    """Yield stable names and paths for installed implementation artifacts."""
+    artifacts = {}
+    module_path_value = getattr(module, "__file__", None)
+    module_path = Path(module_path_value).resolve() if module_path_value else None
+    package_paths = list(getattr(module, "__path__", ()))
+    if not package_paths and module_path is not None:
+        if module_path.name.startswith("__init__."):
+            package_paths = [str(module_path.parent)]
+        else:
+            artifacts[module_path] = module_path.name
+
+    for package_path_value in package_paths:
+        package_path = Path(package_path_value).resolve()
+        try:
+            for artifact in package_path.rglob("*"):
+                if (
+                    artifact.is_file()
+                    and "__pycache__" not in artifact.parts
+                    and artifact.suffix not in (".pyc", ".pyo")
+                ):
+                    artifacts[artifact.resolve()] = (
+                        f"package/{artifact.relative_to(package_path).as_posix()}"
+                    )
+        except OSError:
+            return
+
+    for distribution_name in distribution_names:
+        try:
+            distribution = importlib.metadata.distribution(distribution_name)
+        except importlib.metadata.PackageNotFoundError:
+            continue
+        for relative_path in distribution.files or ():
+            relative = Path(str(relative_path))
+            if (
+                any(
+                    part.endswith((".dist-info", ".egg-info"))
+                    for part in relative.parts
+                )
+                or "__pycache__" in relative.parts
+                or relative.suffix in (".pyc", ".pyo")
+            ):
+                continue
+            artifact = Path(distribution.locate_file(relative_path)).resolve()
+            try:
+                if artifact.is_file():
+                    artifacts[artifact] = f"distribution/{relative.as_posix()}"
+            except OSError:
+                return
+
+    for artifact, stable_name in sorted(artifacts.items(), key=lambda item: item[1]):
+        yield stable_name, artifact
+
+
+def _module_identity(module, distribution_names: Tuple[str, ...]) -> Dict[str, object]:
+    version = getattr(module, "__version__", None)
+    if version is None:
+        for distribution_name in distribution_names:
+            try:
+                version = importlib.metadata.version(distribution_name)
+                break
+            except importlib.metadata.PackageNotFoundError:
+                continue
+
+    manifest = hashlib.sha256()
+    artifact_count = 0
+    try:
+        for stable_name, artifact_path in _module_artifacts(module, distribution_names):
+            content = artifact_path.read_bytes()
+            manifest.update(stable_name.encode())
+            manifest.update(b"\0")
+            manifest.update(hashlib.sha256(content).digest())
+            artifact_count += 1
+    except OSError:
+        artifact_count = 0
+
+    artifact_manifest_sha256 = "unknown"
+    if artifact_count:
+        try:
+            artifact_manifest_sha256 = manifest.hexdigest()
+        except ValueError:
+            artifact_count = 0
+    return {
+        "version": str(version or "unknown"),
+        "artifact_manifest_sha256": artifact_manifest_sha256,
+        "artifact_count": artifact_count,
+    }
+
+
+def _warmup_identity() -> Dict[str, object]:
+    try:
+        import triton
+
+        triton_version = str(triton.__version__)
+    except Exception:
+        triton_version = "unknown"
+
+    device_index = torch.cuda.current_device()
+    capability = torch.cuda.get_device_capability(device_index)
+    warmup_source_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    return {
+        "sglang": str(sglang_version),
+        "sglang_warmup_source_sha256": warmup_source_sha256,
+        "deep_gemm": _module_identity(
+            deep_gemm, ("sgl-deep-gemm", "deep-gemm", "deep_gemm")
+        ),
+        "torch": str(torch.__version__),
+        "cuda": str(torch.version.cuda),
+        "triton": triton_version,
+        "gpu_name": torch.cuda.get_device_name(device_index),
+        "gpu_arch": f"sm{capability[0]}{capability[1]}",
+    }
+
+
+def _normalize_warmup_m_values(
+    kernel_type: DeepGemmKernelType, m_list: List[int]
+) -> List[int]:
+    if kernel_type in (
+        DeepGemmKernelType.GROUPED_GEMM_NT_F8F8BF16_CONTIG,
+        DeepGemmKernelType.GROUPED_GEMM_NT_BF16_CONTIG,
+    ):
+        alignment = deep_gemm.get_mk_alignment_for_contiguous_layout()
+        if isinstance(alignment, tuple):
+            alignment = alignment[0]
+        m_list = [m for m in m_list if m % alignment == 0]
+    return sorted(set(m_list))
+
+
+def _warmup_marker_payload(
+    kernel_type: DeepGemmKernelType,
+    n: int,
+    k: int,
+    num_groups: int,
+    m_list: List[int],
+) -> Optional[Dict[str, object]]:
+    identity = _warmup_identity()
+    deep_gemm_identity = identity.get("deep_gemm")
+    if not isinstance(deep_gemm_identity, dict) or (
+        deep_gemm_identity.get("artifact_manifest_sha256") == "unknown"
+    ):
+        logger.warning(
+            "DeepGEMM implementation identity is unavailable; "
+            "the all-M warmup marker will not be reused or written."
+        )
+        return None
+    return make_marker_payload(
+        identity=identity,
+        settings={
+            "fast_warmup": bool(_FAST_WARMUP),
+            "deep_gemm_jit_env": {
+                key: value
+                for key, value in sorted(os.environ.items())
+                if key.startswith("DG_JIT_")
+            },
+            "standard_layout": envs.SGLANG_DEEPGEMM_STANDARD_LAYOUT.get(),
+            "pdl": envs.SGLANG_DEEPGEMM_PDL.get(),
+        },
+        kernel_type=kernel_type.name,
+        n=n,
+        k=k,
+        num_groups=num_groups,
+        m_values=m_list,
+    )
+
+
 @contextmanager
 def _local_rank_compile_lock(
     kernel_type: DeepGemmKernelType, n: int, k: int, num_groups: int
@@ -158,32 +333,59 @@ def _maybe_compile_deep_gemm_one_type_all(
     ):
         _INITIALIZATION_DICT[query_key] = True
 
-        # TODO maybe improve logs
-        if not _IN_PRECOMPILE_STAGE and _IS_FIRST_RANK_ON_NODE:
-            logger.warning(
-                "Entering DeepGEMM JIT Pre-Compile session. "
-                "It may take a long time (typically 10-20 mins) "
-                "if you have not run `sglang.compile_deep_gemm`. "
-                "It is recommended to run `sglang.compile_deep_gemm` with same args as `sglang.launch_server`"
-                " for pre-compilation to reduce the overhead if you have not run it before. "
-                "For example: "
-                "`python3 -m sglang.compile_deep_gemm --model deepseek-ai/DeepSeek-V3 --tp 8 --trust-remote-code`"
+        normalized_m_list = _normalize_warmup_m_values(kernel_type, _BUILTIN_M_LIST)
+        payload = None
+        completion_marker = None
+        if _USE_WARMUP_MARKER:
+            payload = _warmup_marker_payload(
+                kernel_type, n, k, num_groups, normalized_m_list
             )
-
-        logger.info(
-            f"Try DeepGEMM JIT Compiling for "
-            f"<{kernel_type.name}> N={n}, K={k}, num_groups={num_groups} with all Ms."
-            f"{' It only takes a little time (typically 1 sec) if you have run `python3 -m sglang.compile_deep_gemm`. ' if not _IN_PRECOMPILE_STAGE else ''}"
-        )
+            if payload is not None:
+                completion_marker = marker_path(os.environ["DG_JIT_CACHE_DIR"], payload)
 
         with _local_rank_compile_lock(kernel_type, n, k, num_groups):
-            _compile_deep_gemm_one_type_all(
+            if completion_marker is not None and marker_matches(
+                completion_marker, payload
+            ):
+                logger.info(
+                    "Skipping completed DeepGEMM all-M warmup for <%s> "
+                    "N=%d, K=%d, num_groups=%d (%d M values; marker=%s).",
+                    kernel_type.name,
+                    n,
+                    k,
+                    num_groups,
+                    len(normalized_m_list),
+                    completion_marker,
+                )
+                return
+
+            # TODO maybe improve logs
+            if not _IN_PRECOMPILE_STAGE and _IS_FIRST_RANK_ON_NODE:
+                logger.warning(
+                    "Entering DeepGEMM JIT Pre-Compile session. "
+                    "It may take a long time (typically 10-20 mins) "
+                    "if you have not run `sglang.compile_deep_gemm`. "
+                    "It is recommended to run `sglang.compile_deep_gemm` with same args as `sglang.launch_server`"
+                    " for pre-compilation to reduce the overhead if you have not run it before. "
+                    "For example: "
+                    "`python3 -m sglang.compile_deep_gemm --model deepseek-ai/DeepSeek-V3 --tp 8 --trust-remote-code`"
+                )
+
+            logger.info(
+                f"Try DeepGEMM JIT Compiling for "
+                f"<{kernel_type.name}> N={n}, K={k}, num_groups={num_groups} with all Ms."
+                f"{' It only takes a little time (typically 1 sec) if you have run `python3 -m sglang.compile_deep_gemm`. ' if not _IN_PRECOMPILE_STAGE else ''}"
+            )
+
+            completed_all = _compile_deep_gemm_one_type_all(
                 kernel_type=kernel_type,
                 n=n,
                 k=k,
                 num_groups=num_groups,
-                m_list=_BUILTIN_M_LIST,
+                m_list=normalized_m_list,
             )
+            if completion_marker is not None and completed_all:
+                write_marker_atomic(completion_marker, payload)
 
 
 # NOTE(alcanderian): get_num_sms should be change when 2-batch-overlap is introduced
@@ -193,17 +395,13 @@ def _compile_deep_gemm_one_type_all(
     k: int,
     num_groups: int,
     m_list: List[int],
-) -> None:
+) -> bool:
     # Symmetric memory allocation performs a collective operation across all the GPUs.
     # Temporary disable symmetric memory during compilation since it only runs on the first rank.
     saved_context = disable_symmetric_memory_context()
     try:
-        if kernel_type == DeepGemmKernelType.GROUPED_GEMM_NT_F8F8BF16_CONTIG:
-            m_alignment = deep_gemm.get_mk_alignment_for_contiguous_layout()
-            m_list = sorted(list(set(m for m in m_list if m % m_alignment == 0)))
-        elif kernel_type == DeepGemmKernelType.GROUPED_GEMM_NT_BF16_CONTIG:
-            m_alignment = deep_gemm.get_mk_alignment_for_contiguous_layout()
-            m_list = sorted(list(set(m for m in m_list if m % m_alignment == 0)))
+        m_list = _normalize_warmup_m_values(kernel_type, m_list)
+        requested_m_list = m_list
 
         # Here the precompilation is only run on the first rank, so gpu_id should be 0
         memory_budget = get_available_gpu_memory(
@@ -241,20 +439,24 @@ def _compile_deep_gemm_one_type_all(
         has_compile_mode_api = hasattr(deep_gemm, "get_compile_mode") and hasattr(
             deep_gemm, "set_compile_mode"
         )
-        if has_compile_mode_api:
-            old_compile_mode = deep_gemm.get_compile_mode()
-            deep_gemm.set_compile_mode(1)
+        old_compile_mode = None
+        try:
+            if has_compile_mode_api:
+                old_compile_mode = deep_gemm.get_compile_mode()
+                deep_gemm.set_compile_mode(1)
 
-        # TODO can use multi thread
-        for m in tqdm(m_list, desc="DeepGEMM warmup"):
-            executor.execute(m=m)
-        if has_compile_mode_api:
-            deep_gemm.set_compile_mode(old_compile_mode)
+            # TODO can use multi thread
+            for m in tqdm(m_list, desc="DeepGEMM warmup"):
+                executor.execute(m=m)
+        finally:
+            if old_compile_mode is not None:
+                deep_gemm.set_compile_mode(old_compile_mode)
 
         # clean up input buffers
         torch.cuda.current_stream().synchronize()
         del executor
         torch.cuda.empty_cache()
+        return m_list == requested_m_list
     finally:
         # Restore symmetric memory context
         restore_symmetric_memory_context(saved_context)
