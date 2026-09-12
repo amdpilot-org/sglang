@@ -1,0 +1,48 @@
+.....F                                                                   [100%]
+=================================== FAILURES ===================================
+_____ test_dflash_decode_advances_refreshes_and_removes_min_token_penalty ______
+
+    def test_dflash_decode_advances_refreshes_and_removes_min_token_penalty():
+        batch = _make_batch(min_new_tokens=2)
+        draft_input = DFlashDraftInputV2.create_idle_input(torch.device("cpu"))
+    
+        assert _refresh_penalties(batch) == float("-inf")
+    
+        spec = SimpleNamespace(speculative_num_draft_tokens=1)
+        with (
+            patch("sglang.srt.speculative.dflash_info_v2.get_spec", return_value=spec),
+            patch(
+                "sglang.srt.speculative.dflash_info_v2.page_aligned_decode_alloc_lens",
+                return_value=([1], [2], 1),
+            ),
+            patch("sglang.srt.speculative.dflash_info_v2.alloc_for_spec_decode"),
+        ):
+            draft_input.prepare_for_decode(batch)
+            assert _refresh_penalties(batch) == float("-inf")
+    
+            batch.reqs[0].output_ids.append(8)
+            draft_input.prepare_for_decode(batch)
+>           assert _refresh_penalties(batch) == 0.0
+E           assert -inf == 0.0
+E            +  where -inf = _refresh_penalties(_Batch(reqs=[namespace(sampling_params=namespace(min_new_tokens=2, stop_token_ids={3}, top_k=1), eos_token_ids={2}, to...=tensor([[0., 0., -inf, -inf, 0., 0., 0., 0.]]), acc_scaling_penalties=None), seq_lens_cpu=tensor([1]), seq_lens_sum=1))
+
+test/registered/unit/spec/test_dflash_min_new_tokens.py:103: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/spec/test_dflash_min_new_tokens.py::test_dflash_decode_advances_refreshes_and_removes_min_token_penalty
+1 failed, 5 passed, 17 warnings in 12.62s
