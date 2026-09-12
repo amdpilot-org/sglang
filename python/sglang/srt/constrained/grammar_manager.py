@@ -299,13 +299,18 @@ class GrammarManager:
                                 f"Grammar compilation raised an exception: {e}, "
                                 f"grammar_key={req.grammar_key}"
                             )
+                            invalid_grammar = InvalidGrammarObject(
+                                f"Grammar compilation failed: {e}"
+                            )
+                            req.grammar = invalid_grammar
                             failed_req_idxs.add(i)
                             failed_reasons[i] = (
                                 f"Failed to compile {req.grammar_key[0]} grammar: "
-                                f"Grammar compilation failed: {e}"
+                                f"{invalid_grammar.error_message}"
                             )
                             continue
                         if isinstance(result, InvalidGrammarObject):
+                            req.grammar = result
                             failed_req_idxs.add(i)
                             failed_reasons[i] = (
                                 f"Failed to compile {req.grammar_key[0]} grammar: "
@@ -413,6 +418,8 @@ class GrammarManager:
                     req.grammar_key,
                     InvalidGrammarObject("Grammar preprocessing timed out"),
                 )
+            elif isinstance(req.grammar, InvalidGrammarObject) and req.grammar_key:
+                self.grammar_backend.set_cache(req.grammar_key, req.grammar.copy())
             error_msg = failed_reasons.get(
                 i, f"Grammar preprocessing timed out: {req.grammar_key=}"
             )
