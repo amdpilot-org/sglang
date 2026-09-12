@@ -704,7 +704,10 @@ class CompressedTensorsConfig(QuantizationConfig):
                 )
             else:
                 raise ImportError(
-                    "Other method (CompressedTensorsW4A16Sparse24) is not supported now"
+                    "Unsupported compressed-tensors W4A16 format: "
+                    f"{quant_format!r}. Only {CompressionFormat.pack_quantized.value!r} "
+                    "is supported for weight-only W4A16; 2:4 sparsity is detected "
+                    "separately from sparsity_config."
                 )
 
         if is_activation_quantization_format(quant_format):
@@ -958,7 +961,10 @@ class CompressedTensorsConfig(QuantizationConfig):
             input_quant=input_quant,
             sparsity_scheme=sparsity_scheme,
         ):
-            raise ImportError("CompressedTensors24 is not supported now")
+            raise ImportError(
+                "Compressed-tensors 2:4 sparsity is not supported: SGLang has no "
+                "maintained sparse linear kernel for this checkpoint layout."
+            )
         elif weight_quant is None:
             logger.warning_once(
                 "Acceleration for non-quantized schemes is "
