@@ -18,7 +18,7 @@ Training-free, inference-time FFN neuron pruning for gated-MLP LLMs, built
 for batched decode (arXiv:2608.14003). The gated MLP's activation function
 (``SiluAndMul``) produces ``Z`` of shape ``[tokens, intermediate]``, which
 feeds ``down_proj``. BWAP scores the neurons of ``Z`` per layer, keeps the
-top-``k`` (``k = round((1 - sparsity) * D_FF)``) via a shared per-layer binary
+top-``k`` (``k = floor((1 - sparsity) * D_FF)``) via a shared per-layer binary
 mask. The baseline path zeroes the omitted activations; the optional fused path
 gathers the retained projection weights and executes fixed-width smaller GEMMs.
 
@@ -26,7 +26,7 @@ Per-request phase schedule (defaults ``T_init=8, T_E=4, T_p=16``):
 
 - Prompt (extend) forward: collect the prompt score ``s0``; stay dense.
 - The first ``T_init`` decode steps *of each request*: dense exploration,
-  updating the running max-aggregated score ``m``.
+  pooling a phase score before updating activation memory ``m``.
 - Thereafter, cycles of ``T_trans = T_E + T_p`` steps: ``T_p`` sparse steps
   (apply the mask) then ``T_E`` dense-explore steps (refresh ``m``).
 
@@ -43,8 +43,8 @@ and the schedule reduces exactly to the paper's global one.
 Correctness notes:
 
 - The mask stays shared across the batch (Eq. 3, element-wise max over the
-  rows currently exploring); per-request gating only decides which rows
-  contribute a score and which rows have the shared mask applied this step.
+  per-request Equation 2 phase scores); per-request gating decides which rows
+  contribute to a phase and which rows have the shared mask applied this step.
 - Decode activation rows are assumed aligned with ``req_pool_indices`` /
   ``seq_lens`` order (one token per request; speculative decode, which packs
   multiple tokens per request, is left dense by a row-count guard).
@@ -110,19 +110,14 @@ def compute_prompt_scores(z: torch.Tensor) -> torch.Tensor:
 
 
 def compute_decode_scores(z: torch.Tensor) -> torch.Tensor:
-    """Importance score over decode rows: Eq. 2 per row, Eq. 3 batch max.
-
-    Each row passed here is one token of one *exploring* active sequence, so the
-    per-sequence score (T_valid=1) is the magnitude of its row-normalized
-    activation, and the batch aggregation is the element-wise max over the rows.
-    """
-    return _row_l2_normalize(z.float()).abs().amax(dim=0)
+    """Importance score over all tokens of one decode exploration phase (Eq. 2)."""
+    return compute_prompt_scores(z)
 
 
 def build_topk_mask(scores: torch.Tensor, sparsity: float) -> torch.Tensor:
-    """Binary keep-mask of the top ``round((1 - sparsity) * D)`` neurons."""
+    """Binary keep-mask of the top ``floor((1 - sparsity) * D)`` neurons."""
     dim = scores.shape[0]
-    k = min(dim, max(1, round((1.0 - sparsity) * dim)))
+    k = min(dim, math.floor((1.0 - sparsity) * dim))
     mask = torch.zeros_like(scores)
     mask.scatter_(0, torch.topk(scores, k).indices, 1.0)
     return mask
@@ -205,6 +200,12 @@ class BWAPManager:
         # latest max-aggregated scores (no cross-step scheduling logic).
         self.mem_version: Dict[str, int] = {}
         self.mask_version: Dict[str, int] = {}
+        # Equation 2 is defined over every token in an exploration phase, before
+        # Equation 3 takes the element-wise maximum across samples.  Keep the
+        # sufficient statistics per request so continuous batches can have
+        # independent phase boundaries without degrading this into max-over-token.
+        self._phase_sum_sq: Dict[str, Dict[int, torch.Tensor]] = {}
+        self._phase_token_count: Dict[str, Dict[int, int]] = {}
 
         # Per-request prompt lengths, keyed by req_pool_index. Overwritten on
         # every extend forward, which is self-cleaning: chunked prefill converges
@@ -219,6 +220,7 @@ class BWAPManager:
         self._has_prune = False
         self._has_collect = False
         self._all_prune = False  # every active row is pruning -> fast path eligible
+        self._current_req_ids: List[int] = []
 
         # Phase-2a fused-forward state (keyed by act_fn name).
         self._fast_ok: Dict[str, bool] = {}  # layer eligible for the gather path
@@ -300,14 +302,17 @@ class BWAPManager:
         """
         if forward_mode.is_extend():
             self._phase = _Phase.PROMPT
-            for idx, seq_len in zip(req_pool_indices.tolist(), seq_lens.tolist()):
+            self._current_req_ids = req_pool_indices.tolist()
+            for idx, seq_len in zip(self._current_req_ids, seq_lens.tolist()):
                 self.prompt_lens[idx] = seq_len
+                self._discard_partial_phase(idx)
             self._prune_rows = self._collect_rows = None
             self._has_prune = False
             self._has_collect = True
             self._all_prune = False
         elif forward_mode.is_decode():
             self._phase = _Phase.DECODE
+            self._current_req_ids = req_pool_indices.tolist()
             steps = self._decode_steps(req_pool_indices, seq_lens)
             self._prune_rows, self._collect_rows = compute_row_modes(
                 steps, t_init=self.t_init, t_prune=self.t_prune, t_trans=self.t_trans
@@ -318,6 +323,17 @@ class BWAPManager:
             # (a shared mask, no rows still exploring); mixed steps fall back to
             # the per-row Phase-1 masked path.
             self._all_prune = self._has_prune and not self._has_collect
+            # The activations from the preceding exploration forward are already
+            # accumulated.  Finalize each sample exactly when it crosses into a
+            # pruning stage, before a mask (or graph weight buffer) is refreshed.
+            pruning_ids = [
+                req_id
+                for req_id, prune in zip(
+                    self._current_req_ids, self._prune_rows.tolist()
+                )
+                if prune
+            ]
+            self._finalize_phase_scores(pruning_ids)
             self._total_row_steps += int(steps.numel())
             self._pruned_row_steps += int(self._prune_rows.sum())
             # Phase-2b adaptive graph gating (no freeze): the captured pruned graph
@@ -331,6 +347,7 @@ class BWAPManager:
         else:
             self._phase = _Phase.IDLE
             self._all_prune = False
+            self._current_req_ids = []
 
     def _decode_steps(
         self, req_pool_indices: torch.Tensor, seq_lens: torch.Tensor
@@ -392,7 +409,7 @@ class BWAPManager:
                 # tokens per request); leave the activation dense this step.
                 return None
             if self._has_collect:
-                self._update_mem(name, compute_decode_scores(z[self._collect_rows]))
+                self._accumulate_phase_rows(name, z)
             if self._has_prune:
                 mask = self._get_mask(name, z)
                 gate = self._prune_rows.view(-1, *([1] * (z.dim() - 1)))
@@ -406,6 +423,36 @@ class BWAPManager:
             scores.detach() if mem is None else torch.maximum(mem, scores)
         )
         self.mem_version[name] = self.mem_version.get(name, 0) + 1
+
+    def _accumulate_phase_rows(self, name: str, z: torch.Tensor) -> None:
+        """Accumulate row-normalized squared activations per exploring request."""
+        normalized_sq = _row_l2_normalize(z.float()).square()
+        sums = self._phase_sum_sq.setdefault(name, {})
+        counts = self._phase_token_count.setdefault(name, {})
+        for row, req_id, collect in zip(
+            normalized_sq, self._current_req_ids, self._collect_rows.tolist()
+        ):
+            if not collect:
+                continue
+            sums[req_id] = row.detach() if req_id not in sums else sums[req_id] + row
+            counts[req_id] = counts.get(req_id, 0) + 1
+
+    def _finalize_phase_scores(self, req_ids: List[int]) -> None:
+        """Apply Eq. 2 per sample, then Eq. 3 / activation-memory max."""
+        for name, sums in self._phase_sum_sq.items():
+            counts = self._phase_token_count[name]
+            for req_id in req_ids:
+                phase_sum = sums.pop(req_id, None)
+                count = counts.pop(req_id, 0)
+                if phase_sum is not None and count:
+                    self._update_mem(name, (phase_sum / count).sqrt())
+
+    def _discard_partial_phase(self, req_id: int) -> None:
+        """Drop stale decode statistics when a request-pool slot is reused."""
+        for sums in self._phase_sum_sq.values():
+            sums.pop(req_id, None)
+        for counts in self._phase_token_count.values():
+            counts.pop(req_id, None)
 
     def _get_mask(self, name: str, z: torch.Tensor) -> torch.Tensor:
         return self._materialize_mask(name, z.shape[-1], z.device).to(z.dtype)
@@ -515,7 +562,7 @@ class BWAPManager:
             weight = mlp.down_proj.weight
             d_ff = weight.shape[1]
             hidden = weight.shape[0]
-            k = int(round((1.0 - self.sparsity) * d_ff))
+            k = math.floor((1.0 - self.sparsity) * d_ff)
             # Initial capture mask: data-free magnitude proxy (top-k down_proj column
             # L2 norm). Overwritten by the adaptive mask via post_fill once decoding
             # starts; here it only pins the k-wide topology the graph captures.
