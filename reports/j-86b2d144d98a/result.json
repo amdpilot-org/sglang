@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37369",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced GLM5 fused MLA corruption when RunAI-marked q_a_proj or kv_a_proj_with_mqa views were retained across reuse of a staging buffer. The loader now takes ownership only for marked tensors before caching them, with a shared RunAI ownership helper. Regression coverage includes both shard arrival orders and an unmarked boundary case.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-86b2d144d98a/venv/bin/python -m pytest -q test/registered/unit/models/test_glm5_next_weight_loading.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Exact reusable staging-buffer reproduction: q-first and kv-first cases both corrupted the earlier cached shard; the unmarked independent-buffer boundary passed. Raw summary: reports/j-86b2d144d98a/failing-before.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-86b2d144d98a/venv/bin/python -m pytest -q test/registered/unit/models/test_glm5_next_weight_loading.py test/registered/unit/model_loader/test_runai_model_streamer_loader.py",
+      "exit_code": 0,
+      "what_was_measured": "14 focused tests passed after the fix, covering both GLM5 shard orders, an unmarked boundary, RunAI marking/synchronous consumption, and existing DeepSeek ownership paths. Raw summary: reports/j-86b2d144d98a/passing-after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-86b2d144d98a/venv/bin/python synthetic load_weights plus gfx950 matmul assertion",
+      "exit_code": 0,
+      "what_was_measured": "The fixed loader preserved the fused weight and an exact GPU matrix multiplication matched an independently constructed expected weight/output. Raw summary: reports/j-86b2d144d98a/gpu-numerical.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the patch."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-86b2d144d98a/venv/bin/python -m ruff check ...",
+      "exit_code": 1,
+      "what_was_measured": "Formatting tool was unavailable in the required pinned interpreter: No module named ruff."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-86b2d144d98a/pre-commit /opt/venv/bin/pre-commit run --files <changed files>",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository hooks passed, including isort, ruff, ruff format, codespell, Python AST, CI registry validation, and whitespace checks."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X (gfx950:sramecc+:xnack-) executed an exact synthetic fused-weight matrix multiplication; actual and independent expected outputs were both [[0.0, 2.0, 4.0, 6.0]]."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "GLM-5.3-Flash and draft-model weights were unavailable, so full-model FP8 generation and semantic accuracy were not tested.",
+    "Distributed RunAI Model Streamer, TP=8, DFLASH, Kubernetes, streamer concurrency 8, and multi-node deployment were not available; the deterministic synthetic iterator validates the reported ownership mechanism only.",
+    "No native code changed, so no native library rebuild was applicable."
+  ]
+}
