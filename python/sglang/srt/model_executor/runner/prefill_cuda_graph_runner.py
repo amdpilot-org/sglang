@@ -149,6 +149,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# PyTorch can lose CUDA capture bookkeeping when graph capture runs into the
+# allocator's OOM boundary, turning the useful OOM into a later capture_end()
+# internal assert. Keep a small, measured reserve before starting another
+# prefill bucket. See https://github.com/sgl-project/sglang/issues/35437.
+_MIN_PREFILL_GRAPH_CAPTURE_HEADROOM_GB = 0.3
+
 # A replay executes every padded token in its capture bucket. Sparse bucket
 # lists can otherwise turn the lower launch overhead into substantially more
 # model work than an exact-shape eager forward.
@@ -1425,30 +1431,41 @@ class PrefillCudaGraphRunner(BaseCudaGraphRunner):
             )
 
     def _capture_one_stream(self) -> None:
-        avail_mem = get_available_gpu_memory(
-            self.model_runner.device,
-            self.model_runner.gpu_id,
-            empty_cache=False,
-        )
         capture_range = (
             tqdm.tqdm(list(reversed(self.capture_num_tokens)))
             if get_parallel().tp_rank == 0
             else reversed(self.capture_num_tokens)
         )
+        captured_num_tokens = []
         for num_tokens in capture_range:
+            avail_mem = get_available_gpu_memory(
+                self.model_runner.device,
+                self.model_runner.gpu_id,
+                empty_cache=False,
+            )
             if get_parallel().tp_rank == 0:
-                avail_mem = get_available_gpu_memory(
-                    self.model_runner.device,
-                    self.model_runner.gpu_id,
-                    empty_cache=False,
-                )
                 capture_range.set_description(
                     f"Capturing num tokens ({num_tokens=} {avail_mem=:.2f} GB)"
                 )
+            if avail_mem < _MIN_PREFILL_GRAPH_CAPTURE_HEADROOM_GB:
+                message = (
+                    "Stopping prefill CUDA graph capture before "
+                    f"{num_tokens=} because only {avail_mem:.2f} GB is free "
+                    f"(< {_MIN_PREFILL_GRAPH_CAPTURE_HEADROOM_GB:.2f} GB). "
+                    "Use --cuda-graph-bs-prefill to select fewer buckets."
+                )
+                if not captured_num_tokens:
+                    raise RuntimeError(message)
+                logger.warning(message)
+                break
             self.capture_one_shape(num_tokens)
             if self._capture_chunked_prefix:
                 for captured_n in self._prefix_capture_variants:
                     self.capture_one_shape(num_tokens, prefix_num_chunks=captured_n)
+            captured_num_tokens.append(num_tokens)
+
+        # Replay bucket selection must not choose a shape that was skipped.
+        self.capture_num_tokens = sorted(captured_num_tokens)
 
     def capture_one_shape(self, size: int, *, prefix_num_chunks: int = 0) -> None:
         """Per-shape capture: build dummy ForwardBatch + run_once,

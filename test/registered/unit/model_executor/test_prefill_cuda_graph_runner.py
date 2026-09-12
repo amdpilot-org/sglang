@@ -94,6 +94,56 @@ class _FakeBatchRegistry:
 
 
 class TestPrefillCudaGraphRunnerChunkedPrefix(CustomTestCase):
+    def _make_capture_loop_runner(self):
+        runner = PrefillCudaGraphRunner.__new__(PrefillCudaGraphRunner)
+        runner.capture_num_tokens = [1, 2, 4]
+        runner.model_runner = SimpleNamespace(device="cuda", gpu_id=0)
+        runner._capture_chunked_prefix = False
+        runner._prefix_capture_variants = []
+        runner.capture_one_shape = unittest.mock.Mock()
+        return runner
+
+    @patch.object(runner_module, "get_parallel")
+    @patch.object(runner_module, "get_available_gpu_memory")
+    def test_capture_stops_before_low_memory_bucket(self, mock_memory, mock_parallel):
+        runner = self._make_capture_loop_runner()
+        mock_parallel.return_value.tp_rank = 1
+        mock_memory.side_effect = [1.0, 0.29]
+
+        runner._capture_one_stream()
+
+        runner.capture_one_shape.assert_called_once_with(4)
+        self.assertEqual(runner.capture_num_tokens, [4])
+
+    @patch.object(runner_module, "get_parallel")
+    @patch.object(runner_module, "get_available_gpu_memory")
+    def test_capture_allows_exact_memory_boundary(self, mock_memory, mock_parallel):
+        runner = self._make_capture_loop_runner()
+        mock_parallel.return_value.tp_rank = 1
+        mock_memory.side_effect = [0.3, 0.3, 0.3]
+
+        runner._capture_one_stream()
+
+        self.assertEqual(
+            runner.capture_one_shape.call_args_list,
+            [unittest.mock.call(4), unittest.mock.call(2), unittest.mock.call(1)],
+        )
+        self.assertEqual(runner.capture_num_tokens, [1, 2, 4])
+
+    @patch.object(runner_module, "get_parallel")
+    @patch.object(runner_module, "get_available_gpu_memory", return_value=0.29)
+    def test_capture_fails_cleanly_when_first_bucket_has_low_memory(
+        self, _mock_memory, mock_parallel
+    ):
+        runner = self._make_capture_loop_runner()
+        mock_parallel.return_value.tp_rank = 1
+
+        with self.assertRaisesRegex(RuntimeError, "Stopping prefill CUDA graph"):
+            runner._capture_one_stream()
+
+        runner.capture_one_shape.assert_not_called()
+        self.assertEqual(runner.capture_num_tokens, [1, 2, 4])
+
     @patch(
         "sglang.srt.model_executor.model_runner.require_gathered_buffer",
         return_value=True,
