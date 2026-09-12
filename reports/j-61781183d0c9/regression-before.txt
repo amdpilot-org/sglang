@@ -1,0 +1,57 @@
+.....F                                                                   [100%]
+=================================== FAILURES ===================================
+___________ test_w2_full_scale_table_through_weight_loader_dispatch ____________
+
+    def test_w2_full_scale_table_through_weight_loader_dispatch():
+        loader = FusedMoE.__new__(FusedMoE)
+        torch.nn.Module.__init__(loader)
+        loader.moe_tp_rank = 1
+        loader.moe_tp_size = 2
+        loader.quant_method = SimpleNamespace()
+        loader.scheme = None
+        loader.quant_config = None
+        loader.use_flashinfer_trtllm_moe = False
+        loader.use_triton_kernels = False
+        loader.use_padded_loading = False
+        loader.use_presharded_weights = False
+        loader._has_fused_shared = False
+    
+        param = torch.nn.Parameter(torch.full((1, 4, 4), -1.0), requires_grad=False)
+        param.quant_method = "group"
+        param.is_transposed = True
+        param.load_full_w2 = True
+        loaded_weight = torch.arange(16, dtype=torch.float32).reshape(4, 4)
+    
+        loader._weight_loader_impl(
+            param=param,
+            loaded_weight=loaded_weight,
+            weight_name="experts.0.w2_scales",
+            shard_id="w2",
+            expert_id=0,
+        )
+    
+>       assert torch.equal(param.data[0], loaded_weight)
+E       assert False
+E        +  where False = <built-in method equal of type object at 0x7f9ecc51b220>(tensor([[ 8.,  9., 10., 11.],\n        [12., 13., 14., 15.],\n        [-1., -1., -1., -1.],\n        [-1., -1., -1., -1.]]), tensor([[ 0.,  1.,  2.,  3.],\n        [ 4.,  5.,  6.,  7.],\n        [ 8.,  9., 10., 11.],\n        [12., 13., 14., 15.]]))
+E        +    where <built-in method equal of type object at 0x7f9ecc51b220> = torch.equal
+
+test/registered/unit/layers/quantization/test_gptq_marlin_moe_loading.py:127: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/layers/quantization/test_gptq_marlin_moe_loading.py::test_w2_full_scale_table_through_weight_loader_dispatch
+1 failed, 5 passed, 17 warnings in 26.75s

@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36822",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1278",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1145",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/1242",
+  "candidate_commit": "803c48fc6fa1441b4e79ccd83de0bb207361947e",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved the candidate's dtype, TP shape, and full-w2 helper fixes, then corrected generic GPTQ GROUP/BLOCK scale dispatch to forward load_full_w2. A regression through _weight_loader_impl reproduced the candidate failure on TP rank 1 and passes after the correction; the non-act-order sharded boundary also passes.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-61781183d0c9/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_gptq_marlin_moe_loading.py (candidate plus new dispatch regression, before correction)",
+      "exit_code": 1,
+      "what_was_measured": "Candidate commit behavior through production _weight_loader_impl: 5 passed and 1 failed; rank-1 GROUP w2_scales copied only the second half into the full destination and left the remainder untouched. Raw output: reports/j-61781183d0c9/regression-before.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-61781183d0c9/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_gptq_marlin_moe_loading.py",
+      "exit_code": 0,
+      "what_was_measured": "Seven focused tests passed after correction, covering FP16/BF16 allocation, desc_act TP shapes, direct helper loading, and production dispatch for both full and sharded w2 scale tables. Raw output: reports/j-61781183d0c9/regression-after-boundaries.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No relevant GPU kernel was executed. The prepared host provides one AMD gfx950 GPU, while the reported workload requires NVIDIA CUDA Marlin, TP=2, and unavailable model weights."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The two-rank NVIDIA RTX 4090 CUDA Marlin serving workload was not available on the assigned single AMD gfx950 GPU.",
+    "The reported model weights were unavailable, so end-to-end serving and NaN-logit behavior remain unverified.",
+    "The regression validates allocation and production loader dispatch on CPU; it does not claim CUDA kernel execution or semantic model accuracy.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
