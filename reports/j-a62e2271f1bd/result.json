@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38448",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/867",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/827",
+  "candidate_commit": "0b653c280b4e96ffa31571a4cff170c95f6322e8",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a partial fix. It moves the HiCache hand-over to run_batch and stages pure-prefill input_ids plus extend and DP metadata before the burst, but deliberately leaves mixed prefill+decode input_ids on the deferred forward-entry path. An independent probe observed the burst hand-over before that H2D upload, violating the original issue's round-head ordering contract for ForwardMode.MIXED.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a62e2271f1bd/venv/bin/python /job/test_head_upload_ordering.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "The candidate regression could not import StagedDeviceTensor on the recorded base; independent source inspection also confirmed ready_to_load_host_cache occurred before prepare_for_extend."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a62e2271f1bd/venv/bin/python -m pytest -q test/registered/unit/managers/test_head_upload_ordering.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "All 21 candidate ordering and staging unit tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a62e2271f1bd/venv/bin/python -m pytest -q test/registered/unit/managers/test_head_upload_ordering.py test/registered/unit/model_executor/test_mlp_sync_pad_unpad.py test/registered/unit/managers/test_generation_auxiliary_output.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "All 56 candidate and neighboring focused tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a62e2271f1bd/venv/bin/python /job/review-evidence/mixed_batch_probe.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Observed ['burst_handover', 'input_ids_h2d'] for a mixed prefill+decode batch, proving the deferred prefill input_ids H2D is still issued after the burst hand-over."
+    },
+    {
+      "command": "prepared Python inline torch.cuda _stage pinned-H2D check (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI355X gfx950, staged [3, 5, 8] through a nonblocking host-to-device copy and verified one-shot consumption."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One real pinned nonblocking H2D staging check passed on AMD Instinct MI355X gfx950 with torch 2.11.0+rocm7.2 and HIP 7.2. This did not reproduce the reported NVIDIA copy-engine timing."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "For ForwardMode.MIXED with mix_running_indices present, pre_upload_forward_inputs leaves prefill_input_ids_cpu deferred. _handover_hicache_load then calls ready_to_load_host_cache, and resolve_forward_inputs later performs prefill_input_ids_cpu.to(device, non_blocking=True), so this round-head H2D remains ordered after the burst hand-over.",
+    "No H100 TP=8 multi-GiB HiCache trace demonstrates that the remaining mixed-batch upload avoids the reported copy-engine stall; the deterministic call order instead shows that it can still be exposed."
+  ],
+  "remaining_limitations": "The available machine had one AMD Instinct MI355X (gfx950), not 8 NVIDIA H100 GPUs, and no qualifying large-model hierarchical-cache workload or weights. Therefore H100 copy-engine arbitration, TP=8 all-reduce delay, multi-GiB burst timing, and end-to-end performance were not reproduced. No native C++ changed, so no native rebuild was applicable. Source imports resolved to /job/repo/python/sglang; Torch/ROCm remained intact."
+}
