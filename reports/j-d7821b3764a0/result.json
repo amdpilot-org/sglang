@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39216",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2634",
+  "candidate_commit": "e911ffa191ffba6c42fede96649191ffd2c9f50e",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review reproduced the issue-specific CancelledError escape at both tokenizer-manager disconnect polls on the recorded base. At the exact candidate commit, both branches converted receive-only cancellation into the existing per-request abort path, while explicit handler-task cancellation continued to propagate. A real single-gfx950 server also survived an abrupt TCP close and served a follow-up request. This is a source fix with regression coverage, not test-only hardening.",
+  "source_paths": {
+    "python_executable": "/tmp/amdpilot-repo-j-d7821b3764a0/venv/bin/python",
+    "sglang_package": "/job/repo/python/sglang/__init__.py",
+    "reviewed_module": "/job/repo/python/sglang/srt/managers/tokenizer_manager.py",
+    "native_library": null
+  },
+  "tests": [
+    {
+      "command": "PYTHONPATH=python:test/registered/unit/managers /tmp/amdpilot-repo-j-d7821b3764a0/venv/bin/python - (independent base injection script)",
+      "exit_code": 0,
+      "what_was_measured": "On base 358c163, receive-side CancelledError escaped from both waiting and running disconnect polls and abort_request had zero calls. Evidence: evidence/base-independent-repro.log."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-d7821b3764a0/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py -k DisconnectPollingCancellation",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate e911ffa, all four candidate regressions passed: connected result, waiting abort, running abort, and genuine task-cancellation propagation."
+    },
+    {
+      "command": "PYTHONPATH=python:test/registered/unit/managers /tmp/amdpilot-repo-j-d7821b3764a0/venv/bin/python - (independent adversarial script)",
+      "exit_code": 0,
+      "what_was_measured": "Independently verified waiting and running aborts, connected false preservation, explicit external cancellation propagation including its message, and no polling for background requests."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-d7821b3764a0/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py",
+      "exit_code": 0,
+      "what_was_measured": "Complete affected unit module: 30 tests and 3 subtests passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d7821b3764a0/venv/bin/python reports/j-2c0ee86b22cc/run_disconnect_probe.py --fixture /tmp/amdpilot-repo-j-d7821b3764a0/review-runtime/tiny-random-llama --output reports/j-d7821b3764a0/evidence/gpu-disconnect",
+      "exit_code": 0,
+      "what_was_measured": "A real one-GPU SGLang server remained alive after abrupt TCP close, returned health 200, and completed a subsequent four-token GPU generation with output IDs [104, 40, 16, 93]."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X, gfx950, using Torch 2.11.0+rocm7.2 and Triton attention. Server log records GPU prefill/decode; probe.json records process survival, health 200, and follow-up output IDs [104, 40, 16, 93]."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The exact four-GPU NVIDIA RTX 6000D SM120 deployment was unavailable; the review used one AMD gfx950 GPU.",
+    "DeepSeek-V4.1-Flash weights, the approximately 200,000-token prompt, TP=4 topology, and reported dev-dsv41 container image were unavailable, so the original deployment was not reproduced end to end.",
+    "The deterministic tiny Llama HTTP run validates transport and real engine survival only; it does not validate DeepSeek semantics, long-context behavior, NVIDIA-specific behavior, or distributed execution.",
+    "The real HTTP request completed quickly and did not log an is_disconnected CancelledError. Exact exception behavior was validated by deterministic injection at both affected source call sites.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable.",
+    "git diff --check on the candidate reports trailing whitespace in candidate archival log files; reviewed Python source and test additions are otherwise exercised by pytest."
+  ]
+}
