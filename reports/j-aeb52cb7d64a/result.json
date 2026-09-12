@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31117",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Main did not contain a fix. Added a host-side per-communicator stream guard that orders an eager custom all-reduce behind the previous launch when the issuing GPU stream changes. Unit regressions cover stream switching, same-stream reuse, and graph capture; a real gfx950 probe verified event ordering numerically. The original two-rank CUDA/NVLink deadlock could not be reproduced on the assigned single AMD GPU.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=<base archive>/python python -c '<load base custom_all_reduce_utils and require SingleStreamGuard>'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before evidence: the recorded base has no per-communicator stream-ordering guard. Raw output: raw/regression_before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-aeb52cb7d64a/venv/bin/python -m pytest -q test/registered/unit/distributed/test_custom_all_reduce_stream_guard.py test/registered/unit/distributed/test_custom_all_reduce_v2_capability.py",
+      "exit_code": 0,
+      "what_was_measured": "Nine focused tests passed: cross-stream serialization, same-stream fast path, capture boundary, both communicator launch hooks, and adjacent v2 capability behavior. Raw output: raw/focused_tests.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-aeb52cb7d64a/venv/bin/python <inline gfx950 two-stream ordering probe>",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X gfx950, a delayed write on stream 1 followed by a guarded increment on stream 2 produced 2, equal to the CPU reference; the guard created an event. Raw output: raw/gfx950_stream_guard.txt"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/distributed/device_communicators/custom_all_reduce_utils.py python/sglang/srt/distributed/device_communicators/custom_all_reduce.py python/sglang/srt/distributed/device_communicators/custom_all_reduce_v2.py test/registered/unit/distributed/test_custom_all_reduce_stream_guard.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, spelling, safety, and registered-test registry checks passed. Raw output: raw/precommit.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X (gfx950:sramecc+:xnack-) executed the two-stream event-ordering probe; actual result 2 matched CPU reference 2. This was not a custom all-reduce or multi-GPU reproduction."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one gfx950 AMD GPU was available; the reported two-rank A100 CUDA/NVLink deadlock was not reproduced.",
+    "CUDA CustomAllReduceV2 kernels were neither compiled nor executed in this ROCm environment.",
+    "The host guard cannot observe two CUDA graphs replayed concurrently on different streams. Callers must not concurrently replay graphs that share one custom all-reduce communicator.",
+    "No full model, serving workload, green-context partition, or multi-node workload was run or claimed.",
+    "The open upstream candidate PR also proposes a CUDA device-side spin deadline; that broader kernel change was not copied because this environment cannot provide the required CUDA compiler/ISA and runtime validation."
+  ],
+  "source_paths": [
+    "python/sglang/srt/distributed/device_communicators/custom_all_reduce_utils.py",
+    "python/sglang/srt/distributed/device_communicators/custom_all_reduce.py",
+    "python/sglang/srt/distributed/device_communicators/custom_all_reduce_v2.py",
+    "test/registered/unit/distributed/test_custom_all_reduce_stream_guard.py"
+  ],
+  "native_paths": []
+}

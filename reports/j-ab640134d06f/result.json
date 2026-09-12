@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31117",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Preserved the candidate's valid eager host serialization and corrected its CUDA-graph bypass by excluding custom all-reduce during active capture and rejecting direct capture-time launches. The exact candidate fails the graph contract regression and the correction passes. Native polling remains unbounded because this ROCm-only assignment cannot justify or validate a CUDA device deadline.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ab640134d06f/venv/bin/python reports/j-ab640134d06f/check_graph_capture_contract.py <exact-candidate-worktree>",
+      "exit_code": 1,
+      "what_was_measured": "The exact candidate lacks capture-time selection refusal and direct-launch rejection."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ab640134d06f/venv/bin/python reports/j-ab640134d06f/check_graph_capture_contract.py .",
+      "exit_code": 0,
+      "what_was_measured": "Both communicator implementations refuse selection during capture and the guard rejects direct capture-time launch."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ab640134d06f/venv/bin/python -m pytest -q test/registered/unit/distributed/test_custom_all_reduce_stream_guard.py test/registered/unit/distributed/test_custom_all_reduce_v2_capability.py",
+      "exit_code": 0,
+      "what_was_measured": "Twelve eager serialization, host-thread locking, capture refusal, and adjacent capability tests passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-ab640134d06f/venv/bin/python reports/j-e89cf3de41b7/gpu_host_thread_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, two host threads and two GPU streams produced ordered numeric result 2, matching CPU reference 2."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-ab640134d06f/venv/bin/python reports/j-ab640134d06f/gpu_capture_guard_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "A real HIP graph capture rejected the custom-AR guard call and left its stream/event state unchanged."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X gfx950 executed the eager ordering and graph-capture guard probes; no custom all-reduce kernel or distributed workload was executed.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The assigned host has one AMD gfx950 GPU, not two NVIDIA A100 CUDA GPUs with NVLink and green contexts.",
+    "The original distributed CUDA deadlock and concurrent replay of two CUDA graphs were not executable.",
+    "The JIT one-shot push poll and legacy AOT barriers remain unbounded; no CUDA timeout was added without compiler, ISA, and runtime validation.",
+    "No model weights or full serving workload were used."
+  ]
+}

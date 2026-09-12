@@ -15,6 +15,7 @@ from torch.distributed import ProcessGroup
 import sglang.srt.distributed.device_communicators.custom_all_reduce_ops as ops
 from sglang.srt.distributed.device_communicators.cuda_wrapper import CudaRTLibrary
 from sglang.srt.distributed.device_communicators.custom_all_reduce_utils import (
+    SingleStreamGuard,
     can_use_custom_all_reduce_with_nvlink,
     is_weak_contiguous,
 )
@@ -84,6 +85,7 @@ class CustomAllreduce:
         # now `device` is a `torch.device` object
         assert isinstance(device, torch.device)
         self.device = device
+        self.stream_guard = SingleStreamGuard(device)
         full_nvlink = can_use_custom_all_reduce_with_nvlink(
             group=group,
             device=device,
@@ -260,6 +262,10 @@ class CustomAllreduce:
     def should_custom_ar(self, inp: torch.Tensor):
         if self.disabled:
             return False
+        # Graph replay does not call the Python stream guard. Let the caller
+        # choose its graph-safe collective instead of capturing custom AR.
+        if torch.cuda.is_current_stream_capturing():
+            return False
         inp_size = inp.numel() * inp.element_size()
         # custom allreduce requires input byte size to be multiples of 16
         if inp_size % 16 != 0:
@@ -284,26 +290,31 @@ class CustomAllreduce:
 
     def _all_reduce_impl(self, inp: torch.Tensor, registered: bool):
         out = torch.empty_like(inp)
-        if not _is_hip:  # CUDA-like
-            if registered:
-                ops.all_reduce(self._ptr, inp, out, 0, 0)
-            else:
-                ops.all_reduce(
-                    self._ptr, inp, out, self.buffer_ptrs[self.rank], self.max_size
-                )
-        elif self.use_amd_deterministic_impl:
-            inp_size = inp.numel() * inp.element_size()
-            if inp_size < self.max_size:
-                reg_buffer = self.buffer.view(inp.dtype)[: inp.numel()]
-                ops.deterministic_all_reduce_unreg(self._ptr, inp, reg_buffer, out)
-            else:
-                self.register_buffer(inp)
-                ops.deterministic_all_reduce_reg(self._ptr, inp, out)
-        else:  # normal AMD ROCm path
-            if registered:
-                ops.all_reduce_reg(self._ptr, inp, out)
-            else:
-                ops.all_reduce_unreg(self._ptr, inp, self.buffer, out)
+        with self.stream_guard.serialize():
+            if not _is_hip:  # CUDA-like
+                if registered:
+                    ops.all_reduce(self._ptr, inp, out, 0, 0)
+                else:
+                    ops.all_reduce(
+                        self._ptr,
+                        inp,
+                        out,
+                        self.buffer_ptrs[self.rank],
+                        self.max_size,
+                    )
+            elif self.use_amd_deterministic_impl:
+                inp_size = inp.numel() * inp.element_size()
+                if inp_size < self.max_size:
+                    reg_buffer = self.buffer.view(inp.dtype)[: inp.numel()]
+                    ops.deterministic_all_reduce_unreg(self._ptr, inp, reg_buffer, out)
+                else:
+                    self.register_buffer(inp)
+                    ops.deterministic_all_reduce_reg(self._ptr, inp, out)
+            else:  # normal AMD ROCm path
+                if registered:
+                    ops.all_reduce_reg(self._ptr, inp, out)
+                else:
+                    ops.all_reduce_unreg(self._ptr, inp, self.buffer, out)
         return out
 
     def custom_all_reduce(self, input: torch.Tensor) -> Optional[torch.Tensor]:

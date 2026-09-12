@@ -56,6 +56,7 @@ from .configs.custom_all_reduce_v2 import (
     get_supported_world_sizes,
 )
 from .custom_all_reduce_utils import (
+    SingleStreamGuard,
     can_use_custom_all_reduce_with_nvlink,
     is_one_nvlink_clique,
     is_weak_contiguous,
@@ -134,6 +135,7 @@ class CustomAllReduceV2:
         priority and override all of the size parameters above.
         """
         self.disabled = True
+        self.stream_guard = SingleStreamGuard(device)
         if not can_use_custom_all_reduce_v2(group=group, device=device):
             return
 
@@ -350,6 +352,10 @@ class CustomAllReduceV2:
         """Check if the input tensor is suitable for custom all-reduce."""
         if self.disabled:
             return False
+        # Graph replay does not call the Python stream guard. Let the caller
+        # choose its graph-safe collective instead of capturing custom AR.
+        if torch.cuda.is_current_stream_capturing():
+            return False
         inp_size = inp.numel() * inp.element_size()
         # custom allreduce requires input byte size to be multiples of 16
         if inp_size % 16 != 0:
@@ -365,24 +371,27 @@ class CustomAllReduceV2:
     # ------------------------------------------------------------------
 
     def custom_all_reduce(self, input: torch.Tensor) -> torch.Tensor:
-        nbytes = input.numel() * input.element_size()
-        if self.override_algo is not None:
-            # TODO: enhance this override pattern
-            algo = self.override_algo
-            use_graph = self._can_use_graph() and not algo.is_push()
-            use_multicast = False
-        else:
-            config = self._pick_config(nbytes, self._can_use_graph())
-            assert config is not None, f"No config for {nbytes = }"
-            algo, use_graph, use_multicast = config
-        graph_params = self._allocate_graph_row(input, nbytes) if use_graph else None
-        return custom_all_reduce(
-            self.obj,
-            input,
-            algo=algo,
-            graph_params=graph_params,
-            use_multicast=use_multicast,
-        )
+        with self.stream_guard.serialize():
+            nbytes = input.numel() * input.element_size()
+            if self.override_algo is not None:
+                # TODO: enhance this override pattern
+                algo = self.override_algo
+                use_graph = self._can_use_graph() and not algo.is_push()
+                use_multicast = False
+            else:
+                config = self._pick_config(nbytes, self._can_use_graph())
+                assert config is not None, f"No config for {nbytes = }"
+                algo, use_graph, use_multicast = config
+            graph_params = (
+                self._allocate_graph_row(input, nbytes) if use_graph else None
+            )
+            return custom_all_reduce(
+                self.obj,
+                input,
+                algo=algo,
+                graph_params=graph_params,
+                use_multicast=use_multicast,
+            )
 
     def _allocate_graph_row(self, input: torch.Tensor, nbytes: int) -> torch.Tensor:
         index = self._graph_counter + len(self._graph_inputs)

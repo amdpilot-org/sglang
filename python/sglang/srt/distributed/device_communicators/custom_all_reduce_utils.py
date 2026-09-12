@@ -10,6 +10,8 @@ import pickle
 import subprocess
 import sys
 import tempfile
+import threading
+from contextlib import contextmanager
 from functools import wraps
 from itertools import product
 from typing import Callable, Dict, List, Optional, Sequence, TypeVar
@@ -423,6 +425,59 @@ def is_weak_contiguous(inp: torch.Tensor):
         inp.storage().nbytes() - inp.storage_offset() * inp.element_size()
         == inp.numel() * inp.element_size()
     )
+
+
+_get_raw_stream = getattr(torch._C, "_cuda_getCurrentRawStream", None)
+
+
+class SingleStreamGuard:
+    """Keep one communicator's eager all-reduces totally ordered.
+
+    Custom all-reduce rendezvous state is owned by the communicator and assumes
+    that only one kernel uses it at a time. A single stream supplies that order.
+    When eager calls move between streams, record the previous stream and make
+    the new stream wait for it before launching another collective.
+
+    CUDA graph capture cannot be made safe by this host guard: replay does not
+    call Python, so independently captured graphs could bypass the ordering.
+    Callers must route capture to a graph-safe collective instead.
+    """
+
+    def __init__(self, device: torch.device) -> None:
+        self.device_index = 0 if device.index is None else device.index
+        self._raw_stream = _get_raw_stream or (
+            lambda index: torch.cuda.current_stream(index).cuda_stream
+        )
+        self._last_stream: Optional[torch.cuda.Stream] = None
+        self._last_raw_stream: Optional[int] = None
+        self._event: Optional[torch.cuda.Event] = None
+        self._launch_lock = threading.Lock()
+
+    @contextmanager
+    def serialize(self):
+        """Serialize guard state together with the associated kernel enqueue."""
+        with self._launch_lock:
+            self.maybe_serialize()
+            yield
+
+    def maybe_serialize(self) -> None:
+        """Order this launch after the prior launch when its stream changes."""
+        if torch.cuda.is_current_stream_capturing():
+            raise RuntimeError(
+                "custom all-reduce cannot be captured because concurrent graph "
+                "replay can violate its single-in-flight communicator contract"
+            )
+        if self._raw_stream(self.device_index) == self._last_raw_stream:
+            return
+
+        stream = torch.cuda.current_stream(self.device_index)
+        if self._last_stream is not None:
+            if self._event is None:
+                self._event = torch.cuda.Event(enable_timing=False)
+            self._event.record(self._last_stream)
+            stream.wait_event(self._event)
+        self._last_stream = stream
+        self._last_raw_stream = stream.cuda_stream
 
 
 def can_p2p(rank: int, world_size: int) -> bool:
