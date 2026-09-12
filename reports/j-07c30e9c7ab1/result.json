@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/16255",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved PR 3145's valid V3.2 and NPU extractions and corrected its reproduced missing AMD/CPU hardware separation by adding dedicated mixins and moving AMD/CPU attention prepare/core dispatch out of deepseek_v2.py. This fixes the concrete structural counterexample, not every remaining platform branch in the broader incremental refactor.",
+  "tests": [
+    {
+      "command": "Run test_deepseek_hardware_mixins.py from an archive of exact candidate 8f131570f6d56fa3298720cfec2506660bfd4596",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before layout regression: deepseek_v2_amd_mixin.py was absent (1 failed, 7 passed)."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-07c30e9c7ab1/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_hardware_mixins.py test/registered/unit/models/test_deepseek_v32_mixin.py test/registered/unit/models/test_deepseek_npu_mixin.py test/registered/unit/models/test_deepseek_mla_dispatch.py",
+      "exit_code": 0,
+      "what_was_measured": "Dedicated backend layout; every AMD, CPU, and NPU attention routing signature; preserved V3.2 policy and MLA dispatch (30 passed, 8 subtests passed)."
+    },
+    {
+      "command": "pre-commit run --files <changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "Formatting, imports, lint, registered-test metadata, and repository policy checks."
+    },
+    {
+      "command": "Run empty_dsa_topk on cuda:0 and compare device/dtype/shape with an independent torch.empty allocation",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X gfx950, both tensors were cuda:0, torch.int32, shape (0, 17)."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-07c30e9c7ab1/evidence/gpu-check.log records AMD Instinct MI355X gfx950 execution and the independent allocation comparison."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No real DeepSeek V3.2 checkpoint or weights: Indexer/IndexerKPool loading, logits, serving, and semantic accuracy were not exercised.",
+    "Only one GPU was assigned; no real multi-GPU or pipeline-parallel stage boundary crossed the top-k handoff.",
+    "No NPU, NVIDIA, CPU-only, or MUSA architecture-specific runtime path was executed.",
+    "AMD and CPU attention dispatch was validated with adversarial mocks; the AMD GPU check only validates the V3.2 empty-top-k tensor invariant.",
+    "Platform conditionals unrelated to attention dispatch remain in deepseek_v2.py and require their own architecture/configuration evidence before extraction.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
