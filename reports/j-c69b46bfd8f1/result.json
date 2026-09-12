@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38075",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/3071",
+  "candidate_commit": "8c48a94e349fe8bd2d700a8a3d9d1287706dc1a5",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a substantial partial fix: it preserves the standard health implementation, adds native image/audio/video fields and conversion, and exposes typed lifecycle state. Its focused tests and rebuilt-native wire probe pass. It does not fully satisfy the original operability contract because concurrent gRPC weight updates are represented by one boolean; completion of either update clears the state while another update is still running, falsely advertising SERVING and ready_to_serve. Encoder-disaggregated multimodal execution also remains unverified: the candidate's disaggregated test exercises the existing prefill/decode bootstrap fields, not an encoder-disaggregated deployment.",
+  "tests": [
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-c69b46bfd8f1/base-cargo-target /job/.cargo/bin/cargo +1.92.0 build --release --locked -p sglang-grpc (at 358c163250ad3b1f62939b01ce1314a0a31a0365), then native_contract_probe.py against the rebuilt library",
+      "exit_code": 1,
+      "what_was_measured": "The base native server loaded and started, then the wire probe failed because generated protobuf code had no GetOperationalStateRequest. This reproduces the original missing lifecycle contract against a rebuilt base artifact. The base proto also has no MediaInput fields."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-c69b46bfd8f1/candidate-cargo-target /job/.cargo/bin/cargo +1.92.0 test -p sglang-grpc",
+      "exit_code": 0,
+      "what_was_measured": "All 18 Rust tests passed, including standard health, multimodal dictionary conversion, inline-data validation, and coexistence with prefill/decode bootstrap parameters."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c69b46bfd8f1/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_grpc_bridge.py test/registered/unit/entrypoints/test_grpc_standard_health.py",
+      "exit_code": 0,
+      "what_was_measured": "Four Python tests passed and five standard-health tests were skipped because grpc_health was unavailable in the prepared interpreter. The passing lifecycle tests use constructed RuntimeHandle state, not a loaded model server."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-c69b46bfd8f1/candidate-cargo-target /job/.cargo/bin/cargo +1.92.0 build --release --locked -p sglang-grpc; PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c69b46bfd8f1/venv/bin/python reports/j-a32e4955d8ab/native_contract_probe.py /tmp/amdpilot-repo-j-c69b46bfd8f1/candidate-cargo-target/release/libsglang_grpc_core.so",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate's optimized native library was rebuilt and explicitly loaded. A live native server returned lifecycle phases and delivered image URI, inline audio data URI, video data URI, and prefill/decode bootstrap fields to the Python runtime request dictionary."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c69b46bfd8f1/venv/bin/python reports/j-c69b46bfd8f1/adversarial_weight_update_overlap.py",
+      "exit_code": 1,
+      "what_was_measured": "Independent adversarial failure: after the first of two overlapping weight updates completed, the second remained blocked/running but health_check returned true and operational state reported SERVING, accepting_new_requests=true, ready_to_serve=true, and weight_update_in_progress=false."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "One AMD Instinct MI355X was visible through torch 2.11.0+rocm7.2 (HIP 7.2.26015), but no supported multimodal model weights or encoder-disaggregated deployment were supplied. A text-only tiny Llama fixture cannot validate multimodal numerical or encoder-disaggregated behavior, so no misleading GPU smoke was run.",
+  "native_rebuilt": true,
+  "remaining_counterexamples": [
+    "Two overlapping UpdateWeightsFromDisk RPCs can falsely transition health and operational state to SERVING/ready when the first completes while the second is still in progress.",
+    "The candidate labels a test with DisaggregatedParams as disaggregated multimodal coverage, but those bootstrap fields are the prefill/decode KV-disaggregation contract; no encoder-disaggregated multimodal deployment or execution is exercised.",
+    "No real multimodal model verifies image, audio, or video preprocessing and numerical inference through the native gRPC path.",
+    "No loaded model server under request load verifies pause/drain, weight update, readiness, resume, and shutdown end to end."
+  ],
+  "remaining_limitations": [
+    "The prepared image initially had no Cargo executable despite the candidate report naming Rust 1.92.0. Rust 1.92.0 was installed into the private job runtime and used for both base and candidate native rebuilds; no system-wide toolchain was changed.",
+    "The installed Python environment lacks grpc_health, causing five Python standard-health tests to skip. Rust standard-health tests did run and pass.",
+    "The installed package had no sglang.srt.rust_extensions._grpc module. Native validation explicitly loaded the freshly rebuilt candidate library from the private cargo target.",
+    "Available hardware was AMD Instinct MI355X, but the review had no qualified multimodal weights or multi-process encoder-disaggregated topology."
+  ]
+}
