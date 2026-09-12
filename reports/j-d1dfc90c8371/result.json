@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34582",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "summary": "The original two-node TP=16 GLM-5.2 deadlock could not be reproduced with one gfx950 GPU and no model weights. Source inspection shows the reported overlap-scheduler command defaults to the CPU process group, so the reporter's standalone NCCL collective does not test the implicated Gloo path. Local 2-rank and 16-rank Gloo contract fixtures completed with heterogeneous active/idle metadata; no corrective source change is justified without per-rank evidence from the original topology.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-d1dfc90c8371/venv/bin/python test/registered/unit/managers/scheduler_components/test_dp_attn.py",
+      "exit_code": 0,
+      "what_was_measured": "Four existing CPU unit tests covering DP1 gather skipping and decode-to-extend voting passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d1dfc90c8371/venv/bin/python reports/j-d1dfc90c8371/reproduce_gloo_mlp_sync.py --world-size 2",
+      "exit_code": 0,
+      "what_was_measured": "Two localhost Gloo ranks completed MLPSyncBatchInfo.all_gather with heterogeneous extend/idle metadata and agreed on global token counts."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d1dfc90c8371/venv/bin/python reports/j-d1dfc90c8371/reproduce_gloo_mlp_sync.py --world-size 16",
+      "exit_code": 0,
+      "what_was_measured": "Sixteen localhost Gloo ranks, shaped as dp_size=2 and tp_size=8, completed the checked-out metadata gather and agreed on [64, 0] token counts."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d1dfc90c8371/venv/bin/python -m py_compile reports/j-d1dfc90c8371/reproduce_gloo_mlp_sync.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "The retained evidence fixture compiles and the patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "raw/gpu_inventory.txt and raw/torch_gpu_probe.txt show the assigned single gfx950 GPU and a basic ROCm tensor probe, but no issue-specific SGLang GPU serving path was executed because the report requires two H100 nodes, 16 ranks, and unavailable GLM-5.2 W4AFP8 weights."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No second node or 16 assigned GPUs were available.",
+    "The reported H100/CUDA/NCCL hardware and GLM-5.2 W4AFP8 weights were unavailable.",
+    "Localhost Gloo completion cannot exclude cross-node Gloo transport failure or scheduler collective-order divergence.",
+    "No model architecture, speculative decoding, semantic accuracy, or distributed serving behavior was validated."
+  ]
+}
