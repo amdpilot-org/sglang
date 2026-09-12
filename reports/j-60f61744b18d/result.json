@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31545",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "reproduced",
+  "summary": "On MI355X with Torch 2.11.0+rocm7.2 and HIP 7.2.26015, eager decode had 79 kernels overlapping each of nine CPU decode markers, while graph-on had nine hipGraphLaunch calls and no kernels overlapping any decode marker. Unlike the issue's older image, internal graph kernels were opaque rather than emitted as a deferred burst. Runtime warnings identify the torch.profiler GPU activity backend as ROCTracer. The separate rocprofv3 1.1.0 rocprofiler-sdk tool exposed per-replay dispatches when explicit NVTX/ROCTx markers were present, but SGLang step markers are Kineto record_function spans and the tool requires launch/attach injection, so no evidence-supported /start_profile correction was made.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-60f61744b18d/venv/bin/python reports/j-60f61744b18d/run_profile_probe.py --fixture /tmp/amdpilot-repo-j-60f61744b18d/models/tiny-random-llama --output reports/j-60f61744b18d/evidence/eager",
+      "exit_code": 0,
+      "what_was_measured": "Real eager SGLang HTTP generation and torch.profiler trace: nine decode markers, 900 total kernels, 79 kernels overlapping every decode marker."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-60f61744b18d/venv/bin/python reports/j-60f61744b18d/run_profile_probe.py --graph --fixture /tmp/amdpilot-repo-j-60f61744b18d/models/tiny-random-llama --output reports/j-60f61744b18d/evidence/graph",
+      "exit_code": 0,
+      "what_was_measured": "Real graph-on SGLang HTTP generation and torch.profiler trace: nine decode markers, nine hipGraphLaunch calls, zero kernels overlapping all nine decode markers."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-60f61744b18d/venv/bin/python reports/j-60f61744b18d/analyze_traces.py reports/j-60f61744b18d/evidence/eager/traces/eager-TP-0.trace.json.gz reports/j-60f61744b18d/evidence/graph/traces/graph-TP-0.trace.json.gz",
+      "exit_code": 0,
+      "what_was_measured": "Parsed marker/kernel timestamp overlap from both retained Chrome traces."
+    },
+    {
+      "command": "rocprofv3 --kernel-trace --marker-trace --hip-runtime-trace --output-format json --output-directory reports/j-60f61744b18d/evidence/rocprofv3-nvtx --output-file graph_probe -- /tmp/amdpilot-repo-j-60f61744b18d/venv/bin/python reports/j-60f61744b18d/rocprof_graph_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "rocprofiler-sdk recorded four GPU dispatches inside each of ten explicit replay markers; ten GPU sums exactly matched the independent CPU result (max absolute error 0.0)."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "Assigned AMD Instinct MI355X gfx950 executed eager and graph-on SGLang generation plus the rocprofiler-sdk graph probe; raw traces, responses, logs, and numerical comparison are retained under reports/j-60f61744b18d/evidence.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Pro weights and four GPUs were unavailable; TP4, DP attention, MoE overlap, and the exact reported workload remain unverified.",
+    "The qualified tiny random Llama validates only transport, engine execution, graph replay, and tracing mechanics, not DeepSeek architecture or semantics.",
+    "This newer stack makes graph replay kernels opaque in torch.profiler instead of emitting the reported post-marker burst.",
+    "rocprofv3 needs explicit ROCTx/NVTX step markers and process launch/attach integration; SGLang currently emits decode steps only as Kineto record_function spans."
+  ]
+}
