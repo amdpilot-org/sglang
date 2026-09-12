@@ -1,0 +1,31 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34972",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the HiCache preflight's omission of free hugetlb capacity with a deterministic unit fixture and updated the check to accept an allocation when either matching free HugePages or reserved normal RAM can satisfy it. HugePages are considered only for the default anonymous mmap allocator with a recognized SGLANG_HUGEPAGE_SIZE, and the capacities are deliberately not added because the allocator attempts each backing pool separately.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-726bb240cccc/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mem_pool_host.py -k 'TestHostMemoryBudget'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: the base implementation had no HugePage-aware budget and three new issue/boundary tests failed. Raw output: reports/j-726bb240cccc/failing-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-726bb240cccc/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mem_pool_host.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after host-pool unit suite: 21 tests passed, including free HugePages satisfying the reported low-MemAvailable case, non-additive capacity, plain-page exclusion, page-size matching, and allocator eligibility. Raw output: reports/j-726bb240cccc/passing-after-final.txt"
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-726bb240cccc/pre-commit-cache /opt/venv/bin/pre-commit run --files python/sglang/srt/mem_cache/pool_host/base.py test/registered/unit/mem_cache/test_mem_pool_host.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, spelling, and registered-test metadata checks passed. Raw output: reports/j-726bb240cccc/pre-commit-final.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The defect and fix are CPU host-memory accounting only. The assigned single AMD Instinct MI350X (gfx950-class, Torch 2.11.0+rocm7.2) was detected but no GPU kernel or model execution was relevant or claimed; see reports/j-726bb240cccc/environment.txt.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The assigned host has HugePages_Total=0, so changing node-wide HugePage reservations and a physical hugetlb-backed server allocation were not performed; /proc/meminfo evidence is retained in reports/j-726bb240cccc/host-meminfo.txt.",
+    "No model weights were supplied or needed. No full HTTP server/model reproduction is claimed; the regression exercises the actual HostKVCache budget implementation and allocator-selection logic deterministically.",
+    "The /proc/meminfo HugePages_Free counter describes the kernel default HugePage size. A configured SGLANG_HUGEPAGE_SIZE that does not match Hugepagesize is conservatively excluded from the preflight budget."
+  ]
+}

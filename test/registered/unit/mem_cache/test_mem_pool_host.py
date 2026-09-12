@@ -261,6 +261,75 @@ class TestHostMemoryBudget(CustomTestCase):
             budget * 8, self._AVAILABLE - base.HICACHE_HOST_MEMORY_RESERVE_BYTES
         )
 
+    def test_free_hugepages_can_satisfy_default_mmap_allocation(self):
+        hugepage_bytes = 12 * 1024**3
+        with (
+            unittest.mock.patch.object(base, "ranks_per_host", return_value=1),
+            unittest.mock.patch.object(
+                base.psutil,
+                "virtual_memory",
+                return_value=unittest.mock.Mock(
+                    available=base.HICACHE_HOST_MEMORY_RESERVE_BYTES + 2 * 1024**3
+                ),
+            ),
+            unittest.mock.patch.object(
+                base, "free_hugepage_bytes", return_value=hugepage_bytes
+            ),
+        ):
+            self.assertEqual(base.host_memory_budget_bytes(2 * 1024**2), hugepage_bytes)
+
+    def test_normal_and_hugepage_budgets_are_not_added(self):
+        normal_bytes = 6 * 1024**3
+        hugepage_bytes = 7 * 1024**3
+        with (
+            unittest.mock.patch.object(base, "ranks_per_host", return_value=1),
+            unittest.mock.patch.object(
+                base.psutil,
+                "virtual_memory",
+                return_value=unittest.mock.Mock(
+                    available=base.HICACHE_HOST_MEMORY_RESERVE_BYTES + normal_bytes
+                ),
+            ),
+            unittest.mock.patch.object(
+                base, "free_hugepage_bytes", return_value=hugepage_bytes
+            ),
+        ):
+            self.assertEqual(base.host_memory_budget_bytes(2 * 1024**2), hugepage_bytes)
+
+    def test_hugepages_are_ignored_for_plain_page_allocations(self):
+        normal_bytes = 2 * 1024**3
+        with (
+            unittest.mock.patch.object(base, "ranks_per_host", return_value=1),
+            unittest.mock.patch.object(
+                base.psutil,
+                "virtual_memory",
+                return_value=unittest.mock.Mock(
+                    available=base.HICACHE_HOST_MEMORY_RESERVE_BYTES + normal_bytes
+                ),
+            ),
+            unittest.mock.patch.object(
+                base, "free_hugepage_bytes", return_value=12 * 1024**3
+            ),
+        ):
+            self.assertEqual(base.host_memory_budget_bytes(), normal_bytes)
+
+    def test_free_hugepages_require_matching_configured_page_size(self):
+        meminfo = "HugePages_Free: 3\nHugepagesize: 2048 kB\n"
+        with unittest.mock.patch(
+            "builtins.open", unittest.mock.mock_open(read_data=meminfo)
+        ):
+            self.assertEqual(base.free_hugepage_bytes(2 * 1024**2), 6 * 1024**2)
+            self.assertEqual(base.free_hugepage_bytes(1024**3), 0)
+
+    def test_only_default_allocator_uses_mmap_hugepage_budget(self):
+        default_allocator = base.HostTensorAllocator()
+        shm_allocator = base.get_allocator_from_storage("shm")
+        with base.envs.SGLANG_HUGEPAGE_SIZE.override("2MB"):
+            self.assertEqual(
+                base.configured_hugepage_size_bytes(default_allocator), 2 * 1024**2
+            )
+            self.assertEqual(base.configured_hugepage_size_bytes(shm_allocator), 0)
+
     def test_ranks_per_host_divides_world_size_by_nodes(self):
         # The launcher slices ranks uniformly across nodes, so the co-located
         # rank count is world_size // nnodes — no hostname collective.
