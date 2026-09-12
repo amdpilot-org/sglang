@@ -170,6 +170,46 @@ mean profitable:
 - **TP beyond 2 ranks** rarely improves image-DiT latency: the per-block
   all-reduce grows with rank count faster than the GEMM savings.
 
+### Resolve a calibrated plan
+
+You can make a startup choose from an offline calibration report instead of
+copying a plan between unlike workloads:
+
+```bash
+python -m sglang.multimodal_gen.launch_server \
+  --model-path MODEL_PATH \
+  --diffusion-parallel-plan auto:/srv/calibration/report.json \
+  --diffusion-workload-signature /srv/calibration/signature.json
+```
+
+The signature includes the exact model revision, task, latent-token count,
+step schedule, logical and candidate batch sizes, CFG branch count, dtype,
+cache and compile modes, and device topology. The resolver only considers an
+exact signature match. It removes infeasible results and results whose quality
+gate did not pass, then minimizes the recorded p95 end-to-end latency. If no
+result passes, the existing conservative auto-tuning path remains in control.
+
+Any explicit `--num-gpus`, TP, SP, CFG, DP, or FSDP flag takes priority over
+the report. A report uses schema version 1 and records its code revision,
+environment, peak memory, p50/p95 latency, throughput, quality gate, and
+communication counts and bytes. Generate records from complete warmups and
+repeated end-to-end requests; a kernel microbenchmark is not a qualifying
+calibration result.
+
+At startup, calibrated plans fail closed unless the report's code revision
+matches the running SGLang checkout and its environment exactly matches the
+current device type and name, distributed backend, Torch version, and
+accelerator runtime version. A result's `feasible` field is evidence rather
+than an override: the resolver independently rejects a plan whose CFG, TP, SP,
+and replica degree product differs from `num_gpus`.
+
+The report types, stable signature hash, legality filters, and JSON reader are
+available from
+`sglang.multimodal_gen.runtime.server_args.parallel_advisor`. A world-size-one
+record must use degree one for every axis and `fsdp: false`; the runtime then
+uses its singleton collective fast paths and does not create a device
+communicator for those groups.
+
 ## Data parallelism
 
 `--dp-size N` runs N full engine replicas on `num_gpus / N` GPUs each, every
