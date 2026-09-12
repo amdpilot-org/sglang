@@ -1001,6 +1001,14 @@ class IndexerKPool(MultiPlatformOp):
             k_hi = k_lo + group.k_rows
             q_end = group.q_start + group.q_len
             bytes_per_row = max(group.k_rows * 4, 1)
+            if bytes_per_row > logits_budget_bytes:
+                raise RuntimeError(
+                    "DSA kpool MQA logits budget cannot fit one request-local "
+                    f"row: required={bytes_per_row} bytes, "
+                    f"budget={logits_budget_bytes} bytes, k_rows={group.k_rows}. "
+                    "Refusing the allocation instead of exceeding the memory "
+                    "budget."
+                )
             max_rows = max(1, logits_budget_bytes // bytes_per_row)
             max_rows = min(max_rows, group.q_len)
 

@@ -126,3 +126,48 @@ def test_grouped_chunking_preserves_global_mapping_and_budget(method):
     assert calls == expected_calls
     assert torch.equal(result[:n_real, 0], pool_lens)
     assert torch.all(result[n_real:] == -1)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires one GPU")
+def test_grouped_chunking_rejects_request_row_larger_than_budget():
+    device = torch.device("cuda")
+    k_rows = 10
+    budget = 4
+    plan = SimpleNamespace(
+        seq_lens_expanded=torch.tensor([k_rows], dtype=torch.int32, device=device),
+        pooled_seq_lens_expanded=torch.tensor(
+            [k_rows], dtype=torch.int32, device=device
+        ),
+        ragged_q_ks=torch.tensor([0], dtype=torch.int32, device=device),
+        ragged_q_ke=torch.tensor([k_rows], dtype=torch.int32, device=device),
+        ragged_groups=(
+            SimpleNamespace(q_start=0, q_len=1, k_start=0, k_rows=k_rows),
+        ),
+    )
+    q = torch.zeros((1, 1, 8), dtype=torch.float8_e4m3fn, device=device)
+    k = torch.zeros((k_rows, 8), dtype=torch.float8_e4m3fn, device=device)
+    scale = torch.ones(k_rows, dtype=torch.float32, device=device)
+    weights = torch.ones((1, 1), dtype=torch.float32, device=device)
+
+    with (
+        mock.patch(
+            "sglang.srt.layers.attention.dsa.dsa_indexer_kpool.deep_gemm",
+            SimpleNamespace(fp8_mqa_logits=mock.Mock()),
+            create=True,
+        ) as deep_gemm_mock,
+        pytest.raises(RuntimeError, match="required=40 bytes, budget=4 bytes"),
+    ):
+        _indexer()._topk_ragged_kpool_grouped(
+            plan=plan,
+            q_fp8=q,
+            weights=weights,
+            k_fp8=k,
+            k_scale=scale,
+            logits_budget_bytes=budget,
+            total_q=1,
+            page_table=None,
+            page_table_row_index=None,
+            topk_offsets=None,
+        )
+
+    deep_gemm_mock.fp8_mqa_logits.assert_not_called()
