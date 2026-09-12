@@ -52,6 +52,13 @@ def handle_attention_backend_compatibility(server_args: Any):
 
     # Torch native and flex attention backends
     prefill_backend, decode_backend = attention_backends_of(resolved_view(server_args))
+    if "sage" in (prefill_backend, decode_backend) and get_platform().is_sm100:
+        raise ValueError(
+            "The sage attention backend is not supported on SM100 by the "
+            "pinned SageAttention revision: its public sageattn dispatcher "
+            "raises 'Unsupported CUDA architecture: sm100'. Use another "
+            "attention backend on SM100."
+        )
     if decode_backend in ("torch_native", "sage"):
         logger.warning("Decode cuda graph is disabled for %s", decode_backend)
         declare_resolution(

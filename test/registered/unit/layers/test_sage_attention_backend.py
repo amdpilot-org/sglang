@@ -5,10 +5,9 @@ import torch
 from torch.nn.functional import scaled_dot_product_attention
 
 from sglang.srt.layers.attention.sage_attention_backend import SageAttentionBackend
-from sglang.test.ci.ci_register import register_amd_ci, register_cpu_ci
+from sglang.test.ci.ci_register import register_cpu_ci
 
 register_cpu_ci(est_time=8, suite="base-a-test-cpu")
-register_amd_ci(est_time=8, suite="stage-b-test-1-gpu-small-amd-mi35x")
 
 
 def _backend_with_reference_kernel():
@@ -110,4 +109,19 @@ def test_sage_backend_fails_closed_on_rocm():
         ),
         pytest.raises(RuntimeError, match="requires NVIDIA CUDA"),
     ):
+        SageAttentionBackend(object())
+
+
+def test_sage_backend_fails_closed_on_sm100_before_import():
+    with (
+        patch(
+            "sglang.srt.layers.attention.sage_attention_backend.is_hip",
+            return_value=False,
+        ),
+        patch(
+            "sglang.srt.layers.attention.sage_attention_backend.get_platform"
+        ) as get_platform,
+        pytest.raises(RuntimeError, match="not supported on SM100"),
+    ):
+        get_platform.return_value.is_sm100 = True
         SageAttentionBackend(object())
