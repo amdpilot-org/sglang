@@ -1,0 +1,1042 @@
+diff --git a/python/sglang/srt/disaggregation/prefill.py b/python/sglang/srt/disaggregation/prefill.py
+index 2a15fa75878f..843466041544 100644
+--- a/python/sglang/srt/disaggregation/prefill.py
++++ b/python/sglang/srt/disaggregation/prefill.py
+@@ -419,8 +419,27 @@ def pop_bootstrapped(
+                     self.scheduler.attn_tp_cpu_group,
+                 )
+                 for i, local_poll in zip(uncovered, local_polls):
++                    req = self.queue[i]
+                     if local_poll == KVPoll.Failed:
+-                        polls[i] = KVPoll.Failed
++                        if isinstance(req.finished_reason, FINISH_ABORT):
++                            continue
++                        self.scheduler._pp_record_pending_bootstrap_failure(
++                            req,
++                            "KV transfer failed before bootstrap consensus.",
++                        )
++                    elif local_poll in (
++                        KVPoll.Bootstrapping,
++                        KVPoll.WaitingForInput,
++                    ):
++                        # These are non-terminal local observations. The RID
++                        # stays queued until a later PP consensus decision
++                        # explicitly admits or rejects it.
++                        continue
++                    else:
++                        raise RuntimeError(
++                            f"Unexpected local KV poll state {local_poll} for "
++                            f"bootstrap request {req.rid}"
++                        )
+         else:
+             polls = poll_and_all_reduce_attn_cp_tp_group(
+                 [req.disagg_kv_sender for req in self.queue],
+@@ -454,6 +473,12 @@ def pop_bootstrapped(
+                         continue  # no more metadata buffer
+                     req.prefill_attempt_count += 1
+                 elif not self.finalize_bootstrap(req):
++                    if pp_good_rids is not None:
++                        raise RuntimeError(
++                            f"PP consensus admitted {req.rid} but finalize_bootstrap "
++                            "failed locally; metadata buffer must be reserved at "
++                            "report time"
++                        )
+                     continue
+                 bootstrapped_reqs.append(req)
+                 indices_to_remove.add(i)
+diff --git a/python/sglang/srt/managers/io_struct.py b/python/sglang/srt/managers/io_struct.py
+index 9cc0a62724e3..4a5aa4e70311 100644
+--- a/python/sglang/srt/managers/io_struct.py
++++ b/python/sglang/srt/managers/io_struct.py
+@@ -1921,6 +1921,11 @@ class AbortReq(BaseReq, kw_only=True):
+     # The finished reason data (from BaseFinishReason.to_json())
+     finished_reason: Optional[FinishReasonDict] = None
+     abort_message: Optional[str] = None
++    # In PP disaggregated prefill, PP0 stamps the newest bootstrap decision
++    # that was already frozen when this abort was observed. Downstream stages
++    # must apply through this sequence before executing the abort, so a late
++    # abort cannot retroactively rewrite an earlier immutable decision.
++    pp_bootstrap_abort_after_sequence: Optional[int] = None
+ 
+     def __post_init__(self):
+         # FIXME: This is a hack to keep the same with the old code
+diff --git a/python/sglang/srt/managers/scheduler.py b/python/sglang/srt/managers/scheduler.py
+index a91433dd3eec..93f36e0b914d 100644
+--- a/python/sglang/srt/managers/scheduler.py
++++ b/python/sglang/srt/managers/scheduler.py
+@@ -4423,6 +4423,15 @@ def handle_rpc_request(self, recv_req: RpcReqInput):
+         return RpcReqOutput(success=success, message="" if not exec else str(exec))
+ 
+     def abort_request(self, recv_req: AbortReq):
++        if (
++            self.disaggregation_mode == DisaggregationMode.PREFILL
++            and self.ps.pp_size > 1
++            and self._pp_order_or_defer_abort_request(recv_req)
++        ):
++            # PP0 stamped this abort after a decision that has not reached this
++            # stage yet. The decision commit will replay the abort locally.
++            return
++
+         if (chunked_req := self.chunked_req) is not None:
+             if recv_req.abort_all or chunked_req.rid.startswith(recv_req.rid):
+                 self._pending_chunked_abort_req = chunked_req
+@@ -4449,13 +4458,11 @@ def abort_request(self, recv_req: AbortReq):
+                 release_kv_cache(req, self.tree_cache)
+             # For disaggregation prefill mode, free the metadata buffer index
+             if self.disaggregation_mode == DisaggregationMode.PREFILL:
+-                bootstrap_pending = req.pending_bootstrap
+                 maybe_release_metadata_buffer(
+                     req, self.req_to_metadata_buffer_idx_allocator
+                 )
+                 if (
+-                    bootstrap_pending
+-                    and hasattr(req, "disagg_kv_sender")
++                    hasattr(req, "disagg_kv_sender")
+                     and req.disagg_kv_sender is not None
+                 ):
+                     if hasattr(req.disagg_kv_sender, "abort"):
+diff --git a/python/sglang/srt/managers/scheduler_pp_mixin.py b/python/sglang/srt/managers/scheduler_pp_mixin.py
+index 42ead03e0ede..6bdba0547d8f 100644
+--- a/python/sglang/srt/managers/scheduler_pp_mixin.py
++++ b/python/sglang/srt/managers/scheduler_pp_mixin.py
+@@ -6,7 +6,7 @@
+ from array import array
+ from collections import defaultdict, deque
+ from dataclasses import dataclass
+-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
++from typing import TYPE_CHECKING, Dict, List, NamedTuple, Optional, Tuple
+ 
+ import numpy as np
+ import torch
+@@ -23,6 +23,7 @@
+     is_dp_attention_enabled,
+     set_is_extend_in_batch,
+ )
++from sglang.srt.managers.io_struct import AbortReq
+ from sglang.srt.managers.overlap_utils import RelayPayload
+ from sglang.srt.managers.schedule_batch import FINISH_ABORT, Req, ScheduleBatch
+ from sglang.srt.managers.utils import (
+@@ -64,6 +65,22 @@ class PPBatchMetadata:
+     can_run_cuda_graph: bool
+ 
+ 
++class PPBootstrapDecision(NamedTuple):
++    """An immutable bootstrap-queue commit ordered by PP0.
++
++    Candidate good/bad lists are still reduced stage by stage. They become a
++    decision only after returning to PP0, which merges PP0's pending aborts and
++    assigns the sequence number. Every stage then applies and forwards this
++    exact value; no stage is allowed to rewrite the committed RID sets. It is a
++    tuple value because the existing PP Python-object transport requires a
++    sized container.
++    """
++
++    sequence: int
++    good_rids: Tuple[str, ...]
++    bad_rids: Tuple[str, ...]
++
++
+ class SchedulerPPMixin:
+     @DynamicGradMode()
+     def event_loop_pp(self: Scheduler):
+@@ -217,7 +234,7 @@ def event_loop_pp_disagg_prefill(self: Scheduler):
+         # PD additional state initialization
+         bmbs = [None] * self.pp_loop_size
+         tmbs = [None] * self.pp_loop_size
+-        consensus_bootstrapped_rids: Optional[List[str]] = None
++        consensus_bootstrapped_rids: Optional[PPBootstrapDecision] = None
+         transferred_rids: List[str] = []
+         release_rids: Optional[List[str]] = None
+         send_bootstrapped_work = []
+@@ -581,6 +598,12 @@ def init_pp_loop_state(self: Scheduler):
+         self._pp_tensor_dict_inbox: Dict[str, deque[Dict[str, torch.Tensor]]] = (
+             defaultdict(deque)
+         )
++        # Bootstrap candidates can be in flight concurrently. PP0 is the
++        # single sequencer for decisions returning around the ring; every rank
++        # applies exactly the next decision and never replays one.
++        self._pp_bootstrap_next_decision_sequence = 0
++        self._pp_bootstrap_expected_decision_sequence = 0
++        self._pp_deferred_abort_reqs = deque()
+ 
+     def profile_and_init_predictor(self: Scheduler):
+         """
+@@ -802,25 +825,281 @@ def predict_next_chunk_size(self: Scheduler, history_len: int) -> Optional[int]:
+ 
+         return predicted_size
+ 
+-    def process_bootstrapped_queue(
+-        self: Scheduler, bootstrapped_rids: Optional[List[str]]
+-    ):
+-        # finished consensus bootstrapped reqs and prepare the waiting queue
+-        if bootstrapped_rids is not None:
+-            (
+-                good_consensus_bootstrapped_rids,
+-                bad_consensus_bootstrapped_rids,
+-            ) = bootstrapped_rids
+-            good_reqs, failed_reqs = (
+-                self.disagg_prefill_bootstrap_queue.pop_bootstrapped(
+-                    return_failed_reqs=True,
+-                    pp_good_rids=good_consensus_bootstrapped_rids,
+-                    pp_bad_rids=bad_consensus_bootstrapped_rids,
++    def _pp_ensure_bootstrap_decision_state(self: Scheduler) -> None:
++        """Initialize sequencing state for direct/unit-test callers as well."""
++        if not hasattr(self, "_pp_bootstrap_next_decision_sequence"):
++            self._pp_bootstrap_next_decision_sequence = 0
++        if not hasattr(self, "_pp_bootstrap_expected_decision_sequence"):
++            self._pp_bootstrap_expected_decision_sequence = 0
++        if not hasattr(self, "_pp_deferred_abort_reqs"):
++            self._pp_deferred_abort_reqs = deque()
++        if not hasattr(self, "_pp_pending_bootstrap_failures"):
++            self._pp_pending_bootstrap_failures = {}
++
++    def _pp_record_pending_bootstrap_failure(
++        self: Scheduler, req: Req, message: str
++    ) -> None:
++        """Record a local KV failure without changing request scheduling state.
++
++        A bootstrap good decision may already be in flight when a rank observes
++        KVPoll.Failed. Setting finished_reason here would let that rank veto the
++        immutable decision and select a different microbatch. Instead, retain a
++        local proposal that is unioned into a later bad decision. The good
++        decision, if any, is still applied identically on every rank; the later
++        bad decision then aborts the RID wherever it has progressed.
++        """
++        self._pp_ensure_bootstrap_decision_state()
++        if req.rid in self._pp_pending_bootstrap_failures:
++            return
++        self._pp_pending_bootstrap_failures[req.rid] = message
++        logger.info(
++            "Local KV failure observed for rid=%s bootstrap_room=%s; "
++            "proposed for ordered PP abort",
++            req.rid,
++            req.bootstrap_room,
++        )
++
++    def _pp_order_or_defer_abort_request(self: Scheduler, recv_req) -> bool:
++        """Put an AbortReq on the same logical timeline as bootstrap commits.
++
++        PP0 stamps the newest already-frozen decision. A downstream rank that
++        has not applied through that decision defers the entire AbortReq. This
++        makes an abort observed after decision N take effect only after N on
++        every stage, even if the request and decision use differently phased
++        PP control-message slots.
++
++        Returns True when the caller must stop processing the request for now.
++        """
++        self._pp_ensure_bootstrap_decision_state()
++        boundary = recv_req.pp_bootstrap_abort_after_sequence
++
++        if self.pp_group.is_first_rank:
++            if boundary is None:
++                boundary = self._pp_bootstrap_next_decision_sequence - 1
++                recv_req.pp_bootstrap_abort_after_sequence = boundary
++            return False
++
++        if boundary is None or self._pp_bootstrap_expected_decision_sequence > boundary:
++            return False
++
++        self._pp_deferred_abort_reqs.append(recv_req)
++        logger.info(
++            "Deferred PP AbortReq rid=%s abort_all=%s "
++            "after_sequence=%d expected_sequence=%d",
++            recv_req.rid,
++            recv_req.abort_all,
++            boundary,
++            self._pp_bootstrap_expected_decision_sequence,
++        )
++        return True
++
++    def _pp_drain_deferred_abort_requests(self: Scheduler) -> None:
++        """Execute AbortReqs whose PP0 decision boundary has been crossed."""
++        if not self._pp_deferred_abort_reqs:
++            return
++
++        remaining = deque()
++        while self._pp_deferred_abort_reqs:
++            recv_req = self._pp_deferred_abort_reqs.popleft()
++            boundary = recv_req.pp_bootstrap_abort_after_sequence
++            if (
++                boundary is not None
++                and self._pp_bootstrap_expected_decision_sequence <= boundary
++            ):
++                remaining.append(recv_req)
++                continue
++            logger.info(
++                "Applying deferred PP AbortReq rid=%s abort_all=%s "
++                "after_sequence=%s expected_sequence=%d",
++                recv_req.rid,
++                recv_req.abort_all,
++                boundary,
++                self._pp_bootstrap_expected_decision_sequence,
++            )
++            self.abort_request(recv_req)
++        self._pp_deferred_abort_reqs = remaining
++
++    def _pp_freeze_bootstrap_decision(
++        self: Scheduler, candidate_rids: List[List[str]]
++    ) -> PPBootstrapDecision:
++        """Merge PP0-local aborts and turn a reduced candidate into a commit."""
++        if not self.pp_group.is_first_rank:
++            raise RuntimeError("Only PP0 may freeze a PP bootstrap decision")
++
++        self._pp_ensure_bootstrap_decision_state()
++        good_rids, bad_rids = candidate_rids
++        aborted_rids = {
++            req.rid
++            for req in self.disagg_prefill_bootstrap_queue.queue
++            if isinstance(req.finished_reason, FINISH_ABORT)
++        }
++        aborted_rids.update(self._pp_pending_bootstrap_failures)
++        fenced_good_rids = [rid for rid in good_rids if rid in aborted_rids]
++        good_rids, bad_rids = self._route_aborts_to_bad(
++            good_rids, bad_rids, aborted_rids
++        )
++
++        # Bad wins if a stale candidate contains the RID in both sets. Stable
++        # de-duplication also makes the commit log byte-for-byte comparable
++        # across ranks.
++        bad_rids = list(dict.fromkeys(bad_rids))
++        bad_rid_set = set(bad_rids)
++        good_rids = list(
++            dict.fromkeys(rid for rid in good_rids if rid not in bad_rid_set)
++        )
++
++        sequence = self._pp_bootstrap_next_decision_sequence
++        self._pp_bootstrap_next_decision_sequence += 1
++        decision = PPBootstrapDecision(
++            sequence=sequence,
++            good_rids=tuple(good_rids),
++            bad_rids=tuple(bad_rids),
++        )
++        if fenced_good_rids:
++            logger.info(
++                "PP0 fenced locally aborted RIDs from bootstrap decision "
++                "sequence=%d rids=%s",
++                sequence,
++                tuple(fenced_good_rids),
++            )
++        return decision
++
++    def _pp_apply_bootstrap_decision(
++        self: Scheduler, decision: PPBootstrapDecision
++    ) -> None:
++        """Apply one ordered decision exactly once on this PP stage."""
++        self._pp_ensure_bootstrap_decision_state()
++        expected = self._pp_bootstrap_expected_decision_sequence
++        if decision.sequence < expected:
++            logger.warning(
++                "Ignoring duplicate PP bootstrap decision sequence=%d expected=%d",
++                decision.sequence,
++                expected,
++            )
++            return
++        if decision.sequence > expected:
++            raise RuntimeError(
++                "PP bootstrap decision sequence gap: "
++                f"expected={expected}, received={decision.sequence}"
++            )
++
++        # A sequenced AbortReq that happened after this decision is deferred
++        # until the decision is applied. Therefore, a FINISH_ABORT here means an
++        # unsequenced control event violated the protocol. Local KV failures do
++        # not use finished_reason: they stay in _pp_pending_bootstrap_failures
++        # and are proposed to a later ordered bad decision.
++        good_rid_set = set(decision.good_rids)
++        conflicting_aborts = tuple(
++            req.rid
++            for req in self.disagg_prefill_bootstrap_queue.queue
++            if req.rid in good_rid_set and isinstance(req.finished_reason, FINISH_ABORT)
++        )
++        if conflicting_aborts:
++            raise RuntimeError(
++                "PP bootstrap decision ordering violation: "
++                f"sequence={decision.sequence} committed good RIDs already "
++                f"aborted locally: {conflicting_aborts}"
++            )
++
++        late_local_failures = tuple(
++            rid
++            for rid in decision.good_rids
++            if rid in self._pp_pending_bootstrap_failures
++        )
++        if late_local_failures:
++            logger.info(
++                "Applying frozen PP bootstrap good decision sequence=%d for RIDs "
++                "with a later local KV failure proposal: %s",
++                decision.sequence,
++                late_local_failures,
++            )
++
++        good_reqs, failed_reqs = self.disagg_prefill_bootstrap_queue.pop_bootstrapped(
++            return_failed_reqs=True,
++            pp_good_rids=decision.good_rids,
++            pp_bad_rids=decision.bad_rids,
++        )
++        self.waiting_queue.extend(good_reqs)
++        self._pp_bootstrap_expected_decision_sequence = decision.sequence + 1
++
++        # A bad candidate can overtake the request's physical queue state: an
++        # earlier good decision may already have moved it to waiting/running/
++        # inflight while the later failure proposal traversed the PP ring. The
++        # bad commit therefore applies to the whole scheduler, not only to the
++        # bootstrap queue. Reuse the normal abort machinery with an already-
++        # crossed sequence boundary so every rank performs the same safe cleanup
++        # at this commit point.
++        failed_in_bootstrap = {req.rid for req in failed_reqs}
++        for rid in decision.bad_rids:
++            self._pp_pending_bootstrap_failures.pop(rid, None)
++            if rid in failed_in_bootstrap:
++                continue
++            self.abort_request(
++                AbortReq(
++                    rid=rid,
++                    pp_bootstrap_abort_after_sequence=decision.sequence,
+                 )
+             )
+-            self.waiting_queue.extend(good_reqs)
+-            return [[req.rid for req in good_reqs], [req.rid for req in failed_reqs]]
+-        return None
++        self._pp_drain_deferred_abort_requests()
++
++        logger.debug(
++            "PP bootstrap decision commit sequence=%d good_rids=%s bad_rids=%s",
++            decision.sequence,
++            decision.good_rids,
++            decision.bad_rids,
++        )
++
++    def process_bootstrapped_queue(self: Scheduler, bootstrapped_message):
++        """Freeze at PP0, then apply and forward one immutable decision."""
++        if bootstrapped_message is None:
++            return None
++
++        if self.pp_group.is_first_rank:
++            if isinstance(bootstrapped_message, PPBootstrapDecision):
++                raise RuntimeError(
++                    "PP0 expected a reduced bootstrap candidate from the last "
++                    "stage, but received an already-frozen decision"
++                )
++            decision = self._pp_freeze_bootstrap_decision(bootstrapped_message)
++        else:
++            if not isinstance(bootstrapped_message, PPBootstrapDecision):
++                raise RuntimeError(
++                    "Non-first PP stage expected a sequenced bootstrap decision, "
++                    f"but received {type(bootstrapped_message).__name__}"
++                )
++            decision = bootstrapped_message
++
++        self._pp_apply_bootstrap_decision(decision)
++        # Forward the frozen decision, not locally observed/applied RID lists.
++        return decision
++
++    def _pp_filter_hicache_ready_rids(
++        self: Scheduler, candidate_rids: List[str]
++    ) -> List[str]:
++        """Keep only requests whose HiCache prefetch is locally ready.
++
++        In PP disaggregated prefill, the existing bootstrap protocol computes a
++        stage-by-stage intersection and then circulates the final result back to
++        every stage. Folding HiCache readiness into that protocol guarantees
++        that a request enters ``waiting_queue`` only after every PP stage is
++        ready, without inserting a barrier-like collective into the skewed PP
++        event loop.
++        """
++        if (
++            not self.enable_hicache_storage
++            or self.ps.pp_size <= 1
++            or not candidate_rids
++        ):
++            return candidate_rids
++
++        candidate_set = set(candidate_rids)
++        locally_ready_rids = {
++            req.rid
++            for req in self.disagg_prefill_bootstrap_queue.queue
++            if req.rid in candidate_set
++            and self.tree_cache.check_prefetch_progress(req.rid)
++        }
++        return [rid for rid in candidate_rids if rid in locally_ready_rids]
+ 
+     def _pp_pd_get_bootstrapped_ids(self: Scheduler):
+         # communicate pre-consensus bootstrapp reqs
+@@ -832,6 +1111,9 @@ def _pp_pd_get_bootstrapped_ids(self: Scheduler):
+                 [KVPoll.WaitingForInput],
+                 [KVPoll.Failed],
+             )
++            good_bootstrapped_rids = self._pp_filter_hicache_ready_rids(
++                good_bootstrapped_rids
++            )
+         else:
+             # Other ranks, receive the bootstrap reqs info from the previous rank and ensure the consensus
+             prev_bootstrapped_rids = self._pp_recv_pyobj_from_prev_stage()
+@@ -844,12 +1126,21 @@ def _pp_pd_get_bootstrapped_ids(self: Scheduler):
+                 [KVPoll.WaitingForInput],
+                 [KVPoll.Failed],
+             )
+-            good_bootstrapped_rids = list(
+-                set(prev_good_bootstrapped_rids) & set(curr_good_bootstrapped_rids)
++            curr_good_bootstrapped_rids = self._pp_filter_hicache_ready_rids(
++                curr_good_bootstrapped_rids
+             )
++            curr_good_bootstrapped_rid_set = set(curr_good_bootstrapped_rids)
++            good_bootstrapped_rids = [
++                rid
++                for rid in prev_good_bootstrapped_rids
++                if rid in curr_good_bootstrapped_rid_set
++            ]
+             bad_bootstrapped_rids = list(
+-                set(prev_bad_bootstrapped_rids) | set(curr_bad_bootstrapped_rids)
++                dict.fromkeys(prev_bad_bootstrapped_rids + curr_bad_bootstrapped_rids)
+             )
++        good_bootstrapped_rids = self._pp_filter_metadata_ready_rids(
++            good_bootstrapped_rids
++        )
+         # Route locally-aborted reqs through the bad-union consensus so every PP
+         # rank flushes them in the same consensus round, regardless of when the
+         # AbortReq reaches each rank and regardless of whether
+@@ -859,11 +1150,28 @@ def _pp_pd_get_bootstrapped_ids(self: Scheduler):
+             for req in self.disagg_prefill_bootstrap_queue.queue
+             if isinstance(req.finished_reason, FINISH_ABORT)
+         }
++        self._pp_ensure_bootstrap_decision_state()
++        aborted_rids.update(self._pp_pending_bootstrap_failures)
+         good_bootstrapped_rids, bad_bootstrapped_rids = self._route_aborts_to_bad(
+             good_bootstrapped_rids, bad_bootstrapped_rids, aborted_rids
+         )
+         return [good_bootstrapped_rids, bad_bootstrapped_rids]
+ 
++    def _pp_filter_metadata_ready_rids(
++        self: Scheduler, candidate_rids: List[str]
++    ) -> List[str]:
++        if not candidate_rids:
++            return candidate_rids
++        req_by_rid = {req.rid: req for req in self.disagg_prefill_bootstrap_queue.queue}
++        return [
++            rid
++            for rid in candidate_rids
++            if rid in req_by_rid
++            and self.disagg_prefill_bootstrap_queue.ensure_metadata_buffer(
++                req_by_rid[rid]
++            )
++        ]
++
+     def _pp_pd_get_prefill_transferred_ids(self: Scheduler):
+         # get the current stage transfer success
+         if self.pp_group.is_first_rank:
+@@ -891,12 +1199,14 @@ def _pp_pd_get_prefill_transferred_ids(self: Scheduler):
+ 
+     def _pp_pd_send_consensus_bootstrapped_ids(
+         self: Scheduler,
+-        bmbs: List[List[str]],
+-        next_first_rank_mb_id: int,
+-        consensus_bootstrapped_rids: List[str],
+-        bootstrapped_rids: List[str],
++        bmbs,
++        next_first_rank_mb_id,
++        consensus_bootstrapped_rids,
++        bootstrapped_rids,
+     ):
+-        # 3 (Release): send the release rids from last stage to the first stage
++        # This ring helper is shared by prefill bootstrap and decode-side
++        # retract/preallocation consensus. The last stage closes the reduction
++        # ring; other stages forward the value returned by their processor.
+         send_consensus_bootstrapped_work = []
+         if self.pp_group.is_last_rank:
+             if bmbs[next_first_rank_mb_id] is not None:
+@@ -904,7 +1214,6 @@ def _pp_pd_send_consensus_bootstrapped_ids(
+                 send_consensus_bootstrapped_work = self._pp_send_pyobj_to_next_stage(
+                     consensus_bootstrapped_rids, async_send=True
+                 )
+-        # 4 (Release): send the release rids from non last rank to the next rank
+         else:
+             if consensus_bootstrapped_rids is not None:
+                 send_consensus_bootstrapped_work = self._pp_send_pyobj_to_next_stage(
+@@ -1406,7 +1715,7 @@ def _route_aborts_to_bad(good_rids, bad_rids, aborted_rids):
+         if not aborted_rids:
+             return good_rids, bad_rids
+         good_rids = [rid for rid in good_rids if rid not in aborted_rids]
+-        bad_rids = list(set(bad_rids) | set(aborted_rids))
++        bad_rids = list(dict.fromkeys([*bad_rids, *sorted(aborted_rids)]))
+         return good_rids, bad_rids
+ 
+     def _pp_pd_get_decode_transferred_ids(self: Scheduler):
+diff --git a/test/registered/unit/managers/test_pp_abort_consensus.py b/test/registered/unit/managers/test_pp_abort_consensus.py
+new file mode 100644
+index 000000000000..79320a64f6fd
+--- /dev/null
++++ b/test/registered/unit/managers/test_pp_abort_consensus.py
+@@ -0,0 +1,374 @@
++"""PP disagg prefill: aborts and KV failures must flush via consensus, never locally.
++
++A KV-layer failure (e.g. a decode-side abort notification) lands on each PP
++rank at an arbitrary wall-clock time. If a rank unilaterally deletes such a
++request from its bootstrap queue, the deletion races against an in-flight
++good consensus and the per-rank waiting queues (and therefore the micro-batch
++streams) diverge — downstream ranks then wait forever on a batch that was
++never formed. These tests pin the invariant: local signals only mark; queue
++mutation happens exclusively at the consensus commit step.
++"""
++
++import unittest
++from http import HTTPStatus
++from types import SimpleNamespace
++from unittest.mock import MagicMock, patch
++
++from sglang.srt.disaggregation.base import KVPoll
++from sglang.srt.disaggregation.prefill import PrefillBootstrapQueue
++from sglang.srt.managers.io_struct import AbortReq
++from sglang.srt.managers.schedule_batch import FINISH_ABORT
++from sglang.srt.managers.scheduler_pp_mixin import (
++    PPBootstrapDecision,
++    SchedulerPPMixin,
++)
++from sglang.test.ci.ci_register import register_cpu_ci
++
++register_cpu_ci(est_time=2, suite="base-a-test-cpu")
++
++_POLL_HELPER = "sglang.srt.disaggregation.prefill.poll_and_all_reduce_attn_cp_tp_group"
++
++
++def _req(rid: str):
++    return SimpleNamespace(
++        rid=rid,
++        bootstrap_room=123,
++        finished_reason=None,
++        disagg_kv_sender=MagicMock(),
++        prefill_attempt_count=1,
++        is_retracted=False,
++        return_logprob=False,
++        time_stats=SimpleNamespace(set_wait_queue_entry_time=MagicMock()),
++        to_abort_message=None,
++        to_finish=None,
++    )
++
++
++def _make_queue(reqs, *, pp_size: int = 8):
++    queue = object.__new__(PrefillBootstrapQueue)
++    queue.queue = list(reqs)
++    queue.pp_size = pp_size
++    queue.scheduler = SimpleNamespace(
++        attn_cp_cpu_group=None,
++        attn_tp_cpu_group=None,
++        handle_bootstrap_failure=MagicMock(),
++        _pp_record_pending_bootstrap_failure=MagicMock(),
++        server_args=SimpleNamespace(optimistic_prefill_attempts=0),
++    )
++    queue.finalize_bootstrap = MagicMock(return_value=True)
++    queue.ensure_metadata_buffer = MagicMock(return_value=True)
++    return queue
++
++
++class TestPopBootstrappedLocalFailure(unittest.TestCase):
++    def test_uncovered_local_failure_marks_but_keeps_request(self):
++        """A locally-observed KV failure must not delete the req unilaterally."""
++        req = _req("req-a")
++        queue = _make_queue([req])
++
++        with patch(_POLL_HELPER, return_value=[KVPoll.Failed]):
++            good, failed = queue.pop_bootstrapped(
++                return_failed_reqs=True, pp_good_rids=[], pp_bad_rids=[]
++            )
++
++        self.assertEqual(good, [])
++        self.assertEqual(failed, [])
++        self.assertEqual(queue.queue, [req])  # still queued
++        self.assertIsNone(req.finished_reason)
++        queue.scheduler._pp_record_pending_bootstrap_failure.assert_called_once_with(
++            req, "KV transfer failed before bootstrap consensus."
++        )
++        queue.scheduler.handle_bootstrap_failure.assert_not_called()
++
++    def test_uncovered_local_failure_does_not_remark_aborted_request(self):
++        req = _req("req-a")
++        original = FINISH_ABORT(message="Aborted by AbortReq.")
++        req.finished_reason = original
++        queue = _make_queue([req])
++
++        with patch(_POLL_HELPER, return_value=[KVPoll.Failed]):
++            queue.pop_bootstrapped(
++                return_failed_reqs=True, pp_good_rids=[], pp_bad_rids=[]
++            )
++
++        self.assertIs(req.finished_reason, original)
++        queue.scheduler._pp_record_pending_bootstrap_failure.assert_not_called()
++
++    def test_uncovered_nonterminal_states_wait_for_a_later_consensus(self):
++        for local_poll in (KVPoll.Bootstrapping, KVPoll.WaitingForInput):
++            with self.subTest(local_poll=local_poll):
++                req = _req("req-a")
++                queue = _make_queue([req])
++
++                with patch(_POLL_HELPER, return_value=[local_poll]):
++                    good, failed = queue.pop_bootstrapped(
++                        return_failed_reqs=True,
++                        pp_good_rids=[],
++                        pp_bad_rids=[],
++                    )
++
++                self.assertEqual(good, [])
++                self.assertEqual(failed, [])
++                self.assertEqual(queue.queue, [req])
++                self.assertIsNone(req.finished_reason)
++
++    def test_uncovered_post_bootstrap_state_fails_loudly(self):
++        for local_poll in (KVPoll.Transferring, KVPoll.Success):
++            with self.subTest(local_poll=local_poll):
++                req = _req("req-a")
++                queue = _make_queue([req])
++
++                with patch(_POLL_HELPER, return_value=[local_poll]):
++                    with self.assertRaisesRegex(
++                        RuntimeError, "Unexpected local KV poll state"
++                    ):
++                        queue.pop_bootstrapped(
++                            return_failed_reqs=True,
++                            pp_good_rids=[],
++                            pp_bad_rids=[],
++                        )
++
++    def test_consensus_bad_flushes_request_at_commit(self):
++        """Deletion happens only when the finalized bad list arrives."""
++        req = _req("req-a")
++        queue = _make_queue([req])
++
++        good, failed = queue.pop_bootstrapped(
++            return_failed_reqs=True, pp_good_rids=[], pp_bad_rids=["req-a"]
++        )
++
++        self.assertEqual(good, [])
++        self.assertEqual(failed, [req])
++        self.assertEqual(queue.queue, [])
++        queue.scheduler.handle_bootstrap_failure.assert_called_once_with(req)
++
++    def test_consensus_good_admission_cannot_be_vetoed_locally(self):
++        """A rid the consensus admitted must be admitted (or crash loudly)."""
++        req = _req("req-a")
++        queue = _make_queue([req])
++        queue.finalize_bootstrap = MagicMock(return_value=False)
++
++        with self.assertRaisesRegex(RuntimeError, "consensus admitted"):
++            queue.pop_bootstrapped(
++                return_failed_reqs=True, pp_good_rids=["req-a"], pp_bad_rids=[]
++            )
++
++
++class TestBootstrappedIdsConsensusRound(unittest.TestCase):
++    def _make_mixin(self, reqs, *, pp_rank: int = 0):
++        scheduler = SchedulerPPMixin()
++        scheduler.ps = SimpleNamespace(pp_rank=pp_rank, pp_size=8)
++        scheduler.pp_group = SimpleNamespace(is_first_rank=pp_rank == 0)
++        scheduler.enable_hicache_storage = False
++        scheduler.disagg_prefill_bootstrap_queue = SimpleNamespace(
++            queue=list(reqs),
++            ensure_metadata_buffer=MagicMock(return_value=True),
++        )
++        return scheduler
++
++    def test_marked_request_routes_to_bad_union_next_round(self):
++        """The mark left by pop_bootstrapped enters bad consensus next round."""
++        marked = _req("req-a")
++        marked.finished_reason = FINISH_ABORT(
++            message="KV transfer failed before bootstrap consensus.",
++            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
++        )
++        clean = _req("req-b")
++        scheduler = self._make_mixin([marked, clean])
++        scheduler.get_rids = MagicMock(return_value=(["req-a", "req-b"], []))
++
++        good, bad = scheduler._pp_pd_get_bootstrapped_ids()
++
++        self.assertEqual(good, ["req-b"])
++        self.assertEqual(bad, ["req-a"])
++
++    def test_pending_local_failure_routes_to_bad_after_request_left_queue(self):
++        scheduler = self._make_mixin([])
++        scheduler.get_rids = MagicMock(return_value=([], []))
++        scheduler._pp_pending_bootstrap_failures = {"req-a": "local KV failure"}
++
++        good, bad = scheduler._pp_pd_get_bootstrapped_ids()
++
++        self.assertEqual(good, [])
++        self.assertEqual(bad, ["req-a"])
++
++    def test_metadata_buffer_reserved_before_reporting_good(self):
++        """A rank without buffer headroom withholds the rid instead of
++        vetoing at commit time."""
++        req_a, req_b = _req("req-a"), _req("req-b")
++        scheduler = self._make_mixin([req_a, req_b])
++        scheduler.get_rids = MagicMock(return_value=(["req-a", "req-b"], []))
++        scheduler.disagg_prefill_bootstrap_queue.ensure_metadata_buffer = MagicMock(
++            side_effect=lambda req: req.rid != "req-b"
++        )
++
++        good, bad = scheduler._pp_pd_get_bootstrapped_ids()
++
++        self.assertEqual(good, ["req-a"])
++        self.assertEqual(bad, [])
++
++
++class TestBootstrapDecisionSequencing(unittest.TestCase):
++    def test_bootstrap_decision_satisfies_pp_transport_contract(self):
++        decision = PPBootstrapDecision(7, ("good",), ("bad",))
++
++        self.assertEqual(len(decision), 3)
++        self.assertEqual(decision.sequence, 7)
++        with self.assertRaises(AttributeError):
++            decision.sequence = 8
++
++    def _make_scheduler(self, reqs, *, pp_rank: int):
++        scheduler = SchedulerPPMixin()
++        scheduler.ps = SimpleNamespace(pp_rank=pp_rank, pp_size=8)
++        scheduler.pp_group = SimpleNamespace(
++            is_first_rank=pp_rank == 0, is_last_rank=pp_rank == 7
++        )
++        scheduler.disagg_prefill_bootstrap_queue = _make_queue(reqs)
++        scheduler.waiting_queue = []
++        return scheduler
++
++    def test_pp0_fences_abort_before_freezing_decision(self):
++        aborted = _req("req-a")
++        aborted.finished_reason = FINISH_ABORT(message="Aborted by AbortReq.")
++        clean = _req("req-b")
++        scheduler = self._make_scheduler([aborted, clean], pp_rank=0)
++
++        decision = scheduler.process_bootstrapped_queue([["req-a", "req-b"], []])
++
++        self.assertEqual(
++            decision,
++            PPBootstrapDecision(
++                sequence=0,
++                good_rids=("req-b",),
++                bad_rids=("req-a",),
++            ),
++        )
++        self.assertEqual(scheduler.waiting_queue, [clean])
++        self.assertEqual(scheduler.disagg_prefill_bootstrap_queue.queue, [])
++        scheduler.disagg_prefill_bootstrap_queue.scheduler.handle_bootstrap_failure.assert_called_once_with(
++            aborted
++        )
++
++    def test_non_first_rank_applies_and_forwards_exact_decision(self):
++        req = _req("req-a")
++        scheduler = self._make_scheduler([req], pp_rank=3)
++        decision = PPBootstrapDecision(0, ("req-a",), ())
++
++        forwarded = scheduler.process_bootstrapped_queue(decision)
++
++        self.assertIs(forwarded, decision)
++        self.assertEqual(scheduler.waiting_queue, [req])
++        self.assertEqual(
++            scheduler._pp_bootstrap_expected_decision_sequence,
++            1,
++        )
++
++    def test_duplicate_decision_is_not_replayed(self):
++        scheduler = self._make_scheduler([], pp_rank=2)
++        queue = scheduler.disagg_prefill_bootstrap_queue
++        queue.pop_bootstrapped = MagicMock(return_value=([], []))
++        decision = PPBootstrapDecision(0, (), ())
++
++        self.assertIs(scheduler.process_bootstrapped_queue(decision), decision)
++        self.assertIs(scheduler.process_bootstrapped_queue(decision), decision)
++
++        queue.pop_bootstrapped.assert_called_once()
++
++    def test_sequence_gap_fails_loudly(self):
++        scheduler = self._make_scheduler([], pp_rank=4)
++
++        with self.assertRaisesRegex(RuntimeError, "sequence gap"):
++            scheduler.process_bootstrapped_queue(PPBootstrapDecision(1, (), ()))
++
++    def test_local_abort_cannot_override_frozen_good_decision(self):
++        req = _req("req-a")
++        req.finished_reason = FINISH_ABORT(message="Aborted by AbortReq.")
++        scheduler = self._make_scheduler([req], pp_rank=5)
++
++        with self.assertRaisesRegex(RuntimeError, "ordering violation"):
++            scheduler.process_bootstrapped_queue(PPBootstrapDecision(0, ("req-a",), ()))
++
++        self.assertEqual(
++            scheduler.disagg_prefill_bootstrap_queue.queue,
++            [req],
++        )
++
++    def test_late_local_kv_failure_does_not_veto_frozen_good_decision(self):
++        req = _req("req-a")
++        scheduler = self._make_scheduler([req], pp_rank=5)
++        scheduler._pp_pending_bootstrap_failures = {"req-a": "local KV failure"}
++
++        scheduler.process_bootstrapped_queue(PPBootstrapDecision(0, ("req-a",), ()))
++
++        self.assertEqual(scheduler.waiting_queue, [req])
++        self.assertEqual(
++            scheduler._pp_pending_bootstrap_failures,
++            {"req-a": "local KV failure"},
++        )
++
++    def test_later_bad_commit_aborts_rid_after_good_moved_it_out_of_bootstrap(self):
++        req = _req("req-a")
++        scheduler = self._make_scheduler([req], pp_rank=5)
++        scheduler.abort_request = MagicMock()
++        scheduler._pp_pending_bootstrap_failures = {"req-a": "local KV failure"}
++
++        scheduler.process_bootstrapped_queue(PPBootstrapDecision(0, ("req-a",), ()))
++        scheduler.process_bootstrapped_queue(PPBootstrapDecision(1, (), ("req-a",)))
++
++        scheduler.abort_request.assert_called_once_with(
++            AbortReq(rid="req-a", pp_bootstrap_abort_after_sequence=1)
++        )
++        self.assertEqual(scheduler._pp_pending_bootstrap_failures, {})
++
++    def test_pp0_stamps_abort_after_last_frozen_decision(self):
++        scheduler = self._make_scheduler([], pp_rank=0)
++        scheduler.process_bootstrapped_queue([[], []])
++        abort_req = AbortReq(rid="req-a")
++
++        deferred = scheduler._pp_order_or_defer_abort_request(abort_req)
++
++        self.assertFalse(deferred)
++        self.assertEqual(abort_req.pp_bootstrap_abort_after_sequence, 0)
++
++    def test_downstream_defers_late_abort_until_boundary_is_committed(self):
++        req = _req("req-a")
++        scheduler = self._make_scheduler([req], pp_rank=3)
++        scheduler.abort_request = MagicMock()
++        abort_req = AbortReq(
++            rid="req-a",
++            pp_bootstrap_abort_after_sequence=0,
++        )
++
++        deferred = scheduler._pp_order_or_defer_abort_request(abort_req)
++
++        self.assertTrue(deferred)
++        scheduler.abort_request.assert_not_called()
++        self.assertEqual(
++            scheduler.disagg_prefill_bootstrap_queue.queue,
++            [req],
++        )
++
++        scheduler.process_bootstrapped_queue(PPBootstrapDecision(0, ("req-a",), ()))
++
++        self.assertEqual(scheduler.waiting_queue, [req])
++        scheduler.abort_request.assert_called_once_with(abort_req)
++        self.assertEqual(list(scheduler._pp_deferred_abort_reqs), [])
++
++    def test_stale_good_after_bad_commit_cannot_resurrect_request(self):
++        req = _req("req-a")
++        req.finished_reason = FINISH_ABORT(message="Aborted by AbortReq.")
++        scheduler = self._make_scheduler([req], pp_rank=0)
++
++        bad_decision = scheduler.process_bootstrapped_queue([["req-a"], []])
++        stale_good_decision = scheduler.process_bootstrapped_queue([["req-a"], []])
++
++        self.assertEqual(bad_decision.sequence, 0)
++        self.assertEqual(bad_decision.bad_rids, ("req-a",))
++        self.assertEqual(stale_good_decision.sequence, 1)
++        self.assertEqual(stale_good_decision.good_rids, ("req-a",))
++        self.assertEqual(scheduler.waiting_queue, [])
++        self.assertEqual(scheduler.disagg_prefill_bootstrap_queue.queue, [])
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/test/registered/unit/managers/test_pp_hicache_prefetch_consensus.py b/test/registered/unit/managers/test_pp_hicache_prefetch_consensus.py
+new file mode 100644
+index 000000000000..61795d45d68b
+--- /dev/null
++++ b/test/registered/unit/managers/test_pp_hicache_prefetch_consensus.py
+@@ -0,0 +1,93 @@
++import unittest
++from types import SimpleNamespace
++from unittest.mock import MagicMock
++
++from sglang.srt.managers.scheduler_pp_mixin import SchedulerPPMixin
++from sglang.test.ci.ci_register import register_cpu_ci
++
++register_cpu_ci(est_time=2, suite="base-a-test-cpu")
++
++
++class TestPPHiCachePrefetchConsensus(unittest.TestCase):
++    def _make_scheduler(self, *, pp_rank: int, readiness: dict[str, bool]):
++        reqs = [SimpleNamespace(rid=rid, finished_reason=None) for rid in readiness]
++        scheduler = SchedulerPPMixin()
++        scheduler.ps = SimpleNamespace(pp_rank=pp_rank, pp_size=8)
++        scheduler.pp_group = SimpleNamespace(is_first_rank=pp_rank == 0)
++        scheduler.enable_hicache_storage = True
++        scheduler.disagg_prefill_bootstrap_queue = SimpleNamespace(
++            queue=reqs, ensure_metadata_buffer=MagicMock(return_value=True)
++        )
++        scheduler.tree_cache = SimpleNamespace(
++            check_prefetch_progress=MagicMock(side_effect=lambda rid: readiness[rid])
++        )
++        return scheduler
++
++    def test_local_filter_checks_all_candidates_and_preserves_order(self):
++        scheduler = self._make_scheduler(
++            pp_rank=3,
++            readiness={"req-a": True, "req-b": False, "req-c": True},
++        )
++
++        ready_rids = scheduler._pp_filter_hicache_ready_rids(
++            ["req-c", "req-b", "req-a"]
++        )
++
++        self.assertEqual(ready_rids, ["req-c", "req-a"])
++        self.assertEqual(
++            scheduler.tree_cache.check_prefetch_progress.call_count,
++            3,
++        )
++
++    def test_first_stage_withholds_locally_unready_request(self):
++        scheduler = self._make_scheduler(
++            pp_rank=0,
++            readiness={"req-ready": True, "req-wait": False},
++        )
++        scheduler.get_rids = MagicMock(return_value=(["req-ready", "req-wait"], []))
++
++        good_rids, bad_rids = scheduler._pp_pd_get_bootstrapped_ids()
++
++        self.assertEqual(good_rids, ["req-ready"])
++        self.assertEqual(bad_rids, [])
++
++    def test_later_stage_intersects_previous_and_local_readiness(self):
++        scheduler = self._make_scheduler(
++            pp_rank=5,
++            readiness={
++                "req-a": True,
++                "req-b": False,
++                "req-c": True,
++                "req-local-only": True,
++            },
++        )
++        scheduler._pp_recv_pyobj_from_prev_stage = MagicMock(
++            return_value=[["req-c", "req-b", "req-a"], ["bad-prev"]]
++        )
++        scheduler.get_rids = MagicMock(
++            return_value=(
++                ["req-a", "req-b", "req-c", "req-local-only"],
++                ["bad-local", "bad-prev"],
++            )
++        )
++
++        good_rids, bad_rids = scheduler._pp_pd_get_bootstrapped_ids()
++
++        self.assertEqual(good_rids, ["req-c", "req-a"])
++        self.assertEqual(bad_rids, ["bad-prev", "bad-local"])
++
++    def test_non_pp_path_keeps_existing_scheduler_behavior(self):
++        scheduler = self._make_scheduler(
++            pp_rank=0,
++            readiness={"req": False},
++        )
++        scheduler.ps.pp_size = 1
++
++        ready_rids = scheduler._pp_filter_hicache_ready_rids(["req"])
++
++        self.assertEqual(ready_rids, ["req"])
++        scheduler.tree_cache.check_prefetch_progress.assert_not_called()
++
++
++if __name__ == "__main__":
++    unittest.main()
