@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32426",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "PR 2152 at f31e61cce4b4ebfd83f711defdeb91a546445c77 is valid test-only hardening for the compressed-tensors NVFP4 MoE W13 layout correction already present in the recorded base. Its regression fails on the exact parent of upstream fix PR 32430 and passes on the recorded base and candidate. It does not itself change production source or locally prove full Ornith generation on CUDA Blackwell.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-51ff8188fcfc/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_nvfp4_moe_layout.py (candidate f31e61cce4b4ebfd83f711defdeb91a546445c77)",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression: CUTLASS and TRT-LLM layout selection, default scheme behavior, and wrapper forwarding; 4 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-51ff8188fcfc/venv/bin/python -m pytest -q /job/review-evidence/j-51ff8188fcfc/candidate-test.py (upstream-fix parent 2cbddb842d67b7d16f04c5a7856a0ff9bddc7767)",
+      "exit_code": 1,
+      "what_was_measured": "Independent failing-before comparison against the exact pre-fix source; all 4 assertions failed because the layout property, safe default, and forwarding were absent."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-51ff8188fcfc/venv/bin/python -m pytest -q /job/review-evidence/j-51ff8188fcfc/candidate-test.py (recorded base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "The recorded base already contains the production correction; 4 passed without source mutation."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-51ff8188fcfc/venv/bin/python /job/review-evidence/j-51ff8188fcfc/adversarial_loader_layout.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent real-loader sentinel test verified FusedMoE._load_w13 places distinct gate/up shards in the two contractually required orders."
+    },
+    {
+      "command": "git diff 358c163250ad3b1f62939b01ce1314a0a31a0365 f31e61cce4b4ebfd83f711defdeb91a546445c77 --check",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The assigned AMD Instinct MI350X gfx950 was enumerated through Torch/ROCm, but the issue path rejects non-NVIDIA-Blackwell platforms; no relevant GPU kernel was executed.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No local full-model generation with sakamakismile/Ornith-1.0-35B-NVFP4 was run, so the original garbled-text symptom was not end-to-end reproduced or resolved in this environment.",
+    "No CUDA 13.0 NVIDIA Blackwell device was available to numerically exercise the corrected FlashInfer CUTLASS NVFP4 MoE kernel.",
+    "The candidate tests validate layout selection and propagation but do not validate model semantic accuracy, tokenizer/parser behavior, KV-cache FP8 interaction, or the complete serving configuration from the issue."
+  ],
+  "remaining_limitations": [
+    "Assigned hardware is AMD gfx950/ROCm 7.2 rather than NVIDIA Blackwell/CUDA 13.0.",
+    "Affected model weights were not downloaded because the architecture cannot execute this NVFP4 path.",
+    "No native rebuild was applicable because the candidate changes only Python tests and report files."
+  ]
+}
