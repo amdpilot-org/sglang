@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 import time
 from abc import ABC
 from dataclasses import dataclass
@@ -175,7 +176,9 @@ class ProfileManager:
 
 
 def _get_stage_from_forward_mode(forward_mode: ForwardMode):
-    if forward_mode.is_prefill():
+    if forward_mode in (ForwardMode.TARGET_VERIFY, ForwardMode.DRAFT_EXTEND_V2):
+        return "decode"
+    elif forward_mode.is_prefill():
         return "prefill"
     elif forward_mode.is_decode():
         return "decode"
@@ -375,10 +378,22 @@ class _ProfilerTorch(_ProfilerConcreteBase):
                 + ".trace.json.gz"
             )
 
-            self.torch_profiler.export_chrome_trace(
-                os.path.join(self.output_dir, filename)
+            trace_path = os.path.join(self.output_dir, filename)
+            profiler = self.torch_profiler
+            self.export_thread = threading.Thread(
+                target=self._export_trace,
+                args=(profiler, trace_path),
+                name=f"sglang-profile-v2-export-{self.profile_id}-{self.ps.tp_rank}",
             )
-        torch.distributed.barrier(self.cpu_group)
+            self.export_thread.start()
+
+    @staticmethod
+    def _export_trace(profiler, trace_path):
+        try:
+            profiler.export_chrome_trace(trace_path)
+            logger.info("Profiling done. Trace is saved to: %s", trace_path)
+        except Exception:
+            logger.exception("Failed to export profiler trace to %s", trace_path)
 
         # TODO: migrate `_merge_profile_traces`
 
