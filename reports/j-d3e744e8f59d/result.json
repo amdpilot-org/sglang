@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34675",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "f8502d20d3039acd58b32a60f901bb090802a7d1",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproducibly drops the gateway-injected DP rank during ResponsesRequest validation. The exact candidate declares and migrates both rank spellings, applies the established header-over-body precedence, forwards the effective rank into the initial GenerateReqInput, and retains it across built-in-tool continuation requests. Candidate regression tests and independent adversarial adapter tests pass.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d3e744e8f59d/venv/bin/python -c '<construct ResponsesRequest with data_parallel_rank=4 and assert routed_dp_rank==4>' (at base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Issue-specific failing-before reproduction: source imports resolved to /job/repo/python; ResponsesRequest discarded data_parallel_rank and exposed neither data_parallel_rank nor routed_dp_rank."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d3e744e8f59d/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_responses_protocol.py test/registered/unit/entrypoints/openai/test_serving_responses.py (at candidate f8502d20d3039acd58b32a60f901bb090802a7d1)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and neighboring Responses API coverage: 61 tests and 2 subtests passed, including schema preservation/migration, body forwarding, header precedence, and missing-rank behavior."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d3e744e8f59d/venv/bin/python /job/review-evidence-j-d3e744e8f59d/independent_adversarial.py (at candidate f8502d20d3039acd58b32a60f901bb090802a7d1)",
+      "exit_code": 0,
+      "what_was_measured": "Independent serving-adapter cases: legacy body rank reached GenerateReqInput; canonical body rank beat the deprecated alias; header rank 0 beat body rank; body rank 0 survived; invalid header was rejected with HTTP 400."
+    },
+    {
+      "command": "rocm-smi --showproductname --showuniqueid --showmeminfo vram; python -c '<print Torch/ROCm device properties>'",
+      "exit_code": 0,
+      "what_was_measured": "One assigned AMD Instinct MI350X was visible as gfx950; Torch 2.11.0+rocm7.2 reported HIP 7.2.26015 and one available GPU."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No model or GPU kernel was run. The defect is at the deterministic Pydantic-to-GenerateReqInput boundary, so GPU numerical execution would not establish routing-field preservation. Hardware visibility was recorded separately."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No multi-rank DP server, model weights, distributed scheduler, or multi-node workload was launched; validation ends at the actual GenerateReqInput passed toward tokenizer-manager/scheduler code.",
+    "The available architecture was a single gfx950 AMD Instinct MI350X. This review makes no claims about full inference, semantic accuracy, or distributed execution.",
+    "No native rebuild was applicable because the candidate changed only Python, tests, and report files; imports were explicitly pinned to /job/repo/python rather than an installed SGLang wheel."
+  ]
+}
