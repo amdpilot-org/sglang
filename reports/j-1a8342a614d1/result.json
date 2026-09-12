@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38167",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The diffusion scheduler returned accelerator-fatal execution errors but continued accepting requests. It now recognizes the two exact reported poisoned-device signatures, returns a restart-required error to the triggering request, and exits its event loop after sending that reply. Ordinary OOM and unrelated execution errors remain recoverable. The state transition is regression-tested, but the original 12 GB CUDA MiniMax-H3 workload could not be reproduced on the assigned AMD gfx950-class GPU without the model weights.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-1a8342a614d1/venv/bin/python -m pytest -q /tmp/test_scheduler_device_failure.py (with scheduler.py restored from base)",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before regression: the base implementation lacks the fatal accelerator error classifier and recovery state transition; collection fails on the missing symbol. Raw output: reports/j-1a8342a614d1/raw/pytest_before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1a8342a614d1/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_scheduler_device_failure.py python/sglang/multimodal_gen/test/unit/test_warmup_probe_degradation.py",
+      "exit_code": 0,
+      "what_was_measured": "19 unit tests passed, including both reported fatal signatures, scheduler shutdown with actionable reply, and independent boundaries for ordinary OOM and unrelated errors. Raw output: reports/j-1a8342a614d1/raw/pytest_final.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1a8342a614d1/venv/bin/python reports/j-1a8342a614d1/raw/gpu_numerical_reference.txt (inline script recorded in PR)",
+      "exit_code": 0,
+      "what_was_measured": "One assigned AMD Instinct MI350X was visible. A float64 GPU sum-of-squares exactly matched the independent integer closed-form reference (22898104320). This is device execution evidence only, not a MiniMax-H3 reproduction."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "torch 2.11.0+rocm7.2 executed the numerical check on one AMD Instinct MI350X; see reports/j-1a8342a614d1/raw/gpu_numerical_reference.txt"
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The source report uses an RTX 5070 12 GB under WSL2/CUDA 13.0; the assigned device is an AMD Instinct MI350X with ROCm 7.2, so the CUDA driver and allocator failure were not reproduced.",
+    "MiniMax-H3 weights and the reporter's turbo LoRA were unavailable, so no full model, semantic, 1344x768, or post-failure serving reproduction was claimed.",
+    "The patch deliberately does not relabel device-not-ready as OOM because the available environment cannot prove that diagnosis; it reports the accelerator as unrecoverable and requires restart.",
+    "Whether a supervising server process automatically restarts the stopped scheduler remains deployment-specific and was not qualified here."
+  ]
+}
