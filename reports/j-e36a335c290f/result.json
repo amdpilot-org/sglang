@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31248",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "b1b2f71e8032aff28d638ef356fb62ee61f249c1",
+  "outcome": "candidate_rejected",
+  "recommendation": "reject",
+  "fully_resolves_original": false,
+  "summary": "The candidate is message and test hardening only. It does not add a CompressedTensorsW4A16Sparse24 scheme, weight loader, sparse kernel, or execution path. The exact original-contract configuration still raises ImportError, while another valid-looking representation silently selects the dense CompressedTensorsWNA16 scheme despite 2:4 metadata.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e36a335c290f/venv/bin/python < base W4A16 sparse-24 scheme-selection reproducer",
+      "exit_code": 1,
+      "what_was_measured": "On base 358c1632, reproduced the reported ImportError for groupwise INT4 weight-only quantization with sparse-24-bitmask format and 2:4 sparsity metadata."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e36a335c290f/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_mixed_precision.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate b1b2f71e, all seven candidate CPU tests passed; they validate current mixed-format selection and error wording, not W4A16 2:4 support."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e36a335c290f/venv/bin/python < candidate adversarial contract cases>",
+      "exit_code": 0,
+      "what_was_measured": "The original W4A16 sparse-24 case still raised ImportError; pack-quantized W4A16 plus 2:4 metadata returned dense CompressedTensorsWNA16; unquantized 2:4 explicitly raised unsupported; a non-sparse dense W4A16 case exercised only the improved message."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..HEAD",
+      "exit_code": 0,
+      "what_was_measured": "Review-report patch whitespace validity."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "rocm-smi identified the assigned GPU as AMD Instinct MI355X, gfx950. Torch is 2.11.0+rocm7.2 with HIP 7.2.26015. No NVIDIA Sparse-Marlin/CUTLASS execution or independent sparse numerical reference was possible.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A W4A16 groupwise INT4 configuration with top-level sparse-24-bitmask format and 2:4 sparsity metadata still raises ImportError at the candidate commit.",
+    "A mixed/per-group pack-quantized W4A16 configuration with the same 2:4 metadata returns CompressedTensorsWNA16, which does not implement the requested sparse execution contract.",
+    "An unquantized 2:4 sparse configuration reaches an explicit error stating that compressed-tensors 2:4 sparsity is unsupported."
+  ],
+  "remaining_limitations": [
+    "CompressedTensorsW4A16Sparse24 remains entirely unimplemented.",
+    "No NVIDIA GPU was available for native sparse-kernel compilation, ISA inspection, or independent numerical validation; the assigned architecture was AMD gfx950.",
+    "The candidate changed no native source, so no native rebuild was applicable.",
+    "The reported 26B Gemma weights were not downloaded or served; NEXTN, full model loading, HTTP transport, and semantic accuracy remain unverified.",
+    "The current public model config may have changed since the original report, but that does not satisfy the open feature request or invalidate the deterministic configuration-level failure."
+  ]
+}
