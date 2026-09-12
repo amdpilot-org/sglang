@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35564",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1618",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1583",
+  "candidate_commit": "bd84efaef10c01b4354e5ceed7b69a6c247d9ec5",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a substantial partial fix: it passes the exact issue fixture, all reviewed GLM literal counterexamples, its focused regression, and the full function-call suite. It does not fully implement one-shot/streaming parity because Mistral loses later calls in a valid JSON array when commas are not followed by spaces.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3a9668fccb2c/venv/bin/python /job/review-evidence-j-3a9668fccb2c/reproduce_streaming_empty_args.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Original issue reproduction on the recorded prepared base; GLM-family type corruption, missing MiniMax call, and Step3 extra-call mismatch reproduced. The script's aggregation masks two other reported classes."
+    },
+    {
+      "command": "same exact issue reproduction (candidate bd84efaef10c01b4354e5ceed7b69a6c247d9ec5)",
+      "exit_code": 0,
+      "what_was_measured": "All eight exact supplied fixtures reported parity at the candidate commit."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3a9668fccb2c/venv/bin/python -m pytest -q test/registered/unit/function_call/test_streaming_parity.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression: 10 passed, 1,575 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3a9668fccb2c/venv/bin/python -m pytest -q test/registered/unit/function_call (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Full function-call suite: 550 passed, 1,596 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-3a9668fccb2c/venv/bin/python /job/review-evidence-j-3a9668fccb2c/adversarial_review.py (candidate)",
+      "exit_code": 1,
+      "what_was_measured": "Independent literal and chunk-boundary parity checks. GLM-family cases passed; all 181 Mistral compact-JSON chunkings failed because later calls became normal text."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No GPU was used because all changed and reviewed behavior is deterministic Python parser logic."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Mistral detect_and_parse accepts valid JSON arrays whose object separators are ',' with no following space, but parse_streaming_increment recognizes only the literal ', ' separator. Whole-increment, character-at-a-time, and every two-way split delivery return only the first call and leak later calls into normal_text."
+  ],
+  "remaining_limitations": [
+    "No tokenizer/model or HTTP serving path was exercised; deterministic parser text was supplied directly.",
+    "No semantic accuracy, full-model, multi-GPU, or distributed behavior was tested.",
+    "The prepared host is ROCm 7.2/gfx950 rather than CUDA/RTX 4090; the reviewed code path is architecture-independent, but no cross-architecture serving claim is made.",
+    "No native rebuild was performed because the candidate changes only Python and report/test files."
+  ]
+}
