@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/26794",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "81bdd3011b40fea2c36354e3ae6f5b5d94df4189",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate's focused regression and independent loader cases pass, and the recorded base already contains a source-level correction for the persistent NPU MoE layout mismatch. The candidate is test-only hardening, not a new production fix. Request changes because its committed GPU evidence misidentifies the assigned MI355X as MI350X, and the original Ascend end-to-end path remains independently unverified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-aadaa4f88f4a/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_npu_unquant_moe_reload.py",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate commit, all three focused CPU tests passed. They mock unavailable NPU format casting, execute the NPU post-processing branch, and reload separate gate/up/down tensors through the actual FusedMoE loader."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-aadaa4f88f4a/venv/bin/python <inline reported-size and TP=2 FusedMoE loader checks>",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI355X (gfx950), separate BF16 gate/up tensors with 1408 rows loaded into and numerically matched both halves of the fused destination. An independent TP=2 case verified both rank slices."
+    },
+    {
+      "command": "gh api repos/sgl-project/sglang/pulls/26717/files; gh api repos/sgl-project/sglang/pulls/29503/files",
+      "exit_code": 0,
+      "what_was_measured": "Patch history confirmed that the recorded base already retains canonical NPU MoE parameter shapes and moved transpose semantics to execution, explaining why the original failure is not reproducible on that base."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-aadaa4f88f4a/raw/independent_gpu.txt records actual tensor operations and comparisons on AMD Instinct MI355X, gfx950:sramecc+:xnack-. This does not validate Ascend execution."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The candidate's committed raw GPU record says AMD Instinct MI350X, but the assigned device reports AMD Instinct MI355X; result.json repeats the inaccurate model.",
+    "No Ascend device was available, so actual npu_format_cast and grouped-matmul behavior were not independently executed.",
+    "No full DeepSeekV3.2 Engine or HTTP update_weights_from_disk run established scheduler survival after reload."
+  ],
+  "remaining_limitations": [
+    "The required base already contains the production correction, so the literal reported failure cannot be reproduced there; failing-before evidence is necessarily historical or synthetic.",
+    "The reported checkpoint and Ascend CANN/torch_npu environment were unavailable.",
+    "The gfx950 checks cover loader tensor semantics only, not NPU kernels, semantic accuracy, or distributed execution.",
+    "No native code changed, so a native rebuild was neither applicable nor performed."
+  ]
+}
