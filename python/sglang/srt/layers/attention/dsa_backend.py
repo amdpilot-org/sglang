@@ -1169,6 +1169,26 @@ class DeepseekSparseAttnBackend(
             if metadata is not None and metadata.dsa_cu_seqlens_q is not None
             else -1
         )
+        expanded_rows = (
+            len(metadata.dsa_seqlens_expanded)
+            if metadata is not None and metadata.dsa_seqlens_expanded is not None
+            else -1
+        )
+        token_batch_rows = (
+            len(metadata.token_to_batch_idx)
+            if metadata is not None and metadata.token_to_batch_idx is not None
+            else -1
+        )
+        indexer_range_rows = (
+            tuple(len(rows) for rows in metadata.indexer_k_start_end)
+            if metadata is not None and metadata.indexer_k_start_end is not None
+            else (-1, -1)
+        )
+        topk_offset_rows = (
+            len(metadata.topk_indices_offset)
+            if metadata is not None and metadata.topk_indices_offset is not None
+            else None
+        )
         kv_rows = (
             len(forward_batch.out_cache_loc)
             if forward_batch.out_cache_loc is not None
@@ -1178,12 +1198,20 @@ class DeepseekSparseAttnBackend(
             dsa_rows != physical_tokens
             or dsa_offsets != physical_tokens + 1
             or query_offsets != physical_tokens + 1
+            or expanded_rows != physical_tokens
+            or token_batch_rows != physical_tokens
+            or indexer_range_rows != (physical_tokens, physical_tokens)
+            or topk_offset_rows not in (None, physical_tokens)
             or kv_rows != physical_tokens
         ):
             raise RuntimeError(
                 "DSA preplanned metadata does not cover the physical execution "
                 f"extent: physical_tokens={physical_tokens}, dsa_rows={dsa_rows}, "
                 f"dsa_offsets={dsa_offsets}, query_offsets={query_offsets}, "
+                f"expanded_rows={expanded_rows}, "
+                f"token_batch_rows={token_batch_rows}, "
+                f"indexer_range_rows={indexer_range_rows}, "
+                f"topk_offset_rows={topk_offset_rows}, "
                 f"kv_rows={kv_rows}."
             )
 
