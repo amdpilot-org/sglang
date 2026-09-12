@@ -1,0 +1,31 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/22935",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "The reviewed candidate preserves useful long-prefix reuse by inserting a genuinely captured grid-aligned checkpoint, but it does not fix the original three-token n-1 case: [A,B,C] followed by [A,B] still returns zero. That result is required because the only stored recurrent state belongs to depth 3, and the architecture cannot separately replay recurrent layers for KV-only hits. Exact nonzero reuse requires an exact depth-2 recurrent+convolution checkpoint or a new split-replay execution path.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-7fda5f7a9193/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_short_prefix_ownership.py test/registered/unit/mem_cache/test_mamba_unittest.py",
+      "exit_code": 0,
+      "what_was_measured": "20 tests passed. The exact [A,B,C] then [A,B] lookup returned 0; the full leaf retained ownership; a real depth-64 checkpoint returned 64; divergence before the first checkpoint returned 0. Existing Mamba cache tests remained green."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7fda5f7a9193/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_short_prefix_ownership.py test/registered/unit/mem_cache/test_mamba_radix_cache_match_candidate.py -vv (candidate source temporarily overlaid at ebba936894d3cd195c0795c40ce6cfca2bf6c8a2)",
+      "exit_code": 0,
+      "what_was_measured": "19 tests passed. The candidate's own exact short-prefix test and the independent ownership test both asserted a zero-token hit, while explicitly checkpointed long prefixes returned 64."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7fda5f7a9193/venv/bin/python reports/j-7fda5f7a9193/gpu_cache_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI350X, actual MambaRadixCache GPU tensors returned 0 indices for the short n-1 split, 3 for the full owned leaf, and 64 for a real checkpoint; full and checkpointed results exactly matched independent torch.arange GPU references."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the delivered changes."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": "No hybrid-Mamba model weights were prepared, so end-to-end logits and latency were not measured. Exact n-1 reuse below the first checkpoint remains unsupported without arbitrary-depth recurrent+convolution snapshotting or a split-replay execution path. The candidate's long-prefix improvement was verified but is not included because it does not solve the reviewed original case."
+}
