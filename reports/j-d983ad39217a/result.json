@@ -1,0 +1,30 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31207",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Decode KV offload now uses the existing DeepSeek-V4 composite HiCache host-pool/controller layout and carries SWA, C4/C128 compressed KV, indexer payload/scale, and C4 state sidecars through device-to-host, storage, and release accounting without inventing split K/V tensors. LMCache now preserves MHA and MLA layouts and resolves the existing grouped external-linker capability for composite pools, but the installed/current LMCache SGLang connectors still accept only k_pool/v_pool; SGLang therefore raises a precise NotImplementedError instead of misrepresenting the V4 layout.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-d983ad39217a/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_specv2_kvcache_offloading.py test/registered/unit/mem_cache/test_linker_pool_assembler.py",
+      "exit_code": 0,
+      "what_was_measured": "26 tests and 8 subtests passed, covering existing MHA/MLA decode-offload lifetime behavior, DeepSeek-V4 composite transfer enumeration/SWA translation, derived-sidecar ownership, and external-linker physical pool layout."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d983ad39217a/venv/bin/python reports/j-d983ad39217a/gpu_composite_transfer.py",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI355X with ROCm/HIP 7.2.26015, real device-to-pinned-host transfers for three paged sub-buffers and two ring-state sub-buffers matched independent torch indexing references byte-for-byte."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/disaggregation/decode_kvcache_offload_manager.py python/sglang/srt/mem_cache/storage/lmcache/lmc_radix_cache.py test/registered/unit/disaggregation/test_specv2_kvcache_offloading.py reports/j-d983ad39217a/gpu_composite_transfer.py reports/j-d983ad39217a/result.json",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, secret, and registered-test metadata checks passed for all changed source and evidence files."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "LMCache dev at commit 05a013b29da78cf2321b9b46ec5039dde2fb0bb0 exposes LMCacheLayerwiseConnector and LMCacheMPConnector constructors with only k_pool/v_pool. Full LMCache V4 support requires LMCache to accept SGLang's grouped pool capability (pool names, per-layer mappings, page geometry, index translation, and multiple physical components) in both in-process and multiprocess registration/transfer paths.",
+    "No DeepSeek-V4 model weights or B300 system were available. The GPU test qualifies the actual composite host-transfer primitives and byte layout on MI355X, not DeepSeek-V4 model semantics, full PD serving, unified-KV mode, HiSparse, or LMCache daemon interoperability.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable."
+  ]
+}

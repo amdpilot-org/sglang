@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import enum
+import inspect
 import logging
 import threading
 from dataclasses import dataclass
@@ -15,7 +16,12 @@ from sglang.srt.mem_cache.base_prefix_cache import (
     MatchPrefixParams,
     MatchResult,
 )
+from sglang.srt.mem_cache.hybrid_cache.linker_pool_assembler import (
+    resolve_hybrid_device_pool_group,
+)
+from sglang.srt.mem_cache.memory_pool import MLATokenToKVPool
 from sglang.srt.mem_cache.radix_cache import RadixCache, RadixKey, TreeNode
+from sglang.srt.mem_cache.unified_cache.component_type import ComponentType
 from sglang.srt.runtime_context import get_memory, get_spec
 from sglang.srt.utils import create_device_stream, device_stream_context
 
@@ -116,21 +122,39 @@ class LMCRadixCache(RadixCache):
             sgl_config=model_config,
             tp_size=tp_size,
             rank=rank,
-            # NOTE: The original implementation accessed private buffers via
-            # `_kvcache.k_buffer` / `.v_buffer`. We prefer public accessors when
-            # available; fall back to private fields if needed.
-            k_pool=getattr(
-                kvcache,
-                "k_buffer",
-                getattr(self.token_to_kv_pool_allocator._kvcache, "k_buffer"),
-            ),
-            v_pool=getattr(
-                kvcache,
-                "v_buffer",
-                getattr(self.token_to_kv_pool_allocator._kvcache, "v_buffer"),
-            ),
             tp_group=tp_group.device_group if tp_group is not None else None,
         )
+
+        k_pool = getattr(kvcache, "k_buffer", None)
+        v_pool = getattr(kvcache, "v_buffer", None)
+        if k_pool is not None and v_pool is not None:
+            connector_kwargs.update(k_pool=k_pool, v_pool=v_pool)
+        elif isinstance(kvcache, MLATokenToKVPool):
+            # MLA stores one latent row per layer. LMCache's SGLang adapter
+            # already distinguishes MLA from MHA through model_config and
+            # consumes k_pool alone; an empty v_pool is its established API.
+            connector_kwargs.update(k_pool=kvcache.kv_buffer, v_pool=[])
+        else:
+            pool_group = resolve_hybrid_device_pool_group(
+                kvcache=kvcache,
+                page_size=params.page_size,
+                params=params,
+                components={ComponentType.FULL, ComponentType.SWA},
+            )
+            connector_cls = (
+                LMCacheLayerwiseConnector
+                if self.device.type == "xpu"
+                else LMCacheMPConnector
+            )
+            if "pool_group" not in inspect.signature(connector_cls).parameters:
+                raise NotImplementedError(
+                    "LMCache does not yet expose the grouped-pool connector API "
+                    f"required by {type(kvcache).__name__}. SGLang resolved "
+                    f"{len(pool_group.entries)} physical sub-pools without "
+                    "fabricating K/V buffers, but the installed LMCache "
+                    f"{connector_cls.__name__} only accepts k_pool/v_pool."
+                )
+            connector_kwargs["pool_group"] = pool_group
 
         self.load_stream = create_device_stream(self.device)
         self.store_stream = create_device_stream(self.device)
