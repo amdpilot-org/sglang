@@ -19,7 +19,7 @@ from sglang.srt.runtime_context import (
     process_model_config,
 )
 from sglang.srt.utils import get_bool_env_var, is_cuda, is_hip, is_musa, is_npu
-from sglang.srt.utils.common import ceil_div
+from sglang.srt.utils.common import ceil_align, ceil_div
 
 
 @lru_cache(maxsize=1)
@@ -174,6 +174,9 @@ def cal_padded_tokens(forward_batch: "ForwardBatch"):
         ]
 
     global_num_tokens = forward_batch.global_num_tokens_cpu.copy()
+    attn_tp_size = get_parallel().attn_tp_size
+    for i, num_tokens in enumerate(global_num_tokens):
+        global_num_tokens[i] = ceil_align(num_tokens, attn_tp_size)
     attn_cp_size = get_parallel().attn_cp_size
     # Non-CP forwards (including speculative forwards) use attention-TP padding
     # only, matching ForwardBatch.prepare_mlp_sync_batch.
