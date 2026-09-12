@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33186",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced all three independent-review counterexamples at candidate commit a8b9c0fe45a4cc298d8ed84e52f8e956d5ae0f88, retained its valid split-marker and later-increment fixes, and corrected MiMo to drain every complete block in an increment, preserve text around tool calls in one-shot parsing, and flush unfinished buffered text at stream end. Parent candidate: https://github.com/amdpilot-org/sglang/pull/1966. Parent review: https://github.com/amdpilot-org/sglang/pull/2053.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-ef34decb899e/venv/bin/python -m pytest -q test/registered/unit/function_call/test_mimo_detector.py",
+      "exit_code": 1,
+      "what_was_measured": "Exact candidate behavior with three independent assertions: final-chunk trailing text, multiple calls and text in one increment, and one-shot surrounding-text preservation. All three failed before the correction; the candidate's four original tests passed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-ef34decb899e/venv/bin/python -m pytest -q test/registered/unit/function_call/test_mimo_detector.py test/registered/unit/function_call/test_function_call_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "Corrected MiMo behavior plus neighboring public parser behavior: 252 passed and 208 subtests passed, including equivalence at every two-chunk boundary of a two-call fixture."
+    },
+    {
+      "command": "git diff --check && pre-commit run --files python/sglang/srt/function_call/mimo_detector.py test/registered/unit/function_call/test_mimo_detector.py",
+      "exit_code": 0,
+      "what_was_measured": "Whitespace and all applicable repository hooks passed on the touched source and test files."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-ef34decb899e/venv/bin/python -m pytest -q test/registered/unit/function_call/test_unknown_tool_name.py",
+      "exit_code": 0,
+      "what_was_measured": "The two repository-wide unknown-tool forwarding and filtering tests remained passing."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and correction are deterministic pure-Python parser behavior exercised through MiMoDetector and FunctionCallParser; no model execution or GPU computation is involved."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No MiMo model weights or HTTP serving run was used, so model semantics, tokenizer delivery, and distributed serving were not evaluated.",
+    "The evidence qualifies parser and public end-of-stream behavior only; it does not claim architecture-specific model correctness."
+  ]
+}
