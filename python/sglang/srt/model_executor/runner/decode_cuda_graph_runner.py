@@ -29,6 +29,7 @@ import contextlib
 import inspect
 import logging
 import os
+from collections import deque
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Callable, Optional, Union
 
@@ -767,18 +768,27 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
             trace_dir = graph_capture_profile_dir()
             os.makedirs(trace_dir, exist_ok=True)
 
-            # Track which BS is currently being captured for trace file naming
-            self._profile_bs_list = list(reversed(self.capture_bs))
-            self._profile_bs_idx = 0
+            # FullCudaGraphBackend enqueues the ShapeKey immediately before it
+            # starts the three profiler steps for that capture.  Do not infer
+            # identity from capture_bs here: a batch bucket can contain LoRA and
+            # attention variants, and PDMUX repeats the sweep per stream group.
+            self._profile_capture_identities = deque()
 
             def on_trace_ready(prof):
-                bs = self._profile_bs_list[self._profile_bs_idx]
+                shape_key = self._profile_capture_identities.popleft()
+                identity_parts = [f"bs_{shape_key.size}"]
+                if shape_key.stream_idx is not None:
+                    identity_parts.append(f"stream_{shape_key.stream_idx}")
+                if shape_key.variant_label is not None:
+                    identity_parts.append(f"variant_{shape_key.variant_label}")
+                if shape_key.attention_variant is not None:
+                    identity_parts.append(f"attention_{shape_key.attention_variant}")
+                identity = "_".join(identity_parts)
                 trace_file = os.path.join(
-                    trace_dir, f"{runner_name}_bs_{bs}_rank{rank}.json.gz"
+                    trace_dir, f"{runner_name}_{identity}_rank{rank}.json.gz"
                 )
                 prof.export_chrome_trace(trace_file)
-                logger.info(f"Saved trace for bs={bs} to {trace_file}")
-                self._profile_bs_idx += 1
+                logger.info(f"Saved trace for graph {shape_key} to {trace_file}")
 
             profile_context = profile(
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -803,6 +813,10 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
             )
         torch.cuda.memory._record_memory_history()
         return profile_context
+
+    def _enqueue_profile_capture_identity(self, shape_key: ShapeKey) -> None:
+        """Bind the next profiler flush to the graph capture that produces it."""
+        self._profile_capture_identities.append(shape_key)
 
     def _post_process_after_profile(self, prof_context):
         torch.cuda.memory._dump_snapshot("cuda_graph_runner_memory_usage.pickle")
