@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38651",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/3409",
+  "candidate_commit": "e8cac2caf689119bd8c71eb7d7c7f0d960731448",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a partial implementation and honest limitation report. Caller IDs are parsed and aligned, and the generic trusted-ID artifact cache works, but only Kimi K3 forwards IDs into that cache. Repeated Qwen video and Whisper audio requests still cross their media-load boundaries twice, general image support is absent, and Responses historical-media reuse lacks compatible multimodal serving evidence or a stored artifact-reference mechanism.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5c80aabf0679/venv/bin/python /job/review-evidence-j-5c80aabf0679/reproduce_ignored_cache_ids.py (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "On base 358c163, two repeated video calls reached Qwen load_mm_data twice and two repeated audio calls reached Whisper load_audio twice."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5c80aabf0679/venv/bin/python /job/review-evidence-j-5c80aabf0679/reproduce_ignored_cache_ids.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "On candidate e8cac2c, stable caller IDs still did not prevent two Qwen video load boundary crossings or two Whisper audio load boundary crossings."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5c80aabf0679/venv/bin/python -m pytest -q test/registered/unit/managers/test_mm_hashes.py test/registered/unit/entrypoints/openai/test_protocol.py test/registered/unit/parser/test_jinja_template_utils.py test/registered/unit/multimodal/test_media_artifact_processor.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate focused regression and compatibility suite: 94 passed and 27 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5c80aabf0679/venv/bin/python /job/review-evidence-j-5c80aabf0679/adversarial_artifact_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial check patched snapshot_media to fail and confirmed the generic trusted caller-ID hot hit returned the cached artifact without source snapshotting or a second preprocess batch."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "No compatible multimodal architecture and weights were available. The deterministic tiny Llama fixture cannot validate the affected multimodal contract and was not used as substitute proof."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Repeated Chat video_url inputs with the same cache_id still enter Qwen load_mm_data on every request because the processor does not pass cache_ids to prepare_media_artifacts.",
+    "Repeated Chat audio_url inputs with the same cache_id still enter Whisper load_audio on every request because the processor does not use the artifact cache.",
+    "Caller-ID artifact caching is operational only at the Kimi K3 image processor call site, not across supported image processors generally.",
+    "Responses previous_response_id reconstructs historical multimodal messages and has no verified stored artifact-reference path proving historical media skips I/O, decode, preprocessing, and feature hashing."
+  ],
+  "remaining_limitations": [
+    "Kimi K3 end-to-end caller-ID reuse was not executed because compatible model weights were unavailable.",
+    "Responses multimodal continuation was not executed because the available tiny Llama fixture is not multimodal.",
+    "No GPU model execution was performed.",
+    "No native source changed in the candidate; native rebuild was not applicable."
+  ]
+}
