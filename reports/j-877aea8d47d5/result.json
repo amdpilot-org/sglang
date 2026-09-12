@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35241",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the independent review's remaining counterexample at candidate commit 75e10e4bdbfdfa2f05a5b5258eda2bb48cb3db02: a health probe received by a fully idle scheduler entered ordinary request admission and changed modeled waiting-queue length, attempted prefill batch size, PrefillDelayer outcome accounting, and per-rank prefill progress before the next user request. Preserved the candidate's valid controller-side isolation and additionally diverted all generation health probes before scheduler admission. Busy probes retain the existing next-result health signal; idle probes receive that signal immediately.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-877aea8d47d5/venv/bin/python -m pytest test/registered/unit/managers/test_scheduler_health_check_admission.py -q (candidate scheduler behavior restored temporarily)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before at the exact candidate behavior: 2 failures showed the fully idle health request reached _request_dispatcher; in the interleaving it was admitted before the user request. The admission recorder tracks waiting_queue, attempted_prefill_batch_sizes, prefill_delayer_outcomes, and prefill_progress. Raw output: reports/j-877aea8d47d5/raw/pytest-candidate-failing.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-877aea8d47d5/venv/bin/python -m pytest test/registered/unit/managers/test_scheduler_health_check_admission.py test/registered/unit/managers/test_data_parallel_controller.py -q",
+      "exit_code": 0,
+      "what_was_measured": "28 tests passed. Health probes leave the scheduler admission recorder's waiting queue, attempted prefill size, delayer outcomes, and local prefill progress unchanged; the following user has the same single admission. Busy probes remain deferred until the next result. Candidate controller invariants for user routing counters and budgets also remain covered. Raw output: reports/j-877aea8d47d5/raw/pytest-focused-passing.txt"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/managers/data_parallel_controller.py python/sglang/srt/managers/scheduler.py python/sglang/srt/entrypoints/http_server.py test/registered/unit/managers/test_data_parallel_controller.py test/registered/unit/managers/test_scheduler_health_check_admission.py reports/j-877aea8d47d5/result.json reports/j-877aea8d47d5/review.md",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, repository-policy, and registered-test validation hooks passed. Raw output: reports/j-877aea8d47d5/raw/pre-commit.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "No GPU execution was used as evidence for this scheduler-only correction.",
+  "native_rebuilt": false,
+  "source_paths": [
+    "python/sglang/srt/managers/data_parallel_controller.py",
+    "python/sglang/srt/managers/scheduler.py",
+    "python/sglang/srt/entrypoints/http_server.py",
+    "test/registered/unit/managers/test_data_parallel_controller.py",
+    "test/registered/unit/managers/test_scheduler_health_check_admission.py"
+  ],
+  "native_paths": [],
+  "remaining_limitations": [
+    "The assigned environment does not provide the reported eight NVIDIA B30Z topology or DeepSeek-V4-Pro weights, so TP8/DP8 throughput, one-chunk rank divergence, mixed/delay persistence, and running-request collapse were not rerun.",
+    "The deterministic regression establishes and removes the scheduler-side state perturbation identified by review; it does not claim numerical reproduction of the reported 62-79k tok/s regime.",
+    "Health generation now verifies scheduler responsiveness without admitting a one-token model forward. Busy probes already used this lightweight response behavior before this correction.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable."
+  ]
+}
