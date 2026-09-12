@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34716",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1615",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1579",
+  "candidate_commit": "163165746ac4235926508ad617b5f19edcb0e14c",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduced float coercion and a trailing .0 on the streaming wire payload. The exact candidate normalizes response snapshot created_at at both SSE serialization sites; its focused suite and independent checks pass for created, in-progress, completed, and failed snapshots without changing non-snapshot event serialization.",
+  "tests": [
+    {
+      "command": "prepared Python SDK reproduction at base commit",
+      "exit_code": 0,
+      "what_was_measured": "ResponseCreatedEvent coerced integer created_at to float and model_dump_json emitted 1786588600.0."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b70ae9cffaf6/venv/bin/python test/registered/unit/entrypoints/openai/test_serving_responses_stream.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate focused suite: 10 tests passed, including the actual non-Harmony streaming generator and snapshot serialization assertions."
+    },
+    {
+      "command": "PYTHONPATH=python prepared Python independent adversarial script",
+      "exit_code": 0,
+      "what_was_measured": "Created, in-progress, completed, and failed SDK snapshots retained float internally but serialized created_at as JSON int; Unicode delta event used exact prior serialization."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b70ae9cffaf6/venv/bin/python -m py_compile python/sglang/srt/entrypoints/openai/serving_responses.py test/registered/unit/entrypoints/openai/test_serving_responses_stream.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source and regression test compile successfully."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..163165746ac4235926508ad617b5f19edcb0e14c",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "ROCm 7.2 and a visible gfx950 GPU were present, but no GPU execution was needed or claimed for this deterministic Python serialization defect."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No live model server or full model architecture was exercised.",
+    "Harmony was verified to call the common serializer by source inspection, not through a Harmony model fixture.",
+    "Prepared OpenAI/Pydantic versions were 2.6.1/2.13.5 rather than the reporter's 2.48.0/2.13.4; the reported coercion reproduced identically.",
+    "No native source changed, so native rebuild validation was not applicable."
+  ]
+}
