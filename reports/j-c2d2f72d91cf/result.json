@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33483",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The exact candidate reconciles implicit per-worker admission with enabled decode graph coverage. The original numeric default changes from 4096 on base to 32, preventing default admission above the captured ceiling while retaining explicit overrides with a warning.",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-c2d2f72d91cf/venv/bin/python -m pytest -q /job/review-evidence/j-c2d2f72d91cf/candidate_test.py (recorded base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "Original failure reproduced meaningfully: issue inputs resolve to 4096 rather than 32. The candidate-only warning-helper case also fails with AttributeError; four unaffected cases pass."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c2d2f72d91cf/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_cuda_graph_request_capacity.py (exact candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "All 6 submitted policy and warning regressions pass against checked-out candidate source."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c2d2f72d91cf/venv/bin/python -m pytest -q /job/review-evidence/j-c2d2f72d91cf/test_independent_capacity.py test/registered/unit/model_executor/test_pool_configurator.py (exact candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "50 tests and 7 subtests pass, including independent graph-limit, low-token, disabled/absent-graph, explicit-override, and DP-local boundaries plus adjacent pool configuration."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..28dcbbf30d215f1a487c671de86753d043621860",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace validation."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The host exposes one AMD Instinct MI350X under ROCm 7.2, not the reported NVIDIA L40. Tests were deterministic source-level CPU tests; no GPU result is claimed.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported NVIDIA L40/Qwen2.5-0.5B/ShareGPT latency transition and its 4x magnitude were not rerun because the prepared host is AMD gfx950 and the model/workload assets were unavailable.",
+    "The review verifies that default admission can no longer exceed configured decode graph coverage; it does not benchmark the admission-queue TTFT tradeoff on the reported architecture.",
+    "Explicit max-running-requests values above graph coverage intentionally remain possible and warn; this is outside the no-flags default failure contract."
+  ]
+}
