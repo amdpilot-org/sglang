@@ -1,0 +1,49 @@
+#ifndef USE_ROCM
+template <bool kPDL, TopKMode kMode>
+CLUSTER_TOPK_KERNEL void topk_small_batch_kernel(const __grid_constant__ TopKPagedParams params) {
+  device::enable_smem_spilling();
+  auto problem = params.problem(blockIdx.x);
+  __shared__ impl::MaxSmem<Streaming::Smem, Cluster::Smem> smem;
+  if (problem.seq_len <= problem.topk) return trivial_transform<kPDL, kMode>(problem);
+
+  constexpr bool kNeedStaging = kMode != TopKMode::INDICES;
+  __shared__ int32_t s_topk_indices[kNeedStaging ? kMaxTopK : 1];
+  if constexpr (kNeedStaging) problem.out = s_topk_indices;
+
+  // randomly elect one worker rank to avoid workload imbalance
+  const auto worker_rank = blockIdx.x % kClusterSize;
+
+  // for small batch, we will fuse in the cluster case
+  if (problem.seq_len <= kReg4MaxSeqLen) {
+    if (blockIdx.y != worker_rank) return;
+    Register4::forward<kPDL>(problem, &smem);
+    __syncthreads();
+  } else if (problem.seq_len <= params.cluster_floor) {
+    if (blockIdx.y != worker_rank) return;
+    Streaming::forward<kPDL>(problem, &smem);
+    __syncthreads();
+  } else {
+    auto cluster = cooperative_groups::this_cluster();
+    if constexpr (kNeedStaging) {
+      problem.out = cluster.map_shared_rank(s_topk_indices, worker_rank);
+    }
+    Cluster::forward<kPDL>(problem, &smem);
+    if constexpr (kNeedStaging) {
+      cluster.sync();
+      if (blockIdx.y != worker_rank) return;
+    }
+  }
+
+  device::PDLTriggerSecondary<kPDL>();
+  if constexpr (kNeedStaging) {
+    // Only the elected worker reaches here, and it mapped `topk_indices` to
+    // itself, so `problem.out` is this block's own buffer. Stating that keeps the
+    // shared::cluster address out of the load problem_transform issues -- which is
+    // load-bearing, not an optimization: without it cicc segfaults on CUDA 13.1+
+    // for sm_90a (issue #32830, previously worked around by copying `problem` in
+    // #32910). Verified: dropping this line reproduces the crash on 13.1/13.2/13.3.
+    __builtin_assume(problem.out == s_topk_indices);
+    problem_transform(problem, params.get_output_ptr(blockIdx.x));
+  }
+}
+#endif  // !USE_ROCM

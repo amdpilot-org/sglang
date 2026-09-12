@@ -1,0 +1,52 @@
+author:	Fridge003
+association:	collaborator
+edited:	true
+status:	none
+--
+Hi @lengrongfu I cannot reproduce your compilation issue.
+Can you please try launching from a clean environment of `lmsysorg/sglang:v0.5.15`, with cookbook command
+```
+sglang serve \
+  --trust-remote-code \
+  --model-path deepseek-ai/DeepSeek-V4-Flash \
+  --tp 4 \
+  --moe-runner-backend marlin \
+  --speculative-algorithm EAGLE \
+  --speculative-num-steps 3 \
+  --speculative-eagle-topk 1 \
+  --speculative-num-draft-tokens 4 \
+  --host 0.0.0.0 \
+  --port 30000
+```
+I suspect the cuda13.1 environment caused some mismatch. So shifting to cuda13.0 might help
+--
+author:	AlejandroParedesLT
+association:	contributor
+edited:	false
+status:	none
+--
+I dug into this a bit — pulled out the exact source file that's failing to compile (`topk_v2.cuh`) and fed it to `nvcc` directly, outside the full sglang stack. A few findings:
+
+- It really is `nvcc` itself crashing (specifically `cicc`, the device-code compiler stage), not something flaky about the machine. It's 100% reproducible.
+- CUDA 13.1 and 13.2 both crash on this file targeting `sm_90`. CUDA 12.4 compiles it just fine. So this smells like a regression in the CUDA 13.x compiler rather than something 13.1-specific — I wouldn't assume 13.0 fixes it without testing.
+- Narrowed it down to the two Hopper cluster kernels in that file (`topk_small_batch_kernel` / `topk_persistent_cluster_kernel`). Everything else in the file compiles fine; it's specifically these that trip the compiler up.
+
+Given 12.4 works, a workaround short-term might be pointing the JIT build at a CUDA 12.x toolkit instead of downgrading your whole driver/runtime — this is purely a compile-time issue.
+
+This looks like an nvcc bug worth reporting to NVIDIA directly rather than something fixable on the sglang side. Happy to help shrink it into a minimal repro if that'd be useful for a bug report.
+
+--
+author:	lengrongfu
+association:	contributor
+edited:	false
+status:	none
+--
+@AlejandroParedesLT Can you help submit a issue to NVIDIA, thanks~
+--
+author:	lucashaha
+association:	none
+edited:	false
+status:	none
+--
+sglang0.5.14 version works fine with cuda13.2，but higher verison still has this problem
+--
