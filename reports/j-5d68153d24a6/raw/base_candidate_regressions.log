@@ -1,0 +1,376 @@
+F.F                                                                      [100%]
+=================================== FAILURES ===================================
+_ TestPrefetchCheckpoints.test_fastsafetensors_coordinates_gds_fallback_across_ranks _
+
+self = <test_candidate.TestPrefetchCheckpoints testMethod=test_fastsafetensors_coordinates_gds_fallback_across_ranks>
+
+    def test_fastsafetensors_coordinates_gds_fallback_across_ranks(self):
+        with tempfile.TemporaryDirectory() as tmpdir, Manager() as manager:
+            attempts = manager.list()
+>           mp.spawn(
+                _run_fastsafetensors_rank,
+                args=(2, os.path.join(tmpdir, "pg"), attempts),
+                nprocs=2,
+                join=True,
+            )
+
+/tmp/j-5d68153d24a6-evidence/test_candidate.py:449: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/opt/venv/lib/python3.12/site-packages/torch/multiprocessing/spawn.py:340: in spawn
+    return start_processes(fn, args, nprocs, join, daemon, start_method="spawn")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/torch/multiprocessing/spawn.py:296: in start_processes
+    while not context.join():
+              ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <torch.multiprocessing.spawn.ProcessContext object at 0x70a288aa53a0>
+timeout = None, grace_period = None
+
+    def join(self, timeout: float | None = None, grace_period: float | None = None):
+        r"""Join one or more processes within spawn context.
+    
+        Attempt to join one or more processes in this spawn context.
+        If one of them exited with a non-zero exit status, this function
+        kills the remaining processes (optionally with a grace period)
+        and raises an exception with the cause of the first process exiting.
+    
+        Returns ``True`` if all processes have been joined successfully,
+        ``False`` if there are more processes that need to be joined.
+    
+        Args:
+            timeout (float): Wait this long (in seconds) before giving up on waiting.
+            grace_period (float): When any processes fail, wait this long (in seconds)
+                for others to shutdown gracefully before terminating them. If they
+                still don't exit, wait another grace period before killing them.
+        """
+        # Ensure this function can be called even when we're done.
+        if len(self.sentinels) == 0:
+            return True
+    
+        # Wait for any process to fail or all of them to succeed.
+        ready = multiprocessing.connection.wait(
+            self.sentinels.keys(),
+            timeout=timeout,
+        )
+    
+        error_index = None
+        for sentinel in ready:
+            index = self.sentinels.pop(sentinel)
+            process = self.processes[index]
+            process.join()
+            if process.exitcode != 0:
+                error_index = index
+                break
+    
+        # Return if there was no error.
+        if error_index is None:
+            # Return whether or not all processes have been joined.
+            return len(self.sentinels) == 0
+        # An error occurred. Clean-up all processes before returning.
+        # First, allow a grace period for processes to shutdown themselves.
+        if grace_period is not None:
+            self._join_procs_with_timeout(grace_period)
+        # Then, terminate processes that are still alive. Try SIGTERM first.
+        for process in self.processes:
+            if process.is_alive():
+                log.warning("Terminating process %s via signal SIGTERM", process.pid)
+                process.terminate()
+    
+        # Try SIGKILL if the process isn't going down after another grace_period.
+        # The reason is related to python signal handling is limited
+        # to main thread and if that is in c/c++ land and stuck it won't
+        # to handle it. We have seen processes getting stuck not handling
+        # SIGTERM for the above reason.
+        self._join_procs_with_timeout(30 if grace_period is None else grace_period)
+        for process in self.processes:
+            if process.is_alive():
+                log.warning(
+                    "Unable to shutdown process %s via SIGTERM , forcefully exiting via SIGKILL",
+                    process.pid,
+                )
+                process.kill()
+            process.join()
+    
+        # The file will only be created if the process crashed.
+        failed_process = self.processes[error_index]
+        if not os.access(self.error_files[error_index], os.R_OK):
+            exitcode = self.processes[error_index].exitcode
+            if exitcode < 0:
+                try:
+                    name = signal.Signals(-exitcode).name
+                except ValueError:
+                    name = f"<Unknown signal {-exitcode}>"
+                raise ProcessExitedException(
+                    f"process {error_index:d} terminated with signal {name}",
+                    error_index=error_index,
+                    error_pid=failed_process.pid,
+                    exit_code=exitcode,
+                    signal_name=name,
+                )
+            else:
+                raise ProcessExitedException(
+                    f"process {error_index:d} terminated with exit code {exitcode:d}",
+                    error_index=error_index,
+                    error_pid=failed_process.pid,
+                    exit_code=exitcode,
+                )
+    
+        with open(self.error_files[error_index], "rb") as fh:
+            original_trace = pickle.load(fh)
+        msg = f"\n\n-- Process {error_index:d} terminated with the following error:\n"
+        msg += original_trace
+>       raise ProcessRaisedException(msg, error_index, failed_process.pid)
+E       torch.multiprocessing.spawn.ProcessRaisedException: 
+E       
+E       -- Process 1 terminated with the following error:
+E       Traceback (most recent call last):
+E         File "/opt/venv/lib/python3.12/site-packages/torch/multiprocessing/spawn.py", line 87, in _wrap
+E           fn(i, *args)
+E         File "/tmp/j-5d68153d24a6-evidence/test_candidate.py", line 109, in _run_fastsafetensors_rank
+E           list(fastsafetensors_weights_iterator(["model.safetensors"]))
+E         File "/job/repo/python/sglang/srt/model_loader/weight_utils.py", line 1253, in fastsafetensors_weights_iterator
+E           fb = loader.copy_files_to_device()
+E                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E         File "/tmp/j-5d68153d24a6-evidence/test_candidate.py", line 95, in copy_files_to_device
+E           raise RuntimeError("is_gds_supported(0) failed")
+E       RuntimeError: is_gds_supported(0) failed
+
+/opt/venv/lib/python3.12/site-packages/torch/multiprocessing/spawn.py:211: ProcessRaisedException
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x70a288abb600>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x70ab6c560860>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestPrefetchCheckpoints.test_fastsafetensors_coordinates_gds_fallback_across_ranks
+----------------------------- Captured stderr call -----------------------------
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-5d68153d24a6/cache/aiter/module_aiter_core.so
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /tmp/amdpilot-repo-j-5d68153d24a6/cache/aiter/module_aiter_core.so
+Loading safetensors using Fastsafetensor loader:   0%|   | 0/1 [00:00<?, ?it/s]Loading safetensors using Fastsafetensor loader:   0%|   | 0/1 [00:00<?, ?it/s]Loading safetensors using Fastsafetensor loader:   0%|   | 0/1 [00:00<?, ?it/s]
+Loading safetensors using Fastsafetensor loader: 100%|█| 1/1 [00:00<00:00, 765.
+W0912 15:07:46.767000 2402 torch/multiprocessing/spawn.py:165] Terminating process 2697 via signal SIGTERM
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/tmp/j-5d68153d24a6-evidence/test_candidate.py", line 449, in test_fastsafetensors_coordinates_gds_fallback_across_ranks
+    mp.spawn(
+  File "/opt/venv/lib/python3.12/site-packages/torch/multiprocessing/spawn.py", line 340, in spawn
+    return start_processes(fn, args, nprocs, join, daemon, start_method="spawn")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/torch/multiprocessing/spawn.py", line 296, in start_processes
+    while not context.join():
+              ^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/torch/multiprocessing/spawn.py", line 211, in join
+    raise ProcessRaisedException(msg, error_index, failed_process.pid)
+torch.multiprocessing.spawn.ProcessRaisedException: 
+
+-- Process 1 terminated with the following error:
+Traceback (most recent call last):
+  File "/opt/venv/lib/python3.12/site-packages/torch/multiprocessing/spawn.py", line 87, in _wrap
+    fn(i, *args)
+  File "/tmp/j-5d68153d24a6-evidence/test_candidate.py", line 109, in _run_fastsafetensors_rank
+    list(fastsafetensors_weights_iterator(["model.safetensors"]))
+  File "/job/repo/python/sglang/srt/model_loader/weight_utils.py", line 1253, in fastsafetensors_weights_iterator
+    fb = loader.copy_files_to_device()
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/j-5d68153d24a6-evidence/test_candidate.py", line 95, in copy_files_to_device
+    raise RuntimeError("is_gds_supported(0) failed")
+RuntimeError: is_gds_supported(0) failed
+
+_ TestPrefetchCheckpoints.test_fastsafetensors_uses_local_device_not_global_rank _
+
+self = <test_candidate.TestPrefetchCheckpoints testMethod=test_fastsafetensors_uses_local_device_not_global_rank>
+_ = <MagicMock name='is_initialized' id='123843379886224'>
+
+    @patch("torch.distributed.is_initialized", return_value=True)
+    def test_fastsafetensors_uses_local_device_not_global_rank(self, _):
+        devices = []
+    
+        class FakeGroup:
+            def rank(self):
+                return 11
+    
+            def size(self):
+                return 12
+    
+        class FakeLoader:
+            def __init__(self, group, device, nogds):
+                devices.append(device)
+    
+            def add_filenames(self, rank_file_map):
+                pass
+    
+            def copy_files_to_device(self):
+                return type("FakeBuffer", (), {"key_to_rank_lidx": {}})()
+    
+            def close(self):
+                pass
+    
+        with (
+            patch(
+                "sglang.srt.model_loader.weight_utils.torch.distributed.group",
+                type("FakeDistributedGroup", (), {"WORLD": FakeGroup()})(),
+            ),
+            patch("torch.cuda.current_device", return_value=0),
+            patch("torch.distributed.get_backend", return_value="gloo"),
+            patch("torch.distributed.all_reduce"),
+            patch(
+                "sglang.srt.model_loader.weight_utils.SafeTensorsFileLoader",
+                FakeLoader,
+            ),
+        ):
+            list(fastsafetensors_weights_iterator(["model.safetensors"]))
+    
+>       self.assertEqual(devices, [torch.device("cuda:0")])
+E       AssertionError: Lists differ: [device(type='cuda', index=11)] != [device(type='cuda', index=0)]
+E       
+E       First differing element 0:
+E       device(type='cuda', index=11)
+E       device(type='cuda', index=0)
+E       
+E       - [device(type='cuda', index=11)]
+E       ?                            ^^
+E       
+E       + [device(type='cuda', index=0)]
+E       ?                            ^
+
+/tmp/j-5d68153d24a6-evidence/test_candidate.py:444: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x70a2889676a0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x70ab6c560860>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestPrefetchCheckpoints.test_fastsafetensors_uses_local_device_not_global_rank
+----------------------------- Captured stderr call -----------------------------
+Loading safetensors using Fastsafetensor loader:   0%|          | 0/1 [00:00<?, ?it/s]Loading safetensors using Fastsafetensor loader: 100%|██████████| 1/1 [00:00<00:00, 40329.85it/s]
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1390, in patched
+    return func(*newargs, **newkeywargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/j-5d68153d24a6-evidence/test_candidate.py", line 444, in test_fastsafetensors_uses_local_device_not_global_rank
+    self.assertEqual(devices, [torch.device("cuda:0")])
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1091, in assertListEqual
+    self.assertSequenceEqual(list1, list2, msg, seq_type=list)
+  File "/usr/lib/python3.12/unittest/case.py", line 1073, in assertSequenceEqual
+    self.fail(msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: Lists differ: [device(type='cuda', index=11)] != [device(type='cuda', index=0)]
+
+First differing element 0:
+device(type='cuda', index=11)
+device(type='cuda', index=0)
+
+- [device(type='cuda', index=11)]
+?                            ^^
+
++ [device(type='cuda', index=0)]
+?                            ^
+
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+test_candidate.py::TestPrefetchCheckpoints::test_fastsafetensors_coordinates_gds_fallback_across_ranks
+  /usr/lib/python3.12/multiprocessing/popen_fork.py:66: DeprecationWarning: This process (pid=2402) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../../tmp/j-5d68153d24a6-evidence/test_candidate.py::TestPrefetchCheckpoints::test_fastsafetensors_coordinates_gds_fallback_across_ranks
+FAILED ../../tmp/j-5d68153d24a6-evidence/test_candidate.py::TestPrefetchCheckpoints::test_fastsafetensors_uses_local_device_not_global_rank
+2 failed, 1 passed, 22 deselected, 17 warnings in 29.22s
