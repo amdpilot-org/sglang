@@ -1506,7 +1506,11 @@ class DeepseekSparseAttnBackend(
                 out_cache_loc,
                 actual_forward_mode,
             )
-            return
+
+            # Building the buffers alone does not launch the out-of-graph
+            # metadata kernels.  Continue through the normal update path so
+            # graph capture also JIT-loads them instead of deferring the first
+            # module load to a real request on every rank.
 
         metadata: DSAMetadata = self.decode_cuda_graph_metadata[bs]
 
