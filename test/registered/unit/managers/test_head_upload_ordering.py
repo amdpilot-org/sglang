@@ -10,8 +10,8 @@ ahead of the burst by stream contract.
 
 Properties pinned here:
 * pre_upload_forward_inputs consumes the prefill staging into device-resident
-  input_ids for pure-prefill batches, leaves mixed batches on the deferred
-  path, and stages the extend / global metadata as one-shot device tensors;
+  input_ids for pure-prefill batches, stages the prefill slice for mixed
+  batches, and stages the extend / global metadata as one-shot device tensors;
 * StagedDeviceTensor hands its tensor out once, and only while the host list
   it was built from is still the batch's current value;
 * resolve_forward_inputs on a pre-uploaded batch touches nothing, and keeps
@@ -56,6 +56,7 @@ def _batch(**over):
         spec_info=None,
         head_staged_extend_seq_lens=None,
         head_staged_extend_prefix_lens=None,
+        head_staged_prefill_input_ids=None,
         head_staged_global_num_tokens=None,
         head_staged_global_num_tokens_for_logprob=None,
         hicache_consumer_index=-1,
@@ -90,12 +91,17 @@ class TestPreUpload(CustomTestCase):
         self.assertIsNone(b.prefill_input_ids_cpu)
         self.assertEqual(b.input_ids.tolist(), [1, 2, 3, 4])
 
-    def test_mixed_batch_keeps_the_deferred_path(self):
+    def test_mixed_batch_stages_prefill_before_handover(self):
         b = _batch(mix_running_indices=torch.tensor([0, 1]))
         pre_upload_forward_inputs(b)
-        # input_ids needs a forward-time FutureMap gather; staging must survive.
+        # The decode tokens still need a forward-time FutureMap gather, but the
+        # prefill H2D must already be issued before the HiCache hand-over.
         self.assertIsNotNone(b.prefill_input_ids_cpu)
         self.assertIsNone(b.input_ids)
+        self.assertIsNotNone(b.head_staged_prefill_input_ids)
+        self.assertEqual(
+            b.head_staged_prefill_input_ids.tensor.tolist(), [1, 2, 3, 4]
+        )
         # Metadata staging is still safe for a mixed batch.
         self.assertIsNotNone(b.head_staged_extend_seq_lens)
 
@@ -166,6 +172,24 @@ class TestResolveInterplay(CustomTestCase):
         resolve_forward_inputs(b, _FakeFutureMap())
         self.assertEqual(b.input_ids.tolist(), [1, 2, 3, 4])
         self.assertIsNone(b.prefill_input_ids_cpu)
+
+    def test_resolve_mixed_uses_staged_prefill(self):
+        b = self._resolve_batch(mix_running_indices=torch.tensor([7, 8]))
+        pre_upload_forward_inputs(b)
+        staged = b.head_staged_prefill_input_ids.tensor
+        resolve_forward_inputs(b, _FakeFutureMap())
+        self.assertEqual(b.input_ids.tolist(), [1, 2, 3, 4, 7, 8])
+        self.assertEqual(staged.tolist(), [1, 2, 3, 4])
+        self.assertIsNone(b.head_staged_prefill_input_ids.tensor)
+
+    def test_resolve_mixed_reassigned_prefill_falls_back(self):
+        b = self._resolve_batch(mix_running_indices=torch.tensor([7, 8]))
+        pre_upload_forward_inputs(b)
+        staged = b.head_staged_prefill_input_ids.tensor
+        b.prefill_input_ids_cpu = torch.tensor([9, 10], dtype=torch.int64)
+        resolve_forward_inputs(b, _FakeFutureMap())
+        self.assertEqual(b.input_ids.tolist(), [9, 10, 7, 8])
+        self.assertIs(b.head_staged_prefill_input_ids.tensor, staged)
 
     def test_resolve_decode_gather_untouched(self):
         b = self._resolve_batch(prefill_input_ids_cpu=None)
@@ -254,6 +278,24 @@ class TestHandover(CustomTestCase):
         )
         Scheduler._handover_hicache_load(sched, b)
         self.assertEqual(order, ["upload", "record"])
+
+    def test_mixed_hand_over_stages_prefill_before_record(self):
+        order = []
+        b = _batch(mix_running_indices=torch.tensor([0, 1]))
+        b.prefill_input_ids_cpu = SimpleNamespace(
+            to=lambda *a, **k: order.append("mixed_upload")
+            or torch.tensor([1, 2, 3, 4])
+        )
+        sched = SimpleNamespace(
+            enable_hierarchical_cache=True,
+            enable_unified_cache_external_linker=False,
+            tree_cache=SimpleNamespace(
+                ready_to_load_host_cache=lambda: order.append("record") or 0
+            ),
+        )
+        Scheduler._handover_hicache_load(sched, b)
+        self.assertEqual(order, ["mixed_upload", "record"])
+        self.assertIsNotNone(b.head_staged_prefill_input_ids)
 
     def test_external_linker_alone_hands_over(self):
         calls = []

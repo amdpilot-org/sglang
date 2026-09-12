@@ -2267,6 +2267,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
     # HiCache load burst hand-over (overlap_utils.pre_upload_forward_inputs).
     # ForwardBatch.init_new takes each one at most once, and only while the
     # host list it was built from is still the batch's current value.
+    head_staged_prefill_input_ids: Optional[StagedDeviceTensor] = None
     head_staged_extend_seq_lens: Optional[StagedDeviceTensor] = None
     head_staged_extend_prefix_lens: Optional[StagedDeviceTensor] = None
     head_staged_global_num_tokens: Optional[StagedDeviceTensor] = None
@@ -3573,6 +3574,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             self.input_ids = None
         # Round-head staging belongs to one formation; a merged batch must not
         # consume either side's tensors.
+        self.head_staged_prefill_input_ids = None
         self.head_staged_extend_seq_lens = None
         self.head_staged_extend_prefix_lens = None
         self.head_staged_global_num_tokens = None

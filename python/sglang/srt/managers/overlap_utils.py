@@ -136,20 +136,24 @@ def pre_upload_forward_inputs(batch: ScheduleBatch) -> None:
 
     * Pure prefill: input_ids goes straight to the device; the pinned staging
       is released and resolve_forward_inputs becomes a no-op for it (the same
-      pattern the dynamic chunk sizer uses). A mixed prefill+decode batch keeps
-      the deferred path because its input_ids needs the forward-time FutureMap
-      gather.
+      pattern the dynamic chunk sizer uses). For a mixed prefill+decode batch,
+      the prefill slice is staged here while the decode-token FutureMap gather
+      and concatenation remain deferred until forward entry.
     * extend_lens / prefix_lens (host lists on the main path) and the
       mlp-sync global token counts are staged as StagedDeviceTensor and
       consumed once by ForwardBatch.init_new. Speculative batches skip the
       global counts: init_new rescales them, so the staged values would be
       wrong.
     """
-    if batch.prefill_input_ids_cpu is not None and batch.mix_running_indices is None:
-        batch.input_ids = batch.prefill_input_ids_cpu.to(
-            batch.device, non_blocking=True
-        )
-        batch.prefill_input_ids_cpu = None
+    if batch.prefill_input_ids_cpu is not None:
+        prefill_gpu = batch.prefill_input_ids_cpu.to(batch.device, non_blocking=True)
+        if batch.mix_running_indices is None:
+            batch.input_ids = prefill_gpu
+            batch.prefill_input_ids_cpu = None
+        else:
+            batch.head_staged_prefill_input_ids = StagedDeviceTensor(
+                source=batch.prefill_input_ids_cpu, tensor=prefill_gpu
+            )
 
     device = batch.device
     if isinstance(batch.extend_lens, list) and batch.extend_lens:
@@ -180,7 +184,16 @@ def resolve_forward_inputs(batch: ScheduleBatch, future_map: FutureMap) -> None:
     - Decode/spec_v2: gather from FutureMap (last iter's sampled token).
     """
     if batch.prefill_input_ids_cpu is not None:
-        prefill_gpu = batch.prefill_input_ids_cpu.to(batch.device, non_blocking=True)
+        staged_prefill = batch.head_staged_prefill_input_ids
+        prefill_gpu = (
+            staged_prefill.take(batch.prefill_input_ids_cpu)
+            if staged_prefill is not None
+            else None
+        )
+        if prefill_gpu is None:
+            prefill_gpu = batch.prefill_input_ids_cpu.to(
+                batch.device, non_blocking=True
+            )
         if batch.mix_running_indices is not None:
             if batch.enable_overlap and not batch.spec_algorithm.is_none():
                 future_map.resolve_mixed_spec_tails(batch)
