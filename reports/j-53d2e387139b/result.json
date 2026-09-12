@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31719",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared base still had the reported GDN indexed-write dtype defect. Reproduced both mismatch directions on CPU and gfx950, then adapted the narrow cache-boundary conversion from open upstream PR 36289 and added broader boundary coverage.",
+  "tests": [
+    {
+      "command": "ROCm device inventory plus prepared-Python indexed assignments for BF16 cache/FP16 source and FP32 cache/BF16 source on CPU and cuda:0",
+      "exit_code": 0,
+      "what_was_measured": "Before the fix, PyTorch raised the reported index_put dtype mismatch in both directions on CPU and the assigned AMD Instinct MI350X gfx950. Raw output: reports/j-53d2e387139b/raw/before_dtype_mismatch.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-53d2e387139b/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_gdn_prefill_backend_policy.py",
+      "exit_code": 0,
+      "what_was_measured": "17 tests and 27 subtests passed, including cross-dtype, same-dtype, selected-slot, untouched-slot, and empty-selection regressions. Raw output: reports/j-53d2e387139b/raw/pytest_gdn_prefill_backend_policy.txt"
+    },
+    {
+      "command": "Prepared-Python gfx950 numerical check invoking _store_tracked_conv_states for FP16/BF16, BF16/FP16, and FP32/BF16 cache/source pairs",
+      "exit_code": 0,
+      "what_was_measured": "GPU results exactly equaled an independently constructed source.to(cache_dtype) reference and non-selected slots remained unchanged. Raw output: reports/j-53d2e387139b/raw/gpu_tracked_conv_state.txt"
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-53d2e387139b/pre-commit /opt/venv/bin/pre-commit run --files python/sglang/srt/layers/attention/linear/gdn_backend.py test/registered/unit/layers/attention/test_gdn_prefill_backend_policy.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, AST, registry, and file-integrity hooks passed for the changed source and test files."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X gfx950 (unique ID 0xfa55ca8c650dfefb) executed the failing-before indexed writes and passing-after source helper checks; see raw/before_dtype_mismatch.txt and raw/gpu_tracked_conv_state.txt.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "QuantTrio/Qwen3.6-27B-AWQ weights were unavailable, so the reported full serving path and semantic output were not reproduced.",
+    "The report used ROCm 7.2 on gfx950 rather than the reporter's CUDA 13.3 SM120 environment.",
+    "The GPU fixture validates the implicated GDN cache write only; it does not qualify the Qwen3.6 architecture or full-model execution.",
+    "Upstream PR https://github.com/sgl-project/sglang/pull/36289 already proposed the same narrow boundary conversion but remained open and absent from this base when inspected."
+  ]
+}

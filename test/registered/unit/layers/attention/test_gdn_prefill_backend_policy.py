@@ -11,6 +11,7 @@ from sglang.srt.layers.attention.linear import gdn_backend
 from sglang.srt.layers.attention.linear.gdn_backend import (
     GDNAttnBackend,
     GDNKernelDispatcher,
+    _store_tracked_conv_states,
     _validate_gdn_linear_attn_backends,
     flashinfer_gdn_prefill_default,
     validate_gdn_mis_backend,
@@ -81,6 +82,49 @@ def make_runner(
 
 
 class TestFlashInferGDNPrefillBackendPolicy(CustomTestCase):
+    def test_tracked_conv_states_use_cache_dtype(self):
+        tracked_states = torch.tensor(
+            [[[1.25, -2.5], [3.75, -4.0]], [[5.5, -6.25], [7.0, -8.5]]],
+            dtype=torch.float32,
+        )
+        for cache_dtype, activation_dtype in (
+            (torch.float16, torch.bfloat16),
+            (torch.bfloat16, torch.float16),
+            (torch.float32, torch.bfloat16),
+        ):
+            with self.subTest(
+                cache_dtype=cache_dtype, activation_dtype=activation_dtype
+            ):
+                conv_states = torch.zeros(5, 2, 2, dtype=cache_dtype)
+                _store_tracked_conv_states(
+                    conv_states,
+                    torch.tensor([3, 1]),
+                    tracked_states.to(activation_dtype),
+                )
+
+                torch.testing.assert_close(
+                    conv_states[[3, 1]],
+                    tracked_states.to(activation_dtype).to(cache_dtype),
+                )
+                torch.testing.assert_close(
+                    conv_states[[0, 2, 4]],
+                    torch.zeros(3, 2, 2, dtype=cache_dtype),
+                )
+
+    def test_tracked_conv_states_same_dtype_and_empty_selection(self):
+        conv_states = torch.zeros(3, 2, 2, dtype=torch.float16)
+        tracked_states = torch.arange(4, dtype=torch.float16).reshape(1, 2, 2)
+        _store_tracked_conv_states(conv_states, torch.tensor([2]), tracked_states)
+        torch.testing.assert_close(conv_states[2], tracked_states[0])
+
+        before = conv_states.clone()
+        _store_tracked_conv_states(
+            conv_states,
+            torch.empty(0, dtype=torch.long),
+            torch.empty(0, 2, 2, dtype=torch.bfloat16),
+        )
+        torch.testing.assert_close(conv_states, before)
+
     def test_mis_requires_triton_prefill_backend(self):
         runner = make_runner(self, enable_mis=True)
         with self.assertRaisesRegex(ValueError, "Triton linear-attention prefill"):
