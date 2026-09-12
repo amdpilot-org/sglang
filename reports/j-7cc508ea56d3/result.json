@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38768",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/570",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/566",
+  "candidate_commit": "0ba30c3ec4131e7228c3ea32ec771185feb52a45",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The prepared base reproduced the retained random classification-head bias. At the exact candidate commit, the real Qwen3 load_weights path produced exact bias-free logits when score.bias was absent and retained an explicit nonzero checkpoint bias. Independent GPU cases also passed for float32, float16, and bfloat16.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-7cc508ea56d3/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen3_classification_bias.py (base source with candidate regression)",
+      "exit_code": 1,
+      "what_was_measured": "The original missing-bias failure reproduced through the actual checkout import and load_weights implementation: all 6 logits differed, with greatest absolute difference 0.29578280448913574. The explicit nonzero-bias subcase passed. Raw output: reports/j-7cc508ea56d3/raw/failing_before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7cc508ea56d3/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen3_classification_bias.py (candidate 0ba30c3ec4131e7228c3ea32ec771185feb52a45)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate regression passed exact CPU comparisons for both absent score.bias and explicit nonzero score.bias (2 subtests). Raw output: reports/j-7cc508ea56d3/raw/passing_after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7cc508ea56d3/venv/bin/python - [independent inline ROCm numerical test at candidate commit]",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X, missing-bias and explicit-bias outputs exactly matched torch.nn.functional.linear references for float32, float16, and bfloat16; the initialized bias contained zero nonzero elements. Raw output: reports/j-7cc508ea56d3/raw/adversarial_gpu.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One visible AMD Instinct MI350X executed the independent numerical cases using PyTorch 2.11.0+rocm7.2 and HIP 7.2.26015. Exact parity was observed in all tested dtypes."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": "Validation isolates the classification head and its real load_weights path by replacing the unrelated Qwen3 backbone with nn.Identity; it does not run a full model checkpoint or server. The host reports a NUMA-balancing performance warning. No C++/FlyDSL/native source changed and repository-environment.json records native as null, so no native rebuild was applicable. The candidate keeps a zero-valued bias Parameter for bias-free checkpoints rather than removing the Parameter, but the original issue's required head computation and explicit-bias compatibility are both satisfied."
+}
