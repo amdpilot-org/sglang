@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33035",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2979",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2938",
+  "candidate_commit": "7da983b52f8e95df6c41bebe4a685775e3e65f9f",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate adds effective pre-receive rejection when the configured budget is one and preserves weighted tokenizer-side accounting, but it provisionally charges every unparsed request as one item. Consequently, a budget intended for one N-item request can admit N large N-item bodies concurrently before parsing discovers their true weights. This is a partial fix, not a full resolution of the original weighted pre-scheduler CPU-memory contract.",
+  "tests": [
+    {
+      "command": "on base: inspect checked-out http_server/admission imports and run 32 concurrent approximately 4 MiB JSON bodies through the actual sglang.srt.entrypoints.http_server.ORJSONRequest.json path",
+      "exit_code": 0,
+      "what_was_measured": "The prepared base has no MultimodalBodyAdmissionMiddleware or admission module; its actual ORJSONRequest parser accepted and retained all 32 bodies: 134217120 encoded bytes and at least 134216704 decoded-string bytes. Raw logs: /job/review-evidence-j-369ce08d0c96/base-import-and-contract.log and base-actual-orjson-body.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-369ce08d0c96/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_mm_body_admission.py test/registered/unit/managers/test_multimodal_preprocessing_admission.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and controller tests: 11 passed, including the budget-one case where 31 of 32 requests are rejected before receive and lease resize/accounting cases. Raw log: /job/review-evidence-j-369ce08d0c96/candidate-focused-tests.log"
+    },
+    {
+      "command": "independent ASGI weighted adversarial case on exact candidate: budget=4, four concurrent 4 MiB bodies, simulated eventual weight=4 each",
+      "exit_code": 0,
+      "what_was_measured": "All four bodies reached receive concurrently and retained 16777216 bytes while provisional accounting reported only four items; a correctly weighted body-stage limit would admit one such request. Raw log: /job/review-evidence-j-369ce08d0c96/candidate-weighted-adversarial.log"
+    },
+    {
+      "command": "candidate import-path inspection",
+      "exit_code": 0,
+      "what_was_measured": "http_server.py and multimodal_preprocessing_admission.py imported from /job/repo/python/sglang; Torch was 2.11.0+rocm7.2 with HIP 7.2. Raw log: /job/review-evidence-j-369ce08d0c96/candidate-import-paths.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and candidate change are CPU/ASGI request-body admission logic; no GPU numerical claim was made or needed. The exact Kimi-K2.6 weights and equivalent 1.5 TiB/200-client host workload were unavailable."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_reason": "The candidate changes Python, tests, and reports only; no C++, CUDA, HIP, Rust, or other native source changed, and repository-environment.json provides no native rebuild target.",
+  "remaining_counterexamples": [
+    "Before JSON parsing, each request is charged one provisional item regardless of its eventual media count. With budget N, N concurrent bodies can be buffered even when each body later proves to contain N media items and weighted admission should allow only one.",
+    "The independent budget=4 adversarial case retained four 4 MiB request bodies (16 MiB total) before true weights were known; all four entered downstream receive under a budget that should fit only one four-item request.",
+    "The exact reported 200-client, 28-images/request Kimi-K2.6 failure on a 1.5 TiB host was not reproduced because the model weights and equivalent host were unavailable, so end-to-end prevention remains unverified.",
+    "The option is explicitly rejected for SGLANG_RUST_SERVER and EPD language-only mode, so those architectures remain unsupported."
+  ],
+  "remaining_limitations": [
+    "Candidate regression coverage proves the special budget-one case, not bounded memory proportional to eventual multimodal item weight during HTTP body receipt.",
+    "No model-level semantic, distributed, or Kimi-K2.6 execution was performed; the deterministic tiny Llama fixture would only qualify transport/engine execution and cannot substitute for that architecture or workload.",
+    "ASGI-level tests do not quantify socket/kernel/protocol-server buffering outside application receive."
+  ]
+}
