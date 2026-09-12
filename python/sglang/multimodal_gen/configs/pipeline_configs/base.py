@@ -289,6 +289,16 @@ class PipelineConfig:
 
         del server_args
 
+    def get_step_reuse_adapter(self, batch: Any) -> Any | None:
+        """Return a model-owned step-reuse adapter for this request, if enabled.
+
+        The default deliberately disables prediction reuse. Opt-in adapters must
+        explicitly declare their observation point, state scope, and side effects.
+        """
+
+        del batch
+        return None
+
     def supports_action_endpoint(self) -> bool:
         """Whether this pipeline exposes the generic action generation API."""
 
