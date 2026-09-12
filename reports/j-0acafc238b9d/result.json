@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32459",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Current main still used a 2x EAGLE KV reservation based on kv_committed_len, which lags target execution under overlap. The candidate sizes EAGLE allocation and its capacity check from synchronous host sequence lengths with a 1x per-decode reserve, while retaining the existing 2x behavior for UNO and other committed-watermark callers. A regression fails on the recorded base and passes after the change.",
+  "tests": [
+    {
+      "command": "base worktree: python -c '<remove prepared checkout from sys.path; run pytest>' test/registered/unit/mem_cache/test_spec_decode_allocation_sizing.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before proof at the recorded base: 3 failed and 1 passed. The base rejects synchronous base_kv_lens and lacks the host target-length helper. Raw output: /tmp/amdpilot-repo-j-0acafc238b9d/evidence/failing-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0acafc238b9d/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_spec_decode_allocation_sizing.py test/registered/unit/mem_cache/test_uno_allocation_sizing.py",
+      "exit_code": 0,
+      "what_was_measured": "5 tests passed: exact page-size-1 reservation, page-size-8 rounding, unchanged committed-length callers, encoder image-token adjustment, and unchanged UNO double reserve. Raw output: /tmp/amdpilot-repo-j-0acafc238b9d/evidence/passing-after.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0acafc238b9d/venv/bin/python -m compileall -q <three changed Python modules>; git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed modules compile and the patch has no whitespace errors."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0acafc238b9d/venv/bin/python -m pytest -q test/registered/unit/mem_cache",
+      "exit_code": 1,
+      "what_was_measured": "2235 passed, 1370 skipped, 8 unrelated environment failures: one ROCm JIT source includes cuda_bf16.h and seven Rust-backend cases cannot execute cargo. Raw output: /tmp/amdpilot-repo-j-0acafc238b9d/evidence/mem-cache-tests.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0acafc238b9d/venv/bin/python -m pytest -q ... test/registered/unit/spec",
+      "exit_code": 1,
+      "what_was_measured": "Speculative unit directory collection is blocked because FlashInfer is not installed in the prepared ROCm environment. Raw output: /tmp/amdpilot-repo-j-0acafc238b9d/evidence/focused-tests.log"
+    },
+    {
+      "command": "Torch gfx950 vector arithmetic with an independent Python reference",
+      "exit_code": 0,
+      "what_was_measured": "One assigned AMD Instinct MI355X (gfx950) executed FP32 arithmetic; GPU sum 25188352.0 exactly matched the independent reference. Raw output: /tmp/amdpilot-repo-j-0acafc238b9d/evidence/gpu.json"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "A real numerical check ran on the single assigned gfx950 and matched its independent CPU reference. This does not reproduce EAGLE, GLM-5.2, NVFP4, CUDA, TP8, or multi-node behavior. Raw output: /tmp/amdpilot-repo-j-0acafc238b9d/evidence/gpu.json",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported GLM-5.2 744B MoE DSA NVFP4 weights, EAGLE draft model, eight B200 CUDA GPUs, and TP8 environment were unavailable, so the original cache-hit-rate and TTFT workload was not reproduced.",
+    "The supplied deterministic tiny Llama fixture validates transport and ordinary engine execution only and has no EAGLE draft checkpoint; using it could not qualify this speculative-decoding defect, so no startup smoke is claimed as issue evidence.",
+    "The change is therefore a source-level candidate backed by failing-before/passing-after allocator regression evidence, not a full-model performance validation.",
+    "The broad memory-cache suite has eight environment failures unrelated to this patch, and speculative unit collection requires unavailable FlashInfer."
+  ]
+}
