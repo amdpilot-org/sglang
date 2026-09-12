@@ -40,6 +40,7 @@ from sglang.multimodal_gen.runtime.pipelines_core import Req
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import OutputBatch
 from sglang.multimodal_gen.runtime.post_training.rl_dataclasses import (
     RolloutDebugTensors,
+    RolloutDenoisingEnv,
     RolloutDitTrajectory,
     RolloutTrajectoryData,
 )
@@ -82,12 +83,70 @@ def _slice_output_dim(
     return tensor[output_index : output_index + 1]
 
 
+def _select_denoising_env_value(
+    value: Any,
+    output_index: int,
+    batch_size: int,
+    *,
+    current_key: str | None = None,
+) -> Any:
+    if isinstance(value, torch.Tensor):
+        if value.dim() >= 1 and value.shape[0] == batch_size:
+            return value[output_index : output_index + 1]
+        return value
+    if isinstance(value, dict):
+        return {
+            key: _select_denoising_env_value(
+                item, output_index, batch_size, current_key=key
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        if current_key == "img_shapes" and len(value) == batch_size:
+            return [value[output_index]]
+        return [
+            _select_denoising_env_value(item, output_index, batch_size)
+            for item in value
+        ]
+    if isinstance(value, tuple):
+        return tuple(
+            _select_denoising_env_value(item, output_index, batch_size)
+            for item in value
+        )
+    return value
+
+
+def _select_output_denoising_env(
+    env: RolloutDenoisingEnv | None, output_index: int, batch_size: int
+) -> RolloutDenoisingEnv | None:
+    if env is None:
+        return None
+    return RolloutDenoisingEnv(
+        image_kwargs=_select_denoising_env_value(
+            env.image_kwargs, output_index, batch_size
+        ),
+        pos_cond_kwargs=_select_denoising_env_value(
+            env.pos_cond_kwargs, output_index, batch_size
+        ),
+        neg_cond_kwargs=_select_denoising_env_value(
+            env.neg_cond_kwargs, output_index, batch_size
+        ),
+        guidance=_select_denoising_env_value(env.guidance, output_index, batch_size),
+    )
+
+
 def _select_output_rollout_trajectory(
     trajectory: RolloutTrajectoryData | None, output_index: int | None
 ) -> RolloutTrajectoryData | None:
     """Select one output while preserving the single-output batch dimension."""
     if trajectory is None or output_index is None:
         return trajectory
+
+    batch_size = (
+        trajectory.rollout_log_probs.shape[0]
+        if trajectory.rollout_log_probs is not None
+        else 1
+    )
 
     debug_tensors = trajectory.rollout_debug_tensors
     if debug_tensors is not None:
@@ -117,7 +176,9 @@ def _select_output_rollout_trajectory(
     return RolloutTrajectoryData(
         rollout_log_probs=_slice_output_dim(trajectory.rollout_log_probs, output_index),
         rollout_debug_tensors=debug_tensors,
-        denoising_env=trajectory.denoising_env,
+        denoising_env=_select_output_denoising_env(
+            trajectory.denoising_env, output_index, batch_size
+        ),
         dit_trajectory=dit_trajectory,
     )
 

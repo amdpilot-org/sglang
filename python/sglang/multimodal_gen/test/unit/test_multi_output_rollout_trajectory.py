@@ -6,6 +6,7 @@ from sglang.multimodal_gen.runtime.entrypoints.diffusion_generator import (
 from sglang.multimodal_gen.runtime.managers.gpu_worker import GPUWorker
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import OutputBatch
 from sglang.multimodal_gen.runtime.post_training.rl_dataclasses import (
+    RolloutDenoisingEnv,
     RolloutDitTrajectory,
     RolloutTrajectoryData,
 )
@@ -14,6 +15,17 @@ from sglang.multimodal_gen.runtime.post_training.rl_dataclasses import (
 def _trajectory(tag: float) -> RolloutTrajectoryData:
     return RolloutTrajectoryData(
         rollout_log_probs=torch.full((1, 4), tag),
+        denoising_env=RolloutDenoisingEnv(
+            guidance=torch.tensor([tag]),
+            image_kwargs={
+                "pixels": torch.full((1, 2), tag),
+                "img_shapes": [[(1, int(tag), int(tag))]],
+            },
+            pos_cond_kwargs={"nested": [torch.full((1, 1), tag)]},
+            neg_cond_kwargs={
+                "nested": ({"value": torch.full((1, 1), tag)},)
+            },
+        ),
         dit_trajectory=RolloutDitTrajectory(
             latents=torch.full((1, 5, 2), tag),
             timesteps=torch.arange(4),
@@ -49,6 +61,22 @@ def test_merge_and_result_keep_each_output_trajectory():
     ]
     assert [result.rollout_log_probs[0, 0].item() for result in results] == [1, 2, 3]
     assert all(result.rollout_log_probs.shape == (1, 4) for result in results)
+    assert [result.denoising_env.guidance.item() for result in results] == [1, 2, 3]
+    assert [
+        result.denoising_env.image_kwargs["pixels"][0, 0].item()
+        for result in results
+    ] == [1, 2, 3]
+    assert [
+        result.denoising_env.pos_cond_kwargs["nested"][0][0, 0].item()
+        for result in results
+    ] == [1, 2, 3]
+    assert [
+        result.denoising_env.neg_cond_kwargs["nested"][0]["value"][0, 0].item()
+        for result in results
+    ] == [1, 2, 3]
+    assert [
+        result.denoising_env.image_kwargs["img_shapes"] for result in results
+    ] == [[[(1, 1, 1)]], [[(1, 2, 2)]], [[(1, 3, 3)]]]
 
 
 def test_merge_drops_incomplete_trajectory_group():

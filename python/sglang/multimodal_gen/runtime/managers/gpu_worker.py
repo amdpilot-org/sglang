@@ -81,6 +81,7 @@ from sglang.multimodal_gen.runtime.post_training.gpu_worker_post_training_mixin 
 )
 from sglang.multimodal_gen.runtime.post_training.rl_dataclasses import (
     RolloutDebugTensors,
+    RolloutDenoisingEnv,
     RolloutDitTrajectory,
     RolloutTrajectoryData,
 )
@@ -133,6 +134,60 @@ def _cat_per_output(tensors: list[torch.Tensor | None]) -> torch.Tensor | None:
     return torch.cat(tensors, dim=0)
 
 
+def _concat_denoising_env_value(
+    values: list[Any], *, current_key: str | None = None
+) -> Any:
+    """Combine singleton-batch values while leaving shared metadata unchanged."""
+    first = values[0]
+    if all(isinstance(value, torch.Tensor) for value in values):
+        if all(value.dim() >= 1 and value.shape[0] == 1 for value in values):
+            return torch.cat(values, dim=0)
+        return first
+    if all(isinstance(value, dict) and value.keys() == first.keys() for value in values):
+        return {
+            key: _concat_denoising_env_value(
+                [value[key] for value in values], current_key=key
+            )
+            for key in first
+        }
+    if all(isinstance(value, list) for value in values):
+        if current_key == "img_shapes" and all(len(value) == 1 for value in values):
+            return [item for value in values for item in value]
+        if all(len(value) == len(first) for value in values):
+            return [
+                _concat_denoising_env_value([value[i] for value in values])
+                for i in range(len(first))
+            ]
+    if all(isinstance(value, tuple) and len(value) == len(first) for value in values):
+        return tuple(
+            _concat_denoising_env_value([value[i] for value in values])
+            for i in range(len(first))
+        )
+    return first
+
+
+def _concat_denoising_envs(
+    per_output: list[RolloutTrajectoryData],
+) -> RolloutDenoisingEnv | None:
+    if not all(data.denoising_env is not None for data in per_output):
+        return None
+    envs: list[RolloutDenoisingEnv] = [
+        data.denoising_env
+        for data in per_output
+        if data.denoising_env is not None
+    ]
+    return RolloutDenoisingEnv(
+        image_kwargs=_concat_denoising_env_value([env.image_kwargs for env in envs]),
+        pos_cond_kwargs=_concat_denoising_env_value(
+            [env.pos_cond_kwargs for env in envs]
+        ),
+        neg_cond_kwargs=_concat_denoising_env_value(
+            [env.neg_cond_kwargs for env in envs]
+        ),
+        guidance=_concat_denoising_env_value([env.guidance for env in envs]),
+    )
+
+
 def _concat_rollout_trajectory_data(
     per_output: list[RolloutTrajectoryData | None],
 ) -> RolloutTrajectoryData | None:
@@ -177,7 +232,7 @@ def _concat_rollout_trajectory_data(
             [data.rollout_log_probs for data in per_output]
         ),
         rollout_debug_tensors=debug_tensors,
-        denoising_env=first.denoising_env,
+        denoising_env=_concat_denoising_envs(per_output),
         dit_trajectory=dit_trajectory,
     )
 
