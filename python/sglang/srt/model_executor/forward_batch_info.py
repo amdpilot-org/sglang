@@ -692,6 +692,16 @@ class ForwardBatch(ForwardBatchDeepSeekMHAMixin):
             or num_tokens != self.forward_metadata_planned_num_tokens
         )
 
+    def has_stale_forward_metadata_plan(self) -> bool:
+        """Whether a pre-planned metadata record no longer matches this batch."""
+        if not self.forward_metadata_ready:
+            return False
+        num_tokens = self.input_ids.shape[0] if self.input_ids is not None else 0
+        return (
+            self.batch_size != self.forward_metadata_planned_bs
+            or num_tokens != self.forward_metadata_planned_num_tokens
+        )
+
     def apply_deprecated_skip_attn_backend_init(
         self, skip_attn_backend_init: Optional[bool]
     ) -> None:

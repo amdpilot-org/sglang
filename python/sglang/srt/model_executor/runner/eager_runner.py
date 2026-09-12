@@ -24,6 +24,7 @@ import torch
 
 from sglang.srt.dllm.config import DllmConfig
 from sglang.srt.environ import envs
+from sglang.srt.layers.attention.base_attn_backend import AttentionBackend
 from sglang.srt.layers.cp.utils import (
     cp_gather_after_forward,
     cp_shard_model_inputs,
@@ -75,6 +76,19 @@ from sglang.srt.utils.device_timer import device_timer_ctx
 logger = logging.getLogger(__name__)
 
 _is_hip = is_hip()
+
+
+def _validate_preplanned_metadata_extent(attn_backend, forward_batch) -> None:
+    validator = getattr(attn_backend, "validate_preplanned_metadata_extent", None)
+    if validator is not None:
+        validator(forward_batch)
+    else:
+        # Legacy/multi-step wrappers do not all derive from AttentionBackend.
+        # They receive the same fail-closed matched-extent default.
+        AttentionBackend.validate_preplanned_metadata_extent(
+            attn_backend, forward_batch
+        )
+
 
 if TYPE_CHECKING:
     from sglang.srt.layers.logits_processor import LogitsProcessorOutput
@@ -251,12 +265,15 @@ class EagerRunner(BaseRunner):
         attn_backend, pdmux_ctx = self._resolve_decode_pdmux()
         if not enable_pdmux:
             forward_batch = self.load_batch(forward_batch, pp_proxy_tensors)
-        if forward_batch.needs_forward_metadata_init():
+        needs_metadata_init = forward_batch.needs_forward_metadata_init()
+        if needs_metadata_init:
             if hasattr(model_runner.model, "prepare_forward_batch"):
                 # Prepare model-specific attention metadata before planning,
                 # e.g. Moss-VL's prefill cross-attention custom mask.
                 model_runner.model.prepare_forward_batch(forward_batch)
             attn_backend.init_forward_metadata(forward_batch)
+        else:
+            _validate_preplanned_metadata_extent(attn_backend, forward_batch)
         # FIXME: add pp_proxy_tensors arg to all models
         kwargs = model_runner._pp_kwargs(pp_proxy_tensors)
 
@@ -291,8 +308,9 @@ class EagerRunner(BaseRunner):
         # no static metadata load to fill the gap.  Re-plan target verify from
         # the final batch every time; eager metadata is intentionally derived
         # directly from the live ``spec_info`` tensors.
+        needs_metadata_init = forward_batch.needs_forward_metadata_init()
         if (
-            forward_batch.needs_forward_metadata_init()
+            needs_metadata_init
             or cp_active
             or forward_batch.forward_mode.is_target_verify()
         ):
@@ -328,6 +346,10 @@ class EagerRunner(BaseRunner):
                 model_runner,
                 forward_batch,
                 torch.get_device_module(model_runner.device),
+            )
+        elif not cp_active and not forward_batch.forward_mode.is_target_verify():
+            _validate_preplanned_metadata_extent(
+                model_runner.attn_backend, forward_batch
             )
 
         if not cp_active:

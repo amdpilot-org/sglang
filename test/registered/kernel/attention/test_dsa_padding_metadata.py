@@ -13,7 +13,7 @@ from sglang.srt.model_executor.forward_batch_info import ForwardBatch, ForwardMo
 from sglang.test.ci.ci_register import register_cuda_ci
 from sglang.test.test_utils import CustomTestCase
 
-register_cuda_ci(est_time=10, stage="base-b", runner_config="1-gpu-small")
+register_cuda_ci(est_time=10, stage="base-b-kernel-unit", runner_config="1-gpu-small")
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "GPU is required")
@@ -48,9 +48,7 @@ class TestDSAPaddingMetadata(CustomTestCase):
             return_value=parallel,
         ):
             physical_rows = cal_padded_tokens(batch)
-            padded_cache_seqlens = pad_dsa_cache_seqlens(
-                batch, planned_cache_seqlens
-            )
+            padded_cache_seqlens = pad_dsa_cache_seqlens(batch, planned_cache_seqlens)
 
         self.assertEqual(physical_rows, 4)
         self.assertEqual(padded_cache_seqlens.shape[0], physical_rows)
@@ -59,9 +57,7 @@ class TestDSAPaddingMetadata(CustomTestCase):
             torch.tensor([11, 12, 13, 0], dtype=torch.int32, device="cuda"),
         )
         # Both downstream DSA consumers derive row offsets from this metadata.
-        cu_seqlens = torch.nn.functional.pad(
-            padded_cache_seqlens.cumsum(0), (1, 0)
-        )
+        cu_seqlens = torch.nn.functional.pad(padded_cache_seqlens.cumsum(0), (1, 0))
         self.assertEqual(cu_seqlens.shape[0], physical_rows + 1)
 
 

@@ -1,0 +1,29 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38580",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced a non-replannable ForwardBatch plan recorded at three rows and then padded to four while needs_forward_metadata_init remained false. Eager decode and extend now fail closed before model attention/KV writes unless the backend validates an explicit physical execution extent. DSA preserves semantic preplanning and accepts the resized batch only when its padded kernel row metadata, query/key cumulative offsets, and KV write locations cover all physical tokens. The candidate's attention-TP padding correction is retained.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-04c9f1d479a7/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_eager_metadata_extent.py test/registered/kernel/attention/test_dsa_padding_metadata.py test/registered/unit/model_executor/test_forward_metadata_plan_record.py",
+      "exit_code": 0,
+      "what_was_measured": "13 tests passed, including real EagerRunner decode and draft-extend boundaries that reject the three-to-four-row stale plan before model.forward, plus DSA acceptance/rejection based on concrete four-row kernel and KV extents. Raw output: reports/j-04c9f1d479a7/raw/focused-tests-final.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-04c9f1d479a7/venv/bin/python reports/j-04c9f1d479a7/gpu_reference.py",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X, GPU-resident DSA metadata for three real rows and attention TP 2 was [11, 12, 13, 0], equal to an independent ceiling-alignment reference with four physical rows. Raw output: reports/j-04c9f1d479a7/raw/gpu-reference.txt"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/model_executor/forward_batch_info.py python/sglang/srt/layers/attention/base_attn_backend.py python/sglang/srt/model_executor/runner/eager_runner.py python/sglang/srt/layers/attention/dsa_backend.py test/registered/unit/model_executor/test_eager_metadata_extent.py test/registered/kernel/attention/test_dsa_padding_metadata.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, test registration taxonomy, and source checks. Raw output: reports/j-04c9f1d479a7/raw/pre-commit-final.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X, ROCm 7.2.26015; the focused GPU test and independent GPU tensor reference both executed successfully."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": "No model-weight end-to-end speculative DSA run was performed, so full speculative model correctness is not claimed. Validation covers the actual ForwardBatch/EagerRunner/backend boundary and concrete DSA/KV row extents. CUDA-only architectures were not exercised. No FlyDSL C++ or other native source changed, so a native rebuild was not applicable."
+}
