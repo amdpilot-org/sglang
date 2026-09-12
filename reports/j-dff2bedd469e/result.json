@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38069",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/593",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/590",
+  "candidate_commit": "45638ad1cf0d18cad80c9b6095bd063e9693e1a3",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate substantially implements skip_cache_insert and passed focused unit tests plus live MI350X radix/HiCache tests, but it violates the original issue's explicit backward-compatibility contract. Req previously derived skip_radix_cache_insert from bootstrap_host == FAKE_BOOTSTRAP_HOST; the candidate derives it only from skip_cache_insert and includes a test requiring the legacy sentinel not to skip. Existing clients using bootstrap_host: 2.2.2.2 therefore begin inserting request KV unless changed in lockstep.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-dff2bedd469e/venv/bin/python (base import-path reproduction script)",
+      "exit_code": 0,
+      "what_was_measured": "On the actual prepared base, GenerateReqInput has no skip_cache_insert parameter, construction with it raises TypeError, and OpenAI chat/completion/responses models discard the unknown field. Raw output: /job/review-evidence-j-dff2bedd469e/base-reproduction.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-dff2bedd469e/venv/bin/python (candidate source/import and normalization checks)",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed imports resolve to /job/repo/python/sglang, all requested public models expose the field, and single/batched GenerateReqInput normalization preserves true/false values. Raw output: /job/review-evidence-j-dff2bedd469e/candidate-imports.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-dff2bedd469e/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_skip_radix_cache_insert.py test/registered/unit/managers/test_io_struct.py test/registered/unit/entrypoints/openai/test_serving_completions.py test/registered/unit/entrypoints/openai/test_serving_chat.py test/registered/unit/entrypoints/test_http_server_warmup.py test/registered/unit/managers/test_priority_scheduling_disaggregation.py test/registered/unit/disaggregation/test_encode_receiver.py test/registered/unit/mem_cache/test_session_token_share_unit.py test/registered/unit/mem_cache/test_radix_cache_cpp_unit.py",
+      "exit_code": 0,
+      "what_was_measured": "241 tests and 81 subtests passed, covering request propagation, cache backends, chunked-prefill ownership, OpenAI adapters, and internal synthetic callers. Raw output: /job/review-evidence-j-dff2bedd469e/candidate-focused-unit.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-dff2bedd469e/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_skip_radix_cache_insert.py::TestReqSkipCacheInsertDerivation::test_fake_bootstrap_host_alone_does_not_skip",
+      "exit_code": 0,
+      "what_was_measured": "The candidate explicitly tests and enforces the incompatible behavior: FAKE_BOOTSTRAP_HOST alone no longer skips insertion. Base source sets skip_radix_cache_insert from that sentinel; candidate source sets it only from skip_cache_insert. Raw output: /job/review-evidence-j-dff2bedd469e/candidate-sentinel-regression.txt."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-dff2bedd469e/venv/bin/python /job/review-evidence-j-dff2bedd469e/run_candidate_e2e.py",
+      "exit_code": 0,
+      "what_was_measured": "Five live tests passed on both plain radix and HiCache write_through with Qwen/Qwen2.5-1.5B-Instruct: explicit opt-out left no reusable prefix, normal requests inserted, opted-out requests read existing prefixes, per-item batches worked, OpenAI chat worked, and a 64-token chunk size exercised multi-chunk prompts. Raw output: /job/review-evidence-j-dff2bedd469e/candidate-e2e-gpu.txt."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Assigned GPU 0 was an AMD Instinct MI350X (gfx950, unique ID 0x5e94f9cc641f4027). Live inference ran through ROCm 7.2/PyTorch 2.11.0+rocm7.2. Inventory: /job/review-evidence-j-dff2bedd469e/gpu-inventory.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A request that relied on the existing bootstrap_host value 2.2.2.2 without the new field skipped radix/HiCache insertion on the base but inserts under the candidate. This contradicts the issue requirement that the PD sentinel keep working unchanged."
+  ],
+  "remaining_limitations": "No native C++/FlyDSL source changed, so no native rebuild was applicable; radix_cache_cpp.py is Python and its focused tests passed. Prefill-only PD, speculative decoding, retraction, pure-SWA on live GPU, and the repository-default gated Llama model were not exercised end to end. The live matrix used public Qwen/Qwen2.5-1.5B-Instruct. Aiter compiled gfx950 kernels during startup and warned that the pinned clang does not accept -amdgpu-coerce-illegal-types=1, then retried without it; inference and all E2E assertions completed."
+}
