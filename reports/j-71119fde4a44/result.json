@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36886",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1124",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "a6e24ec6b9964325bc475561c7040235a4cd8f2f",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes and tests the in-bounds no-rope MLA DCP owner/local-location write and adds the two virtual-capacity adjustments, but an independent GPU case shows that its changed no-rope kernel still violates the reserved_skip_index contract on DCP rank 0. Full eight-rank H100 GLM-5.3-Flash serving, watermark crossing, sparse read/merge/gather paths, and semantic quality could not be verified on the single assigned gfx950 GPU without the model weights.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-71119fde4a44/triton-base /tmp/amdpilot-repo-j-71119fde4a44/venv/bin/python -m pytest -q /job/review-evidence-j-71119fde4a44/candidate-test_set_mla_kv_buffer.py -k 'dcp_sharded_localizes_virtual_locs and not with_rope'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction at the recorded base: both simulated DCP ranks failed local-row numerical comparison for no-rope writes, while the rope controls passed (2 failed, 2 passed)."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-71119fde4a44/triton-candidate /tmp/amdpilot-repo-j-71119fde4a44/venv/bin/python -m pytest -q test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py -k dcp_sharded_localizes_virtual_locs",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression executed the changed Triton kernel on gfx950 for rope/no-rope, ranks 0/1, owner filtering, and loc//world-size localization (4 passed)."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-71119fde4a44/triton-full /tmp/amdpilot-repo-j-71119fde4a44/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_dcp_dsa_virtual_capacity.py test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py",
+      "exit_code": 0,
+      "what_was_measured": "All runnable touched unit/kernel tests passed (12 passed); 58 CUDA-TMA-specific cases were skipped on ROCm."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-71119fde4a44/triton-adversarial /tmp/amdpilot-repo-j-71119fde4a44/venv/bin/python /tmp/review_dcp_mla_adversarial.py",
+      "exit_code": 1,
+      "what_was_measured": "Independent GPU boundary test: owner localization at the last physical row passed for both ranks, but the default reserved location 0 was overwritten with NaNs on DCP rank 0."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Changed Triton source from /job/repo/python/sglang/kernels/ops/kvcache/mla_buffer.py was compiled with private Triton caches and executed on one AMD Instinct MI350X (gfx950), ROCm 7.2, torch 2.11.0+rocm7.2."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With DCP world size 2, rank 0, no-rope input, loc=[0], and the public default reserved_skip_index=0, the candidate writes the padding row into physical slot 0; a NaN source makes the reserved slot NaN.",
+    "The candidate regression always passes reserved_skip_index=-1 and therefore does not cover its public default or parity with the rope kernel."
+  ],
+  "remaining_limitations": [
+    "Only one AMD gfx950 GPU was assigned; the reported eight-H100 DCP topology and CUDA-specific kernels were unavailable.",
+    "GLM-5.3-Flash weights were unavailable, so the original long-context watermark crossing and semantic-quality degradation were not reproduced end to end.",
+    "Sparse decode/target-verify LSE merge and sparse-extend all-gather behavior were not qualified end to end.",
+    "The index-K capacity tests are construction-helper unit tests; the reported multi-request OOB crash was not reproduced without the model and eight GPUs.",
+    "No native C++ or FlyDSL files changed, so no native rebuild was applicable; 58 CUDA-TMA-specific tests were skipped on ROCm."
+  ]
+}
