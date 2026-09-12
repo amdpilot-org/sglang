@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36194",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1283",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1249",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "aff03080588f3a879a4e5a8871523a224b8997a8",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes the reported pre-serving Pydantic rejection for strict=null in both ResponsesRequest and ChatCompletionRequest, and its focused and complete affected protocol tests pass. However, it changes the fields to Optional[bool] and preserves explicit null as None through model_dump and the Responses-to-chat conversion. The original issue explicitly requires null to be treated as false, matching the existing omitted-key default. This is therefore a partial acceptance fix, not a full original-contract fix.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-759f1aa63883/venv/bin/python < inline baseline contract reproduction",
+      "exit_code": 0,
+      "what_was_measured": "At the recorded base, strict=null failed with Pydantic bool_type for both request models, while omission was accepted and produced bool false."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-759f1aa63883/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_protocol.py -k 'nullable_strict or non_boolean_strict' test/registered/unit/entrypoints/openai/test_responses_protocol.py -k 'nullable_strict or omitted_strict or non_boolean_strict'",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate's five selected nullable/omitted/invalid regressions passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-759f1aa63883/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_protocol.py test/registered/unit/entrypoints/openai/test_responses_protocol.py",
+      "exit_code": 0,
+      "what_was_measured": "The complete affected protocol modules passed: 69 tests and 25 subtests."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-759f1aa63883/venv/bin/python < inline independent null-normalization and boundary script",
+      "exit_code": 1,
+      "what_was_measured": "Both request models accepted null, and invalid object/list/2 values were rejected, but explicit null remained None and dumped as null. Responses-to-chat conversion also retained None. Assertions requiring null to normalize to false failed."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The prepared environment exposes one AMD Instinct MI355X (gfx950-class capability 9.5) under Torch 2.11.0+rocm7.2 / HIP 7.2.26015. No GPU kernel was executed because the reported failure occurs in CPU-side Pydantic validation before model execution; no model, semantic, or serving-path GPU claim is made.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "ResponsesRequest with a function tool containing explicit strict:null accepts the request but leaves tool.strict as None and model_dump emits strict:null instead of treating it as false.",
+    "ChatCompletionRequest with nested function.strict:null accepts the request but leaves function.strict as None and model_dump emits strict:null instead of treating it as false.",
+    "The Responses serving conversion passes ResponseTool.strict=None into Function.strict, so the null value remains None across that internal boundary rather than normalizing to false."
+  ],
+  "remaining_limitations": [
+    "No live HTTP server/model-weight run was performed. The exact request models responsible for the original 400 were exercised directly, which establishes pre-serving rejection/acceptance and normalization behavior but not a full engine response.",
+    "No full model architecture, semantic accuracy, distributed workload, or multi-node behavior was tested or claimed.",
+    "The candidate changes only Python protocol and test/report files; there are no native changes, so no native rebuild was applicable.",
+    "The original upstream issue snapshot was supplied as task data and the mirror issue/PR metadata were inspected; upstream participants were not contacted."
+  ]
+}
