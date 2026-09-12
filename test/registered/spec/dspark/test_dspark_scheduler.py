@@ -1,6 +1,7 @@
 import functools
 import types
 import unittest
+from unittest.mock import Mock, patch
 
 import torch
 
@@ -9,6 +10,7 @@ from sglang.kernels.ops.speculative.dspark.dspark_schedule import (
 )
 from sglang.srt.speculative.dspark_components.dspark_planner import (
     DSparkScheduleConfig,
+    DSparkVerifyPlanner,
     HostConfidenceBudgetPlanner,
     VerifyBudgetDecision,
     compute_verify_token_budget,
@@ -18,7 +20,7 @@ from sglang.srt.speculative.dspark_components.dspark_sps import (
     SpsAdditiveCostTable,
     SpsCostTable,
 )
-from sglang.srt.speculative.ragged_verify import RaggedVerifyLayout
+from sglang.srt.speculative.ragged_verify import RaggedVerifyLayout, RaggedVerifyMode
 from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import CustomTestCase
 
@@ -223,6 +225,37 @@ class TestBudgetDecisionLifecycle(CustomTestCase):
         planner.last_decision = VerifyBudgetDecision(budget=1)
         planner.note_non_decode_step()
         self.assertIsNone(planner.take_last_decision())
+
+
+class TestForcedBudgetLayout(CustomTestCase):
+    def test_forced_budget_bypasses_uninitialized_table_verify_all_cache(self):
+        planner = DSparkVerifyPlanner.__new__(DSparkVerifyPlanner)
+        planner._ragged_verify_mode = RaggedVerifyMode.COMPACT
+        planner._is_verify_all = True
+        planner._uniform_layout_cache = {}
+        planner._budget_planner = types.SimpleNamespace(forced_budget_frac=0.2)
+        planner._dynamic_graph_tier = False
+        planner._schedule_cfg = DSparkScheduleConfig(gamma=4)
+        planner.verify_num_draft_tokens = 4
+        planner.model_runner = None
+        planner._budget_aligned_to_graph_tier = Mock(return_value=3)
+        planner._schedule_verify_lens = Mock(return_value=None)
+
+        with patch(
+            "sglang.srt.speculative.dspark_components.dspark_planner.uniform_ragged_layout",
+            return_value="uniform-layout",
+        ):
+            layout = planner.schedule_layout(
+                req_pool_indices=torch.arange(2),
+                prefix_lens=torch.tensor([10, 20]),
+                device=torch.device("cpu"),
+                confidence=torch.ones((2, 4)),
+                budget=3,
+            )
+
+        self.assertEqual(layout, "uniform-layout")
+        planner._schedule_verify_lens.assert_called_once()
+        self.assertEqual(planner._schedule_verify_lens.call_args.kwargs["budget"], 3)
 
 
 class TestScheduleVerifyLensTopk(CustomTestCase):
