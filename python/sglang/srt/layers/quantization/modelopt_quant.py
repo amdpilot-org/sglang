@@ -329,9 +329,9 @@ class ModelOptQuantConfig(QuantizationConfig):
         from sglang.srt.layers.vocab_parallel_embedding import ParallelLMHead
 
         if isinstance(layer, (LinearBase, ParallelLMHead)):
-            if is_layer_skipped(
+            if self.is_layer_excluded(prefix) or is_layer_skipped(
                 prefix, self.exclude_modules, self.packed_modules_mapping
-            ) or self.is_layer_excluded(prefix):
+            ):
                 return UnquantizedLinearMethod()
             return Linear(self)
         elif self.kv_cache_quant_algo and isinstance(layer, RadixAttention):
@@ -379,10 +379,27 @@ class ModelOptQuantConfig(QuantizationConfig):
         if not self.exclude_modules:
             return False
 
-        # Build prefix variants: some models wrap layers under "language_model."
+        # Build prefix variants for wrappers and fused runtime modules whose
+        # checkpoint shards are named separately.
         prefixes_to_check = [prefix]
         if prefix.startswith("language_model."):
             prefixes_to_check.append(prefix.removeprefix("language_model."))
+        if self.packed_modules_mapping:
+            head, _, tail = prefix.rpartition(".")
+            for shard_name in self.packed_modules_mapping.get(tail, []):
+                expanded = f"{head}.{shard_name}" if head else shard_name
+                prefixes_to_check.append(expanded)
+                if expanded.startswith("language_model."):
+                    prefixes_to_check.append(
+                        expanded.removeprefix("language_model.")
+                    )
+
+        prefixes_to_check.extend(
+            f"model.{pfx}"
+            for pfx in tuple(prefixes_to_check)
+            if not pfx.startswith("model.")
+        )
+        prefixes_to_check = list(dict.fromkeys(prefixes_to_check))
 
         # Fused module patterns: the exclude list may reference a sub-component
         # (e.g., "q_a_proj") that is fused into a combined parameter name
