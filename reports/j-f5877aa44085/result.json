@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35723",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "summary": "The private/gated NVIDIA NVFP4 checkpoint could not be loaded on the assigned AMD gfx950, so the reported token-loop serving failure was not reproduced and no new source correction was justified. The reporter's known-good revision is 863 commits after v0.5.17 and includes Qwen3.8 support plus several GDN/quantization fixes. Current source contains and passes the deterministic GDN prefill correction from the known-good commit.",
+  "tests": [
+    {
+      "command": "curl -L --fail -sS https://huggingface.co/orcarouter/Qwen3.8-27B-Uncensored-NVFP4/raw/main/config.json -o reports/j-f5877aa44085/raw/model-config.json",
+      "exit_code": 22,
+      "what_was_measured": "Checkpoint metadata availability; Hugging Face returned HTTP 401, preventing model/config retrieval."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f5877aa44085/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_gdn_prefill_backend_policy.py",
+      "exit_code": 0,
+      "what_was_measured": "Current GDN prefill backend selection, deterministic-mode fallback/rejection regression, and independent policy boundaries: 15 tests, 24 subtests passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-f5877aa44085/venv/bin/python -m pytest -q test/registered/attention/unittests/gdn/test_triton.py::TestTritonGDNBackendCorrectness::test_projected_gdn_attention_cases test/registered/attention/unittests/gdn/test_triton.py::TestTritonGDNBackendCorrectness::test_runner_mode_split_op_extend_cases test/registered/attention/unittests/gdn/test_triton.py::TestTritonGDNBackendCorrectness::test_runner_mode_eagle_verify_cases",
+      "exit_code": 0,
+      "what_was_measured": "On one gfx950, Triton GDN output versus the suite's pure-PyTorch recurrence reference across 15 projected extend/decode subtests and five EAGLE/frozen-KV/DFLASH/ngram verify subtests; 2 tests passed and the CUDA-only split-op test skipped on ROCm."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-f5877aa44085/venv/bin/python -m pytest -q -rs test/registered/attention/unittests/gdn/test_triton.py::TestTritonGDNBackendCorrectness::test_runner_mode_split_op_extend_cases",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the independent boundary was skipped because TcPiecewiseForwardContext.num_tokens is not wired on ROCm, rather than silently counted as GPU coverage."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "HIP_VISIBLE_DEVICES=0 exposed exactly one AMD Instinct MI350X, capability (9, 5), gfx950. Raw environment and numerical test logs are retained under reports/j-f5877aa44085/raw/."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The exact orcarouter checkpoint is private/gated and returned HTTP 401.",
+    "The reported checkpoint uses NVIDIA NVFP4; the assigned accelerator is AMD gfx950, so its quantized execution path cannot be qualified here.",
+    "No full-model HTTP generation, semantic-quality, or token-loop reproduction was performed.",
+    "FlashInfer GDN behavior on NVIDIA hardware was not executed.",
+    "The piecewise CUDA-graph split-op GDN boundary is not wired on ROCm and was skipped explicitly.",
+    "The precise causal commit among the 863 commits between v0.5.17 and the reported known-good revision remains unverified without the model and compatible hardware."
+  ]
+}
