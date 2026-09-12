@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/29738",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the reported NameError in the checked-out entrypoint when ENABLE_JIT_DEEPGEMM is false, then fixed it by importing deep_gemm locally in the independently gated HC-prenorm wrapper after its empty-input fast path. Added regression coverage for forwarding a nonempty call, preserving the empty-input path without DeepGEMM, and reporting ImportError when the dependency is missing.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-e2a54d63d2f2/venv/bin/python test/registered/unit/layers/test_deep_gemm_hc_prenorm_import.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "The real entrypoint module with ENABLE_JIT_DEEPGEMM=false: both nonempty cases failed at entrypoint.py with NameError, while the empty-input boundary passed. Raw output: reports/j-e2a54d63d2f2/raw/failing-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e2a54d63d2f2/venv/bin/python test/registered/unit/layers/test_deep_gemm_hc_prenorm_import.py",
+      "exit_code": 0,
+      "what_was_measured": "After the fix, all three focused import/control-flow regression cases passed. Raw output: reports/j-e2a54d63d2f2/raw/passing-after.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e2a54d63d2f2/venv/bin/python -m pytest -q test/registered/unit/layers/test_deep_gemm_hc_prenorm_import.py",
+      "exit_code": 0,
+      "what_was_measured": "Pytest collection and execution passed all three registered CPU tests. Raw output: reports/j-e2a54d63d2f2/raw/pytest-after.log"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/layers/deep_gemm_wrapper/entrypoint.py test/registered/unit/layers/test_deep_gemm_hc_prenorm_import.py",
+      "exit_code": 0,
+      "what_was_measured": "Formatting, lint, AST, test-registry, and applicable repository hooks passed. Raw output: reports/j-e2a54d63d2f2/raw/pre-commit.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "The patch contains no whitespace errors. Raw output: reports/j-e2a54d63d2f2/raw/git-diff-check.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned device is an AMD Instinct MI355X with gfx950 under ROCm 7.2. The reported kernel is a CUDA DeepGEMM TF32 path on H100/SM90, so no GPU kernel or DeepSeek-V4 forward execution was claimed. Device probe: reports/j-e2a54d63d2f2/raw/gpu-environment.log"
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4 weights were not available, so the full model serving/forward path was not run.",
+    "The assigned gfx950 ROCm GPU cannot validate the reported CUDA DeepGEMM TF32 kernel on H100/SM90.",
+    "The regression validates the actual Python wrapper's import gating and call forwarding with a stub kernel; it does not validate kernel numerical accuracy or model semantics."
+  ]
+}
