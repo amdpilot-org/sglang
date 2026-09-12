@@ -2389,8 +2389,11 @@ class MooncakeKVManager(StagingManagerMixin, CommonKVManager):
 
     def _run_one_probe_pass(self) -> None:
         with self.session_lock:
-            snapshot = list(self.failed_sessions)
-        for session_id in snapshot:
+            snapshot = {
+                session_id: self.session_failures.get(session_id, 0)
+                for session_id in self.failed_sessions
+            }
+        for session_id, failure_count in snapshot.items():
             send_probe = getattr(self.engine, "send_probe", None)
             if send_probe is None:
                 rc = -1
@@ -2402,15 +2405,24 @@ class MooncakeKVManager(StagingManagerMixin, CommonKVManager):
                     continue
             if rc == 0:
                 with self.session_lock:
-                    was_blacklisted = session_id in self.failed_sessions
-                    self.failed_sessions.discard(session_id)
-                    self.session_failures.pop(session_id, None)
-                if was_blacklisted:
+                    can_recover = (
+                        session_id in self.failed_sessions
+                        and self.session_failures.get(session_id, 0) == failure_count
+                    )
+                    if can_recover:
+                        self.failed_sessions.remove(session_id)
+                        self.session_failures.pop(session_id, None)
+                if can_recover:
                     logger.info(
                         "Session %s recovered via probe; un-blacklisted",
                         session_id,
                     )
                     FAILED_SESSION_RECOVERIES.inc()
+                else:
+                    logger.debug(
+                        "Ignoring stale successful probe for %s; failure state changed",
+                        session_id,
+                    )
             else:
                 logger.debug("Probe still failing for %s (rc=%d)", session_id, rc)
 
