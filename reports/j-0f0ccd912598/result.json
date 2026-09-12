@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33783",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "pause_generation(mode=\"retract\") now evicts every radix-cache component that is evictable after all retracted requests have dropped their locks, so a released prefix cannot be matched after resume. The correction covers standard full-KV radix caches and hybrid full/SWA/Mamba caches while leaving chunk-cache behavior unchanged.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-0f0ccd912598/venv/bin/python -m pytest -q test/registered/unit/managers/test_retract_all_cache_release.py (candidate block temporarily removed)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: 2 failures showed retract_all never queried or evicted the 37-token standard radix prefix or the full/SWA/Mamba hybrid components; the empty and chunk-cache boundary cases passed. Raw output: reports/j-0f0ccd912598/retract-tests-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0f0ccd912598/venv/bin/python -m pytest -q test/registered/unit/managers/test_retract_all_cache_release.py test/registered/unit/managers/test_scheduler_pause_generation.py test/registered/unit/mem_cache/test_decode_radix_lock_ref.py",
+      "exit_code": 0,
+      "what_was_measured": "37 tests passed plus 2 subtests. The regression inserted and locked a real four-token RadixCache prefix, simulated request unlock during retract_all, and verified a subsequent match returned zero tokens and the allocator received the freed segment. Independent standard, hybrid, empty-cache, and chunk-cache cases passed. Raw output: reports/j-0f0ccd912598/retract-tests-after.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the source and regression changes."
+    },
+    {
+      "command": "rocm-smi --showproductname --showuniqueid --showmeminfo vram; prepared Python torch.cuda inventory",
+      "exit_code": 0,
+      "what_was_measured": "The assigned single GPU is an AMD Instinct MI350X with gfx950; Torch 2.11.0+rocm7.2 sees exactly one device. This was inventory only, not an issue-specific GPU execution. Raw output: reports/j-0f0ccd912598/gpu-inventory.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and regression are scheduler/radix ownership bookkeeping and execute deterministically on CPU. The assigned gfx950 was detected, but the prepared job has no Qwen3-4B/Qwen3-4B-Instruct-2507 weights, so no full-model weight-swap or semantic-output claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported Qwen3-4B to Qwen3-4B-Instruct-2507 weight-update sequence and its logprob/text divergence were not reproduced because those model weights are not present in the prepared runtime.",
+    "The deterministic regression validates radix ownership, physical allocator release, and post-retract prefix match invalidation; it does not validate model semantic accuracy.",
+    "Disaggregated prefill intentionally retains a live mid-chunk chunked request in the existing implementation; that documented stale-weight limitation remains outside this narrow fix.",
+    "No native C++ or FlyDSL source changed; native rebuild was not applicable."
+  ]
+}

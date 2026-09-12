@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33783",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2058",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 1965's complete idle RadixCache reset and added safe teardown/rebootstrap for a live disaggregated-prefill chunk. Retract now aborts the live KV sender, releases its metadata slot, retracts its KV, resets all cache/pool namespaces, and requeues it through a fresh prefill bootstrap.",
+  "tests": [
+    {
+      "command": "Exact-candidate inline simulated-RadixCache probe at 723d55b5b5f30fba408b11761e3bd15292d4623b",
+      "exit_code": 0,
+      "what_was_measured": "Failing before: a separately inserted four-token prefix remained matchable 4/4; the unfinished PREFILL chunk remained retained and allocator clear count was zero."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-348710cebd49/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_pause_generation.py test/registered/unit/managers/test_retract_all_cache_release.py test/registered/unit/mem_cache/test_decode_radix_lock_ref.py",
+      "exit_code": 0,
+      "what_was_measured": "36 tests passed and 2 subtests passed, covering idle and active retract, hierarchical reset semantics, live PREFILL sender teardown/requeue, and radix lock references."
+    },
+    {
+      "command": "Corrected inline simulated-RadixCache live PREFILL probe",
+      "exit_code": 0,
+      "what_was_measured": "Passing after: prefix match changed from 4/4 before pause to 0/4 after pause; chunk was not retained, sender abort ran once, allocator clear ran once, and requeue ran once."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-348710cebd49/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_prefill_abort_result_cleanup.py test/registered/unit/disaggregation/test_register_to_bootstrap.py test/registered/unit/managers/test_scheduler_chunked_abort_race.py",
+      "exit_code": 0,
+      "what_was_measured": "25 disaggregated-prefill abort, bootstrap, and chunked-abort race tests passed."
+    },
+    {
+      "command": "Torch CUDA tensor square on the assigned device",
+      "exit_code": 0,
+      "what_was_measured": "One AMD Instinct MI355X was visible and produced [1.0, 4.0] from [1.0, 2.0] squared."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A basic Torch device operation executed on the assigned AMD Instinct MI355X. The issue-specific scheduler/RadixCache regression itself is deterministic CPU simulation."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Qwen model weights were available, so the reported old/new-weight logprob and text divergence were not reproduced.",
+    "No multi-node disaggregated deployment was available; transport abort and fresh bootstrap behavior were validated through existing scheduler interfaces and deterministic unit fixtures, not live RDMA transfer.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}

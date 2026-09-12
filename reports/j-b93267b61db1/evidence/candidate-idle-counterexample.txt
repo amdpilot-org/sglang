@@ -1,0 +1,59 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+__________ test_idle_retract_invalidates_finished_old_weight_prefixes __________
+
+    def test_idle_retract_invalidates_finished_old_weight_prefixes():
+        allocator = MagicMock()
+        allocator.device = torch.device("cpu")
+        cache = RadixCache.create_simulated(mock_allocator=allocator)
+        key = RadixKey(array("q", [1, 2, 3, 4]))
+        cache.insert(InsertParams(key=key, value=torch.tensor([10, 11, 12, 13])))
+        assert len(cache.match_prefix(MatchPrefixParams(key=key)).device_indices) == 4
+
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler._engine_paused = False
+        scheduler.enable_overlap = False
+        scheduler.last_batch = None
+        scheduler.cur_batch_for_debug = None
+        scheduler.chunked_req = None
+        scheduler.running_batch = MagicMock()
+        scheduler.running_batch.reqs = []
+        scheduler.running_batch.batch_is_full = False
+        scheduler.tree_cache = cache
+        scheduler.req_to_token_pool = MagicMock()
+        scheduler.token_to_kv_pool_allocator = MagicMock()
+        scheduler.hisparse_coordinator = None
+        scheduler.result_queue = deque()
+        scheduler.disaggregation_mode = DisaggregationMode.NULL
+        scheduler.waiting_queue = []
+        scheduler.metrics_reporter = MagicMock()
+        scheduler.metrics_reporter.current_scheduler_metrics_enabled = False
+        scheduler.kv_events_publisher = MagicMock()
+
+        scheduler.pause_generation(PauseGenerationReqInput(mode="retract"))
+
+        rematch = cache.match_prefix(MatchPrefixParams(key=key))
+>       assert len(rematch.device_indices) == 0, (
+            "retract pause left an old, finished-request prefix matchable when "
+            "there were no active requests"
+        )
+E       AssertionError: retract pause left an old, finished-request prefix matchable when there were no active requests
+E       assert 4 == 0
+E        +  where 4 = len(tensor([10, 11, 12, 13]))
+E        +    where tensor([10, 11, 12, 13]) = MatchResult(device_indices=tensor([10, 11, 12, 13]), last_device_node=<sglang.srt.mem_cache.radix_cache.TreeNode objec...mamba_host_hit_length=0, mamba_branching_seqlen=None, cache_protected_len=None, full_kv_hit_length=0, cache_actions=()).device_indices
+
+/tmp/amdpilot-repo-j-b93267b61db1/review-evidence/test_adversarial_retract.py:45: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../../tmp/amdpilot-repo-j-b93267b61db1/review-evidence/test_adversarial_retract.py::test_idle_retract_invalidates_finished_old_weight_prefixes
+1 failed, 16 warnings in 20.50s

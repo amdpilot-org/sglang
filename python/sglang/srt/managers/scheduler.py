@@ -5371,8 +5371,18 @@ class Scheduler(
             self.chunked_req is not None
             and not self.chunked_req.finished()
             and self.chunked_req not in retract_reqs
-            and self.disaggregation_mode != DisaggregationMode.PREFILL
         ):
+            if self.disaggregation_mode == DisaggregationMode.PREFILL:
+                # A live sender may still read the request's KV asynchronously.
+                # Retire that transport ownership before retract_all frees the KV;
+                # _add_request_to_queue below creates a fresh sender/bootstrap so
+                # the request restarts from token IDs after the pause.
+                self.clear_pending_chunk_send(self.chunked_req)
+                self.chunked_req.disagg_kv_sender.abort()
+                maybe_release_metadata_buffer(
+                    self.chunked_req, self.req_to_metadata_buffer_idx_allocator
+                )
+                self.chunked_req.pending_bootstrap = False
             retract_reqs.append(self.chunked_req)
 
         self.last_batch = None
@@ -5391,6 +5401,16 @@ class Scheduler(
                 hisparse_coordinator=self.hisparse_coordinator,
                 offload_kv=False,
             )
+
+        # Retract is used as a KV-provenance boundary around weight updates.
+        # Reset the complete cache namespace even when there were no active
+        # requests: finished requests can leave reusable prefixes behind.
+        # reset(), unlike pressure eviction, also clears hierarchical host
+        # backing state instead of potentially staging device entries there.
+        self.tree_cache.reset()
+        self.req_to_token_pool.clear()
+        self.token_to_kv_pool_allocator.clear()
+        self.req_to_token_pool.reset_aux_cache_allocator()
         self.running_batch.reqs = []
         for req in retract_reqs:
             if self.disaggregation_mode == DisaggregationMode.DECODE:
@@ -5402,14 +5422,7 @@ class Scheduler(
             else:
                 self._add_request_to_queue(req)
         self.running_batch.batch_is_full = False
-        # In disagg-PREFILL, keep a live mid-chunk chunked_req rather than retract it:
-        # freeing its KV under a live disagg KV-sender crashes pop_bootstrapped or
-        # sends freed/reused KV to decode. Kept, it resumes prefill after the pause.
-        # TODO(disagg-prefill-retract): tear the sender down (abort + release metadata
-        # buffer + reset pending_bootstrap) before freeing KV, then retract for real.
-        # Until then a weight-update pause leaves stale-weight prefix KV (off-policy).
-        if self.disaggregation_mode != DisaggregationMode.PREFILL:
-            self.chunked_req = None
+        self.chunked_req = None
 
         # Surface the paused state to dashboards immediately. The scheduler
         # event loop short-circuits before reaching ``on_idle`` while paused,
