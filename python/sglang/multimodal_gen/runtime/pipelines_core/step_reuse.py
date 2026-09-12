@@ -170,7 +170,10 @@ class StepReuseController:
             raise RuntimeError("cannot reuse before a real prediction")
         state.reused_steps += 1
         state.reuse_streak += 1
-        return state.last_real_prediction
+        # A scheduler or another downstream consumer may mutate model_output in
+        # place. Never expose the controller's canonical real prediction: each
+        # skipped step gets an independently owned value.
+        return state.last_real_prediction.clone()
 
     def after_real_forward(self, prediction: torch.Tensor, step_index: int) -> None:
         state = self.state

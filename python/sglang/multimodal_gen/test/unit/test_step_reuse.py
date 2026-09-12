@@ -98,9 +98,26 @@ class TestStepReuseController(unittest.TestCase):
         original = state.real_history[0]
         for step in (1, 2):
             self.assertTrue(controller.before_step(step, 4).reuse)
-            self.assertIs(controller.reused_prediction(), original)
+            reused = controller.reused_prediction()
+            self.assertIsNot(reused, original)
+            self.assertTrue(torch.equal(reused, original))
         self.assertEqual(len(state.real_history), 1)
         self.assertEqual(state.real_forwards, 1)
+
+    def test_consumer_mutation_does_not_corrupt_later_reuse(self):
+        controller = StepReuseController(_Adapter(history_size=1, budget=2))
+        state = controller.begin_scope(_batch())
+        controller.before_step(0, 4)
+        controller.after_real_forward(torch.tensor([3.25]), 0)
+
+        first_reuse = controller.reused_prediction()
+        first_reuse.mul_(2)
+        later_reuse = controller.reused_prediction()
+
+        self.assertEqual(first_reuse.item(), 6.5)
+        self.assertEqual(later_reuse.item(), 3.25)
+        self.assertEqual(state.last_real_prediction.item(), 3.25)
+        self.assertNotEqual(first_reuse.data_ptr(), later_reuse.data_ptr())
 
     def test_scope_isolation_and_retry_reset(self):
         controller = StepReuseController(_Adapter(history_size=1))
