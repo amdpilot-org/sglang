@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34149",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1741",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1709",
+  "candidate_commit": "68815346b5fee9a1dd9b947c8fe93d6f7a5f21ba",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduced the delayed final-prefill abort commit race. The exact candidate prevents pending-finish prefill admission to optimistic decode, consumes the delayed result with zero accepted tokens, suppresses token-derived metadata, preserves packed cursors for later requests, and reuses normal finished-request cleanup. Independent adversarial checks also preserved mixed-batch decode partial-output semantics.",
+  "tests": [
+    {
+      "command": "git checkout 68815346b5fee9a1dd9b947c8fe93d6f7a5f21ba -- test/registered/unit/managers/test_scheduler_chunked_req_gate.py test/registered/unit/managers/test_batch_result_processor_hidden_states.py && PYTHONPATH=python /tmp/amdpilot-repo-j-bb1e41183003/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunked_req_gate.py test/registered/unit/managers/test_batch_result_processor_hidden_states.py",
+      "exit_code": 1,
+      "what_was_measured": "On base 358c163, 3 failed and 11 passed with 2 subtests: optimistic-decode admission occurred, output_ids changed from [] to [101], and sampling-mask overflow overrode the pending abort."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-bb1e41183003/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunked_req_gate.py test/registered/unit/managers/test_batch_result_processor_hidden_states.py test/registered/unit/managers/test_batch_result_processor_spec_grammar.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression suite: 20 passed and 2 subtests passed, including admission, token/metadata suppression, sampling-mask precedence, cursor alignment, and grammar behavior."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-bb1e41183003/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunked_abort_race.py test/registered/unit/managers/test_batch_result_processor_spec_grammar.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent selection of existing adjacent boundaries: 8 passed."
+    },
+    {
+      "command": "PYTHONPATH=python:test/registered/unit/managers /tmp/amdpilot-repo-j-bb1e41183003/venv/bin/python -m pytest -q /job/review-evidence-j-bb1e41183003/test_adversarial_review.py",
+      "exit_code": 0,
+      "what_was_measured": "Two review-only adversarial tests passed: normal cleanup was invoked without unfinished caching, and mixed-batch decode retained its committed token before abort."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bb1e41183003/venv/bin/python -m compileall -q python/sglang/srt/managers/scheduler.py python/sglang/srt/managers/scheduler_components/batch_result_processor.py",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate's changed Python source compiled successfully."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 68815346b5fee9a1dd9b947c8fe93d6f7a5f21ba",
+      "exit_code": 2,
+      "what_was_measured": "Whole-candidate whitespace check found trailing whitespace only in committed raw pytest logs; restricting the check to python/ and test/ returned zero."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The reviewer confirmed ROCm 7.2 sees one AMD Instinct MI355X (gfx950). Candidate-retained logs show a prior tiny-Llama gfx950 server smoke, but the review did not rerun a GPU server and does not treat that unrelated smoke as race proof.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No exact-race HTTP/GPU reproduction was run; deterministic scheduler and result-processor tests provide the issue-specific evidence.",
+    "No Qwen weights or semantic model validation was performed.",
+    "No multi-GPU, pipeline-parallel, data-parallel, distributed, or multi-node runtime validation was performed.",
+    "No native source changed, so no native rebuild was applicable.",
+    "The complete candidate diff has trailing whitespace in retained raw pytest logs, although source and test files pass git diff --check."
+  ]
+}
