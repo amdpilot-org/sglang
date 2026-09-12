@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37579",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1037",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/998",
+  "candidate_commit": "4b86ae8a60f8bab36eb56c1cde599d675af3e2b8",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The base reproduces the reported excess-placeholder failure. The exact candidate neutralizes stray GLM-V image/video strings in all text-bearing fields named by the issue before structured media rendering, preserves real media placeholders and caller inputs, and passes focused plus independent adversarial validation.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-36aff8398ebf/venv/bin/python /job/review-evidence/j-36aff8398ebf/reproduce_processor_mismatch.py (on base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced the original StopIteration mismatch and empty-suffix RuntimeError with two rendered image placeholders and one media datum."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-36aff8398ebf/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py (on candidate 4b86ae8a60f8bab36eb56c1cde599d675af3e2b8)",
+      "exit_code": 0,
+      "what_was_measured": "139 serving-chat tests and 73 subtests passed, including the candidate regression coverage."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-36aff8398ebf/venv/bin/python /job/review-evidence/j-36aff8398ebf/adversarial_candidate.py (on candidate 4b86ae8a60f8bab36eb56c1cde599d675af3e2b8)",
+      "exit_code": 0,
+      "what_was_measured": "Independent image+video matrix across user/assistant/reasoning/tool-call/tool-result/tool-description text reduced counts from 5 image/4 video to exactly one real placeholder each and preserved caller input."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-36aff8398ebf/venv/bin/python -c <inspect imported source paths> (on candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Both serving_chat and base_processor imported from /job/repo/python/sglang rather than an installed package."
+    },
+    {
+      "command": "rocm-smi --showproductname --showuniqueid --showmeminfo vram",
+      "exit_code": 0,
+      "what_was_measured": "One assigned AMD Instinct MI350X gfx950 with 270566162432 bytes VRAM was visible."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The failure and candidate change are CPU-side prompt preparation. GPU inventory was recorded, but no model weights were available and GPU execution would not validate placeholder pairing."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "GLM-5.3-Flash weights were unavailable, so no full-model HTTP launch or semantic generation was run.",
+    "The deterministic tests validate request rendering and the exact processor mismatch contract, not distributed or multi-node serving.",
+    "No native source changed; native rebuild was not applicable."
+  ]
+}
