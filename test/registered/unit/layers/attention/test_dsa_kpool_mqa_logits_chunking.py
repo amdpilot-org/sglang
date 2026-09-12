@@ -68,6 +68,10 @@ def test_kpool_plan_chunks_rows_and_preserves_results():
         ragged_concat_page_table=torch.zeros(1, dtype=torch.int32, device=device),
         ragged_paged_page_table=None,
         ragged_paged_page_table_row_index=None,
+        ragged_groups=(
+            SimpleNamespace(q_start=0, q_len=2, k_start=0, k_rows=6),
+            SimpleNamespace(q_start=2, q_len=3, k_start=6, k_rows=6),
+        ),
     )
     metadata = SimpleNamespace(
         attn_metadata=SimpleNamespace(
@@ -86,9 +90,13 @@ def test_kpool_plan_chunks_rows_and_preserves_results():
 
     def fake_topk(logits, pool_lens_chunk, **kwargs):
         rows = torch.arange(logits.shape[0], device=device)
-        return torch.stack((rows, pool_lens_chunk.to(torch.int64)), dim=1).to(
-            torch.int32
+        result = torch.full(
+            (logits.shape[0], 11), -1, dtype=torch.int32, device=device
         )
+        result[:, :2] = torch.stack(
+            (rows, pool_lens_chunk.to(torch.int64)), dim=1
+        ).to(torch.int32)
+        return result
 
     def run(chunk_rows):
         indexer = _indexer()
@@ -125,6 +133,6 @@ def test_kpool_plan_chunks_rows_and_preserves_results():
     dense, dense_calls = run(n_real)
     chunked, chunked_calls = run(2)
     assert dense_calls == 1
-    assert chunked_calls == 3
+    assert chunked_calls == 2
     assert torch.equal(dense[:n_real, 1], chunked[:n_real, 1])
     assert torch.all(chunked[n_real:] == -1)
