@@ -2588,6 +2588,16 @@ def calculate_mla_kv_cache_dim(
     ):
         return kv_cache_dim
 
+    # CUDA TileLang FP8 uses the same raw MLA layout as the HIP kernel.
+    # Argument validation requires both local consumers to be TileLang.
+    if (
+        not _is_hip
+        and kv_cache_dtype == torch.float8_e4m3fn
+        and get_exec().kernel.dsa_prefill_backend == "tilelang"
+        and get_exec().kernel.dsa_decode_backend == "tilelang"
+    ):
+        return kv_cache_dim
+
     quant_block_size = DSATokenToKVPool.quant_block_size
     rope_storage_dtype = DSATokenToKVPool.rope_storage_dtype
     # Calculate override_kv_cache_dim for FP8 storage in backends that use scaled KV layout

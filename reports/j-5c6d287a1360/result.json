@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36830",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1284",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1148",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/1248",
+  "candidate_commit": "99ffeba90a6607025df41a45eb7ebbbd3375ece5",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the candidate's GLM-5.3-Flash d_tail=0 TileLang layout-inference divide-by-zero on gfx950, preserved its raw-FP8 CUDA routing fixes, and added compile-time d_tail guards plus a cross-vendor GPU numerical regression. The zero-tail test and a nonzero-tail control both execute and match independent one-hot gathered-KV references after the correction.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5c6d287a1360/venv/bin/python -m pytest -q test/registered/unit/test_dsa_tilelang_fp8_validation.py test/registered/attention/test_dsa_tilelang_fp8_kv_cuda.py (candidate content before correction)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate focused suite: 10 passed and 2 CUDA numerical tests skipped on ROCm, confirming the review's coverage gap."
+    },
+    {
+      "command": "ROCM_PATH=/opt/rocm PYTHONPATH=/job/repo/python TILELANG_CACHE_DIR=/tmp/amdpilot-repo-j-5c6d287a1360/tilelang-cache /tmp/amdpilot-repo-j-5c6d287a1360/venv/bin/python -c '<model-shaped d_tail=0 raw-FP8 TileLang probe>' (candidate content before correction)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: q=[1,32,512], kv=[128,1,512], d_v=512 produced d_tail=0 and failed during TileLang LayoutInference with a divide-by-zero before GPU launch."
+    },
+    {
+      "command": "ROCM_PATH=/opt/rocm PYTHONPATH=/job/repo/python TILELANG_CACHE_DIR=/tmp/amdpilot-repo-j-5c6d287a1360/tilelang-cache /tmp/amdpilot-repo-j-5c6d287a1360/venv/bin/python -c '<otherwise equivalent d_tail=64 raw-FP8 TileLang probe>' (candidate content before correction)",
+      "exit_code": 0,
+      "what_was_measured": "Independent boundary control: d_tail=64 compiled for gfx950, launched, synchronized, and returned finite BF16 output."
+    },
+    {
+      "command": "ROCM_PATH=/opt/rocm PYTHONPATH=/job/repo/python TILELANG_CACHE_DIR=/tmp/amdpilot-repo-j-5c6d287a1360/tilelang-cache-after /tmp/amdpilot-repo-j-5c6d287a1360/venv/bin/python -m pytest -q test/registered/attention/test_dsa_tilelang_fp8_kv_cuda.py::test_fp8_zero_tail_one_hot_exact",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression: the GLM-5.3-Flash zero-tail shape compiled and executed on gfx950, with output matching an independent one-hot gathered-KV reference (1 passed)."
+    },
+    {
+      "command": "ROCM_PATH=/opt/rocm PYTHONPATH=/job/repo/python TILELANG_CACHE_DIR=/tmp/amdpilot-repo-j-5c6d287a1360/tilelang-cache-after /tmp/amdpilot-repo-j-5c6d287a1360/venv/bin/python -m pytest -q test/registered/unit/test_dsa_tilelang_fp8_validation.py test/registered/attention/test_dsa_tilelang_fp8_kv_cuda.py",
+      "exit_code": 0,
+      "what_was_measured": "Consolidated focused suite after correction: 11 passed, 2 CUDA-only tests skipped; the new cross-vendor numerical regression executed on ROCm."
+    },
+    {
+      "command": "ROCM_PATH=/opt/rocm PYTHONPATH=/job/repo/python TILELANG_CACHE_DIR=/tmp/amdpilot-repo-j-5c6d287a1360/tilelang-cache-after /tmp/amdpilot-repo-j-5c6d287a1360/venv/bin/python -c '<d_tail=64 one-hot reference control>'",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after nonzero-tail boundary: compiled and executed on gfx950 with finite BF16 output and exact one-hot gathered-KV reference agreement (relative error 0.0)."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "One assigned AMD Instinct MI355X/gfx950 was used. Before correction, d_tail=0 failed during compilation while d_tail=64 executed. After correction, both zero-tail and nonzero-tail cases compiled and executed; each numerical one-hot comparison was exact.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The assigned GPU is AMD gfx950/ROCm 7.2, not NVIDIA H20/SM90, so CUDA code generation and execution were not locally verified.",
+    "GLM-5.3-Flash weights were unavailable; no full-model serving, semantic-accuracy, speculative-decoding, capacity, multi-GPU, or multi-node run was performed.",
+    "No native rebuild was needed because the correction changes TileLang DSL Python and tests only, not FlyDSL C++ or another native extension source."
+  ]
+}
