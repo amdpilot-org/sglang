@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36599",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Moved the legacy DeepSeek modelopt_fp4 NextN-to-BF16 decision out of the shared DeepseekModelNextN constructor and into DeepSeek's quant-config resolver. GLM-5.3 can now retain modelopt_fp4 for its quantized NextN layer, while checkpoint-declared unquantized GLM NextN layers and DeepSeek modelopt_fp4 NextN remain BF16. The original constructor behavior was reproduced directly: before the correction, the decoder received quant_config=None.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-fadd43cfc17a/venv/bin/python -m pytest -q test/registered/unit/models/test_nextn_quant_config.py (against recorded-base source behavior)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: 3 failures showed that the shared NextN constructor discarded modelopt_fp4 and the DeepSeek/GLM resolver boundary did not express the intended per-model behavior. Raw output: reports/j-fadd43cfc17a/evidence/regression-before.log"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-fadd43cfc17a/venv/bin/python -m pytest -q test/registered/unit/models/test_nextn_quant_config.py",
+      "exit_code": 0,
+      "what_was_measured": "5 tests passed: GLM modelopt_fp4 reaches the decoder, DeepSeek modelopt_fp4 remains BF16, GLM whole-NextN exclusion remains BF16, GLM quantized NextN retains modelopt_fp4, and non-modelopt quantization is unchanged. Raw output: reports/j-fadd43cfc17a/evidence/regression-after.log"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-fadd43cfc17a/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_modelopt_loader.py::TestModelOptFp4LoaderSelection::test_draft_modelopt_fp4_uses_checkpoint_exclusions test/registered/unit/model_loader/test_modelopt_loader.py::TestModelOptFp4LoaderSelection::test_unquantized_modelopt_fp4_preserves_modelopt_workflows",
+      "exit_code": 0,
+      "what_was_measured": "2 adjacent loader tests passed with 6 subtests, covering serialized/unserialized draft selection and ModelOpt workflow loader selection. Raw output: reports/j-fadd43cfc17a/evidence/related-loader-tests-passing.log"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-fadd43cfc17a/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_modelopt_loader.py -k 'draft_modelopt_fp4 or unquantized_modelopt_fp4'",
+      "exit_code": 1,
+      "what_was_measured": "Two loader tests passed, while one configuration-routing test was blocked by the repository's explicit ROCm rejection of modelopt_fp4. Raw output: reports/j-fadd43cfc17a/evidence/related-loader-tests.log"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-fadd43cfc17a/venv/bin/python (torch device probe)",
+      "exit_code": 0,
+      "what_was_measured": "The assigned device is one AMD Instinct MI350X (gfx950) under torch 2.11.0+rocm7.2. Raw output: reports/j-fadd43cfc17a/evidence/gpu-environment.log"
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The GLM-5.3-Flash-NVFP4 weights were not available locally, so no full checkpoint load or speculative-serving reproduction was performed.",
+    "The assigned gfx950 GPU was identified, but SGLang explicitly rejects modelopt_fp4 on ROCm and the reported checkpoint/backend is NVIDIA ModelOpt FP4 on SM121; no GPU kernel or model inference was claimed.",
+    "The report used two NVIDIA DGX Spark nodes with TP2/EP2 and Marlin; this environment provides one AMD gfx950 GPU, so that distributed NVIDIA workload remains unverified.",
+    "The deterministic tiny Llama fixture is not architecture- or quantization-equivalent and therefore was not used to claim GLM-5.3 or ModelOpt FP4 validation.",
+    "Open upstream PR https://github.com/sgl-project/sglang/pull/37322 addresses the same issue with a broader cross-model exclusion-mapping change; it was inspected but not copied wholesale into this narrow GLM-specific correction."
+  ]
+}
