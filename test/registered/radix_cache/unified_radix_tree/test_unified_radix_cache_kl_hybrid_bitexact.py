@@ -78,10 +78,9 @@ register_cuda_ci(est_time=2300, stage="extra-a", runner_config="1-gpu-large")
 _MODEL_PATH = os.environ.get("INKLING_TEST_MODEL_PATH", "thinkingmachines/Inkling")
 _MODEL_REVISION = os.environ.get("INKLING_TEST_MODEL_REVISION", "test")
 
-# Both classes measure exactly 0 in their fixed state -- every logprob matches bit
-# for bit. The floor only keeps a stray ulp from failing the run; a state-reuse
-# bug lands orders of magnitude above it. It cannot be 0.0: the comparison is a
-# strict `<`, so an exact 0 would fail its own threshold.
+# The older bit-exact classes still use this numerical threshold. Unified-memory
+# coverage below additionally requests direct elementwise equality so no nonzero
+# difference can be hidden by KL approximation, averaging, or a tolerance.
 KL_DIV_THRESHOLD = 1e-9
 
 # Equal to the page size below. Out-of-window SWA slots are freed a page at a
@@ -314,6 +313,7 @@ class TestUnifiedMemoryHybridBitExact(CustomTestCase):
             max_samples=32,
             max_new_tokens=MAX_NEW_TOKENS,
             trust_remote_code=True,
+            require_exact=True,
         )
 
     def test_logprobs_match(self):

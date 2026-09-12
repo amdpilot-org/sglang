@@ -99,13 +99,27 @@ def get_input_ids(
 
 
 def compare_kl_divergence(
-    input_logprobs, output_logprobs, ACC_THRESHOLDS, model_name, test_name
+    input_logprobs,
+    output_logprobs,
+    ACC_THRESHOLDS,
+    model_name,
+    test_name,
+    require_exact=False,
 ):
     """Compare the KL divergence between input and output log probabilities."""
     kl_divs = []
-    for input_logprob, output_logprob in zip(input_logprobs, output_logprobs):
+    exact_mismatches = []
+    assert len(input_logprobs) == len(output_logprobs)
+    for sample_index, (input_logprob, output_logprob) in enumerate(
+        zip(input_logprobs, output_logprobs)
+    ):
         input_logprob = np.array(input_logprob)
         output_logprob = np.array(output_logprob)
+        if require_exact and not np.array_equal(input_logprob, output_logprob):
+            mismatch_indices = np.flatnonzero(input_logprob != output_logprob)
+            exact_mismatches.append(
+                (sample_index, mismatch_indices[:10].tolist(), mismatch_indices.size)
+            )
         logr = input_logprob - output_logprob
         kl_approx = (np.exp(logr) - 1) - logr
         kl_divs.append(np.mean(kl_approx))
@@ -114,6 +128,12 @@ def compare_kl_divergence(
     avg_kl_div = sum(kl_divs) / len(kl_divs)
     print(f"avg_kl_div={avg_kl_div}")
     print(f"ACC_THRESHOLDS={ACC_THRESHOLDS[model_name]}")
+    if require_exact:
+        assert not exact_mismatches, (
+            f"non-bit-exact logprobs for {model_name} {test_name}; "
+            f"(sample, first mismatch indices, mismatch count)={exact_mismatches}"
+        )
+        return
     assert avg_kl_div < ACC_THRESHOLDS[model_name]["kl_div"], (
         f"avg_kl_div={avg_kl_div} > threshold={ACC_THRESHOLDS[model_name]['kl_div']} "
         f"for {model_name} {test_name}"
@@ -202,6 +222,7 @@ def test_input_output_logprobs_match_helper(
     max_samples=None,
     max_new_tokens=16000,
     trust_remote_code=False,
+    require_exact=False,
 ):
     num_samples = DEFAULT_NUM_SAMPLES
     if max_samples is not None and max_samples > num_samples:
@@ -235,6 +256,7 @@ def test_input_output_logprobs_match_helper(
         ACC_THRESHOLDS,
         model_name,
         inspect.currentframe().f_code.co_name,
+        require_exact=require_exact,
     )
 
 
@@ -245,6 +267,7 @@ def test_input_output_logprobs_match_prefill_cache_hit_helper(
     max_samples=None,
     max_new_tokens=8192,
     trust_remote_code=False,
+    require_exact=False,
 ):
     server_info = requests.get(base_url + "/server_info").json()
     if server_info["disable_radix_cache"]:
@@ -298,6 +321,7 @@ def test_input_output_logprobs_match_prefill_cache_hit_helper(
         ACC_THRESHOLDS,
         model_name,
         inspect.currentframe().f_code.co_name,
+        require_exact=require_exact,
     )
 
 
@@ -309,6 +333,7 @@ def test_input_output_logprobs_match_decode_cache_hit_helper(
     max_new_tokens=8192,
     trust_remote_code=False,
     min_cache_hit_ratio=0.5,
+    require_exact=False,
 ):
     server_info = requests.get(base_url + "/server_info").json()
     if server_info["disable_radix_cache"]:
@@ -380,4 +405,5 @@ def test_input_output_logprobs_match_decode_cache_hit_helper(
         ACC_THRESHOLDS,
         model_name,
         inspect.currentframe().f_code.co_name,
+        require_exact=require_exact,
     )

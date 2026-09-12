@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34899",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved the candidate's six Python/Rust unified-memory scenarios and corrected their oracle to require direct elementwise logprob equality. This rejects the independently reproduced 5.0000069648240756e-11 nonzero KL and differences small enough for KL arithmetic to round to zero. End-to-end Inkling and restoration fault qualification remain unsupported on this AMD host.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-c44ff39e0704/venv/bin/python -c \"from sglang.test.kl_test_utils import compare_kl_divergence; compare_kl_divergence([[0.0]], [[-1e-5]], {'model': {'kl_div': 1e-9}}, 'model', 'candidate_default')\"",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before reproduction: unequal logprobs produced avg_kl_div=5.0000069648240756e-11 and the candidate/default 1e-9 averaged threshold accepted it."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c44ff39e0704/venv/bin/python -m pytest -q test/srt/test_kl_test_utils.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression: exact mode accepts identical values, rejects the review's below-threshold nonzero KL, and rejects a 1e-12 difference whose computed KL rounds to zero; 3 tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c44ff39e0704/venv/bin/python -m pytest --collect-only -q test/registered/radix_cache/unified_radix_tree/test_unified_radix_cache_kl_hybrid_bitexact.py",
+      "exit_code": 0,
+      "what_was_measured": "The consolidated file collects 24 tests, including baseline, prefill-cache-hit, and decode-cache-hit unified-memory cases for Python and Rust tree backends. This is discovery evidence only."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c44ff39e0704/venv/bin/python -c \"import sglang.srt.models.inkling\"",
+      "exit_code": 1,
+      "what_was_measured": "Inkling import reaches the NVIDIA CUTE implementation and fails with ModuleNotFoundError: No module named 'cutlass' on the assigned AMD gfx950/ROCm host."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "rocm-smi identified one AMD Instinct MI350X, gfx950. No supported Inkling inference or unified-memory regression executed on GPU.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Neither the Python nor Rust unified-memory class completed an end-to-end Inkling request.",
+    "No supported NVIDIA CUTLASS/CUTE path or qualifying Inkling weights were available, so no exact-zero GPU KL/logprob result was measured.",
+    "No unified-memory FULL, SWA, or MAMBA restoration defect was demonstrated failing before and passing after through revert-then-red or fault injection.",
+    "The deterministic tiny Llama fixture cannot qualify Inkling's combined FULL/SWA/MAMBA architecture.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
