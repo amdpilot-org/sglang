@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31861",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2548",
+  "candidate_commit": "ed2ca323422f819e95fc8be3f3494df036d12b09",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate correctly repairs the DeepSeek CPU/AMX-selected and Ernie4 router fixtures and enforces FP32 at the CPU biased TopK boundary, but it is only a partial fix: Dots3MoEGate still emits BF16 logits and is rejected by that new boundary.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d8b219867593/venv/bin/python /job/review-evidence/router_contract_probe.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "DeepSeek AMX-selected fixture and Ernie4 both emitted BF16; base biased_grouped_topk_cpu accepted BF16 and dispatched the mocked native op."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d8b219867593/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_amx_router_logits.py (candidate ed2ca323422f819e95fc8be3f3494df036d12b09)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 7 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d8b219867593/venv/bin/python /job/review-evidence/router_contract_probe.py (candidate ed2ca323422f819e95fc8be3f3494df036d12b09)",
+      "exit_code": 0,
+      "what_was_measured": "DeepSeek and Ernie4 fixtures emitted FP32, and the DeepSeek fixture bypassed packed BF16-output linear."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d8b219867593/venv/bin/python /job/review-evidence/candidate/adversarial_dots3.py (candidate ed2ca323422f819e95fc8be3f3494df036d12b09)",
+      "exit_code": 0,
+      "what_was_measured": "Dots3MoEGate emitted BF16 [11.75, 11.75] instead of FP32 reference [11.780056953430176, 11.775662422180176], then biased_grouped_topk_cpu raised ValueError before native dispatch."
+    },
+    {
+      "command": "GPU linear_bf16_fp32 numerical reference fixture on candidate ed2ca323422f819e95fc8be3f3494df036d12b09",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X, output dtype was FP32 and maximum absolute error versus CPU FP32 F.linear was 2.5033950805664062e-06."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI350X executed the existing GPU BF16 x FP32 router-linear reference path; this is not Intel AMX evidence.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "python/sglang/srt/models/dots3_common/modeling.py Dots3MoEGate still uses BF16 tiny_gemm_bf16/F.linear outputs. In the independently tested non-tiny BF16 F.linear path, candidate biased_grouped_topk_cpu raises ValueError instead of receiving FP32 router logits.",
+    "The optional specialized BF16 activation x FP32 router-weight AMX kernel is not implemented; affected FP32-weight paths use semantically correct but unaccelerated FP32 F.linear fallbacks."
+  ],
+  "remaining_limitations": [
+    "The AMD EPYC 9965 host has no Intel AMX, so actual AMX execution, ISA use, and performance are unverified.",
+    "No affected full-model weights were available; no full-model, serving-path, or distributed claim is made.",
+    "The installed sgl_kernel native egg was used only for import-path inspection; no native source changed in the candidate, so no rebuild was applicable."
+  ]
+}
