@@ -1,0 +1,272 @@
+FF.                                                                      [100%]
+=================================== FAILURES ===================================
+_____________ test_scheduler_skips_timed_out_request_after_dequeue _____________
+
+fut = <Future cancelled>, timeout = 0.01
+
+    async def wait_for(fut, timeout):
+        """Wait for the single Future or coroutine to complete, with timeout.
+
+        Coroutine will be wrapped in Task.
+
+        Returns result of the Future or coroutine.  When a timeout occurs,
+        it cancels the task and raises TimeoutError.  To avoid the task
+        cancellation, wrap it in shield().
+
+        If the wait is cancelled, the task is also cancelled.
+
+        If the task suppresses the cancellation and returns a value instead,
+        that value is returned.
+
+        This function is a coroutine.
+        """
+        # The special case for timeout <= 0 is for the following case:
+        #
+        # async def test_waitfor():
+        #     func_started = False
+        #
+        #     async def func():
+        #         nonlocal func_started
+        #         func_started = True
+        #
+        #     try:
+        #         await asyncio.wait_for(func(), 0)
+        #     except asyncio.TimeoutError:
+        #         assert not func_started
+        #     else:
+        #         assert False
+        #
+        # asyncio.run(test_waitfor())
+
+
+        if timeout is not None and timeout <= 0:
+            fut = ensure_future(fut)
+
+            if fut.done():
+                return fut.result()
+
+            await _cancel_and_wait(fut)
+            try:
+                return fut.result()
+            except exceptions.CancelledError as exc:
+                raise TimeoutError from exc
+
+        async with timeouts.timeout(timeout):
+>           return await fut
+                   ^^^^^^^^^
+E           asyncio.exceptions.CancelledError
+
+/usr/lib/python3.12/asyncio/tasks.py:520: CancelledError
+
+The above exception was the direct cause of the following exception:
+
+    def test_scheduler_skips_timed_out_request_after_dequeue():
+        class FakeEncoder:
+            def __init__(self):
+                self.encode_dispatch_lock = asyncio.Lock()
+                self.first_started = asyncio.Event()
+                self.release_first = asyncio.Event()
+                self.batches = []
+                self.released = []
+
+            async def batch_encode(self, requests, _modality):
+                req_ids = [request["req_id"] for request in requests]
+                self.batches.append(req_ids)
+                if req_ids == ["blocked"]:
+                    self.first_started.set()
+                    await self.release_first.wait()
+                return [(1, 2, 3, None, None) for _ in requests]
+
+            async def release_request(self, req_id):
+                self.released.append(req_id)
+
+        async def run_test():
+            encoder = FakeEncoder()
+            broadcasts = []
+            scheduler = EncoderScheduler(
+                encoder=encoder,
+                send_sockets=[object()],
+                max_batch_size=1,
+                request_timeout=1.0,
+            )
+            scheduler.request_timeout = 0.01
+            with patch(
+                "sglang.srt.disaggregation.encoder.runtime.sock_send",
+                side_effect=lambda _sock, payload: broadcasts.append(payload),
+            ):
+                scheduler.start()
+                blocked = asyncio.create_task(scheduler.submit(_request("blocked")))
+                try:
+                    await encoder.first_started.wait()
+                    with pytest.raises(asyncio.TimeoutError):
+                        await scheduler.submit(_request("timed-out"))
+
+                    live = asyncio.create_task(scheduler.submit(_request("live")))
+                    encoder.release_first.set()
+                    assert await blocked == (1, 2, 3, None, None)
+                    assert await live == (1, 2, 3, None, None)
+                finally:
+                    encoder.release_first.set()
+                    await scheduler.stop()
+
+            assert encoder.batches == [["blocked"], ["live"]]
+            assert encoder.released == ["timed-out"]
+            assert len(broadcasts) == 2
+
+>       asyncio.run(run_test())
+
+test/registered/unit/disaggregation/test_encoder_scheduler.py:178:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/usr/lib/python3.12/asyncio/runners.py:194: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+test/registered/unit/disaggregation/test_encoder_scheduler.py:168: in run_test
+    assert await blocked == (1, 2, 3, None, None)
+           ^^^^^^^^^^^^^
+python/sglang/srt/disaggregation/encoder/runtime.py:191: in submit
+    return await asyncio.wait_for(pending.future, timeout=self.request_timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/tasks.py:519: in wait_for
+    async with timeouts.timeout(timeout):
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <Timeout [expired]>
+exc_type = <class 'asyncio.exceptions.CancelledError'>
+exc_val = CancelledError(), exc_tb = <traceback object at 0x75b2ac741f40>
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> Optional[bool]:
+        assert self._state in (_State.ENTERED, _State.EXPIRING)
+
+        if self._timeout_handler is not None:
+            self._timeout_handler.cancel()
+            self._timeout_handler = None
+
+        if self._state is _State.EXPIRING:
+            self._state = _State.EXPIRED
+
+            if self._task.uncancel() <= self._cancelling and exc_type is exceptions.CancelledError:
+                # Since there are no new cancel requests, we're
+                # handling this.
+>               raise TimeoutError from exc_val
+E               TimeoutError
+
+/usr/lib/python3.12/asyncio/timeouts.py:115: TimeoutError
+------------------------------ Captured log call -------------------------------
+ERROR    sglang.srt.disaggregation.encoder.runtime:runtime.py:198 EncoderScheduler.submit timed out after 0.01s for req_id=blocked
+ERROR    sglang.srt.disaggregation.encoder.runtime:runtime.py:198 EncoderScheduler.submit timed out after 0.01s for req_id=timed-out
+_____________ test_dispatch_rechecks_completed_requests_after_lock _____________
+
+    def test_dispatch_rechecks_completed_requests_after_lock():
+        class FakeEncoder:
+            def __init__(self):
+                self.encode_dispatch_lock = asyncio.Lock()
+                self.batches = []
+
+            async def batch_encode(self, requests, _modality):
+                self.batches.append([request["req_id"] for request in requests])
+                return [(1, 2, 3, None, None) for _ in requests]
+
+        async def run_test():
+            encoder = FakeEncoder()
+            broadcasts = []
+            scheduler = EncoderScheduler(
+                encoder=encoder, send_sockets=[object()], max_batch_size=2
+            )
+            completed = PendingRequest(_request("completed"), asyncio.get_running_loop())
+            live = PendingRequest(_request("live"), asyncio.get_running_loop())
+
+            await encoder.encode_dispatch_lock.acquire()
+            with patch(
+                "sglang.srt.disaggregation.encoder.runtime.sock_send",
+                side_effect=lambda _sock, payload: broadcasts.append(payload),
+            ):
+                dispatch = asyncio.create_task(
+                    scheduler._dispatch_group([completed, live], Modality.IMAGE)
+                )
+                await asyncio.sleep(0)
+                completed.future.set_result((9, 9, 9, None, None))
+                encoder.encode_dispatch_lock.release()
+                await dispatch
+
+            assert encoder.batches == [["live"]]
+            assert len(broadcasts) == 1
+            assert await live.future == (1, 2, 3, None, None)
+
+>       asyncio.run(run_test())
+
+test/registered/unit/disaggregation/test_encoder_scheduler.py:217:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/usr/lib/python3.12/asyncio/runners.py:194: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    async def run_test():
+        encoder = FakeEncoder()
+        broadcasts = []
+        scheduler = EncoderScheduler(
+            encoder=encoder, send_sockets=[object()], max_batch_size=2
+        )
+        completed = PendingRequest(_request("completed"), asyncio.get_running_loop())
+        live = PendingRequest(_request("live"), asyncio.get_running_loop())
+
+        await encoder.encode_dispatch_lock.acquire()
+        with patch(
+            "sglang.srt.disaggregation.encoder.runtime.sock_send",
+            side_effect=lambda _sock, payload: broadcasts.append(payload),
+        ):
+            dispatch = asyncio.create_task(
+                scheduler._dispatch_group([completed, live], Modality.IMAGE)
+            )
+            await asyncio.sleep(0)
+            completed.future.set_result((9, 9, 9, None, None))
+            encoder.encode_dispatch_lock.release()
+            await dispatch
+
+>       assert encoder.batches == [["live"]]
+E       AssertionError: assert [['completed', 'live']] == [['live']]
+E
+E         At index 0 diff: ['completed', 'live'] != ['live']
+E         Use -v to get more diff
+
+test/registered/unit/disaggregation/test_encoder_scheduler.py:213: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+<frozen abc>:106
+  <frozen abc>:106: DeprecationWarning: MultiPlatformOp is deprecated; subclass sglang.kernels.fused_op.BaseFusedOp instead (RFC #29630).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/disaggregation/test_encoder_scheduler.py::test_scheduler_skips_timed_out_request_after_dequeue
+FAILED test/registered/unit/disaggregation/test_encoder_scheduler.py::test_dispatch_rechecks_completed_requests_after_lock
+2 failed, 1 passed, 14 deselected, 18 warnings in 26.84s
