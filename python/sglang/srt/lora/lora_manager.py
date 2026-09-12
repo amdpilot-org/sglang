@@ -24,7 +24,6 @@ import torch
 from sglang.srt.configs.load_config import LoadConfig
 from sglang.srt.environ import envs
 from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
-from sglang.srt.layers.utils import get_layer_id
 from sglang.srt.layers.vocab_parallel_embedding import (
     ParallelLMHead,
     VocabParallelEmbedding,
@@ -41,6 +40,7 @@ from sglang.srt.lora.utils import (
     EMBEDDING_NAMES,
     LoRAType,
     auto_detect_lora_target_modules,
+    get_lora_layer_id,
     get_normalized_target_modules,
     get_target_module_name,
     warn_if_adapter_targets_embeddings,
@@ -1039,7 +1039,7 @@ class LoRAManager:
             ):
                 from sglang.srt.lora.layers import ReplicatedLinearWithLoRA
 
-                layer_id = get_layer_id(module_name)
+                layer_id = get_lora_layer_id(module_name, self.base_model)
                 if layer_id is None:
                     continue
                 lora_module = self.set_lora_module(module_name, module)
@@ -1055,7 +1055,7 @@ class LoRAManager:
                 parts[-1] in self.target_modules
                 or ".".join(parts[-2:]) in self.target_modules
             ):
-                layer_id = get_layer_id(module_name)
+                layer_id = get_lora_layer_id(module_name, self.base_model)
                 if layer_id is None:
                     continue
                 self.lora_modules[layer_id][module_name] = self.set_lora_module(
@@ -1066,7 +1066,7 @@ class LoRAManager:
             if isinstance(module, (FusedMoE, InklingBatchDenseMLP)) and all(
                 x in self.target_modules for x in ["gate_up_proj", "down_proj"]
             ):
-                layer_id = get_layer_id(module_name)
+                layer_id = get_lora_layer_id(module_name, self.base_model)
                 if layer_id is None:
                     if module_name.startswith("model.meta_mlp."):
                         raise ValueError(

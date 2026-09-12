@@ -5,10 +5,23 @@ from typing import Iterable, List, Optional, Set, Tuple, Union
 
 import torch
 
+from sglang.srt.layers.utils import get_layer_id
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.utils.hf_transformers_utils import AutoConfig
 
 logger = logging.getLogger(__name__)
+
+
+def get_lora_layer_id(module_name: str, base_model: torch.nn.Module) -> Optional[int]:
+    """Resolve the logical LoRA buffer layer for a module or adapter weight."""
+    layer_id = get_layer_id(module_name)
+    if layer_id is not None:
+        return layer_id
+
+    resolver = getattr(base_model, "get_lora_layer_id", None)
+    if resolver is not None:
+        return resolver(module_name)
+    return None
 
 
 def warn_if_adapter_targets_embeddings(
@@ -361,6 +374,7 @@ ROW_PARALLELISM_LINEAR_LORA_NAMES = [
     "down_proj",
     "down_proj_moe",
     "down_proj_shared_moe",
+    "linear_fc2",
     "wo_ud",
 ]
 DSA_INDEXER_LORA_NAMES = frozenset(
@@ -407,6 +421,8 @@ _KNOWN_LORA_TARGET_MODULES = frozenset(
         "down_proj",
         "fc1_latent_proj",
         "fc2_latent_proj",
+        "linear_fc1",
+        "linear_fc2",
         "embed_tokens",
         "lm_head",
         "fused_qkv_a_proj_with_mqa",

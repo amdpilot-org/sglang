@@ -26,9 +26,9 @@ import torch
 from torch import nn
 
 from sglang.srt.configs.load_config import LoadConfig
-from sglang.srt.layers.utils import get_layer_id
 from sglang.srt.lora.backend.base_backend import BaseLoRABackend
 from sglang.srt.lora.lora_config import LoRAConfig
+from sglang.srt.lora.utils import get_lora_layer_id
 from sglang.srt.model_loader.loader import DefaultModelLoader
 from sglang.srt.utils.hf_transformers_utils import AutoConfig
 
@@ -116,7 +116,7 @@ class LoRAAdapter(nn.Module):
             )
             if not isinstance(inner, FusedMoE):
                 continue
-            layer_id = get_layer_id(name)
+            layer_id = get_lora_layer_id(name, base_model)
             if layer_id is not None:
                 gated_map[layer_id] = bool(inner.moe_runner_config.is_gated)
         return gated_map
@@ -135,7 +135,7 @@ class LoRAAdapter(nn.Module):
         """
         if not _ROUTED_EXPERT_PATTERN.search(weight_name):
             return False
-        layer_id = get_layer_id(weight_name)
+        layer_id = get_lora_layer_id(weight_name, self.base_model)
         if layer_id is None:
             return False
         return self._moe_is_gated_by_layer.get(layer_id) is False
@@ -173,7 +173,7 @@ class LoRAAdapter(nn.Module):
         if "unembed_tokens" in name:
             name = name.replace("unembed_tokens", "lm_head")
 
-        layer_id = get_layer_id(name)
+        layer_id = get_lora_layer_id(name, self.base_model)
         if layer_id is not None:
             self.layers[layer_id].weights[name] = loaded_weight.cpu()
         elif "embed_tokens" in name or "lm_head" in name:

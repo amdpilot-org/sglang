@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from array import array
 from functools import partial
 from typing import Iterable, List, Optional, Tuple
@@ -1231,6 +1232,32 @@ class MossVLForConditionalGeneration(nn.Module):
 
     def get_input_embeddings(self):
         return self.language_model.model.embed_tokens
+
+    def get_lora_layer_id(self, module_name: str):
+        # MOSS-VL has one unindexed visual merger. Store its adapter weights in
+        # logical layer 0; its linear_fc target names do not overlap the text
+        # decoder's layer-0 targets.
+        if re.search(r"(?:^|\.)visual\.merger\.linear_fc[12](?:\.|$)", module_name):
+            return 0
+        return None
+
+    def get_hidden_dim(self, module_name: str, layer_idx: int):
+        if module_name in ("linear_fc1", "linear_fc2"):
+            vision_config = self.config.vision_config
+            merger_hidden_size = (
+                vision_config.hidden_size
+                * vision_config.spatial_merge_size**2
+                * (1 + len(vision_config.deepstack_visual_indexes))
+            )
+            if module_name == "linear_fc1":
+                return merger_hidden_size, merger_hidden_size
+            return merger_hidden_size, vision_config.out_hidden_size
+
+        from sglang.srt.lora.utils import get_default_hidden_dim
+
+        return get_default_hidden_dim(
+            module_name, self.config.get_text_config(), layer_idx
+        )
 
     # ---- pad_input_ids (called at request scheduling time) ----
 
