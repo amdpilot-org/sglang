@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35582",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the Qwen-VL marker/data mismatch at the OpenAI chat-render to multimodal-loader boundary. Qwen-family multimodal requests now neutralize complete client-supplied vision marker sequences before the template emits authoritative attachment markers. A real PNG plus literal user or tool text reaches the loader as exactly one attachment; text-only input remains text; malformed image references remain request-validation errors.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-74fcd69b2b4a/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py -k 'qwen_vl_literal_vision_markers or qwen_vl_text_only_literal' (before change)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: the rendered prompt contained two complete Qwen vision markers for one image in both user-text and tool-result cases."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-74fcd69b2b4a/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py -k 'qwen_vl or malformed_image_references'",
+      "exit_code": 0,
+      "what_was_measured": "Four focused tests passed with nine subtests: real 1x1 PNG data-URL decoding after actual chat rendering, literal user and tool text, text-only input, expanded and partial parser boundaries, and malformed attachment schema rejection."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-74fcd69b2b4a/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py test/registered/unit/multimodal/test_base_processor_bad_input.py test/registered/unit/multimodal/test_base_processor_image_decode.py",
+      "exit_code": 0,
+      "what_was_measured": "160 tests and 92 subtests passed across OpenAI chat rendering, multimodal bad-input classification, and actual image decoding."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-74fcd69b2b4a/venv/bin/python - <<'PY' ... torch tensor matmul on cuda ... PY",
+      "exit_code": 0,
+      "what_was_measured": "ROCm GPU execution on the assigned AMD Instinct MI350X (gfx950): [[1,2],[3,4]] squared produced [[7,10],[15,22]], exactly matching the independent CPU reference."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the patch."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "PyTorch 2.11.0+rocm7.2 reported one AMD Instinct MI350X device and executed a deterministic matrix multiplication matching an explicit CPU reference exactly. The parser regression itself is CPU-only.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Qwen3.8-27B weights were not available in the prepared environment, so a full model-server launch and semantic generation were not performed.",
+    "The deterministic tiny Llama fixture was not used because it can validate transport/engine execution only and cannot exercise or qualify the Qwen-VL chat template or multimodal processor architecture.",
+    "The fix is verified through the checked-out OpenAI request models, actual _apply_jinja_template implementation, actual load_mm_data dispatch, and real image decoding; it is not a claim of Qwen3.8-27B inference validation.",
+    "No native code changed, so no native rebuild was applicable."
+  ]
+}
