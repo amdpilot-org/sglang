@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33415",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the eager OLMo-2 QK norm bypass and changed the non-capture branch to use normal RMSNorm dispatch. On the assigned MI350X this selected the real AITER kernel, matched independent FP64 references across relevant layouts and dtypes, and replayed correctly from a real ROCm graph.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-29840765b7c7/venv/bin/python -m pytest -q test/registered/unit/models/test_olmo2_qk_norm.py (base behavior)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: eager branch bypassed module dispatch and called forward_native; capture branch already dispatched."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-29840765b7c7/venv/bin/python -m pytest -q test/registered/unit/models/test_olmo2_qk_norm.py (patched)",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression for eager dispatch and capture-only alternate-stream behavior."
+    },
+    {
+      "command": "SGLANG_USE_AITER=1 /tmp/amdpilot-repo-j-29840765b7c7/venv/bin/python < GPU numerical harness",
+      "exit_code": 0,
+      "what_was_measured": "Real forward_aiter RMSNorm on MI350X versus an independent FP64 reference for BF16/FP16/FP32 and contiguous/QKV-split layouts."
+    },
+    {
+      "command": "SGLANG_USE_AITER=1 /tmp/amdpilot-repo-j-29840765b7c7/venv/bin/python < branch and ROCm graph harness",
+      "exit_code": 0,
+      "what_was_measured": "Eager public dispatch, graph-capture branch, replay without Python re-entry, and replay numerical equivalence."
+    },
+    {
+      "command": "SGLANG_USE_AITER=1 /tmp/amdpilot-repo-j-29840765b7c7/venv/bin/python < AMD kernel timing harness",
+      "exit_code": 0,
+      "what_was_measured": "Focused two-norm microbenchmark only: AITER versus decomposed native at 1, 128, and 16384 tokens; not full-model timing."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-29840765b7c7/venv/bin/python -m compileall -q python/sglang/srt/models/olmo2.py test/registered/unit/models/test_olmo2_qk_norm.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Python syntax and patch whitespace."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "AMD Instinct MI350X; real AITER RMSNorm shared objects loaded from /tmp/amdpilot-repo-j-29840765b7c7/cache/aiter; ROCm graph capture/replay and numerical harness logs retained.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No OLMo-2 weights: full-model serving, semantic accuracy, and end-to-end prefill/decode timing were unavailable.",
+    "No NVIDIA H200 was assigned; upstream H200 measurements were not reproduced.",
+    "Tensor-parallel execution was not tested.",
+    "The unrelated CUDA FA3 illegal-address failure was kept out of scope.",
+    "No SGLang/FlyDSL native source changed and repository-environment.json supplied no native rebuild target."
+  ]
+}
