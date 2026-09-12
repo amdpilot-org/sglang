@@ -209,14 +209,17 @@ quantization. Add an MTP pattern to `quantization_config.ignore` in the model's
 ```json
 {
   "quantization_config": {
-    "ignore": ["re:mtp\\..*"]
+    "ignore": ["re:(model\\.)?mtp\\..*"]
   }
 }
 ```
 
-Depending on the checkpoint's module naming, `"mtp.*"` or a corresponding
-`"model.mtp.*"` pattern may be appropriate instead. Inspect the weight names
-and use a pattern that covers only dense MTP tensors such as `mtp.layers.0.*`.
+The `re:` prefix is required for wildcard matching. Plain entries such as
+`"mtp.*"` and `"model.mtp.*"` are not globs: they match only an exact name or
+a dotted suffix, so they do not ignore MTP children such as
+`mtp.layers.0.self_attn.qkv_proj`. Inspect the module prefixes and use a regular
+expression that covers only the checkpoint's dense MTP layers. For a checkpoint
+that uses only the top-level `mtp...` form, `"re:mtp\\..*"` is sufficient.
 Do not add this exclusion when the MTP module is genuinely quantized and the
 checkpoint contains packed tensors such as `weight_packed` or `weight_scale`;
 doing so would allocate incompatible dense parameters.

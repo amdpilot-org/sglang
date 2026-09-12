@@ -71,6 +71,27 @@ class TestCompressedTensorsNextN(CustomTestCase):
         self.assertIsInstance(layer.quant_method, UnquantizedLinearMethod)
         self.assertEqual(layer.weight.dtype, torch.bfloat16)
 
+    def test_documented_regex_covers_both_mtp_prefix_forms(self):
+        ignore = ["re:(model\\.)?mtp\\..*"]
+
+        for prefix in (MTP_LAYER, f"model.{MTP_LAYER}"):
+            with self.subTest(prefix=prefix):
+                layer = ReplicatedLinear(
+                    input_size=8,
+                    output_size=16,
+                    bias=False,
+                    params_dtype=torch.bfloat16,
+                    quant_config=_config(ignore),
+                    prefix=prefix,
+                )
+                self.assertIsInstance(layer.quant_method, UnquantizedLinearMethod)
+
+    def test_plain_glob_looking_ignores_do_not_match_mtp_children(self):
+        for ignore in (["mtp.*"], ["model.mtp.*"]):
+            with self.subTest(ignore=ignore):
+                with self.assertRaises(NotImplementedError):
+                    _linear(_config(ignore))
+
     def test_dense_mtp_checkpoint_has_actionable_construction_error(self):
         # Dense checkpoint storage is not visible while modules are constructed.
         # The unsupported broad Linear match must therefore fail with enough
