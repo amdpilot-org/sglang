@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33187",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "41e7ba79d5a83b5e3ddb4f43b733ed0820a04351",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate correctly detects and request-aborts fully-NaN rows on the plain sampling path when both the new abort flag and the existing sanitize flag are enabled, and avoids committing the sampled token. It does not make the advertised abort flag safe by itself: with abort enabled and sanitization disabled, the logits remain NaN and still reach sampling kernels before the host-side abort. Prefill cleanup also bypasses the established comprehensive abort helper, leaving important resource/cache variants unverified.",
+  "tests": [
+    {
+      "command": "SGLANG_SANITIZE_NAN_LOGITS=1 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-5944acaebf39/venv/bin/python -c '<163840-wide full-NaN sanitize/softmax reproduction>'",
+      "exit_code": 0,
+      "what_was_measured": "On the recorded base and assigned AMD Instinct MI350X gfx950, sanitization produced one constant -1e30 row; softmax summed to 1.0 and had max absolute error 0.0 from the uniform reference."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5944acaebf39/venv/bin/python -m pytest -vv test/registered/unit/utils/test_abort_on_nan_logits.py",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate commit, all five candidate unit tests passed. They cover helper detection and request marking but not the abort-only environment configuration or full prefill lifecycle."
+    },
+    {
+      "command": "SGLANG_ABORT_ON_NAN_LOGITS=1 SGLANG_SANITIZE_NAN_LOGITS=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-5944acaebf39/venv/bin/python -c '<candidate preprocess counterexample>'",
+      "exit_code": 0,
+      "what_was_measured": "The candidate returned mask [true] but left NaNs in the 163840-wide GPU row (nan_after_preprocess=true, finite_after_preprocess=false), proving downstream sampling is not made safe by the abort flag alone."
+    },
+    {
+      "command": "SGLANG_ABORT_ON_NAN_LOGITS=1 SGLANG_SANITIZE_NAN_LOGITS=1 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-5944acaebf39/venv/bin/python -c '<full/partial mixed-row boundary test>'",
+      "exit_code": 0,
+      "what_was_measured": "With both flags enabled, the candidate produced mask [true, false], sanitized both rows to finite values, and preserved the partial row's healthy argmax."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5944acaebf39/venv/bin/python -m pytest -q test/registered/unit/managers/test_batch_result_processor_hidden_states.py test/registered/unit/managers/test_batch_result_processor_mamba_boundary.py test/registered/unit/disaggregation/test_prefill_abort_result_cleanup.py",
+      "exit_code": 0,
+      "what_was_measured": "19 neighboring tests and four subtests passed, but none inject a full-NaN candidate mask through a real prefill abort and the relevant specialized cleanup branches."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X, GFX version gfx950, ROCm 7.2, torch 2.11.0+rocm7.2; only HIP_VISIBLE_DEVICES=0 was used.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With SGLANG_ABORT_ON_NAN_LOGITS=1 and SGLANG_SANITIZE_NAN_LOGITS=0, a fully-NaN GPU row is marked but remains NaN when handed to the sampling implementation, so failure can occur before request-scoped abort processing.",
+    "The prefill full-NaN branch directly invokes release_kv_cache instead of the established abort cleanup helper, bypassing multimodal, disaggregated-offload, HiSparse, and backend-specific release hooks.",
+    "Hierarchical-cache write-through interactions are not covered by a regression, so poisoned host-cache publication remains unverified.",
+    "Speculative decoding asserts if a full-NaN mask is present; this is outside the reported production configuration but remains unsupported."
+  ],
+  "remaining_limitations": [
+    "The original Blackwell SM10x TP=8 Kimi-K3 deployment, model weights, and transient kernel/model NaN source were unavailable.",
+    "No full model server or HTTP client path was run; the prepared gfx950 fixture validates the numerical mechanism and source preprocessing only.",
+    "No native code changed, so a native rebuild was not applicable.",
+    "The review did not validate multi-node, hierarchical-cache, multimodal, HiSparse, MLX, or disaggregated-serving cleanup behavior."
+  ]
+}
