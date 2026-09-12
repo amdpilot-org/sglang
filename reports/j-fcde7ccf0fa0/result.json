@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/11186",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 3181's piggyback reporting and corrected the three independently reviewed Rust /v1/loads counterexamples: the scheduler watch publication now seeds and refreshes the Rust newest-per-rank cache without requiring generation frames, Prometheus output is supported, and accelerator topology is carried through the typed launch handoff.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-fcde7ccf0fa0/venv/bin/python -m pytest -q test/registered/unit/managers/test_piggyback_load.py -k rust_cache_receives_watch_snapshot_without_generation (candidate-equivalent source plus regression)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: a successful watch publication made zero calls into the Rust cache when no generation frame existed. Raw output: /job/reports/j-fcde7ccf0fa0/evidence/failing-before-watch.txt"
+    },
+    {
+      "command": "cargo test -p sglang-server loads_preserves_prometheus_and_metadata_contract (candidate-equivalent source plus regression)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: format=prometheus returned HTTP 400 instead of 200. Raw output: /job/reports/j-fcde7ccf0fa0/evidence/failing-before-endpoint.txt"
+    },
+    {
+      "command": "git show 34fe255b6c2bae81eb73d7546d6526033bbbeda1:rust/sglang-server/src/api_server/common.rs | deterministic contract check",
+      "exit_code": 1,
+      "what_was_measured": "Exact-candidate source check independently confirmed the explicit Prometheus rejection and both metadata fields hard-coded to null. Raw output: /job/reports/j-fcde7ccf0fa0/evidence/failing-before-source-contract.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fcde7ccf0fa0/venv/bin/python -m pytest -q test/registered/unit/managers/test_piggyback_load.py test/registered/unit/managers/test_multi_tokenizer_mixin.py",
+      "exit_code": 0,
+      "what_was_measured": "14 focused Python tests passed, covering generation piggybacking, newest-timestamp arbitration, Python watch merging, and the new generation-independent Rust cache update."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-fcde7ccf0fa0/cargo-target cargo test --manifest-path rust/Cargo.toml -p sglang-server",
+      "exit_code": 0,
+      "what_was_measured": "All 266 Rust tests passed with pinned Rust 1.92, including direct Rust handler coverage for Prometheus samples and non-null accelerator metadata."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-fcde7ccf0fa0/cargo-target cargo build --manifest-path rust/Cargo.toml --release -p sglang-server; direct importlib import",
+      "exit_code": 0,
+      "what_was_measured": "Rebuilt the optimized native extension, imported /tmp/amdpilot-repo-j-fcde7ccf0fa0/cargo-target/release/libsglang_server.so directly, and confirmed Server.update_load_snapshot is exported."
+    },
+    {
+      "command": "cargo fmt --manifest-path rust/Cargo.toml --all --check && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Rust formatting and patch whitespace checks passed."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "No GPU execution was needed: the defects are deterministic scheduler-to-Rust cache, HTTP formatting, and typed configuration handoff behavior. No numerical or model-architecture claim is made.",
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "No live model server was launched because model weights are not required to validate these control-plane defects.",
+    "Multi-rank and multi-node serving were not exercised; newest-per-rank cache arbitration remains covered by unit tests.",
+    "The change does not claim semantic model accuracy, GPU numerical behavior, or coverage of a model architecture."
+  ]
+}

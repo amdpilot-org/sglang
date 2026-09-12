@@ -715,6 +715,11 @@ class Scheduler(
 
         self.init_load_inquirer()
 
+        # Seed the embedded HTTP cache before any request generates a frame.
+        # Later watch publications keep it current, including idle transitions.
+        if self.rust_server is not None:
+            self.publish_load_snapshot(force=True)
+
         self.init_output_streamer()
 
         self.init_batch_result_processor()
@@ -871,6 +876,8 @@ class Scheduler(
         try:
             load = self.load_inquirer.get_loads()
             writer.write(load)
+            if getattr(self, "rust_server", None) is not None:
+                self.rust_server.update_load_snapshot(load)
             return load
         except Exception as e:
             logger.warning("load snapshot publish failed: %s", e)
@@ -2457,6 +2464,7 @@ class Scheduler(
             disaggregation_mode=self.disaggregation_mode,
             enable_hicache_storage=lambda: self.enable_hicache_storage,
             rust_server=self.rust_server,
+            load_snapshot_provider=self.load_inquirer.get_loads,
         )
 
     def get_output_streamer_class(self) -> type[SchedulerOutputStreamer]:

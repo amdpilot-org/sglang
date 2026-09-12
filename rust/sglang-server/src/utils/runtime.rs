@@ -44,6 +44,9 @@ pub struct Runtime {
     /// MM results parked between a worker's `MmEncoded` and the scheduler drain
     /// (`Server.take_mm_result`).
     pub mm_results: crate::multi_modality::result_store::MmResultStore,
+    /// Latest scheduler load per DP rank, shared by piggyback frames, direct
+    /// watch publications, and the Rust `/v1/loads` handler.
+    pub load_snapshots: tokenizer_manager::from_scheduler::LoadSnapshots,
     /// Wiring for the late-spawned MM pool ([`Runtime::start_mm_workers`]).
     mm_wiring: crate::multi_modality::worker::MmWiring,
     /// Worker join handles, joined by `request_shutdown` / `Drop`.
@@ -222,6 +225,7 @@ pub fn start(cfg: RuntimeConfig) -> Result<Runtime, String> {
     // Response heartbeat: bumped per drained frame, watched by `/health_generate`.
     let response_activity: tokenizer_manager::from_scheduler::ActivityCounter =
         Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let load_snapshots = Arc::new(std::sync::RwLock::new(std::collections::BTreeMap::new()));
 
     // --- Response dispatcher: drains from_scheduler channel → routes chunks to shards ---
     {
@@ -234,12 +238,14 @@ pub fn start(cfg: RuntimeConfig) -> Result<Runtime, String> {
             .map(|c| vec![c]);
         let mut from_scheduler_rx = Some(from_scheduler_rx); // moved into the single worker
         let activity = response_activity.clone();
+        let loads = load_snapshots.clone();
         let shutdown_rx = shutdown_rx.clone();
         spawn_pool("from-scheduler", cores, 1, &mut threads, |_| {
             tokenizer_manager::from_scheduler::Dispatcher::new(
                 from_scheduler_rx.take().unwrap(),
                 senders.clone(),
                 activity.clone(),
+                loads.clone(),
                 shutdown_rx.clone(),
             )
         });
@@ -281,6 +287,7 @@ pub fn start(cfg: RuntimeConfig) -> Result<Runtime, String> {
         let api_cores = plan.as_ref().map(|p| p.api.clone());
         let senders = senders.clone();
         let response_activity = response_activity.clone();
+        let load_snapshots = load_snapshots.clone();
         let shutdown_rx = shutdown_rx.clone();
         // Bind synchronously so an unavailable port (EADDRINUSE) is a hard
         // startup error. The `?` drops `shutdown_tx`/`senders`, which stops the
@@ -312,6 +319,7 @@ pub fn start(cfg: RuntimeConfig) -> Result<Runtime, String> {
                     cfg.server_args.clone(),
                     // Response heartbeat watched by `/health_generate`.
                     response_activity,
+                    load_snapshots,
                     shutdown_rx,
                 ))
             })
@@ -323,6 +331,7 @@ pub fn start(cfg: RuntimeConfig) -> Result<Runtime, String> {
         to_scheduler_rx,
         from_scheduler_tx,
         mm_results,
+        load_snapshots,
         mm_wiring: crate::multi_modality::worker::MmWiring {
             mm_rx: mm_worker_rx,
             tm_tx: tok_manager_tx,

@@ -193,6 +193,21 @@ impl Server {
         self.push_frame(py, crate::message::response::frame_error(rid, message))
     }
 
+    /// Update the HTTP-visible load cache from the scheduler's existing watch
+    /// publication path. This is independent of token generation, so idle
+    /// ranks remain visible and a failed later collection retains the last
+    /// successful snapshot.
+    fn update_load_snapshot(&self, payload: &[u8]) -> PyResult<()> {
+        let snapshot: serde_json::Value = rmp_serde::from_slice(payload).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!("invalid load snapshot: {e}"))
+        })?;
+        crate::tokenizer_manager::from_scheduler::record_load_snapshot(
+            &self.rt.load_snapshots,
+            snapshot,
+        );
+        Ok(())
+    }
+
     /// Spawn the MM worker pool for the pipeline in `spec` (built from the
     /// resolved processor config; see `RustMmProcessor.resolve_spec` and
     /// `RustServer._build_mm_spec`). Image-only requests are processed entirely

@@ -256,6 +256,12 @@ class RustServer:
 
         self.server.push_control_result(recv_req.rid, encoded)
 
+    def update_load_snapshot(self, snapshot) -> None:
+        """Feed the Rust HTTP cache from the scheduler's watch publication."""
+        self.server.update_load_snapshot(
+            msgspec.msgpack.encode(msgspec.structs.asdict(snapshot))
+        )
+
     def push_generation(self, payload: BatchTokenIDOutput) -> None:
         """Egress redirect for generation output (replaces the zmq detokenizer).
 
@@ -308,6 +314,9 @@ class RustServer:
         # Column order here MUST match BatchHeader (header_cols) and
         # for_each_chunk's read order (data_cols); the extras contribution
         # is ordered by the `extras` tuple below.
+        # Keep the load report on the same scheduler -> frontend frame as the
+        # tokens.  The Rust dispatcher records this batch-level value before it
+        # fans the per-request chunks out to detokenizer shards.
         header_cols = [rids, finish_reasons, prompt_tokens, tok_lens]
         data_cols = [flat_ids.tobytes()]
 
@@ -397,6 +406,17 @@ class RustServer:
             for extra in extras:
                 header_cols += extra.header_cols()
                 data_cols += extra.data_cols()
+
+        # BatchHeader is a positional ABI. A snapshot is the new trailing
+        # column, so a plain-token frame must retain empty placeholders for
+        # all twelve pre-existing optional headers.
+        if not has_extra:
+            header_cols.extend([[] for _ in range(12)])
+        header_cols.append(
+            msgspec.structs.asdict(payload.load_snapshot)
+            if payload.load_snapshot is not None
+            else None
+        )
 
         header = msgspec.msgpack.encode(header_cols)
         # Pass the raw column list; the Rust side concatenates it into the frame
