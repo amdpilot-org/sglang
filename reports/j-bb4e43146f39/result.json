@@ -1,0 +1,27 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37052",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Current full decode graph capture already sizes target-verify inputs by batch_size times draft width and does not use the breakable backend's request-row output clamp. The reporter later reproduced the invalid-probability failure with CUDA graphs disabled, rejecting a graph-only cause. No narrow source change is justified without the missing model/hardware reproduction.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-bb4e43146f39/venv/bin/python -m pytest -q test/registered/unit/model_executor/runner_backend/test_full_cuda_graph_backend.py",
+      "exit_code": 0,
+      "what_was_measured": "Current FullCudaGraphBackend capture behavior; 5 tests passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-bb4e43146f39/venv/bin/python reports/j-bb4e43146f39/check_full_graph_rows.py",
+      "exit_code": 0,
+      "what_was_measured": "Real gfx950 HIP-graph versus eager softmax for batch sizes 1, 2, and 8 with draft width 4. All batch*draft rows were retained, values were finite/nonnegative, and maximum graph/eager absolute error was 0.0."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X gfx950:sramecc+:xnack-, ROCm 7.2.26015; reports/j-bb4e43146f39/full_graph_rows_output.json",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No NVIDIA GB10 sm_121 or CUDA 13 environment was available.",
+    "Qwen3.8-Flash-Next-NVFP4 weights and ModelOpt FP4 kernels were unavailable.",
+    "The reported TP2 two-node RoCE workload and long recurrent-state request sequence were not reproduced.",
+    "The gfx950 fixture validates only graph row transport and numerical equality for a small deterministic operation; it does not qualify model semantics or the unresolved eager-path failure."
+  ]
+}
