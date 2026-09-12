@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31018",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2421",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/2382",
+  "candidate_commit": "4af0a2a8dbba75d138607e3268e1f0006550025a",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the checkpoint-gamma/runtime-gamma confidence reshape failure. The exact candidate passes its regression and independent GPU boundary cases by propagating runtime gamma through the real planner/model hook. This is a full source-level fix, with full NVIDIA H20 CUDA-graph serving validation unavailable in the assigned environment.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-81c16a2014cc/venv/bin/python -m pytest -q /job/review-evidence-j-81c16a2014cc/test_dspark_runtime_gamma.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Candidate regression executed against recorded base: override case reproduced RuntimeError shape '[2, 5, -1]' for 56 elements; 1 failed, 2 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-81c16a2014cc/venv/bin/python -m pytest -q test/registered/spec/dspark/test_dspark_runtime_gamma.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression at exact candidate commit: 3 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-81c16a2014cc/venv/bin/python reports/j-10e383f4dd2e/gpu_runtime_gamma.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate-authored real-GPU numerical reference on MI355X: checkpoint gamma 5, runtime gamma 7, output shape (2, 7), max absolute error 0.0."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-81c16a2014cc/venv/bin/python /job/review-evidence-j-81c16a2014cc/adversarial_candidate.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent real-GPU cases for 5->7, 7->3, gamma 1, Markov on/off, and checkpoint-default fallback all matched independent tensor references exactly."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-81c16a2014cc/venv/bin/python /job/review-evidence-j-81c16a2014cc/base_contract_repro.py (base then candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Base exit was 1 at the issue-specific reshape; candidate exit was 0 with confidence shape (2, 7, 4) and Markov shape (2, 7, 2)."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI355X, gfx950:sramecc+:xnack-, executed candidate-authored and independent numerical tensor checks."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No DeepSeek-V4-Flash-DSpark checkpoint weights were available, so full model loading and semantic output were not tested.",
+    "The assigned host has one AMD MI355X on ROCm 7.2, not eight NVIDIA H20 GPUs on CUDA 12.9; full CUDA graph capture and NVIDIA ISA/compiler behavior remain unexecuted.",
+    "The reported TP=4, DP=4, DP-attention, and multi-GPU serving topology was unavailable; no distributed or multi-node claim is made.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
