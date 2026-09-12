@@ -1,0 +1,58 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32204",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2130",
+  "candidate_commit": "8b5ab59b905622ea414746c75e1f70dc4065c928",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the ordinary Qwen3.5/Qwen3-VL terminal-position IndexError and its focused regression passes, but it leaves the original issue's Qwen2/Qwen3 silent-drop variants unchanged and fails on Qwen3.5's deferred FlashInfer finalization branch because capture occurs before the handoff is finalized.",
+  "tests": [
+    {
+      "command": "python -c '<construct 32-layer Qwen3_5ForCausalLM and set shifted positions [4,12,20,28,32]>' on recorded base",
+      "exit_code": 1,
+      "what_was_measured": "Exact original setup failure: IndexError at self.layers[32]."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/models/test_qwen3_5_dflash_capture.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite; 5 tests passed."
+    },
+    {
+      "command": "python adversarial fixture invoking real Qwen2Model.forward and inherited Qwen3Model.forward with terminal capture position",
+      "exit_code": 0,
+      "what_was_measured": "Both models silently returned no auxiliary capture for position num_layers."
+    },
+    {
+      "command": "python adversarial fixture passing Qwen35MoeFinalizeHandoff to candidate terminal capture helper",
+      "exit_code": 1,
+      "what_was_measured": "Candidate raises TypeError before the existing deferred finalization logic."
+    },
+    {
+      "command": "python GPU residual-stream arithmetic comparison",
+      "exit_code": 0,
+      "what_was_measured": "Candidate helper output on gfx950 exactly equaled an independently computed CPU hidden+residual reference."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 8b5ab59b905622ea414746c75e1f70dc4065c928",
+      "exit_code": 2,
+      "what_was_measured": "Candidate's claimed diff check does not pass due to trailing whitespace in a retained log."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X gfx950 ran the candidate terminal residual-stream arithmetic and exactly matched the CPU reference."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Qwen2Model and Qwen3Model still silently omit a requested terminal capture position equal to num_layers.",
+    "Qwen3.5 FlashInfer MNNVL deferred finalization supplies Qwen35MoeFinalizeHandoff at the candidate's new capture point, causing TypeError when residual is added before finalize.",
+    "Repeated Qwen3.5 capture configuration leaves stale _is_layer_to_capture flags on formerly selected layers."
+  ],
+  "remaining_limitations": [
+    "Qwen3.5-4B weights were unavailable, so no full model/server startup was run.",
+    "Ascend NPU hardware was unavailable; the assigned architecture was AMD gfx950.",
+    "The GPU run validates boundary arithmetic only, not model semantics or distributed execution.",
+    "No native rebuild was needed because the candidate changes only Python and report/test files."
+  ]
+}
