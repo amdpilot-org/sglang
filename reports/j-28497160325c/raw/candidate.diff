@@ -1,0 +1,179 @@
+diff --git a/python/sglang/srt/entrypoints/openai/serving_base.py b/python/sglang/srt/entrypoints/openai/serving_base.py
+index 46a5d25..9a19e92 100644
+--- a/python/sglang/srt/entrypoints/openai/serving_base.py
++++ b/python/sglang/srt/entrypoints/openai/serving_base.py
+@@ -208,7 +208,9 @@ class OpenAIServingBase(ABC):
+             param=param,
+             code=status_code,
+         )
+-        return ORJSONResponse(content=error.model_dump(), status_code=status_code)
++        return ORJSONResponse(
++            content={"error": error.model_dump()}, status_code=status_code
++        )
+ 
+     def create_streaming_error_response(
+         self,
+diff --git a/test/registered/openai_server/basic/test_openai_server.py b/test/registered/openai_server/basic/test_openai_server.py
+index 09a550d..331a604 100644
+--- a/test/registered/openai_server/basic/test_openai_server.py
++++ b/test/registered/openai_server/basic/test_openai_server.py
+@@ -1163,8 +1163,8 @@ class TestOpenAIV1Score(CustomTestCase):
+         response = self.run_score(query, items, label_token_ids, apply_softmax=True)
+ 
+         # Handle error responses
+-        if response.get("type") == "BadRequestError":
+-            self.fail(f"Score request failed with error: {response['message']}")
++        if response.get("error", {}).get("type") == "BadRequestError":
++            self.fail(f"Score request failed with error: {response['error']['message']}")
+ 
+         # Verify response structure
+         self.assertIn("scores", response, "Response should have a 'scores' field")
+@@ -1225,8 +1225,8 @@ class TestOpenAIV1Score(CustomTestCase):
+         )
+ 
+         # Handle error responses
+-        if response.get("type") == "BadRequestError":
+-            self.fail(f"Score request failed with error: {response['message']}")
++        if response.get("error", {}).get("type") == "BadRequestError":
++            self.fail(f"Score request failed with error: {response['error']['message']}")
+ 
+         # Verify response structure
+         self.assertIn("scores", response, "Response should have a 'scores' field")
+@@ -1290,8 +1290,11 @@ class TestOpenAIV1Score(CustomTestCase):
+         )
+         self.assertEqual(response.status_code, 400)
+         error_response = response.json()
+-        self.assertEqual(error_response["type"], "BadRequestError")
+-        self.assertIn("Token ID 999999 is out of vocabulary", error_response["message"])
++        self.assertEqual(error_response["error"]["type"], "BadRequestError")
++        self.assertIn(
++            "Token ID 999999 is out of vocabulary",
++            error_response["error"]["message"],
++        )
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/test/registered/unit/entrypoints/openai/test_serving_base.py b/test/registered/unit/entrypoints/openai/test_serving_base.py
+new file mode 100644
+index 0000000..f592f4a
+--- /dev/null
++++ b/test/registered/unit/entrypoints/openai/test_serving_base.py
+@@ -0,0 +1,90 @@
++"""Unit tests for OpenAIServingBase error response serialization."""
++
++from sglang.test.test_utils import maybe_stub_sgl_kernel
++
++maybe_stub_sgl_kernel()
++
++import json
++import unittest
++
++import orjson
++
++from sglang.srt.entrypoints.openai.serving_base import OpenAIServingBase
++from sglang.test.ci.ci_register import register_cpu_ci
++
++register_cpu_ci(est_time=5, suite="base-a-test-cpu")
++
++
++class _StubServing(OpenAIServingBase):
++    def _request_id_prefix(self) -> str:
++        return "stub-"
++
++    def _convert_to_internal_request(self, request, raw_request=None):
++        raise NotImplementedError
++
++
++class TestCreateErrorResponse(unittest.TestCase):
++    def setUp(self):
++        self.serving = object.__new__(_StubServing)
++
++    @staticmethod
++    def _body(response):
++        return orjson.loads(response.body)
++
++    def test_non_streaming_error_uses_openai_envelope(self):
++        response = self.serving.create_error_response(
++            "max_tokens=999999 cannot be greater than the model context length",
++            param="max_tokens",
++        )
++
++        self.assertEqual(response.status_code, 400)
++        self.assertEqual(
++            self._body(response),
++            {
++                "error": {
++                    "object": "error",
++                    "message": (
++                        "max_tokens=999999 cannot be greater than the model "
++                        "context length"
++                    ),
++                    "type": "BadRequestError",
++                    "param": "max_tokens",
++                    "code": 400,
++                }
++            },
++        )
++
++    def test_non_streaming_error_preserves_non_default_fields(self):
++        response = self.serving.create_error_response(
++            "unprocessable",
++            err_type="ValidationError",
++            status_code=422,
++        )
++
++        self.assertEqual(response.status_code, 422)
++        self.assertEqual(
++            self._body(response)["error"],
++            {
++                "object": "error",
++                "message": "unprocessable",
++                "type": "ValidationError",
++                "param": None,
++                "code": 422,
++            },
++        )
++
++    def test_streaming_and_non_streaming_error_shapes_match(self):
++        kwargs = {
++            "message": "bad request",
++            "err_type": "BadRequestError",
++            "status_code": 400,
++        }
++
++        non_streaming = self._body(self.serving.create_error_response(**kwargs))
++        streaming = json.loads(self.serving.create_streaming_error_response(**kwargs))
++
++        self.assertEqual(non_streaming, streaming)
++
++
++if __name__ == "__main__":
++    unittest.main(verbosity=2)
+diff --git a/test/registered/unit/entrypoints/openai/test_serving_chat.py b/test/registered/unit/entrypoints/openai/test_serving_chat.py
+index 1cac901..da19b72 100644
+--- a/test/registered/unit/entrypoints/openai/test_serving_chat.py
++++ b/test/registered/unit/entrypoints/openai/test_serving_chat.py
+@@ -455,7 +455,7 @@ class ServingChatTestCase(unittest.TestCase):
+                 response = get_or_create_event_loop().run_until_complete(
+                     self.chat.handle_request(request, self.fastapi_request)
+                 )
+-                error = json.loads(response.body)
++                error = json.loads(response.body)["error"]
+                 self.assertEqual(response.status_code, HTTPStatus.BAD_REQUEST)
+                 self.assertEqual(error["type"], "BadRequestError")
+                 self.assertIn(media_type, error["message"])
+diff --git a/test/registered/unit/entrypoints/openai/test_serving_transcription.py b/test/registered/unit/entrypoints/openai/test_serving_transcription.py
+index 531a7a0..47c6c87 100644
+--- a/test/registered/unit/entrypoints/openai/test_serving_transcription.py
++++ b/test/registered/unit/entrypoints/openai/test_serving_transcription.py
+@@ -427,7 +427,9 @@ class TestLongAudioChunkedNonStreaming(CustomTestCase):
+             result = self._create_transcription(tm, _long_wav_bytes(65.0))
+ 
+         self.assertEqual(result.status_code, 400)
+-        self.assertIn("Failed to split audio", json.loads(result.body)["message"])
++        self.assertIn(
++            "Failed to split audio", json.loads(result.body)["error"]["message"]
++        )
+         self.assertEqual(tm.requests, [])
+ 
+     def test_short_audio_stays_unchunked(self):
