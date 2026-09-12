@@ -812,6 +812,34 @@ def _handle_frozen_kv_mtp(server_args: ServerArgs) -> None:
         )
 
 
+def _validate_native_mtp_algorithm(
+    *,
+    model_arch: str,
+    speculative_algorithm: Optional[str],
+    model_path: str,
+    speculative_draft_model_path: Optional[str],
+) -> None:
+    """Reject treating GLM5's bundled NextN head as an EAGLE3 checkpoint.
+
+    The bundled head consumes the target model's final hidden state through the
+    EAGLE/NEXTN path. EAGLE3 instead requests concatenated auxiliary layer
+    states, which do not match the head's H-wide ``eh_proj`` input and were not
+    used to train it. Keep separately trained EAGLE3 draft checkpoints open.
+    """
+    uses_bundled_draft = speculative_draft_model_path in (None, model_path)
+    if (
+        model_arch == "Glm5NextForConditionalGeneration"
+        and speculative_algorithm == "EAGLE3"
+        and uses_bundled_draft
+    ):
+        raise ValueError(
+            "Glm5NextForConditionalGeneration's bundled NextN head is trained "
+            "for EAGLE/NEXTN with the final target hidden state, not EAGLE3 "
+            "auxiliary hidden states. Use --speculative-algorithm NEXTN (or "
+            "EAGLE), or provide a distinct EAGLE3-trained draft checkpoint."
+        )
+
+
 def _handle_eagle_family(server_args: ServerArgs) -> None:
 
     cfg = resolving_view(server_args)
@@ -860,6 +888,12 @@ def _handle_eagle_family(server_args: ServerArgs) -> None:
         )
 
     model_arch = model_config_of(server_args).hf_config.architectures[0]
+    _validate_native_mtp_algorithm(
+        model_arch=model_arch,
+        speculative_algorithm=cfg.speculative_algorithm,
+        model_path=cfg.model_path,
+        speculative_draft_model_path=cfg.speculative_draft_model_path,
+    )
     if model_arch in [
         "DeepseekV32ForCausalLM",
         "DeepseekV3ForCausalLM",
