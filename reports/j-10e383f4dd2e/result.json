@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31018",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the DSpark confidence-head reshape failure when runtime gamma differs from checkpoint gamma. The planner now passes runtime gamma to DeepseekV4ForCausalLMDSpark.compute_confidence, which uses it consistently for the hidden-state reshape and Markov context while preserving checkpoint gamma as the direct-call default.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-10e383f4dd2e/venv/bin/python -m pytest -q test/registered/spec/dspark/test_dspark_runtime_gamma.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: runtime gamma 7 with checkpoint gamma 5 raised RuntimeError while reshaping 56 elements to [2, 5, -1]. Two boundary tests passed. Raw output: reports/j-10e383f4dd2e/failing-before.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-10e383f4dd2e/venv/bin/python -m pytest -q test/registered/spec/dspark/test_dspark_runtime_gamma.py test/registered/spec/dspark/test_dspark_draft_path_default.py",
+      "exit_code": 0,
+      "what_was_measured": "10 tests passed, covering runtime override propagation, checkpoint-default behavior, the generic confidence path, and existing DSpark argument/default behavior. Raw output: reports/j-10e383f4dd2e/passing-after.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-10e383f4dd2e/venv/bin/python reports/j-10e383f4dd2e/gpu_runtime_gamma.py",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI355X/gfx950, checkpoint gamma 5 and runtime gamma 7 produced shape [2, 7] and matched an independently constructed PyTorch reference exactly (max absolute error 0.0; checksum 13.518386841). Raw output: reports/j-10e383f4dd2e/gpu-runtime-gamma.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The runtime-gamma confidence path executed on the assigned AMD Instinct MI355X/gfx950 using ROCm PyTorch. Device inventory is in reports/j-10e383f4dd2e/gpu-info.txt and numerical output is in reports/j-10e383f4dd2e/gpu-runtime-gamma.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-DSpark model weights were not available, so full model loading and CUDA/HIP graph capture were not reproduced.",
+    "The reported 4x NVIDIA H20 TP4/DP4 deployment could not be reproduced with the assigned single AMD gfx950 GPU.",
+    "The GPU fixture validates the affected planner/model confidence computation and numerical result, not full-model semantic accuracy or distributed execution."
+  ]
+}
