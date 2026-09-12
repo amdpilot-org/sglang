@@ -60,6 +60,62 @@ class TestXGrammarPatternLengthCombination(unittest.TestCase):
                     has_xgrammar_unsupported_pattern_length_combination(schema)
                 )
 
+    def test_detects_constraints_split_across_all_of(self):
+        schemas = (
+            {
+                "type": "object",
+                "properties": {
+                    "v": {
+                        "allOf": [
+                            {"type": "string", "pattern": "^[a-z]+$"},
+                            {"type": "string", "minLength": 5},
+                        ]
+                    }
+                },
+            },
+            {
+                "$defs": {
+                    "letters": {"type": "string", "pattern": "^[a-z]+$"},
+                    "long": {"type": "string", "minLength": 5},
+                },
+                "type": "object",
+                "properties": {
+                    "v": {
+                        "allOf": [
+                            {"$ref": "#/$defs/letters"},
+                            {"$ref": "#/$defs/long"},
+                        ]
+                    }
+                },
+            },
+        )
+        for schema in schemas:
+            with self.subTest(schema=schema):
+                self.assertTrue(
+                    has_xgrammar_unsupported_pattern_length_combination(schema)
+                )
+
+    def test_does_not_merge_constraints_at_different_instance_locations(self):
+        schemas = (
+            {
+                "anyOf": [
+                    {"type": "string", "pattern": "^[a-z]+$"},
+                    {"type": "string", "minLength": 5},
+                ]
+            },
+            {
+                "properties": {
+                    "patterned": {"type": "string", "pattern": "^[a-z]+$"},
+                    "long": {"type": "string", "minLength": 5},
+                }
+            },
+        )
+        for schema in schemas:
+            with self.subTest(schema=schema):
+                self.assertFalse(
+                    has_xgrammar_unsupported_pattern_length_combination(schema)
+                )
+
     def test_allows_individual_constraints(self):
         for schema in (
             {"type": "string", "pattern": "^[a-z]+$"},
@@ -86,21 +142,35 @@ class TestXGrammarPatternLengthCombination(unittest.TestCase):
     def test_dispatch_rejects_before_xgrammar_compilation(self):
         backend = object.__new__(XGrammarGrammarBackend)
         backend.grammar_compiler = MagicMock()
-        schema = {
-            "type": "object",
-            "properties": {
-                "v": {
-                    "type": "string",
-                    "pattern": "^[a-z]+$",
-                    "minLength": 5,
-                }
+        schemas = (
+            {
+                "type": "object",
+                "properties": {
+                    "v": {
+                        "type": "string",
+                        "pattern": "^[a-z]+$",
+                        "minLength": 5,
+                    }
+                },
             },
-        }
+            {
+                "type": "object",
+                "properties": {
+                    "v": {
+                        "allOf": [
+                            {"type": "string", "pattern": "^[a-z]+$"},
+                            {"type": "string", "minLength": 5},
+                        ]
+                    }
+                },
+            },
+        )
 
-        result = backend.dispatch_json(json.dumps(schema))
-
-        self.assertIsInstance(result, InvalidGrammarObject)
-        self.assertIn("cannot enforce together", result.error_message)
+        for schema in schemas:
+            with self.subTest(schema=schema):
+                result = backend.dispatch_json(json.dumps(schema))
+                self.assertIsInstance(result, InvalidGrammarObject)
+                self.assertIn("cannot enforce together", result.error_message)
         backend.grammar_compiler.compile_json_schema.assert_not_called()
 
     def test_dispatch_preserves_supported_schema_compilation(self):
