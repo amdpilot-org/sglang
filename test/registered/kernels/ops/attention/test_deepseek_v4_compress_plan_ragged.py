@@ -45,6 +45,13 @@ def _assert_warp_extrema_synchronized(test: unittest.TestCase, kernel: str) -> N
         test.assertTrue(all(position >= 0 for position in init_positions))
         barrier = before_reduction.rfind("__syncthreads();")
         test.assertGreater(barrier, max(init_positions))
+        # __syncthreads() is a block barrier only when every block thread reaches
+        # it.  For this kernel, function-body depth one excludes barriers nested
+        # in the tx < kNumWarps initializer (or any other divergent branch).
+        depth = before_reduction[:barrier].count("{") - before_reduction[
+            :barrier
+        ].count("}")
+        test.assertEqual(depth, 1)
 
 
 class TestCompressPlanRaggedReduction(CustomTestCase):
@@ -87,6 +94,16 @@ class TestCompressPlanRaggedReduction(CustomTestCase):
         racy_kernel = kernel.replace(stage_b, initialization + stage_b)
         with self.assertRaises(AssertionError):
             _assert_warp_extrema_synchronized(self, racy_kernel)
+
+        divergent_barrier_kernel = kernel.replace(
+            stage_b,
+            initialization.replace(
+                "  }\n  ", "    __syncthreads();\n  }\n  "
+            )
+            + stage_b,
+        )
+        with self.assertRaises(AssertionError):
+            _assert_warp_extrema_synchronized(self, divergent_barrier_kernel)
 
     def _assert_gpu_matches_cpu(self, extend_lens: list[int]) -> None:
         bs = len(extend_lens)
