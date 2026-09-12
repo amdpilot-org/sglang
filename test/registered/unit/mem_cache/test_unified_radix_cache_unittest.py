@@ -5975,6 +5975,95 @@ class UnifiedRadixCacheSuite:
         swa.commit_insert_component_data(mock.Mock(), False, params, result, [])
         self.assertTrue(result.swa_branch_inserted)
 
+    def test_swa_branch_does_not_rekey_later_mamba_checkpoint(self):
+        if (
+            self.cfg.components
+            != (ComponentType.FULL, ComponentType.SWA, ComponentType.MAMBA)
+            or self.cfg.page_size != 1
+            or self.cfg.sliding_window_size != 128
+        ):
+            self.skipTest("requires the page-size-1 Full+SWA+Mamba fixture")
+
+        cache, allocator, req_to_token_pool = build_fixture(
+            self.cfg, mamba_cache_chunk_size=64
+        )
+        main = list(range(1, 129))
+        first = self._insert(cache, allocator, req_to_token_pool, main[:64])
+        first_slot = _device_value(
+            cache, first.last_device_node, ComponentType.MAMBA
+        ).item()
+        second = self._insert(cache, allocator, req_to_token_pool, main)
+        second_slot = _device_value(
+            cache, second.last_device_node, ComponentType.MAMBA
+        ).item()
+
+        branch = main[:96] + list(range(1000, 1096))
+        branch_req = self._make_req(req_to_token_pool)
+        branch_slot = branch_req.kv.mamba_pool_idx.item()
+        params = InsertParams(
+            value=self._alloc(allocator, len(branch)),
+            mamba_value=branch_req.kv.mamba_pool_idx.unsqueeze(0),
+        )
+        scheduling_req = mock.Mock(
+            swa_branching_seqlen=96,
+            kv=mock.Mock(cache_protected_len=64, swa_evicted_seqlen=0),
+        )
+
+        # Mamba saved the actual post-forward checkpoint at 192.  SWA's branch
+        # at 96 must not shorten the key paired with that unsliceable state.
+        effective_len = 192
+        swa_len = cache.components[ComponentType.SWA].prepare_for_caching_req(
+            scheduling_req, params, len(branch), is_finished=True
+        )
+        if swa_len is not None:
+            effective_len = min(effective_len, swa_len)
+        self.assertEqual(effective_len, 192)
+        params.key = RadixKey(array("q", branch[:effective_len]))
+        params.value = params.value[:effective_len]
+        inserted = cache.insert(params)
+
+        def path_by_depth(node_id, total_depth):
+            path = {}
+            depth = total_depth
+            node = node_id
+            while node != cache.root_node_handle():
+                path[depth] = node
+                depth -= _node_key_length(cache, node)
+                node = _node_parent(cache, node)
+            self.assertEqual(depth, 0)
+            return path
+
+        path = path_by_depth(inserted.last_device_node, len(branch))
+        self.assertIn(96, path)  # inserting the fork split the old 64..128 node
+        self.assertIsNone(_device_value(cache, path[96], ComponentType.MAMBA))
+        self.assertEqual(
+            _device_value(cache, path[192], ComponentType.MAMBA).item(), branch_slot
+        )
+
+        main_path = path_by_depth(second.last_device_node, len(main))
+        self.assertEqual(
+            _device_value(cache, main_path[64], ComponentType.MAMBA).item(), first_slot
+        )
+        self.assertEqual(
+            _device_value(cache, main_path[128], ComponentType.MAMBA).item(),
+            second_slot,
+        )
+
+        # Evict only the later fork checkpoint.  The shared 96-token split must
+        # remain checkpoint-free, so this fork falls back to the real state64.
+        evicted = cache.tree_core.evict_component(
+            path[192], ComponentType.MAMBA, EvictLayer.DEVICE
+        )
+        cache._free_values(evicted.device_frees, evicted.host_frees)
+        self.assertIsNone(_device_value(cache, path[192], ComponentType.MAMBA))
+        self.assertIsNone(_device_value(cache, path[96], ComponentType.MAMBA))
+        rematch = cache.match_prefix(
+            MatchPrefixParams(key=RadixKey(array("q", branch)))
+        )
+        self.assertEqual(len(rematch.device_indices), 64)
+        self.assertEqual(rematch.last_device_node, path[64])
+        cache.sanity_check()
+
     def test_swa_branch_insert_releases_forward_overshoot(self):
         if (
             not self.cfg.has_swa
