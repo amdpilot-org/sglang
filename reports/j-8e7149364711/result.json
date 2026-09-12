@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32486",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The candidate is valid test-only hardening for a production fix already present in the recorded base. The historical issue commit omits the distinct draft object-store metadata download, while the base and exact candidate prepare target, tokenizer, and draft URIs and deduplicate shared paths. The candidate regression and independent adversarial cases pass.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8e7149364711/venv/bin/python /job/review-evidence-j-8e7149364711/probe_historical.py (checkout 5cc273a780e1b35255717e52975c3f43ed1e9978)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction of the original issue: only the target URI was downloaded; the distinct speculative draft URI was omitted."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8e7149364711/venv/bin/python -m pytest -q test/registered/unit/server_args/test_model_source_paths.py (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "The prepared base's existing model-source suite passed: 12 tests."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8e7149364711/venv/bin/python -m pytest -q test/registered/unit/server_args/test_model_source_paths.py (candidate 2a536e1012cd4e2dd4254ae6009f17ea0ca4d458)",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate's regression suite passed: 15 tests, including distinct draft preparation, shared-path deduplication, and non-object-store exclusion."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8e7149364711/venv/bin/python /job/review-evidence-j-8e7149364711/probe_current.py (base and exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial cases passed for explicit runai_streamer settings, S3/GCS/Azure schemes, uppercase scheme recognition, mixed duplicate/unique paths, and non-object-store exclusion."
+    },
+    {
+      "command": "Python import-path inspection at exact candidate",
+      "exit_code": 0,
+      "what_was_measured": "sglang, model_path_hook, and runai_utils resolved from /job/repo/python, proving the checked-out source rather than an unrelated installed copy was exercised."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The issue is a pre-worker Python URI-preparation contract and the candidate changes only Python tests/reports. The available device was one AMD Instinct MI350X (gfx950), whereas the report used two-node NVIDIA H20 TP=8 PP=2; an unrelated GPU smoke would not validate this contract."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No object-store credentials or accessible target/draft repositories were supplied, so real S3-compatible network transfers and cache contents were not exercised.",
+    "The reported two-node NVIDIA H20 TP=8 PP=2 deployment was not available; the prepared environment has one AMD Instinct MI350X (gfx950).",
+    "Distributed serving, weight streaming, model execution, and semantic accuracy were outside what the deterministic pre-worker handler probe can qualify.",
+    "No native rebuild was performed because neither the candidate nor the relevant production behavior changes native code."
+  ]
+}
