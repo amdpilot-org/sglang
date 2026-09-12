@@ -1,0 +1,90 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_________ test_media_timings_preserve_absent_download_and_error_paths __________
+
+    def test_media_timings_preserve_absent_download_and_error_paths():
+        collector = _RecordingCollector()
+        payload = _png_bytes()
+        _ImageHandler.payload = payload
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _ImageHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{server.server_port}/fixture.png"
+>           loaded = _StubProcessor._load_single_item(
+                url, Modality.IMAGE, metrics_collector=collector
+            )
+E           TypeError: BaseMultimodalProcessor._load_single_item() got an unexpected keyword argument 'metrics_collector'
+
+../review-evidence-j-8fcf256e0a03/test_mm_latency_metrics.py:69: TypeError
+___________________ test_request_stage_timings_are_isolated ____________________
+
+    def test_request_stage_timings_are_isolated():
+        collector = _RecordingCollector()
+        processor = _StubProcessor.__new__(_StubProcessor)
+        processor.metrics_collector = collector
+        processor.io_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        processor._tokenizer_auto_adds_specials = False
+        processor.image_config = None
+        processor.video_config = None
+        processor.audio_config = None
+        processor.disable_fast_image_processor = True
+        processor.video_preprocessing_device = None
+        processor.mm_feature_transport = "cpu"
+        processor.precompute_hash_before_cpu_transfer = False
+        processor.FEATURE_NAMES = []
+    
+        class _Processor:
+            def __call__(self, **kwargs):
+                time.sleep(kwargs.pop("delay"))
+                return {"input_ids": [[1]]}
+    
+        processor._resolve_processor = lambda value: (_Processor(), object())
+    
+        async def run_load(delay):
+            await processor._observe_mm_load_data(asyncio.sleep(delay))
+    
+        async def exercise():
+            await asyncio.gather(run_load(0.02), run_load(0.04))
+    
+        try:
+>           asyncio.run(exercise())
+
+../review-evidence-j-8fcf256e0a03/test_mm_latency_metrics.py:132: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/usr/lib/python3.12/asyncio/runners.py:194: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+../review-evidence-j-8fcf256e0a03/test_mm_latency_metrics.py:129: in exercise
+    await asyncio.gather(run_load(0.02), run_load(0.04))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+delay = 0.02
+
+    async def run_load(delay):
+>       await processor._observe_mm_load_data(asyncio.sleep(delay))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: '_StubProcessor' object has no attribute '_observe_mm_load_data'
+
+../review-evidence-j-8fcf256e0a03/test_mm_latency_metrics.py:126: AttributeError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../review-evidence-j-8fcf256e0a03/test_mm_latency_metrics.py::test_media_timings_preserve_absent_download_and_error_paths
+FAILED ../review-evidence-j-8fcf256e0a03/test_mm_latency_metrics.py::test_request_stage_timings_are_isolated
+2 failed, 16 warnings in 20.25s
