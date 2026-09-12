@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37852",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "PR 1110 at 090cc57059021edb34acd063d7ba2ab7f3ab8a2d replaces inherited zero accounting with physical-tensor accounting for DeepSeek-V4 pools and fixes the remaining HiSparse uint64 device-pointer-table omission. Real gfx950 allocations and independent pipeline-slice cases matched exactly.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-9d7120f197ed/venv/bin/python <candidate verify_hisparse_accounting.py via process substitution> (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced the original failure with real GPU tensors: non-unified FP8 owned 3,594,944 bytes while base mem_usage reported 0."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9d7120f197ed/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_dsv4_compressed_pools.py (candidate 090cc57059021edb34acd063d7ba2ab7f3ab8a2d)",
+      "exit_code": 0,
+      "what_was_measured": "Six tests and ten subtests passed, including one- and three-layer HiSparse pointer-table accounting plus top-level unified/non-unified aggregation boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9d7120f197ed/venv/bin/python reports/j-21eb86c1d067/verify_hisparse_accounting.py (candidate 090cc57059021edb34acd063d7ba2ab7f3ab8a2d)",
+      "exit_code": 0,
+      "what_was_measured": "Actual gfx950 FP8, ROCm FP4-indexer, HiSparse, and unified allocations all matched independent physical byte sums; HiSparse was 3,594,952 bytes with zero delta."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9d7120f197ed/venv/bin/python <independent adversarial pipeline-slice fixture> (candidate 090cc57059021edb34acd063d7ba2ab7f3ab8a2d)",
+      "exit_code": 0,
+      "what_was_measured": "C4-only HiSparse, C128-only, SWA-only, mixed, and unified mixed PP slices had zero byte delta; independent enumeration also asserted unique backing-storage identities."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..090cc57059021edb34acd063d7ba2ab7f3ab8a2d",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Actual allocations ran on one AMD Instinct MI355X gfx950 GPU. Raw base, candidate, and adversarial outputs are in reports/j-9d7120f197ed/evidence/."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": "No DeepSeek-V4 weights or 8x H100 system were available, so full HTTP serving/metric scrape, CUDA/H100, multi-rank, model-semantic, NPU, and CUDA-only online-C128 behavior remain unverified. No native source changed, so no native rebuild was applicable."
+}
