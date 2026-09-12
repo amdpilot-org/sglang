@@ -123,6 +123,16 @@ intra_batch_mode = True if _use_mla_ps_kernel else False
 _KV_INDEX_BLOCKS_MIN_CONTEXT = 32768
 
 
+def get_aiter_workspace_size_bytes(
+    *, max_num_reqs: int, num_heads: int, max_context_len: int, head_dim: int
+) -> int:
+    """Return the exact byte size of the legacy AITER decode workspace."""
+    max_num_partitions = (
+        max_context_len + _AITER_PARTITION_SIZE_ROCM - 1
+    ) // _AITER_PARTITION_SIZE_ROCM
+    return max_num_reqs * num_heads * max_num_partitions * (head_dim * 4 + 8)
+
+
 class WrapperDispatch(Enum):
     SLIDING_WINDOW = auto()
     CROSS_ATTENTION = auto()
@@ -393,13 +403,14 @@ class AiterAttnBackend(AttentionBackend):
             self.max_context_len + _AITER_PARTITION_SIZE_ROCM - 1
         ) // _AITER_PARTITION_SIZE_ROCM
 
-        nbyes_per_qo_elem = torch.finfo(torch.float32).bits // 8
-
         if not (self.use_mla or self.use_triton_unified_attention):
             self.workspace_buffer = torch.empty(
-                (max_bs * self.num_head * self.max_num_partitions * self.head_dim)
-                * nbyes_per_qo_elem
-                + 2 * (max_bs * self.num_head * self.max_num_partitions) * 4,
+                get_aiter_workspace_size_bytes(
+                    max_num_reqs=max_bs,
+                    num_heads=self.num_head,
+                    max_context_len=self.max_context_len,
+                    head_dim=self.head_dim,
+                ),
                 dtype=torch.uint8,
                 device=self.device,
             )
