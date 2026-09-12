@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33579",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1906",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1867",
+  "candidate_commit": "34f94a1cef6489459f2cc7b8c98db8f3587a1d23",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the original DFLASH/DSPARK page_size=1 defect: req_to_token headroom is 21 slots while the decode reserve is 34 slots for 17 draft tokens. The exact candidate commit widens DFLASH-family rows for the reserve at every page size and adds a pre-allocation row-width assertion. Its submitted tests pass, and independent sizing and exact-boundary adversarial checks found no counterexample to the reported source-level contract.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-1cf380832dc9/venv/bin/python - <<'PY' (base sizing matrix for DSPARK/DFLASH, page sizes 1, 2, and 16)",
+      "exit_code": 0,
+      "what_was_measured": "On base 358c163, DSPARK and DFLASH at page_size=1 each returned extra=21 and reserve=34 (invariant false); page sizes 2 and 16 covered reserve plus alignment."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1cf380832dc9/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_dflash_allocation_sizing.py test/registered/unit/spec/test_dflash_row_width_guard.py test/registered/unit/mem_cache/test_uno_allocation_sizing.py",
+      "exit_code": 0,
+      "what_was_measured": "At candidate 34f94a1, all six submitted DFLASH/DSPARK sizing, guard, non-spec, alignment, and UNO regression tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1cf380832dc9/venv/bin/python - <<'PY' (independent sizing and guard adversarial matrix)",
+      "exit_code": 0,
+      "what_was_measured": "At candidate 34f94a1, 50 DFLASH-family combinations across draft counts 1, 2, 17, 64, 257 and page sizes 1, 2, 3, 16, 256 covered reserve plus alignment; unrelated page-size-one algorithms retained baseline sizing; reserved length 134 was rejected at row width 133 and accepted at exact width 134."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..34f94a1cef6489459f2cc7b8c98db8f3587a1d23",
+      "exit_code": 0,
+      "what_was_measured": "The candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The prepared interpreter enumerated one AMD Instinct MI350X with gcnArchName gfx950:sramecc+:xnack-. No compatible DFLASH/DSPARK target and draft weights were provided, so no issue-specific live serving or GPU numerical workload was run."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The reported live 4x B200 workload, cross-request row corruption, leaked-slot count, and delayed idle leak were not reproduced on the assigned single gfx950 GPU.",
+    "No compatible DFLASH/DSPARK model weights were available; the deterministic tiny Llama fixture cannot qualify this speculative architecture and was therefore not used as substitute proof.",
+    "The review verifies the exact source-level sizing invariant and fail-fast boundary behavior, not model semantic accuracy, NVIDIA behavior, or a distributed workload.",
+    "No native source changed in the candidate, so no native rebuild was applicable."
+  ]
+}
