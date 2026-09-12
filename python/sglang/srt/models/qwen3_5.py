@@ -95,7 +95,10 @@ from sglang.srt.models.qwen2_moe import (
 )
 
 # Models
-from sglang.srt.models.qwen3_vl import Qwen3VLForConditionalGeneration
+from sglang.srt.models.qwen3_vl import (
+    Qwen3VLForConditionalGeneration,
+    is_qwen_visual_weight,
+)
 from sglang.srt.models.utils import (
     WeightsMapper,
     fused_qk_gemma_rmsnorm,
@@ -2253,6 +2256,8 @@ class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration):
         loaded_params: Set[str] = set()
         params_dict = dict(self.named_parameters(remove_duplicate=False))
         for name, loaded_weight in weights:
+            if self.language_model_only and is_qwen_visual_weight(name):
+                continue
             if "rotary_emb.inv_freq" in name:
                 continue
             if "mtp" in name:
@@ -2515,6 +2520,8 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3VLForConditionalGeneration):
         params_dict = dict(self.named_parameters(remove_duplicate=False))
 
         for name, loaded_weight in weights:
+            if self.language_model_only and is_qwen_visual_weight(name):
+                continue
             if "rotary_emb.inv_freq" in name:
                 continue
             if "mtp" in name:

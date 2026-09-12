@@ -30,7 +30,10 @@ from sglang.srt.layers.utils import get_layer_id
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch, PPProxyTensors
 from sglang.srt.model_loader.weight_utils import default_weight_loader
 from sglang.srt.models.qwen3_moe import Qwen3MoeDecoderLayer, Qwen3MoeModel
-from sglang.srt.models.qwen3_vl import Qwen3VLForConditionalGeneration
+from sglang.srt.models.qwen3_vl import (
+    Qwen3VLForConditionalGeneration,
+    is_qwen_visual_weight,
+)
 from sglang.srt.runtime_context import get_exec
 from sglang.srt.utils.hf_transformers_utils import get_processor
 
@@ -254,6 +257,8 @@ class Qwen3VLMoeForConditionalGeneration(Qwen3VLForConditionalGeneration):
         params_dict = dict(self.named_parameters())
 
         for name, loaded_weight in weights:
+            if self.language_model_only and is_qwen_visual_weight(name):
+                continue
             name = name.replace(r"model.language_model.", r"model.")
             layer_id = get_layer_id(name)
             if (

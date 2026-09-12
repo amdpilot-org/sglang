@@ -1676,6 +1676,8 @@ class Qwen3VLForConditionalGeneration(nn.Module):
         ]
         params_dict = dict(self.named_parameters(remove_duplicate=False))
         for name, loaded_weight in weights:
+            if self.language_model_only and is_qwen_visual_weight(name):
+                continue
             if "rotary_emb.inv_freq" in name:
                 continue
             if "language_model" in name:
@@ -1775,6 +1777,11 @@ def _require_vision(model) -> None:
             "Checkpoint is marked language_model_only=True and was loaded "
             "without a vision encoder; multimodal inputs are not supported."
         )
+
+
+def is_qwen_visual_weight(name: str) -> bool:
+    """Return whether a checkpoint key belongs to the Qwen vision tower."""
+    return name.startswith(("model.visual.", "visual."))
 
 
 EntryClass = Qwen3VLForConditionalGeneration

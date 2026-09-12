@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/28194",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Extended the existing --language-model-only implementation to Qwen2.5-VL, Qwen3-VL dense/MoE, and Qwen3.5 dense/MoE. The supported models do not construct their vision tower, take the direct language-model forward path, skip exact visual checkpoint prefixes, and inherit the existing serving-layer rejection of image/video/audio requests.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-26abe37b9fc7/venv/bin/python - <<'PY' ... assert Qwen language-model-only allowlist ... PY",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: all four initially targeted Qwen3/Qwen3.5 architecture names were absent from the language-model-only allowlist. Qwen2.5 inspection additionally showed unconditional vision-tower construction."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-26abe37b9fc7/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen_language_model_only.py",
+      "exit_code": 0,
+      "what_was_measured": "4 tests passed with 15 subtests: five Qwen VL architectures pass validation, an unsupported near-match remains rejected, exact visual prefixes are distinguished from adversarial non-tower names, and every affected loader bypasses visual tensors in language-only mode."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/models/qwen2_5_vl.py python/sglang/srt/models/qwen3_5.py python/sglang/srt/models/qwen3_vl.py python/sglang/srt/models/qwen3_vl_moe.py python/sglang/srt/server_args.py test/registered/unit/models/test_qwen_language_model_only.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, import ordering, Ruff lint/format, syntax, secrets, conflict, and registered-test metadata checks passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-26abe37b9fc7/venv/bin/python -m compileall -q python/sglang/srt/models/qwen2_5_vl.py python/sglang/srt/models/qwen3_vl.py python/sglang/srt/models/qwen3_vl_moe.py python/sglang/srt/models/qwen3_5.py python/sglang/srt/server_args.py",
+      "exit_code": 0,
+      "what_was_measured": "All modified production Python modules compiled successfully."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-26abe37b9fc7/venv/bin/python -m pytest -q test/registered/unit/server_args/test_server_args.py test/registered/unit/configs/test_model_config.py",
+      "exit_code": 1,
+      "what_was_measured": "231 tests passed with 48 subtests; two pre-existing context-parallel tests failed because this pinned ROCm host intentionally rejects prefill CP on HIP before the CUDA-oriented assertions. No failure involved language-model-only code."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X (gfx950) was visible through torch 2.11.0+rocm7.2 / HIP 7.2.26015, but no qualifying Qwen2.5/3/3.5 multimodal checkpoint was available. No model inference or GPU memory-saving claim was made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No qualifying Qwen multimodal checkpoint was available, so end-to-end text numerical parity, HTTP multimodal rejection for these architectures, and measured GPU/KV-cache memory recovery remain unverified.",
+    "The change covers the Qwen vision-language family discussed in the original issue and related implementation, not every multimodal architecture in SGLang. Other families remain gated unless already supported by the pre-existing allowlist.",
+    "Audio/omni architectures such as Qwen3-ASR and Qwen3-Omni need separate handling for their audio and nested multimodal towers and remain unsupported by --language-model-only.",
+    "No native code changed, so no native rebuild was applicable."
+  ]
+}
