@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37848",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "ee6033d403ad5790a1580c7a83c36d206cf01ec3",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "PR 1094 is a verified partial fix: its focused regressions pass and it fixes the four named PR 1032 counterexamples, but the original repository-wide audit still fails with 38 sites and an independent Persimmon constructor probe demonstrates a live omitted lm_head prefix.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-33f7df6d7aa2/venv/bin/python /job/review-evidence-j-33f7df6d7aa2/scan_missing_prefixes.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced the original failure with 53 quantization-aware constructor sites lacking an explicit prefix."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-33f7df6d7aa2/venv/bin/python /job/review-evidence-j-33f7df6d7aa2/scan_missing_prefixes.py (candidate ee6033d)",
+      "exit_code": 1,
+      "what_was_measured": "The same independent audit still found 38 sites, so the original contract remains unresolved."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-33f7df6d7aa2/venv/bin/python reports/j-a3aab35d6fdc/reproduce_review_counterexamples.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's AST regression found explicit prefixes for all four named PR 1032 counterexamples."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-33f7df6d7aa2/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_compressed_tensors_lm_head.py test/registered/unit/models/test_phi_quantization_prefix.py",
+      "exit_code": 0,
+      "what_was_measured": "18 tests and 42 subtests passed, including real Phi FP8 and ModelOpt resolver behavior."
+    },
+    {
+      "command": "independent patched-dependency PersimmonForCausalLM constructor probe",
+      "exit_code": 1,
+      "what_was_measured": "ParallelLMHead received no prefix keyword for root and nested wrappers; nested expected nested.lm_head."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The deterministic defect is source/configuration routing. One AMD Instinct MI350X gfx950 was visible, but no affected model weights were available and no architecture execution was claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "python/sglang/srt/models/persimmon.py: ParallelLMHead omits lm_head prefix (independently reproduced at constructor boundary)",
+    "python/sglang/srt/models/persimmon.py: MLP and attention projections omit qualified prefixes",
+    "python/sglang/srt/models/voxtral.py: QKVParallelLinear and RowParallelLinear omit qualified prefixes",
+    "python/sglang/srt/models/falcon_h1.py: QKVParallelLinear and RowParallelLinear omit qualified prefixes",
+    "python/sglang/srt/models/hunyuan.py: FusedMoE experts and ParallelLMHead omit qualified prefixes",
+    "python/sglang/srt/models/gpt_j.py: RadixAttention and ParallelLMHead omit qualified prefixes",
+    "The independent broad audit reports 38 syntactic sites total at the candidate; some are literal quant_config=None false positives and the remainder require architecture-specific qualified-name validation."
+  ],
+  "remaining_limitations": [
+    "No affected full-model weights were available, so no semantic, serving-path, or distributed validation was performed.",
+    "The available GPU is AMD gfx950 whereas the issue snapshot reported NVIDIA RTX 4090; the CPU-only routing failure is architecture-independent, but no cross-architecture numerical claim is made.",
+    "No native code changed in the candidate, so native rebuilding was not applicable."
+  ]
+}
