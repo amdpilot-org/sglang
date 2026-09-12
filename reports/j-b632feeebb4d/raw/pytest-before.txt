@@ -1,0 +1,141 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_____ test_glm4v_mrope_mask_follows_final_input_ids[retokenization-shrank] _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fcc880b6f00>
+final_input_ids = [10, 11, 12, 13], processor_mask = [1, 1, 1]
+
+    @pytest.mark.parametrize(
+        ("final_input_ids", "processor_mask"),
+        [
+            pytest.param([10, 11, 12, 13], [1, 1, 1], id="retokenization-shrank"),
+            pytest.param([10, 11, 12], [1, 1, 1], id="canonical-same-length"),
+        ],
+    )
+    def test_glm4v_mrope_mask_follows_final_input_ids(
+        monkeypatch, final_input_ids, processor_mask
+    ):
+        observed_masks = []
+
+        def fake_get_rope_index_glm4v(*, input_ids, attention_mask, **kwargs):
+            observed_masks.append(attention_mask)
+            effective_mask = (
+                torch.ones_like(input_ids) if attention_mask is None else attention_mask
+            )
+            selected_ids = input_ids[0][effective_mask[0] == 1]
+            positions = torch.arange(selected_ids.numel()).view(1, 1, -1).expand(3, 1, -1)
+            return positions, torch.zeros(1)
+
+        monkeypatch.setattr(
+            MRotaryEmbedding,
+            "get_rope_index_glm4v",
+            MagicMock(side_effect=fake_get_rope_index_glm4v),
+        )
+
+>       output = _run_processor(final_input_ids, processor_mask)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/registered/unit/multimodal/test_glm4v_stale_attention_mask.py:76:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/registered/unit/multimodal/test_glm4v_stale_attention_mask.py:40: in _run_processor
+    return asyncio.run(
+/usr/lib/python3.12/asyncio/runners.py:194: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+python/sglang/srt/multimodal/processors/glm4v.py:636: in process_mm_data_async
+    mrope_positions, mrope_position_delta = MRotaryEmbedding.get_rope_index_glm4v(
+/usr/lib/python3.12/unittest/mock.py:1134: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1138: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1199: in _execute_mock_call
+    result = effect(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input_ids = tensor([[10, 11, 12, 13]]), attention_mask = tensor([[1, 1, 1]])
+kwargs = {'hf_config': namespace(model_type='glm4v'), 'image_grid_thw': None, 'video_grid_thw': None}
+effective_mask = tensor([[1, 1, 1]])
+
+    def fake_get_rope_index_glm4v(*, input_ids, attention_mask, **kwargs):
+        observed_masks.append(attention_mask)
+        effective_mask = (
+            torch.ones_like(input_ids) if attention_mask is None else attention_mask
+        )
+>       selected_ids = input_ids[0][effective_mask[0] == 1]
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       IndexError: The shape of the mask [3] at index 0 does not match the shape of the indexed tensor [4] at index 0
+
+test/registered/unit/multimodal/test_glm4v_stale_attention_mask.py:66: IndexError
+_____ test_glm4v_mrope_mask_follows_final_input_ids[canonical-same-length] _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fcc880d49b0>
+final_input_ids = [10, 11, 12], processor_mask = [1, 1, 1]
+
+    @pytest.mark.parametrize(
+        ("final_input_ids", "processor_mask"),
+        [
+            pytest.param([10, 11, 12, 13], [1, 1, 1], id="retokenization-shrank"),
+            pytest.param([10, 11, 12], [1, 1, 1], id="canonical-same-length"),
+        ],
+    )
+    def test_glm4v_mrope_mask_follows_final_input_ids(
+        monkeypatch, final_input_ids, processor_mask
+    ):
+        observed_masks = []
+
+        def fake_get_rope_index_glm4v(*, input_ids, attention_mask, **kwargs):
+            observed_masks.append(attention_mask)
+            effective_mask = (
+                torch.ones_like(input_ids) if attention_mask is None else attention_mask
+            )
+            selected_ids = input_ids[0][effective_mask[0] == 1]
+            positions = torch.arange(selected_ids.numel()).view(1, 1, -1).expand(3, 1, -1)
+            return positions, torch.zeros(1)
+
+        monkeypatch.setattr(
+            MRotaryEmbedding,
+            "get_rope_index_glm4v",
+            MagicMock(side_effect=fake_get_rope_index_glm4v),
+        )
+
+        output = _run_processor(final_input_ids, processor_mask)
+
+>       assert observed_masks == [None]
+E       assert [tensor([[1, 1, 1]])] == [None]
+E
+E         At index 0 diff: tensor([[1, 1, 1]]) != None
+E         Use -v to get more diff
+
+test/registered/unit/multimodal/test_glm4v_stale_attention_mask.py:78: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+<frozen abc>:106
+  <frozen abc>:106: DeprecationWarning: MultiPlatformOp is deprecated; subclass sglang.kernels.fused_op.BaseFusedOp instead (RFC #29630).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/multimodal/test_glm4v_stale_attention_mask.py::test_glm4v_mrope_mask_follows_final_input_ids[retokenization-shrank]
+FAILED test/registered/unit/multimodal/test_glm4v_stale_attention_mask.py::test_glm4v_mrope_mask_follows_final_input_ids[canonical-same-length]
+2 failed, 18 warnings in 27.00s

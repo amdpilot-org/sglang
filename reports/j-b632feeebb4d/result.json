@@ -1,0 +1,31 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37097",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Glm4vImageProcessor passed the Hugging Face processor's attention_mask to MRoPE after the shared multimodal processor could replace input_ids with the client's exact pretokenized IDs. The retained regression reproduced the resulting length-mismatch IndexError. The GLM call site now passes None so get_rope_index_glm4v constructs an all-ones mask from the final input_ids; a same-length boundary confirms canonical inputs retain full-length positions.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-b632feeebb4d/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_glm4v_stale_attention_mask.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression on the original source: the mismatched case raised IndexError for mask length 3 versus final input_ids length 4, and the same-length case showed the stale processor mask was forwarded. Raw output: reports/j-b632feeebb4d/raw/pytest-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b632feeebb4d/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_glm4v_stale_attention_mask.py test/registered/unit/multimodal/test_mrope_encoder_utils.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after focused GLM stale-mask regression plus adjacent MRoPE helper coverage: 7 passed. Raw output: reports/j-b632feeebb4d/raw/pytest-after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b632feeebb4d/venv/bin/python -m ruff check test/registered/unit/multimodal/test_glm4v_stale_attention_mask.py python/sglang/srt/multimodal/processors/glm4v.py",
+      "exit_code": 1,
+      "what_was_measured": "Tool availability only: the prepared interpreter reports 'No module named ruff'; no packages were installed or replaced."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The reproduced failure and corrected call are CPU-side multimodal preprocessing. No model weights or GPU execution are needed to exercise this IndexError, and no model-level claim is made.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No GLM-5.3 model weights were available or used, so full server/model semantic accuracy was not validated.",
+    "The deterministic regression isolates the actual Glm4vImageProcessor async call site and MRoPE mask indexing contract; it does not claim a long-context RL or distributed workload reproduction.",
+    "The prepared Python environment does not include ruff."
+  ]
+}
