@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38156",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "956321de134fde54ee75b71aad60be1546163183",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate removes timing-dependent double charging for equal-sized ranks by synchronizing one world-group baseline and reserving later pools locally, but retains an equal per-rank cap that rejects aggregate-fitting heterogeneous pipeline-stage allocations.",
+  "tests": [
+    {
+      "command": "recorded-base deterministic actual host_memory_budget_bytes reproduction with 100 then 60 GiB readings, four local ranks, and a 20 GiB request",
+      "exit_code": 1,
+      "what_was_measured": "The actual base returned 22.5 then 12.5 GiB although four 20 GiB pools fit within 90 GiB usable initial memory."
+    },
+    {
+      "command": "PYTHONPATH=$PWD/python /tmp/amdpilot-repo-j-cfb270f9d9a7/venv/bin/python reports/j-3cca4095cc2c/repro_two_tp_groups.py (at exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Four real Gloo processes all received a 22.5 GiB primary budget; later sidecars received 2.5 GiB from the cached baseline without another collective."
+    },
+    {
+      "command": "PYTHONPATH=$PWD/python /tmp/amdpilot-repo-j-cfb270f9d9a7/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mem_pool_host.py (at exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "22 focused host-pool tests passed."
+    },
+    {
+      "command": "independent candidate boundary: 100 GiB available, 10 GiB reserve, four local ranks, heterogeneous requests 30+20+20+20 GiB",
+      "exit_code": 1,
+      "what_was_measured": "The 90 GiB aggregate fits the 90 GiB usable host memory, but the 30 GiB rank is rejected by the 22.5 GiB equal-share cap."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Tests exercised CPU host accounting and real Gloo collectives. One AMD Instinct MI355X gfx950 GPU was visible, but no GPU computation was relevant or claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Heterogeneous pipeline stages or other in-job groups with unequal per-rank pool sizes can fit in aggregate yet be rejected when one rank exceeds the retained equal host share; e.g. 30+20+20+20 GiB fits 90 GiB usable but 30 GiB exceeds 22.5 GiB per rank.",
+    "Separately launched jobs sharing a host are outside the candidate's world process group and cannot share its cached snapshot/accounting."
+  ],
+  "remaining_limitations": [
+    "No 8xH200 GLM-5.2-W4AFP8 weights or workload were available.",
+    "Only one AMD Instinct MI355X gfx950 GPU was available; no full-model, H200, multi-node, or real heterogeneous-PP serving reproduction was performed.",
+    "No native files changed, so native rebuilding was not applicable."
+  ]
+}
