@@ -37,6 +37,7 @@ from unittest import mock
 
 import sglang.srt.connector as connector_module
 from sglang.srt.arg_groups.model_path_hook import (
+    handle_model_source_paths,
     handle_modelscope_paths,
     resolve_hf_gguf_model_path,
 )
@@ -78,6 +79,63 @@ class _ModelSourceCase(CustomTestCase):
         path = os.path.join(self._directory(), "model.gguf")
         open(path, "w").close()
         return path
+
+
+class TestTheObjectStoreArm(_ModelSourceCase):
+    def _downloads_for(self, server_args):
+        with (
+            mock.patch(
+                "sglang.srt.arg_groups.model_path_hook.resolve_hf_gguf_model_path"
+            ),
+            mock.patch(
+                "sglang.srt.arg_groups.model_path_hook."
+                "ObjectStorageModel.download_and_get_path"
+            ) as download,
+        ):
+            handle_model_source_paths(server_args)
+        return [call.args[0] for call in download.call_args_list]
+
+    def test_a_distinct_speculative_draft_is_prepared_before_startup(self):
+        server_args = ServerArgs(
+            model_path="s3://bucket/target",
+            tokenizer_path="s3://bucket/tokenizer",
+            speculative_draft_model_path="s3://bucket/draft",
+            load_format="runai_streamer",
+            speculative_draft_load_format="runai_streamer",
+            device="cuda",
+        )
+
+        self.assertEqual(
+            self._downloads_for(server_args),
+            [
+                "s3://bucket/target",
+                "s3://bucket/tokenizer",
+                "s3://bucket/draft",
+            ],
+        )
+
+    def test_shared_target_tokenizer_and_draft_are_prepared_once(self):
+        shared = "s3://bucket/shared"
+        server_args = ServerArgs(
+            model_path=shared,
+            tokenizer_path=shared,
+            speculative_draft_model_path=shared,
+            device="cuda",
+        )
+
+        self.assertEqual(self._downloads_for(server_args), [shared])
+
+    def test_only_object_store_paths_are_prepared(self):
+        server_args = ServerArgs(
+            model_path="s3://bucket/target",
+            tokenizer_path="owner/tokenizer",
+            speculative_draft_model_path="redis://host/draft",
+            device="cuda",
+        )
+
+        self.assertEqual(
+            self._downloads_for(server_args), ["s3://bucket/target"]
+        )
 
 
 class TestTheGgufArm(_ModelSourceCase):

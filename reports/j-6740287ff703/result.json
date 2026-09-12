@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32486",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The reported defect reproduces at 5cc273a780, but the prepared base already contains the required correction. Commit abddb1c7e (PR #32541) changed model-source preparation to include speculative_draft_model_path and deduplicate shared paths. Added direct regression coverage for a distinct draft URI plus independent shared-path and non-object-store boundaries; no production source change was needed.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=<reported checkout>/python /tmp/amdpilot-repo-j-6740287ff703/venv/bin/python <issue-shaped probe against 5cc273a780>",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: _handle_model_source_paths downloaded only s3://bucket/target-model and omitted the distinct s3://bucket/draft-model. Raw output: /tmp/amdpilot-repo-j-6740287ff703/evidence/reported_commit_reproduction.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6740287ff703/venv/bin/python -m pytest -q test/registered/unit/server_args/test_model_source_paths.py",
+      "exit_code": 0,
+      "what_was_measured": "Current implementation: 15 tests passed, including distinct target/tokenizer/draft preparation, shared-path single-download deduplication, and exclusion of non-object-store paths. Raw output: /tmp/amdpilot-repo-j-6740287ff703/evidence/test_model_source_paths.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6740287ff703/venv/bin/python -m ruff check test/registered/unit/server_args/test_model_source_paths.py",
+      "exit_code": 1,
+      "what_was_measured": "Tool availability only: the prepared interpreter reports 'No module named ruff'; no packages were replaced or installed. Raw output: /tmp/amdpilot-repo-j-6740287ff703/evidence/ruff.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reported failure occurs in ServerArgs model-source path preparation before worker launch or model execution. The deterministic regression exercises the actual handler and ObjectStorageModel call boundary; GPU execution would not add issue-specific evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No credentials or accessible target/draft S3-compatible model repositories were supplied, so real object-store network transfers were not performed; ObjectStorageModel.download_and_get_path was intercepted to measure the exact URIs and call count.",
+    "The reported H20 two-node TP=8 PP=2 deployment was not reproduced. The verified behavior is limited to pre-worker metadata preparation and does not qualify distributed serving, model architecture behavior, weight streaming, or semantic accuracy.",
+    "The prepared interpreter does not contain ruff, so the focused lint command could not run."
+  ]
+}
