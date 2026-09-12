@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38645",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the DCP widened-logical versus rank-local-physical index mismatch in the current cpu_tensor retraction path and localized MLA token indices at MLATokenToKVPool CPU backup/restore. Restore independently translates newly allocated logical destinations; DCP=1 remains identity and Mamba/KDA indices are outside the changed boundary.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a8d04b114093/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mla_retraction_dcp.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Negative control: 2 failures at MLATokenToKVPool.get_cpu_copy from widened logical indices indexing a 10-row physical buffer; DCP=1 identity passed. Raw output: /tmp/amdpilot-repo-j-a8d04b114093/evidence/regression-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a8d04b114093/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mla_retraction_dcp.py",
+      "exit_code": 0,
+      "what_was_measured": "3/3 passed: owner filtering/localization with chunking, restore to different logical locations, and DCP=1 identity. Raw output: /tmp/amdpilot-repo-j-a8d04b114093/evidence/regression-after.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a8d04b114093/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_dcp_host_pool.py test/registered/unit/mem_cache/test_mla_retraction_dcp.py",
+      "exit_code": 0,
+      "what_was_measured": "13/13 focused DCP host-transfer and retraction index tests passed. Raw output: /tmp/amdpilot-repo-j-a8d04b114093/evidence/focused-tests.log"
+    },
+    {
+      "command": "gfx950 torch script invoking MLATokenToKVPool.get_cpu_copy/load_cpu_copy with DCP=4 rank=2",
+      "exit_code": 0,
+      "what_was_measured": "Actual GPU gather/CPU backup/GPU restore matched an independently constructed full-buffer reference; restored destination physical rows 6 and 8 contained 2.0 and 5.0 and all other rows remained -1. Raw output: /tmp/amdpilot-repo-j-a8d04b114093/evidence/gfx950-roundtrip.log"
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Kimi-K3 weights were available, so the full model architecture and semantic accuracy were not validated.",
+    "The reported TP8/DCP8 PD-disaggregated NVIDIA B300 workload requires eight GPUs; this job had one AMD gfx950 GPU, so no full serving or multi-rank runtime reproduction is claimed.",
+    "The deterministic tiny Llama fixture cannot qualify the affected hybrid MLA plus KDA architecture and was therefore not substituted for the reported workload.",
+    "No native source changed, so no native rebuild was applicable.",
+    "The prepared interpreter does not contain the ruff module; git diff --check and focused tests were used instead."
+  ]
+}

@@ -4602,7 +4602,16 @@ class MLATokenToKVPool(KVCache):
         for kv_cache in self.kv_buffer:
             kv_cache[tgt_loc_flat] = kv_cache[src_loc_flat]
 
+    @staticmethod
+    def _localize_dcp_indices(indices: torch.Tensor) -> torch.Tensor:
+        parallel = get_parallel()
+        if parallel.attn_dcp_size == 1:
+            return indices
+        owned = indices % parallel.attn_dcp_size == parallel.attn_dcp_rank
+        return indices[owned] // parallel.attn_dcp_size
+
     def get_cpu_copy(self, indices, mamba_indices=None, req_pool_index=None):
+        indices = self._localize_dcp_indices(indices)
         current_platform.synchronize()
         kv_cache_cpu = []
         chunk_size = self.cpu_offloading_chunk_size
@@ -4622,6 +4631,7 @@ class MLATokenToKVPool(KVCache):
     def load_cpu_copy(
         self, kv_cache_cpu, indices, mamba_indices=None, req_pool_index=None
     ):
+        indices = self._localize_dcp_indices(indices)
         current_platform.synchronize()
         chunk_size = self.cpu_offloading_chunk_size
         for layer_id in range(self.layer_num):
