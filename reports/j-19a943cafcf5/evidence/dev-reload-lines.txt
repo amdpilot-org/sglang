@@ -1,0 +1,56 @@
+    25	        raise ValueError(f"Module is not loaded in this process: {name!r}")
+    26	    spec = module.__spec__
+    27	    origin = None if spec is None else spec.origin
+    28	    if not origin or Path(origin).suffix not in {".py", ".pyc"}:
+    29	        raise ValueError(
+    30	            f"Module is not reloadable pure Python: {name!r} (origin={origin!r})"
+    31	        )
+    32	    return module
+    33
+    34
+    35	def _replace_class_contents(old: type, new: type) -> None:
+    36	    """Make existing instances dispatch through definitions from ``new``."""
+    37	    protected = {"__dict__", "__weakref__", "__module__", "__name__", "__qualname__"}
+    38	    for name in set(vars(old)) - set(vars(new)) - protected:
+    39	        delattr(old, name)
+    40	    for name, value in vars(new).items():
+    41	        if name not in protected:
+    42	            setattr(old, name, value)
+    43
+    44
+    45	def reload_modules(module_names: Iterable[str]) -> ReloadResult:
+    46	    """Reload selected modules and repair common references to replaced objects.
+    47
+    48	    Existing class identities are retained and updated, which makes already-created
+    49	    scheduler/model instances see new methods. Module globals that imported replaced
+    50	    functions or classes directly are also rebound.
+    51	    """
+    52	    names = tuple(dict.fromkeys(module_names))
+    53	    if not names:
+    54	        raise ValueError("At least one module must be specified")
+    55	    modules = [_validate_module(name) for name in names]
+    56	    replacements: dict[int, object] = {}
+    57
+    58	    for module in modules:
+    59	        old_values = dict(vars(module))
+    60	        importlib.invalidate_caches()
+    61	        importlib.reload(module)
+    62	        for name, old in old_values.items():
+    63	            new = vars(module).get(name)
+    64	            if new is None or new is old:
+    65	                continue
+    66	            if inspect.isclass(old) and inspect.isclass(new):
+    67	                _replace_class_contents(old, new)
+    68	                setattr(module, name, old)
+    69	                replacements[id(new)] = old
+    70	            elif inspect.isfunction(old) and inspect.isfunction(new):
+    71	                replacements[id(old)] = new
+    72
+    73	    rebound = 0
+    74	    for module in tuple(sys.modules.values()):
+    75	        if module is None or not getattr(module, "__name__", "").startswith("sglang."):
+    76	            continue
+    77	        for name, value in tuple(vars(module).items()):
+    78	            replacement = replacements.get(id(value))
+    79	            if replacement is not None and replacement is not value:
+    80	                setattr(module, name, replacement)
