@@ -1,0 +1,472 @@
+..........FFF.FF............                                             [100%]
+=================================== FAILURES ===================================
+_ TestHealthCheckScheduler.test_health_and_user_round_robin_state_are_independent _
+
+self = <test_data_parallel_controller_candidate.TestHealthCheckScheduler testMethod=test_health_and_user_round_robin_state_are_independent>
+
+    def test_health_and_user_round_robin_state_are_independent(self):
+        ctl = _make_controller(dp_size=4)
+    
+        for rid in ("user_0", "user_1"):
+            ctl.dispatching_with_trace(_req(rid=rid))
+        ctl.dispatching_with_trace(_req(rid="HEALTH_CHECK_0"))
+        ctl.dispatching_with_trace(_req(rid="user_2"))
+        ctl.dispatching_with_trace(_req(rid="HEALTH_CHECK_1"))
+        for rid in ("user_3", "user_4"):
+            ctl.dispatching_with_trace(_req(rid=rid))
+    
+>       self.assertEqual(ctl.round_robin_counter, 1)
+E       AssertionError: 3 != 1
+
+/tmp/amdpilot-review-j-ea6b08828b8e/test_data_parallel_controller_candidate.py:210: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x703ce0a587c0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7045c75d2980>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestHealthCheckScheduler.test_health_and_user_round_robin_state_are_independent
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/tmp/amdpilot-review-j-ea6b08828b8e/test_data_parallel_controller_candidate.py", line 210, in test_health_and_user_round_robin_state_are_independent
+    self.assertEqual(ctl.round_robin_counter, 1)
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 878, in _baseAssertEqual
+    raise self.failureException(msg)
+AssertionError: 3 != 1
+__ TestHealthCheckScheduler.test_health_does_not_change_total_requests_budget __
+
+self = <test_data_parallel_controller_candidate.TestHealthCheckScheduler testMethod=test_health_does_not_change_total_requests_budget>
+
+    def test_health_does_not_change_total_requests_budget(self):
+        ctl = _make_controller(dp_size=3)
+        ctl.load_balance_method = LoadBalanceMethod.TOTAL_REQUESTS
+        ctl.dispatching = ctl.total_requests_scheduler
+        ctl.refresh_load_budget_on_dispatch = False
+    
+        ctl.dispatching_with_trace(_req(rid="user_0"))
+        budget_after_user = ctl.dp_budget.total_requests.copy()
+        ctl.dispatching_with_trace(_req(rid="HEALTH_CHECK_0"))
+>       self.assertEqual(ctl.dp_budget.total_requests, budget_after_user)
+E       AssertionError: Lists differ: [1, 1, 0] != [1, 0, 0]
+E       
+E       First differing element 1:
+E       1
+E       0
+E       
+E       - [1, 1, 0]
+E       ?     ^
+E       
+E       + [1, 0, 0]
+E       ?     ^
+
+/tmp/amdpilot-review-j-ea6b08828b8e/test_data_parallel_controller_candidate.py:226: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x703ce0a5a0c0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7045c75d2980>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestHealthCheckScheduler.test_health_does_not_change_total_requests_budget
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/tmp/amdpilot-review-j-ea6b08828b8e/test_data_parallel_controller_candidate.py", line 226, in test_health_does_not_change_total_requests_budget
+    self.assertEqual(ctl.dp_budget.total_requests, budget_after_user)
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1091, in assertListEqual
+    self.assertSequenceEqual(list1, list2, msg, seq_type=list)
+  File "/usr/lib/python3.12/unittest/case.py", line 1073, in assertSequenceEqual
+    self.fail(msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: Lists differ: [1, 1, 0] != [1, 0, 0]
+
+First differing element 1:
+1
+0
+
+- [1, 1, 0]
+?     ^
+
++ [1, 0, 0]
+?     ^
+
+___ TestHealthCheckScheduler.test_health_does_not_change_total_tokens_budget ___
+
+self = <test_data_parallel_controller_candidate.TestHealthCheckScheduler testMethod=test_health_does_not_change_total_tokens_budget>
+
+    def test_health_does_not_change_total_tokens_budget(self):
+        ctl = _make_controller(dp_size=3)
+        ctl.load_balance_method = LoadBalanceMethod.TOTAL_TOKENS
+        ctl.dispatching = ctl.total_tokens_scheduler
+        ctl.refresh_load_budget_on_dispatch = False
+    
+        ctl.dispatching_with_trace(_req(rid="user_0", input_ids=[1, 2, 3]))
+        requests_after_user = ctl.dp_budget.total_requests.copy()
+        tokens_after_user = ctl.dp_budget.total_tokens.copy()
+        ctl.dispatching_with_trace(_req(rid="HEALTH_CHECK_0", input_ids=[0]))
+    
+>       self.assertEqual(ctl.dp_budget.total_requests, requests_after_user)
+E       AssertionError: Lists differ: [1, 1, 0] != [1, 0, 0]
+E       
+E       First differing element 1:
+E       1
+E       0
+E       
+E       - [1, 1, 0]
+E       ?     ^
+E       
+E       + [1, 0, 0]
+E       ?     ^
+
+/tmp/amdpilot-review-j-ea6b08828b8e/test_data_parallel_controller_candidate.py:244: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x703ce0a5a5c0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7045c75d2980>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestHealthCheckScheduler.test_health_does_not_change_total_tokens_budget
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/tmp/amdpilot-review-j-ea6b08828b8e/test_data_parallel_controller_candidate.py", line 244, in test_health_does_not_change_total_tokens_budget
+    self.assertEqual(ctl.dp_budget.total_requests, requests_after_user)
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1091, in assertListEqual
+    self.assertSequenceEqual(list1, list2, msg, seq_type=list)
+  File "/usr/lib/python3.12/unittest/case.py", line 1073, in assertSequenceEqual
+    self.fail(msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: Lists differ: [1, 1, 0] != [1, 0, 0]
+
+First differing element 1:
+1
+0
+
+- [1, 1, 0]
+?     ^
+
++ [1, 0, 0]
+?     ^
+
+_ TestHealthCheckScheduler.test_health_only_batch_does_not_refresh_user_budget _
+
+self = <test_data_parallel_controller_candidate.TestHealthCheckScheduler testMethod=test_health_only_batch_does_not_refresh_user_budget>
+
+    def test_health_only_batch_does_not_refresh_user_budget(self):
+        ctl = _make_controller(dp_size=2)
+        ctl.refresh_load_budget_on_dispatch = True
+        ctl.refresh_load_budget = MagicMock()
+    
+        health_req = _req(rid="HEALTH_CHECK_batch")
+        ctl.dispatch_batch_generate([health_req])
+>       ctl.refresh_load_budget.assert_not_called()
+
+/tmp/amdpilot-review-j-ea6b08828b8e/test_data_parallel_controller_candidate.py:263: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock id='123406771336880'>
+
+    def assert_not_called(self):
+        """assert that the mock was never called.
+        """
+        if self.call_count != 0:
+            msg = ("Expected '%s' to not have been called. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'mock' to not have been called. Called 1 times.
+E           Calls: [call()].
+
+/usr/lib/python3.12/unittest/mock.py:905: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x703ce0a32480>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7045c75d2980>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestHealthCheckScheduler.test_health_only_batch_does_not_refresh_user_budget
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/tmp/amdpilot-review-j-ea6b08828b8e/test_data_parallel_controller_candidate.py", line 263, in test_health_only_batch_does_not_refresh_user_budget
+    ctl.refresh_load_budget.assert_not_called()
+  File "/usr/lib/python3.12/unittest/mock.py", line 905, in assert_not_called
+    raise AssertionError(msg)
+AssertionError: Expected 'mock' to not have been called. Called 1 times.
+Calls: [call()].
+_ TestHealthCheckScheduler.test_health_preserves_follow_bootstrap_room_routing _
+
+self = <test_data_parallel_controller_candidate.TestHealthCheckScheduler testMethod=test_health_preserves_follow_bootstrap_room_routing>
+
+    def test_health_preserves_follow_bootstrap_room_routing(self):
+        ctl = _make_controller(dp_size=4)
+        ctl.load_balance_method = LoadBalanceMethod.FOLLOW_BOOTSTRAP_ROOM
+    
+        ctl.dispatching_with_trace(_req(rid="HEALTH_CHECK_pd", bootstrap_room=3))
+    
+>       ctl.workers[3].send_pyobj.assert_called_once()
+
+/tmp/amdpilot-review-j-ea6b08828b8e/test_data_parallel_controller_candidate.py:295: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock name='worker_3.send_pyobj' id='123406771345392'>
+
+    def assert_called_once(self):
+        """assert that the mock was called only once.
+        """
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to have been called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'send_pyobj' to have been called once. Called 0 times.
+
+/usr/lib/python3.12/unittest/mock.py:923: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x703ce0a59760>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7045c75d2980>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestHealthCheckScheduler.test_health_preserves_follow_bootstrap_room_routing
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/tmp/amdpilot-review-j-ea6b08828b8e/test_data_parallel_controller_candidate.py", line 295, in test_health_preserves_follow_bootstrap_room_routing
+    ctl.workers[3].send_pyobj.assert_called_once()
+  File "/usr/lib/python3.12/unittest/mock.py", line 923, in assert_called_once
+    raise AssertionError(msg)
+AssertionError: Expected 'send_pyobj' to have been called once. Called 0 times.
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../../tmp/amdpilot-review-j-ea6b08828b8e/test_data_parallel_controller_candidate.py::TestHealthCheckScheduler::test_health_and_user_round_robin_state_are_independent
+FAILED ../../tmp/amdpilot-review-j-ea6b08828b8e/test_data_parallel_controller_candidate.py::TestHealthCheckScheduler::test_health_does_not_change_total_requests_budget
+FAILED ../../tmp/amdpilot-review-j-ea6b08828b8e/test_data_parallel_controller_candidate.py::TestHealthCheckScheduler::test_health_does_not_change_total_tokens_budget
+FAILED ../../tmp/amdpilot-review-j-ea6b08828b8e/test_data_parallel_controller_candidate.py::TestHealthCheckScheduler::test_health_only_batch_does_not_refresh_user_budget
+FAILED ../../tmp/amdpilot-review-j-ea6b08828b8e/test_data_parallel_controller_candidate.py::TestHealthCheckScheduler::test_health_preserves_follow_bootstrap_room_routing
+5 failed, 23 passed, 16 warnings in 22.04s
