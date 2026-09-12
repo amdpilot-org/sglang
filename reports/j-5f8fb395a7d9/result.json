@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/29024",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Tokenized generate and embedding batch wrappers arrived at stamp_http_worker_ipc with rids=None. The existing code stamped only each child request, leaving wrapper rids and http_worker_ipcs unset. The fix derives missing wrapper rids from the child requests and stamps wrapper-level routes while preserving explicit rids. The actual current split-output path remains a BaseBatchReq and already routes through http_worker_ipcs, so no unsupported scalar http_worker_ipc field was added.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-5f8fb395a7d9/venv/bin/python -m pytest test/registered/unit/managers/test_multi_tokenizer_mixin.py -q (test-only patch, before implementation fix)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction against the checked-out stamp_http_worker_ipc implementation: generate and embedding tokenized batches retained rids=None and http_worker_ipcs=None; the empty-batch boundary also failed. Raw output: reports/j-5f8fb395a7d9/evidence/failing-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5f8fb395a7d9/venv/bin/python -m pytest test/registered/unit/managers/test_multi_tokenizer_mixin.py -q",
+      "exit_code": 0,
+      "what_was_measured": "9 tests and 2 subtests passed after the fix, covering generate and embedding tokenized batches, preservation of explicit wrapper rids, and an empty tokenized batch. Raw output: reports/j-5f8fb395a7d9/evidence/passing-after.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5f8fb395a7d9/venv/bin/python -m py_compile python/sglang/srt/managers/tokenizer_manager.py test/registered/unit/managers/test_multi_tokenizer_mixin.py",
+      "exit_code": 0,
+      "what_was_measured": "The changed implementation and regression test compile successfully."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5f8fb395a7d9/venv/bin/python -m pre_commit run --files python/sglang/srt/managers/tokenizer_manager.py test/registered/unit/managers/test_multi_tokenizer_mixin.py",
+      "exit_code": 0,
+      "what_was_measured": "All repository formatting, lint, safety, and registered-test validation hooks applicable to the changed files passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5f8fb395a7d9/venv/bin/python /tmp/amdpilot-repo-j-5f8fb395a7d9/fixture-tools/run_server_probe.py --fixture /tmp/amdpilot-repo-j-5f8fb395a7d9/tiny-random-llama --output /tmp/amdpilot-repo-j-5f8fb395a7d9/evidence/multi-tokenizer-batch-encode",
+      "exit_code": 0,
+      "what_was_measured": "A source-checkout server on one gfx950 GPU with --tokenizer-worker-num 2 and --enable-tokenizer-batch-encode became ready. A native two-item input_ids /generate batch returned HTTP 200 with two results and six completion tokens each. The server log records a two-sequence GPU prefill. Raw request/response, launch metadata, fixture manifest, and server log are retained under reports/j-5f8fb395a7d9/evidence/."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The GPU serving validation used the campaign-qualified deterministic two-layer random Llama fixture. It validates HTTP transport, multi-tokenizer routing, batch tokenization, and engine execution only; it does not validate semantic accuracy or another model architecture.",
+    "Only one assigned gfx950 GPU was used. No tensor-parallel, data-parallel, multi-GPU, or multi-node workload was claimed or tested.",
+    "No native C++ or FlyDSL source changed, so a native rebuild was not relevant.",
+    "The upstream proposed PR https://github.com/sgl-project/sglang/pull/27995 remains open. Its current approach is related; this change was independently reproduced and validated against the prepared mirror base."
+  ]
+}

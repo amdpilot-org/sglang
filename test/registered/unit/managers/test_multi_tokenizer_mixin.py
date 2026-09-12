@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 
 from sglang.srt.utils.weight_versions import WeightVersionSpan
 from sglang.test.ci.ci_register import register_cpu_ci
@@ -6,12 +7,17 @@ from sglang.test.test_utils import maybe_stub_sgl_kernel
 
 maybe_stub_sgl_kernel()
 
-from sglang.srt.managers.io_struct import BatchStrOutput
+from sglang.srt.managers.io_struct import (
+    BatchStrOutput,
+    BatchTokenizedEmbeddingReqInput,
+    BatchTokenizedGenerateReqInput,
+)
 from sglang.srt.managers.multi_tokenizer_mixin import (
     TokenizerWorker,
     _handle_output_by_index,
     get_tokenizer_worker_class,
 )
+from sglang.srt.managers.tokenizer_manager import stamp_http_worker_ipc
 
 register_cpu_ci(est_time=12, suite="base-a-test-cpu")
 
@@ -88,6 +94,51 @@ def _make_batch_str_output() -> BatchStrOutput:
 
 
 class TestMultiTokenizerMixin(unittest.TestCase):
+    def test_stamp_http_worker_ipc_populates_tokenized_batch_metadata(self):
+        for batch_cls in (
+            BatchTokenizedGenerateReqInput,
+            BatchTokenizedEmbeddingReqInput,
+        ):
+            with self.subTest(batch_cls=batch_cls):
+                batch_req = batch_cls(
+                    batch=[
+                        SimpleNamespace(rid="rid-0", http_worker_ipc=None),
+                        SimpleNamespace(rid="rid-1", http_worker_ipc=None),
+                    ]
+                )
+
+                stamp_http_worker_ipc(batch_req, "ipc://tokenizer-0")
+
+                self.assertEqual(batch_req.rids, ["rid-0", "rid-1"])
+                self.assertEqual(
+                    batch_req.http_worker_ipcs,
+                    ["ipc://tokenizer-0", "ipc://tokenizer-0"],
+                )
+                self.assertEqual(
+                    [item.http_worker_ipc for item in batch_req.batch],
+                    ["ipc://tokenizer-0", "ipc://tokenizer-0"],
+                )
+
+    def test_stamp_http_worker_ipc_preserves_explicit_batch_rids(self):
+        batch_req = BatchTokenizedGenerateReqInput(
+            rids=["wrapper-rid"],
+            batch=[SimpleNamespace(rid="item-rid", http_worker_ipc=None)],
+        )
+
+        stamp_http_worker_ipc(batch_req, "ipc://tokenizer-1")
+
+        self.assertEqual(batch_req.rids, ["wrapper-rid"])
+        self.assertEqual(batch_req.http_worker_ipcs, ["ipc://tokenizer-1"])
+        self.assertEqual(batch_req.batch[0].http_worker_ipc, "ipc://tokenizer-1")
+
+    def test_stamp_http_worker_ipc_handles_empty_tokenized_batch(self):
+        batch_req = BatchTokenizedGenerateReqInput(batch=[])
+
+        stamp_http_worker_ipc(batch_req, "ipc://tokenizer-2")
+
+        self.assertEqual(batch_req.rids, [])
+        self.assertEqual(batch_req.http_worker_ipcs, [])
+
     def test_batch_str_output_preserves_cached_tokens_details(self):
         output = _make_batch_str_output()
 
