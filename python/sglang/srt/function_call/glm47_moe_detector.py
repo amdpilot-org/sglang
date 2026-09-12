@@ -764,6 +764,26 @@ class Glm47MoeDetector(BaseFormatDetector):
                         current_text,
                     )
                     calls.extend(finalize_calls)
+
+                    # A single model delta may contain multiple complete tool
+                    # calls, including the final delta where no later parse
+                    # invocation is guaranteed. Drain complete calls already
+                    # left in the buffer, while preserving a partial suffix.
+                    if not getattr(self, "_draining_complete_calls", False):
+                        while (
+                            self.bot_token in self._buffer
+                            and self.eot_token in self._buffer
+                        ):
+                            buffer_before_drain = self._buffer
+                            self._draining_complete_calls = True
+                            try:
+                                drained = self.parse_streaming_increment("", tools)
+                            finally:
+                                self._draining_complete_calls = False
+                            normal_text += drained.normal_text
+                            calls.extend(drained.calls)
+                            if self._buffer == buffer_before_drain:
+                                break
                     return StreamingParseResult(normal_text=normal_text, calls=calls)
 
         except Exception as e:

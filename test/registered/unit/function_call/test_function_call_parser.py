@@ -3385,6 +3385,84 @@ class TestGlm47MoeDetector(unittest.TestCase):
             tool_calls[1]["parameters"], '{"city": "Shanghai", "date": "2024-06-28"}'
         )
 
+    def test_streaming_two_complete_no_arg_calls_in_one_increment(self):
+        tools = [
+            Tool(
+                type="function",
+                function=Function(
+                    name=name,
+                    description=name,
+                    parameters={"type": "object", "properties": {}},
+                ),
+            )
+            for name in ("first", "second")
+        ]
+        result = self.detector.parse_streaming_increment(
+            "<tool_call>first</tool_call><tool_call>second</tool_call>", tools
+        )
+
+        names = [(call.tool_index, call.name) for call in result.calls if call.name]
+        parameters = {
+            call.tool_index: call.parameters for call in result.calls if call.parameters
+        }
+        self.assertEqual(names, [(0, "first"), (1, "second")])
+        self.assertEqual(parameters, {0: "{}", 1: "{}"})
+        self.assertEqual(self.detector._buffer, "")
+
+    def test_streaming_two_complete_calls_with_args_in_one_increment(self):
+        source = (
+            "<tool_call>get_weather"
+            "<arg_key>city</arg_key><arg_value>Beijing</arg_value>"
+            "<arg_key>date</arg_key><arg_value>2024-06-27</arg_value>"
+            "</tool_call>"
+            "<tool_call>get_weather"
+            "<arg_key>city</arg_key><arg_value>Shanghai</arg_value>"
+            "<arg_key>date</arg_key><arg_value>2024-06-28</arg_value>"
+            "</tool_call>"
+        )
+        result = self.detector.parse_streaming_increment(source, self.tools)
+
+        calls = {}
+        for item in result.calls:
+            call = calls.setdefault(item.tool_index, {"name": None, "parameters": ""})
+            call["name"] = item.name or call["name"]
+            call["parameters"] += item.parameters
+        self.assertEqual(sorted(calls), [0, 1])
+        self.assertEqual(calls[0]["name"], "get_weather")
+        self.assertEqual(
+            json.loads(calls[0]["parameters"]),
+            {"city": "Beijing", "date": "2024-06-27"},
+        )
+        self.assertEqual(calls[1]["name"], "get_weather")
+        self.assertEqual(
+            json.loads(calls[1]["parameters"]),
+            {"city": "Shanghai", "date": "2024-06-28"},
+        )
+        self.assertEqual(self.detector._buffer, "")
+
+    def test_streaming_complete_call_followed_by_partial_call(self):
+        partial = "<tool_call>second<arg_key>value</arg_key>"
+        tools = [
+            Tool(
+                type="function",
+                function=Function(
+                    name=name,
+                    description=name,
+                    parameters={"type": "object", "properties": {}},
+                ),
+            )
+            for name in ("first", "second")
+        ]
+        result = self.detector.parse_streaming_increment(
+            "<tool_call>first</tool_call>" + partial, tools
+        )
+
+        self.assertEqual(
+            [(call.tool_index, call.name) for call in result.calls if call.name],
+            [(0, "first")],
+        )
+        self.assertEqual(self.detector._buffer, partial)
+
     def test_tool_call_id(self):
         """Test that the buffer and state are reset after a tool call is completed."""
         chunks = [
