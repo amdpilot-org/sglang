@@ -19,7 +19,7 @@ from sglang.srt.runtime_context import (
     process_model_config,
 )
 from sglang.srt.utils import get_bool_env_var, is_cuda, is_hip, is_musa, is_npu
-from sglang.srt.utils.common import ceil_div
+from sglang.srt.utils.common import ceil_align, ceil_div
 
 
 @lru_cache(maxsize=1)
@@ -189,6 +189,12 @@ def cal_padded_tokens(forward_batch: "ForwardBatch"):
         tokens = global_num_tokens[get_parallel().attn_dp_rank]
     else:
         tokens = global_num_tokens[0]
+    # Keep this in lockstep with ForwardBatch.prepare_mlp_sync_batch: the
+    # physical DP bucket is aligned before its per-rank/MAX_LEN size is chosen.
+    # DSA metadata is consumed row-wise by both the indexer and sparse attention,
+    # so leaving it at the unaligned semantic length makes those consumers see
+    # fewer rows than the query after attention-TP padding.
+    tokens = ceil_align(tokens, get_parallel().attn_tp_size)
     if can_dsa_prefill_cp_interleave(forward_batch):
         tokens = ceil_div(tokens, attn_cp_size)
     return tokens
