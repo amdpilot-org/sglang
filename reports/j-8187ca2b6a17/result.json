@@ -1,0 +1,51 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34442",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1641",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1605",
+  "candidate_commit": "684b9cf4091ef76471236cc035e257573e68d9a3",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the issue-specific construction failure: both MoonViT RowParallelLinear sites are sharded by attn_tp_size but retain global-TP reduction when DP attention is enabled. At the exact candidate commit, both sites select the attention-TP reducer. The candidate regression passes, the full Kimi-VL unit file passes, and an independent forward-path test proves both affected projections call the expected communicator in DP-enabled and DP-disabled modes.",
+  "tests": [
+    {
+      "command": "Temporarily install the candidate test file on base 358c163250ad3b1f62939b01ce1314a0a31a0365, then run /tmp/amdpilot-repo-j-8187ca2b6a17/venv/bin/python -m pytest -q 'test/registered/unit/models/test_kimi_vl.py::TestKimiVLEncoderParallelism::test_moonvit_reduction_group_matches_dp_attention'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction of the communicator-selection contract. The DP-enabled TP4/attention-TP2 subtest observed False instead of True; the DP-disabled boundary passed. Evidence: raw/base-candidate-regression.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8187ca2b6a17/venv/bin/python -m pytest -q 'test/registered/unit/models/test_kimi_vl.py::TestKimiVLEncoderParallelism::test_moonvit_reduction_group_matches_dp_attention' at candidate 684b9cf4091ef76471236cc035e257573e68d9a3",
+      "exit_code": 0,
+      "what_was_measured": "The candidate regression passed at the exact candidate commit. Evidence: raw/candidate-regression.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8187ca2b6a17/venv/bin/python -m pytest -q test/registered/unit/models/test_kimi_vl.py at candidate 684b9cf4091ef76471236cc035e257573e68d9a3",
+      "exit_code": 0,
+      "what_was_measured": "The complete Kimi-VL unit file passed: 5 tests and 2 subtests. Evidence: raw/candidate-full-kimi-test.log"
+    },
+    {
+      "command": "Independent Python adversarial forward-path harness at candidate 684b9cf4091ef76471236cc035e257573e68d9a3",
+      "exit_code": 0,
+      "what_was_measured": "Executed both real MoonViT RowParallelLinear forward paths with instrumented collectives. DP enabled: attention-TP calls=2, global-TP calls=0. DP disabled: attention-TP calls=0, global-TP calls=2. Evidence: raw/candidate-adversarial-forward-routing.log"
+    },
+    {
+      "command": "Prepared-interpreter import-path and version inspection at candidate 684b9cf4091ef76471236cc035e257573e68d9a3",
+      "exit_code": 0,
+      "what_was_measured": "SGLang, MoonViT, and RowParallelLinear imported from /job/repo/python; PyTorch was 2.11.0+rocm7.2 with HIP 7.2. Evidence: raw/candidate-import-paths.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned host exposes one AMD Instinct MI350X, gfx950. The original deadlock requires TP4/DP2 and the unavailable Kimi-VL weights. No unrelated single-GPU smoke was treated as original-issue proof. Evidence: raw/gpu-inventory.log"
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The original Kimi-VL TP4/DP2 HTTP serving deadlock was not reproduced end-to-end because only one GPU was assigned and Kimi-VL weights were unavailable.",
+    "The available architecture is AMD gfx950, not the NVIDIA H100 architecture in the original report.",
+    "The regression and independent harness verify construction and actual RowParallelLinear communicator dispatch, but cannot execute a real four-rank collective schedule on one GPU.",
+    "No model semantic-accuracy, full-model numerical, NVIDIA, or multi-node claim is made.",
+    "No native rebuild was needed because the candidate changes only Python and report files."
+  ]
+}
