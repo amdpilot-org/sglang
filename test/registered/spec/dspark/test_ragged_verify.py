@@ -97,6 +97,45 @@ class TestPaddedRaggedVerifyGeometry(CustomTestCase):
 
 
 class TestCaptureVerifyLens(CustomTestCase):
+    def test_capture_slots_follow_request_width_across_tiers(self):
+        from sglang.srt.speculative.ragged_verify import capture_num_slots
+
+        for num_tokens, expected in [(6, 1), (12, 2), (24, 4), (42, 7), (48, 8)]:
+            with self.subTest(num_tokens=num_tokens):
+                self.assertEqual(
+                    capture_num_slots(num_tokens=num_tokens, request_width=6, max_bs=8),
+                    expected,
+                )
+
+    def test_capture_slots_keep_partial_last_request(self):
+        from sglang.srt.speculative.ragged_verify import (
+            build_capture_verify_lens,
+            capture_num_slots,
+        )
+
+        expected = {
+            41: [6, 6, 6, 6, 6, 6, 5],
+            43: [6, 6, 6, 5, 5, 5, 5, 5],
+            47: [6, 6, 6, 6, 6, 6, 6, 5],
+        }
+        for num_tokens, expected_lens in expected.items():
+            with self.subTest(num_tokens=num_tokens):
+                num_slots = capture_num_slots(
+                    num_tokens=num_tokens, request_width=6, max_bs=8
+                )
+                self.assertEqual(
+                    build_capture_verify_lens(
+                        num_tokens=num_tokens,
+                        num_slots=num_slots,
+                        num_draft_tokens=6,
+                    ),
+                    expected_lens,
+                )
+                # These tiers are intentionally compact-ragged. Consumers such as
+                # Engram must use the per-request layout rather than assume six
+                # tokens for every request.
+                self.assertNotEqual(num_tokens, num_slots * 6)
+
     def test_small_tier_one_token_rows(self):
         from sglang.srt.speculative.ragged_verify import build_capture_verify_lens
 
