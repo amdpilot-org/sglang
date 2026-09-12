@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38129",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced stale per-request NGRAM misses after corpus insertion in BFS and PROB, then independently verified the narrow candidate from 1sgtpepper/sglang:fix/ngram-cached-miss at commit 17b2508. A trie growth generation rebuilds states containing cached misses after new edges are inserted while preserving valid live anchors.",
+  "tests": [
+    {
+      "command": "SGLANG_USE_CPU_ENGINE=1 /tmp/amdpilot-repo-j-54c3ab6ab28d/venv/bin/python - <<'PY' ... exact issue reproducer ... PY",
+      "exit_code": 1,
+      "what_was_measured": "Before the fix, cached requests returned [30, 70, 80, 90] while fresh and erased-state controls returned [30, 40, 50, 60] in both BFS and PROB. Raw output: reports/j-54c3ab6ab28d/raw/original_reproducer.txt"
+    },
+    {
+      "command": "SGLANG_USE_CPU_ENGINE=1 SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-54c3ab6ab28d/jit-cache /tmp/amdpilot-repo-j-54c3ab6ab28d/venv/bin/python - <<'PY' ... exact issue reproducer ... PY",
+      "exit_code": 0,
+      "what_was_measured": "Against the rebuilt modified JIT library, cached, fresh, and erased-state requests all returned [30, 40, 50, 60] in both BFS and PROB. Raw output: reports/j-54c3ab6ab28d/raw/fixed_original_reproducer.txt"
+    },
+    {
+      "command": "SGLANG_USE_CPU_ENGINE=1 SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-54c3ab6ab28d/jit-cache /tmp/amdpilot-repo-j-54c3ab6ab28d/venv/bin/python -m pytest -q test/registered/unit/spec/test_ngram_corpus.py -k 'cached_miss_becomes_match_after_insert or leaf_anchor_becomes_expandable or incremental_matches_stateless or stale_state_rebuilds_after_eviction'",
+      "exit_code": 0,
+      "what_was_measured": "The issue regression passed for BFS and PROB across empty/partial initial corpora and zero/one/two appended tokens; independent leaf-extension, normal incremental, and eviction boundaries also passed (5 tests, 12 subtests)."
+    },
+    {
+      "command": "SGLANG_USE_CPU_ENGINE=1 SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-54c3ab6ab28d/jit-cache /tmp/amdpilot-repo-j-54c3ab6ab28d/venv/bin/python -m pytest -q test/registered/unit/spec/test_ngram_corpus.py",
+      "exit_code": 0,
+      "what_was_measured": "Complete NGRAM corpus unit coverage passed: 43 tests and 12 subtests. Raw output: reports/j-54c3ab6ab28d/raw/full_ngram_corpus_tests.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reported NgramCorpus failure is a CPU-only native data-structure path and the supplied reproducer requires no GPU. No GPU kernel or model was executed; gfx950 appears only as the prepared JIT cache target directory."
+  },
+  "native_rebuilt": {
+    "value": true,
+    "evidence": "The final modified ngram_corpus C++ sources were JIT-compiled to /tmp/amdpilot-repo-j-54c3ab6ab28d/jit-cache/gfx950/sgl_kernel_jit_ngram_corpus/build-8825ebe152d79ec6/deps-b00fe0722a1007f5/sgl_kernel_jit_ngram_corpus.so; artifact timestamps are retained in reports/j-54c3ab6ab28d/raw/native_artifacts.txt."
+  },
+  "remaining_limitations": [
+    "No model-serving, semantic-accuracy, or distributed-workload claim is made because the issue is isolated to the CPU NGRAM corpus implementation.",
+    "No GPU execution was performed because it is not part of the reported code path."
+  ]
+}
