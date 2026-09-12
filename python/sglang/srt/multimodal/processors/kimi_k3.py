@@ -737,6 +737,7 @@ class KimiK3ImageProcessor(
         artifacts = await self.prepare_media_artifacts(
             image_data,
             content_hashes=request_obj.mm_content_hashes,
+            cache_ids=getattr(request_obj, "mm_cache_ids", None),
         )
         return self.compose_request(input_text, artifacts)
 
