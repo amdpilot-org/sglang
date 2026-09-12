@@ -1,0 +1,97 @@
+F....                                                                    [100%]
+=================================== FAILURES ===================================
+__________________ test_request_rate_offline_matches_blocking __________________
+
+tmp_path = PosixPath('/tmp/pytest-of-qinwu/pytest-0/test_request_rate_offline_matc0')
+
+    def test_request_rate_offline_matches_blocking(tmp_path):
+>       offline_metrics, offline_requests = _run_mode("offline", tmp_path)
+                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tools/sglang-simulator/test/test_simulation_offline_blocking.py:55: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tools/sglang-simulator/test/test_simulation_offline_blocking.py:36: in _run_mode
+    runner = SGLangServingRunner(SIM_CONFIGS["aic_sol"], case_dir, mode=mode)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <test_simulation_sglang_serving.SGLangServingRunner object at 0x7fa42e9ba720>
+config_path = PosixPath('/job/repo/tools/sglang-simulator/examples/sim_configs/aic_sol.json')
+tmp_path = PosixPath('/tmp/pytest-of-qinwu/pytest-0/test_request_rate_offline_matc0/offline')
+mode = 'offline'
+
+    def __init__(self, config_path: Path, tmp_path: Path, mode: str = "offline"):
+        self.mode = mode
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            self.port = sock.getsockname()[1]
+    
+        self.output_dir = tmp_path / "output"
+        env = os.environ.copy()
+        env.update(
+            CUDA_VISIBLE_DEVICES="",
+            SGLANG_USE_CPU_ENGINE="1",
+            SGLANG_SIMULATOR_CONFIG_PATH=str(config_path),
+            SGLANG_SIMULATOR_OUTPUT_MODE=mode.upper(),
+            SGLANG_SIMULATOR_OUTPUT_DIR=str(self.output_dir),
+        )
+        cmd = [
+            sys.executable,
+            "-m",
+            "sglang_simulator.simulation.sglang.launch_server",
+            "--model-path",
+            str(ASSETS / "qwen3-8b"),
+            "--sim-config-path",
+            str(config_path),
+            "--port",
+            str(self.port),
+            "--tokenizer-path",
+            str(EXAMPLES / "assets" / "tokenizer"),
+            "--max-total-tokens",
+            "8192",
+            "--max-running-requests",
+            "8",
+            "--disable-overlap-schedule",
+        ]
+        self.server_proc = subprocess.Popen(cmd, env=env, preexec_fn=os.setsid)
+        for _ in range(120):
+            if self.server_proc.poll() is not None:
+>               raise RuntimeError("SGLang Simulator server exited during startup")
+E               RuntimeError: SGLang Simulator server exited during startup
+
+tools/sglang-simulator/test/test_simulation_sglang_serving.py:62: RuntimeError
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/job/repo/tools/sglang-simulator/src/sglang_simulator/simulation/sglang/launch_server.py", line 75, in <module>
+    validate_launch_runtime()
+  File "/job/repo/tools/sglang-simulator/src/sglang_simulator/compat.py", line 71, in validate_launch_runtime
+    from sglang.srt.entrypoints.http_server import launch_server
+  File "/job/repo/python/sglang/srt/entrypoints/http_server.py", line 69, in <module>
+    from sglang.srt.disaggregation.utils import FAKE_BOOTSTRAP_HOST, DisaggregationMode
+  File "/job/repo/python/sglang/srt/disaggregation/utils.py", line 22, in <module>
+    from sglang.srt.configs.model_config import get_dsa_mtp_topk_width, is_deepseek_dsa
+  File "/job/repo/python/sglang/srt/configs/model_config.py", line 32, in <module>
+    from sglang.srt.layers.quantization import QUANTIZATION_METHODS
+  File "/job/repo/python/sglang/srt/layers/quantization/__init__.py", line 8, in <module>
+    from sglang.srt.layers.quantization.auto_round import AutoRoundConfig
+  File "/job/repo/python/sglang/srt/layers/quantization/auto_round.py", line 12, in <module>
+    from sglang.srt.layers.quantization.utils import get_scalar_types
+  File "/job/repo/python/sglang/srt/layers/quantization/utils.py", line 15, in <module>
+    from sglang.kernels.ops.quantization.fp8_kernel import scaled_fp8_quant
+  File "/job/repo/python/sglang/kernels/ops/quantization/fp8_kernel.py", line 49, in <module>
+    _is_gfx1250 = is_gfx1250_supported()
+                  ^^^^^^^^^^^^^^^^^^^^^^
+  File "/job/repo/python/sglang/srt/utils/common.py", line 1070, in is_gfx1250_supported
+    gcn_arch = torch.cuda.get_device_properties(0).gcnArchName
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py", line 686, in get_device_properties
+    _lazy_init()  # will define _get_device_properties
+    ^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py", line 478, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+=========================== short test summary info ============================
+FAILED tools/sglang-simulator/test/test_simulation_offline_blocking.py::test_request_rate_offline_matches_blocking
+1 failed, 4 passed in 6.96s
