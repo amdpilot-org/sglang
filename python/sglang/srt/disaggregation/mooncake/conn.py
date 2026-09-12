@@ -1343,6 +1343,7 @@ class MooncakeKVManager(StagingManagerMixin, CommonKVManager):
             StateType.SWA,
             StateType.DSA,
             StateType.SWA_RING,
+            StateType.DSV4_C2_STATE,
             StateType.DSV4_REQUEST_STATE,
             StateType.BLOCK_SCALE,
             StateType.BLOCK_SCALE_SWA,
@@ -1350,7 +1351,11 @@ class MooncakeKVManager(StagingManagerMixin, CommonKVManager):
 
     def _requires_exact_state_index_match(self, st: StateType) -> bool:
         """State types whose page lists are positional and must not be truncated."""
-        return st in (StateType.SWA_RING, StateType.DSV4_REQUEST_STATE)
+        return st in (
+            StateType.SWA_RING,
+            StateType.DSV4_C2_STATE,
+            StateType.DSV4_REQUEST_STATE,
+        )
 
     def maybe_send_extra(
         self,
