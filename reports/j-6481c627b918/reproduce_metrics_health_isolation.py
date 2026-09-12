@@ -15,9 +15,13 @@ from sglang.srt.utils.common import add_prometheus_middleware
 class SlowMetricsProcess:
     returncode = 0
 
-    async def communicate(self):
+    async def communicate(self, input=None):
         await asyncio.sleep(0.35)
-        return b"sglang_test_metric 1\n", b""
+        return (
+            b'{"status": 200, "headers": [["Content-Type", "text/plain"]]}'
+            b"\nsglang_test_metric 1\n",
+            b"",
+        )
 
     def kill(self):
         pass

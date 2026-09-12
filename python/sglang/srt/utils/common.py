@@ -2615,6 +2615,7 @@ def set_prometheus_multiproc_dir():
 
 _PROMETHEUS_GENERATION_TIMEOUT_SECONDS = 8.0
 _PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
+_PROMETHEUS_ERROR_HEADERS = [("Content-Type", _PROMETHEUS_CONTENT_TYPE)]
 
 
 class _PrometheusMetricsExporter:
@@ -2625,32 +2626,52 @@ class _PrometheusMetricsExporter:
         self._timeout_seconds = timeout_seconds
         self._generation_lock = asyncio.Lock()
 
-    async def generate(self) -> Tuple[int, bytes]:
+    async def generate(
+        self, query_string: str = "", accept: str = "", accept_encoding: str = ""
+    ) -> Tuple[int, List[Tuple[str, str]], bytes]:
         # A backlog defeats the isolation: once the active collection completes,
         # queued scrapes would immediately start more expensive collections.
         if self._generation_lock.locked():
-            return 503, b"Prometheus metrics collection already in progress\n"
+            return (
+                503,
+                _PROMETHEUS_ERROR_HEADERS,
+                b"Prometheus metrics collection already in progress\n",
+            )
 
         async with self._generation_lock:
             env = os.environ.copy()
             env["PROMETHEUS_MULTIPROC_DIR"] = self._multiproc_dir
             script = (
-                "from prometheus_client import CollectorRegistry, multiprocess;"
-                "from prometheus_client.exposition import generate_latest;"
+                "import json,sys;from urllib.parse import parse_qs;"
+                "from prometheus_client import CollectorRegistry,multiprocess;"
+                "from prometheus_client.exposition import _bake_output;"
+                "p=json.loads(sys.stdin.buffer.read());"
                 "r=CollectorRegistry();multiprocess.MultiProcessCollector(r);"
-                "import sys;sys.stdout.buffer.write(generate_latest(r))"
+                "s,h,o=_bake_output(r,p['accept'],p['accept_encoding'],"
+                "parse_qs(p['query_string']),False);"
+                "m=json.dumps({'status':int(s.split()[0]),'headers':h}).encode();"
+                "sys.stdout.buffer.write(m+b'\\n'+o)"
             )
+            request_data = json.dumps(
+                {
+                    "query_string": query_string,
+                    "accept": accept,
+                    "accept_encoding": accept_encoding,
+                }
+            ).encode()
             process = await asyncio.create_subprocess_exec(
                 sys.executable,
                 "-c",
                 script,
                 env=env,
+                stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             try:
                 stdout, stderr = await asyncio.wait_for(
-                    process.communicate(), timeout=self._timeout_seconds
+                    process.communicate(input=request_data),
+                    timeout=self._timeout_seconds,
                 )
             except asyncio.TimeoutError:
                 process.kill()
@@ -2659,7 +2680,11 @@ class _PrometheusMetricsExporter:
                     "Prometheus metrics collection exceeded %.1f seconds",
                     self._timeout_seconds,
                 )
-                return 504, b"Prometheus metrics collection timed out\n"
+                return (
+                    504,
+                    _PROMETHEUS_ERROR_HEADERS,
+                    b"Prometheus metrics collection timed out\n",
+                )
             except asyncio.CancelledError:
                 process.kill()
                 await asyncio.shield(process.communicate())
@@ -2670,8 +2695,30 @@ class _PrometheusMetricsExporter:
                     "Prometheus metrics collection failed: %s",
                     stderr.decode("utf-8", errors="replace").strip(),
                 )
-                return 500, b"Prometheus metrics collection failed\n"
-            return 200, stdout
+                return (
+                    500,
+                    _PROMETHEUS_ERROR_HEADERS,
+                    b"Prometheus metrics collection failed\n",
+                )
+
+            metadata_bytes, separator, content = stdout.partition(b"\n")
+            if not separator:
+                logger.warning("Prometheus metrics collection returned invalid output")
+                return (
+                    500,
+                    _PROMETHEUS_ERROR_HEADERS,
+                    b"Prometheus metrics collection failed\n",
+                )
+            try:
+                metadata = json.loads(metadata_bytes)
+                return metadata["status"], metadata["headers"], content
+            except (JSONDecodeError, KeyError, TypeError, ValueError):
+                logger.warning("Prometheus metrics collection returned invalid metadata")
+                return (
+                    500,
+                    _PROMETHEUS_ERROR_HEADERS,
+                    b"Prometheus metrics collection failed\n",
+                )
 
 
 def add_prometheus_middleware(app):
@@ -2686,11 +2733,15 @@ def add_prometheus_middleware(app):
     )
 
     async def metrics_endpoint(request):
-        status_code, content = await exporter.generate()
+        status_code, headers, content = await exporter.generate(
+            query_string=request.url.query,
+            accept=request.headers.get("accept", ""),
+            accept_encoding=request.headers.get("accept-encoding", ""),
+        )
         return Response(
             content=content,
             status_code=status_code,
-            headers={"Content-Type": _PROMETHEUS_CONTENT_TYPE},
+            headers=dict(headers),
         )
 
     app.routes.append(Route("/metrics", metrics_endpoint, methods=["GET"]))
