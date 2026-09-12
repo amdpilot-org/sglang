@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35201",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the exact 1.421875 GiB issue-shape allocation arithmetic and confirmed that the base DSV4 paged and nonpaged paths had no logits budget. Adopted the current upstream candidate that chunks both paths by query rows under the shared DSA free-memory budget, then fixed its low-budget boundary so the chosen chunk never has an artificial 128-row floor above the budget.",
+  "tests": [
+    {
+      "command": "prepared-Python source assertion against base commit 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before evidence: 4096 * align(92992, 256) * 4 = 1526726656 bytes (1.421875 GiB), with a single full-row paged dispatch and no DSV4 budget/chunk helper or nonpaged chunk field."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f5c1bba2a455/venv/bin/python -m pytest -q test/registered/unit/layers/test_dsv4_indexer_chunk.py test/registered/unit/layers/test_dsv4_nonpaged_indexer.py test/registered/unit/layers/attention/test_dsa_mqa_logits_chunking.py",
+      "exit_code": 0,
+      "what_was_measured": "21 tests and 25 subtests passed: issue-shape budget arithmetic, paged schedule/top-k chunk alignment, nonpaged row chunking, shared DSA behavior, below-one-row budget, exact-fit, and one-row-over boundary cases."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 prepared-Python deterministic GPU top-k equivalence fixture",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X gfx950, chunk sizes 1, 7, 16, and 36 produced exactly the same selected page indices as the unchunked 37x4096 fp32 logits transform."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X (gfx950:sramecc+:xnack-) executed the deterministic chunked-vs-unchunked top-k numerical comparison with exact equality; see gpu-validation.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 weights were unavailable, so no full-model or 800K-token HTTP serving reproduction was run.",
+    "The assigned environment has one gfx950 AMD GPU, not the reported 4xH100 TP4 system; CUDA DeepGEMM and multi-rank behavior remain unverified locally.",
+    "The GPU fixture validates row-wise top-k equivalence, not model semantic accuracy or the actual H100 allocation failure.",
+    "No native C++ source changed, so no native rebuild was applicable."
+  ]
+}
