@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31766",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 2245's bounded LRU and paired ZMQ socket cleanup, reproduced review PR 2328's RLIMIT_NOFILE=128 failure against exact candidate commit 368fafdf463b9f208433d3254d7f3e1b42180a74, and corrected the unset cache default to derive a conservative cap from current descriptor headroom.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-fcb51a80e931/venv/bin/python -m pytest -vv -s test/registered/unit/disaggregation/test_common_kv_manager_socket_cache.py -k low_process_fd_limit (candidate 368fafdf463b9f208433d3254d7f3e1b42180a74 plus new regression)",
+      "exit_code": 1,
+      "what_was_measured": "A fresh subprocess set its own soft RLIMIT_NOFILE to 128, left SGLANG_DISAGGREGATION_ZMQ_SOCKET_CACHE_SIZE unset, and exercised real CommonKVManager._connect; candidate monitor socket creation raised zmq.error.ZMQError: Too many open files."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fcb51a80e931/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_common_kv_manager_socket_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "8 tests passed, including the same RLIMIT_NOFILE=128 subprocess completing 1,000 unique real PyZMQ endpoints with a derived/cache occupancy of 21 and 76 final open FDs, plus deterministic low/high limit boundary cases."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fcb51a80e931/venv/bin/python -m pytest -q test/registered/unit/disaggregation test/registered/unit/test_environ.py",
+      "exit_code": 0,
+      "what_was_measured": "379 tests and 47 subtests passed across the registered disaggregation and environment suites."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/environ.py python/sglang/srt/disaggregation/common/conn.py test/registered/unit/disaggregation/test_common_kv_manager_socket_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "All repository checks passed after ruff-format's one mechanical test-file reformat was applied."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reporter's 16x NVIDIA H800 full-model and multi-node serving workload and weights were unavailable; the actual host-side CommonKVManager/PyZMQ path was reproduced instead.",
+    "The assigned single gfx950 GPU was not executed because no GPU kernel participates in this descriptor lifecycle.",
+    "No native source changed and repository-environment.json reports native as null, so no native rebuild was applicable.",
+    "The derived default is sampled at manager initialization; an explicitly oversized SGLANG_DISAGGREGATION_ZMQ_SOCKET_CACHE_SIZE remains an operator override and can exceed the FD budget."
+  ]
+}
