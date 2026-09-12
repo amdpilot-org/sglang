@@ -1,0 +1,27 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33846",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source already contains the reporter-confirmed fix from upstream PR 32219: KDAAttnBackend opts out of the unnecessary per-step CPU seq_lens mirror. Added focused regression coverage for the exact KDA/DSPARK scheduler contract and independent forced-host-mirror boundaries. The old True behavior fails the regression; the prepared False behavior passes.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-17025c2d8ab2/venv/bin/python -m pytest -q test/registered/unit/managers/test_kda_cpu_seq_lens.py",
+      "exit_code": 0,
+      "what_was_measured": "Four scheduler-contract cases passed: KDA with DSPARK avoids the CPU seq_lens mirror; a host-consuming sibling, TBO, and ngram still force it; unset backend slots do not force it."
+    },
+    {
+      "command": "temporary negative control: set KDAAttnBackend.needs_cpu_seq_lens=True, then run test_kda_cpu_seq_lens.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before evidence: the restored pre-fix behavior failed the KDA/DSPARK and unset-slot regression cases. The temporary source edit was reverted."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-17025c2d8ab2/venv/bin/python -m pytest -q test/registered/attention/unittests/kda/test_triton.py::TestTritonKDABackendCorrectness::test_projected_kda_attention_cases",
+      "exit_code": 0,
+      "what_was_measured": "One MI355X/gfx950 executed the production KDA Triton path; 10 subtests passed numerical comparison with the independent pure-PyTorch recurrence, including single-request extend and bsz=1 decode boundaries."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-17025c2d8ab2/raw/gpu_environment.txt identifies AMD Instinct MI355X, GFX Version gfx950; reports/j-17025c2d8ab2/raw/test_kda_triton_gfx950.txt records 10 passing KDA subtests.",
+  "native_rebuilt": false,
+  "remaining_limitations": "The original 8xMI350X TP8 Kimi-K3 MXFP4 DSPARK serving workload and weights were unavailable. A single-GPU deterministic KDA fixture cannot reproduce or qualify the reported nondeterministic full-model hang. Original-scale resolution evidence comes from the issue reporter's ten c=1 rounds with the isolated fix."
+}
