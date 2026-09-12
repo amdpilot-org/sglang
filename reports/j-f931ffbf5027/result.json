@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33713",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Current main retained a committed Full+MAMBA node as a discoverable host leaf after device eviction and restored both components through real D2H/H2D fixture transfers. Added a focused regression for host LRU, locks, accounting, numerical restoration, and absent/incomplete host-state negatives. The original TP4 hybrid-KDA deployment was not available.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-f931ffbf5027/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py::Test_FULL_MAMBA_ps1::test_hicache_evict_to_host test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py::Test_FULL_MAMBA_ps1::test_hicache_evict_to_host_updates_aux_lru test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py::Test_FULL_MAMBA_ps1::test_hicache_load_back_restores_data test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py::Test_FULL_MAMBA_ps1::test_hicache_mamba_host_best_match_keeps_device_anchor -s",
+      "exit_code": 0,
+      "what_was_measured": "Baseline behavior on the prepared implementation: backed-up leaf demotion, MAMBA host-LRU movement, host-prefix discovery, and exact Full+MAMBA restoration through real cache-controller transfers; 4 passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-f931ffbf5027/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py::Test_FULL_MAMBA_ps1::test_hicache_mamba_committed_host_leaf_contract test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py::Test_FULL_MAMBA_ps1::test_hicache_mamba_missing_host_state_does_not_claim_aux_load_back test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py::Test_FULL_MAMBA_ps1::test_hicache_mamba_only_host_state_is_pruned_on_device_eviction -s",
+      "exit_code": 0,
+      "what_was_measured": "Focused contract: committed dual host state survives device eviction, remains discoverable, obeys host LRU/locking/accounting, and numerically restores Full KV plus MAMBA temporal/conv state. Negative cases verify no fabricated MAMBA load-back and pruning of MAMBA-only incomplete state; 3 passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-f931ffbf5027/venv/bin/python - <<'PY' ... GPU and CPU matmul reference ... PY",
+      "exit_code": 0,
+      "what_was_measured": "ROCm device identity and an independent numerical reference: AMD Instinct MI350X GPU float32 matrix multiplication exactly equaled the CPU result."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f931ffbf5027/venv/bin/python -m ruff check test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py",
+      "exit_code": 1,
+      "what_was_measured": "Formatting tool availability only; the prepared interpreter does not contain the ruff module. git diff --check passed separately."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Raw logs identify AMD Instinct MI350X/gfx950. Full KV and MAMBA temporal/convolution buffers were seeded on GPU, transferred D2H, evicted, transferred H2D, and compared exactly with pre-eviction CPU snapshots. raw/gpu_numerical_reference.txt also records an exact GPU-vs-CPU matmul comparison.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Ling-3.0-flash or other hybrid-KDA model weights were provided.",
+    "Only one assigned GPU was exposed, so the reported TP4 serving workload was not reproduced.",
+    "The small unified-cache fixture validates component state and real transfer behavior, not distributed serving, model semantics, or the full deployment.",
+    "The upstream issue remains open; current main appears to contain broader unified-cache behavior that covers the reported contract, but the exact introducing fix was not identifiable from the prepared shallow/grafted checkout.",
+    "No native code changed; native rebuild was not applicable."
+  ]
+}

@@ -5529,6 +5529,131 @@ class UnifiedRadixCacheSuite:
                 self.assertTrue(cache.tree_core.is_node_in_host_lru(node, aux))
         cache.sanity_check()
 
+    def test_hicache_mamba_committed_host_leaf_contract(self):
+        """Committed Full+Mamba host state survives D eviction and loads back.
+
+        This is the focused regression for #33713: exercise the real D2H/H2D
+        controller copies, then check tree discovery, both LRUs, host locking,
+        component accounting, and the restored numerical payloads.
+        """
+        if not self.cfg.has_mamba or self.cfg.has_swa or self.cfg.page_size != 1:
+            self.skipTest("requires page_size=1 Full+Mamba")
+        cache, allocator, req_to_token_pool = self._build_hicache_fixture()
+        seq = self._make_seq(33713, 2)
+        self._insert(cache, allocator, req_to_token_pool, seq)
+
+        match = cache.match_prefix(MatchPrefixParams(key=RadixKey(array("q", seq))))
+        node = match.last_device_node
+        full_device = match.device_indices.clone()
+        mamba_device = _device_value(cache, node, ComponentType.MAMBA).clone()
+        self._fill_full_kv(allocator, full_device, marker=31)
+        self._fill_mamba_state(req_to_token_pool, mamba_device, marker=41)
+        expected_k, expected_v = self._snapshot_full_kv(allocator, full_device)
+        expected_temporal, expected_conv = self._snapshot_mamba_state(
+            req_to_token_pool, mamba_device
+        )
+
+        self._backup_node(cache, node)
+        self.assertIsNotNone(_host_value(cache, node, ComponentType.FULL))
+        self.assertIsNotNone(_host_value(cache, node, ComponentType.MAMBA))
+
+        full_before = cache.tree_core.component_evictable_size(ComponentType.FULL)
+        mamba_before = cache.tree_core.component_evictable_size(ComponentType.MAMBA)
+        result = cache.evict(EvictParams(num_tokens=len(seq)))
+        self.assertGreaterEqual(result.num_tokens_evicted, len(seq))
+        self.assertTrue(cache.tree_core.contains_node(node))
+        self.assertTrue(cache.tree_core.is_host_evictable_leaf(node))
+        self.assertFalse(
+            cache.tree_core.is_node_in_device_lru(node, ComponentType.MAMBA)
+        )
+        self.assertTrue(
+            cache.tree_core.is_node_in_host_lru(node, ComponentType.MAMBA)
+        )
+        self.assertLess(
+            cache.tree_core.component_evictable_size(ComponentType.FULL), full_before
+        )
+        self.assertLess(
+            cache.tree_core.component_evictable_size(ComponentType.MAMBA), mamba_before
+        )
+
+        host_lock = cache.inc_host_lock_ref(node)
+        self.assertFalse(cache.tree_core.is_host_evictable_leaf(node))
+        cache.dec_host_lock_ref(node, host_lock.to_dec_params())
+        self.assertTrue(cache.tree_core.is_host_evictable_leaf(node))
+
+        match = cache.match_prefix(MatchPrefixParams(key=RadixKey(array("q", seq))))
+        self.assertEqual(match.last_host_node, node)
+        self.assertEqual(match.host_hit_length, len(seq))
+        self.assertEqual(len(match.device_indices), 0)
+
+        self._load_back_node(cache, node)
+        loaded = cache.match_prefix(
+            MatchPrefixParams(key=RadixKey(array("q", seq)))
+        ).device_indices
+        loaded_k, loaded_v = self._snapshot_full_kv(allocator, loaded)
+        loaded_temporal, loaded_conv = self._snapshot_mamba_state(
+            req_to_token_pool,
+            _device_value(cache, node, ComponentType.MAMBA),
+        )
+        self.assertTrue(torch.equal(loaded_k, expected_k))
+        self.assertTrue(torch.equal(loaded_v, expected_v))
+        self.assertTrue(torch.equal(loaded_temporal, expected_temporal))
+        for actual, expected in zip(loaded_conv, expected_conv):
+            self.assertTrue(torch.equal(actual, expected))
+        cache.sanity_check()
+
+    def test_hicache_mamba_missing_host_state_does_not_claim_aux_load_back(self):
+        """A Full-only host copy stays discoverable but cannot invent Mamba state."""
+        if not self.cfg.has_mamba or self.cfg.has_swa or self.cfg.page_size != 1:
+            self.skipTest("requires page_size=1 Full+Mamba")
+        cache, allocator, req_to_token_pool = self._build_hicache_fixture()
+        seq = self._make_seq(33714, 2)
+        self._insert(cache, allocator, req_to_token_pool, seq)
+        node = cache.match_prefix(
+            MatchPrefixParams(key=RadixKey(array("q", seq)))
+        ).last_device_node
+        self._backup_node(cache, node)
+
+        removed = cache.tree_core.evict_component(
+            node, ComponentType.MAMBA, EvictLayer.HOST
+        )
+        cache._free_values(removed.device_frees, removed.host_frees)
+        self.assertIsNone(_host_value(cache, node, ComponentType.MAMBA))
+        cache.evict(EvictParams(num_tokens=len(seq)))
+
+        self.assertTrue(cache.tree_core.contains_node(node))
+        self.assertTrue(cache.tree_core.is_host_evictable_leaf(node))
+        kv_xfer, comp_xfers = cache.tree_core.build_load_back_spec(node)
+        self.assertGreater(kv_xfer.host_indices.numel(), 0)
+        self.assertNotIn(ComponentType.MAMBA, comp_xfers)
+        cache.sanity_check()
+
+    def test_hicache_mamba_only_host_state_is_pruned_on_device_eviction(self):
+        """Mamba host state without the Full anchor is incomplete and not matchable."""
+        if not self.cfg.has_mamba or self.cfg.has_swa or self.cfg.page_size != 1:
+            self.skipTest("requires page_size=1 Full+Mamba")
+        cache, allocator, req_to_token_pool = self._build_hicache_fixture()
+        seq = self._make_seq(33715, 2)
+        self._insert(cache, allocator, req_to_token_pool, seq)
+        node = cache.match_prefix(
+            MatchPrefixParams(key=RadixKey(array("q", seq)))
+        ).last_device_node
+        self._backup_node(cache, node)
+
+        removed = cache.tree_core.evict_component(
+            node, ComponentType.FULL, EvictLayer.HOST
+        )
+        cache._free_values(removed.device_frees, removed.host_frees)
+        self.assertIsNone(_host_value(cache, node, ComponentType.FULL))
+        self.assertIsNotNone(_host_value(cache, node, ComponentType.MAMBA))
+        cache.evict(EvictParams(num_tokens=len(seq)))
+
+        self.assertFalse(cache.tree_core.contains_node(node))
+        match = cache.match_prefix(MatchPrefixParams(key=RadixKey(array("q", seq))))
+        self.assertEqual(len(match.device_indices), 0)
+        self.assertEqual(match.host_hit_length, 0)
+        cache.sanity_check()
+
     def _build_chain_pages(self, cache, allocator, req_to_token_pool, num_pages):
         """Insert an incremental chain of single-page extensions.
 
