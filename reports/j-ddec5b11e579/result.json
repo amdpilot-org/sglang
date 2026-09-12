@@ -1,0 +1,56 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33454",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1991",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1959",
+  "candidate_commit": "be7ba1b5424e57410b0af3e04d7bf3305970a897",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "request_changes",
+  "fully_resolves_original": true,
+  "summary": "The candidate fixes the DSpark context/generation-boundary planner contract in source and passed focused plus independent CPU/GPU boundary cases. Changes are requested because its new registered test violates repository path taxonomy and the candidate report incorrectly claims the registration validator passed.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ddec5b11e579/venv/bin/python < base original reproduction fixture",
+      "exit_code": 0,
+      "what_was_measured": "On the exact recorded base, seq_len=1048574 plus offsets 0..5 produced four illegal positions: 1048576..1048579."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ddec5b11e579/venv/bin/python -m pytest -q test/registered/spec/dspark/test_dspark_context_boundary.py",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate commit, all four candidate boundary regressions passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ddec5b11e579/venv/bin/python < independent adversarial fixture",
+      "exit_code": 0,
+      "what_was_measured": "CPU and AMD GPU mixed per-request context/generation budgets clamped to [6,3,2,1]; padded draft positions remained below max_context_len; exhausted rows were explicitly rejected."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ddec5b11e579/venv/bin/python -m pytest -q test/registered/spec/dspark/test_dspark_context_boundary.py test/registered/spec/dspark/test_dspark_scheduler.py test/registered/spec/dspark/test_ragged_verify.py",
+      "exit_code": 0,
+      "what_was_measured": "39 tests and 18 subtests passed across the candidate regression and existing DSpark scheduling/ragged-layout coverage."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ddec5b11e579/venv/bin/python scripts/lint/check_registered_tests.py",
+      "exit_code": 1,
+      "what_was_measured": "The candidate regression path violates registered-test taxonomy because `spec` is not an allowed test kind."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ddec5b11e579/venv/bin/python -m py_compile python/sglang/srt/speculative/dspark_components/dspark_planner.py python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py",
+      "exit_code": 0,
+      "what_was_measured": "Both changed runtime modules compiled as Python source."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-ddec5b11e579/raw/candidate_independent_adversarial.txt records execution on one AMD Instinct MI355X with torch 2.11.0+rocm7.2/HIP 7.2.26015.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The candidate's new regression is rejected by scripts/lint/check_registered_tests.py due to its invalid registered-test directory.",
+    "No runtime counterexample to the original position-boundary contract was found in the available source-level, CPU, or single-GPU cases."
+  ],
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 weights were unavailable, so full-model semantic behavior was not exercised.",
+    "The reported NVIDIA B300 CUDA 13 TP2 environment was unavailable; the assigned environment had one AMD Instinct MI355X on ROCm 7.2.",
+    "The original fused_q_norm_rope CUDA illegal-address crash and distributed TP behavior could not be reproduced directly.",
+    "No native rebuild was applicable because the candidate changes no native source."
+  ]
+}
