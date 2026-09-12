@@ -1,0 +1,56 @@
+   245	                "Initialization failed. Please see the error messages above."
+   246	            )
+   247	        scheduler_infos.append(data)
+   248	        reader.close()
+   249
+   250	    logger.debug("All workers are ready")
+   251
+   252	    if node_rank != 0:
+   253	        # The TokenizerManager / HTTP surface lives on the node that owns
+   254	        # global rank 0; this node only hosts local workers, which tear
+   255	        # down together with the distributed group on shutdown.
+   256	        logger.info(
+   257	            "Node %d ready with %d local worker(s); no local HTTP surface.",
+   258	            node_rank,
+   259	            local_num_gpus,
+   260	        )
+   261	        try:
+   262	            for p in processes:
+   263	                p.join()
+   264	        finally:
+   265	            shutdown_scheduler_processes(None, processes, request_shutdown=False)
+   266	        return processes
+   267
+   268	    if launch_http_server:
+   269	        if server_args.pipeline_config.supports_action_endpoint():
+   270	            logger.info(
+   271	                "Action generation endpoint ready: model=%s; per-request details are "
+   272	                "debug-only (use --log-level debug).",
+   273	                server_args.served_model_name,
+   274	            )
+   275	        logger.info("Starting FastAPI server.")
+   276	        if server_args.webui:
+   277	            logger.info("Launch FastAPI server in another process because of webui.")
+   278	            http_server_process = mp.Process(
+   279	                target=_run_http_server_process,
+   280	                args=(server_args,),
+   281	                name="sglang-diffusion-webui",
+   282	                daemon=True,
+   283	            )
+   284	            http_server_process.start()
+   285	        else:
+   286	            try:
+   287	                launch_http_server_only(server_args)
+   288	            finally:
+   289	                shutdown_scheduler_processes(server_args, processes)
+   290
+   291	    return processes
+   292
+   293
+   294	def launch_pool_disagg_server(
+   295	    server_args: ServerArgs,
+   296	    encoder_gpus: list[list[int]],
+   297	    denoiser_gpus: list[list[int]],
+   298	    decoder_gpus: list[list[int]],
+   299	    launch_http_server: bool = True,
+   300	):

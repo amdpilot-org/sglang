@@ -1,0 +1,64 @@
+    65	        raise ValueError(
+    66	            f"timeout_ms must be None or an integer between 1 and {max_timeout_ms}"
+    67	        )
+    68	    socket.setsockopt(zmq.RCVTIMEO, timeout_ms)
+    69
+    70
+    71	def _resolve_timeout_ms(server_args: ServerArgs, timeout_ms: int | None) -> int | None:
+    72	    if timeout_ms is not None:
+    73	        return timeout_ms
+    74	    timeout_s = server_args.scheduler_rpc_timeout
+    75	    return None if timeout_s is None else timeout_s * 1000
+    76
+    77
+    78	async def run_zeromq_broker(server_args: ServerArgs):
+    79	    """
+    80	    This function runs as a background task in the FastAPI process.
+    81	    It listens for TCP requests from offline clients (e.g., DiffGenerator).
+    82	    """
+   250	        self.server_args = server_args
+   251	        self.request_logger = DiffusionRequestLogger.from_server_args(server_args)
+   252	        self.context = zmq.asyncio.Context()
+   253	        logger.debug("AsyncSchedulerClient initialized with zmq.asyncio.Context")
+   254
+   255	    async def forward(self, batch: Any, timeout_ms: int | None = None) -> Any:
+   256	        """Sends a batch or request to the scheduler and waits for the response."""
+   257	        self.request_logger.log_received_request(batch)
+   258	        if self.context is None:
+   259	            raise RuntimeError(
+   260	                "AsyncSchedulerClient is not initialized. Call initialize() first."
+   261	            )
+   262
+   263	        endpoints = self.server_args.scheduler_endpoints
+   264	        if isinstance(batch, _CONTROL_REQ_TYPES):
+   265	            # replica state (weights, LoRA, memory) must change everywhere
+   266	            results = [
+   267	                await self._forward_one(ep, batch, timeout_ms) for ep in endpoints
+   268	            ]
+   269	            output_batch = _merge_fanout_results(results)
+   270	        else:
+   271	            replica = _select_replica(batch, len(endpoints), self._replica_counter)
+   272	            output_batch = await self._forward_one(
+   273	                endpoints[replica], batch, timeout_ms
+   274	            )
+   275	        self.request_logger.log_finished_request(batch, output_batch)
+   276	        return output_batch
+   277
+   278	    async def _forward_one(
+   279	        self, endpoint: str, batch: Any, timeout_ms: int | None
+   280	    ) -> Any:
+   281	        # a temporary REQ socket per request keeps concurrent requests from
+   282	        # interleaving on one socket's strict send/recv alternation
+   283	        socket = self.context.socket(zmq.REQ)
+   284	        try:
+   285	            socket.setsockopt(zmq.LINGER, 0)
+   286	            effective_timeout = _resolve_timeout_ms(self.server_args, timeout_ms)
+   287	            _configure_recv_timeout(socket, effective_timeout)
+   288	            socket.connect(endpoint)
+   289	            await socket.send(pickle.dumps(batch))
+   290	            payload = await socket.recv()
+   291	            output_batch = pickle.loads(payload)
+   292	            _materialize_output_batch_file_refs(output_batch)
+   293	            return output_batch
+   294	        except zmq.error.Again:
+   295	            logger.error("Timeout waiting for response from %s.", endpoint)
