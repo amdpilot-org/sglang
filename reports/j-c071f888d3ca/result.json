@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30322",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "PR 2448 is valid test-only hardening for restore ordering and index coverage. It changes no production implementation, and its new tests pass unchanged on the recorded base, so it is not a failing-before/passing-after fix. The full H20 CP=8/DP=8 Mooncake restart failure remains unverified.",
+  "tests": [
+    {
+      "command": "temporarily replace the base test_decode_hicache_tree_core.py with the file from a171524, then /tmp/amdpilot-repo-j-c071f888d3ca/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_decode_hicache_tree_core.py",
+      "exit_code": 0,
+      "what_was_measured": "All five tests, including the candidate's three L3-only restore tests, passed against production source at the recorded base; this establishes that the candidate is test-only hardening rather than a failing-before regression."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c071f888d3ca/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_decode_hicache_tree_core.py test/registered/unit/disaggregation/test_decode_queue_cleanup.py test/registered/unit/mem_cache/test_decode_radix_lock_ref.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate a171524ccc35794fcd1bbd5501cd8ea61d0a3bff, 25 focused CPU tests passed across HiCache restore gating, transfer cleanup, and radix lock ownership."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c071f888d3ca/venv/bin/python /job/review_adversarial_hicache.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial checks verified 63/64 incomplete coverage fails, mixed L1/L2/L3 restores exactly the non-L1 suffix, and transport failure is not hidden by the success gate."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "Torch detected one AMD Instinct MI355X with capability (9, 5), ROCm 7.2, and checkout-local SGLang source. The issue-specific tests were CPU mock/control-flow tests and did not execute GPU kernels.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A real decode restart after an L3-only persistent HiCache match under Mooncake could still expose an ordering or persistence race not represented by synchronous mocks.",
+    "The reported CP=8 prefill plus DP=8 decode topology can have cross-rank behavior not covered by single-process unit tests.",
+    "NVIDIA H20/CUDA behavior is not qualified by the available single AMD gfx950/ROCm device.",
+    "The tests do not prove full-model KV correctness or semantic output accuracy after restoration."
+  ],
+  "remaining_limitations": [
+    "No eight-rank prefill CP plus eight-rank decode DP deployment was available.",
+    "No NVIDIA H20/CUDA device, Mooncake persistent-storage fixture, model weights, or restart-capable distributed serving setup was supplied.",
+    "Candidate and adversarial tests validate mocked control flow and tensor-index coverage only.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
