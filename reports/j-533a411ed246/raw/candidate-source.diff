@@ -1,0 +1,122 @@
+diff --git a/python/sglang/kernels/ops/attention/fla/fused_kda_conv_recurrent_verify.py b/python/sglang/kernels/ops/attention/fla/fused_kda_conv_recurrent_verify.py
+index dfb5bc0..6c0e320 100644
+--- a/python/sglang/kernels/ops/attention/fla/fused_kda_conv_recurrent_verify.py
++++ b/python/sglang/kernels/ops/attention/fla/fused_kda_conv_recurrent_verify.py
+@@ -116,9 +116,15 @@ def fused_kda_conv_gating_verify_kernel(
+     is_qk_owner = (i_v == 0) & (i_hv % (HV // H) == 0)
+ 
+     cs_idx = tl.load(conv_state_indices + i_n).to(tl.int64)
+-    # Padded rows carry -1 slots; the reference conv kernel early-returns on
+-    # them (their outputs are never consumed), so skip the whole program.
++    # Dummy requests own no state, but downstream layers consume their
++    # physical output rows. Initialize them before skipping the update.
+     if cs_idx < 0:
++        for token_idx in range(T):
++            tl.store(
++                o + ((bos + token_idx) * HV + i_hv) * V + o_v,
++                0.0,
++                mask=mask_v,
++            )
+         return
+     cs_base = conv_state + cs_idx * stride_cs_line
+ 
+diff --git a/python/sglang/kernels/ops/attention/fla/fused_sigmoid_gating_recurrent.py b/python/sglang/kernels/ops/attention/fla/fused_sigmoid_gating_recurrent.py
+index 8f7c342..5f7c2fb 100644
+--- a/python/sglang/kernels/ops/attention/fla/fused_sigmoid_gating_recurrent.py
++++ b/python/sglang/kernels/ops/attention/fla/fused_sigmoid_gating_recurrent.py
+@@ -134,6 +134,13 @@ def fused_sigmoid_gating_delta_rule_update_kernel(
+         # per-slot pitch spans ALL layers' state, not HV*K*V. int64: envelope
+         # pitches overflow an int32 index product.
+         idx = tl.load(h0_indices + i_n).to(tl.int64)
++        if DISABLE_STATE_UPDATE and CACHE_INTERMEDIATE_STATES:
++            if idx < 0:
++                # Padded verify rows have no state or tree metadata. Do not
++                # read their gates, parent links, or intermediate-state indices.
++                for token_idx in range(T):
++                    tl.store(p_o + token_idx * HV * V, 0.0, mask=mask_v)
++                return
+         if idx >= 0:
+             p_h0 = (
+                 h0_source
+diff --git a/python/sglang/kernels/ops/mamba/causal_conv1d_triton.py b/python/sglang/kernels/ops/mamba/causal_conv1d_triton.py
+index 9449a3a..7c13c60 100644
+--- a/python/sglang/kernels/ops/mamba/causal_conv1d_triton.py
++++ b/python/sglang/kernels/ops/mamba/causal_conv1d_triton.py
+@@ -661,18 +661,31 @@ def _causal_conv1d_update_kernel(
+         conv_state_batch_coord = tl.load(
+             conv_state_indices_ptr + idx_seq * stride_state_indices
+         ).to(tl.int64)
+-        if SAVE_INTERMEDIATE:
+-            intermediate_state_batch_coord = tl.load(
+-                intermediate_state_indices_ptr
+-                + idx_seq * stride_intermediate_state_indices
+-            ).to(tl.int64)
+     else:
+         conv_state_batch_coord = idx_seq
+     if USE_PAD_SLOT:  # noqa
+         if conv_state_batch_coord == pad_slot_id:
+-            # not processing as this is not the actual sequence
++            # Dummy requests own no state, but callers still consume the
++            # physical output rows. Initialize them before skipping the update.
++            idx_tokens = tl.arange(0, NP2_SEQLEN)
++            out_ptrs = (
++                o_ptr
++                + idx_seq * stride_o_seq
++                + idx_feats[:, None] * stride_o_dim
++                + idx_tokens[None, :] * stride_o_token
++            )
++            tl.store(
++                out_ptrs,
++                tl.full((BLOCK_N, NP2_SEQLEN), 0, tl.float32),
++                (idx_feats[:, None] < dim) & (idx_tokens[None, :] < seqlen),
++            )
+             return
+ 
++    if IS_CONTINUOUS_BATCHING and SAVE_INTERMEDIATE:
++        intermediate_state_batch_coord = tl.load(
++            intermediate_state_indices_ptr + idx_seq * stride_intermediate_state_indices
++        ).to(tl.int64)
++
+     if IS_SPEC_DECODING:
+         # The rolling of conv state:
+         #
+diff --git a/python/sglang/srt/model_executor/forward_batch_info.py b/python/sglang/srt/model_executor/forward_batch_info.py
+index 5fff912..1e763f5 100644
+--- a/python/sglang/srt/model_executor/forward_batch_info.py
++++ b/python/sglang/srt/model_executor/forward_batch_info.py
+@@ -28,6 +28,7 @@ ScheduleBatch -> ForwardBatch
+ from __future__ import annotations
+ 
+ import hashlib
++import math
+ import warnings
+ from dataclasses import dataclass
+ from enum import IntEnum, auto
+@@ -1367,10 +1368,26 @@ class ForwardBatch(ForwardBatchDeepSeekMHAMixin):
+         sync_group_size = len(global_num_tokens)
+         attn_tp_size = get_parallel().attn_tp_size
+ 
++        # Fixed-width hybrid verify kernels consume complete request groups.
++        # Align the globally agreed token counts before selecting MAX_LEN/SUM_LEN
++        # so active and synchronized idle ranks retain the same collective domain.
++        token_alignment = attn_tp_size
++        if (
++            self.spec_info is not None
++            and not self.spec_info.is_draft_input()
++            and self.spec_info.ragged_verify_layout is None
++            and self.spec_info.num_tokens_per_req > 0
++            and (self.forward_mode.is_target_verify() or self.forward_mode.is_idle())
++            and mambaish_config(model_runner.model_config) is not None
++        ):
++            token_alignment = math.lcm(
++                token_alignment, self.spec_info.num_tokens_per_req
++            )
++
+         for i in range(sync_group_size):
+             # make sure that the padded length is divisible by attn_tp_size because we may need reduce-scatter across attn_tp dim.
+             # there is no reduce-scatter in LM logprob, so we do not need to adjust the padded length for logprob
+-            global_num_tokens[i] = ceil_align(global_num_tokens[i], attn_tp_size)
++            global_num_tokens[i] = ceil_align(global_num_tokens[i], token_alignment)
+ 
+         dp_padding_mode = DpPaddingMode.get_dp_padding_mode(
+             self.is_extend_in_batch, global_num_tokens

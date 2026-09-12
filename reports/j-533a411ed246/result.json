@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37585",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1030",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/993",
+  "candidate_commit": "f32316b1869fe8fb2207286e6db22d7264410c11",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The recorded base reproduced the original shared eager fixed-width verification defect: TP-only padding produced incomplete request groups (228 -> 232 for B=38,D=6,A=8 and 198 -> 200 for B=33). Exact candidate f32316b aligns fixed-width hybrid target verification to lcm(attention TP size, tokens per request) before DP padding selection and makes fabricated dummy requests state-free with initialized output rows in the affected Triton convolution, recurrent GDN, and opt-in fused KDA kernels. Candidate and independent tests passed. This is a correct partial fix, not a complete resolution of the original issue, because the separate GLM DSA KPool real-request planning boundary remains outside this PR.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-533a411ed246/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-533a411ed246/review-evidence/test_hybrid_verify_group_padding.py (on base)",
+      "exit_code": 1,
+      "what_was_measured": "Issue-specific failing-before behavior on exact base: 3 test methods failed, with failing subtests including B=33 (198 -> 200 instead of 216), B=38 (228 -> 232 instead of 240), and incorrect DP MAX_LEN/SUM_LEN group boundaries."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-533a411ed246/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-533a411ed246/review-evidence/test_linear_verify_dummy_requests.py (on base)",
+      "exit_code": 1,
+      "what_was_measured": "All 17 candidate GPU regressions failed before the patch, including deterministic NaN evidence for uninitialized dummy outputs and dummy-request state/metadata safety failures."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-533a411ed246/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_hybrid_verify_group_padding.py (on exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "5 tests and 7 subtests passed: original B33/B38 geometry, B36/B39 controls, output-domain restoration, DP MAX_LEN/SUM_LEN active and idle ranks, and non-hybrid/ragged controls."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-533a411ed246/venv/bin/python -m pytest -q test/registered/kernel/linear_attention/test_linear_verify_dummy_requests.py (on exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "17 tests passed on one AMD Instinct MI355X gfx950. Real rows matched independently executed unpadded references; dummy outputs were zero; persistent and intermediate state remained unchanged across convolution, recurrent GDN, and fused KDA paths."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-533a411ed246/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-533a411ed246/review-evidence/test_adversarial_contract.py (on exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "51 independent adversarial cases passed across TP sizes 1/3/4/7/8/16, request widths 1/5/6/7/8, batch sizes 0/1/2/17/33/38/39/65, and DP token domains; every physical count remained divisible by both TP and fixed request width."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-533a411ed246/venv/bin/python -m compileall -q <four changed Python/Triton modules> && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed modules compiled and the candidate diff had no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI355X gfx950 was used. The candidate passed 17 numerical/state GPU tests; raw logs are retained under reports/j-533a411ed246/raw/."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "GLM-5.3-Flash with DSA KPool still requires the separate real-request writer/read planning correction in upstream PR https://github.com/sgl-project/sglang/pull/37588; PR 993 does not modify dsa_indexer_kpool.py and therefore cannot fully resolve that original-issue path."
+  ],
+  "remaining_limitations": [
+    "Qwen3.5-35B-A3B and GLM-5.3-Flash weights were unavailable, so no full model or HTTP serving workload was run.",
+    "Only one AMD Instinct MI355X gfx950 was available; the reported 8x NVIDIA H20 TP8/EP8 CUDA 13 environment and multi-rank collective execution were not reproduced.",
+    "The focused tests validate layout, dummy-output initialization, and state ownership, not model semantic accuracy or universal backend coverage.",
+    "No native C/C++/HIP/FlyDSL source changed, so a native rebuild was not applicable."
+  ]
+}
