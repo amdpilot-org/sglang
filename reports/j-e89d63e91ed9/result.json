@@ -1,0 +1,56 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38513",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3212",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/739",
+  "candidate_commit": "a2979819b4ac3df4fea4e93f41523a4efdc7a841",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate fully resolves the original issue's permitted contract for supported dense FP8 linear paths. On the recorded base, controlled CUDA capability probes incorrectly returned true for SM75 and SM80, and both scalar per-tensor apply_fp8_linear and the nominal fallback propagated a forced unsupported torch._scaled_mm error. At candidate commit a2979819b4ac3df4fea4e93f41523a4efdc7a841, the probes return false for SM75/SM80 and true for SM89/SM90, unsupported-CUDA scalar dispatch and direct scalar/channelwise fallback avoid torch._scaled_mm and match an explicit FP32-dequantized torch.mm reference, and the quantization documentation distinguishes FP8 storage from the SM89+ native GEMM requirement. supports_fp8 still has no production consumer in this checkout, but the issue explicitly permits a numerical software fallback, which the candidate supplies in the failing production path.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-e89d63e91ed9/venv/bin/python /job/review-evidence/independent_fp8_review.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "The base capability API returned true for 7.5, 8.0, 8.9, and 9.0. A forced unsupported native FP8 GEMM error propagated from scalar per-tensor apply_fp8_linear, and direct fallback calls propagated the same error for scalar and channelwise scales. The script treats reproduction as data and therefore exits zero."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e89d63e91ed9/venv/bin/python /job/review-evidence/independent_fp8_review.py (candidate a2979819b4ac3df4fea4e93f41523a4efdc7a841)",
+      "exit_code": 0,
+      "what_was_measured": "Controlled capability probes produced 7.5=false, 8.0=false, 8.9=true, and 9.0=true. With torch._scaled_mm forced to fail, scalar per-tensor apply_fp8_linear passed and matched the explicit dequantized GEMM reference. Direct fallback also passed for scalar/channelwise scales at M=1 and M=4."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e89d63e91ed9/venv/bin/python -m pytest -q test/registered/quant/test_fp8_utils.py -k 'fallback or unsupported_cuda'",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's two focused FP8 fallback regressions passed; 6 unrelated tests were deselected."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e89d63e91ed9/venv/bin/python -m pytest -q test/registered/unit/platforms/test_platform_interface.py -k cuda_srt_platform_capabilities",
+      "exit_code": 0,
+      "what_was_measured": "The candidate platform regression passed with four controlled capability subtests."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-e89d63e91ed9/venv/bin/python /job/review-evidence/rocm_gpu_candidate.py",
+      "exit_code": 1,
+      "what_was_measured": "On AMD Instinct MI350X, the changed software fallback executed on GPU and exactly matched the explicit FP32 dequantized torch.mm reference. The script then attempted the unchanged ROCm native per-tensor route, which failed because hipBLASLt could not find a valid solution for the chosen probe shape; this latter failure is retained as an environment/shape limitation rather than evidence against the CUDA fallback fix."
+    },
+    {
+      "command": "rg -n 'supports_fp8\\(' python/sglang",
+      "exit_code": 0,
+      "what_was_measured": "Only platform method definitions were found; supports_fp8 is not consumed by production code in this checkout."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The candidate software fallback ran on one assigned AMD Instinct MI350X (gfx950, reported capability 9.5) with torch 2.11.0+rocm7.2 and matched the independent dequantized torch.mm reference. No NVIDIA GPU was available."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No physical NVIDIA GPU was assigned, so SM75/SM80/SM89/SM90 behavior was checked with controlled capability probes and forced unsupported-kernel dispatch, not physical NVIDIA execution.",
+    "The correctness fallback converts FP8 operands to FP32 and is expected to be slower and use more temporary memory than native FP8 GEMM.",
+    "CudaSRTPlatform.supports_fp8() is not consumed by production code in this checkout; execution is nevertheless corrected by the candidate's software fallback, satisfying the original issue's explicit fallback-or-refusal contract.",
+    "The independent ROCm native torch._scaled_mm shape probe could not find a hipBLASLt solution. The candidate does not change that ROCm branch, while its changed software fallback did execute correctly on the assigned GPU.",
+    "No C++, CUDA, HIP, FlyDSL, LLVM, or other native source changed, and repository-environment.json records native as null; a native rebuild was not applicable."
+  ]
+}
