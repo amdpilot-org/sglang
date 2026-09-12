@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38002",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced HTTP 200 for cancellation of a stored foreground response, then retained the request background flag on ResponsesResponse and rejected cancellation unless it is true. Regression coverage verifies omitted and explicit false foreground requests at active and terminal states, active background cancellation and abort, and terminal background idempotency.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python:test/registered/unit/entrypoints/openai /tmp/amdpilot-repo-j-4ca13640955c/venv/bin/python reports/j-4ca13640955c/repro_before.py (before fix)",
+      "exit_code": 0,
+      "what_was_measured": "Actual checked-out cancel handler returned HTTP 200 with completed state and did not abort for background=false."
+    },
+    {
+      "command": "PYTHONPATH=python:test/registered/unit/entrypoints/openai /tmp/amdpilot-repo-j-4ca13640955c/venv/bin/python reports/j-4ca13640955c/repro_before.py (after fix)",
+      "exit_code": 0,
+      "what_was_measured": "The unchanged reproduction returned HTTP 400, exposed no response status, and did not invoke abort."
+    },
+    {
+      "command": "PYTHONPATH=python:test/registered/unit/entrypoints/openai /tmp/amdpilot-repo-j-4ca13640955c/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_responses.py -k 'CancelIdempotency'",
+      "exit_code": 0,
+      "what_was_measured": "3 cancellation regression tests passed, covering foreground rejection, active background abort, and terminal background idempotency."
+    },
+    {
+      "command": "PYTHONPATH=python:test/registered/unit/entrypoints/openai /tmp/amdpilot-repo-j-4ca13640955c/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_responses_protocol.py test/registered/unit/entrypoints/openai/test_serving_responses.py",
+      "exit_code": 0,
+      "what_was_measured": "58 Responses API unit tests and 2 subtests passed."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed files contain no whitespace errors."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-4ca13640955c/pre-commit /opt/venv/bin/pre-commit run --files python/sglang/srt/entrypoints/openai/protocol.py python/sglang/srt/entrypoints/openai/serving_responses.py test/registered/unit/entrypoints/openai/test_serving_responses.py reports/j-4ca13640955c/repro_before.py reports/j-4ca13640955c/reproduction.txt reports/j-4ca13640955c/result.json",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository pre-commit hooks passed, including isort, ruff lint, ruff format, codespell, AST checks, and CI registry validation."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The defect reproduces entirely in ResponsesResponse construction, in-memory storage, and cancel_responses with a mocked tokenizer manager. No model execution or GPU kernel is involved, so a GPU smoke would not validate this issue.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Validation covers the deterministic request lifecycle and handler directly; no HTTP server or model was started because neither is required to exercise the reported policy error.",
+    "No GPU execution was performed because it is not relevant to this CPU-only cancellation bookkeeping defect."
+  ],
+  "evidence_paths": [
+    "reports/j-4ca13640955c/repro_before.py",
+    "reports/j-4ca13640955c/reproduction.txt",
+    "python/sglang/srt/entrypoints/openai/protocol.py",
+    "python/sglang/srt/entrypoints/openai/serving_responses.py",
+    "test/registered/unit/entrypoints/openai/test_serving_responses.py"
+  ]
+}
