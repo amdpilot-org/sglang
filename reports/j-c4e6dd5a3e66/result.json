@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/9674",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3175",
+  "candidate_commit": "3cd00373248daf94cc7fde4a8009691001148995",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review verified that the candidate preserves the original embedding benchmark workflows and corrects all three reported loader counterexamples. The recorded base has no embedding dataset loader. At the exact candidate, token-ID lists and token-ID batches load with correct token counts, whitespace-only strings are rejected before dispatch, the full benchmark dataset API suite passes, and a real GPU-backed /v1/embeddings server accepts all four documented input shapes while rejecting whitespace-only input.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c4e6dd5a3e66/venv/bin/python /job/review-evidence-j-c4e6dd5a3e66/probe_embedding_loader.py (at 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Original failure on the recorded base: sglang.benchmark.datasets.embedding cannot be imported because the requested embedding JSONL dataset workflow does not exist. The protocol module was imported from the source checkout."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c4e6dd5a3e66/venv/bin/python /job/review-evidence-j-c4e6dd5a3e66/probe_embedding_loader.py (at 3cd00373248daf94cc7fde4a8009691001148995)",
+      "exit_code": 0,
+      "what_was_measured": "Independent schema/loader matrix. The documented text, text-batch, token-ID, and token-ID-batch forms loaded; the two token-ID cases each counted three tokens; whitespace-only strings and batches, empty inputs, negative IDs, and malformed nested batches were rejected. Source paths resolved to /job/repo/python."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c4e6dd5a3e66/venv/bin/python -m pytest test/registered/bench_fn/test_benchmark_datasets_api.py -q -k 'embedding_dataset or offline_embedding'",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression tests: 6 passed, 45 deselected, and 2 subtests passed, including the three reviewed counterexamples and offline encode behavior."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c4e6dd5a3e66/venv/bin/python -m pytest test/registered/bench_fn/test_benchmark_datasets_api.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Complete candidate benchmark dataset API module: 51 passed and 8 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c4e6dd5a3e66/venv/bin/python -m py_compile python/sglang/benchmark/datasets/embedding.py python/sglang/benchmark/offline_throughput.py python/sglang/benchmark/serving.py",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python implementation modules compiled from the candidate checkout."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c4e6dd5a3e66/venv/bin/python /job/runtime-j-c4e6dd5a3e66/run_embedding_probe.py /job/runtime-j-c4e6dd5a3e66/tiny-random-llama /job/review-evidence-j-c4e6dd5a3e66/http-probe",
+      "exit_code": 0,
+      "what_was_measured": "Real source-checkout SGLang embedding server and GPU engine execution. Text, text batch, token-ID list, and token-ID batch returned HTTP 200; whitespace-only text returned HTTP 400. The random tiny fixture qualifies transport and engine execution only."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X, gfx950, Torch 2.11.0+rocm7.2, HIP 7.2.26015. The source-checkout server ran with Triton attention and deterministic tiny Llama weights, returned 64-dimensional embeddings, and was stopped with its descendant reaped. GPU use was 0% after cleanup.",
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "Not applicable: the candidate changes Python, documentation, tests, and reports only; no C++, FlyDSL, or other native source changed.",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The deterministic tiny Llama fixture validates HTTP transport and GPU engine execution, not semantic embedding quality or a specialized embedding-model architecture.",
+    "No independent numerical comparison against a real embedding-model reference was run because qualified embedding-model weights were unavailable. The original candidate's recorded numerical claims were not used as review proof.",
+    "vLLM server interoperability was not executed; candidate unit coverage verifies that vllm-embedding selects the OpenAI embedding request path.",
+    "SGLang-specific multimodal embedding input objects are accepted by EmbeddingRequest but are outside the candidate's documented OpenAI-compatible JSONL shapes and remain unsupported by this loader.",
+    "No native code changed, so no native rebuild was applicable."
+  ]
+}
