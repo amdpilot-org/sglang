@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35736",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that the checked-out DSV4/DSV3.2 serving path rendered request-level and message-level tool schemas, including DSML instructions, when tool_choice was none. The fix removes tool metadata from the copied encoder input for that choice while retaining tools for auto and leaving the request objects unchanged.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-55e145f1d06c/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py -k 'dsv_encoders_omit_tools_when_tool_choice_is_none or dsv_encoders_keep_tools_when_tool_choice_is_auto'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before prompt-level regression. Both DSV4 and DSV3.2 prompts contained ## Tools and request/message tool names with tool_choice=none. The run also exposed an initially over-specific DSV3.2 auto-marker assertion, which was corrected to account for its function_calls spelling. Raw output: reports/j-55e145f1d06c/raw/pytest_before_fix.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-55e145f1d06c/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py -k 'dsv_encoders_omit_tools_when_tool_choice_is_none or dsv_encoders_keep_tools_when_tool_choice_is_auto'",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression and boundaries: neither encoder exposes tool instructions or names for none; both preserve tools for auto; input request objects are not mutated. Result: 2 passed, 4 subtests passed. Raw output: reports/j-55e145f1d06c/raw/pytest_after_fix_targeted.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-55e145f1d06c/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py",
+      "exit_code": 0,
+      "what_was_measured": "Full serving-chat unit module. Result: 137 passed, 72 subtests passed. Raw output: reports/j-55e145f1d06c/raw/pytest_after_fix_full.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-55e145f1d06c/venv/bin/python -m ruff format --check ... && /tmp/amdpilot-repo-j-55e145f1d06c/venv/bin/python -m ruff check ...",
+      "exit_code": 1,
+      "what_was_measured": "Formatting/lint command could not run because ruff is not installed in the prepared interpreter; no environment packages were changed."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The defect and regression are in CPU-side prompt construction before model execution. The assigned ROCm device was visible as one AMD Instinct MI350X with torch 2.11.0+rocm7.2, but an unrelated GPU smoke would not validate DSV4 encoding. See reports/j-55e145f1d06c/raw/gpu_environment.txt.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash weights were not available, so no full model HTTP generation was run and no claim is made about model semantics or generated text after the corrected prompt.",
+    "The qualified tiny Llama fixture was not used because it can validate transport and engine execution only, not the DeepSeek-V4-specific encoder or DSML behavior.",
+    "No native components were changed or rebuilt.",
+    "Ruff was absent from the prepared interpreter; git diff --check and the full relevant unit module passed."
+  ]
+}
