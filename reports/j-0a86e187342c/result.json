@@ -1,0 +1,27 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35415",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source already contains the issue-specific fix from upstream PR #33875 (merge commit 914644e81c9b6fc31d60a1ab5327a4884514c074): fused 2-D LoRA-B weights are sliced independently per logical merged section for each TP rank, while stacked 3-D adapters retain their established slicing. The legacy implementation reproduced the reported IndexError; the current implementation and its pre-existing regression passed.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-0a86e187342c/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_fused_lora_compose.py",
+      "exit_code": 0,
+      "what_was_measured": "Eleven focused fused-LoRA tests, including the pre-existing two-rank unequal-section regression against an independent unfused numerical reference."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0a86e187342c/venv/bin/python reports/j-0a86e187342c/reproduce_lora_sharding.py",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned gfx950 GPU, the legacy slicer raised the reported 3-D-on-2-D IndexError; the current slicer returned exact expected rows for TP ranks 0 and 1 with unequal Q/K/V sections, and preserved exact 3-D stacked slicing at both rank boundaries."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "reports/j-0a86e187342c/raw/gpu_lora_sharding.txt records exact-value assertions and synchronization on AMD Instinct MI350X (gfx950).",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "MiniMax-H3 and Turbo LoRA weights were not available, so no full model semantic or video-generation validation was performed.",
+    "Only one assigned AMD gfx950 GPU was available; the reported two-rank behavior was exercised deterministically by mocking rank while all tensor operations ran on that GPU, not by a real multi-process collective.",
+    "The reporter used NVIDIA sm_120 hardware and TP=2; hardware-specific serving behavior on that platform remains unverified.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable."
+  ]
+}
