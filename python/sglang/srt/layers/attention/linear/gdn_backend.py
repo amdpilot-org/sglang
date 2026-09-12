@@ -51,6 +51,20 @@ _fused_decode_verify_real_tensors = (
 )
 
 
+def _store_tracked_conv_states(
+    conv_states: torch.Tensor,
+    slot_indices: torch.Tensor,
+    tracked_states: torch.Tensor,
+) -> None:
+    """Store a GDN conv snapshot in the cache's configured dtype.
+
+    The conv cache may intentionally differ from the activation dtype through
+    SGLANG_MAMBA_CONV_DTYPE. Indexed assignment requires equal dtypes, so
+    normalize the tracked activation at this cache boundary.
+    """
+    conv_states[slot_indices] = tracked_states.to(dtype=conv_states.dtype)
+
+
 class GDNMISMetadata(msgspec.Struct, frozen=True):
     query_token_indices: torch.Tensor
     query_cu_seqlens: torch.Tensor
@@ -908,8 +922,10 @@ class GDNAttnBackend(MambaAttnBackendBase):
                 mixed_qkv_to_track = mixed_qkv[
                     :, forward_metadata.track_conv_indices
                 ].transpose(0, 1)
-                conv_states[forward_metadata.conv_states_mask_indices] = (
-                    mixed_qkv_to_track
+                _store_tracked_conv_states(
+                    conv_states,
+                    forward_metadata.conv_states_mask_indices,
+                    mixed_qkv_to_track,
                 )
 
             mixed_qkv = causal_conv1d_fn(
