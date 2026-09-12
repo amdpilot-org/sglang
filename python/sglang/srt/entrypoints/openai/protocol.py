@@ -569,6 +569,7 @@ class ChatCompletionMessageContentImageURL(BaseModel):
     max_dynamic_patch: Optional[int] = None
     min_dynamic_patch: Optional[int] = None
     content_hash: Optional[str] = None
+    cache_id: Optional[str] = None
 
     @field_validator("content_hash")
     @classmethod
@@ -576,6 +577,13 @@ class ChatCompletionMessageContentImageURL(BaseModel):
         from sglang.srt.multimodal.cache import parse_content_hash
 
         return parse_content_hash(value)
+
+    @field_validator("cache_id")
+    @classmethod
+    def validate_cache_id(cls, value: Optional[str]) -> Optional[str]:
+        from sglang.srt.multimodal.cache import parse_cache_id
+
+        return parse_cache_id(value)
 
 
 class ChatCompletionMessageContentVideoURL(BaseModel):
@@ -586,10 +594,26 @@ class ChatCompletionMessageContentVideoURL(BaseModel):
     max_frames: Optional[int] = None
     max_tokens_per_frame: Optional[int] = None
     max_image_tokens: Optional[int] = None
+    cache_id: Optional[str] = None
+
+    @field_validator("cache_id")
+    @classmethod
+    def validate_cache_id(cls, value: Optional[str]) -> Optional[str]:
+        from sglang.srt.multimodal.cache import parse_cache_id
+
+        return parse_cache_id(value)
 
 
 class ChatCompletionMessageContentAudioURL(BaseModel):
     url: str
+    cache_id: Optional[str] = None
+
+    @field_validator("cache_id")
+    @classmethod
+    def validate_cache_id(cls, value: Optional[str]) -> Optional[str]:
+        from sglang.srt.multimodal.cache import parse_cache_id
+
+        return parse_cache_id(value)
 
 
 class ChatCompletionMessageContentImagePart(BaseModel):
@@ -1758,6 +1782,16 @@ class ResponsesRequest(BaseModel):
             return part
 
         part_type = part.get("type")
+        if part_type == "input_image" and part.get("cache_id") is not None:
+            image_url = part.get("image_url")
+            if isinstance(image_url, dict):
+                image_url = image_url.copy()
+            else:
+                image_url = {"url": image_url}
+            image_url["cache_id"] = part["cache_id"]
+            if part.get("detail") is not None:
+                image_url["detail"] = part["detail"]
+            return {"type": "image_url", "image_url": image_url}
         if part_type != "input_image" or part.get("detail") is not None:
             return part
 

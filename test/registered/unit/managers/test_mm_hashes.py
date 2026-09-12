@@ -17,11 +17,13 @@ import unittest
 from unittest.mock import patch
 
 from sglang.srt.managers.io_struct import GenerateReqInput
+from sglang.srt.managers.tokenizer_manager import TokenizerManager
 from sglang.srt.managers.schedule_batch import (
     Modality,
     MultimodalDataItem,
     _compute_pad_value,
 )
+from sglang.srt.utils import AudioData, ImageData, VideoData
 from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import CustomTestCase
 
@@ -63,11 +65,48 @@ class TestMmHashesContract(CustomTestCase):
                 ["sha256:" + "11" * 32],
                 ["sha256:" + "22" * 32, "sha256:" + "33" * 32],
             ],
+            mm_cache_ids=[["first"], ["second", "third"]],
         )
         req.normalize_batch_and_arguments()
         self.assertEqual(req[0].mm_hashes, ["01"])
         self.assertEqual(req[1].mm_hashes, ["02", "03"])
         self.assertEqual(len(req[1].mm_content_hashes), 2)
+        self.assertEqual(req[1].mm_cache_ids, ["second", "third"])
+
+    def test_native_video_cache_id_is_not_aligned_as_an_image(self):
+        req = GenerateReqInput(
+            text="describe this video",
+            video_data=["missing.mp4"],
+            mm_cache_ids=["stable-video-id"],
+        )
+
+        TokenizerManager._normalize_mm_content_hashes(req)
+
+        self.assertEqual(req.mm_cache_ids, ["stable-video-id"])
+
+    def test_native_mixed_media_cache_ids_use_documented_order(self):
+        req = GenerateReqInput(
+            text="describe",
+            image_data=[ImageData("image.png", cache_id="image-id")],
+            video_data=[VideoData("video.mp4", cache_id="video-id")],
+            audio_data=[AudioData("audio.wav", cache_id="audio-id")],
+        )
+
+        TokenizerManager._normalize_mm_content_hashes(req)
+
+        self.assertEqual(req.mm_cache_ids, ["image-id", "video-id", "audio-id"])
+
+    def test_batched_video_cache_ids_follow_each_request(self):
+        req = GenerateReqInput(
+            text=["one", "two"],
+            video_data=[["one.mp4"], ["two.mp4"]],
+            mm_cache_ids=["video-one", "video-two"],
+        )
+
+        req.normalize_batch_and_arguments()
+
+        self.assertEqual(req[0].mm_cache_ids, ["video-one"])
+        self.assertEqual(req[1].mm_cache_ids, ["video-two"])
 
     def test_set_pad_value_honors_preset_hash(self):
         """set_pad_value() must use a pre-set hash without recomputing."""

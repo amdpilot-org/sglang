@@ -111,9 +111,10 @@ class Mm(msgspec.Struct):
     ] = None
     trust_mm_content_hashes: A[
         bool,
-        "Trust caller-provided multimodal SHA-256 content hashes. This can "
-        "skip reading media on a hot metadata-cache hit; only enable it when "
-        "the caller guarantees that hashes identify immutable media bytes.",
+        "Trust caller-provided multimodal SHA-256 content hashes and opaque "
+        "cache IDs. This can skip reading media on a hot metadata-cache hit; "
+        "only enable it when the caller guarantees that each identity changes "
+        "whenever the underlying media changes.",
     ] = False
     limit_mm_data_per_request: A[
         Optional[Union[str, Dict[str, int]]],

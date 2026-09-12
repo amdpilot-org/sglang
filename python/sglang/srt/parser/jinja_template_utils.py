@@ -9,7 +9,7 @@ import logging
 import jinja2
 import transformers.utils.chat_template_utils as hf_chat_utils
 
-from sglang.srt.utils import GLM_MEDIA_CONFIG_KEYS, ImageData, VideoData
+from sglang.srt.utils import AudioData, GLM_MEDIA_CONFIG_KEYS, ImageData, VideoData
 
 logger = logging.getLogger(__name__)
 
@@ -229,6 +229,7 @@ def process_content_for_template_format(
                             detail=image_obj.get("detail") or "auto",
                             max_dynamic_patch=mdp,
                             content_hash=image_obj.get("content_hash"),
+                            cache_id=image_obj.get("cache_id"),
                         )
                     )
 
@@ -247,7 +248,15 @@ def process_content_for_template_format(
                     if mdp is not None:
                         preprocess_kwargs["max_dynamic_patch"] = mdp
                     if not preprocess_kwargs:
-                        video_data.append(chunk["video_url"]["url"])
+                        if video_obj.get("cache_id") is None:
+                            video_data.append(video_obj["url"])
+                        else:
+                            video_data.append(
+                                VideoData(
+                                    url=video_obj["url"],
+                                    cache_id=video_obj["cache_id"],
+                                )
+                            )
                     else:
                         # VideoData survives load_video on every processor; a
                         # plain dict only the GLM consumer understands.
@@ -255,6 +264,7 @@ def process_content_for_template_format(
                             VideoData(
                                 url=video_obj["url"],
                                 preprocess_kwargs=preprocess_kwargs,
+                                cache_id=video_obj.get("cache_id"),
                             )
                         )
                     if chunk.get("modalities"):
@@ -262,7 +272,13 @@ def process_content_for_template_format(
                     # Normalize to simple 'video' type for template compatibility
                     processed_content_parts.append({"type": "video"})
                 elif chunk_type == "audio_url":
-                    audio_data.append(chunk["audio_url"]["url"])
+                    audio_obj = chunk["audio_url"]
+                    if audio_obj.get("cache_id") is None:
+                        audio_data.append(audio_obj["url"])
+                    else:
+                        audio_data.append(
+                            AudioData(audio_obj["url"], cache_id=audio_obj["cache_id"])
+                        )
                     # Normalize to simple 'audio' type
                     processed_content_parts.append({"type": "audio"})
                 elif chunk_type in ("text", "input_text"):

@@ -38,8 +38,10 @@ from sglang.srt.multimodal.cache import (
     CacheMiss,
     MediaSnapshot,
     build_artifact_key,
+    cache_id_content_digest,
     media_preprocess_kwargs,
     parse_content_hash,
+    parse_cache_id,
     snapshot_media,
 )
 from sglang.srt.utils import load_image
@@ -261,6 +263,7 @@ class MediaArtifactCacheMixin:
         media_data: Sequence[Any],
         *,
         content_hashes: Optional[Sequence[Optional[str]]] = None,
+        cache_ids: Optional[Sequence[Optional[str]]] = None,
         featureless_hit_mask: Optional[Sequence[bool]] = None,
         modality: Optional[Modality] = None,
     ) -> list[MediaArtifact]:
@@ -287,6 +290,21 @@ class MediaArtifactCacheMixin:
                 f"{media_count} {modality.name.lower()} items"
             )
         content_hashes = [parse_content_hash(value) for value in content_hashes]
+        if cache_ids is None:
+            cache_ids = [None] * media_count
+        if len(cache_ids) != media_count:
+            raise ValueError(
+                f"mm_cache_ids has {len(cache_ids)} entries for "
+                f"{media_count} {modality.name.lower()} items"
+            )
+        cache_ids = [parse_cache_id(value) for value in cache_ids]
+        for index, (content_hash, cache_id) in enumerate(
+            zip(content_hashes, cache_ids)
+        ):
+            if content_hash is not None and cache_id is not None:
+                raise ValueError(
+                    f"media_data[{index}] cannot specify both content_hash and cache_id"
+                )
 
         if featureless_hit_mask is None:
             featureless_hit_mask = [False] * media_count
@@ -305,15 +323,18 @@ class MediaArtifactCacheMixin:
         #    "content_hash": "sha256:<64-hex>"
         # }
         load_indices = []
-        for index, (source, caller_hash, allow_featureless) in enumerate(
-            zip(media_data, content_hashes, featureless_hit_mask)
+        for index, (source, caller_hash, cache_id, allow_featureless) in enumerate(
+            zip(media_data, content_hashes, cache_ids, featureless_hit_mask)
         ):
-            if self.trust_mm_content_hashes and caller_hash is not None:
-                key = self._artifact_key(caller_hash, source, modality=modality)
+            trusted_digest = caller_hash or (
+                cache_id_content_digest(cache_id) if cache_id is not None else None
+            )
+            if self.trust_mm_content_hashes and trusted_digest is not None:
+                key = self._artifact_key(trusted_digest, source, modality=modality)
                 keys[index] = key
                 artifact = self._get_cached_artifact(
                     key,
-                    caller_hash,
+                    trusted_digest,
                     modality,
                     allow_featureless=allow_featureless,
                 )
@@ -336,6 +357,14 @@ class MediaArtifactCacheMixin:
                 raise ValueError(
                     f"content hash mismatch for media_data[{index}]: "
                     f"expected {caller_hash}, got {snapshot.content_digest}"
+                )
+            cache_id = cache_ids[index]
+            if self.trust_mm_content_hashes and cache_id is not None:
+                snapshot = MediaSnapshot(
+                    snapshot.data,
+                    cache_id_content_digest(cache_id),
+                    snapshot.size_bytes,
+                    snapshot.source,
                 )
             snapshots[index] = snapshot
             key = self._artifact_key(

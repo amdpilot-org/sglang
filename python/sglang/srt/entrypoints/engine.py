@@ -405,6 +405,9 @@ class Engine(EngineScoreMixin, EngineBase):
         mm_content_hashes: Optional[
             Union[List[Optional[str]], List[List[Optional[str]]]]
         ] = None,
+        mm_cache_ids: Optional[
+            Union[List[Optional[str]], List[List[Optional[str]]]]
+        ] = None,
         return_logprob: Optional[Union[List[bool], bool]] = False,
         logprob_start_len: Optional[Union[List[int], int]] = None,
         top_logprobs_num: Optional[Union[List[int], int]] = None,
@@ -450,6 +453,7 @@ class Engine(EngineScoreMixin, EngineBase):
             video_data=video_data,
             mm_hashes=mm_hashes,
             mm_content_hashes=mm_content_hashes,
+            mm_cache_ids=mm_cache_ids,
             cache_salt=cache_salt,
             return_logprob=return_logprob,
             logprob_start_len=logprob_start_len,
@@ -518,6 +522,9 @@ class Engine(EngineScoreMixin, EngineBase):
         mm_content_hashes: Optional[
             Union[List[Optional[str]], List[List[Optional[str]]]]
         ] = None,
+        mm_cache_ids: Optional[
+            Union[List[Optional[str]], List[List[Optional[str]]]]
+        ] = None,
         return_logprob: Optional[Union[List[bool], bool]] = False,
         logprob_start_len: Optional[Union[List[int], int]] = None,
         top_logprobs_num: Optional[Union[List[int], int]] = None,
@@ -563,6 +570,7 @@ class Engine(EngineScoreMixin, EngineBase):
             video_data=video_data,
             mm_hashes=mm_hashes,
             mm_content_hashes=mm_content_hashes,
+            mm_cache_ids=mm_cache_ids,
             cache_salt=cache_salt,
             return_logprob=return_logprob,
             logprob_start_len=logprob_start_len,
