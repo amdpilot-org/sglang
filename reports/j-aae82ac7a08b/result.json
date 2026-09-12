@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35295",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced PR 1685's final-chunk duplicated-word counterexamples at candidate commit 41d3846aea50aee5a478156a0797d6a7d3fa35dd, retained PR 1593's valid streaming ASR fixes, and made finalization use the same boundary-aware punctuation append and rollback handling before word-level revision fallback.",
+  "tests": [
+    {
+      "command": "deterministic Python finalize/process_asr_chunk counterexample matrix at 41d3846aea50aee5a478156a0797d6a7d3fa35dd",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before behavior for comma, quote, Unicode ellipsis, em dash, ?!, fullwidth closing parenthesis, and the shared production final-chunk helper; all seven assertions failed with duplicated final words."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-aae82ac7a08b/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_streaming_asr_state.py test/registered/unit/entrypoints/openai/test_serving_transcription.py test/registered/unit/entrypoints/openai/test_audio_chunking.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after incremental and final state transitions, direct process_asr_chunk final-path regression, serving transcription tests, and audio chunking tests: 37 passed and 11 subtests passed."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/entrypoints/openai/streaming_asr.py test/registered/unit/entrypoints/openai/test_streaming_asr_state.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository formatting, lint, syntax, spelling, secret, and test-registration checks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is a deterministic Python string-state transition and was reproduced and validated without model inference; no GPU result is claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Qwen3-ASR weights or live HTTP SSE/realtime server were used, so model semantic accuracy and end-to-end network transport were not assessed.",
+    "The shared process_asr_chunk production helper was validated with a deterministic fake tokenizer manager and adapter.",
+    "The documented whitespace-free CJK rollback limitation remains unchanged."
+  ]
+}
