@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35433",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the DeepSeek-V4 encoder accepting a trailing system message and omitting the assistant generation prefix. The encoder now rejects system messages after the conversation has started; the OpenAI serving base maps this ValueError to HTTP 400 before inference. Valid leading-system and user-tail prompts retain their generation prefixes, and context plus new messages are validated as one conversation.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-392eb1a0f5e5/venv/bin/python reports/j-392eb1a0f5e5/reproduce_trailing_system.py (before fix)",
+      "exit_code": 0,
+      "what_was_measured": "The reported system-tail prompt ended without <｜Assistant｜><think>, while changing only the tail role to user produced that prefix; raw output is in reproduction-before.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-392eb1a0f5e5/venv/bin/python test/registered/unit/entrypoints/openai/test_serving_chat.py ServingChatTestCase.test_dsv4_rejects_non_leading_system_messages ServingChatTestCase.test_dsv4_system_message_order_boundaries -v (before fix)",
+      "exit_code": 1,
+      "what_was_measured": "The issue-specific regression failed because the malformed ordering did not raise; the independent valid boundaries passed. Raw output is in regression-before.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-392eb1a0f5e5/venv/bin/python test/registered/unit/entrypoints/openai/test_serving_chat.py ServingChatTestCase.test_dsv4_rejects_non_leading_system_messages ServingChatTestCase.test_dsv4_system_message_order_boundaries -v",
+      "exit_code": 0,
+      "what_was_measured": "The reported tool-calling sequence is rejected, valid leading-system and no-system prompts keep generation prefixes, and a system turn introduced after prior context is rejected. Raw output is in regression-after.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-392eb1a0f5e5/venv/bin/python test/registered/unit/entrypoints/openai/test_serving_chat.py -k dsv4 -v",
+      "exit_code": 0,
+      "what_was_measured": "All 10 DeepSeek-V4-focused serving-chat unit tests passed; raw output is in dsv4-tests.log."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-392eb1a0f5e5/venv/bin/python reports/j-392eb1a0f5e5/reproduce_trailing_system.py (after fix)",
+      "exit_code": 0,
+      "what_was_measured": "The system-tail case raises a precise ordering error at index 4 and the user-tail control still ends in <｜Assistant｜><think>; raw output is in reproduction-after.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-392eb1a0f5e5/venv/bin/python -m compileall -q python/sglang/srt/entrypoints/openai/encoding_dsv4.py reports/j-392eb1a0f5e5/reproduce_trailing_system.py",
+      "exit_code": 0,
+      "what_was_measured": "The changed encoder and retained reproduction script compile successfully."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "This defect is deterministic prompt construction and rejection before tokenization/model execution. No DeepSeek-V4 weights were available, and a tiny Llama transport fixture cannot qualify DeepSeek-V4 architecture behavior, semantic generation, or the reported long-context EOS outcome."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No DeepSeek-V4-Flash-0731 weights were available, so the reported 10/10 first-token EOS behavior was not replayed on a model.",
+    "No HTTP server with a DeepSeek-V4 tokenizer/model was launched. HTTP 400 mapping is established by the existing OpenAIServingBase.handle_request ValueError handling; the issue-specific tests exercise the actual custom encoder path.",
+    "GPU execution was not relevant to the pre-inference message-order validation and was not used.",
+    "The prepared environment does not include ruff; git diff --check and Python compilation succeeded instead."
+  ]
+}

@@ -2370,6 +2370,101 @@ class ServingChatTestCase(unittest.TestCase):
         self.assertIn("<｜User｜>describe", out)
         self.assertNotIn("image_url", out)
 
+    def test_dsv4_rejects_non_leading_system_messages(self):
+        """DSV4 must not send a prompt without an assistant generation boundary."""
+        from sglang.srt.entrypoints.openai import encoding_dsv4
+
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Summarize the tool result."},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "lookup",
+                            "arguments": '{"id":"demo"}',
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "content": "status=ok",
+            },
+            {
+                "role": "system",
+                "content": "<runtime_reminder>123 tokens left</runtime_reminder>",
+            },
+        ]
+
+        with self.assertRaisesRegex(
+            ValueError, "DeepSeek-V4 only supports system messages at the beginning"
+        ):
+            encoding_dsv4.encode_messages(messages, thinking_mode="thinking")
+
+    def test_dsv4_system_message_order_boundaries(self):
+        from sglang.srt.entrypoints.openai import encoding_dsv4
+
+        leading_system = encoding_dsv4.encode_messages(
+            [
+                {"role": "system", "content": "Be concise."},
+                {"role": "user", "content": "Hello"},
+            ],
+            thinking_mode="thinking",
+        )
+        self.assertIn("Be concise.", leading_system)
+        self.assertTrue(leading_system.endswith("<｜Assistant｜><think>"))
+
+        no_system = encoding_dsv4.encode_messages(
+            [{"role": "user", "content": "Hello"}],
+            thinking_mode="chat",
+        )
+        self.assertTrue(no_system.endswith("<｜Assistant｜></think>"))
+
+        with self.assertRaisesRegex(ValueError, "found one at index 1"):
+            encoding_dsv4.encode_messages(
+                [{"role": "system", "content": "Too late."}],
+                thinking_mode="chat",
+                context=[{"role": "user", "content": "Earlier turn"}],
+            )
+
+        for system_messages in (
+            [{"role": "system", "content": "Be concise."}],
+            [
+                {"role": "system", "content": "Be concise."},
+                {"role": "system", "content": "Use plain language."},
+            ],
+        ):
+            with self.subTest(system_messages=system_messages):
+                with self.assertRaisesRegex(
+                    ValueError, "requires at least one non-system message"
+                ):
+                    encoding_dsv4.encode_messages(
+                        system_messages, thinking_mode="thinking"
+                    )
+
+    def test_dsv4_serving_rejects_system_only_request_before_tokenization(self):
+        self.template_manager.chat_template_name = None
+        self.template_manager.jinja_template_content_format = "string"
+        self.chat.chat_encoding_spec = "dsv4"
+        self.chat._dsv4_reasoning_effort_profile = "preview"
+        request = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "system", "content": "Be concise."}],
+        )
+        self.tm.tokenizer.encode.reset_mock()
+
+        with self.assertRaisesRegex(
+            ValueError, "requires at least one non-system message"
+        ):
+            self.chat._process_messages(request, is_multimodal=False)
+        self.tm.tokenizer.encode.assert_not_called()
+
     def test_dsv4_task_and_reminder_encode_end_to_end(self):
         """Task + latest_reminder plumb through to the dsv4 encoder correctly."""
         from sglang.srt.entrypoints.openai import encoding_dsv4
