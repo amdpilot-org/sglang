@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35241",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced that generation health probes mutate DataParallelController user routing state before scheduler admission, then isolated probes behind an independent active-worker round-robin path. Probes remain real requests sent to schedulers, while user round-robin position, total-request estimates, total-token estimates, and load-budget refresh state are unchanged. The implementation adapts the still-open upstream candidate PR #35721 and adds direct counter/interleaving assertions.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-fa6cb4f00321/venv/bin/python -m pytest test/registered/unit/managers/test_data_parallel_controller.py -q (before implementation)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: health probes advanced shared round-robin routing and incremented DPBudget total_requests/total_tokens. Four new tests failed on the checked-out implementation."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fa6cb4f00321/venv/bin/python -m pytest test/registered/unit/managers/test_data_parallel_controller.py -q",
+      "exit_code": 0,
+      "what_was_measured": "25 unit tests passed. Coverage measures user/probe interleavings, independent round-robin counters, unchanged DPBudget request/token counters, health-only batch refresh suppression, active-worker selection, explicit DP routing, bootstrap-room routing, and actual worker dispatch for scheduler admission. Raw output: reports/j-fa6cb4f00321/raw/pytest-data-parallel-controller.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fa6cb4f00321/venv/bin/python -c '<seeded ROCm matmul compared with NumPy float64 reference>'",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI350X, a 257x193 by 193x129 float32 GPU matmul had max_abs_err=1.0059784056437593e-05 against an independently computed NumPy float64 reference. Raw output: reports/j-fa6cb4f00321/raw/gpu-matmul.txt"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/managers/data_parallel_controller.py test/registered/unit/managers/test_data_parallel_controller.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, repository-policy, and registered-test validation hooks passed."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "PyTorch 2.11.0+rocm7.2 executed the seeded numerical check on the one visible AMD Instinct MI350X; see reports/j-fa6cb4f00321/raw/gpu-matmul.txt.",
+  "native_rebuilt": false,
+  "source_paths": [
+    "python/sglang/srt/managers/data_parallel_controller.py",
+    "test/registered/unit/managers/test_data_parallel_controller.py"
+  ],
+  "native_paths": [],
+  "remaining_limitations": [
+    "Only one GPU is assigned in this environment, so the original 8-GPU TP8/DP8 long-prefill throughput bifurcation and per-rank PrefillDelayer metrics could not be rerun locally.",
+    "No throughput conclusion is inferred from mocked request success or from the single-GPU numerical check; local verification is limited to the deterministic routing/admission state defect and its scheduler-facing invariants.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable."
+  ]
+}
