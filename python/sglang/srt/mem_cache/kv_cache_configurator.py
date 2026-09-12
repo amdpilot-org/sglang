@@ -160,7 +160,7 @@ def mm_runtime_reservation_gb(
 
 
 # base ratio of mamba pool size to max_running_requests. Under
-# SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK the decode-time skip frees one resident slot
+# With SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK the decode-time skip frees one resident slot
 # per running request, so the base drops by 1 (overlap 5->4, lazy 4->3). no_buffer
 # stays at effective 3 either way: its binding limit is the prefill->decode peak,
 # which the decode-time drop does not shrink.

@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30314",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared source already contained upstream PR #32228's issue-specific safe decode-lock release, matching the reporter's successful SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK=1 experiment, but it remained disabled by default. Enabled that existing path by default while retaining environment value 0 as a rollback escape hatch. A new regression failed on the recorded base and passed after the change; existing tests independently cover locked-pool exhaustion, eviction progress, enabled/disabled sizing, and lock-receipt cleanup.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a636cc8b00d1/venv/bin/python test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py (base source plus regression, before source change)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: the Mamba decode-lock skip default was false; 9 existing boundary tests passed and the new default-on assertion failed. Raw output: reports/j-a636cc8b00d1/failing-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a636cc8b00d1/venv/bin/python test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py",
+      "exit_code": 0,
+      "what_was_measured": "10 CPU tests passed, including default-on behavior, explicit enabled/disabled pool ratios, locked-prefix exhaustion, sufficient headroom, and eviction progress from decode-evictable prefixes. Raw output: reports/j-a636cc8b00d1/passing-after-mamba-ratio.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a636cc8b00d1/venv/bin/python test/registered/unit/mem_cache/test_streaming_session_unit.py",
+      "exit_code": 0,
+      "what_was_measured": "9 tests passed, including propagation of the component lock receipt through streaming-session release. Raw output: reports/j-a636cc8b00d1/streaming-session.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a636cc8b00d1/venv/bin/python test/registered/unit/mem_cache/test_unified_radix_allocation_eviction.py",
+      "exit_code": 0,
+      "what_was_measured": "17 allocation-aware eviction tests passed, covering zero-free-slot recovery, no-victim boundaries, shared capacity, and Mamba/Full donor behavior. Raw output: reports/j-a636cc8b00d1/allocation-eviction.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a636cc8b00d1/venv/bin/python - (deterministic float32 GPU matmul compared with float64 CPU reference)",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X gfx950, a 256x192 by 192x128 matmul had max absolute error 1.1668331893588402e-05 and mean absolute error 1.381386918422131e-06 versus the independent float64 CPU reference. This validates GPU execution only, not the scheduler defect. Raw output: reports/j-a636cc8b00d1/gpu-numerical-smoke.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the proposed patch."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "PyTorch 2.11.0+rocm7.2 executed the deterministic numerical check on the assigned AMD Instinct MI355X (gfx950:sramecc+:xnack-); see reports/j-a636cc8b00d1/gpu-numerical-smoke.log. The changed default and its regression are CPU-side scheduler/cache policy logic."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported Qwen3.5-397B-A17B-FP8 weights were unavailable.",
+    "The assigned environment has one AMD gfx950 GPU, not eight H100 80GB GPUs, so the original TP=8, 100K+ token, production-traffic hang was not reproduced end to end.",
+    "The deterministic fixture validates resource-lock and eviction boundaries, not Qwen3.5 semantic accuracy, EAGLE behavior, direct HiCache I/O latency, or multi-node behavior.",
+    "No native code changed and no native rebuild was applicable.",
+    "The prepared interpreter does not contain the ruff module; git diff --check passed and the focused Python tests imported and executed the changed files."
+  ]
+}
