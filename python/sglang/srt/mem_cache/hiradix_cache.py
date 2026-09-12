@@ -28,9 +28,6 @@ from sglang.srt.mem_cache.base_prefix_cache import (
     MatchResult,
 )
 from sglang.srt.mem_cache.hicache_storage import (
-    PoolHitPolicy,
-    PoolName,
-    PoolTransfer,
     PrefetchTimeoutConfig,
 )
 from sglang.srt.mem_cache.hybrid_cache.hybrid_cache_controller import (
@@ -51,6 +48,7 @@ from sglang.srt.mem_cache.memory_pool import (
 from sglang.srt.mem_cache.pool_host.common import get_allocator_type
 from sglang.srt.mem_cache.pool_host.mha import get_mha_host_pool_cls
 from sglang.srt.mem_cache.pool_host.mla import MLATokenToKVPoolHost
+from sglang.srt.mem_cache.pool_transfer import PoolHitPolicy, PoolName, PoolTransfer
 from sglang.srt.mem_cache.radix_cache import (
     RadixCache,
     RadixKey,
