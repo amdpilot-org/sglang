@@ -9,7 +9,7 @@ from typing import Optional
 import psutil
 import torch
 
-from sglang.srt.distributed.parallel_state import get_tp_group, get_world_group
+from sglang.srt.distributed.parallel_state import get_world_group
 from sglang.srt.mem_cache.memory_pool import KVCache
 from sglang.srt.mem_cache.pool_host.common import (
     _cuda_host_unregister,
@@ -50,39 +50,62 @@ def ranks_per_host() -> int:
 
 
 def host_memory_sync_group() -> Optional[torch.distributed.ProcessGroup]:
-    """Return the TP CPU group used to synchronize host-memory readings.
+    """Return the world CPU group used for the initial host-memory snapshot.
 
-    TP ranks in one pipeline stage build matching host pools in the same order,
-    unlike the world group when pipeline stages own different layers. Single-rank
-    and not-yet-initialized runs keep using their local reading.
+    Every rank that enables HiCache constructs a primary host pool, so the first
+    sizing check is common even when later pipeline stages construct different
+    sidecar pools. Synchronizing that check across the whole job also covers
+    multiple TP or in-job DP groups co-located on one host.
     """
     if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
         return None
     try:
-        tp_group = get_tp_group()
+        world_group = get_world_group()
     except AssertionError:
         return None
-    if tp_group.world_size <= 1:
+    if world_group.world_size <= 1:
         return None
-    return tp_group.cpu_group
+    return world_group.cpu_group
 
 
-def host_memory_budget_bytes() -> int:
-    """Host RAM this rank may claim for a HiCache pool.
+_initial_host_memory_available_bytes: Optional[int] = None
+_reserved_host_memory_bytes = 0
+_host_memory_budget_lock = threading.Lock()
 
-    Synchronize the reading before splitting it across co-located ranks. The
-    collective prevents a faster TP peer from allocating a pool before slower
-    peers have sampled memory, avoiding a second charge for the earlier pool.
+
+def host_memory_budget_bytes(requested_bytes: int = 0) -> int:
+    """Remaining per-rank host RAM before an optional pool reservation.
+
+    Take one job-wide synchronized snapshot before any rank allocates its first
+    pool, then keep that baseline for later pools. This makes the result
+    independent of allocation timing across TP, PP, and in-job DP groups while
+    avoiding collectives for sidecar pools that not every rank constructs.
+
+    Accepted requests are accumulated locally because the baseline no longer
+    falls as this process allocates its earlier pools. The equal per-rank split
+    is intentionally preserved from the original guard.
     """
-    free = psutil.virtual_memory().available
-    sync_group = host_memory_sync_group()
-    if sync_group is not None:
-        reading = torch.tensor(free, dtype=torch.int64)
-        torch.distributed.all_reduce(
-            reading, op=torch.distributed.ReduceOp.MIN, group=sync_group
-        )
-        free = int(reading.item())
-    return (free - HICACHE_HOST_MEMORY_RESERVE_BYTES) // ranks_per_host()
+    global _initial_host_memory_available_bytes, _reserved_host_memory_bytes
+
+    with _host_memory_budget_lock:
+        if _initial_host_memory_available_bytes is None:
+            free = psutil.virtual_memory().available
+            sync_group = host_memory_sync_group()
+            if sync_group is not None:
+                reading = torch.tensor(free, dtype=torch.int64)
+                torch.distributed.all_reduce(
+                    reading, op=torch.distributed.ReduceOp.MIN, group=sync_group
+                )
+                free = int(reading.item())
+            _initial_host_memory_available_bytes = free
+
+        total_budget = (
+            _initial_host_memory_available_bytes - HICACHE_HOST_MEMORY_RESERVE_BYTES
+        ) // ranks_per_host()
+        remaining_budget = total_budget - _reserved_host_memory_bytes
+        if requested_bytes <= remaining_budget:
+            _reserved_host_memory_bytes += requested_bytes
+        return remaining_budget
 
 
 def sync_fixed_hicache_size(size: int, host_size: int) -> int:
@@ -198,7 +221,7 @@ class HostKVCache(abc.ABC):
 
         # Verify there is enough available host memory.
         requested_bytes = self.size * self.size_per_token
-        available_bytes = host_memory_budget_bytes()
+        available_bytes = host_memory_budget_bytes(requested_bytes)
         if requested_bytes > available_bytes:
             raise ValueError(
                 f"Not enough host memory available. Requesting "
