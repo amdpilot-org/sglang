@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/6357",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Restored sglang:avg_request_queue_latency as a live gauge computed from initialized wait_queue_entry_time values in the current scheduler waiting queue, using one shared allocation-free helper for prefill and decode reporting.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-c031fac99fc2/venv/bin/python -m pytest -q test/registered/unit/observability/test_queue_latency_metrics.py (before implementation)",
+      "exit_code": 2,
+      "what_was_measured": "The issue-specific regression failed during collection because the queue-latency calculation did not exist in the prepared base."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c031fac99fc2/venv/bin/python -m pytest -q test/registered/unit/observability/test_queue_latency_metrics.py",
+      "exit_code": 0,
+      "what_was_measured": "Four deterministic numerical cases passed: mean current wait, empty queue, exclusion of an uninitialized timestamp, and clamping a future timestamp to zero."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c031fac99fc2/venv/bin/python -m pytest -q test/registered/unit/observability/test_ray_wrappers.py",
+      "exit_code": 0,
+      "what_was_measured": "Existing metrics wrapper compatibility: 33 tests and 4 subtests passed."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-c031fac99fc2/venv/bin/python reports/j-c031fac99fc2/run_metrics_probe.py --fixture /tmp/amdpilot-repo-j-c031fac99fc2/tiny-random-llama --output reports/j-c031fac99fc2/evidence",
+      "exit_code": 0,
+      "what_was_measured": "A source-checkout SGLang server on one gfx950 GPU returned HTTP 200 for two queued generation requests; /metrics simultaneously reported num_queue_reqs=1.0 and avg_request_queue_latency=0.003117550048045814."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-c031fac99fc2/evidence/server.log records real Triton gfx950 prefill/decode work; run-metadata.json records the successful queued HTTP requests and positive metric observation.",
+  "native_rebuilt": false,
+  "remaining_limitations": "The deterministic random tiny Llama fixture validates only single-gfx950 transport, engine execution, and scheduler metric emission. The reported TP=8 DP-attention NVIDIA deployment, production weights/model semantics, and distributed behavior were not reproduced. No native C++ source changed. The probe server required SIGKILL after its graceful-shutdown timeout; its descendants were reaped and rocm-smi showed the assigned GPU idle afterward. Ruff was not installed in the required interpreter, so focused pytest, source execution, and git diff --check were used instead."
+}
