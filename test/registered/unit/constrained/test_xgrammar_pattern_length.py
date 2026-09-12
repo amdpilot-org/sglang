@@ -95,6 +95,33 @@ class TestXGrammarPatternLengthCombination(unittest.TestCase):
                     has_xgrammar_unsupported_pattern_length_combination(schema)
                 )
 
+    def test_detects_property_constraints_split_across_object_all_of(self):
+        schemas = (
+            {
+                "type": "object",
+                "allOf": [
+                    {"properties": {"v": {"pattern": "^[a-z]+$"}}},
+                    {"properties": {"v": {"minLength": 5}}},
+                ],
+            },
+            {
+                "$defs": {
+                    "patterned": {"properties": {"v": {"pattern": "^[a-z]+$"}}},
+                    "long": {"properties": {"v": {"minLength": 5}}},
+                },
+                "type": "object",
+                "allOf": [
+                    {"$ref": "#/$defs/patterned"},
+                    {"$ref": "#/$defs/long"},
+                ],
+            },
+        )
+        for schema in schemas:
+            with self.subTest(schema=schema):
+                self.assertTrue(
+                    has_xgrammar_unsupported_pattern_length_combination(schema)
+                )
+
     def test_does_not_merge_constraints_at_different_instance_locations(self):
         schemas = (
             {
@@ -108,6 +135,12 @@ class TestXGrammarPatternLengthCombination(unittest.TestCase):
                     "patterned": {"type": "string", "pattern": "^[a-z]+$"},
                     "long": {"type": "string", "minLength": 5},
                 }
+            },
+            {
+                "allOf": [
+                    {"properties": {"patterned": {"pattern": "^[a-z]+$"}}},
+                    {"properties": {"long": {"minLength": 5}}},
+                ]
             },
         )
         for schema in schemas:

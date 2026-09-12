@@ -132,6 +132,36 @@ def has_xgrammar_unsupported_pattern_length_combination(schema: dict) -> bool:
 
         return has_pattern, has_length
 
+    def conjunctive_properties(value, resolving_refs=frozenset()):
+        """Collect property schemas joined by object-level allOf/$ref."""
+        if not isinstance(value, dict):
+            return {}
+
+        result = {}
+        properties = value.get("properties")
+        if isinstance(properties, dict):
+            for name, child in properties.items():
+                if isinstance(child, dict):
+                    result.setdefault(name, []).append(child)
+
+        ref = value.get("$ref")
+        if isinstance(ref, str) and ref not in resolving_refs:
+            target = resolve_local_ref(ref)
+            for name, children in conjunctive_properties(
+                target, resolving_refs | {ref}
+            ).items():
+                result.setdefault(name, []).extend(children)
+
+        children = value.get("allOf")
+        if isinstance(children, list):
+            for child in children:
+                for name, property_schemas in conjunctive_properties(
+                    child, resolving_refs
+                ).items():
+                    result.setdefault(name, []).extend(property_schemas)
+
+        return result
+
     def check_subschema(value) -> bool:
         if not isinstance(value, dict):
             return False
@@ -139,6 +169,19 @@ def has_xgrammar_unsupported_pattern_length_combination(schema: dict) -> bool:
         has_pattern, has_length = constraints_at_location(value)
         if has_pattern and has_length:
             return True
+
+        # Object-level allOf/$ref branches can contribute constraints to the
+        # same property even though the keywords are not adjacent in the
+        # schema tree. Treat those property schemas as one instance location.
+        for property_schemas in conjunctive_properties(value).values():
+            property_pattern = False
+            property_length = False
+            for property_schema in property_schemas:
+                child_pattern, child_length = constraints_at_location(property_schema)
+                property_pattern |= child_pattern
+                property_length |= child_length
+            if property_pattern and property_length:
+                return True
 
         for keyword in single_subschema_keywords:
             child = value.get(keyword)
