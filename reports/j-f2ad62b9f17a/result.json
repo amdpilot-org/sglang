@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/22935",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "reject",
+  "fully_resolves_original": false,
+  "summary": "PR 662 at 6eaf6c114f3dd23ad901e47d2cf8e2532ade22a6 is test-only hardening and documentation, not a fix for the original issue. Its new regression explicitly accepts the original [A,B,C] then n-1 [A,B] zero-hit behavior. Independent base and candidate probes reproduced that zero hit on an AMD Instinct MI350X. The existing implementation can reuse a prefix only through a node that owns a recurrent state at exactly that depth: an explicit depth-2 checkpoint returns two indices, a real depth-64 checkpoint returns 64, and divergence before the first checkpoint returns zero.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-f2ad62b9f17a/venv/bin/python /job/review-evidence-j-f2ad62b9f17a/independent_probe.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Actual GPU-resident MambaRadixCache indices: short n-1=0, full owned leaf=3, explicit exact depth-2 checkpoint=2, long n-1 through a depth-64 checkpoint=64, divergence after checkpoint=64, divergence before checkpoint=0."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f2ad62b9f17a/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_short_prefix_ownership.py test/registered/unit/mem_cache/test_mamba_unittest.py (candidate 6eaf6c114f3dd23ad901e47d2cf8e2532ade22a6)",
+      "exit_code": 0,
+      "what_was_measured": "20 tests passed. The candidate's new exact short-prefix test passes by asserting a zero-token hit, so this is regression documentation rather than a passing-after fix for the source issue."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f2ad62b9f17a/venv/bin/python /job/review-evidence-j-f2ad62b9f17a/independent_probe.py (candidate 6eaf6c114f3dd23ad901e47d2cf8e2532ade22a6)",
+      "exit_code": 0,
+      "what_was_measured": "The independent assigned-GPU probe produced the same values as base, including the unresolved exact short n-1 zero hit and correct independent torch.arange references for supported owned checkpoints."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "The delivered review report has no whitespace errors."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "torch 2.11.0+rocm7.2 reported CUDA/HIP execution available on AMD Instinct MI350X; cache values and independent torch.arange references were allocated on device cuda.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Insert [A,B,C] with its only recurrent state owned at depth 3, then match the fresh-prefill n-1 key [A,B]: device_indices remains length 0 at the exact candidate commit.",
+    "Divergence before the first real recurrent checkpoint returns zero reusable indices, even when attention KV structurally matches.",
+    "The candidate supplies no arbitrary-depth recurrent plus convolution checkpoint and no execution path that replays recurrent layers while retaining attention KV."
+  ],
+  "remaining_limitations": "No hybrid-Mamba model weights were prepared, so end-to-end logits and latency were not measured. The source issue's exact short-prefix reuse remains unsupported by the current architecture unless an exact penultimate state is captured or a split-replay path is added. PR 662 changes only tests and reports; it changes no Python runtime implementation or native source, so a native rebuild was not applicable."
+}
