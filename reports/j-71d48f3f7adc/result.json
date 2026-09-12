@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35156",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared base already contains the issue's exact two-line correction: both cache-aware tests pass the owned String from format! directly to BasicWorkerBuilder::new. Git history identifies commit 413df1f8db4fd159c5d07e960f9ec5547edeb5c1 as the change that removed both needless borrows. Reintroducing only those two borrows makes the documented Clippy command fail with exactly two needless_borrows_for_generic_args errors; restoring the base source makes the same command pass.",
+  "tests": [
+    {
+      "command": "cd sgl-model-gateway && cargo clippy --all-targets --all-features -- -D warnings (after temporarily reintroducing the two reported &format! expressions)",
+      "exit_code": 101,
+      "what_was_measured": "Failing-before regression: Clippy 1.90 emitted exactly the reported needless_borrows_for_generic_args diagnostics at cache_aware.rs lines 682 and 741. Raw output: reports/j-71d48f3f7adc/raw/clippy-failing-before.log"
+    },
+    {
+      "command": "cd sgl-model-gateway && cargo clippy --all-targets --all-features -- -D warnings",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after/current-base regression: the complete gateway CI lint command completed successfully with the owned String call sites. Raw output: reports/j-71d48f3f7adc/raw/clippy-passing-after.log"
+    },
+    {
+      "command": "cd sgl-model-gateway && cargo test --lib test_cache_aware_imbalanced_random_tie_break -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Independent behavior boundary for the first changed call site: one imbalanced-load random tie-break test ran and passed. Raw output: reports/j-71d48f3f7adc/raw/test-imbalanced-tie-break.log"
+    },
+    {
+      "command": "cd sgl-model-gateway && cargo test --lib test_cache_aware_random_tie_break_cold_start -- --nocapture",
+      "exit_code": 0,
+      "what_was_measured": "Independent behavior boundary for the second changed call site: one cold-start random tie-break test ran and passed. Raw output: reports/j-71d48f3f7adc/raw/test-cold-start.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and its validation are confined to Rust Clippy diagnostics and CPU unit tests; no model, accelerator kernel, or serving path is involved, so the assigned GPU was not used."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The prepared checkout starts after the historical fix, so the original a2e88279c tree was not used as the delivery base. Failing-before evidence was produced by reintroducing exactly the two historical borrows into the prepared implementation, and the repository history independently records the identical two-line removal in commit 413df1f8db4fd159c5d07e960f9ec5547edeb5c1.",
+    "No GPU or model-serving validation was performed because it cannot add evidence for this Rust-only lint issue."
+  ]
+}
