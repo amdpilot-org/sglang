@@ -1,0 +1,29 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37639",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared main checkout still hardcoded sigmoid in Spark2_5Attention despite the gate_attn_act_mode configuration supported by the reference. The fix preserves the sigmoid default, dispatches sigmoid or silu in float32, and raises ValueError for unsupported modes. An existing open upstream candidate, https://github.com/sgl-project/sglang/pull/37727, was inspected before implementing the mirror delivery.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ca26f1f6f593/venv/bin/python -m pytest -q test/registered/unit/models/test_spark2_5.py (before source fix)",
+      "exit_code": 2,
+      "what_was_measured": "Regression collection failed because the checked-out implementation had no config-aware _apply_gate_activation helper; raw output: reports/j-ca26f1f6f593/raw/pytest-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ca26f1f6f593/venv/bin/python -m pytest -q test/registered/unit/models/test_spark2_5.py",
+      "exit_code": 0,
+      "what_was_measured": "Config default/propagation, exact float32 sigmoid and silu results over negative, zero, ordinary, and large inputs, dtype behavior, and rejection of an unsupported mode; raw output: reports/j-ca26f1f6f593/raw/pytest-after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ca26f1f6f593/venv/bin/python < inline GPU numerical check",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, both activation modes matched independent formulas; sigmoid max_abs_diff=0, silu max_abs_diff=9.53674316e-07, while the pre-fix hardcoded sigmoid differed from the silu reference by 19; raw output: reports/j-ca26f1f6f593/raw/gpu-numerical.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2 / HIP 7.2.26015; reports/j-ca26f1f6f593/raw/gpu-numerical.txt"
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": "No Spark-X2.5 weights were available, so no full-model or semantic-accuracy reproduction was performed. The GPU fixture validates only the corrected activation selection numerically, not accumulated model outputs or serving behavior. Released Spark-X2.5 checkpoints use sigmoid and therefore were not numerically affected by the original latent mismatch. No native code changed, so no native rebuild was applicable."
+}
