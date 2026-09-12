@@ -1,0 +1,63 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34943",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "d0fbb177b80d57956c3fd543e5f70a306b69f4ad",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate fixes speculative decode-stage classification and removes synchronous torch trace export from both legacy and profile-v2 scheduler stop paths. Independent tests also confirm that export threads no longer use the scheduler process group, eliminating the reviewed collective-ordering hang.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7f2c1b4f8edd/venv/bin/python -m pytest -q /job/review-evidence-j-7f2c1b4f8edd/meta/test_profiler_manager_stage_stop.py::TestProfilerManagerStageStop::test_profile_v2_classifies_speculative_steps_as_decode",
+      "exit_code": 1,
+      "what_was_measured": "On the prepared base, TARGET_VERIFY was classified as prefill rather than decode."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7f2c1b4f8edd/venv/bin/python -m pytest -q /job/review-evidence-j-7f2c1b4f8edd/meta/test_profiler_manager_stage_stop.py::TestProfilerManagerStageStop::test_trace_export_does_not_block_stop",
+      "exit_code": 1,
+      "what_was_measured": "On the prepared base, legacy stop remained inside the mocked exporter for its five-second timeout."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7f2c1b4f8edd/venv/bin/python -m pytest -q /job/review-evidence-j-7f2c1b4f8edd/meta/test_profiler_manager_stage_stop.py::TestProfilerManagerStageStop::test_profile_v2_trace_export_does_not_block_stop",
+      "exit_code": 1,
+      "what_was_measured": "On the prepared base, profile-v2 stop remained inside the mocked exporter for its five-second timeout."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7f2c1b4f8edd/venv/bin/python -m pytest -q test/registered/unit/managers/test_profiler_manager_stage_stop.py",
+      "exit_code": 0,
+      "what_was_measured": "At the candidate commit, five tests passed, including speculative classification and nonblocking/no-barrier behavior for legacy and profile-v2 paths."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7f2c1b4f8edd/venv/bin/python reports/j-b0e05ade0242/adversarial_collective.py",
+      "exit_code": 0,
+      "what_was_measured": "At the candidate commit, two staggered Gloo ranks completed a normal all-reduce with value 3.0 while trace exports ran."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7f2c1b4f8edd/venv/bin/python -m pytest -q test/registered/unit/utils/test_profile_merger.py test/registered/unit/managers/test_profile_merger_http_api.py",
+      "exit_code": 0,
+      "what_was_measured": "Thirteen existing profile merge and API tests passed at the candidate commit."
+    },
+    {
+      "command": "REVIEW_GPU_OUTPUT=<private-runtime-dir> PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7f2c1b4f8edd/venv/bin/python /job/review-evidence-j-7f2c1b4f8edd/meta/independent_gpu_legacy.py",
+      "exit_code": 0,
+      "what_was_measured": "Legacy stop returned before export completion on gfx950, then produced a 41810-byte trace; GPU matmul max absolute error was 2.86102294921875e-05."
+    },
+    {
+      "command": "REVIEW_GPU_OUTPUT=<private-runtime-dir> PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7f2c1b4f8edd/venv/bin/python /job/review-evidence-j-7f2c1b4f8edd/meta/independent_gpu_profile_v2.py",
+      "exit_code": 0,
+      "what_was_measured": "Profile-v2 stop returned before export completion on gfx950, then produced a 41668-byte trace; GPU matmul max absolute error was 2.6702880859375e-05."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Both profiler implementations generated nonempty traces around a real 256x256 matrix multiplication on AMD Instinct MI350X/gfx950."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Only one AMD Instinct MI350X/gfx950 GPU was available; no B200 x8 or multi-rank GPU profile was run.",
+    "GLM-5.2 weights and the TP8/MTP serving workload were unavailable, so the reported 25-second duration and end-to-end TTFT delta were not reproduced.",
+    "The distributed ordering test used two Gloo CPU ranks.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
