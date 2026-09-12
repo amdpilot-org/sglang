@@ -70,6 +70,11 @@ logger = logging.getLogger(__name__)
 # Use power of 2 values for better memory allocation.
 DETOKENIZER_MAX_STATES = int(os.environ.get("SGLANG_DETOKENIZER_MAX_STATES", 1 << 16))
 
+# Keep retries for genuinely incomplete characters small in token space. A
+# token bound, unlike an event bound, remains effective when one speculative
+# decode event contains many accepted tokens.
+MAX_STALLED_DECODE_TOKENS = 64
+
 
 @dataclasses.dataclass
 class DecodeStatus:
@@ -81,6 +86,7 @@ class DecodeStatus:
     read_offset: int
     # Offset that's sent to tokenizer for incremental update.
     sent_offset: int = 0
+    stalled_decode_start: Optional[int] = None
     decoded_text_len: int = dataclasses.field(init=False)
     decoded_text_chunks: List[str] = dataclasses.field(default_factory=list)
 
@@ -390,11 +396,21 @@ class DetokenizerManager(MultiHttpWorkerDetokenizerMixin):
                 # in a prior "�" recovery step; we skip it from this step's
                 # emission so we don't double-send.
                 pending = s.sent_offset - s.decoded_text_len
-                if new_text and not new_text.endswith("�"):
-                    # Clean text: commit to decoded_text and advance offsets.
+                clean = bool(new_text) and not new_text.endswith("�")
+                if s.stalled_decode_start is None:
+                    s.stalled_decode_start = s.read_offset
+                stalled_tokens = len(s.decode_ids) - s.stalled_decode_start
+                force_commit = stalled_tokens >= MAX_STALLED_DECODE_TOKENS
+                if clean or force_commit:
+                    # Commit clean text or recover from an oversized stalled tail.
                     s.append_decoded_text(new_text)
-                    s.surr_offset = s.read_offset
+                    # A forced recovery accepts the replacement text as final,
+                    # so no undecodable prefix needs to remain in the next
+                    # window. This makes the retained tail strictly bounded
+                    # even when a single event is very large.
+                    s.surr_offset = len(s.decode_ids) if force_commit else s.read_offset
                     s.read_offset = len(s.decode_ids)
+                    s.stalled_decode_start = None
                     s.sent_offset = s.decoded_text_len
                     output_strs.append(new_text[pending:] if pending else new_text)
                 else:
