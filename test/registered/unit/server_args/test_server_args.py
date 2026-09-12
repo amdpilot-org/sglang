@@ -23,6 +23,7 @@ from sglang.srt.arg_groups.cuda_graph_hook import (
     disable_tc_piecewise_cudagraph_if_incompatible,
     handle_cuda_graph_config,
 )
+from sglang.srt.arg_groups.deepseek_v4_hook import validate_deepseek_v4_cp
 from sglang.srt.arg_groups.hicache_hook import (
     handle_hicache,
     handle_hicache_ratio_default,
@@ -1157,6 +1158,55 @@ class TestContextParallelServerArgs(CustomTestCase):
 
         self.assertTrue(is_cp_enabled())
         self.assertTrue(is_interleave())
+
+    @override_platform(is_hip=False, is_npu=False, is_musa=False)
+    def test_deepseek_v4_unified_interleave_cp_does_not_create_legacy_conflict(self):
+        """Regression for https://github.com/sgl-project/sglang/issues/32553."""
+        parsed = self.parser.parse_args(
+            [
+                "--model",
+                "dummy",
+                "--tp",
+                "8",
+                "--attn-cp-size",
+                "8",
+                "--enable-prefill-cp",
+                "--cp-strategy",
+                "interleave",
+            ]
+        )
+        args = self._new_cp_args(
+            enable_prefill_cp=resolution_result(parsed, "enable_prefill_cp"),
+            cp_strategy=resolution_result(parsed, "cp_strategy"),
+            attn_cp_size=8,
+            tp_size=8,
+        )
+
+        validate_deepseek_v4_cp(args)
+        handle_context_parallelism(args)
+
+        self.assertTrue(resolution_result(args, "enable_dp_attention"))
+        self.assertEqual(resolution_result(args, "moe_dense_tp_size"), 1)
+        self.assertEqual(resolution_result(args, "attn_cp_size"), 8)
+        field_names = {field.name for field in msgspec.structs.fields(ServerArgs)}
+        self.assertNotIn("enable_prefill_context_parallel", field_names)
+        self.assertNotIn("enable_dsa_prefill_context_parallel", field_names)
+        self.assertTrue(is_cp_enabled())
+        self.assertTrue(is_interleave())
+
+    def test_deepseek_v4_cp_rejects_non_interleave_strategy(self):
+        args = self._new_cp_args(enable_prefill_cp=True, cp_strategy="zigzag")
+
+        with self.assertRaisesRegex(ValueError, "only supports interleave"):
+            validate_deepseek_v4_cp(args)
+
+    def test_deepseek_v4_cp_disabled_leaves_parallel_defaults_unchanged(self):
+        args = self._new_cp_args(enable_prefill_cp=False, cp_strategy=None)
+
+        validate_deepseek_v4_cp(args)
+
+        self.assertFalse(resolution_result(args, "enable_dp_attention"))
+        self.assertEqual(resolution_result(args, "attn_cp_size"), 1)
 
 
 class TestFlashinferA2ADispatchType(CustomTestCase):
