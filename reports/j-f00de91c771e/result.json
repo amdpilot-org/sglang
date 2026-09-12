@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31356",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Added build_app and init_app_state for fresh Engine-bound ASGI apps. Request-scoped state dispatch keeps native and OpenAI routes isolated between app instances without changing the compatibility module global, and the single-tokenizer launch_server path now uses the same factory construction.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/tmp/amdpilot-repo-j-f00de91c771e/base-tree/python python -I -c 'from sglang.srt.entrypoints.http_server import build_app, init_app_state'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction at the recorded base: the proposed public factory functions did not exist. Raw output: evidence/factory_import_before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f00de91c771e/venv/bin/python -m pytest -q test/registered/unit/entrypoints/test_http_server_app_factory.py test/registered/unit/entrypoints/test_server_info.py",
+      "exit_code": 0,
+      "what_was_measured": "31 tests and 12 subtests passed, including concurrent isolation of two fresh apps on an existing native route and compatibility-global preservation. Raw output: evidence/focused-tests.log"
+    },
+    {
+      "command": "SGLANG_QUAL_FIXTURE=/tmp/amdpilot-repo-j-f00de91c771e/tiny-random-llama SGLANG_INTEGRATION_OUTPUT=reports/j-f00de91c771e/evidence/engine-app /tmp/amdpilot-repo-j-f00de91c771e/venv/bin/python reports/j-f00de91c771e/engine_app_integration.py",
+      "exit_code": 0,
+      "what_was_measured": "A real prepared Engine was bound with build_app/init_app_state and served /model_info plus an eight-token /generate request through ASGI TestClient; owned descendants were reaped. Raw output: evidence/engine-app.log and evidence/engine-app/result.json"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/entrypoints/http_server.py python/sglang/srt/entrypoints/elastic_ep.py test/registered/unit/entrypoints/test_http_server_app_factory.py reports/j-f00de91c771e/engine_app_integration.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, and registered-test policy checks."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X, Torch 2.11.0+rocm7.2 / HIP 7.2.26015 executed the deterministic tiny Llama and returned output_ids [12, 100, 124, 43, 124, 43, 124, 51]."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "build_app intentionally supports the in-process Engine single-tokenizer configuration; multi-tokenizer HTTP workers still require launch_server shared-memory bootstrap.",
+    "The deterministic random tiny Llama validates transport and engine execution only, not semantic quality, other model architectures, or distributed workloads.",
+    "SGLang runtime configuration remains process-wide independently of this ASGI state fix; the isolation regression uses compatible server arguments for both app instances."
+  ]
+}

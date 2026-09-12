@@ -41,7 +41,7 @@ async def scale_elastic_ep(raw_request: Request):
             status_code=HTTPStatus.BAD_REQUEST,
         )
 
-    from sglang.srt.entrypoints.http_server import _global_state
+    from sglang.srt.entrypoints.http_server import get_global_state
     from sglang.srt.managers.io_struct import ScaleElasticEPReqInput
 
     if get_exec().moe.elastic_ep_backend is None:
@@ -50,7 +50,7 @@ async def scale_elastic_ep(raw_request: Request):
             status_code=HTTPStatus.NOT_FOUND,
         )
 
-    result = await _global_state.tokenizer_manager.scale_elastic_ep(
+    result = await get_global_state().tokenizer_manager.scale_elastic_ep(
         ScaleElasticEPReqInput(new_ep_size=new_ep_size)
     )
 
@@ -77,7 +77,7 @@ async def scale_elastic_ep(raw_request: Request):
 @auth_level(AuthLevel.ADMIN_OPTIONAL)
 async def is_scaling_elastic_ep(raw_request: Request):
     """Return the tokenizer's mirrored Elastic EP scale state."""
-    from sglang.srt.entrypoints.http_server import _global_state
+    from sglang.srt.entrypoints.http_server import get_global_state
 
     if get_exec().moe.elastic_ep_backend is None:
         return ORJSONResponse(
@@ -85,4 +85,4 @@ async def is_scaling_elastic_ep(raw_request: Request):
             status_code=HTTPStatus.NOT_FOUND,
         )
 
-    return ORJSONResponse(_global_state.tokenizer_manager.get_elastic_ep_state())
+    return ORJSONResponse(get_global_state().tokenizer_manager.get_elastic_ep_state())
