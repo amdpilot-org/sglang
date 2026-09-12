@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33483",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Verified that effective max_running_requests can exceed the independently derived decode CUDA graph ceiling and added a one-time startup warning without changing scheduling policy. The exact L40/Qwen latency transition was not reproducible on the assigned AMD gfx950 hardware.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ee32a0b3d017/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_cuda_graph_request_capacity_warning.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: the issue values resolved to 4096 requests versus graph max batch 32, but the unmodified implementation emitted no warning (1 failed, 2 passed)."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ee32a0b3d017/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_cuda_graph_request_capacity_warning.py test/registered/unit/model_executor/test_pool_configurator.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression and adjacent memory-pool coverage: 44 tests and 7 subtests passed, including issue arithmetic, equal-capacity, disabled-graph, and warn-once behavior."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-ee32a0b3d017/pre-commit /opt/venv/bin/pre-commit run --files python/sglang/srt/mem_cache/kv_cache_configurator.py test/registered/unit/model_executor/test_cuda_graph_request_capacity_warning.py",
+      "exit_code": 0,
+      "what_was_measured": "All configured formatting, lint, syntax, registry, and repository policy hooks passed for the changed source and test."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ee32a0b3d017/venv/bin/python /tmp/amdpilot-repo-j-ee32a0b3d017/fixture-tools/run_server_probe.py --fixture /tmp/amdpilot-repo-j-ee32a0b3d017/tiny-random-llama --output /job/repo/reports/j-ee32a0b3d017/raw/gpu-graph-final --graph",
+      "exit_code": 0,
+      "what_was_measured": "Real gfx950 engine startup and decode graph capture for batches 1 and 2; startup warned for effective request capacity 4; four HTTP probes returned 200 and the owned process group was reaped."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ee32a0b3d017/venv/bin/python (Torch GPU dot-product evidence script)",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X gfx950 with Torch 2.11.0+rocm7.2/HIP 7.2.26015, the GPU dot product was 32.0 and exactly matched the independent CPU reference 32.0."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-ee32a0b3d017/raw/gpu-graph-final/server.log records gfx950 decode graph capture and the new capacity warning; probe-summary.json records four HTTP 200 responses; gpu-numerical-reference.json records device identity and an exact numerical reference match.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported NVIDIA L40 and Qwen/Qwen2.5-0.5B-Instruct weights/ShareGPT workload were unavailable, so the 4x latency transition and absorbing-state dynamics were not reproduced.",
+    "The deterministic tiny random Llama fixture validates transport and engine execution only; it does not qualify Qwen architecture behavior, semantic accuracy, or a distributed workload.",
+    "The correction is diagnostic: it exposes the unsafe default relationship at startup but does not choose between reducing admission and increasing graph capture, whose latency and memory tradeoffs are workload-dependent.",
+    "No native library was changed or rebuilt."
+  ]
+}
