@@ -1,0 +1,75 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32101",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2805",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2774",
+  "candidate_commit": "8cf9aac4789b675f221af1728ffa391749866b67",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "The candidate adds a plausible Python-only Gemma 4 model-native-cache bridge and its portable policy tests pass, but the prepared Linux x86_64 ROCm host has neither mlx nor mlx_lm. All 43 runner-level MLX tests skipped, and the candidate contains no independently executable evidence for the tiny real architecture, long-prompt greedy parity, real multi-request cache lifecycle, Apple Silicon HTTP serving, or real E2B token parity required by the open issue. This is partial implementation and test hardening, not a verified full original-issue fix.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-fa24c699834b/venv/bin/python -m pytest -q test/registered/unit/hardware_backend/mlx/test_gemma4_native_cache_policy.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate portable recognition and scheduler-policy helpers; 3 tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fa24c699834b/venv/bin/python -m pytest -q test/registered/unit/hardware_backend/mlx/test_attention_patching.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate MLX runner regression collection; 43 tests skipped because mlx and mlx_lm are unavailable, so no runner behavior was measured."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-fa24c699834b/venv/bin/python -c '<exhaustive radix/overlap/chunk-size policy matrix>'",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial matrix over both radix states, both overlap states, and chunk sizes -1, 0, and 1024; only disable_radix_cache=true, disable_overlap_schedule=true, chunked_prefill_size=-1 was accepted."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fa24c699834b/venv/bin/python -m compileall -q python/sglang/srt/hardware_backend/mlx test/registered/unit/hardware_backend/mlx/test_gemma4_native_cache_policy.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python source and test syntax/import compilation."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..8cf9aac4789b675f221af1728ffa391749866b67",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace integrity."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-fa24c699834b/venv/bin/python -c 'import sglang.srt.hardware_backend.mlx.model_runner' (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before environment reproduction on the exact recorded base: import stops at ModuleNotFoundError: No module named mlx. The original Gemma 4 runtime failure cannot be executed on this host."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-fa24c699834b/venv/bin/python -c 'from sglang.srt.hardware_backend.mlx.native_cache import uses_model_native_cache' (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "The exact base lacks the candidate native_cache bridge (ModuleNotFoundError), establishing the source-level before/after delta without claiming runtime reproduction."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD ROCm device is visible (Torch 2.11.0+rocm7.2, HIP 7.2), but the requested backend requires Apple Silicon/Metal. Running an unrelated ROCm numerical smoke would not test the issue contract."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Instantiate the public mlx_lm gemma4.Model wrapper and gemma4_text.Model tiny real architecture and verify model.make_cache() ownership/shape through MlxModelRunner initialization and prefill.",
+    "Compare greedy generation against unmodified mlx-lm for a prompt longer than the synthetic sliding window.",
+    "Run two or more concurrent requests through the actual scheduler, verify distinct native cache objects and outputs, cancel/finish them, and demonstrate state release without cross-request contamination.",
+    "Launch mlx-community/gemma-4-e2b-it-4bit on Apple Silicon, serve /v1/chat/completions, and compare generated tokens token-for-token with raw mlx-lm.",
+    "Verify the documented 2048-token configuration on Metal and show that unsupported radix, overlap, and chunked-prefill settings fail through the real launch path with actionable messages."
+  ],
+  "remaining_limitations": [
+    "Host is Linux 4.18 x86_64 with AMD ROCm, not macOS on Apple Silicon.",
+    "mlx and mlx_lm are not installed and are not supported by this prepared architecture.",
+    "No Gemma 4 weights were downloaded because they cannot execute on this host.",
+    "No HTTP/serving smoke was substituted: the provided tiny Llama fixture cannot qualify Gemma 4 architecture, cache semantics, or token accuracy.",
+    "No native C++ or FlyDSL files changed in the candidate, so no native rebuild applies.",
+    "The candidate's MLX-only tests are skipped wholesale on the prepared host and use hand-constructed cache doubles rather than a tiny real Gemma 4 architecture."
+  ],
+  "evidence_paths": {
+    "preserved_external_directory": "/job/review-evidence/j-fa24c699834b",
+    "candidate_source_checkout": "/job/repo at detached 8cf9aac4789b675f221af1728ffa391749866b67 during review",
+    "base_source_checkout": "/job/repo at detached 358c163250ad3b1f62939b01ce1314a0a31a0365 during review",
+    "prepared_interpreter": "/tmp/amdpilot-repo-j-fa24c699834b/venv/bin/python",
+    "native_library": null
+  }
+}
