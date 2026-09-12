@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38981",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/727",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/723",
+  "candidate_commit": "f2e1f3240e87f0cb0baf46fbef533db34c434a71",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate coalesces touching ranges and removes the reported shared-page assertion, but its allocator-wide last-call fingerprint only suppresses consecutive retries. An A, B, A cleanup sequence frees A's pages twice, so cleanup remains non-idempotent under the approved interleaved-retry contract.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-836f53935809/venv/bin/python /job/evidence-j-836f53935809/review_probe.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "The actual base free_kv_row_segments path raised AssertionError: segment at 5 shares a page with the one ending at 5 for touching [0,5) and [5,7) ranges."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-836f53935809/venv/bin/python -m pytest -q <five exact candidate regression nodeids>",
+      "exit_code": 0,
+      "what_was_measured": "All five candidate regressions passed (5 passed), covering touching coalescing and immediate retries in paged, SWA, and unified SWA allocators."
+    },
+    {
+      "command": "PROBE_DEVICE=cpu PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-836f53935809/venv/bin/python /job/evidence-j-836f53935809/review_probe.py (candidate f2e1f3240e87f0cb0baf46fbef533db34c434a71)",
+      "exit_code": 0,
+      "what_was_measured": "Touching cleanup freed two pages and an immediate retry freed zero more; interleaved A, B, A cleanup produced deltas 2, 1, 2 instead of 2, 1, 0."
+    },
+    {
+      "command": "PROBE_DEVICE=cuda:0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-836f53935809/venv/bin/python /job/evidence-j-836f53935809/review_probe.py (candidate f2e1f3240e87f0cb0baf46fbef533db34c434a71)",
+      "exit_code": 0,
+      "what_was_measured": "The same result was observed with allocator tensors on the assigned AMD Instinct MI350X: the original touching case passed, but interleaved retry A freed two duplicate pages."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "PyTorch 2.11.0+rocm7.2 reported one AMD Instinct MI350X (gfx950), and the adversarial allocator probe ran with device=cuda:0.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With one allocator, free row A, then row B, then retry the identical segments for A. The candidate overwrites _last_kv_row_free while freeing B, so retry A inserts A's two physical pages into free_pages again (observed total growth 5 pages where 3 unique pages were released)."
+  ],
+  "remaining_limitations": [
+    "The production configuration uses 8 NVIDIA B300 GPUs (SM103), while the prepared host provides one AMD Instinct MI350X (gfx950) under ROCm 7.2; the full Kimi-K3 multi-rank abort workload was not reproducible here.",
+    "No model weights or eight-GPU topology were available. Validation therefore exercised the actual free_kv_row_segments and allocator paths directly, on CPU and the assigned GPU.",
+    "The candidate changes Python only. repository-environment.json declares native=null and wheel=null, so no native rebuild was applicable; imports were confirmed from /job/repo/python/sglang/srt/mem_cache/common.py."
+  ]
+}
