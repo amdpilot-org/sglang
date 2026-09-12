@@ -90,11 +90,54 @@ def has_xgrammar_unsupported_pattern_length_combination(schema: dict) -> bool:
         "properties",
     )
 
+    def resolve_local_ref(ref: str):
+        if ref == "#":
+            return schema
+        if not ref.startswith("#/"):
+            return None
+
+        target = schema
+        for part in ref[2:].split("/"):
+            part = part.replace("~1", "/").replace("~0", "~")
+            if not isinstance(target, dict) or part not in target:
+                return None
+            target = target[part]
+        return target
+
+    def constraints_at_location(value, resolving_refs=frozenset()):
+        """Collect constraints joined at one instance location by allOf/$ref."""
+        if not isinstance(value, dict):
+            return False, False
+
+        has_pattern = "pattern" in value
+        has_length = "minLength" in value or "maxLength" in value
+
+        ref = value.get("$ref")
+        if isinstance(ref, str) and ref not in resolving_refs:
+            target = resolve_local_ref(ref)
+            ref_pattern, ref_length = constraints_at_location(
+                target, resolving_refs | {ref}
+            )
+            has_pattern |= ref_pattern
+            has_length |= ref_length
+
+        children = value.get("allOf")
+        if isinstance(children, list):
+            for child in children:
+                child_pattern, child_length = constraints_at_location(
+                    child, resolving_refs
+                )
+                has_pattern |= child_pattern
+                has_length |= child_length
+
+        return has_pattern, has_length
+
     def check_subschema(value) -> bool:
         if not isinstance(value, dict):
             return False
 
-        if "pattern" in value and ("minLength" in value or "maxLength" in value):
+        has_pattern, has_length = constraints_at_location(value)
+        if has_pattern and has_length:
             return True
 
         for keyword in single_subschema_keywords:
