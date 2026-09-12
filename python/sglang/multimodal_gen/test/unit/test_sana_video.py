@@ -21,6 +21,7 @@ from sglang.multimodal_gen.runtime.pipelines.sana_video import (
 from sglang.multimodal_gen.runtime.pipelines_core.stages.latent_preparation import (
     LatentPreparationStage,
 )
+from sglang.multimodal_gen.test.test_utils import DEFAULT_SANA_VIDEO_MODEL_NAME_FOR_TEST
 
 
 def test_sana_video_registry_resolution(monkeypatch):
@@ -29,7 +30,7 @@ def test_sana_video_registry_resolution(monkeypatch):
         lambda _: {"_class_name": "SanaVideoPipeline"},
     )
     get_model_info.cache_clear()
-    model_info = get_model_info("Efficient-Large-Model/SANA-Video_2B_480p_diffusers")
+    model_info = get_model_info(DEFAULT_SANA_VIDEO_MODEL_NAME_FOR_TEST)
 
     assert model_info is not None
     assert model_info.pipeline_config_cls is SanaVideoPipelineConfig

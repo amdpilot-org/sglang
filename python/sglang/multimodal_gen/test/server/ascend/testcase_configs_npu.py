@@ -12,6 +12,7 @@ from sglang.multimodal_gen.test.test_utils import (
     DEFAULT_FLUX_1_DEV_MODEL_NAME_FOR_TEST,
     DEFAULT_FLUX_2_DEV_MODEL_NAME_FOR_TEST,
     DEFAULT_FLUX_2_KLEIN_4B_MODEL_NAME_FOR_TEST,
+    DEFAULT_LTX_2_MODEL_NAME_FOR_TEST,
     DEFAULT_QWEN_IMAGE_MODEL_NAME_FOR_TEST,
     DEFAULT_WAN_2_1_T2V_1_3B_MODEL_NAME_FOR_TEST,
 )
@@ -34,7 +35,7 @@ GLM_IMAGE_WEIGHTS_PATH = use_modelscope("ZhipuAI/GLM-Image")
 JOYAI_IMAGE_EDIT_WEIGHTS_PATH = use_modelscope(
     "jd-opensource/JoyAI-Image-Edit-Diffusers"
 )
-LTX_2_WEIGHTS_PATH = use_modelscope("Lightricks/LTX-2")
+LTX_2_WEIGHTS_PATH = use_modelscope(DEFAULT_LTX_2_MODEL_NAME_FOR_TEST)
 MOVA_360_WEIGHTS_PATH = use_modelscope("openmoss/MOVA-360p")
 MINIMAX_H3_WEIGHTS_PATH = use_modelscope("MiniMax/MiniMax-H3")
 QWEN_IMAGE_WEIGHTS_PATH = use_modelscope(DEFAULT_QWEN_IMAGE_MODEL_NAME_FOR_TEST)
