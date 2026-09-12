@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39147",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced HiCacheFile returning [3, 2, 2] for the reported sparse SWA/Mamba endpoint cases, then changed the real file backend to intersect each pool's complete set of legal prefix endpoints. Added CPU regression coverage for false hits, a fully restorable prefix, an empty KV prefix, and mixed ALL_PAGES/TRAILING_PAGES cases. The exact reproduction now returns [3, 0, 1].",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-f6b14e57ac25/venv/bin/python < exact issue reproduction (before fix)",
+      "exit_code": 1,
+      "what_was_measured": "Actual checked-out HiCacheFile.batch_exists_v2 returned [3, 2, 2], reproducing both false-hit patterns. Raw output: reports/j-f6b14e57ac25/raw/reproduction-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f6b14e57ac25/venv/bin/python < exact issue reproduction (after fix)",
+      "exit_code": 0,
+      "what_was_measured": "Actual HiCacheFile.batch_exists_v2 returned the expected [3, 0, 1]. Raw output: reports/j-f6b14e57ac25/raw/reproduction-after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f6b14e57ac25/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_file_batch_exists_unit.py",
+      "exit_code": 0,
+      "what_was_measured": "Six focused filesystem-backed tests passed, covering sparse SWA/Mamba intersections, fully restorable, empty, and mixed ALL_PAGES/TRAILING_PAGES cases. Raw output: reports/j-f6b14e57ac25/raw/focused-tests.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f6b14e57ac25/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_file_lru_unit.py",
+      "exit_code": 0,
+      "what_was_measured": "All 34 neighboring HiCacheFile unit tests passed. Raw output: reports/j-f6b14e57ac25/raw/file-backend-tests.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f6b14e57ac25/venv/bin/python < CPU/GPU arithmetic comparison",
+      "exit_code": 0,
+      "what_was_measured": "On the single visible AMD Instinct MI350X, ROCm output [4.25, -1.0, 16.0625] exactly matched the independently computed CPU reference. This verifies the prepared GPU environment only, not the storage-query behavior. Raw output: reports/j-f6b14e57ac25/raw/gpu-environment-check.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f6b14e57ac25/venv/bin/python -m ruff check python/sglang/srt/mem_cache/hicache_storage.py test/registered/unit/mem_cache/test_hicache_file_batch_exists_unit.py",
+      "exit_code": 1,
+      "what_was_measured": "Static lint could not run because the prepared interpreter does not contain the ruff module. Raw output: reports/j-f6b14e57ac25/raw/ruff-check.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One visible AMD Instinct MI350X executed a deterministic arithmetic check whose result exactly matched a CPU reference; see reports/j-f6b14e57ac25/raw/gpu-environment-check.txt. The fixed HiCacheFile query itself requires no GPU or valid KV payload."
+  },
+  "native_rebuilt": false,
+  "source_paths": [
+    "python/sglang/srt/mem_cache/hicache_storage.py",
+    "test/registered/unit/mem_cache/test_hicache_file_batch_exists_unit.py"
+  ],
+  "native_paths": [],
+  "remaining_limitations": "No model-output or end-to-end cache-load behavior was exercised because the reported defect is specifically the filesystem existence-query contract and uses empty files. No native code changed. Ruff was unavailable in the prepared interpreter; git diff --check and the Python test suites passed."
+}
