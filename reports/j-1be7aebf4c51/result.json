@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/12562",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "The candidate source removes draft_probs from the target-only ABI and implements scratch-free rejected-token masking, but its changed CUDA/FlashInfer native operator could not be rebuilt or executed on the prepared ROCm-only MI350X. Source and algebra checks are supportive, not sufficient to verify the complete functional and efficiency contract.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1be7aebf4c51/venv/bin/python -m pytest -q /job/review-evidence-j-1be7aebf4c51/candidate-test.py -k masks_rejected_siblings -vv (on recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction of the old API: the prepared native wrapper requires draft_probs. Log: /job/review-evidence-j-1be7aebf4c51/base-candidate-regression.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-1be7aebf4c51/venv/bin/python -m pytest -q python/sglang/kernels/aot/tests/speculative/test_speculative_sampling.py -vv (at candidate commit)",
+      "exit_code": 1,
+      "what_was_measured": "All three candidate tests failed before dispatch because source imported the unchanged prepared sgl_kernel wheel with the old ABI; this is import-path evidence, not a candidate functional failure. Log: /job/review-evidence-j-1be7aebf4c51/candidate-tests-installed-native.log"
+    },
+    {
+      "command": "CMAKE_BUILD_PARALLEL_LEVEL=2 CMAKE_ARGS='-DSGL_KERNEL_COMPILE_THREADS=1' /tmp/amdpilot-repo-j-1be7aebf4c51/venv/bin/python -m pip install -e . --no-build-isolation",
+      "exit_code": 1,
+      "what_was_measured": "Real candidate native build attempt failed at CMake configuration because nvcc/CUDA toolkit is absent. The assigned ROCm build excludes the changed speculative_sampling.cu operator. Log: /job/review-evidence-j-1be7aebf4c51/candidate-native-build.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1be7aebf4c51/venv/bin/python independent AST and 10,000-case distribution-equivalence check",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed source ABI removal and algebraic equivalence of old dense scratch subtraction to rejected-ID masking, including randomized duplicate IDs. This did not compile or execute native code. Log: /job/review-evidence-j-1be7aebf4c51/independent-static-checks.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1be7aebf4c51/venv/bin/python -m py_compile <three changed Python files> && git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..c356b25345ae137a2d1d233f3bd473e5067e350d",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python files parse and the exact candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "One AMD Instinct MI350X (gfx950) was visible with Torch 2.11.0+rocm7.2, but no candidate kernel executed. GPU tensor allocation before the old-wrapper TypeError is not counted as candidate GPU execution.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Candidate-native forced rejection followed by independent masked-CDF sampling was not executable.",
+    "Multiple rejected siblings and duplicate candidate token IDs were not tested on device.",
+    "All-drafts-accepted bonus sampling, boundary uniform samples, and multi-batch behavior were not independently tested on device.",
+    "No timing or resource benchmark verifies the requested top-k=1 efficiency improvement."
+  ],
+  "remaining_limitations": [
+    "The assigned architecture is AMD MI350X/gfx950 with ROCm 7.2; the changed operator is in the CUDA/FlashInfer build and is excluded from setup_rocm.py.",
+    "No CUDA toolkit/nvcc, NVIDIA GPU, MUSA toolchain, or MUSA device was available.",
+    "The prepared sgl_kernel wheel retained the old ABI, so source/native paths could not be combined into a valid candidate runtime.",
+    "Static source and CPU algebra checks cannot prove native compilation, GPU numerical behavior, or performance."
+  ]
+}
