@@ -1,0 +1,61 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39147",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/613",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/611",
+  "candidate_commit": "2286e15f1b108f52426d58a71034b76048f6316a",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The prepared base reproduced the reported false hybrid-prefix hits exactly ([3, 2, 2] instead of [3, 0, 1]). At the exact candidate commit, the original reproduction passed, the candidate regression suite passed, 34 existing HiCacheFile tests passed, and an independent exhaustive reference sweep of 20,480 combinations found no disagreement. The change is a full fix for the original existence-query contract, not merely test hardening. No candidate source was copied into this review branch.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8e1626603762/venv/bin/python /job/review-evidence-j-8e1626603762/repro_original.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Actual HiCacheFile.batch_exists_v2 source import and the issue's three sparse trailing-pool cases; returned [3, 2, 2], reproducing the defect."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8e1626603762/venv/bin/python /job/review-evidence-j-8e1626603762/repro_original.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "The identical issue reproduction at candidate commit returned [3, 0, 1]."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8e1626603762/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_file_batch_exists_unit.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression coverage: 6 tests passed, including common sparse endpoints, empty KV, and ALL_PAGES truncation."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8e1626603762/venv/bin/python /job/review-evidence-j-8e1626603762/adversarial_reference.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent legal-endpoint oracle over 20,480 combinations: KV prefix lengths 0-4, all auxiliary page subsets, two pools, ALL_PAGES/TRAILING_PAGES policy combinations, and trailing windows 1-3. Both kv_hit_pages and restorable_prefix_pages matched every case."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-8e1626603762/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_file_lru_unit.py",
+      "exit_code": 0,
+      "what_was_measured": "Existing HiCacheFile regression suite: 34 tests passed."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..2286e15f1b108f52426d58a71034b76048f6316a",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The environment exposes one AMD Instinct MI350X (gfx950) through Torch 2.11.0+rocm7.2 / HIP 7.2.26015. No GPU kernel was run because the original contract is a CPU filesystem existence query requiring neither valid KV payloads nor accelerator execution."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "The exact candidate diff contains no C, C++, HIP, CUDA, header, or other native source changes; the changed implementation is imported from /job/repo/python/sglang/srt/mem_cache/hicache_storage.py. A native rebuild is not applicable.",
+  "source_paths": [
+    "/job/repo/python/sglang/srt/mem_cache/hicache_storage.py",
+    "/job/repo/test/registered/unit/mem_cache/test_hicache_file_batch_exists_unit.py"
+  ],
+  "native_paths": [],
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No model-output, end-to-end cache-load, or scheduler/L3 behavior was tested because the source issue explicitly concerns only the backend existence-query result.",
+    "The exhaustive independent sweep bounded inputs to four pages, two auxiliary pools, and trailing window sizes one through three; the algorithmic set-intersection behavior also passed the issue's three-page cases and candidate tests.",
+    "GPU hardware was enumerated but not used for numerical execution; GPU behavior is outside this filesystem-only contract.",
+    "No native validation was performed because the candidate changes no native code."
+  ]
+}
