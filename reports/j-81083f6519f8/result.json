@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38450",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The exact encoder defect reproduces at the reporter's commit 40b3e15ddbd9a1067e181283d9900dd3f4d76ed7, but the prepared base already contains the correction associated with upstream commit 76603c6c2c9c276e0e9965d00fac97886fbe563a. Added focused regression and boundary coverage; no production source change was needed.",
+  "tests": [
+    {
+      "command": "execute encoding_dsv4.py from fetched issue commit 40b3e15ddbd9a1067e181283d9900dd3f4d76ed7 with dict and JSON-string tool arguments",
+      "exit_code": 0,
+      "what_was_measured": "The serving-path dict encoded as a nested DSML parameter named arguments, while the JSON string encoded filePath directly. Raw output is in reports/j-81083f6519f8/encoder_reproduction.txt."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-81083f6519f8/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_dsv4_tool_history.py",
+      "exit_code": 0,
+      "what_was_measured": "3 tests passed with 2 subtests: serving normalization remains flat, JSON strings and dicts encode identically including nested/non-string values, and non-object arguments are rejected."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-81083f6519f8/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_chat.py::ServingChatTestCase::test_jinja_rejects_non_object_tool_call_arguments test/registered/unit/entrypoints/openai/test_serving_chat.py::ServingChatTestCase::test_jinja_accepts_object_tool_call_arguments_string test/registered/unit/entrypoints/openai/test_serving_chat.py::ServingChatTestCase::test_dsv_encoders_reject_non_object_tool_call_arguments test/registered/unit/entrypoints/openai/test_serving_chat.py::ServingChatTestCase::test_dsv_encoders_accept_object_tool_call_arguments_string",
+      "exit_code": 0,
+      "what_was_measured": "4 existing adjacent tests passed with 6 subtests, covering accepted object strings and rejected non-object arguments across the serving and DSV encoder boundaries."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the proposed changes."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-81083f6519f8/venv/bin/python -m ruff check test/registered/unit/entrypoints/openai/test_dsv4_tool_history.py",
+      "exit_code": 1,
+      "what_was_measured": "The prepared interpreter does not include the ruff module, so this optional lint check could not run."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reported root cause and regression are deterministic CPU-only prompt encoding. No DeepSeek-V4-Flash-Vision weights or 4x H200 environment were available, and a gfx950 execution would not qualify that model configuration."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No full-model DeepSeek-V4-Flash-Vision inference was run because the reported weights and 4x H200 configuration were unavailable.",
+    "The CPU encoder regression verifies the prompt-shape cause and correction, but cannot measure stochastic model output or semantic accuracy.",
+    "The prepared interpreter lacks ruff; pytest and git diff --check completed successfully."
+  ],
+  "evidence_paths": [
+    "reports/j-81083f6519f8/encoder_reproduction.txt",
+    "python/sglang/srt/entrypoints/openai/encoding_dsv4.py",
+    "python/sglang/srt/entrypoints/openai/serving_chat.py",
+    "test/registered/unit/entrypoints/openai/test_dsv4_tool_history.py"
+  ],
+  "native_paths": []
+}
