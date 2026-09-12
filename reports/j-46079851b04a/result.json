@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34786",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared main checkout already contains both the None-to-zero crash guard from upstream PR #27998 and the lazy speculative track-planning implementation from PR #30437. Added a focused GPU regression for the previously untested fresh-request and boundary cases; no runtime source change was justified.",
+  "tests": [
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-46079851b04a/venv/bin/python reports/j-46079851b04a/reproduce_pre_fix.py",
+      "exit_code": 0,
+      "what_was_measured": "The fetched pre-fix expression reproduced TypeError for mamba_next_track_idx=None; raw output is in raw/pre_fix_reproduction.log."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-46079851b04a/venv/bin/python -m pytest -q test/registered/unit/managers/test_mamba_track_indices.py",
+      "exit_code": 0,
+      "what_was_measured": "3 tests passed using an actual GPU-resident ping-pong mapping: fresh None defaults to slot 0 without request mutation, mixed slot values gather correctly, and a lazy-spec plan overrides request-local positions."
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-46079851b04a/venv/bin/python -m pytest -q test/registered/unit/managers/test_schedule_batch_prepare_for_decode.py test/registered/unit/managers/test_batch_result_processor_mamba_boundary.py",
+      "exit_code": 0,
+      "what_was_measured": "3 tests and 2 subtests passed for adjacent prepare-for-decode and post-verify mamba boundary lifecycle behavior."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Tests ran with ROCR_VISIBLE_DEVICES=0 on AMD Instinct MI350X, capability (9, 5); rocminfo reports gfx950. See raw/pre_fix_reproduction.log, raw/pytest_mamba_track_indices.log, and raw/gpu_identity.log."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The Qwen3.6-27B-FP8 model weights were unavailable, so full-model semantic accuracy was not tested.",
+    "Only the assigned single gfx950 GPU was used; the reported two-NVIDIA-RTX-3090 serving workload and multi-GPU behavior were not reproduced.",
+    "The deterministic tiny Llama fixture is a different non-hybrid architecture and would not qualify this mamba-specific issue, so it was not used.",
+    "No native source changed; a native rebuild was not applicable."
+  ]
+}
