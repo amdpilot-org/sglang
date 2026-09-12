@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 from typing import List, Literal, Optional, Union
 
@@ -22,6 +23,8 @@ logger = logging.getLogger(__name__)
 _KIMI_K2_SPECIAL_TOKENS = [
     "<|tool_calls_section_begin|>",
     "<|tool_calls_section_end|>",
+    "<|tool_call_section_begin|>",
+    "<|tool_call_section_end|>",
     "<|tool_call_begin|>",
     "<|tool_call_end|>",
     "<|tool_call_argument_begin|>",
@@ -65,6 +68,20 @@ class KimiK2Detector(BaseFormatDetector):
         self.tool_call_start_token: str = "<|tool_call_begin|>"
         self.tool_call_end_token: str = "<|tool_call_end|>"
         self.tool_call_argument_begin_token: str = "<|tool_call_argument_begin|>"
+        try:
+            self.section_max = int(
+                os.environ.get("SGLANG_KIMI_PARSER_SECTION_MAX", 512 * 1024)
+            )
+        except ValueError:
+            logger.warning(
+                "Invalid SGLANG_KIMI_PARSER_SECTION_MAX; using 524288 bytes"
+            )
+            self.section_max = 512 * 1024
+        if self.section_max <= 0:
+            logger.warning(
+                "SGLANG_KIMI_PARSER_SECTION_MAX must be positive; using 524288 bytes"
+            )
+            self.section_max = 512 * 1024
 
         # Capture tool_call_id broadly: the model may emit standard IDs
         # like "functions.ReadFile:0" or bare call counters like "3".
@@ -214,6 +231,18 @@ class KimiK2Detector(BaseFormatDetector):
     ) -> StreamingParseResult:
         """Streaming incremental parsing tool calls for KimiK2 format."""
         self._buffer += new_text
+
+        # A truncated generation must not retain an arbitrarily large section.
+        # Once the configured bound is crossed, release it as content and reset
+        # the detector so a later request cannot inherit poisoned state.
+        if (
+            self.tool_call_start_token in self._buffer
+            and self.tool_call_end_token not in self._buffer
+            and len(self._buffer) > self.section_max
+        ):
+            normal_text = _strip_special_tokens(self._buffer)
+            self.reset()
+            return StreamingParseResult(normal_text=normal_text)
 
         # Fast path: no tool call in flight and no markers yet -- emit as
         # normal text, holding back any trailing partial start token.
@@ -365,6 +394,17 @@ class KimiK2Detector(BaseFormatDetector):
         self.current_tool_name_sent = False
         self._current_stream_function_name = None
 
+    def reset(self) -> None:
+        """Clear all streaming state before reusing this detector for a request."""
+        self._buffer = ""
+        self.prev_tool_call_arr = []
+        self.current_tool_id = -1
+        self.current_tool_name_sent = False
+        self.streamed_args_for_tool = []
+        self._reset_inflight_call_state()
+        if hasattr(self, "_tool_indices"):
+            del self._tool_indices
+
     def _locate_tool_call_start(
         self, buffer: str, normal_text_parts: list
     ) -> int | None:
@@ -390,11 +430,11 @@ class KimiK2Detector(BaseFormatDetector):
         <|tool_calls_section_begin|> or <|tool_call_begin|>. Everything
         before it is safe to emit as normal text.
         """
-        candidates = (self.bot_token, self.tool_call_start_token)
+        candidates = tuple(_KIMI_K2_SPECIAL_TOKENS)
         max_tail = max(len(t) for t in candidates) - 1
-        for n in range(min(len(text), max_tail), 1, -1):
+        for n in range(min(len(text), max_tail), 0, -1):
             tail = text[-n:]
-            if any(t.startswith(tail) for t in candidates):
+            if any(len(t) > n and t.startswith(tail) for t in candidates):
                 return text[:-n], tail
         return text, ""
 
