@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33268",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced identical HiCache file keys for intended bf16 and fp8 runs, then added the runtime KV cache dtype to HiCacheStorageConfig and the file, NIXL, EIC, Mooncake, and hf3fs key namespaces. hf3fs read/write/existence/delete paths now use a symmetric dtype prefix.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-97c3563f96cc/venv/bin/python < inline pre-fix collision reproducer",
+      "exit_code": 1,
+      "what_was_measured": "On the recorded base, intended bf16 and fp8 configurations both generated page-1_DeepSeek-V4-Flash; the non-collision assertion failed. Raw output: reports/j-97c3563f96cc/raw/reproduction-before.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-97c3563f96cc/venv/bin/python < inline post-fix collision reproducer",
+      "exit_code": 0,
+      "what_was_measured": "The same page generated distinct _dtype_torch.bfloat16 and _dtype_torch.float8_e4m3fn keys. Raw output: reports/j-97c3563f96cc/raw/reproduction-after.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-97c3563f96cc/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_kv_cache_dtype_key.py",
+      "exit_code": 0,
+      "what_was_measured": "18 tests passed: differing/same/None dtype behavior, MHA and MLA, PP/CP/component boundaries, and hf3fs store-read round trips including cross-dtype isolation. Raw output: reports/j-97c3563f96cc/raw/regression-after.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-97c3563f96cc/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mem_pool_host.py test/registered/unit/mem_cache/test_mooncake_tenant_config.py",
+      "exit_code": 0,
+      "what_was_measured": "24 registered related tests passed, including HostPoolGroup dtype forwarding and Mooncake config compatibility. Raw output: reports/j-97c3563f96cc/raw/registered-related-tests.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect is deterministic CPU-side key construction. The hf3fs regression executes real backend read/write logic with its local mock client; no unrelated GPU smoke is claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No external hf3fs, Mooncake, NIXL, or EIC service was available; those integrations were not exercised end to end.",
+    "No model weights, full serving-path reproduction, or multi-node workload was used or claimed.",
+    "FlexKV and LMCache use separate external connector/client key derivation and were not integration-tested; Aibrix passes dtype through its external KVCacheBlockSpec and was not integration-tested.",
+    "A direct pytest attempt on the standalone Mooncake script was invalid without Mooncake environment configuration; its failure is retained separately and is not counted as a regression failure."
+  ]
+}
