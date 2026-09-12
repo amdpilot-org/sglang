@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36886",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Verified on the prepared gfx950 checkout that the no-rope MLA DCP writer used raw virtual locations while the rope writer localized them. Localized no-rope writes by DCP owner/rank, sized replicated DSA index-K storage for the target allocator's virtual location space (without double-scaling draft pools), and scaled the prefix-sharing capacity assertion for DCP virtual locations.",
+  "tests": [
+    {
+      "command": "TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-7d79d9f95401/triton-cache-before-semantic PYTHONPATH=python /tmp/amdpilot-repo-j-7d79d9f95401/venv/bin/python -m pytest -q test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py -k 'dcp_sharded_localizes_virtual_locs and False'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before numerical regression on gfx950: both DCP ranks wrote raw virtual rows instead of owner-local loc//world_size rows. Raw output: reports/j-7d79d9f95401/failing-before-norope.log"
+    },
+    {
+      "command": "TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-7d79d9f95401/triton-cache-after-semantic PYTHONPATH=python /tmp/amdpilot-repo-j-7d79d9f95401/venv/bin/python -m pytest -q test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py -k 'dcp_sharded_localizes_virtual_locs'",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after GPU numerical comparison for no-rope and rope writes, DCP ranks 0 and 1, including owned and non-owned virtual locations. Raw output: reports/j-7d79d9f95401/passing-after-dcp-write.log"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-7d79d9f95401/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_dcp_dsa_virtual_capacity.py",
+      "exit_code": 0,
+      "what_was_measured": "Index-K sizing boundaries: DCP target expands to virtual capacity, replicated draft avoids double scaling, and non-DCP retains the default. Raw output: reports/j-7d79d9f95401/passing-index-capacity.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace integrity"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The Triton regression compiled and executed on the assigned AMD gfx950 GPU; hardware evidence is retained in reports/j-7d79d9f95401/gpu.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported GLM-5.3-Flash weights were unavailable, so no full-model semantic-quality or long-context watermark reproduction was performed.",
+    "Only one gfx950 GPU was assigned; the reported eight-rank H100 DCP server and multi-node behavior were not reproduced.",
+    "The sparse decode/verify LSE merge and sparse-extend all-gather paths were not qualified end to end by this fixture.",
+    "No native C++ or FlyDSL source changed, so a native rebuild was not applicable.",
+    "ruff was unavailable in the prepared interpreter; focused pytest checks and git diff --check were used instead."
+  ]
+}
