@@ -3349,6 +3349,65 @@ class TestGlm47MoeDetector(unittest.TestCase):
         )
         self.assertEqual(result.normal_text, "")
 
+    def test_non_streaming_tool_indices_follow_call_order(self):
+        search_tool = Tool(
+            type="function",
+            function=Function(
+                name="search",
+                description="Search",
+                parameters={
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                },
+            ),
+        )
+        tools = [self.tools[0], search_tool]
+
+        cases = {
+            "repeated tool": [
+                ("get_weather", "A"),
+                ("get_weather", "B"),
+                ("get_weather", "C"),
+            ],
+            "mixed tools": [
+                ("get_weather", "A"),
+                ("search", "B"),
+                ("get_weather", "C"),
+            ],
+        }
+        for label, call_specs in cases.items():
+            with self.subTest(label=label):
+                text = "".join(
+                    f"<tool_call>{name}"
+                    f"<arg_key>city</arg_key><arg_value>{city}</arg_value>"
+                    "</tool_call>"
+                    for name, city in call_specs
+                )
+                result = Glm47MoeDetector().detect_and_parse(text, tools)
+
+                self.assertEqual(
+                    [call.name for call in result.calls],
+                    [name for name, _ in call_specs],
+                )
+                self.assertEqual(
+                    [call.tool_index for call in result.calls], [0, 1, 2]
+                )
+
+    def test_non_streaming_tool_indices_remain_dense_after_unknown_tool(self):
+        text = (
+            "<tool_call>unknown"
+            "<arg_key>city</arg_key><arg_value>A</arg_value>"
+            "</tool_call>"
+            "<tool_call>get_weather"
+            "<arg_key>city</arg_key><arg_value>B</arg_value>"
+            "</tool_call>"
+        )
+
+        result = self.detector.detect_and_parse(text, self.tools)
+
+        self.assertEqual([call.name for call in result.calls], ["get_weather"])
+        self.assertEqual([call.tool_index for call in result.calls], [0])
+
     def test_streaming_multiple_tool_calls(self):
         """Test streaming incremental parsing of multiple tool calls."""
         chunks = [

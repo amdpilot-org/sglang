@@ -1,0 +1,30 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33324",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced Glm47MoeDetector non-streaming tool_index values following request tool-list positions ([0,0,0] and [0,1,0]) instead of response call order. Updated only the GLM-4.7/GLM-5 non-streaming path to assign dense local call indices, matching its streaming path, and added regression and skipped-unknown-tool boundary coverage.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-839dfae640d5/venv/bin/python < inline reproduction script",
+      "exit_code": 0,
+      "what_was_measured": "Before the fix, actual Glm47MoeDetector.detect_and_parse returned indices [0,0,0] for three get_weather calls and [0,1,0] for get_weather/search/get_weather; raw output: reports/j-839dfae640d5/raw/reproduction-before.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-839dfae640d5/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py::TestGlm47MoeDetector::test_non_streaming_tool_indices_follow_call_order test/registered/unit/function_call/test_function_call_parser.py::TestGlm47MoeDetector::test_non_streaming_tool_indices_remain_dense_after_unknown_tool test/registered/unit/function_call/test_function_call_parser.py::TestGlm47MoeDetector::test_multiple_tool_calls test/registered/unit/function_call/test_function_call_parser.py::TestGlm47MoeDetector::test_streaming_multiple_tool_calls",
+      "exit_code": 0,
+      "what_was_measured": "Reported duplicate and mixed call sequences now produce [0,1,2]; a skipped unknown tool leaves the first emitted valid call at index 0; existing non-streaming and streaming multi-call behavior remains valid. 4 passed and 2 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-839dfae640d5/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py::TestGlm47MoeDetector",
+      "exit_code": 0,
+      "what_was_measured": "Full GLM-4.7 detector unit class: 14 passed and 2 subtests passed; raw output: reports/j-839dfae640d5/raw/glm47-class-after.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The defect and correction are deterministic CPU-side parsing of an already generated tool-call string. No model execution, numerical kernel, or GPU-dependent path is involved.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No GLM-4.7/GLM-5 model weights were available or needed, so no full model generation or HTTP serving reproduction was claimed.",
+    "The similarly structured detectors named in the issue scope note were not changed or qualified; this fix is intentionally limited to Glm47MoeDetector."
+  ]
+}
