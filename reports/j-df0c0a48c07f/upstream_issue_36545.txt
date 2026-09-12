@@ -1,0 +1,40 @@
+author:	jahnclawdmonet
+association:	none
+edited:	false
+status:	none
+--
+Independently reproduced on another RTX PRO 6000 Blackwell (SM120, 96 GB), same day-0 image, and there is a useful twist: **PR #36556 fixes this configuration too.**
+
+Reproduction (vanilla `lmsysorg/sglang:qwen38flashnext`, `RadixArk/Qwen3.8-Flash-Next-NVFP4`, `--quantization modelopt_fp4 --fp4-gemm-backend flashinfer_cutlass --kv-cache-dtype fp8_e4m3 --linear-attn-prefill-backend triton --linear-attn-decode-backend flashinfer --mamba-ssm-dtype bfloat16 --context-length 65536 --max-total-tokens 65536 --mem-fraction-static 0.92 --max-running-requests 8 --page-size 64 --tp 1`), dies during warmup exactly as reported:
+
+```
+File "/usr/local/lib/python3.12/dist-packages/flash_attn/cute/interface.py", line 411, in _flash_attn_fwd
+    assert present[a].dtype == present[b].dtype, f"{a}.dtype {present[a].dtype} != {b}.dtype {present[b].dtype}"
+AssertionError: q.dtype torch.bfloat16 != k.dtype torch.float8_e4m3fn
+```
+
+A/B in the same container with only `git apply --include='python/sglang/srt/layers/attention/qwen_sparse_attn_backend.py'` of sgl-project/sglang#36556: the identical launch reaches `The server is fired up and ready to roll!` and serves warmup to completion.
+
+That makes sense given where the assertion lives: it is raised inside the pip `flash_attn.cute` interface, which is only in the call path because `_resolve_trtllm_sparse_decode()` rejects SM120 and the resolver falls back to the pip FA4 package (the #36531 mechanism). #36556 opens the FlashInfer TRTLLM sparse-decode path on SM120 and routes the varlen fallback to SGLang's architecture-owned FA4 dispatcher, and that combination handles the BF16-q / FP8-KV case.
+
+The non-FP8 verification of the same PR on this card is in sgl-project/sglang#36556 (comment); so as of that PR this issue looks resolved as a side effect, and might be closable once it merges.
+--
+author:	LingZ315
+association:	contributor
+edited:	false
+status:	none
+--
+#36556 fixes the SM120 warmup/decode fallback reported above, but it does not cover QSA chunk-prefill reading an FP8 prefix cache. I reproduced that remaining path with a 50k-token WikiText-103 request after prewarming a 45k prefix: the cached prefill still reached the Triton QSA dot as BF16 Q x FP8 K.
+
+I opened #36644 for that dtype/scale contract. With #36556 plus #36644, the same TP=8 RTX 5090 run completes at 89.98% cache hit, including 8 concurrent distinct suffixes and an 8-concurrent cached replay with decode CUDA Graph enabled. The PR also covers the FA fallback, native TRT-LLM descales, and non-unit cache scales in focused tests.
+
+--
+author:	PeterHodges15
+association:	none
+edited:	false
+status:	none
+--
+For now, we got this working by following the same approach as #36644, for this model's specific attention (QSA) code path.                                                                 
+ 
+When we set the KV cache to store in 8-bit, we insert code to translate to 16-bit (the model full-size) - at the two spots where the code pulls the cached K/V out runs the attention math.  We use the per-tensor scale factor (per the model). That way the math always sees values of a matching size.            
+--

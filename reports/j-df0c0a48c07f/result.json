@@ -1,0 +1,28 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36545",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The prepared base already contains the open upstream candidate fixes: exact-SM120 QSA decode routes to FlashInfer TRT-LLM instead of the uniform-dtype FA4 fallback, and cached chunk-prefill casts FP8 K/V loads to the BF16 query dtype. No additional runtime correction was justified. Focused routing regressions pass, and the architecture-independent FP8 chunk-prefill computation matches an independent PyTorch reference on gfx950.",
+  "tests": [
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-df0c0a48c07f/venv/bin/python reports/j-df0c0a48c07f/gpu_qsa_fp8_check.py",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, QSA chunk-prefill output for BF16 queries with FP8 e4m3 K/V matched an independent float32 PyTorch softmax/einsum reference at top-k 1, 16, and 17; maximum absolute error was 0.00390625. BF16-cache boundary controls also passed, with maximum absolute error 0.0078125."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-df0c0a48c07f/venv/bin/python -m pytest -q test/registered/kernel/qsa/test_qsa.py -k 'qsa_trtllm_sparse_decode_arch_gate or qsa_sm121_resolves_kda_varlen_kernel or qsa_chunk_prefill_accepts_fp8_cached_prefix'",
+      "exit_code": 0,
+      "what_was_measured": "Five focused regressions passed: the FP8 cached-prefix numerical regression, three SM100/SM120/other-SM12x TRT-LLM resolver boundaries, and the SM121 fallback resolver boundary."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-df0c0a48c07f/gpu_qsa_fp8_check.log records six numerical cases executed on AMD Instinct MI350X, gfx950:sramecc+:xnack-."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The assigned gfx950 GPU cannot execute or qualify the original NVIDIA SM120 FA4/FlashInfer TRT-LLM path.",
+    "The reported RadixArk/Qwen3.8-Flash-Next-NVFP4 weights were unavailable, so no full server warmup or model-level reproduction was performed.",
+    "The existing candidate fixes remain open upstream as sgl-project/sglang PRs 36556 and 36644 at investigation time; upstream issue comments describing SM120 model runs are retained only as external evidence."
+  ]
+}
