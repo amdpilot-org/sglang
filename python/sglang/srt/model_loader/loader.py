@@ -4257,6 +4257,12 @@ class RunaiModelStreamerLoader(BaseModelLoader):
         except (OSError, json.JSONDecodeError, KeyError, TypeError):
             return hf_weights_files
 
+        indexed_shards = {
+            os.path.join(hf_folder, shard) for shard in weight_map.values()
+        }
+        if not set(hf_weights_files).issubset(indexed_shards):
+            return hf_weights_files
+
         layouts = (
             (re.compile(r"^mtp\.(\d+)\."), "mtp."),
             (re.compile(r"^model\.mtp\.layers\.(\d+)\."), "model.mtp."),

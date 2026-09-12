@@ -5,6 +5,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import patch
@@ -100,6 +101,7 @@ class TestRunaiModelStreamerLoader(CustomTestCase):
         selected, files = self._get_streamed_files(
             {
                 "model.layers.0.weight": "target-1.safetensors",
+                "model.layers.1.weight": "target-2.safetensors",
                 "mtp.0.decoder.weight": "draft-0.safetensors",
                 "mtp.1.decoder.weight": "draft-1.safetensors",
                 "mtp.shared_head.norm.weight": "draft-shared.safetensors",
@@ -139,6 +141,65 @@ class TestRunaiModelStreamerLoader(CustomTestCase):
                 )
 
         self.assertEqual(selected, files[1:])
+
+    def test_incomplete_index_keeps_auto_added_mtp_safetensors(self):
+        with tempfile.TemporaryDirectory() as model_dir:
+            target_file = os.path.join(model_dir, "target.safetensors")
+            draft_file = os.path.join(model_dir, "draft-1.safetensors")
+            supplemental_file = os.path.join(model_dir, "mtp.safetensors")
+            files = [target_file, draft_file]
+            for path in (*files, supplemental_file):
+                Path(path).touch()
+
+            with open(
+                os.path.join(model_dir, "model.safetensors.index.json"), "w"
+            ) as index_file:
+                json.dump(
+                    {
+                        "weight_map": {
+                            "model.layers.0.weight": "target.safetensors",
+                            "mtp.1.decoder.weight": "draft-1.safetensors",
+                        }
+                    },
+                    index_file,
+                )
+
+            load_config = LoadConfig(
+                load_format=LoadFormat.RUNAI_STREAMER,
+                model_loader_extra_config={},
+                draft_model_idx=1,
+            )
+            runai_loader = loader_mod.RunaiModelStreamerLoader(load_config)
+            runai_loader.target_device_str = "cpu"
+            source = runai_loader.Source(
+                model_dir,
+                revision=None,
+                model_config=SimpleNamespace(
+                    hf_config=SimpleNamespace(
+                        architectures=["Glm4MoeForCausalLM"],
+                        num_nextn_predict_layers=1,
+                    )
+                ),
+            )
+
+            with (
+                patch.object(
+                    runai_loader,
+                    "_prepare_weights",
+                    return_value=(model_dir, files),
+                ),
+                patch.object(
+                    weight_utils,
+                    "runai_safetensors_weights_iterator",
+                    return_value=iter(()),
+                ) as mock_iterator,
+            ):
+                list(runai_loader._get_weights_iterator(source))
+
+            self.assertEqual(
+                mock_iterator.call_args.args[0],
+                [target_file, draft_file, supplemental_file],
+            )
 
     def test_mtp_shard_selection_falls_back_safely(self):
         cases = {
