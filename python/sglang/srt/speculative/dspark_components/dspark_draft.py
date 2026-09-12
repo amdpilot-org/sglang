@@ -36,17 +36,24 @@ logger = logging.getLogger(__name__)
 
 
 def _one_hot_token0(probs: torch.Tensor) -> torch.Tensor:
-    degenerate = torch.isnan(probs[:, :1])
+    row_sums = probs.sum(dim=-1, keepdim=True)
+    valid = (
+        torch.isfinite(probs).all(dim=-1, keepdim=True)
+        & (probs >= 0).all(dim=-1, keepdim=True)
+        & torch.isfinite(row_sums)
+        & (row_sums > 0)
+    )
     one_hot = torch.zeros_like(probs)
     one_hot[:, 0] = 1.0
-    return torch.where(degenerate, one_hot, probs)
+    return torch.where(valid, probs, one_hot)
 
 
 # Draft step logits: NaN is a bug, but -inf is legitimate (masking). The data
 # layer lives downstream (probs one-hot below, or the fast kernel's clamp).
 _DRAFT_STEP_LOGITS = Invariant("dspark.draft.step_logits", Bucket.GUARD, NotNaN())
 # Draft sampling probs: SOFTEN (tolerate + count), matching the original
-# unconditional clamp; an all-NaN row would otherwise make multinomial raise.
+# unconditional clamp. Enforce every torch.multinomial input precondition here;
+# malformed rows would otherwise raise or trigger a device-side assertion.
 _DRAFT_PROBS = Invariant(
     "dspark.draft.probs", Bucket.SOFTEN, NotNaN(), recover=_one_hot_token0
 )
