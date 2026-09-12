@@ -1,0 +1,22 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/29942",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "not_reproduced",
+  "summary": "The prepared implementation already runs two eager model forwards before entering the CUDA graph context, so first-dispatch DeepEP buffer creation occurs outside capture. This ordering also predates the issue's latest update. No issue-specific runtime defect was demonstrated, and the shared deep_ep.cpp:230 signature can also result from an unchecked NVSHMEM allocation OOM.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-1e35fa03297a/venv/bin/python reports/j-1e35fa03297a/verify_capture_order.py",
+      "exit_code": 0,
+      "what_was_measured": "The actual FullCudaGraphBackend.capture_one invoked the focused forward with capture states [false, false, true], performed one lazy GPU allocation, and replayed with max_abs_error=0.0 against an independent CPU reference."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-1e35fa03297a/venv/bin/python -c 'import deep_ep'",
+      "exit_code": 1,
+      "what_was_measured": "The prepared ROCm interpreter lacks the DeepEP extension (ModuleNotFoundError), explicitly bounding the investigation."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "Actual SGLang FullCudaGraphBackend capture and replay ran on AMD Instinct MI350X (gfx950), with capture_state=[false,false,true], one eager lazy allocation, and exact numerical output.",
+  "native_rebuilt": false,
+  "remaining_limitations": "No H800/CUDA host, DeepEP extension, NVSHMEM/InfiniBand topology, Kimi K2.6 W4A8 weights, or 2-node x 8-GPU PP=2/TP=8/DP=8/EP=8 environment was available. The GPU fixture validates graph ordering only, not DeepEP communication, Kimi semantics, quantization, pipeline parallelism, or the reported distributed workload."
+}
