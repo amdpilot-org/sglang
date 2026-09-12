@@ -2188,7 +2188,11 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
         # Abort the request if the client is disconnected.
         async def abort_request():
             await asyncio.sleep(2)
-            rids = [obj.rid] if obj.is_single else obj.rid
+            # The response background task can run even if StreamingResponse never
+            # starts iterating generate_request(), so request normalization may not
+            # have populated is_single yet. The public rid shape is already enough
+            # to distinguish a single request from a batch here.
+            rids = obj.rid if isinstance(obj.rid, list) else [obj.rid]
             for rid in rids:
                 if rid in self.rid_to_state:
                     self.abort_request(rid)
