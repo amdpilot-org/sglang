@@ -1,0 +1,72 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38794",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2714",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2707",
+  "candidate_commit": "17063ab77e03d1774966ebf56d9c032d534f01b0",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate is a valid incremental Korean Cookbook localization pilot: it preserves the complete English navigation, adds native Mintlify English/Korean language navigation, publishes two Korean pages, and passes its checks plus pinned Mintlify validation. It does not fully resolve the broader localization request because coverage is limited to two pages, no fluent Korean reviewer was available, and the upstream issue has no maintainer decision on the preferred long-term structure. Independent adversarial cases also show that the checker does not inspect orphaned Korean MDX files or preserve inline API/model/config tokens outside fenced code blocks.",
+  "tests": [
+    {
+      "command": "on base 358c163: find docs/ko -type f; inspect docs/docs.json navigation.languages; test -f docs/scripts/check_localizations.mjs",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced the original localization gap: no docs/ko tree, no language navigation, and no localization checker."
+    },
+    {
+      "command": "node docs/scripts/check_localizations.mjs",
+      "exit_code": 0,
+      "what_was_measured": "Validated both Korean navigation targets, translation metadata, source-change tracking, Hangul presence, and fenced-code equality on the exact candidate."
+    },
+    {
+      "command": "node docs/scripts/test_check_localizations.mjs",
+      "exit_code": 0,
+      "what_was_measured": "Ran the candidate regression/adversarial unit cases for English-only prose, fenced-command mutation, and abbreviated source SHA."
+    },
+    {
+      "command": "node docs/scripts/check_cookbook_configs.mjs",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the existing Cookbook configuration check invokes and passes the localization checks."
+    },
+    {
+      "command": "npm_config_cache=/tmp/amdpilot-repo-j-6f1b265892c8/npm-cache npx --yes --package mintlify@4.2.559 mint validate",
+      "exit_code": 0,
+      "what_was_measured": "Built and schema-validated the candidate documentation with the pinned Mintlify CLI version."
+    },
+    {
+      "command": "npm_config_cache=/tmp/amdpilot-repo-j-6f1b265892c8/npm-cache npx --yes --package mintlify@4.2.559 mint broken-links --check-anchors --check-redirects",
+      "exit_code": 0,
+      "what_was_measured": "Checked candidate links, anchors, and redirects."
+    },
+    {
+      "command": "add docs/ko/orphan-unlisted.mdx without adding it to docs.json; node docs/scripts/check_localizations.mjs",
+      "exit_code": 0,
+      "what_was_measured": "Independent counterexample: an unlisted Korean translation is ignored; output still reported only two checked pages."
+    },
+    {
+      "command": "change inline `/v1/embeddings` to `/v1/wrong-endpoint` in the Korean page; node docs/scripts/check_localizations.mjs",
+      "exit_code": 0,
+      "what_was_measured": "Independent counterexample: preservation enforcement covers fenced blocks but not inline API/model/config tokens required by the documented policy."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The candidate changes only Markdown/MDX, docs/docs.json, Node.js documentation checks, and prior report artifacts. No runtime, model, kernel, or GPU path changed, so GPU numerical execution is not applicable."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "git diff --name-status between the recorded base and candidate contains no C/C++, CUDA/HIP, build-system, Python runtime, or native-library files; repository-environment.json also declares native and wheel as null.",
+  "remaining_counterexamples": [
+    "A Korean MDX translation under docs/ko that is omitted from docs.json is never validated by check_localizations.mjs.",
+    "Incorrect inline commands, model IDs, API fields, endpoints, or configuration values can pass because only fenced code blocks are compared with the English source.",
+    "Translation accuracy and natural Korean remain unverified by a fluent Korean reviewer.",
+    "Only the Cookbook landing page and EmbeddingGemma recipe are localized; the rest of the Cookbook remains English-only.",
+    "The upstream issue remains open with no maintainer response confirming this as the preferred long-term i18n structure."
+  ],
+  "remaining_limitations": [
+    "This is a two-page incremental pilot, not complete Korean Cookbook localization.",
+    "No native-speaker review was available in the prepared environment.",
+    "A browser-level mint dev language-selector smoke was not run; pinned build/schema and link validation passed.",
+    "Architecture and GPU validation are inapplicable to this documentation-only candidate."
+  ]
+}
