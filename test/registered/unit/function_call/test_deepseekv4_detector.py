@@ -130,6 +130,13 @@ class TestDeepSeekV4Streaming(CustomTestCase):
             {"arguments": json.dumps({"city": "SF"})},
             {"args": {"city": "SF"}},
             {"arguments": {"arguments": {"city": "SF"}}},
+            {
+                "arguments": {
+                    "arguments": {
+                        "arguments": {"arguments": {"city": "SF"}}
+                    }
+                }
+            },
         ]
         for payload in cases:
             with self.subTest(payload=payload):
@@ -175,6 +182,50 @@ class TestDeepSeekV4Streaming(CustomTestCase):
                     _wrapped(_invoke("get_weather", json.dumps(payload))), self.tools
                 )
                 self.assertEqual(json.loads(result.calls[0].parameters), payload)
+
+    def test_preserves_irrecoverable_or_schema_ambiguous_payloads(self):
+        """Normalization must not guess at damaged content or free-form schemas."""
+        cases = [
+            (
+                self.tools,
+                {"arguments": {"command": "printf okprintf ok"}},
+                {"arguments": {"command": "printf okprintf ok"}},
+            ),
+            (
+                self.tools,
+                {
+                    "arguments": {
+                        "arguments": {
+                            "arguments": {
+                                "arguments": '{"city":"SF"'
+                            }
+                        }
+                    }
+                },
+                {"arguments": '{"city":"SF"'},
+            ),
+            (
+                [
+                    Tool(
+                        type="function",
+                        function=Function(
+                            name="get_weather",
+                            parameters={
+                                "type": "object",
+                                "additionalProperties": True,
+                            },
+                        ),
+                    )
+                ],
+                {"arguments": {"city": "SF"}},
+                {"arguments": {"city": "SF"}},
+            ),
+        ]
+        for tools, payload, expected in cases:
+            with self.subTest(payload=payload):
+                text = _wrapped(_invoke("get_weather", json.dumps(payload)))
+                result = DeepSeekV4Detector().detect_and_parse(text, tools)
+                self.assertEqual(json.loads(result.calls[0].parameters), expected)
 
 
 if __name__ == "__main__":
