@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34676",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Confirmed that current admission accounting already prevents full-attention evictability from masking zero Mamba-slot capacity, but reproduced the remaining late prefill allocation exception escaping Scheduler._get_new_batch_prefill_raw. Added typed KV allocation misses, failed-call request-slot cleanup, chunk bookkeeping rollback, and request requeue/backpressure, with focused regression and boundary coverage.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-c5ca6fd09709/venv/bin/python -m pytest -q test/registered/unit/managers/test_prefill_alloc_oom_requeue.py::TestSchedulerPrefillOOM::test_late_allocation_miss_requeues_instead_of_escaping (scheduler recovery hunk temporarily removed)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before evidence: the injected KV allocation miss escaped the actual prefill scheduling method instead of returning the request to waiting_queue. Raw output: reports/j-c5ca6fd09709/failing_before_requeue.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c5ca6fd09709/venv/bin/python -m pytest -q test/registered/unit/managers/test_prefill_alloc_oom_requeue.py test/registered/unit/managers/test_prefill_adder.py",
+      "exit_code": 0,
+      "what_was_measured": "34 tests and 12 subtests passed, covering scheduler requeue, new versus pre-existing request-slot ownership, the issue-shaped exhausted-Mamba admission case, Mamba-evictable recovery, and ChunkCache boundary behavior. Raw output: reports/j-c5ca6fd09709/passing_after.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c5ca6fd09709/venv/bin/python (torch device inventory script)",
+      "exit_code": 0,
+      "what_was_measured": "Detected one AMD Instinct MI355X, gfx950:sramecc+:xnack-, torch 2.11.0+rocm7.2 and ROCm 7.2.26015. Raw output: reports/j-c5ca6fd09709/gpu_environment.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Only device inventory was queried. The changed behavior is CPU scheduler/control flow and the deterministic regressions run on CPU; no GPU kernel result is claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The exact Kimi-K3 TP8/DCP4 sustained-traffic reproduction was not run because the job provides one AMD gfx950 GPU rather than eight NVIDIA B300 GPUs and does not provide Kimi-K3 weights.",
+    "The tests validate allocation failure propagation, ownership cleanup, queue recovery, and admission boundaries; they do not validate Kimi-K3 semantic accuracy or distributed behavior.",
+    "The tiny Llama serving fixture was not used because it cannot exercise the hybrid Mamba allocator or qualify the reported architecture."
+  ]
+}
