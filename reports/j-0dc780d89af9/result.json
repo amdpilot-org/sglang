@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33507",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1910",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1868",
+  "candidate_commit": "bbc71c010dd9870c6e903b8eb291564016d122c7",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the issue-specific scheduler failure: KVPoll.Success overwrites a pending FINISH_ABORT in req.to_finish with FINISH_LENGTH. At the exact candidate commit, the pending abort is promoted through update_finish_state before the ordinary length sentinel is applied. The candidate suite and independent mixed-queue cases preserve abort message, error type, and both issue-relevant HTTP status classes (400 and 503), while transient polls retain the pending abort and ordinary success remains FINISH_LENGTH(0). This verifies the original scheduler-state defect, but not the unavailable two-node Qwen HTTP reproduction.",
+  "tests": [
+    {
+      "command": "git switch --detach 358c163250ad3b1f62939b01ce1314a0a31a0365; git checkout bbc71c010dd9870c6e903b8eb291564016d122c7 -- test/registered/unit/disaggregation/test_prefill_abort_result_cleanup.py; /tmp/amdpilot-repo-j-0dc780d89af9/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_prefill_abort_result_cleanup.py -k successful_transfer_preserves_abort_reason",
+      "exit_code": 1,
+      "what_was_measured": "The candidate regression run unchanged against the recorded base failed only the pending-abort case: FINISH_LENGTH was produced instead of FINISH_ABORT; the already-promoted abort and ordinary success boundaries passed. See raw/base-regression.log."
+    },
+    {
+      "command": "git switch --detach bbc71c010dd9870c6e903b8eb291564016d122c7; /tmp/amdpilot-repo-j-0dc780d89af9/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_prefill_abort_result_cleanup.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression and related cleanup suite: 14 passed. See raw/candidate-suite.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0dc780d89af9/venv/bin/python < independent inline mixed-queue assertions",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial scheduler cases: a 400 BadRequest abort retained message/status/type on Success; neighboring Transferring and WaitingForInput requests retained pending aborts; ordinary Success remained FINISH_LENGTH(0). Also documented an out-of-contract inconsistent state where a preexisting FINISH_LENGTH prevents promotion of a later to_finish abort. See raw/candidate-adversarial.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0dc780d89af9/venv/bin/python -c 'import inspect, sglang; import sglang.srt.disaggregation.prefill as p; ...'",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed sglang and prefill imports resolve to /job/repo/python, so tests exercised the checked-out source. See raw/import-paths-candidate.log."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI355X gfx950 GPU with Torch 2.11.0+rocm7.2 was visible, but this defect is a CPU scheduler state transition and no model weights or second PD node were available. No GPU numerical, H100, model-semantic, or distributed claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "If an internally inconsistent request reaches KVPoll.Success with both a preexisting non-abort finished_reason (for example FINISH_LENGTH) and a later FINISH_ABORT in to_finish, the candidate's `not req.finished()` guard leaves the abort pending. Source inspection did not identify this as the original mid-transfer lifecycle, where set_finish_with_abort supplies to_finish before the success branch assigns any finished_reason."
+  ],
+  "remaining_limitations": [
+    "The original two-node Qwen2-7B PD HTTP reproduction was not run because model weights and a second assigned GPU/node were unavailable.",
+    "The available architecture is AMD gfx950/ROCm 7.2, whereas the report used NVIDIA H100/CUDA; the scheduler transition is architecture-independent but transport and full serving were not qualified.",
+    "HTTP serialization was not exercised end to end. The reviewed boundary verifies the FINISH_ABORT object, message, error type, and status code passed to output streaming.",
+    "No native files changed, repository-environment.json lists no native build target, and therefore no native rebuild was required or performed."
+  ]
+}
