@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31475",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the independent review counterexample against candidate commit 650754532755ba75de1195f7d5231899ae9cabb5, then separated skip reasons that defer to a later cross-rank SUM from A2A/all-gather skips that already absorb the routed collective. TP1 shared output is scaled only for the former, preserving the candidate's valid DP reduce-scatterv fix without producing R + S/8 on A2A paths.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-01c2f3ae5b2d/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v2_shared_expert_tp1.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's five focused tests passed before correction."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-01c2f3ae5b2d/venv/bin/python -c <candidate A2A GPU counterexample>",
+      "exit_code": 1,
+      "what_was_measured": "On gfx950, exact candidate behavior for an A2A skip with no later SUM returned [10.25, -3.0] instead of R + S = [12.0, 4.0], maximum absolute error 7.0."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-01c2f3ae5b2d/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v2_shared_expert_tp1.py",
+      "exit_code": 0,
+      "what_was_measured": "Six focused regression and boundary tests passed after correction, including deferred-SUM scaling, executed all-reduce, A2A no-later-SUM, nonreplicated, and single-rank cases."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-01c2f3ae5b2d/venv/bin/python -m pytest -q test/registered/unit/test_runtime_context.py test/registered/unit/layers/test_layer_communicator_fusion_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "99 related tests and 140 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-01c2f3ae5b2d/venv/bin/python -c <corrected GPU boundary check>",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, A2A/no-later-SUM produced R + S and DP reduce-scatterv produced the per-rank R + S/8 contribution, both with zero maximum absolute error."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Candidate failure and corrected boundary arithmetic ran on one AMD Instinct MI350X, gfx950:sramecc+:xnack-, using Torch 2.11.0+rocm7.2 and HIP 7.2.26015; raw logs are retained under reports/j-01c2f3ae5b2d/raw/."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one gfx950 GPU was assigned, so actual eight-rank RCCL reduce-scatterv and A2A transport were not executed.",
+    "DeepSeek-V2-Lite-Chat and GLM-5.2 weights were unavailable; no full-model serving or semantic-accuracy claim is made.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}

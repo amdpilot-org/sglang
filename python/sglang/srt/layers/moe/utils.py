@@ -711,6 +711,20 @@ def should_skip_mlp_all_reduce() -> bool:
     return f.fuse_mlp_allreduce or f.mlp_reduce_scatter
 
 
+def should_defer_post_experts_all_reduce() -> bool:
+    """Whether a later cross-rank SUM replaces the post-experts all-reduce.
+
+    This is narrower than :func:`should_skip_post_experts_all_reduce`: A2A
+    combines and the FP4 all-gather path also skip that all-reduce, but their
+    output is already reduced and is not consumed by a later SUM.
+    """
+    return (
+        should_skip_mlp_all_reduce()
+        or get_parallel().dwdp_size > 1
+        or should_use_dp_reduce_scatterv()
+    )
+
+
 def should_skip_post_experts_all_reduce(*, is_tp_path: bool) -> bool:
     """Whether to skip the post-experts all-reduce (EP or TP) because a
     downstream component will fuse, replace, or absorb it.
@@ -737,11 +751,7 @@ def should_skip_post_experts_all_reduce(*, is_tp_path: bool) -> bool:
     the decoder via ``get_forward().scoped(...)``. Pass ``is_tp_path=True``
     for the post-experts TP all-reduce, ``False`` for the EP all-reduce.
     """
-    if should_skip_mlp_all_reduce():
-        return True
-    if get_parallel().dwdp_size > 1:
-        return True
-    if should_use_dp_reduce_scatterv():
+    if should_defer_post_experts_all_reduce():
         return True
     if is_tp_path and should_use_flashinfer_cutlass_moe_fp4_allgather():
         return True

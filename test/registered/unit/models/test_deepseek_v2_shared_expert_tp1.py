@@ -5,9 +5,9 @@ import torch
 
 from sglang.srt.models import deepseek_v2 as deepseek_v2_module
 from sglang.srt.models.deepseek_v2 import DeepseekV2MoE
-from sglang.test.ci.ci_register import register_cuda_ci
+from sglang.test.ci.ci_register import register_cpu_ci
 
-register_cuda_ci(est_time=30, stage="base-a", runner_config="1-gpu-small")
+register_cpu_ci(est_time=30, suite="base-a-test-cpu")
 
 
 def make_moe(*, tp_size=8, moe_ep_size=8, shared_expert_tp1=True):
@@ -19,12 +19,19 @@ def make_moe(*, tp_size=8, moe_ep_size=8, shared_expert_tp1=True):
 
 
 class TestDeepseekV2SharedExpertTp1(unittest.TestCase):
-    def run_helper(self, moe, routed, shared, *, skip):
+    def run_helper(self, moe, routed, shared, *, skip, deferred_sum=None):
+        if deferred_sum is None:
+            deferred_sum = skip
         with (
             mock.patch.object(
                 deepseek_v2_module,
                 "should_skip_post_experts_all_reduce",
                 return_value=skip,
+            ),
+            mock.patch.object(
+                deepseek_v2_module,
+                "should_defer_post_experts_all_reduce",
+                return_value=deferred_sum,
             ),
             mock.patch.object(
                 deepseek_v2_module,
@@ -67,6 +74,18 @@ class TestDeepseekV2SharedExpertTp1(unittest.TestCase):
         output, all_reduce = self.run_helper(moe, routed, shared, skip=False)
 
         all_reduce.assert_called_once()
+        torch.testing.assert_close(output, routed + shared)
+
+    def test_a2a_skip_without_later_sum_keeps_full_shared_output(self):
+        routed = torch.tensor([[10.0, -4.0]])
+        shared = torch.tensor([[2.0, 8.0]])
+        moe = make_moe()
+
+        output, all_reduce = self.run_helper(
+            moe, routed, shared, skip=True, deferred_sum=False
+        )
+
+        all_reduce.assert_not_called()
         torch.testing.assert_close(output, routed + shared)
 
     def test_nonreplicated_and_single_rank_boundaries(self):

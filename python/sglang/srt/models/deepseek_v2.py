@@ -95,6 +95,7 @@ from sglang.srt.layers.logits_processor import LogitsProcessor
 from sglang.srt.layers.moe import (
     get_moe_a2a_backend,
     get_moe_runner_backend,
+    should_defer_post_experts_all_reduce,
     should_skip_post_experts_all_reduce,
     should_use_flashinfer_cutlass_moe_fp4_allgather,
 )
@@ -1046,7 +1047,7 @@ class DeepseekV2MoE(nn.Module):
         if self.tp_size > 1 and not skip_post_all_reduce:
             final_hidden_states = tensor_model_parallel_all_reduce(final_hidden_states)
         if shared_output is not None and self._shared_expert_tp1:
-            if self.tp_size > 1 and skip_post_all_reduce:
+            if self.tp_size > 1 and should_defer_post_experts_all_reduce():
                 shared_output = shared_output / self.moe_ep_size
             final_hidden_states += shared_output
         return final_hidden_states
