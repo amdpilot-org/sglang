@@ -1,5 +1,6 @@
 # Copyright 2025 XunhaoLai. All rights reserved.
 
+import logging
 from typing import Optional
 
 import torch
@@ -15,6 +16,8 @@ from ..common.utils import (
     sparse_out_dtype,
     unit_scale,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @triton.heuristics(
@@ -508,6 +511,19 @@ def flash_prefill_with_topk_index(
             cu_seqlens, max_seqlen_q, block_size_q, block_size_k
         )
     max_seqblock_k = triton.cdiv(max_seqlen_k, block_size_k)
+    live_max_seqlen_k = int(seq_lens.max().item())
+    live_max_seqblock_k = triton.cdiv(live_max_seqlen_k, block_size_k)
+    if live_max_seqblock_k > max_seqblock_k:
+        logger.warning(
+            "flash_prefill_with_topk_index: max_seqlen_k=%d underestimates "
+            "max(seq_lens)=%d; enlarging score buffer from %d to %d block-columns "
+            "to prevent an out-of-bounds write",
+            max_seqlen_k,
+            live_max_seqlen_k,
+            max_seqblock_k,
+            live_max_seqblock_k,
+        )
+        max_seqblock_k = live_max_seqblock_k
     if disable_index_value:
         o = None
     else:
