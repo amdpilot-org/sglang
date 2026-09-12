@@ -1,0 +1,114 @@
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+_ test_runner_stages_live_geometry_into_pointer_stable_capture_buffers[live_lens0-expected_lens0] _
+
+live_lens = [6, 6, 6, 6, 6, 6, ...], expected_lens = [6, 6, 6, 6, 6, 6, ...]
+
+    @pytest.mark.parametrize(
+        "live_lens, expected_lens",
+        [
+            ([6] * 32, [6] * 32 + [0] * 160),
+            # 160 live tokens select the same 192-token tier. The remaining graph
+            # tokens must be assigned to synthetic request slots, not discarded.
+            ([5] * 32, [5] * 32 + [1] * 32 + [0] * 128),
+        ],
+    )
+    def test_runner_stages_live_geometry_into_pointer_stable_capture_buffers(
+        live_lens, expected_lens
+    ):
+        runner, captured = _runner_with_captured_layout()
+        verify_lens_ptr = captured.verify_lens.data_ptr()
+        qo_indptr_ptr = captured.qo_indptr_device.data_ptr()
+    
+        runner._stage_ragged_verify_layout(_layout(live_lens), _TIER)
+    
+>       assert captured.verify_lens.tolist() == expected_lens
+E       assert [1, 1, 1, 1, 1, 1, ...] == [6, 6, 6, 6, 6, 6, ...]
+E         
+E         At index 0 diff: 1 != 6
+E         Use -v to get more diff
+
+test/registered/unit/model_executor/runner/test_ragged_verify_replay_layout.py:57: AssertionError
+_ test_runner_stages_live_geometry_into_pointer_stable_capture_buffers[live_lens1-expected_lens1] _
+
+live_lens = [5, 5, 5, 5, 5, 5, ...], expected_lens = [5, 5, 5, 5, 5, 5, ...]
+
+    @pytest.mark.parametrize(
+        "live_lens, expected_lens",
+        [
+            ([6] * 32, [6] * 32 + [0] * 160),
+            # 160 live tokens select the same 192-token tier. The remaining graph
+            # tokens must be assigned to synthetic request slots, not discarded.
+            ([5] * 32, [5] * 32 + [1] * 32 + [0] * 128),
+        ],
+    )
+    def test_runner_stages_live_geometry_into_pointer_stable_capture_buffers(
+        live_lens, expected_lens
+    ):
+        runner, captured = _runner_with_captured_layout()
+        verify_lens_ptr = captured.verify_lens.data_ptr()
+        qo_indptr_ptr = captured.qo_indptr_device.data_ptr()
+    
+        runner._stage_ragged_verify_layout(_layout(live_lens), _TIER)
+    
+>       assert captured.verify_lens.tolist() == expected_lens
+E       assert [1, 1, 1, 1, 1, 1, ...] == [5, 5, 5, 5, 5, 5, ...]
+E         
+E         At index 0 diff: 1 != 5
+E         Use -v to get more diff
+
+test/registered/unit/model_executor/runner/test_ragged_verify_replay_layout.py:57: AssertionError
+______________ test_dsv4_replay_resolves_the_runner_staged_layout ______________
+
+    def test_dsv4_replay_resolves_the_runner_staged_layout():
+        runner, captured = _runner_with_captured_layout()
+        runner._stage_ragged_verify_layout(_layout([6] * 32), _TIER)
+        forward_batch = SimpleNamespace(
+            spec_info=SimpleNamespace(ragged_verify_layout=captured)
+        )
+        backend = DeepseekV4AttnBackend.__new__(DeepseekV4AttnBackend)
+        backend.online_c128_mtp = SimpleNamespace(enabled=lambda: False)
+    
+        with (
+            patch(
+                "sglang.srt.layers.attention.deepseek_v4_backend.read_ragged_verify_mode",
+                return_value=RaggedVerifyMode.COMPACT,
+            ),
+            patch(
+                "sglang.srt.layers.attention.deepseek_v4_backend.get_parallel",
+                return_value=SimpleNamespace(attn_cp_size=1),
+            ),
+        ):
+            replay_layout = backend._resolve_verify_layout(forward_batch, bs=_TIER)
+    
+>       assert replay_layout.verify_lens.tolist() == [6] * 32 + [0] * 160
+E       assert [1, 1, 1, 1, 1, 1, ...] == [6, 6, 6, 6, 6, 6, ...]
+E         
+E         At index 0 diff: 1 != 6
+E         Use -v to get more diff
+
+test/registered/unit/model_executor/runner/test_ragged_verify_replay_layout.py:86: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+<frozen abc>:106
+  <frozen abc>:106: DeprecationWarning: MultiPlatformOp is deprecated; subclass sglang.kernels.fused_op.BaseFusedOp instead (RFC #29630).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/model_executor/runner/test_ragged_verify_replay_layout.py::test_runner_stages_live_geometry_into_pointer_stable_capture_buffers[live_lens0-expected_lens0]
+FAILED test/registered/unit/model_executor/runner/test_ragged_verify_replay_layout.py::test_runner_stages_live_geometry_into_pointer_stable_capture_buffers[live_lens1-expected_lens1]
+FAILED test/registered/unit/model_executor/runner/test_ragged_verify_replay_layout.py::test_dsv4_replay_resolves_the_runner_staged_layout
+3 failed, 18 warnings in 8.61s

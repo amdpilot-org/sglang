@@ -43,6 +43,32 @@ class TestRaggedTargetVerifyGeometry(CustomTestCase):
 
 
 class TestPaddedRaggedVerifyGeometry(CustomTestCase):
+    def test_issue_34384_replay_geometry_matches_192_slot_capture(self):
+        raw = RaggedVerifyLayout.from_verify_lens(
+            verify_lens_cpu=[6] * 32,
+            device=_DEVICE,
+            grid=[1, 32, 192],
+        )
+        self.assertEqual(raw.graph_num_tokens, 192)
+
+        padded = raw.padded_to_bucket(padded_bs=192, cap=6)
+        self.assertEqual(padded.bs, 192)
+        self.assertEqual(padded.verify_lens.tolist(), [6] * 32 + [0] * 160)
+        self.assertEqual(
+            padded.qo_indptr_device[:34].tolist(), list(range(0, 193, 6)) + [192]
+        )
+        self.assertEqual(padded.qo_indptr_device[-1].item(), 192)
+
+    def test_full_192_request_tier_needs_no_zero_length_padding(self):
+        raw = RaggedVerifyLayout.from_verify_lens(
+            verify_lens_cpu=[1] * 192,
+            device=_DEVICE,
+            grid=[1, 32, 192],
+        )
+        padded = raw.padded_to_bucket(padded_bs=192, cap=6)
+        self.assertEqual(padded.verify_lens.tolist(), [1] * 192)
+        self.assertEqual(padded.qo_indptr_device.tolist(), list(range(193)))
+
     def test_padded_layout_grows_bs_and_fills_bucket(self):
         raw = RaggedVerifyLayout.from_verify_lens(
             verify_lens_cpu=[8, 1, 3],
