@@ -1,0 +1,114 @@
+.FF                                                                      [100%]
+=================================== FAILURES ===================================
+_ TestMambaTrackIndices.test_unallocated_position_does_not_replace_valid_positions _
+
+self = <test_mamba_track_indices.TestMambaTrackIndices testMethod=test_unallocated_position_does_not_replace_valid_positions>
+
+    def test_unallocated_position_does_not_replace_valid_positions(self):
+        batch = _make_batch([None, 1, 0])
+    
+>       set_mamba_track_indices_from_reqs(batch)
+
+test/registered/unit/managers/test_mamba_track_indices.py:40: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+batch = namespace(req_to_token_pool=namespace(req_index_to_mamba_ping_pong_track_buffer_mapping=tensor([[10, 11],
+        [20,...ce(mamba_next_track_idx=1)), namespace(kv=namespace(mamba_next_track_idx=0))], mamba_track_buffer_indices=[None, 1, 0])
+track_positions = [None, 1, 0]
+
+    def set_mamba_track_indices_from_reqs(
+        batch, track_positions: Optional[List[int]] = None
+    ):
+        """Build mamba_track_indices from req objects (authoritative source).
+    
+        track_positions: optional per-req ping-pong position override (the lazy
+        spec track plan, see mamba_lazy_spec_prepare).
+        """
+        req_to_token_pool = batch.req_to_token_pool
+        all_buffers = req_to_token_pool.req_index_to_mamba_ping_pong_track_buffer_mapping[
+            batch.req_pool_indices
+        ]  # (bs, ping_pong_size), int64, on device
+        if track_positions is None:
+            # Guard: mamba_next_track_idx may be None for requests that haven't
+            # gone through _alloc_ping_pong_buffer yet (e.g., spec v2 verify path).
+            # Default to 0 (first ping-pong slot) to avoid TypeError.
+            track_positions = [req.kv.mamba_next_track_idx for req in batch.reqs]
+        batch.mamba_track_buffer_indices = list(track_positions)
+        idx = (
+>           torch.tensor(
+                track_positions,
+                dtype=torch.int64,
+                pin_memory=True,
+            )
+            .unsqueeze(1)
+            .to(device=all_buffers.device, non_blocking=True)
+        )
+E       TypeError: 'NoneType' object cannot be interpreted as an integer
+
+python/sglang/srt/managers/schedule_batch.py:2080: TypeError
+__ TestMambaTrackIndices.test_unallocated_positions_use_first_ping_pong_slot ___
+
+self = <test_mamba_track_indices.TestMambaTrackIndices testMethod=test_unallocated_positions_use_first_ping_pong_slot>
+
+    def test_unallocated_positions_use_first_ping_pong_slot(self):
+        batch = _make_batch([None, None, None])
+    
+>       set_mamba_track_indices_from_reqs(batch)
+
+test/registered/unit/managers/test_mamba_track_indices.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+batch = namespace(req_to_token_pool=namespace(req_index_to_mamba_ping_pong_track_buffer_mapping=tensor([[10, 11],
+        [20,...t_track_idx=None)), namespace(kv=namespace(mamba_next_track_idx=None))], mamba_track_buffer_indices=[None, None, None])
+track_positions = [None, None, None]
+
+    def set_mamba_track_indices_from_reqs(
+        batch, track_positions: Optional[List[int]] = None
+    ):
+        """Build mamba_track_indices from req objects (authoritative source).
+    
+        track_positions: optional per-req ping-pong position override (the lazy
+        spec track plan, see mamba_lazy_spec_prepare).
+        """
+        req_to_token_pool = batch.req_to_token_pool
+        all_buffers = req_to_token_pool.req_index_to_mamba_ping_pong_track_buffer_mapping[
+            batch.req_pool_indices
+        ]  # (bs, ping_pong_size), int64, on device
+        if track_positions is None:
+            # Guard: mamba_next_track_idx may be None for requests that haven't
+            # gone through _alloc_ping_pong_buffer yet (e.g., spec v2 verify path).
+            # Default to 0 (first ping-pong slot) to avoid TypeError.
+            track_positions = [req.kv.mamba_next_track_idx for req in batch.reqs]
+        batch.mamba_track_buffer_indices = list(track_positions)
+        idx = (
+>           torch.tensor(
+                track_positions,
+                dtype=torch.int64,
+                pin_memory=True,
+            )
+            .unsqueeze(1)
+            .to(device=all_buffers.device, non_blocking=True)
+        )
+E       TypeError: 'NoneType' object cannot be interpreted as an integer
+
+python/sglang/srt/managers/schedule_batch.py:2080: TypeError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/managers/test_mamba_track_indices.py::TestMambaTrackIndices::test_unallocated_position_does_not_replace_valid_positions
+FAILED test/registered/unit/managers/test_mamba_track_indices.py::TestMambaTrackIndices::test_unallocated_positions_use_first_ping_pong_slot
+2 failed, 1 passed, 17 warnings in 8.67s
