@@ -200,7 +200,7 @@ class RasSocketClient:
         addr: str = "localhost",
         port: int = 28028,
         connect_timeout: float = 1.0,
-        read_timeout: float = 1.0,
+        read_timeout: float = 5.0,
     ) -> None:
         self.addr = addr
         self.port = port
