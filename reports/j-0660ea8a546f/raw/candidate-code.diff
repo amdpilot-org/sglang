@@ -1,0 +1,148 @@
+commit 611cdb905edbdba7ccb82fcbad2200e514c5eb8b
+Author: AMDPilot Agent <amdpilot-agent@users.noreply.github.com>
+Date:   Sat Sep 12 11:49:17 2026 +0000
+
+    Fix decode bootstrap DP-rank query storm
+
+diff --git a/python/sglang/srt/disaggregation/decode.py b/python/sglang/srt/disaggregation/decode.py
+index b16c5ce..b25ad5e 100644
+--- a/python/sglang/srt/disaggregation/decode.py
++++ b/python/sglang/srt/disaggregation/decode.py
+@@ -388,6 +388,8 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
+         self._prefill_dp_rank_queries: Dict[
+             str, Tuple[Tuple[int, ...], Future[Dict[str, int]]]
+         ] = {}
++        self._dp_rank_query_last_attempt_time: Dict[str, float] = {}
++        self._dp_rank_query_interval: float = 0.01  # seconds
+         self._ensure_retry_count: Dict[str, int] = {}
+         self._max_ensure_retries: int = 15  # scheduling cycles
+         self._ensure_last_attempt_time: Dict[str, float] = {}
+@@ -990,6 +992,10 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
+         for bootstrap_addr in set(queries) - set(addr_to_reqs):
+             _, stale_future = queries.pop(bootstrap_addr)
+             stale_future.cancel()
++        for bootstrap_addr in set(self._dp_rank_query_last_attempt_time) - set(
++            addr_to_reqs
++        ):
++            del self._dp_rank_query_last_attempt_time[bootstrap_addr]
+
+         for bootstrap_addr, decode_reqs in addr_to_reqs.items():
+             if bootstrap_addr in queries:
+@@ -1004,6 +1010,8 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
+             )
+             if not rooms:
+                 continue
++            if not self._can_query_prefill_dp_ranks(bootstrap_addr):
++                continue
+
+             future = self.kv_manager._ensure_prefill_recompute_executor().submit(
+                 CommonKVReceiver.query_prefill_dp_ranks,
+@@ -1012,6 +1020,18 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
+             )
+             queries[bootstrap_addr] = (rooms, future)
+
++    def _can_query_prefill_dp_ranks(self, bootstrap_addr: str) -> bool:
++        """Rate-limit unresolved room lookups independently per prefill server."""
++        now = time.monotonic()
++        last_attempt = self._dp_rank_query_last_attempt_time.get(bootstrap_addr)
++        if (
++            last_attempt is not None
++            and now - last_attempt < self._dp_rank_query_interval
++        ):
++            return False
++        self._dp_rank_query_last_attempt_time[bootstrap_addr] = now
++        return True
++
+     def _cancel_prefill_dp_rank_queries(self) -> None:
+         for _, future in self._prefill_dp_rank_queries.values():
+             future.cancel()
+@@ -1062,6 +1082,9 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
+                 else:
+                     if prefetched is not None:
+                         prefetched[1].cancel()
++                    if not self._can_query_prefill_dp_ranks(bootstrap_addr):
++                        remaining.extend(need_query)
++                        continue
+                     room_to_rank = CommonKVReceiver.query_prefill_dp_ranks(
+                         bootstrap_addr, rooms
+                     )
+diff --git a/test/registered/unit/disaggregation/test_decode_queue_cleanup.py b/test/registered/unit/disaggregation/test_decode_queue_cleanup.py
+index b203b44..b6e0466 100644
+--- a/test/registered/unit/disaggregation/test_decode_queue_cleanup.py
++++ b/test/registered/unit/disaggregation/test_decode_queue_cleanup.py
+@@ -300,6 +300,8 @@ class TestDecodeQueueCleanup(CustomTestCase):
+         queue = DecodePreallocQueue.__new__(DecodePreallocQueue)
+         queue.pending_reqs = [first]
+         queue._prefill_dp_rank_queries = {}
++        queue._dp_rank_query_last_attempt_time = {}
++        queue._dp_rank_query_interval = 0.01
+         queue.kv_manager = SimpleNamespace(
+             prefill_info_table={addr: object()},
+             _ensure_prefill_recompute_executor=lambda: executor,
+@@ -323,6 +325,66 @@ class TestDecodeQueueCleanup(CustomTestCase):
+         tail.kv_receiver.init.assert_called_once_with(2)
+         self.assertEqual(queue.pending_reqs, [])
+
++    def test_unresolved_prefill_dp_rank_queries_are_rate_limited(self):
++        addr = "127.0.0.1:11500"
++        decode_req = SimpleNamespace(
++            req=SimpleNamespace(
++                bootstrap_host="127.0.0.1",
++                bootstrap_port=11500,
++                bootstrap_room=7,
++            ),
++            kv_receiver=MagicMock(),
++        )
++        queue = DecodePreallocQueue.__new__(DecodePreallocQueue)
++        queue.pending_reqs = [decode_req]
++        queue._prefill_dp_rank_queries = {}
++        queue._dp_rank_query_last_attempt_time = {}
++        queue._dp_rank_query_interval = 0.01
++        executor = MagicMock()
++
++        def completed_query(*args):
++            future = Future()
++            future.set_result({})
++            return future
++
++        executor.submit.side_effect = completed_query
++        queue.kv_manager = SimpleNamespace(
++            prefill_info_table={addr: object()},
++            _ensure_prefill_recompute_executor=lambda: executor,
++        )
++        queue._resolve_prefill_dp_rank = MagicMock(return_value=None)
++        queue._ensure_prefill_info = lambda groups: (groups, [])
++
++        with (
++            patch(
++                "sglang.srt.disaggregation.decode.time.monotonic",
++                side_effect=[1.0, 1.001, 1.001, 1.011],
++            ),
++            patch(
++                "sglang.srt.disaggregation.decode.CommonKVReceiver.query_prefill_dp_ranks"
++            ) as direct_query,
++        ):
++            for _ in range(3):
++                queue.prefetch_prefill_dp_rank_queries()
++                queue._resolve_pending_reqs()
++
++        self.assertEqual(executor.submit.call_count, 2)
++        direct_query.assert_not_called()
++        self.assertEqual(queue.pending_reqs, [decode_req])
++
++    def test_dp_rank_query_throttle_is_independent_per_bootstrap(self):
++        queue = DecodePreallocQueue.__new__(DecodePreallocQueue)
++        queue._dp_rank_query_last_attempt_time = {}
++        queue._dp_rank_query_interval = 0.01
++
++        with patch(
++            "sglang.srt.disaggregation.decode.time.monotonic",
++            side_effect=[1.0, 1.001, 1.002],
++        ):
++            self.assertTrue(queue._can_query_prefill_dp_ranks("prefill-a:8998"))
++            self.assertFalse(queue._can_query_prefill_dp_ranks("prefill-a:8998"))
++            self.assertTrue(queue._can_query_prefill_dp_ranks("prefill-b:8998"))
++
+     @patch("sglang.srt.disaggregation.decode.release_kv_cache")
+     @patch("sglang.srt.disaggregation.decode.prepare_abort")
+     @patch("sglang.srt.disaggregation.decode.poll_and_all_reduce")

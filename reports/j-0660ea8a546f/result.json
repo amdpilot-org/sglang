@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33088",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "611cdb905edbdba7ccb82fcbad2200e514c5eb8b",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a genuine partial mitigation: a per-process, per-bootstrap fixed 10 ms gate reduces scheduler-cycle DP-rank queries, and its regression passes. It does not bound retries, back off exponentially, fail an unreachable bootstrap, coordinate once per node, or demonstrate successful serving, so the original zero-success deadlock and ongoing multi-rank retry stream remain possible.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-0660ea8a546f/venv/bin/python -m pytest -q /job/review-evidence-j-0660ea8a546f/candidate-test_decode_queue_cleanup.py -k 'unresolved_prefill_dp_rank_queries_are_rate_limited or dp_rank_query_throttle_is_independent_per_bootstrap' (recorded base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before comparison against recorded base: unresolved lookup submitted on 3 of 3 cycles rather than 2, and the candidate throttle helper did not exist."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0660ea8a546f/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_decode_queue_cleanup.py (exact candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and neighboring queue cleanup coverage: 11 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0660ea8a546f/venv/bin/python /tmp/adversarial_review.py (exact candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Independent contract counterexamples: 3374 permitted attempts for one rank over 60 simulated seconds, 680 permitted attempts across eight independent ranks over one simulated second, and no retry-cap state."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The prepared interpreter detected one AMD Instinct MI355X with gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2, and HIP 7.2.26015. No GPU computation was used as evidence for this CPU-side HTTP scheduling change.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A permanently unreachable bootstrap remains eligible for queries indefinitely; there is no bounded retry count or terminal failure path for DP-rank lookup.",
+    "Each decode DP-rank process owns independent throttle state, so TP8/EP8/DP8 still multiplies attempts across ranks rather than querying once per node.",
+    "The fixed 10 ms interval is not exponential backoff and still permits hundreds of aggregate attempts per second across eight ranks.",
+    "The request can remain pending forever with zero successful requests; the candidate only lowers retry frequency.",
+    "No two-node model-serving evidence demonstrates elimination of the reported Errno 99 ephemeral-port exhaustion."
+  ],
+  "remaining_limitations": [
+    "Qwen3.5-397B-A17B-FP8 weights were unavailable.",
+    "Only one gfx950 GPU and one node were assigned; the original two-node TP8/EP8/DP8 MoRI topology could not be run.",
+    "The exact Errno 99 failure and full serving success were not reproduced.",
+    "The candidate changed no native source, so no native rebuild was applicable."
+  ]
+}
