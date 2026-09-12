@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35295",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1459",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1421",
+  "candidate_commit": "7ca83d8652bac65ff85abac25501043711f5b451",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate genuinely fixes the exact partial-word revision and comma-spacing examples and passes focused regressions, but it only recognizes selected punctuation. Punctuation-only growth with a closing quote, Unicode ellipsis, or em dash emits a repeated full word and corrupts the monotonic prompt prefix, so the broad original contract is only partially fixed.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c60ae91c4b43/venv/bin/python <base reproduction script>",
+      "exit_code": 0,
+      "what_was_measured": "On the exact recorded base, confirmed source import path and reproduced both original failures: word revision emitted 'erpillar' and comma growth recorded 'hello world ,'."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c60ae91c4b43/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_streaming_asr_state.py test/registered/unit/entrypoints/openai/test_serving_transcription.py test/registered/unit/entrypoints/openai/test_audio_chunking.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, 31 focused state, serving-transcription, and audio-chunking tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c60ae91c4b43/venv/bin/python /job/review-evidence-j-c60ae91c4b43/adversarial_streaming_asr.py",
+      "exit_code": 1,
+      "what_was_measured": "At exact candidate commit, reported word/comma cases and normal append/rollback boundaries passed; independent closing-quote, Unicode-ellipsis, and em-dash punctuation-only growth cases failed with duplicated words in emitted_text."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and candidate are deterministic Python string-state logic. No GPU or model weights are required, and no GPU result is claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "'hello world' -> 'hello world\"' emits 'world\"' and records 'hello world world\"' instead of emitting '\"' and recording 'hello world\"'.",
+    "'hello world' -> 'hello world…' emits 'world…' and records 'hello world world…' instead of emitting '…' and recording 'hello world…'.",
+    "'hello world' -> 'hello world—' emits 'world—' and records 'hello world world—' instead of emitting '—' and recording 'hello world—'."
+  ],
+  "remaining_limitations": [
+    "Review ran on x86_64 with Python 3.12.3, not the reporter's macOS arm64 environment; the reproduced logic is platform-independent Python.",
+    "No Qwen3-ASR weights or model inference were used.",
+    "No live HTTP SSE or realtime WebSocket server was launched; direct shared-state reproduction and focused existing serving tests were used.",
+    "No native source changed, so a native rebuild was not applicable.",
+    "The pre-existing documented whitespace-free CJK rollback limitation remains outside this candidate review."
+  ]
+}
