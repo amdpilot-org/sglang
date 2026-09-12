@@ -434,5 +434,70 @@ def test_grouped_conv_supports_runtime_block_sizes():
         torch.testing.assert_close(actual, expected)
 
 
+def test_dflash_missing_target_layer_ids_rejects_count_collision():
+    config = parse_dflash_draft_config(
+        draft_hf_config={
+            "num_hidden_layers": 5,
+            "dflash_config": {"selector_rank": 256, "selector_top_k": 16},
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"requires dflash_config\.target_layer_ids.*cannot be inferred",
+    ):
+        config.resolve_target_layer_ids(target_num_layers=64)
+
+
+def test_dflash_target_layer_ids_resolve_verbatim():
+    trained_layer_ids = [5, 19, 33, 47, 61]
+    config = parse_dflash_draft_config(
+        draft_hf_config={
+            "num_hidden_layers": 5,
+            "dflash_config": {
+                "selector_rank": 256,
+                "selector_top_k": 16,
+                "target_layer_ids": trained_layer_ids,
+            },
+        }
+    )
+
+    assert config.resolve_target_layer_ids(target_num_layers=64) == trained_layer_ids
+
+
+@pytest.mark.parametrize("target_num_layers", [0, -1])
+def test_dflash_target_layer_ids_reject_nonpositive_target_depth(target_num_layers):
+    config = parse_dflash_draft_config(
+        draft_hf_config={
+            "num_hidden_layers": 1,
+            "dflash_config": {
+                "selector_rank": 256,
+                "selector_top_k": 16,
+                "target_layer_ids": [0],
+            },
+        }
+    )
+
+    with pytest.raises(ValueError, match="target_num_layers must be positive"):
+        config.resolve_target_layer_ids(target_num_layers=target_num_layers)
+
+
+@pytest.mark.parametrize("layer_ids", [[-1], [64]])
+def test_dflash_target_layer_ids_reject_out_of_range_ids(layer_ids):
+    config = parse_dflash_draft_config(
+        draft_hf_config={
+            "num_hidden_layers": 1,
+            "dflash_config": {
+                "selector_rank": 256,
+                "selector_top_k": 16,
+                "target_layer_ids": layer_ids,
+            },
+        }
+    )
+
+    with pytest.raises(ValueError, match="out-of-range layer id"):
+        config.resolve_target_layer_ids(target_num_layers=64)
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

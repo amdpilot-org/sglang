@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37475",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the DFlash count-collision fallback at the recorded base: a missing dflash_config.target_layer_ids resolved to [1, 16, 31, 46, 61] for a 64-layer target and five-layer draft, which has the same width but differs from the trained [5, 19, 33, 47, 61]. Removed the formula fallback and now require the checkpoint's explicit tap list, while preserving explicit-list range validation.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-33bf3d22a401/venv/bin/python inline reproduction using parse_dflash_draft_config and resolve_target_layer_ids",
+      "exit_code": 0,
+      "what_was_measured": "Before the fix, the actual checkout returned [1, 16, 31, 46, 61] instead of [5, 19, 33, 47, 61], with equal list lengths; raw output: reports/j-33bf3d22a401/raw/reproduction-before.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-33bf3d22a401/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_logits.py -k target_layer_ids",
+      "exit_code": 0,
+      "what_was_measured": "Six post-fix regression and boundary cases passed: missing-key collision rejection, verbatim explicit IDs, nonpositive target depths, and lower/upper out-of-range IDs."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-33bf3d22a401/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_logits.py",
+      "exit_code": 0,
+      "what_was_measured": "All 16 DFlash unit tests passed; raw output: reports/j-33bf3d22a401/raw/test-dflash-logits.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-33bf3d22a401/venv/bin/python -m pytest -q test/registered/unit/model_executor/model_runner_components/test_spec_aux_hidden_state.py",
+      "exit_code": 0,
+      "what_was_measured": "All five auxiliary hidden-state tests passed after updating the production call site; raw output: reports/j-33bf3d22a401/raw/test-spec-aux-hidden-state.txt."
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/speculative/dflash_utils.py python/sglang/srt/model_executor/model_runner_components/spec_aux_hidden_state.py python/sglang/srt/models/dflash.py test/registered/unit/spec/test_dflash_logits.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, registry, and policy hooks passed; raw output: reports/j-33bf3d22a401/raw/pre-commit.txt."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reproduced defect and fix are deterministic CPU-side config resolution. No DFlash checkpoint weights were provided, so a gfx950 smoke could not validate trained tap semantics or acceptance quality and was not used as substitute evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No full DFlash/DFlash2 model was loaded because the affected checkpoint weights were unavailable.",
+    "Acceptance-rate recovery was not measured; the regression proves the unsafe guessed configuration is rejected before model execution.",
+    "No GPU execution was performed because it would not add issue-specific evidence without the affected weights.",
+    "Upstream PR https://github.com/sgl-project/sglang/pull/37476 was inspected and remained open during this investigation."
+  ]
+}
