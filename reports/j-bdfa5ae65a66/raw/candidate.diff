@@ -1,0 +1,189 @@
+diff --git a/python/sglang/srt/mem_cache/allocator/paged.py b/python/sglang/srt/mem_cache/allocator/paged.py
+index ffc479e..ca2d3e2 100755
+--- a/python/sglang/srt/mem_cache/allocator/paged.py
++++ b/python/sglang/srt/mem_cache/allocator/paged.py
+@@ -199,6 +199,15 @@ class PagedTokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
+         if extend_num_tokens // self.page_size + bs + 1 > len(self.free_pages):
+             self.merge_and_sort_free()
+ 
++        if num_new_pages is None:
++            num_new_pages = get_num_new_pages(
++                seq_lens=seq_lens_cpu,
++                page_size=self.page_size,
++                prefix_lens=prefix_lens_cpu,
++            )
++        if num_new_pages > len(self.free_pages):
++            return None
++
+         out_indices = torch.empty(
+             (extend_num_tokens,), dtype=torch.int64, device=self.device
+         )
+@@ -216,15 +225,6 @@ class PagedTokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
+         if self.debug_mode:
+             assert len(torch.unique(out_indices)) == len(out_indices)
+ 
+-        if num_new_pages is None:
+-            num_new_pages = get_num_new_pages(
+-                seq_lens=seq_lens_cpu,
+-                page_size=self.page_size,
+-                prefix_lens=prefix_lens_cpu,
+-            )
+-        if num_new_pages > len(self.free_pages):
+-            return None
+-
+         self.free_pages = self.free_pages[num_new_pages:]
+         return out_indices
+ 
+@@ -243,6 +243,14 @@ class PagedTokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
+         if bs > len(self.free_pages):
+             self.merge_and_sort_free()
+ 
++        num_new_pages = get_num_new_pages(
++            seq_lens=seq_lens_cpu,
++            page_size=self.page_size,
++            decode=True,
++        )
++        if num_new_pages > len(self.free_pages):
++            return None
++
+         out_indices = torch.empty((bs,), dtype=torch.int64, device=self.device)
+         alloc_decode_kernel[(bs,)](
+             seq_lens,
+@@ -256,14 +264,6 @@ class PagedTokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
+         if self.debug_mode:
+             assert len(torch.unique(out_indices)) == len(out_indices)
+ 
+-        num_new_pages = get_num_new_pages(
+-            seq_lens=seq_lens_cpu,
+-            page_size=self.page_size,
+-            decode=True,
+-        )
+-        if num_new_pages > len(self.free_pages):
+-            return None
+-
+         self.free_pages = self.free_pages[num_new_pages:]
+         return out_indices
+ 
+diff --git a/test/registered/unit/mem_cache/test_paged_allocator_oom.py b/test/registered/unit/mem_cache/test_paged_allocator_oom.py
+new file mode 100644
+index 0000000..634fa9f
+--- /dev/null
++++ b/test/registered/unit/mem_cache/test_paged_allocator_oom.py
+@@ -0,0 +1,117 @@
++"""Regression tests for paged allocator out-of-memory handling."""
++
++from unittest.mock import patch
++
++import pytest
++import torch
++
++from sglang.srt.mem_cache.allocator.paged import PagedTokenToKVPoolAllocator
++from sglang.test.ci.ci_register import register_cpu_ci
++
++register_cpu_ci(est_time=5, suite="base-a-test-cpu")
++
++
++def _make_allocator(*, need_sort=False, size=8):
++    return PagedTokenToKVPoolAllocator(
++        size=size,
++        page_size=4,
++        dtype=torch.float16,
++        device="cpu",
++        kvcache=None,
++        need_sort=need_sort,
++    )
++
++
++@pytest.mark.parametrize("num_new_pages", [None, 3])
++def test_extend_oom_does_not_launch_kernel(num_new_pages):
++    allocator = _make_allocator()
++    free_pages_before = allocator.free_pages.clone()
++    prefix_lens = torch.tensor([0], dtype=torch.int64)
++    seq_lens = torch.tensor([12], dtype=torch.int64)
++    last_loc = torch.tensor([-1], dtype=torch.int64)
++
++    with patch("sglang.srt.mem_cache.allocator.paged.alloc_extend_kernel") as kernel:
++        result = allocator.alloc_extend(
++            prefix_lens,
++            prefix_lens,
++            seq_lens,
++            seq_lens,
++            last_loc,
++            extend_num_tokens=12,
++            num_new_pages=num_new_pages,
++        )
++
++    assert result is None
++    assert torch.equal(allocator.free_pages, free_pages_before)
++    kernel.__getitem__.assert_not_called()
++
++
++def test_decode_oom_does_not_launch_kernel():
++    allocator = _make_allocator()
++    free_pages_before = allocator.free_pages.clone()
++    seq_lens = torch.tensor([5, 9, 13], dtype=torch.int64)
++    last_loc = torch.tensor([3, 7, 11], dtype=torch.int64)
++
++    with patch("sglang.srt.mem_cache.allocator.paged.alloc_decode_kernel") as kernel:
++        result = allocator.alloc_decode(seq_lens, seq_lens, last_loc)
++
++    assert result is None
++    assert torch.equal(allocator.free_pages, free_pages_before)
++    kernel.__getitem__.assert_not_called()
++
++
++@pytest.mark.parametrize("operation", ["extend", "decode"])
++def test_exact_capacity_still_launches_and_consumes_pages(operation):
++    allocator = _make_allocator()
++
++    if operation == "extend":
++        lens = torch.tensor([8], dtype=torch.int64)
++        with patch(
++            "sglang.srt.mem_cache.allocator.paged.alloc_extend_kernel"
++        ) as kernel:
++            result = allocator.alloc_extend(
++                torch.tensor([0], dtype=torch.int64),
++                torch.tensor([0], dtype=torch.int64),
++                lens,
++                lens,
++                torch.tensor([-1], dtype=torch.int64),
++                extend_num_tokens=8,
++            )
++    else:
++        lens = torch.tensor([5, 9], dtype=torch.int64)
++        with patch(
++            "sglang.srt.mem_cache.allocator.paged.alloc_decode_kernel"
++        ) as kernel:
++            result = allocator.alloc_decode(
++                lens, lens, torch.tensor([3, 7], dtype=torch.int64)
++            )
++
++    assert result is not None
++    assert len(allocator.free_pages) == 0
++    kernel.__getitem__.assert_called_once_with((1,) if operation == "extend" else (2,))
++
++
++def test_capacity_check_occurs_after_staged_pages_are_merged():
++    allocator = _make_allocator(need_sort=True, size=12)
++    allocated = allocator.alloc(8)
++    allocator.free(allocated[:4])
++    assert len(allocator.free_pages) == 1
++    assert allocator.num_staged_pages == 1
++
++    prefix_lens = torch.tensor([0], dtype=torch.int64)
++    seq_lens = torch.tensor([8], dtype=torch.int64)
++    last_loc = torch.tensor([-1], dtype=torch.int64)
++    with patch("sglang.srt.mem_cache.allocator.paged.alloc_extend_kernel") as kernel:
++        result = allocator.alloc_extend(
++            prefix_lens,
++            prefix_lens,
++            seq_lens,
++            seq_lens,
++            last_loc,
++            extend_num_tokens=8,
++        )
++
++    assert result is not None
++    assert len(allocator.free_pages) == 0
++    assert allocator.num_staged_pages == 0
++    kernel.__getitem__.assert_called_once_with((1,))
