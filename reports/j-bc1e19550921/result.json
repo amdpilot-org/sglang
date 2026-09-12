@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32924",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/2000",
+  "candidate_commit": "51ee81b5d924c479141bf17423a74a9e459c8062",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate correctly implements and tests a narrow kill switch for the suspect Kimi-K3 fused route/pack/MXFP8-quant path. This satisfies the issue's request for an independent same-precision field A/B and provides a mitigation, but it does not reproduce, diagnose, or fix the unknown 8xB300 asynchronous CUDA launch failure.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bc1e19550921/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-bc1e19550921/review-evidence/candidate_test.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "All 3 candidate feature tests failed because the new environment field was absent. This reproduces the missing kill-switch contract, not the original CUDA crash."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bc1e19550921/venv/bin/python -m pytest -q test/registered/unit/layers/moe/test_route_quant_handoff.py test/registered/unit/layers/quantization/test_mxfp4_flashinfer_activation_prep.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "8 tests passed for default fused selection, disabled fallback before availability/launch, re-enable behavior, and neighboring activation preparation."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bc1e19550921/venv/bin/python -m pytest -q test/registered/unit/test_environ.py test/registered/unit/layers/moe/test_route_quant_handoff.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "16 tests and 2 subtests passed for environment parsing/override behavior and handoff selection."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-bc1e19550921/venv/bin/python /tmp/amdpilot-repo-j-bc1e19550921/review-evidence/adversarial_candidate.py (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial test proved 1/true/TRUE/yes/y bypass the fused module import itself, while explicit 0 invokes fused dispatch exactly once."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-bc1e19550921/venv/bin/python deterministic Torch arithmetic fixture",
+      "exit_code": 0,
+      "what_was_measured": "Actual execution on AMD Instinct MI355X gfx950; GPU sum 3148288.0 equaled the independent CPU reference. This did not exercise either CUDA Kimi-K3 path."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 51ee81b5d924c479141bf17423a74a9e459c8062",
+      "exit_code": 2,
+      "what_was_measured": "Three trailing-whitespace findings, all in captured raw pytest log files; no executable source finding."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "One AMD Instinct MI355X gfx950 executed a deterministic ROCm Torch calculation with exact agreement to a CPU reference. Import evidence recorded torch 2.11.0+rocm7.2, HIP 7.2.26015, and no CUDA runtime.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The candidate does not prevent the original failure when the new switch is left at its default false value.",
+    "No evidence shows whether disabling the fused path prevents the production crash during a multi-hour 8xB300 Kimi-K3 soak.",
+    "If the true fault is in another decode kernel, hardware, CUDA graphs, DSPARK, or rank-specific execution, this switch will not resolve it.",
+    "The standalone CUDA fallback kernels were not executable on the assigned ROCm gfx950 host."
+  ],
+  "remaining_limitations": [
+    "No NVIDIA B300/CUDA hardware, Kimi-K3 weights, 8-GPU TP8/DCP8 topology, long-context workload, or production traffic soak was available.",
+    "The original asynchronous unspecified-launch-failure was not reproduced and remains unroot-caused.",
+    "The exact checkout's Python sources were verified, but CUDA/PDL native execution could not be validated on ROCm.",
+    "No native source changed in the candidate, so no native rebuild was applicable."
+  ]
+}
