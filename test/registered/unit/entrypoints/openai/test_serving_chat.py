@@ -476,6 +476,18 @@ class ServingChatTestCase(unittest.TestCase):
                     request, None, is_multimodal=True
                 )
 
+                rendered_messages = (
+                    self.tm.tokenizer.apply_chat_template.call_args_list[-2].args[0]
+                )
+                rendered_text = rendered_messages[-1]["content"]
+                if isinstance(rendered_text, list):
+                    rendered_text = next(
+                        part["text"]
+                        for part in rendered_text
+                        if part["type"] == "text"
+                    )
+                self.assertIn(marker, rendered_text)
+
                 self.assertEqual(result.prompt.count(marker), 1)
                 self.assertIn(escaped_marker, result.prompt)
                 self.assertEqual(len(result.image_data), 1)
@@ -513,7 +525,7 @@ class ServingChatTestCase(unittest.TestCase):
         )
         self.tm.tokenizer.encode.side_effect = lambda text, **_: list(range(len(text)))
         self.tm.tokenizer.decode.side_effect = (
-            lambda ids: "<| vision_start |><| image_pad |><| vision_end |>"
+            lambda ids: marker
         )
 
         result = self.chat._apply_jinja_template(
@@ -524,12 +536,9 @@ class ServingChatTestCase(unittest.TestCase):
             is_multimodal=True,
         )
 
-        self.assertNotIn(marker, result.prompt)
+        self.assertIn(marker, result.prompt)
         rendered_messages = self.tm.tokenizer.apply_chat_template.call_args.args[0]
-        self.assertEqual(
-            rendered_messages[0]["content"],
-            "<| vision_start |><| image_pad |><| vision_end |>",
-        )
+        self.assertEqual(rendered_messages[0]["content"], marker)
 
     def test_qwen_vl_marker_neutralization_obeys_full_parser_boundaries(self):
         expanded = (

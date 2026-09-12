@@ -1398,17 +1398,6 @@ class OpenAIServingChat(OpenAIServingBase):
                 message, strict=self.chat_encoding_spec != "kimi_k3"
             )
 
-        hf_config = self.tokenizer_manager.model_config.hf_config
-        model_type = getattr(hf_config, "model_type", None)
-        if (
-            is_multimodal
-            and isinstance(model_type, str)
-            and model_type.startswith("qwen")
-            and getattr(hf_config, "vision_config", None) is not None
-        ):
-            for message in messages:
-                neutralize_qwen_vl_message_markers(message)
-
         prompt_ids = self._encode_messages(
             copy.deepcopy(messages),
             request,
@@ -1569,6 +1558,30 @@ class OpenAIServingChat(OpenAIServingBase):
                     return_dict=False,
                     **extra_template_kwargs,
                 )
+                hf_config = self.tokenizer_manager.model_config.hf_config
+                model_type = getattr(hf_config, "model_type", None)
+                if (
+                    image_data
+                    and isinstance(model_type, str)
+                    and model_type.startswith("qwen")
+                    and getattr(hf_config, "vision_config", None) is not None
+                ):
+                    # Render the exact client content first.  Only the separate
+                    # prompt sent to the legacy multimodal scanner is escaped;
+                    # text-only requests never need that scanner protection.
+                    loader_messages = copy.deepcopy(openai_compatible_messages)
+                    for message in loader_messages:
+                        neutralize_qwen_vl_message_markers(message)
+                    rendered_prompt = (
+                        self.tokenizer_manager.tokenizer.apply_chat_template(
+                            loader_messages,
+                            tokenize=False,
+                            add_generation_prompt=True,
+                            tools=tools,
+                            return_dict=False,
+                            **extra_template_kwargs,
+                        )
+                    )
                 prompt_ids = self.tokenizer_manager.tokenizer.encode(
                     rendered_prompt, **encode_kwargs
                 )
@@ -1591,6 +1604,27 @@ class OpenAIServingChat(OpenAIServingBase):
                             **extra_template_kwargs,
                         )
                     )
+                    hf_config = self.tokenizer_manager.model_config.hf_config
+                    model_type = getattr(hf_config, "model_type", None)
+                    if (
+                        image_data
+                        and isinstance(model_type, str)
+                        and model_type.startswith("qwen")
+                        and getattr(hf_config, "vision_config", None) is not None
+                    ):
+                        loader_messages = copy.deepcopy(openai_compatible_messages)
+                        for message in loader_messages:
+                            neutralize_qwen_vl_message_markers(message)
+                        rendered_prompt = (
+                            self.tokenizer_manager.tokenizer.apply_chat_template(
+                                loader_messages,
+                                tokenize=False,
+                                add_generation_prompt=True,
+                                tools=tools,
+                                return_dict=False,
+                                **extra_template_kwargs,
+                            )
+                        )
                     prompt_ids = self.tokenizer_manager.tokenizer.encode(
                         rendered_prompt, **encode_kwargs
                     )
