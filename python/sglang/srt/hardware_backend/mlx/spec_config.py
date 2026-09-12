@@ -17,6 +17,12 @@ ASSISTANT_ARCHITECTURES = frozenset(
 MLX_GEMMA4_MTP_MAX_CONTEXT = 2048
 MLX_GEMMA4_MTP_VERIFY_WIDTH = 2
 MLX_GEMMA4_MTP_TARGET_ARCHITECTURE = "Gemma4ForConditionalGeneration"
+MLX_GEMMA4_MTP_TARGET_MODEL = "mlx-community/gemma-4-e2b-it-4bit"
+MLX_GEMMA4_MTP_TARGET_REVISION = "238767527555cb75a05732a84dff5d6ba0dd6809"
+MLX_GEMMA4_MTP_ASSISTANT_MODEL = (
+    "mlx-community/gemma-4-E2B-it-assistant-bf16"
+)
+MLX_GEMMA4_MTP_ASSISTANT_REVISION = "a7770799b560135ebdbfae8b7f468947415003bc"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -157,6 +163,32 @@ def validate_mlx_frozen_kv_mtp_args(server_args: ServerArgs) -> None:
 
     if not getattr(server_args, "speculative_draft_model_path", None):
         raise ValueError("MLX Frozen-KV MTP requires --speculative-draft-model-path.")
+    if getattr(server_args, "model_path", None) != MLX_GEMMA4_MTP_TARGET_MODEL:
+        raise ValueError(
+            "MLX Frozen-KV MTP Level 1 requires target repository "
+            f"{MLX_GEMMA4_MTP_TARGET_MODEL!r}."
+        )
+    if getattr(server_args, "revision", None) != MLX_GEMMA4_MTP_TARGET_REVISION:
+        raise ValueError(
+            "MLX Frozen-KV MTP Level 1 requires target revision "
+            f"{MLX_GEMMA4_MTP_TARGET_REVISION}."
+        )
+    if (
+        server_args.speculative_draft_model_path
+        != MLX_GEMMA4_MTP_ASSISTANT_MODEL
+    ):
+        raise ValueError(
+            "MLX Frozen-KV MTP Level 1 requires assistant repository "
+            f"{MLX_GEMMA4_MTP_ASSISTANT_MODEL!r}."
+        )
+    if (
+        getattr(server_args, "speculative_draft_model_revision", None)
+        != MLX_GEMMA4_MTP_ASSISTANT_REVISION
+    ):
+        raise ValueError(
+            "MLX Frozen-KV MTP Level 1 requires assistant revision "
+            f"{MLX_GEMMA4_MTP_ASSISTANT_REVISION}."
+        )
     if int(getattr(server_args, "speculative_eagle_topk", -1)) != 1:
         raise ValueError("MLX Frozen-KV MTP requires --speculative-eagle-topk 1.")
     if int(getattr(server_args, "speculative_num_steps", -1)) != 1:
@@ -239,11 +271,15 @@ def validate_mlx_frozen_kv_mtp_request(
     """Return an admission error for request features outside the MVP."""
 
     params = req.sampling_params
-    if int(params.top_k) != 1:
+    if not bool(getattr(params, "temperature_was_zero", False)) or int(
+        params.top_k
+    ) != 1:
         return (
             "MLX Frozen-KV MTP requires greedy requests with temperature=0 "
             "(normalized top_k must equal 1)."
         )
+    if getattr(params, "beam_width", None) not in (None, 1):
+        return "MLX Frozen-KV MTP does not support beam search."
     if (
         float(params.frequency_penalty) != 0.0
         or float(params.presence_penalty) != 0.0

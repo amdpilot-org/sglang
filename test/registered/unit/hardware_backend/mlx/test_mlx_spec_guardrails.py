@@ -16,6 +16,10 @@ from sglang.srt.arg_groups.speculative_hook import (
 )
 from sglang.srt.arg_groups.overrides import resolution_result
 from sglang.srt.hardware_backend.mlx.spec_config import (
+    MLX_GEMMA4_MTP_ASSISTANT_MODEL,
+    MLX_GEMMA4_MTP_ASSISTANT_REVISION,
+    MLX_GEMMA4_MTP_TARGET_MODEL,
+    MLX_GEMMA4_MTP_TARGET_REVISION,
     validate_mlx_frozen_kv_mtp_args,
     validate_mlx_frozen_kv_mtp_request,
 )
@@ -70,8 +74,10 @@ def _assistant_config():
 def _server_args(**overrides):
     values = {
         "speculative_algorithm": "FROZEN_KV_MTP",
-        "speculative_draft_model_path": "assistant",
-        "speculative_draft_model_revision": "assistant-revision",
+        "model_path": MLX_GEMMA4_MTP_TARGET_MODEL,
+        "revision": MLX_GEMMA4_MTP_TARGET_REVISION,
+        "speculative_draft_model_path": MLX_GEMMA4_MTP_ASSISTANT_MODEL,
+        "speculative_draft_model_revision": MLX_GEMMA4_MTP_ASSISTANT_REVISION,
         "speculative_eagle_topk": 1,
         "speculative_num_steps": 1,
         "speculative_num_draft_tokens": 2,
@@ -212,6 +218,13 @@ class TestMlxGemma4MTPGuardrails(unittest.TestCase):
 
         cases = [
             ({"speculative_draft_model_path": None}, "draft-model-path"),
+            ({"model_path": "other/shape-compatible-target"}, "target repository"),
+            ({"revision": "main"}, "target revision"),
+            (
+                {"speculative_draft_model_path": "other/shape-compatible-assistant"},
+                "assistant repository",
+            ),
+            ({"speculative_draft_model_revision": "main"}, "assistant revision"),
             ({"disable_radix_cache": False}, "disable-radix-cache"),
             ({"chunked_prefill_size": 64}, "chunked-prefill-size"),
             ({"speculative_eagle_topk": 2}, "eagle-topk"),
@@ -255,6 +268,18 @@ class TestMlxGemma4MTPGuardrails(unittest.TestCase):
         self.assertIsNone(validate_mlx_frozen_kv_mtp_request(self._request(valid)))
 
         cases = [
+            (
+                SamplingParams(temperature=0.7, top_k=1),
+                {},
+                False,
+                "temperature=0",
+            ),
+            (
+                SamplingParams(temperature=0, beam_width=2),
+                {},
+                False,
+                "beam search",
+            ),
             (SamplingParams(temperature=0.5), {}, False, "temperature=0"),
             (
                 SamplingParams(temperature=0, frequency_penalty=0.1),
