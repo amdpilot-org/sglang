@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31475",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "650754532755ba75de1195f7d5231899ae9cabb5",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes the reported backend-none DP reduce-scatterv arithmetic, but incorrectly scales the TP1 shared expert for all post-expert all-reduce skip reasons. A2A backends whose combine already returns reduced routed output have no later SUM for the separate shared output, so the candidate changes correct R + S output to R + S/moe_ep_size.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-983253f0e820/venv/bin/python /job/review-evidence-j-983253f0e820/reproduce_contract.py (base)",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, the prepared base matched R + 8*S within 1.4603137969970703e-06 and differed from R + S by 15.595806956291199."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-983253f0e820/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v2_shared_expert_tp1.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "All five candidate helper-level regression and boundary tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-983253f0e820/venv/bin/python /job/review-evidence-j-983253f0e820/reproduce_contract.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, the reported downstream-SUM invariant matched R + S within 6.92903995513916e-07."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-983253f0e820/venv/bin/python /job/review-evidence-j-983253f0e820/adversarial_candidate.py (candidate)",
+      "exit_code": 1,
+      "what_was_measured": "Independent A2A no-later-SUM boundary failed: candidate produced R + S/8 instead of R + S, with maximum absolute error 7.0."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-983253f0e820/venv/bin/python -m pytest -q test/registered/unit/test_runtime_context.py test/registered/unit/layers/test_layer_communicator_fusion_gate.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "99 related tests and 140 subtests passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Arithmetic checks ran on one AMD Instinct MI355X with gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2 and HIP 7.2.26015."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With a TP1 shared expert and a skip caused by an A2A backend whose combine already reduces routed expert output and has no later SUM for shared_output, EP=8 produces R + S/8 instead of R + S."
+  ],
+  "remaining_limitations": [
+    "Only one gfx950 GPU was assigned, so actual eight-rank RCCL reduce-scatterv and A2A transport were not executed.",
+    "DeepSeek-V2-Lite-Chat and GLM-5.2 weights were unavailable; no full-model serving or semantic-accuracy claim is made.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
