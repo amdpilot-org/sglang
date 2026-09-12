@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36906",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced the GLM-5 mHC pipeline proxy KeyError in the checked-out implementation and aligned the model with the runner contract: mHC stages consume and emit the folded hidden_states tensor without a separate residual, while non-mHC stages retain the existing residual proxy. The focused regression failed before the source change and passed after it; the handoff was also exercised on the assigned gfx950 GPU.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-7cf1344686a5/venv/bin/python -m pytest -q test/registered/unit/models/test_glm5_next_dflash_capture.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Issue-specific non-first mHC pipeline stage with only the runner-allocated hidden_states proxy; reproduced KeyError: 'residual'. Raw output: reports/j-7cf1344686a5/evidence/regression-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7cf1344686a5/venv/bin/python -m pytest -q test/registered/unit/models/test_glm5_next_dflash_capture.py",
+      "exit_code": 0,
+      "what_was_measured": "Three focused cases passed: mHC proxy without residual, independent non-mHC proxy with residual, and existing mHC DFLASH contraction behavior. Raw output: reports/j-7cf1344686a5/evidence/regression-after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7cf1344686a5/venv/bin/python -m pytest -q test/registered/unit/model_executor/test_cuda_graph_buffer_registry.py",
+      "exit_code": 0,
+      "what_was_measured": "41 buffer-registry tests passed, covering pipeline proxy allocation boundaries including residual-shaped buffers. Raw output: reports/j-7cf1344686a5/evidence/buffer-registry.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-7cf1344686a5/venv/bin/python reports/j-7cf1344686a5/evidence/gpu_pp_contract.py",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, verified exact tensor preservation and proxy key sets for mHC (hidden_states only, checksum 276.0) and non-mHC (hidden_states plus residual, residual checksum 12.0). Raw output: reports/j-7cf1344686a5/evidence/gpu-pp-contract.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The proxy contract fixture executed tensor operations on the assigned AMD Instinct MI350X, reported by PyTorch as gfx950:sramecc+:xnack-. This validates the handoff logic on GPU, not full model serving."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "GLM-5.3-Flash-NVFP4 weights were unavailable, so full model warmup and semantic accuracy were not tested.",
+    "Only one assigned GPU was available, so an actual pp_size > 1 server topology could not be launched.",
+    "The assigned GPU is AMD gfx950, while the original report used three NVIDIA SM120 GPUs; backend-specific integration remains unverified.",
+    "The deterministic tiny Llama serving fixture was not used because it cannot qualify the GLM-5 mHC model architecture or a multi-stage pipeline contract."
+  ]
+}
