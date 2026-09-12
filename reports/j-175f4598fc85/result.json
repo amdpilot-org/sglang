@@ -1,0 +1,35 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33356",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Current main already contains the primary producer-side no-init fix from merged PR #32467. The real GPU-input plan_prefill path emitted no out-of-bound ragged_id values in 6000 issue-shaped calls on gfx950; no production change was justified.",
+  "tests": [
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-175f4598fc85/cache-fixed-report /tmp/amdpilot-repo-j-175f4598fc85/venv/bin/python reports/j-175f4598fc85/plan_ragged_id_regression.py --iterations 2000",
+      "exit_code": 0,
+      "what_was_measured": "Actual GPU-input DSV4 c128 plan_prefill output for [4]*96, [4]*72+[3]*24, and [3]*104+[2]*24. Measured max emitted ragged_id against the independent sum(extend_lens)-1 bound: 0/6000 bad plans."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-175f4598fc85/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_deepseek_v4_compress_plan_draft_pad.py",
+      "exit_code": 0,
+      "what_was_measured": "Existing DSV4 host/GPU planner agreement and ring residency boundaries: 5 tests, 82 subtests passed."
+    },
+    {
+      "command": "Temporary restoration of the five lines removed by 8549cce11b878d2fbf814d5e27bcc5e626890e70, then the same 2000-call-per-shape harness with an isolated JIT cache",
+      "exit_code": 0,
+      "what_was_measured": "Historical-source negative control on gfx950: 0/6000 bad plans, so the architecture-sensitive old race was not reproduced in this environment. Source was restored afterward."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X (gfx950), PyTorch 2.11.0+rocm7.2. The regression passes GPU-resident seq_lens and extend_lens through the actual JIT plan_prefill implementation; raw output is in reports/j-175f4598fc85/raw/."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No B300/B30Z or CUDA 13 hardware was available.",
+    "Only one GPU was assigned, so TP8 and cross-rank behavior were not exercised.",
+    "DeepSeek-V4-Pro-DSpark weights were unavailable; full server startup, graph capture, replay, semantic accuracy, and host SIGSEGV modes were not tested.",
+    "The historical five-line variant did not reproduce its scheduling race on gfx950, so failing-before evidence remains the upstream B300 direct harness rather than this environment.",
+    "Open PRs #33795 and #34286 concern separate Full/Breakable CUDA Graph capture-ordering boundaries and were not treated as the primary producer fix."
+  ]
+}
