@@ -895,6 +895,16 @@ def _handle_eagle_family(server_args: ServerArgs) -> None:
                     "DeepSeek MTP does not require setting speculative_draft_model_path."
                 )
 
+    if (
+        cfg.speculative_algorithm == "EAGLE3"
+        and cfg.speculative_draft_model_path is None
+    ):
+        raise ValueError(
+            "EAGLE3 speculative decoding requires setting "
+            "--speculative-draft-model-path unless the target checkpoint "
+            "contains a compatible bundled draft model."
+        )
+
     if not cfg.speculative_adaptive and cfg.speculative_num_steps is None:
         assert (
             cfg.speculative_eagle_topk is None

@@ -1,5 +1,6 @@
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from sglang.srt.arg_groups.overrides import resolution_result
 from sglang.srt.arg_groups.speculative_hook import handle_speculative_decoding
@@ -41,9 +42,17 @@ class TestSpecCPUOverlapConstraint(CustomTestCase):
         self.assertTrue(resolution_result(args, "disable_overlap_schedule"))
 
     def test_cpu_eagle3_forces_disable_overlap_schedule(self):
-        args = _make_spec_args(device="cpu", algorithm="EAGLE3")
+        args = _make_spec_args(
+            device="cpu",
+            algorithm="EAGLE3",
+            speculative_draft_model_path="dummy-draft",
+        )
 
-        handle_speculative_decoding(args)
+        with patch(
+            "sglang.srt.utils.hf_transformers_utils.get_config",
+            return_value=SimpleNamespace(architectures=["LlamaForCausalLM"]),
+        ):
+            handle_speculative_decoding(args)
 
         self.assertTrue(resolution_result(args, "disable_overlap_schedule"))
 
@@ -70,6 +79,55 @@ class TestSpecCPUOverlapConstraint(CustomTestCase):
         handle_speculative_decoding(args)
 
         self.assertFalse(resolution_result(args, "disable_overlap_schedule"))
+
+    def test_eagle3_requires_draft_model_for_ordinary_target(self):
+        args = _make_spec_args(device="cuda", algorithm="EAGLE3")
+
+        with self.assertRaisesRegex(
+            ValueError, "EAGLE3.*--speculative-draft-model-path"
+        ):
+            handle_speculative_decoding(args)
+
+    def test_eagle3_accepts_explicit_draft_model(self):
+        args = _make_spec_args(
+            device="cuda",
+            algorithm="EAGLE3",
+            speculative_draft_model_path="dummy-draft",
+        )
+
+        with patch(
+            "sglang.srt.utils.hf_transformers_utils.get_config",
+            return_value=SimpleNamespace(architectures=["LlamaForCausalLM"]),
+        ):
+            handle_speculative_decoding(args)
+
+        self.assertEqual(
+            resolution_result(args, "speculative_draft_model_path"), "dummy-draft"
+        )
+
+    def test_eagle3_uses_bundled_draft_model(self):
+        args = _make_spec_args(device="cuda", algorithm="EAGLE3")
+        args.model_path = "dummy-bundled-target"
+        args.revision = "test-revision"
+        args._model_config.hf_config.architectures = ["DeepseekV3ForCausalLM"]
+
+        handle_speculative_decoding(args)
+
+        self.assertEqual(
+            resolution_result(args, "speculative_draft_model_path"),
+            "dummy-bundled-target",
+        )
+        self.assertEqual(
+            resolution_result(args, "speculative_draft_model_revision"),
+            "test-revision",
+        )
+
+    def test_eagle_without_draft_model_remains_allowed(self):
+        args = _make_spec_args(device="cuda", algorithm="EAGLE")
+
+        handle_speculative_decoding(args)
+
+        self.assertIsNone(resolution_result(args, "speculative_draft_model_path"))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36528",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "EAGLE3 now rejects ordinary target checkpoints without --speculative-draft-model-path during server-argument resolution, before the target can be loaded again as an incompatible draft. Existing bundled-draft target architectures continue to resolve the target checkpoint as their draft, explicit draft paths remain accepted, and EAGLE behavior is unchanged.",
+  "tests": [
+    {
+      "command": "Export base commit, copy in the new regression test, and run pytest -q test/registered/unit/spec/test_spec_cpu_overlap_constraint.py::TestSpecCPUOverlapConstraint::test_eagle3_requires_draft_model_for_ordinary_target",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before evidence: the recorded base did not raise the expected EAGLE3 draft-path ValueError. Raw output: reports/j-fa884aa3321a/raw/regression-base-focused.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fa884aa3321a/venv/bin/python -m pytest -q test/registered/unit/spec/test_spec_registry.py test/registered/unit/spec/test_spec_cpu_overlap_constraint.py",
+      "exit_code": 0,
+      "what_was_measured": "36 unit tests passed, including the regression and independent explicit-draft, bundled-draft, and EAGLE boundary cases. Raw output: reports/j-fa884aa3321a/raw/unit-suite-after.txt"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 python -m sglang.launch_server --model-path Qwen/Qwen2.5-0.5B-Instruct --skip-tokenizer-init --mem-fraction-static 0.35 --max-total-tokens 4096 --context-length 1024 --cuda-graph-backend-decode disabled --cuda-graph-backend-prefill disabled --speculative-algorithm EAGLE3 --port 30000",
+      "exit_code": 1,
+      "what_was_measured": "The actual launcher resolved the public Qwen target config and raised the intended ValueError before scheduler creation or weight loading. Raw output: reports/j-fa884aa3321a/raw/qwen-launch-after.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace validation."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The corrected path intentionally exits during server-argument resolution before model workers or GPU kernels initialize. No numerical GPU claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No target or EAGLE3 draft weights were loaded, so full speculative decoding and semantic accuracy were not exercised.",
+    "The original post-load Qwen set_embed and Llama hot_token_id crashes were not rerun with model weights; the regression instead verifies that the actual configuration path now prevents reaching those invalid draft-worker states.",
+    "This is a single-process startup/configuration fix and does not claim multi-node validation."
+  ]
+}
