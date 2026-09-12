@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32124",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "f3ba3f6883a434ebcc0f9841845f37156bc7d5eb",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate provides a functional opt-in atomic warmup marker and passes its regression suite, but its compatibility key does not exactly identify the DeepGEMM/JIT implementation. An independent adversarial test changed a JIT source file outside deep_gemm.__file__ without changing the candidate identity, permitting an incompatible restored cache to skip warmup.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-534a83c33497/venv/bin/python /job/review-evidence-j-534a83c33497/base_reproduction.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Original behavior reproduced directly: two process-equivalent calls retaining the same cache both dispatched the all-M warmup (warmup_calls=2)."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-534a83c33497/venv/bin/python -m pytest -q test/registered/utils/test_deep_gemm_warmup_marker.py (candidate f3ba3f6883a434ebcc0f9841845f37156bc7d5eb)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: nine marker serialization, invalidation, dispatch, partial-coverage, and failure-path tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-534a83c33497/venv/bin/python /job/review-evidence-j-534a83c33497/candidate_adversarial.py (candidate f3ba3f6883a434ebcc0f9841845f37156bc7d5eb)",
+      "exit_code": 1,
+      "what_was_measured": "Positive independent restored-cache case passed (one warmup, one marker), then the exact-identity adversarial assertion failed: changing a sibling DeepGEMM JIT source file left _module_identity unchanged."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-534a83c33497/venv/bin/python -m compileall -q python/sglang/srt/layers/deep_gemm_wrapper/warmup_marker.py python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python modules compile successfully."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 f3ba3f6883a434ebcc0f9841845f37156bc7d5eb",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the candidate diff."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The only assigned device was an AMD Instinct MI350X under ROCm 7.2. The prepared environment had no CUDA runtime and no deep_gemm package; no unrelated ROCm execution was counted as DeepGEMM validation.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A DeepGEMM installation can change JIT generator or native implementation files outside deep_gemm.__file__ while retaining the same package version and __init__.py. The candidate then computes the same compatibility identity and may skip warmup for an incompatible restored cache."
+  ],
+  "remaining_limitations": [
+    "Real NVIDIA DeepGEMM JIT compilation and restored-cache reuse were unavailable.",
+    "Independent GPU numerical comparison and CUDA graph parity were unavailable.",
+    "DeepSeek-V4-Pro TP=8 startup latency and steady-state inference performance were unavailable.",
+    "No native source changed in the candidate, so native rebuild was not applicable."
+  ]
+}
