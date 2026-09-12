@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/22935",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "reject",
+  "fully_resolves_original": false,
+  "summary": "Exact candidate 26f1a21 is test-only ownership hardening, not a runtime fix. On both the prepared base and exact candidate, an inserted [A,B,C] checkpoint owned only at depth 3 is structurally split by the fresh-prefill [A,B] lookup but returns zero device indices. The candidate adds no runtime or native change and its passing regression explicitly asserts that unresolved result.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d925e51cded9/venv/bin/python /job/review-evidence-j-d925e51cded9/independent_probe.py (prepared base)",
+      "exit_code": 0,
+      "what_was_measured": "Actual MambaRadixCache on AMD Instinct MI355X: the original depth-3-only n-1 lookup returned 0 after a structural split; exact depth-2 and arbitrary depth-37 checkpoints returned 2 and 37 GPU indices matching independent torch.arange references; divergence before the first depth-64 checkpoint returned 0."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d925e51cded9/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_split_checkpoint_ownership.py test/registered/unit/mem_cache/test_mamba_unittest.py (exact candidate 26f1a21)",
+      "exit_code": 0,
+      "what_was_measured": "20 tests passed. The candidate's new short-prefix test passes by asserting device_indices.numel() == 0, so this is regression documentation rather than a fix."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-d925e51cded9/venv/bin/python /job/review-evidence-j-d925e51cded9/independent_probe.py (exact candidate 26f1a21)",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate reproduced every base measurement, including original_n_minus_1_count=0 and divergence_before_checkpoint_count=0. Source imports resolved to /job/repo/python/sglang and its mamba_radix_cache.py."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "torch 2.11.0+rocm7.2 reported AMD Instinct MI355X; cache indices and independent references were allocated on device cuda.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Insert [A,B,C] with its only complete Mamba state owned at depth 3, then match the fresh-prefill n-1 key [A,B]: the split node has no Mamba state and device_indices remains length 0.",
+    "Divergence before the first real recurrent checkpoint returns zero reusable indices even when attention KV structurally matches.",
+    "The candidate provides neither arbitrary-depth recurrent-plus-convolution checkpoint production nor an execution path that retains attention KV while replaying recurrent layers."
+  ],
+  "remaining_limitations": "No hybrid Mamba model weights were available, so end-to-end cold/warm logits, logprobs, latency, and recurrent/convolution replay semantics remain unverified. The actual cache behavior and GPU-resident index handling were tested, but this does not qualify model execution. No source or native file changed in the candidate, so no native rebuild was applicable."
+}
