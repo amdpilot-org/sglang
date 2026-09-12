@@ -1,0 +1,29 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35705",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the reported AttributeError in move_logprobs_to_cpu when next_token_token_ids_logprobs_val contains a host list, then made the prefill and decode consumers preserve host-list entries while converting tensor entries. Upstream PR https://github.com/sgl-project/sglang/pull/35052 independently proposes the same consumer-side guard (plus top-logprob fields), but remains open and is not present in the prepared main base. Upstream PR https://github.com/sgl-project/sglang/pull/34075 proposes a decode-producer-only alternative and also remains open.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-e33e1e8cf549/venv/bin/python <inline mixed-list move_logprobs_to_cpu reproduction>",
+      "exit_code": 1,
+      "what_was_measured": "On the unmodified recorded base, a mixed host-list/tensor next_token_token_ids_logprobs_val raised AttributeError: 'list' object has no attribute 'tolist' at batch_result_processor.py:539. Raw output: reports/j-e33e1e8cf549/raw/failing_before.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-e33e1e8cf549/venv/bin/python -m pytest -q test/registered/unit/managers/test_batch_result_processor_logprob_conversion.py",
+      "exit_code": 0,
+      "what_was_measured": "Four regression/boundary cases passed: empty host list, tensor-only, mixed empty-list/tensor in move_logprobs_to_cpu, and the duplicated decode normalization path. Raw output: reports/j-e33e1e8cf549/raw/focused_tests_final.txt"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-e33e1e8cf549/venv/bin/python <inline gfx950 conversion check>",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X (gfx950), a real device tensor mixed with a host-list entry converted to the same values as an independent CPU/NumPy reference. Raw output: reports/j-e33e1e8cf549/raw/gpu_conversion.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "reports/j-e33e1e8cf549/raw/gpu_conversion.txt records AMD Instinct MI355X, gcnArchName gfx950:sramecc+:xnack-, and equality with the CPU/NumPy reference."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": "No model weights or original request/server configuration were supplied, so no full serving/model reproduction was claimed. The deterministic fixture was unnecessary because the defect is isolated before model semantics in a scheduler conversion method. No multi-node or distributed workload was tested. The related MLX selection command collected no executed tests (26 deselected) and is retained only as raw diagnostic output, not validation. Top-logprob fields have a similar open upstream proposal but were not changed because issue 35705 specifically reports next_token_token_ids_logprobs_val. No native code was changed or rebuilt."
+}
