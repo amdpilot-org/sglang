@@ -216,6 +216,10 @@ class GenerateReqInput:
     mm_content_hashes: Optional[
         Union[List[Optional[str]], List[List[Optional[str]]]]
     ] = None
+    # Optional opaque, stable caller identities, aligned one-to-one with media
+    # in image, video, then audio order.
+    # They are trusted only when --trust-mm-content-hashes is enabled.
+    mm_cache_ids: Optional[Union[List[Optional[str]], List[List[Optional[str]]]]] = None
     # Whether to extract and process audio from video inputs.
     use_audio_in_video: bool = False
     # Optional request-scoped video processor configuration.
@@ -554,6 +558,7 @@ class GenerateReqInput:
         self._normalize_mm_hashes(num)
         self._normalize_video_data(num)
         self._normalize_audio_data(num)
+        self._normalize_mm_cache_ids(num)
         self._normalize_sampling_params(num)
         self._normalize_logprob_params(num)
         self._normalize_return_hidden_states(num)
@@ -667,6 +672,46 @@ class GenerateReqInput:
                     )
                 normalized.append(per_request)
             setattr(self, field_name, normalized * self.parallel_sample_num)
+
+    def _normalize_mm_cache_ids(self, num):
+        """Align caller cache IDs with all native multimodal inputs."""
+        if self.mm_cache_ids is None:
+            self.mm_cache_ids = [None] * num
+            return
+        if not isinstance(self.mm_cache_ids, list):
+            raise ValueError("mm_cache_ids must be a list")
+        if len(self.mm_cache_ids) != self.batch_size:
+            raise ValueError(
+                "The length of mm_cache_ids should equal the batch size"
+            )
+
+        def item_count(value):
+            if value is None:
+                return 0
+            return len(value) if isinstance(value, list) else 1
+
+        normalized = []
+        for request_index, request_cache_ids in enumerate(self.mm_cache_ids):
+            media_count = sum(
+                item_count(values[request_index])
+                for values in (self.image_data, self.video_data, self.audio_data)
+            )
+            if isinstance(request_cache_ids, list):
+                per_request = request_cache_ids
+            elif media_count == 1:
+                per_request = [request_cache_ids]
+            else:
+                raise ValueError(
+                    f"mm_cache_ids[{request_index}] must be a list with one "
+                    "entry per media item"
+                )
+            if len(per_request) != media_count:
+                raise ValueError(
+                    f"mm_cache_ids[{request_index}] has {len(per_request)} "
+                    f"entries for {media_count} media items"
+                )
+            normalized.append(per_request)
+        self.mm_cache_ids = normalized * self.parallel_sample_num
 
     def _normalize_video_data(self, num):
         """Normalize video data for batch processing."""
@@ -895,6 +940,9 @@ class GenerateReqInput:
                 self.mm_content_hashes[i]
                 if self.mm_content_hashes is not None
                 else None
+            ),
+            mm_cache_ids=(
+                self.mm_cache_ids[i] if self.mm_cache_ids is not None else None
             ),
             sampling_params=self.sampling_params[i],
             return_logprob=self.return_logprob[i],
