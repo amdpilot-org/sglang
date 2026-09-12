@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37639",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1033",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1001",
+  "candidate_commit": "2af74468719b913fa5b64e0096c035f2e3d40ea7",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the source defect: Spark2_5Attention.forward hardcodes sigmoid even when the config carries gate_attn_act_mode='silu'. At the exact candidate commit, the mode is explicitly preserved by Spark2_5Config, propagated through Spark2_5DecoderLayer, and applied in the real attention forward path with sigmoid and silu branches plus ValueError for unsupported values. Candidate regression tests and independent CPU and gfx950 GPU numerical checks passed.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a0fac3663983/venv/bin/python -m pytest -q /job/review-evidence-j-a0fac3663983/test_spark2_5_candidate.py (base checkout)",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before regression against the exact candidate test; collection failed because the base implementation has no _apply_gate_activation helper. Independent base inspection also confirmed the real forward method hardcodes torch.sigmoid and differs from the SiLU reference by max_abs_diff=19.0 on [-20,-2,0,2,20]."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a0fac3663983/venv/bin/python -m pytest -q test/registered/unit/models/test_spark2_5.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: config default/override, exact float32 sigmoid and SiLU activation references, and unsupported-mode rejection; 4 tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a0fac3663983/venv/bin/python < independent activation/config propagation script (candidate checkout; output retained at /job/review-evidence-j-a0fac3663983/candidate-independent.txt)",
+      "exit_code": 0,
+      "what_was_measured": "Verified imports came from /job/repo/python; exact CPU parity for float16, bfloat16, and float32 inputs; invalid modes '', 'SiLU', 'gelu', and None rejected; decoder propagated silu; exact GPU parity on AMD Instinct MI355X gfx950."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a0fac3663983/venv/bin/python < independent Spark2_5Attention.forward harness (candidate checkout; output retained at /job/review-evidence-j-a0fac3663983/candidate-forward-path.txt)",
+      "exit_code": 0,
+      "what_was_measured": "Exercised the real forward gating block on CPU and GPU with two heads and negative/positive gate scores. Sigmoid and SiLU matched independent PyTorch references exactly, and gelu raised ValueError."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..2af74468719b913fa5b64e0096c035f2e3d40ea7",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "PyTorch 2.11.0+rocm7.2 executed the helper and actual Spark2_5Attention.forward gating path on the assigned AMD Instinct MI355X, reported as gfx950:sramecc+:xnack-."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No Spark-X2.5 checkpoint weights were available, so no full-model generation or semantic-accuracy comparison was run.",
+    "The deterministic tiny Llama serving fixture is a different architecture and would not qualify this Spark2.5 model-path issue, so it was not used.",
+    "No native source changed in the candidate; repository-environment.json reports no prepared native artifact, so a native rebuild was not applicable.",
+    "Only the assigned single AMD Instinct MI355X (gfx950) was exercised; no multi-GPU or multi-node claim is made."
+  ]
+}
