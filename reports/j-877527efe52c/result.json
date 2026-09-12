@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31924",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "PR 3014 is valid test-only hardening and an honest negative result, not a production fix. Its tests pass, while the original mapped plain-loader layout mismatch remains reproducible with an empty AssertionError on CPU and gfx950 at both the recorded base and exact candidate commit.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-877527efe52c/venv/bin/python /job/review-evidence-j-877527efe52c/candidate-files/reproduce_candidate_counterexamples.py",
+      "exit_code": 0,
+      "what_was_measured": "At base 358c1632, mapped img_in.weight with incompatible layout raised an empty AssertionError on CPU and gfx950; BF16-style exact-name to_q.weight used the identity path."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-877527efe52c/venv/bin/python -m pytest -q /job/review-evidence-j-877527efe52c/candidate-files/test_flux2_weight_reload.py",
+      "exit_code": 0,
+      "what_was_measured": "At the recorded base, the candidate's two test-only regressions passed, showing they do not distinguish the unresolved production behavior."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-877527efe52c/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_flux2_weight_reload.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate f5be8cec, both fused-QKV and matching runtime-layout regression tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-877527efe52c/venv/bin/python reports/j-4a50c8915d09/reproduce_candidate_counterexamples.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate f5be8cec, the mapped incompatible layout still raised the empty AssertionError on CPU and gfx950, and exact-name BF16-style Q used the identity path."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Independent base and candidate executions used cuda:0 on AMD Instinct MI350X, gfx950:sramecc+:xnack-, and reproduced the mapped-layout AssertionError."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A diffusers/BFL img_in.weight mapped to x_embedder.weight still reaches the ordinary two-argument loader without layout reconciliation and can raise the original empty shape AssertionError.",
+    "BF16 FLUX.2 separate to_q/to_k/to_v exact-name parameters take the identity path and do not exercise the fused-QKV regression.",
+    "The secondary FSDP text-encoder name mismatch and real-checkpoint silent drops are not covered or fixed.",
+    "The ROCm update_weights_from_disk standalone test remains explicitly skipped pending issue 31924."
+  ],
+  "remaining_limitations": [
+    "Qwen-Image and FLUX.2-klein-base-4B weights were unavailable, so the historical full-model HTTP 400 was not replayed and the exact real failing tensor remains unidentified.",
+    "The synthetic transposed fixture proves absence of generic layout reconciliation but does not prove that transpose or any particular reshape is correct for a real checkpoint.",
+    "FSDP/DTensor text-encoder reload, layerwise offload, tensor parallel, multi-GPU, and multi-node behavior were not qualified.",
+    "No production or native source changed, so a native rebuild was not applicable."
+  ]
+}
