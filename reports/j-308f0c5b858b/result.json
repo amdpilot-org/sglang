@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38924",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/607",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/604",
+  "candidate_commit": "202c851845976d0c76fccb8e3707a219625f8100",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The prepared base reproduced the reported malformed Direct-JSON and XML DSML argument wrappers in both one-shot and streaming parsing. At the exact candidate commit, the focused regression suite, the broader function-call parser suite, and independent adversarial cases all passed. The candidate changes the actual DeepSeekV32 implementation inherited by DeepSeekV4 and preserves legitimate schema properties named input/arguments and ambiguous scalar wrappers. This is a full parser-level fix for the concrete malformed shapes in the original issue, not test-only hardening.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-308f0c5b858b/venv/bin/python -m pytest -q /job/review-evidence-j-308f0c5b858b/test_candidate_deepseekv4_detector.py -k WrappedArguments (base commit)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction of nested Direct-JSON wrapper, scalar Direct-JSON wrapper, XML string wrapper, and streaming accumulation. Result: 3 failed, 1 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-308f0c5b858b/venv/bin/python -m pytest -q test/registered/unit/function_call/test_deepseekv4_detector.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression coverage on the exact SHA, including V3.2/V4 one-shot and streaming wrapper normalization and preservation cases. Result: 10 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-308f0c5b858b/venv/bin/python -m pytest -q /job/review-evidence-j-308f0c5b858b/test_independent_adversarial.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Independent cases for every direct-JSON split boundary, bytewise XML streaming, double-encoded dicts, Unicode scalar values, mixed parallel calls, legitimate reserved-name properties, and ambiguous multi-property scalar preservation. Result: 8 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-308f0c5b858b/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py test/registered/unit/function_call/test_deepseekv4_detector.py (candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Broader function-call parser regression suite. Result: 253 passed and 4 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-308f0c5b858b/venv/bin/python GPU tensor polynomial check against an independently computed CPU float64 reference",
+      "exit_code": 0,
+      "what_was_measured": "AMD Instinct MI350X execution produced [4.8125, -2.5, 22.25, -0.109375], exactly matching the CPU reference with max_abs_error 0.0. This is environment evidence only and does not validate the CPU-side parser behavior."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A numerical sanity check ran on AMD Instinct MI350X with PyTorch 2.11.0+rocm7.2 / HIP 7.2 and matched an independent CPU reference exactly. The parser tests themselves are CPU-only."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No live DeepSeek-V4-Flash-Vision-Exp server/model was available, so the long-context stochastic generation scenario and OpenAI HTTP transport were not replayed end to end.",
+    "The defect and candidate are Python parser-only; no C++/FlyDSL/native source changed, repository-environment.json declares native null, and no native rebuild or compiler/ISA claim was applicable.",
+    "GPU architecture is AMD Instinct MI350X (ROCm 7.2); GPU execution was unrelated to the deterministic parser verification."
+  ]
+}
