@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38167",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved PR 997's monolithic fatal-device latch and fixed two independently reproduced review counterexamples: the default scheduler RPC is now bounded at one hour, and disaggregated encoder work returns a fatal error then rejects later work without another worker dispatch. No speculative memory diagnosis or resolution admission rule was added.",
+  "tests": [
+    {
+      "command": "deterministic Python probe at candidate 7035931a1eee025b1847b58c531c583f983ea8a6 using a real ZeroMQ socket and injected disaggregated encoder failure",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before: effective timeout None, ZeroMQ RCVTIMEO -1, two encoder dispatches after the first fatal signature, and no fatal state latch."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-b9fd41c69e68/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_scheduler_device_failure.py python/sglang/multimodal_gen/test/unit/test_scheduler_client.py python/sglang/multimodal_gen/test/unit/test_server_args.py",
+      "exit_code": 0,
+      "what_was_measured": "216 tests and 62 subtests passed, including finite default RPC timeout and disaggregated fatal-state rejection regressions."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the consolidated patch."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-b9fd41c69e68/venv/bin/python -m ruff check <changed Python files>",
+      "exit_code": 1,
+      "what_was_measured": "The prepared interpreter does not include ruff; no package installation was attempted."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The justified changes are deterministic transport/control-flow fixes. The available gfx950/ROCm GPU cannot reproduce the reported RTX 5070/CUDA workload, so no unrelated GPU smoke is claimed as issue evidence.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "RTX 5070 12 GB, WSL2 Ubuntu 24.04, CUDA 13.0, MiniMax-H3 weights, and the reporter's LoRA were unavailable.",
+    "The exact 1344x768 failure, its alleged memory-exhaustion cause, and the subsequent real 480p request remain unverified.",
+    "Ordinary OOM remains excluded from fatal classification; available evidence does not justify treating every recoverable allocation failure as a poisoned device.",
+    "No resolution-specific admission threshold was added because it would be architecture-, model-, configuration-, and workload-dependent without measurements from the reported setup."
+  ]
+}

@@ -1,5 +1,8 @@
+import pickle
+from types import SimpleNamespace
 from unittest.mock import Mock
 
+from sglang.multimodal_gen.runtime.disaggregation.roles import RoleType
 from sglang.multimodal_gen.runtime.entrypoints.control_requests import ShutdownReq
 from sglang.multimodal_gen.runtime.managers.scheduler import (
     Scheduler,
@@ -74,3 +77,43 @@ def test_recoverable_error_keeps_scheduler_running():
     assert scheduler._running is True
     assert scheduler._fatal_error_message is None
     assert result.error == "CUDA error: out of memory"
+
+
+def test_disagg_encoder_rejects_later_work_after_unrecoverable_error(monkeypatch):
+    scheduler = Scheduler.__new__(Scheduler)
+    scheduler._running = True
+    scheduler._fatal_error_message = None
+    scheduler._disagg_role = RoleType.ENCODER
+    scheduler.gpu_id = 0
+    scheduler.server_args = SimpleNamespace(
+        sp_degree=1, tp_size=1, enable_cfg_parallel=False
+    )
+    scheduler._compute_ready_queue = None
+    scheduler._consecutive_error_count = 0
+    scheduler._max_consecutive_errors = 3
+    scheduler._pool_result_push = object()
+    scheduler._disagg_metrics = None
+    scheduler._cleanup_disagg = Mock()
+
+    frames = [pickle.dumps(SimpleNamespace(request_id="request-1"))]
+    scheduler._disagg_recv_work = Mock(side_effect=[frames, frames])
+    dispatch = Mock(side_effect=RuntimeError("CUDA driver error: device not ready"))
+    scheduler._disagg_encoder_step = dispatch
+    replies = []
+
+    def capture_reply(_socket, _tensors, scalar_fields):
+        replies.append(scalar_fields)
+        if len(replies) == 2:
+            scheduler._running = False
+
+    monkeypatch.setattr(
+        "sglang.multimodal_gen.runtime.disaggregation.scheduler_mixin.send_tensors",
+        capture_reply,
+    )
+
+    scheduler._disagg_event_loop()
+
+    dispatch.assert_called_once()
+    assert len(replies) == 2
+    assert all(reply["request_id"] == "request-1" for reply in replies)
+    assert all("restart the server" in reply["_disagg_error"] for reply in replies)

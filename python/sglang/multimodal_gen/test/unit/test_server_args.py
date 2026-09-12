@@ -3259,9 +3259,9 @@ class TestDisaggTimeoutArgs(unittest.TestCase):
 
 
 class TestSchedulerRpcTimeoutArgs(unittest.TestCase):
-    def test_scheduler_rpc_timeout_defaults_to_unbounded(self):
+    def test_scheduler_rpc_timeout_defaults_to_one_hour(self):
         args = _from_dict_without_model_resolution({"model_path": "/fake"})
-        self.assertIsNone(args.scheduler_rpc_timeout)
+        self.assertEqual(args.scheduler_rpc_timeout, 3600)
 
     def test_scheduler_rpc_timeout_cli_arg_is_parsed_in_seconds(self):
         parser = FlexibleArgumentParser()
