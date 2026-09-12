@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33033",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced Gemma4's quadratic dense image-attention metadata on the prepared base, then replaced it with compact per-request image spans. Triton evaluates causal-or-same-image directly in both extend kernels, and the spans are supplied only to sliding-attention layers. The implementation follows the still-open upstream candidate PR #33034, adapted to the newer prepared base.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-233fe0f883cd/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_gemma4_attention_mask.py (before fix)",
+      "exit_code": 1,
+      "what_was_measured": "Regression failed because compact image-span metadata was absent; the prepared implementation instead installed a dense custom mask. Raw output: reports/j-233fe0f883cd/raw/failing_before_unit.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-233fe0f883cd/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_gemma4_attention_mask.py",
+      "exit_code": 0,
+      "what_was_measured": "Compact metadata contents and size, sliding-only layer selection, mixed-batch indptr construction, and causal fallback for an image split across a chunk boundary. Two tests passed. Raw output: reports/j-233fe0f883cd/raw/unit_after.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-233fe0f883cd/venv/bin/python -m pytest -q test/registered/attention/test_triton_attention_kernels.py -k image_spans",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, both two-stage and unified Triton extend kernels matched an independent PyTorch dense-attention reference for two requests, prefixes, multiple spans, a query-block-crossing span, and a span ending at the request boundary. Raw output: reports/j-233fe0f883cd/raw/gpu_image_span.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-233fe0f883cd/venv/bin/python -m pytest -q test/registered/attention/test_triton_attention_kernels.py",
+      "exit_code": 1,
+      "what_was_measured": "The new image-span test and 10 other tests passed. Three pre-existing/general gfx950 expectations failed: generic large extend-attention tolerance, block-size expectation (_is_gfx95 classification), and one unified-vs-regular tolerance case. Raw output: reports/j-233fe0f883cd/raw/gpu_attention_full.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-233fe0f883cd/venv/bin/python -m py_compile python/sglang/kernels/ops/attention/extend_attention.py python/sglang/srt/layers/attention/triton_backend.py python/sglang/srt/models/gemma4_mm.py test/registered/attention/test_triton_attention_kernels.py test/registered/unit/layers/attention/test_gemma4_attention_mask.py",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python sources and tests compiled successfully. Raw output: reports/j-233fe0f883cd/raw/py_compile.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors. Raw output: reports/j-233fe0f883cd/raw/diff_check.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Executed both modified Triton extend-attention kernels and compared their numerical output with a PyTorch reference on the assigned single AMD Instinct MI350X, gfx950, using torch 2.11.0+rocm7.2. See reports/j-233fe0f883cd/raw/gpu_environment.log and gpu_image_span.log.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Gemma4 E4B model weights were not available, so no full-model semantic/quality or TTFT benchmark was performed.",
+    "The reported H20 and DGX Spark NVIDIA performance results were not reproduced on this AMD gfx950 host; the local GPU evidence is kernel-level numerical parity only.",
+    "The full pre-existing Triton attention test file has three unrelated/general gfx950 failures recorded in gpu_attention_full.log; the issue-specific image-span test passes.",
+    "Ruff and Black are not installed in the prepared interpreter; py_compile and git diff --check passed."
+  ]
+}
