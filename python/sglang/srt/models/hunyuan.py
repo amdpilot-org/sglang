@@ -51,7 +51,7 @@ from sglang.srt.model_loader.weight_utils import (
     maybe_remap_kv_scale_name,
 )
 from sglang.srt.runtime_context import get_parallel
-from sglang.srt.utils import is_hip
+from sglang.srt.utils import add_prefix, is_hip
 from sglang.srt.utils.hf_transformers_utils import get_rope_config
 
 expert_distribution_recorder = ExpertDistributionRecorder()
@@ -119,6 +119,7 @@ class HunYuanSparseMoeBlock(nn.Module):
         config: PretrainedConfig,
         quant_config: Optional[QuantizationConfig] = None,
         layer_id: int = -1,
+        prefix: str = "",
     ):
         super().__init__()
         self.tp_size = get_parallel().tp_size
@@ -159,6 +160,7 @@ class HunYuanSparseMoeBlock(nn.Module):
             reduce_results=False,
             layer_id=layer_id,
             quant_config=quant_config,
+            prefix=add_prefix("experts", prefix),
         )
 
         self.gate = ReplicatedLinear(
@@ -435,6 +437,7 @@ class HunYuanDecoderLayer(nn.Module):
                 config=config,
                 quant_config=quant_config,
                 layer_id=layer_id,
+                prefix=add_prefix("mlp", prefix),
             )
         else:
             self.mlp = HunYuanMLP(
@@ -501,7 +504,7 @@ class HunYuanModel(nn.Module):
                     config=config,
                     layer_id=layer_id,
                     quant_config=quant_config,
-                    # prefix=prefix
+                    prefix=add_prefix(f"layers.{layer_id}", prefix),
                 )
                 for layer_id in range(config.num_hidden_layers)
             ]
@@ -569,17 +572,21 @@ class HunYuanMoEV1ForCausalLM(nn.Module):
         self,
         config: PretrainedConfig,
         quant_config: Optional[QuantizationConfig] = None,
+        prefix: str = "",
     ) -> None:
         super().__init__()
 
         self.config = config
 
-        self.model = HunYuanModel(config, quant_config, prefix="model")
+        self.model = HunYuanModel(
+            config, quant_config, prefix=add_prefix("model", prefix)
+        )
         self.unpadded_vocab_size = config.vocab_size
         self.lm_head = ParallelLMHead(
             config.vocab_size,
             config.hidden_size,
             quant_config=quant_config,
+            prefix=add_prefix("lm_head", prefix),
         )
         if config.tie_word_embeddings:
             self.lm_head.weight = self.model.embed_tokens.weight
