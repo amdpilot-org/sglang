@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32781",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Accept PR 2034 as test-only hardening. Its exact commit is based directly on the recorded base and adds a focused regression but no implementation change. The recorded base already contains the issue-specific unpadded checkpoint offset calculation. The candidate test and independent all-rank CPU/gfx950 tensor oracles pass, while the original H100 TP16 two-node deployment remains unverified.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-0f4317e5d661/venv/bin/python < independent old-offset reproduction script",
+      "exit_code": 0,
+      "what_was_measured": "The reported destination-derived offset calculation reproduced all four stated IndexErrors: w13 starts 3328 and 3840 into length 3072, and w2-scale starts 104 and 112 into length 96. Evidence: /job/review-evidence-j-0f4317e5d661/base_reproduction.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0f4317e5d661/venv/bin/python -m pytest -q test/registered/unit/layers/moe/test_padded_tp_weight_loading.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 7de89a2736938ae5d0ef060aa226275c93b7efc1, all 8 candidate regression cases passed. Evidence: /job/review-evidence-j-0f4317e5d661/candidate_regression.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0f4317e5d661/venv/bin/python < independent CPU/gfx950 loader oracle",
+      "exit_code": 0,
+      "what_was_measured": "Actual checkout-imported _load_w13/_load_w2 methods matched independent references for all 16 TP ranks, separate w1/w3 placement, fused w13, w2 scale padding, and presharded input on CPU and AMD Instinct MI355X gfx950. Evidence: /job/review-evidence-j-0f4317e5d661/independent_cpu_gpu.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Actual loader tensor operations ran on the assigned AMD Instinct MI355X gfx950 for all 16 logical TP ranks and matched independent references; this is not CUDA/H100 Marlin execution.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The candidate is test-only hardening and does not itself implement the source fix already present in the recorded base.",
+    "The assigned gfx950 GPU cannot validate the CUDA-only H100 Marlin execution path.",
+    "DeepSeek-V4-Pro weights were unavailable, so full architecture loading and semantic accuracy were not tested.",
+    "Only one GPU was assigned; the reported TP16 process topology and two-node deployment were not reproduced.",
+    "No native code changed in the candidate, so a native rebuild was not applicable."
+  ]
+}
