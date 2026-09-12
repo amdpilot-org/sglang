@@ -1,0 +1,67 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35808",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3137",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3125",
+  "candidate_commit": "22a6bcf1d48f7331c4090cc0e6da49f320e9de92",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes and tests the reported UnifiedRadixCache retraction gaps, including real GPU host-capacity rejection, target+draft backup/restore metrics and rid logs, and injected synchronous submission failures. It does not complete the original full-lifecycle contract for the still-supported HiRadixCache path: ordinary L1 lookup remains unclassified, successful asynchronous L2-to-L1 completion has no request-correlated terminal log, and asynchronous L1-to-L2/L2-to-L1 completion exceptions re-raise without failure counters. The candidate is therefore a meaningful partial fix but not a full original-issue resolution.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c1b46e252224/venv/bin/python -m pytest -q -s /job/review-evidence-j-c1b46e252224/test_decode_retraction_backup_candidate.py (at base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction using the candidate regression held outside the checkout: all 3 tests failed because the base emitted no required retraction lifecycle logs; capacity, successful round-trip, and transfer-exception observability were absent."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c1b46e252224/venv/bin/python -m pytest -q -s test/registered/unit/mem_cache/test_decode_retraction_backup.py (at candidate 22a6bcf1d48f7331c4090cc0e6da49f320e9de92)",
+      "exit_code": 0,
+      "what_was_measured": "3 passed on one AMD Instinct MI355X. Exercised real device/host pools, host-capacity failure, exact target+draft K/V GPU round trip, rid logs, success/failure transfer metrics, and injected submit failure."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c1b46e252224/venv/bin/python -m pytest -q test/registered/unit/observability/test_stat_loggers_di.py (at candidate)",
+      "exit_code": 0,
+      "what_was_measured": "17 passed; metric collector labels, monotonic deltas, and bounded transfer-result labels."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c1b46e252224/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py -k 'scheduler_hicache_load_back or buffer_only_read_path_roundtrip' -x (at candidate)",
+      "exit_code": 0,
+      "what_was_measured": "16 passed, 60 skipped, 2496 deselected; focused UnifiedRadixCache ordinary/buffer load-back behavior, with architecture/configuration-specific variants skipped by the suite."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c1b46e252224/venv/bin/python /job/review-evidence-j-c1b46e252224/adversarial_hiradix_async.py (at candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent HiRadixCache adversarial injection: both loading_check and writing_check re-raised asynchronous completion errors with metric_calls=[] instead of recording bounded transfer_error failures."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c1b46e252224/venv/bin/python /job/review-evidence-j-c1b46e252224/adversarial_hiradix_success.py (at candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent successful HiRadixCache L2-to-L1 completion: aggregate success metric was emitted, but no [HICACHE] terminal lifecycle log was emitted and ongoing_load_back retained no rid."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..22a6bcf1d48f7331c4090cc0e6da49f320e9de92",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X (gfx950:sramecc+:xnack-) was visible and used by the retraction regression under torch 2.11.0+rocm7.2 / HIP 7.2.26015. The test compares restored target and draft K/V tensors exactly."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_reason": "The candidate changes Python, documentation, tests, and report artifacts only; no native C++/HIP/FlyDSL source or build definition changed. Imports resolved to /job/repo/python/sglang/srt/mem_cache/unified_radix_cache.py and /job/repo/python/sglang/srt/observability/metrics_collector.py. The prepared AITER module loaded from /tmp/amdpilot-repo-j-c1b46e252224/cache/aiter/module_aiter_core.so.",
+  "remaining_counterexamples": [
+    "HiRadixCache.loading_check re-raises a finish_event.synchronize() exception without incrementing hicache_transfer_requests_total{direction=l2_to_l1,result=failure,reason=transfer_error}.",
+    "HiRadixCache.writing_check re-raises a finish_event.synchronize() exception without incrementing hicache_transfer_requests_total{direction=l1_to_l2,result=failure,reason=transfer_error}.",
+    "A successful HiRadixCache L2-to-L1 completion emits the aggregate success metric but no request-correlated terminal [HICACHE] record; ongoing_load_back stores only the node, so the initiating rid is unavailable at completion.",
+    "HiRadixCache.init_load_back emits tier=l1 result=complete rather than a hit/miss classification with hit_tokens, and its only L2-to-L1 request log is result=scheduled rather than a terminal result."
+  ],
+  "remaining_limitations": [
+    "Mooncake, HF3FS, NIXL, UMBP, multi-node, TP/PP distributed behavior, model-specific storage backends, and NVIDIA/CUDA were not available and remain unverified.",
+    "The GPU regression qualifies cache transport and exact synthetic K/V restoration, not HTTP serving behavior or model semantic accuracy.",
+    "The focused UnifiedRadixCache suite skipped 60 architecture/configuration-dependent cases.",
+    "No native rebuild was applicable because the candidate contains no native source changes."
+  ],
+  "evidence_directory": "/job/review-evidence-j-c1b46e252224"
+}
