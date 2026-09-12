@@ -131,6 +131,25 @@ const walkMarkdown = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap(
   e.isDirectory() ? walkMarkdown(join(dir, e.name))
     : (/\.mdx?$/.test(e.name) ? [join(dir, e.name)] : []));
 
+const UV_GLOBAL_OPTIONS_WITH_VALUE = new Set([
+  "--allow-insecure-host", "--cache-dir", "--color", "--config-file",
+  "--directory", "--project", "--python-downloads", "--python-preference",
+]);
+
+const isUvPipInstall = (command) => {
+  const tokens = command.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i] !== "uv") continue;
+    let j = i + 1;
+    while (tokens[j]?.startsWith("-")) {
+      const option = tokens[j].split("=", 1)[0];
+      j += UV_GLOBAL_OPTIONS_WITH_VALUE.has(option) && !tokens[j].includes("=") ? 2 : 1;
+    }
+    if (tokens[j] === "pip" && tokens[j + 1] === "install") return true;
+  }
+  return false;
+};
+
 // uv before 0.12 ignores transitive pre-release specifiers. Since SGLang's
 // dependencies include pre-releases, an unflagged PyPI install can silently
 // resolve to an old SGLang release. Check all documentation and the cookbook
@@ -138,7 +157,7 @@ const walkMarkdown = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap(
 // and git installs are excluded because their project metadata makes the
 // pre-release dependencies direct requirements.
 const isUnsafeSglangUvInstall = (command) => {
-  const isUvInstall = /uv\s+pip\s+install\b/i.test(command);
+  const isUvInstall = isUvPipInstall(command);
   const installsSglangFromPypi = /\bsglang(?:\[[^\]]+\])?(?:[<>=!~]|\b)/i.test(command)
     && !/\bsglang-/i.test(command)
     && !/git\+/i.test(command);
@@ -147,6 +166,9 @@ const isUnsafeSglangUvInstall = (command) => {
 };
 for (const [command, expected] of [
   ["uv pip install sglang", true],
+  ["uv --no-cache pip install sglang", true],
+  ["uv --color never pip install sglang", true],
+  ["uv --directory=/tmp pip install sglang", true],
   ["uv pip install SGLang", true],
   ["uv pip install \\\n  sglang", true],
   ["uv pip install \"sglang>=0.5.10\"", true],
@@ -156,6 +178,8 @@ for (const [command, expected] of [
   ["uv pip install \"sglang @ git+https://example.test/sglang.git\"", false],
   ["uv pip install lmms_eval", false],
   ["uv pip install sglang-router", false],
+  ["uv tool run pip install sglang", false],
+  ["uvx pip install sglang", false],
   ["uv pip install .", false],
 ]) {
   if (isUnsafeSglangUvInstall(command) !== expected) {

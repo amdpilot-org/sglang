@@ -1,0 +1,83 @@
+Correction generation 2 evidence, captured 2026-09-12 UTC
+
+Prepared base
+  commit: 358c163250ad3b1f62939b01ce1314a0a31a0365
+  candidate: https://github.com/amdpilot-org/sglang/pull/3274
+  candidate commit: 32c938d42440087ac742d24790a8c0b9cc9cf6b3
+  independent review: https://github.com/amdpilot-org/sglang/pull/3304
+
+Exact candidate counterexample reproduction
+  Added docs/docs/review-global-option.md containing:
+    uv --no-cache pip install sglang
+
+  node docs/scripts/check_cookbook_configs.mjs
+  exit 0: cookbook config check: OK
+
+  This is an incorrect pass: uv 0.11.16 accepts the global option before the
+  pip subcommand, but the candidate required adjacent `uv pip install` tokens.
+  The temporary fixture was removed.
+
+uv syntax and resolver reproduction
+  uv versions were installed with the prepared interpreter into:
+    /tmp/amdpilot-repo-j-10b3092eaa1e/uv-011
+    /tmp/amdpilot-repo-j-10b3092eaa1e/uv-012
+
+  /tmp/amdpilot-repo-j-10b3092eaa1e/uv-011/bin/uv --no-cache \
+    pip install --help
+  exit 0, confirming that the review command uses valid uv 0.11.16 syntax.
+
+  printf 'sglang\n' | uv-0.11.16 pip compile - --no-cache \
+    --python-platform x86_64-manylinux_2_34 --python-version 3.12
+  exit 0: selected sglang==0.5.9 and torch==2.9.1.
+
+  printf 'sglang<0.5.18\n' | uv-0.12.0 pip compile - --no-cache \
+    --python-platform x86_64-manylinux_2_34 --python-version 3.12
+  exit 0: selected sglang==0.5.17, flash-attn-4==4.0.0b19, and torch==2.11.0.
+
+  printf 'sglang<0.5.18\n' | uv-0.11.16 pip compile - --no-cache \
+    --prerelease=allow --python-platform x86_64-manylinux_2_34 \
+    --python-version 3.12
+  exit 0: selected sglang==0.5.17, flash-attn-4==4.0.0b19, and torch==2.11.0.
+
+Corrected checker adversarial regression
+  Added a temporary Markdown fixture with three unsafe commands:
+    uv --no-cache pip install sglang
+    uv --color never pip install sglang
+    uv --directory=/tmp pip install sglang
+
+  It also contained two negative boundaries:
+    uv tool run pip install sglang-router
+    uvx pip install sglang
+
+  node docs/scripts/check_cookbook_configs.mjs
+  exit 1 with exactly three failures, one for each unsafe global-option form.
+  The temporary fixture was removed.
+
+Corrected clean tree
+  node docs/scripts/check_cookbook_configs.mjs
+  exit 0: cookbook config check: OK
+
+  git diff --check
+  exit 0
+
+Raw runtime output
+  /tmp/amdpilot-repo-j-10b3092eaa1e/evidence/candidate-global-option.txt
+  /tmp/amdpilot-repo-j-10b3092eaa1e/evidence/uv-versions.txt
+  /tmp/amdpilot-repo-j-10b3092eaa1e/evidence/uv011-global-option-help.txt
+  /tmp/amdpilot-repo-j-10b3092eaa1e/evidence/uv011-plain.txt
+  /tmp/amdpilot-repo-j-10b3092eaa1e/evidence/uv012-bounded.txt
+  /tmp/amdpilot-repo-j-10b3092eaa1e/evidence/uv011-allow-bounded.txt
+  /tmp/amdpilot-repo-j-10b3092eaa1e/evidence/corrected-global-options.txt
+  /tmp/amdpilot-repo-j-10b3092eaa1e/evidence/corrected-clean.txt
+  /tmp/amdpilot-repo-j-10b3092eaa1e/evidence/diff-check.txt
+
+Scope limitation
+  This is a repository documentation mitigation and recurrence guard. It cannot
+  change an already installed uv 0.11.16 resolver. A user who manually runs
+  plain `uv pip install sglang` with that version remains vulnerable to the
+  silent 0.5.9 resolution. No speculative package-metadata change was made.
+
+  No GPU execution or native rebuild is relevant to package resolution or the
+  static documentation checker. The Qwen3.8-27B-FP8 TP=2 semantic consequence
+  remains unverified because the required weights and two-GPU topology were not
+  available; the assigned single GPU cannot qualify it.
